@@ -1443,8 +1443,26 @@ void Prp2lnast::rewrite_decls_to_declare() {
     auto is_type_attr_set = [&](const Lnast_nid& k) {
       return Lnast_ntype::is_attr_set(lnast->get_type(k)) && prp_child_name(*lnast, k, 1) == "type";
     };
+    // `reg x:T:[latch=true]` spells a level-sensitive LATCH (the grammar has no
+    // `latch` declaration keyword; the prp_writer re-emits a latch this way).
+    // Collect the flagged targets so the declare below gets mode "latch" (the
+    // shape the slang reader emits and tolg lowers to Ntype Latch), and drop
+    // the marker attr_set itself.
+    auto is_latch_attr_set = [&](const Lnast_nid& k) {
+      return Lnast_ntype::is_attr_set(lnast->get_type(k)) && prp_child_name(*lnast, k, 1) == "latch";
+    };
+    std::set<std::string> latch_targets;
+    for (const auto& k : kids) {
+      if (is_latch_attr_set(k)) {
+        latch_targets.insert(std::string(prp_child_name(*lnast, k, 0)));
+      }
+    }
     for (size_t i = 0; i < kids.size();) {
       const auto& k = kids[i];
+      if (is_latch_attr_set(k)) {
+        ++i;  // consumed into the declare's mode — do not copy
+        continue;
+      }
       if (!is_type_attr_set(k)) {
         copy_merge(k, nn);
         ++i;
@@ -1482,6 +1500,9 @@ void Prp2lnast::rewrite_decls_to_declare() {
       // lowers it as one depth-N pipeline Flop (pipe_min/pipe_max pins).
       const bool  is_stage = kind == "stage";
       std::string mode(is_stage ? "reg" : kind);
+      if (kind == "reg" && latch_targets.count(target)) {
+        mode = "latch";  // `reg x:[latch=true]` — the latch spelling (see above)
+      }
       if (comptime) {
         if (!mode.empty()) {
           mode.push_back(' ');

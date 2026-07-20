@@ -659,8 +659,19 @@ protected:
   // Single-shot "store result only when the value actually changed".
   // The has_trivial/get_trivial!=/set dance was repeated at every fold site;
   // centralising it kills a bug-prone pattern.
+  //
+  // The same-value skip is only sound in STRAIGHT-LINE code. Inside an
+  // uncertain if-arm the write is a semantic (re)definition even when the
+  // value coincides with the stored trivial: the stored trivial may be a STALE
+  // pre-branch constant (the SSA carry-in `d = d___ssa_N` redefines the base
+  // to runtime, but a no-bundle/no-trivial ref rhs leaves the old trivial in
+  // place), and st().set is what fires record_uncertain_modification — skipping
+  // it means leave_scope never invalidates the var, so a post-if read
+  // resurrects the stale constant and silently drops the mux (an in-arm
+  // `d = 0` matching the `mut d = 0` declare-init miscompiled `v_o = d` to 0).
+  // Write through under uncertainty so the modification is always recorded.
   void store_trivial(std::string_view name, const Dlop& v) {
-    if (!st().has_trivial(name) || !st().get_trivial(name).same_repr(v)) {
+    if (!st().has_trivial(name) || !st().get_trivial(name).same_repr(v) || st().in_uncertain_scope()) {
       st().set(name, v);
     }
   }

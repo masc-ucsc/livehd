@@ -196,15 +196,20 @@ http_archive(
 # Pinned to fd8d3a8 (top of tree; adds the 2opt-freq B `{ ::[abc=…, color=…] … }`
 # scope-attribute grammar — "block attributes" — on top of the 2f-verify
 # `formal name.dotted {}` block grammar and the 3g generics grammar).
-http_archive(
+# LOCAL CO-DEVELOPMENT (prpparse `pub type` grammar, uncommitted) — restore the
+# http_archive below once the grammar change is pushed + repinned.
+new_local_repository(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-+KgygiizbXGJQkkipM+4UKMYMDLSuKOcRHd6cYXL1oI=",  # fd8d3a8 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-fd8d3a88700378cfdeee46927a01e6e97a30161c/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/fd8d3a88700378cfdeee46927a01e6e97a30161c.zip"],
+    path = "../tree-sitter-pyrope/prpparse",
 )
-# LOCAL CO-DEVELOPMENT — swap the http_archive above for:
-# new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
+# http_archive(
+#     name = "prpparse",
+#     build_file = "//packages:prpparse.BUILD",
+#     integrity = "sha256-+KgygiizbXGJQkkipM+4UKMYMDLSuKOcRHd6cYXL1oI=",  # fd8d3a8 (same archive as @tree_sitter_pyrope below)
+#     strip_prefix = "tree-sitter-pyrope-fd8d3a88700378cfdeee46927a01e6e97a30161c/prpparse",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/fd8d3a88700378cfdeee46927a01e6e97a30161c.zip"],
+# )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)

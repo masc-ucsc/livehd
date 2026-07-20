@@ -174,6 +174,13 @@ std::optional<std::string> Slang_context::package_symbol_ref(const slang::ast::S
   if (cv == nullptr || !cv->isInteger()) {
     return std::nullopt;  // only integral consts carry a scalar pyrope value
   }
+  if (cv->integer().hasUnknown()) {
+    // A parameter with X/Z don't-care bits (an instruction-encoding mask):
+    // fold the 4-state literal inline instead of a symbolic `pkg.PARAM` — the
+    // recompile's import machinery cannot materialize an unknown-bit pub
+    // const as a hardware driver.
+    return std::nullopt;
+  }
   const auto* pkg = owning_package(sym);
   if (pkg == nullptr) {
     return std::nullopt;
@@ -472,6 +479,37 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // intercepted before reaching here).
   if (is_scalar_struct_var(sym) || is_packed_array_bundle_var(sym)) {
     return read_struct_whole(sym);
+  }
+
+  // M7: a whole read of a BUNDLE port (bare port in casts/compares/concat/
+  // whole-copies/instance actuals) reassembles the flat value from the field
+  // tuple_gets. MUST beat the input fast-path below — the bare port name is a
+  // tuple, not an integer value.
+  if (bundle_port_of(sym) != nullptr) {
+    return read_bundle_port_whole(sym);
+  }
+
+  // Whole read of a per-field TUPLE memory (`meta_t x [N]` — detupled into
+  // per-field arrays `x.field:[N]`): the flat base net does not exist, so
+  // reassemble element-by-element, field-by-field (element k at bit k*elem_bits,
+  // matching the unpacked flat-port convention). Bounded so a whole-read of a
+  // genuinely large memory does not explode into thousands of nodes.
+  if (auto mit = mem_info_.find(&sym);
+      mit != mem_info_.end() && mit->second.is_tuple && !mit->second.fields.empty() && mit->second.size > 0
+      && mit->second.size <= 64) {
+    const auto               mi   = mit->second;  // copy: builder calls below can rehash mem_info_
+    auto                     base = lname_of(sym);
+    std::vector<std::string> parts;
+    for (int64_t e = 0; e < mi.size; ++e) {
+      for (const auto& f : mi.fields) {
+        auto d = to_pattern(to_int_value(emit_field_read_chain(base, std::to_string(e), f.name)), f.bits, false);
+        const int64_t off = e * mi.elem_bits + f.off;
+        parts.push_back(off == 0 ? d : builder_.create_shl_stmts(d, std::to_string(off)));
+      }
+    }
+    if (!parts.empty()) {
+      return builder_.create_bit_or_stmts(parts);
+    }
   }
 
   auto name = lname_of(sym);
@@ -895,6 +933,19 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         }
       }
     }
+    // M7: field read of a BUNDLE port — a plain read of the dotted io leaf
+    // (`req.cmd`), the hand-flattened-twin form the SSA port flatten produces.
+    // A part-select WITHIN a field (`req.f[3:0]`) recurses here through the
+    // generic select path below, so its offset math is already field-relative.
+    if (ma.value().kind == ExpressionKind::NamedValue) {
+      const auto& bsym = ma.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (const auto* bsi = bundle_port_of(bsym)) {
+        const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+        if (const auto* f = find_struct_field(*bsi, field.name)) {
+          return read_leaf(absl::StrCat(bundle_port_body_base(bsym), ".", f->name));
+        }
+      }
+    }
     // Field read of a scalar packed-struct VARIABLE lowered as a bundle:
     // `io.operation` is just the leaf net (an independent wire), not a bit-slice
     // of a flat `io` bus. (`io.operation[4]` then bit-selects this leaf.)
@@ -1158,8 +1209,16 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
       return "0";
     }
     declare_value_symbol(fa, /*force_reg=*/false);
-    note_write(fa, /*nonblocking=*/false, expr.sourceRange.start());
-    builder_.create_assign_stmts(lname_of(fa), argv[i]);
+    // A struct-typed formal is declared as a per-field bundle (its reads route
+    // through the leaves), so a flat whole store would be dead — split the
+    // actual's value onto the leaves (same as assign_to's NamedValue path).
+    const bool saved_nb         = current_assign_nonblocking_;
+    current_assign_nonblocking_ = false;  // formal binding is a blocking write
+    if (!assign_struct_whole_value(fa, argv[i], expr.sourceRange.start())) {
+      note_write(fa, /*nonblocking=*/false, expr.sourceRange.start());
+      builder_.create_assign_stmts(lname_of(fa), argv[i]);
+    }
+    current_assign_nonblocking_ = saved_nb;
   }
 
   const auto& rv = *sub.returnValVar;

@@ -175,6 +175,29 @@ void uPass_ssa::copy_with_rename(
     dst->set_srcid(new_nid, src->get_srcid(src_nid));
   }
   for (auto child : src->children(src_nid)) {
+    // A named tuple-literal field `store(ref key, val)` under a tuple_add: the
+    // key is a structural FIELD LABEL, not a variable read — renaming it (the
+    // module also has a var of that name, e.g. a struct field `data` next to a
+    // local `data`) corrupts the bundle's field name, so a later expansion
+    // against the callee's flattened `port.key` leaf params (or a `t.key`
+    // read) can never match. Copy the key verbatim; only the value follows the
+    // rename map. (Same rule as a func_call named-arg formal, above.)
+    if (Lnast_ntype::is_tuple_add(type) && Lnast_ntype::is_store(src->get_type(child))) {
+      auto st = dst->add_child(new_nid, Lnast_ntype::create_store());
+      if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+        dst->set_srcid(st, src->get_srcid(child));
+      }
+      bool first_field_child = true;
+      for (auto c2 : src->children(child)) {
+        if (first_field_child) {
+          copy_subtree(src, c2, dst, st);  // field key — verbatim
+          first_field_child = false;
+        } else {
+          copy_with_rename(src, c2, dst, st, rename_map);  // field value — a read
+        }
+      }
+      continue;
+    }
     copy_with_rename(src, child, dst, new_nid, rename_map);
   }
 }
@@ -1288,6 +1311,27 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
           staging->set_srcid(new_nid, lnast->get_srcid(src_nid));
         }
         for (auto c : lnast->children(src_nid)) {
+          // Named tuple-literal field key under a tuple_add: a structural
+          // label, never a variable read — keep it verbatim (see
+          // copy_with_rename); only the value follows the branch-aware copy.
+          if (Lnast_ntype::is_tuple_add(type) &&
+              Lnast_ntype::is_store(lnast->get_type(c))) {
+            auto st =
+                staging->add_child(new_nid, Lnast_ntype::create_store());
+            if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+              staging->set_srcid(st, lnast->get_srcid(c));
+            }
+            bool first_field_child = true;
+            for (auto c2 : lnast->children(c)) {
+              if (first_field_child) {
+                copy_subtree(lnast, c2, staging, st); // field key — verbatim
+                first_field_child = false;
+              } else {
+                copy_branch_port_aware(c2, st);
+              }
+            }
+            continue;
+          }
           copy_branch_port_aware(c, new_nid);
         }
       };
@@ -1464,6 +1508,27 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
           copy_subtree(lnast, sub, staging,
                        stmt_node); // write target — verbatim
           first = false;
+        } else if (Lnast_ntype::is_tuple_add(type) &&
+                   Lnast_ntype::is_store(lnast->get_type(sub))) {
+          // Named tuple-literal field `store(ref key, val)`: the key is a
+          // structural FIELD LABEL (never a variable read) — renaming it when
+          // a same-named var is live (`data` field next to a `data` local)
+          // corrupts the bundle field name. Key verbatim; value renamed.
+          // (Mirrors the func_call named-arg formal handling above.)
+          auto arg_node =
+              staging->add_child(stmt_node, Lnast_ntype::create_store());
+          if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+            staging->set_srcid(arg_node, lnast->get_srcid(sub));
+          }
+          bool first_field_child = true;
+          for (auto a2 : lnast->children(sub)) {
+            if (first_field_child) {
+              copy_subtree(lnast, a2, staging, arg_node); // field key
+              first_field_child = false;
+            } else {
+              copy_with_rename(lnast, a2, staging, arg_node, rename_map);
+            }
+          }
         } else {
           copy_with_rename(lnast, sub, staging, stmt_node, rename_map); // reads
         }

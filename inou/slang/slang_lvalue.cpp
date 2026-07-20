@@ -113,6 +113,12 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       if (assign_struct_whole_value(sym, rhs, lhs.sourceRange.start())) {
         return;
       }
+      // M7: a WHOLE write to a BUNDLE output port (`resp = expr;`, `resp = '0;`)
+      // splits the flat value into per-field stores — the tuple port has no
+      // flat net either.
+      if (assign_bundle_port_whole_value(sym, rhs, lhs.sourceRange.start())) {
+        return;
+      }
       note_write(sym, current_assign_nonblocking_, lhs.sourceRange.start());
       builder_.create_assign_stmts(name, to_int_value(rhs));
       return;
@@ -189,6 +195,126 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       // read-modify-write the addressed word.
       if (lower_mem_element_dynamic_write(lhs, rhs)) {
         return;
+      }
+
+      // `struct.field[i] = v` / `struct.field[hi:lo] = v` on a PER-FIELD bundle
+      // struct: a bit-write of the FIELD LEAF net. The flat whole-struct net
+      // does not exist (fields were detupled), so rooting the RMW on the base
+      // (the resolve_packed_lvalue fallback below) writes an undeclared net
+      // nobody reads — recompile error AND lost behavior.
+      if (base.kind == ExpressionKind::MemberAccess) {
+        const auto& ma = base.as<slang::ast::MemberAccessExpression>();
+        if (ma.value().kind == ExpressionKind::NamedValue && ma.member.kind == slang::ast::SymbolKind::Field) {
+          const auto& bsym = ma.value().as<slang::ast::NamedValueExpression>().symbol;
+          if (is_scalar_struct_var(bsym)) {
+            if (!declared_.contains(&bsym)) {
+              declare_value_symbol(bsym, /*force_reg=*/false);
+            }
+            const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+            if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+              const auto* f = find_struct_field(it->second, field.name);
+              if (f != nullptr && !it->second.is_tuple && base.type->isIntegral() && base.type->hasFixedRange()) {
+                const auto rng = base.type->getFixedRange();
+                auto       ti  = tinfo(*lhs.type);
+                std::optional<int64_t> lo;
+                if (lhs.kind == ExpressionKind::ElementSelect) {
+                  if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
+                    lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
+                  }
+                } else {
+                  const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+                  auto        kind = rs.getSelectionKind();
+                  if (kind == slang::ast::RangeSelectionKind::Simple) {
+                    auto l = try_eval_int(rs.left());
+                    auto r = try_eval_int(rs.right());
+                    if (l && r) {
+                      lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
+                    }
+                  } else if (auto b = try_eval_int(rs.left())) {  // `[base+:W]` / `[base-:W]` with constant base
+                    if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+                      lo = rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (ti.bits - 1));
+                    } else {  // IndexedDown
+                      lo = rng.isDescending() ? (*b - rng.lower() - (ti.bits - 1)) : (rng.upper() - *b);
+                    }
+                  }
+                }
+                if (lo && *lo >= 0 && *lo + ti.bits <= f->bits) {
+                  auto        val      = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
+                  std::string sel_mask = *lo == 0
+                                             ? mask_text(ti.bits)
+                                             : std::string(Dlop::get_mask_value(*lo + ti.bits - 1, *lo)->to_pyrope());
+                  note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
+                  builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f->name), sel_mask, val);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // `structvar[i] = v` / `structvar[hi:lo] = v` on a PER-FIELD bundle
+      // struct (the whole packed struct used as a bit vector): the flat
+      // whole-struct net does not exist (fields were detupled), so rooting the
+      // RMW on the base writes an undeclared net nobody reads — recompile
+      // error AND lost behavior. Split the constant slice across every
+      // overlapped FIELD LEAF (a span may cross field boundaries).
+      if (base.kind == ExpressionKind::NamedValue && base.type->isIntegral() && base.type->hasFixedRange()) {
+        const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
+        if (is_scalar_struct_var(bsym)) {
+          if (!declared_.contains(&bsym)) {
+            declare_value_symbol(bsym, /*force_reg=*/false);
+          }
+          if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end() && !it->second.is_tuple) {
+            const auto             rng   = base.type->getFixedRange();
+            auto                   ti    = tinfo(*lhs.type);
+            const int64_t          width = ti.bits;
+            std::optional<int64_t> lo;
+            if (lhs.kind == ExpressionKind::ElementSelect) {
+              if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
+                lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
+              }
+            } else {
+              const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+              auto        kind = rs.getSelectionKind();
+              if (kind == slang::ast::RangeSelectionKind::Simple) {
+                auto l = try_eval_int(rs.left());
+                auto r = try_eval_int(rs.right());
+                if (l && r) {
+                  lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
+                }
+              } else if (auto b = try_eval_int(rs.left())) {
+                if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+                  lo = rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (width - 1));
+                } else {  // IndexedDown
+                  lo = rng.isDescending() ? (*b - rng.lower() - (width - 1)) : (rng.upper() - *b);
+                }
+              }
+            }
+            if (lo && *lo >= 0 && width > 0) {
+              const int64_t hi = *lo + width - 1;
+              note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
+              auto val = to_pattern(to_int_value(rhs), static_cast<int>(width), ti.is_signed);
+              for (const auto& f : it->second.fields) {
+                const int64_t ov_lo = std::max<int64_t>(*lo, f.off);
+                const int64_t ov_hi = std::min<int64_t>(hi, f.off + f.bits - 1);
+                if (ov_lo > ov_hi) {
+                  continue;  // field outside the written slice
+                }
+                const int   ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
+                std::string part
+                    = ov_lo == *lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - *lo)));
+                part                   = to_pattern(part, ov_bits, false);
+                const int64_t rel      = ov_lo - f.off;  // LSB position within the field leaf
+                std::string   sel_mask = rel == 0
+                                             ? mask_text(ov_bits)
+                                             : std::string(Dlop::get_mask_value(rel + ov_bits - 1, rel)->to_pyrope());
+                builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f.name), sel_mask, part);
+              }
+              return;
+            }
+          }
+        }
       }
 
       // A whole-element write `vec[const] = v` into a per-element bundle array
@@ -428,15 +554,27 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
         declare_value_symbol(osym, /*force_reg=*/false);
       }
       if (auto oit = struct_var_info_.find(&osym); oit != struct_var_info_.end()) {
-        const bool o_is_tuple = oit->second.is_tuple;
-        note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-        for (const auto& f : fields) {
-          // Read the source field per the SOURCE struct's representation.
-          auto src = o_is_tuple ? read_struct_field_get(lname_of(osym), f.name)
-                                : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
-          put(f.name, src);
+        // Per-leaf copy is only valid when the source has the SAME field list
+        // (names/offsets/widths). A bitcast between different struct types
+        // (`ret = csr_sip_t'(mip)` with `mip : csr_mip_t` — the Conversion was
+        // peeled above) must NOT read dest-named leaves off the source (they
+        // do not exist); it falls through to the whole-value slice below.
+        const auto& of         = oit->second.fields;
+        bool        same_shape = of.size() == fields.size();
+        for (size_t i = 0; same_shape && i < fields.size(); ++i) {
+          same_shape = of[i].name == fields[i].name && of[i].off == fields[i].off && of[i].bits == fields[i].bits;
         }
-        return true;
+        if (same_shape) {
+          const bool o_is_tuple = oit->second.is_tuple;
+          note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+          for (const auto& f : fields) {
+            // Read the source field per the SOURCE struct's representation.
+            auto src = o_is_tuple ? read_struct_field_get(lname_of(osym), f.name)
+                                  : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
+            put(f.name, src);
+          }
+          return true;
+        }
       }
     }
   }
@@ -473,6 +611,87 @@ bool Slang_context::assign_struct_whole_value(const slang::ast::ValueSymbol& sym
     }
   }
   return true;
+}
+
+// M7: whole write to a BUNDLE port — slice the flat value onto the field
+// leaves (mirror assign_struct_whole_value; the tuple port has no flat net).
+bool Slang_context::assign_bundle_port_whole_value(const slang::ast::ValueSymbol& sym, const std::string& value,
+                                                   slang::SourceLocation loc) {
+  auto it = bundle_port_info_.find(&sym);
+  if (it == bundle_port_info_.end()) {
+    return false;
+  }
+  const auto fields = it->second.fields;  // copy: builder calls can rehash the map
+  auto       base   = bundle_port_body_base(sym);
+  auto       bi     = tinfo(sym.getType());
+  auto       p      = to_pattern(to_int_value(value), bi.bits, false);
+  note_write(sym, current_assign_nonblocking_, loc);
+  for (const auto& f : fields) {
+    auto fv = extract_field(p, f.off, f.bits);
+    if (f.is_signed) {
+      fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
+    }
+    emit_leaf_store(absl::StrCat(base, ".", f.name), fv);
+  }
+  return true;
+}
+
+// M7: partial (bit-slice) write on a BUNDLE port, already collapsed to
+// (base, offset, width) by resolve_packed_lvalue. Constant offsets split the
+// span per overlapped field (full cover = plain leaf store, partial cover =
+// set_mask on the field leaf — the same shape the struct-var leaf branch
+// emits). A dynamic offset reassembles the whole port, splices at the runtime
+// position, and writes every field back (rare; correctness over beauty).
+void Slang_context::emit_bundle_port_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  const auto& sym = *lv.base;
+  auto        it  = bundle_port_info_.find(&sym);
+  if (it == bundle_port_info_.end()) {
+    return;  // caller guards; defensive
+  }
+  const auto fields = it->second.fields;  // copy: builder calls can rehash the map
+  auto       base   = bundle_port_body_base(sym);
+  auto       val    = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
+
+  if (!lv.dyn_off.empty()) {
+    auto        bi    = tinfo(sym.getType());
+    auto        cur_p = to_pattern(read_bundle_port_whole(sym), bi.bits, false);
+    std::string shamt
+        = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
+    auto sel_mask = builder_.create_shl_stmts(mask_text(static_cast<int>(lv.width)), shamt);
+    auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+    auto ins      = builder_.create_shl_stmts(val, shamt);
+    auto next     = builder_.create_bit_or_stmts({keep, ins});
+    assign_bundle_port_whole_value(sym, next, sr.start());  // note_write inside
+    return;
+  }
+
+  int64_t lo = lv.const_off;
+  if (lo < 0) {
+    emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
+    lo = 0;
+  }
+  const int64_t hi = lo + lv.width - 1;
+  note_write(sym, current_assign_nonblocking_, sr.start());
+  for (const auto& f : fields) {
+    const int64_t ov_lo = std::max<int64_t>(lo, f.off);
+    const int64_t ov_hi = std::min<int64_t>(hi, f.off + f.bits - 1);
+    if (ov_lo > ov_hi) {
+      continue;  // field outside the written slice
+    }
+    const int   ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
+    std::string part = ov_lo == lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - lo)));
+    part             = to_pattern(part, ov_bits, false);
+    const int64_t rel = ov_lo - f.off;  // LSB position within the field leaf
+    if (rel == 0 && ov_bits == f.bits) {
+      // Full field cover: plain leaf store, landed in the leaf's declared sign.
+      auto fv = f.is_signed ? builder_.create_sext_stmts(part, std::to_string(f.bits - 1)) : part;
+      emit_leaf_store(absl::StrCat(base, ".", f.name), fv);
+      continue;
+    }
+    std::string sel_mask
+        = rel == 0 ? mask_text(ov_bits) : std::string(Dlop::get_mask_value(rel + ov_bits - 1, rel)->to_pyrope());
+    builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), sel_mask, part);
+  }
 }
 
 void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs,
@@ -1161,6 +1380,15 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 }
 
 void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  // M7: a partial write whose resolved root is a BUNDLE port has no flat net
+  // to set_mask — split/splice on the field leaves instead. Every packed
+  // lvalue chain on a bundle port (`resp.f = v`, `resp.f[3:0] = v`,
+  // `resp[10:3] = v`, dynamic-index forms) funnels through here.
+  if (bundle_port_of(*lv.base) != nullptr) {
+    emit_bundle_port_rmw(lv, rhs, sr);
+    return;
+  }
+
   // value written into the slice comes from the LOW bits of the RHS
   auto val       = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
   auto base_name = lname_of(*lv.base);

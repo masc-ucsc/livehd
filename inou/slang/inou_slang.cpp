@@ -95,6 +95,8 @@ void Inou_slang::setup() {
   m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
   m1.add_label_optional("preserve_param_provenance",
                         "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m1.add_label_optional("struct_port_bundles",
+                        "true to emit qualifying packed-struct ports as Pyrope tuple/bundle ports (pyrope-emit flows; graphs flows keep flat ports)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -110,6 +112,8 @@ void Inou_slang::setup() {
   m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
   m2.add_label_optional("preserve_param_provenance",
                         "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m2.add_label_optional("struct_port_bundles",
+                        "true to emit qualifying packed-struct ports as Pyrope tuple/bundle ports (pyrope-emit flows; graphs flows keep flat ports)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -260,6 +264,10 @@ void Inou_slang::work(Eprp_var& var) {
   // const` package units) for provenance-preserving Pyrope emission.
   opts.preserve_param_provenance
       = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
+  // Emit qualifying packed-struct ports as tuple/bundle ports (per-leaf dotted
+  // io after SSA). Defaulted ON by the CLI for pyrope-emitting no-graphs
+  // compiles, mirroring preserve_param_provenance.
+  opts.struct_port_bundles = var.has_label("struct_port_bundles") && var.get("struct_port_bundles") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;

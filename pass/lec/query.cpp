@@ -908,7 +908,9 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   // timing, or a fast inconclusive looks identical to (and is easily mistaken
   // for) a hard query the solver actually spent its budget on.
   auto reason = [](const Query_result& e) -> std::string {
-    if (e.detail.find("encode failed") != std::string::npos || e.detail.find("ENGINE CRASH") != std::string::npos) {
+    if (e.detail.find("encode failed") != std::string::npos || e.detail.find("ENGINE CRASH") != std::string::npos
+        || e.detail.find("worker also died") != std::string::npos
+        || e.detail.find("terminated without a result") != std::string::npos) {
       return " [" + e.detail + "]";
     }
     return "";
@@ -1447,19 +1449,23 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     Lec_options oi                       = opts;
     oi.engine                            = "ind";
     oi.partitions                        = 1;
+    auto                              ti = std::chrono::steady_clock::now();
     auto                              ri = safe_prove_equal(ref, impl, oi, sub_lib);
+    ri.engine                            = "ind";
+    ri.elapsed_ms                        = now_ms(ti);  // real per-engine timing (was -1 in the ladder's diagnostics)
     absl::flat_hash_set<hhds::Graph*> seen;
     const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
     if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
-      ri.engine = "ind";
       return ri;
     }
     Lec_options ob = opts;
     ob.engine      = "bmc";
     ob.partitions  = 1;
+    auto tb        = std::chrono::steady_clock::now();
     auto rb        = safe_prove_equal(ref, impl, ob, sub_lib);
+    rb.engine      = "bmc";
+    rb.elapsed_ms  = now_ms(tb);
     if (rb.verdict == Verdict::Refuted) {
-      rb.engine = "bmc";
       return rb;
     }
     Query_result bp;
@@ -1608,7 +1614,134 @@ bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Enc
   return true;
 }
 
+// ── Tuple-leaf <-> flat-bus port bundles ────────────────────────────────────
+// A Pyrope tuple-typed port compiles to PER-LEAF graph ports named
+// `base.field` (any nesting depth: `req.hdr.a`), while the same design read
+// from SystemVerilog carries ONE flat packed port `base` whose width is the
+// SUM of the leaf widths. Name-keyed IO pairing then treats the two sets as
+// unrelated free symbols — a false REFUTED when the remaining outputs still
+// name-match, Unknown otherwise. `detect_port_bundles` finds the shape
+// divergence from the two designs' io decl lists (declaration order, which
+// GraphIO::get_input_pin_decls documents as deterministic); prove_equal
+// bridges it: input leaves bind to extracts of ONE shared flat symbol, output
+// bundles compare concat(leaves) == flat bus. Layout convention: the FIRST
+// leaf in decl order is the MOST SIGNIFICANT bits of the flat bus (the
+// SystemVerilog packed-struct layout — the first-declared field is the MSB
+// range), i.e. leaf i covers bits [W - cum_i - w_i, W - cum_i - 1] where
+// cum_i sums the widths of leaves 0..i-1.
+struct Port_bundle {
+  std::string base;                 // flat-side port name == leaf-side "base." prefix
+  bool        flat_in_ref = false;  // which side declares the FLAT bus (the other holds the leaves)
+  bool        is_input    = false;  // decl direction (a base never mixes directions — see the decline rules)
+  int         width       = 0;      // flat width W == sum of the leaf widths
+  bool        flat_signed = false;  // flat decl's sign (informational; the encoder adopts local signs)
+  std::vector<std::pair<std::string, int>> leaves;  // (name, width) in decl order; FIRST = MSB
+};
+
+struct Io_decl_view {
+  std::string name;
+  int         width = 0;  // real declared width (real_width_io); 0 = unknown
+  bool        sgn   = false;
+};
+
+std::vector<Io_decl_view> io_decl_views(hhds::Graph* g, bool inputs) {
+  std::vector<Io_decl_view> v;
+  auto                      gio   = g->get_io();
+  const auto&               decls = inputs ? gio->get_input_pin_decls() : gio->get_output_pin_decls();
+  v.reserve(decls.size());
+  for (const auto& d : decls) {
+    auto pin = inputs ? g->get_input_pin(d.name) : g->get_output_pin(d.name);
+    v.push_back({d.name, real_width_io(pin, *gio, d.name), !gio->is_unsign(d.name)});
+  }
+  return v;
+}
+
+// One direction, one orientation: fd/fo = the flat side's this-direction /
+// other-direction decls, ld/lo = the leaf side's. DECLINES (silently keeps
+// today's by-name pairing) on: a width-less port, `base` declared on the leaf
+// side too (identical sets already pair by name — leave untouched), dotted
+// `base.` leaves on the FLAT side (both sides have leaves, or a leaf coexists
+// with the flat bus), an input/output direction mix under one base, or a
+// width-sum mismatch. Every declined case falls back to the one-sided
+// unmatched bookkeeping, which gates the verdict to Unknown — never a false
+// verdict.
+void match_bundles_oriented(const std::vector<Io_decl_view>& fd, const std::vector<Io_decl_view>& fo,
+                            const std::vector<Io_decl_view>& ld, const std::vector<Io_decl_view>& lo, bool flat_in_ref,
+                            bool is_input, std::vector<Port_bundle>& out) {
+  absl::flat_hash_set<std::string> leaf_side_names;  // every decl on the leaf side, both directions
+  for (const auto& d : ld) {
+    leaf_side_names.insert(d.name);
+  }
+  for (const auto& d : lo) {
+    leaf_side_names.insert(d.name);
+  }
+  auto any_prefixed = [](const std::vector<Io_decl_view>& v, const std::string& p) {
+    for (const auto& d : v) {
+      if (d.name.size() > p.size() && d.name.compare(0, p.size(), p) == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const auto& f : fd) {
+    if (f.width <= 0) {
+      continue;  // width-less flat port: nothing sound to slice
+    }
+    if (leaf_side_names.count(f.name) > 0) {
+      continue;  // `base` exists on both sides -> plain by-name pairing owns it
+    }
+    const std::string prefix = f.name + ".";
+    if (any_prefixed(fd, prefix) || any_prefixed(fo, prefix)) {
+      continue;  // dotted leaves on the flat side too (or leaf/flat coexistence)
+    }
+    if (any_prefixed(lo, prefix)) {
+      continue;  // direction mix: some `base.` decls are inputs, some outputs
+    }
+    Port_bundle b;
+    b.base        = f.name;
+    b.flat_in_ref = flat_in_ref;
+    b.is_input    = is_input;
+    b.width       = f.width;
+    b.flat_signed = f.sgn;
+    long long sum = 0;
+    bool      ok  = true;
+    for (const auto& l : ld) {
+      if (l.name.size() <= prefix.size() || l.name.compare(0, prefix.size(), prefix) != 0) {
+        continue;
+      }
+      if (l.width <= 0) {
+        ok = false;  // a width-less leaf: the layout cannot be established
+        break;
+      }
+      b.leaves.emplace_back(l.name, l.width);
+      sum += l.width;
+    }
+    if (!ok || b.leaves.empty() || sum != f.width) {
+      continue;  // width-sum mismatch (or no leaves): keep today's behavior
+    }
+    out.push_back(std::move(b));
+  }
+}
+
+std::vector<Port_bundle> detect_port_bundles(hhds::Graph* ref, hhds::Graph* impl) {
+  std::vector<Port_bundle> out;
+  if (ref == nullptr || impl == nullptr) {
+    return out;
+  }
+  const auto r_in  = io_decl_views(ref, true);
+  const auto r_out = io_decl_views(ref, false);
+  const auto i_in  = io_decl_views(impl, true);
+  const auto i_out = io_decl_views(impl, false);
+  match_bundles_oriented(r_in, r_out, i_in, i_out, /*flat_in_ref=*/true, /*is_input=*/true, out);    // ref flat in
+  match_bundles_oriented(i_in, i_out, r_in, r_out, /*flat_in_ref=*/false, /*is_input=*/true, out);   // impl flat in
+  match_bundles_oriented(r_out, r_in, i_out, i_in, /*flat_in_ref=*/true, /*is_input=*/false, out);   // ref flat out
+  match_bundles_oriented(i_out, i_in, r_out, r_in, /*flat_in_ref=*/false, /*is_input=*/false, out);  // impl flat out
+  return out;
+}
+
 }  // namespace
+
+bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
 
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
@@ -2425,6 +2558,88 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return sm;
   };
 
+  // ── Tuple-leaf <-> flat-bus port correspondence (both engines) ────────────
+  // See detect_port_bundles above. INPUTS: one shared flat symbol per base;
+  // the flat side's decl consumes it whole, each leaf decl consumes
+  // extract(symbol, hi, lo) per the first-leaf-is-MSB layout — both sides are
+  // then constrained to the IDENTICAL input space (no extra freedom, no lost
+  // bits). OUTPUTS: one synthesized compare point per bundle,
+  // concat(leaves in decl order) == flat value, counted as MATCHED in the
+  // completeness bookkeeping. Flop/next-state pairing is untouched (it is
+  // keyed by canon_flop_name, not port names).
+  const std::vector<Port_bundle> port_bundles = detect_port_bundles(ref, impl);
+  std::vector<const Port_bundle*> in_bundles, out_bundles;
+  for (const auto& b : port_bundles) {
+    (b.is_input ? in_bundles : out_bundles).push_back(&b);
+  }
+  std::string bundle_note;
+  if (!port_bundles.empty()) {
+    bundle_note = "; leaf<->bus port bundle(s):";
+    for (const auto& b : port_bundles) {
+      bundle_note += " " + b.base + (b.is_input ? "[in]" : "[out]");
+    }
+    res.detail += bundle_note;  // the bmc engine rebuilds detail and re-appends this note
+  }
+  // Names consumed by a bundle compare point are MATCHED — the unmatched scans
+  // must skip them (per side: the flat base on one, the leaves on the other).
+  absl::flat_hash_set<std::string> bundle_out_ref, bundle_out_impl;
+  absl::flat_hash_set<std::string> bundle_in_leaves;  // leaf inputs: bound via the base symbol, never minted free
+  for (const auto* b : out_bundles) {
+    (b->flat_in_ref ? bundle_out_ref : bundle_out_impl).insert(b->base);
+    for (const auto& l : b->leaves) {
+      (b->flat_in_ref ? bundle_out_impl : bundle_out_ref).insert(l.first);
+    }
+  }
+  for (const auto* b : in_bundles) {
+    for (const auto& l : b->leaves) {
+      bundle_in_leaves.insert(l.first);
+    }
+  }
+  // Leaf input Vals from the flat symbol: leaf i = flat[W-cum-1 : W-cum-w_i]
+  // (first leaf in decl order = MSB). The Vals are unsigned slices; the
+  // encoder adopts each decl's local sign at its lookup site.
+  auto bundle_leaf_vals = [&](const Port_bundle& b, const cvc5::Term& flat) {
+    std::vector<std::pair<std::string, Val>> lv;
+    int                                      cum = 0;
+    for (const auto& [ln, lw] : b.leaves) {
+      const int hi = b.width - 1 - cum;
+      const int lo = b.width - cum - lw;
+      auto      op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(hi), static_cast<uint32_t>(lo)});
+      lv.emplace_back(ln, Val{tm.mkTerm(op, {flat}), lw, false});
+      cum += lw;
+    }
+    return lv;
+  };
+  // Output-bundle miter terms: each leaf fitted to its DECLARED width (the
+  // physical field size), concatenated first-leaf-MSB, against the flat value
+  // fitted to W. False when either side's encoded outputs are missing a
+  // member — the caller then falls back to unmatched bookkeeping (gates to
+  // Unknown, never a false verdict). NOTE the ref-X don't-care plane
+  // (formal.lec.gold_x=ignore) is not applied to bundle points (v1).
+  auto bundle_out_terms = [&](const Port_bundle& b, const Encoded& renc, const Encoded& ienc, cvc5::Term& rt,
+                              cvc5::Term& it) -> bool {
+    const Encoded& flat_e = b.flat_in_ref ? renc : ienc;
+    const Encoded& leaf_e = b.flat_in_ref ? ienc : renc;
+    auto           fv     = flat_e.outputs.find(b.base);
+    if (fv == flat_e.outputs.end()) {
+      return false;
+    }
+    std::vector<cvc5::Term> parts;
+    parts.reserve(b.leaves.size());
+    for (const auto& [ln, lw] : b.leaves) {
+      auto lv = leaf_e.outputs.find(ln);
+      if (lv == leaf_e.outputs.end()) {
+        return false;
+      }
+      parts.push_back(fit_to(tm, lv->second, lw));
+    }
+    cvc5::Term cat  = parts.size() == 1 ? parts[0] : tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, parts);
+    cvc5::Term flat = fit_to(tm, fv->second, b.width);
+    rt              = b.flat_in_ref ? flat : cat;
+    it              = b.flat_in_ref ? cat : flat;
+    return true;
+  };
+
   // ── BMC engine: unroll N cycles from the reset state ──────────────────────
   // The single-step inductive miter (below) assumes an arbitrary equal current
   // state, so it false-REFUTEs on UNREACHABLE states where the two front-ends
@@ -2581,28 +2796,31 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // the window still exercises `bound` free-running cycles, and UNDER-flushing
     // can only cause a false REFUTE, never a false PROVEN.)
     auto pipeline_latency = [&](hhds::Graph* g) -> int {
+      // ONE topological sweep, NO recursion: forward_hier() is topological, so
+      // every driver is finalized before its sink is visited, and a driver
+      // MISSING from the memo is exactly a feedback back-edge (contributes 0 —
+      // loop state never flushes), matching the recursive formulation this
+      // replaces. The recursion's depth was the longest driver chain of the
+      // FLAT design, which blew the forked bmc worker's stack on a large
+      // descended parent (macOS reports the guard page as SIGBUS; the worker
+      // then died without a result — surfaced only as "isolated proof worker
+      // exited without a valid result" while the ind worker survived).
       absl::flat_hash_map<std::string, int> memo;
-      absl::flat_hash_set<std::string>      on_stack;
-      std::function<int(const hhds::Node_class&)> lat = [&](const hhds::Node_class& n) -> int {
-        std::string id = n.get_hier_name();
-        if (auto it = memo.find(id); it != memo.end()) {
-          return it->second;
-        }
-        if (!on_stack.insert(id).second) {
-          return 0;  // feedback back-edge: do not recurse (loop state never flushes)
-        }
+      int                                   m = 0;
+      for (auto node : g->forward_hier()) {
         int base = 0;
-        for (auto e : n.inp_edges()) {
+        for (auto e : node.inp_edges()) {
           if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
             continue;  // primary input / constant: latency 0
           }
-          base = std::max(base, lat(e.driver.get_master_node()));
+          if (auto it = memo.find(e.driver.get_master_node().get_hier_name()); it != memo.end()) {
+            base = std::max(base, it->second);
+          }
         }
-        on_stack.erase(id);
         int depth = 0;
-        if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+        if (graph_util::type_op_of(node) == Ntype_op::Flop) {
           depth = 1;
-          auto pm = graph_util::get_driver_of_sink_name(n, "pipe_min");
+          auto pm = graph_util::get_driver_of_sink_name(node, "pipe_min");
           if (!pm.is_invalid() && graph_util::is_const_pin(pm)) {
             int d = static_cast<int>(graph_util::hydrate_const(pm).to_just_i64());
             if (d > 1) {
@@ -2610,13 +2828,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
             }
           }
         }
-        int total  = base + depth;
-        memo[id]   = total;
-        return total;
-      };
-      int m = 0;
-      for (auto node : g->forward_hier()) {
-        m = std::max(m, lat(node));
+        const int total            = base + depth;
+        memo[node.get_hier_name()] = total;
+        m                          = std::max(m, total);
       }
       return m;
     };
@@ -2997,6 +3211,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
       Io_name_map<Val> sh_ref, sh_impl;
       for (const auto& [name, info] : ins) {
+        if (bundle_in_leaves.count(name) > 0) {
+          continue;  // bound to extracts of its flat base's symbol below, never an independent free
+        }
         cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "c" + std::to_string(cyc) + "_" + name);
         // Phase control: pin a primary reset input to its asserted level during
         // the reset phase / run-prologue, and to its deasserted level in the
@@ -3015,6 +3232,30 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         sh_impl[name] = v;
         if (opts.witness) {
           wit_ins.push_back({cyc, name, t});
+        }
+      }
+      // Input bundles: bind each leaf to its slice of the flat base's per-cycle
+      // symbol (minted just above — the base IS a decl on the flat side, so it
+      // is always in `ins` at width W). Written into BOTH share maps; only the
+      // leaf side declares the names, the other entries are inert.
+      for (const auto* b : in_bundles) {
+        auto       bit = sh_ref.find(b->base);
+        cvc5::Term flat;
+        if (bit != sh_ref.end() && bit->second.width == b->width) {
+          flat = bit->second.term;
+        } else {
+          // Defensive (unreachable today: the base is a flat-side decl, so
+          // collect_ins carries it at exactly W): mint the W-bit symbol here
+          // rather than leave the leaves as per-side frees (a per-side free
+          // input could produce a spurious SAT -> false REFUTED).
+          flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), "c" + std::to_string(cyc) + "_" + b->base);
+          Val fv{flat, b->width, b->flat_signed};
+          sh_ref[b->base]  = fv;
+          sh_impl[b->base] = fv;
+        }
+        for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
+          sh_ref[ln]  = lv;
+          sh_impl[ln] = lv;
         }
       }
       for (const auto& [k, v] : ref_state) {
@@ -3076,6 +3317,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
             continue;  // next-state / env-gated debug tap, not a primary output
           }
+          if (bundle_out_ref.count(name) > 0) {
+            continue;  // compared via its leaf<->bus bundle point below (MATCHED)
+          }
           auto it = ie.outputs.find(name);
           if (it == ie.outputs.end()) {
             bmc_unmatched_ref.insert(display_name(name));
@@ -3107,8 +3351,28 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
             continue;
           }
+          if (bundle_out_impl.count(name) > 0) {
+            continue;  // consumed by a leaf<->bus bundle point (MATCHED)
+          }
           if (re.outputs.find(name) == re.outputs.end()) {
             bmc_unmatched_impl.insert(display_name(name));
+          }
+        }
+        // Leaf<->bus output bundles: one compare point per bundle,
+        // concat(leaves, first = MSB) vs the flat bus (see bundle_out_terms).
+        for (const auto* b : out_bundles) {
+          cvc5::Term rt, it2;
+          if (!bundle_out_terms(*b, re, ie, rt, it2)) {
+            // A member failed to encode on its side: keep the completeness
+            // gate honest (Unknown, never a silent skip).
+            (b->flat_in_ref ? bmc_unmatched_ref : bmc_unmatched_impl).insert(display_name(b->base));
+            continue;
+          }
+          cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rt, it2});
+          bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+          decomp_diffs.push_back({b->base + "@" + std::to_string(cyc), diff});
+          if (opts.witness) {
+            wit_outs.push_back({cyc, b->base, rt, it2});
           }
         }
       }
@@ -3192,7 +3456,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
                + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
-               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")";
+               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
+               + bundle_note;
     // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
@@ -3511,6 +3776,18 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // would constrain it (false PROVE), truncating it in the encoder drops it
   // (false REFUTE, e.g. an input 0x80 -> 0).
   Io_name_map<Val> shared;
+  // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
+  // extracts, so both sides range over the SAME input space (no extra freedom,
+  // no lost bits). add_inputs below keeps any name already present at an
+  // equal-or-wider width, so these entries survive the union build (detection
+  // and add_inputs read widths through the same real_width_io).
+  for (const auto* b : in_bundles) {
+    cvc5::Term flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), b->base);
+    shared[b->base] = Val{flat, b->width, b->flat_signed};
+    for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
+      shared[ln] = lv;
+    }
+  }
   auto                                  add_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
@@ -3855,6 +4132,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (bridged_ref_out.count(name)) {
       continue;  // bank-flop next state -> compared via the memory bridge above
     }
+    if (bundle_out_ref.count(name) > 0) {
+      continue;  // compared via its leaf<->bus bundle point below (MATCHED)
+    }
     auto it = ie.outputs.find(name);
     if (it == ie.outputs.end()) {
       res.unmatched_ref.push_back(display_name(name));
@@ -3888,9 +4168,26 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (bridged_impl_out.count(name)) {
       continue;
     }
+    if (bundle_out_impl.count(name) > 0) {
+      continue;  // consumed by a leaf<->bus bundle point (MATCHED)
+    }
     if (!re.outputs.count(name)) {
       res.unmatched_impl.push_back(display_name(name));
     }
+  }
+  // Leaf<->bus output bundles: one compare point per bundle,
+  // concat(leaves, first = MSB) vs the flat bus (see bundle_out_terms).
+  for (const auto* b : out_bundles) {
+    cvc5::Term rt, it2;
+    if (!bundle_out_terms(*b, re, ie, rt, it2)) {
+      // A member failed to encode on its side: keep the completeness gate
+      // honest (incomplete -> Unknown, never a silent skip).
+      (b->flat_in_ref ? res.unmatched_ref : res.unmatched_impl).push_back(display_name(b->base));
+      continue;
+    }
+    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rt, it2});
+    bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+    ind_diffs.push_back({display_name(b->base), diff});
   }
   // Memory next-state contents: corresponding memories must hold equal contents
   // after the step (DISTINCT over array sort). A memory present on only one side
@@ -4507,9 +4804,20 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   return res;
 }
 
-Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
-                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
-  int p[2];
+namespace {
+
+// Fork ONE isolated worker running safe_prove_equal under `opts` and read its
+// serialized result back. `died` is set when the child produced NO valid result
+// (crash, memory-backstop / OOM kill, hard abort — never a normal verdict), and
+// `why` then decodes the wait status so the caller can say WHAT killed it
+// instead of a bare "no valid result".
+Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, bool& died,
+                                   std::string& why) {
+  died = false;
+  why.clear();
+  const auto t0 = std::chrono::steady_clock::now();
+  int        p[2];
   if (::pipe(p) != 0) {
     Lec_options fallback = opts;
     fallback.partitions  = 1;
@@ -4553,10 +4861,101 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   ::waitpid(c, &status, 0);
   Query_result out;
   if (!deserialize_result(blob, out)) {
-    out.verdict = Verdict::Unknown;
-    out.engine  = "isolated-worker";
-    out.detail  = "isolated proof worker exited without a valid result";
+    died = true;
+    if (WIFSIGNALED(status)) {
+      const int sig = WTERMSIG(status);
+      why           = "killed by signal " + std::to_string(sig);
+      if (const char* sn = strsignal(sig); sn != nullptr) {
+        why += std::string(" (") + sn + ")";
+      }
+      if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
+        // The usual causes at these signals on a big flat def: the RLIMIT_AS
+        // memory backstop (malloc fails -> abort / the OS kills), or a genuine
+        // encoder crash. Either way the run must SAY so, not report a bare
+        // silent Unknown.
+        why += "; likely the memory backstop (RLIMIT_AS) on a design too large "
+               "to encode in one worker, or an engine crash";
+      }
+    } else if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+      why = "exited with status " + std::to_string(WEXITSTATUS(status));
+    } else {
+      why = "exited without a serialized result";
+    }
+    if (!blob.empty()) {
+      why += " after " + std::to_string(blob.size()) + " partial byte(s)";
+    }
+    out            = Query_result{};
+    out.verdict    = Verdict::Unknown;
+    out.engine     = "isolated-worker";
+    out.detail     = "isolated proof worker died: " + why;
+    out.elapsed_ms = now_ms(t0);
+    return out;
   }
+  if (out.elapsed_ms < 0) {
+    out.elapsed_ms = now_ms(t0);
+  }
+  return out;
+}
+
+}  // namespace
+
+Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  bool         died = false;
+  std::string  why;
+  Query_result r = spawn_isolated_worker(ref, impl, opts, sub_lib, died, why);
+  if (!died) {
+    return r;
+  }
+  // The auto ladder runs ind THEN bmc inside ONE worker process, so its peak
+  // memory (two full encodes + two cvc5 instances' heap high-water) is what
+  // usually killed it. Retry each engine in its OWN fresh worker: half the
+  // peak per process, and even if one engine's worker dies again the other
+  // can still settle — the same trust rules as the in-worker ladder (ind
+  // Proven; ind Refuted trusted only for a pure combinational pair; bmc
+  // Refuted; bounded-bmc PASS policy). Never an upgrade: a surviving verdict
+  // is a verdict prove_equal itself produced.
+  if (opts.engine != "auto") {
+    return r;  // explicit engine: nothing further to split; the diagnostic stands
+  }
+  const std::string died_note = "isolated auto worker died: " + why + "; per-engine retry in fresh workers: ";
+  Lec_options       oi        = opts;
+  oi.engine                   = "ind";
+  bool         ind_died       = false;
+  std::string  ind_why;
+  Query_result ri = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why);
+  ri.engine       = "ind";
+  if (ind_died) {
+    ri.detail = "ind retry worker also died: " + ind_why;
+  }
+  absl::flat_hash_set<hhds::Graph*> seen;
+  const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
+  if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
+    ri.detail = died_note + ri.detail;
+    return ri;
+  }
+  Lec_options ob = opts;
+  ob.engine      = "bmc";
+  bool         bmc_died = false;
+  std::string  bmc_why;
+  Query_result rb = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why);
+  rb.engine       = "bmc";
+  if (bmc_died) {
+    rb.detail = "bmc retry worker also died: " + bmc_why;
+  }
+  if (rb.verdict == Verdict::Refuted) {
+    rb.detail = died_note + rb.detail;
+    return rb;
+  }
+  Query_result bp;
+  if (try_bounded_proven(rb, bp)) {
+    bp.detail     = died_note + bp.detail;
+    bp.elapsed_ms = ri.elapsed_ms + rb.elapsed_ms;
+    return bp;
+  }
+  Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);
+  out.engine       = "isolated-worker";
+  out.detail       = died_note + out.detail;
   return out;
 }
 
@@ -5153,28 +5552,27 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // (same MAX-parallel / SUM-series flop-weighted metric as prove_equal).
   int reset_hold = phase_run ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
   if (phase_run) {
-    absl::flat_hash_map<std::string, int>        memo;
-    absl::flat_hash_set<std::string>             on_stack;
-    std::function<int(const hhds::Node_class&)> lat = [&](const hhds::Node_class& n) -> int {
-      std::string id = n.get_hier_name();
-      if (auto it = memo.find(id); it != memo.end()) {
-        return it->second;
-      }
-      if (!on_stack.insert(id).second) {
-        return 0;
-      }
+    // Iterative topological sweep (same rewrite as prove_equal's
+    // pipeline_latency): forward_hier() is topological, a memo-missing driver
+    // is a feedback back-edge (0). The recursive version's depth was the flat
+    // design's longest driver chain — a stack overflow (SIGBUS on macOS) on a
+    // large design, killing the forked worker without a result.
+    absl::flat_hash_map<std::string, int> memo;
+    int                                   flush = 0;
+    for (auto node : design->forward_hier()) {
       int base = 0;
-      for (auto e : n.inp_edges()) {
+      for (auto e : node.inp_edges()) {
         if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
           continue;
         }
-        base = std::max(base, lat(e.driver.get_master_node()));
+        if (auto it = memo.find(e.driver.get_master_node().get_hier_name()); it != memo.end()) {
+          base = std::max(base, it->second);
+        }
       }
-      on_stack.erase(id);
       int depth = 0;
-      if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+      if (graph_util::type_op_of(node) == Ntype_op::Flop) {
         depth   = 1;
-        auto pm = graph_util::get_driver_of_sink_name(n, "pipe_min");
+        auto pm = graph_util::get_driver_of_sink_name(node, "pipe_min");
         if (!pm.is_invalid() && graph_util::is_const_pin(pm)) {
           int d = static_cast<int>(graph_util::hydrate_const(pm).to_just_i64());
           if (d > 1) {
@@ -5182,13 +5580,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           }
         }
       }
-      int total = base + depth;
-      memo[id]  = total;
-      return total;
-    };
-    int flush = 0;
-    for (auto node : design->forward_hier()) {
-      flush = std::max(flush, lat(node));
+      const int total            = base + depth;
+      memo[node.get_hier_name()] = total;
+      flush                      = std::max(flush, total);
     }
     if (flush > reset_hold) {
       reset_hold = flush;

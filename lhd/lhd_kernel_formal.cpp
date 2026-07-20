@@ -490,16 +490,18 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<uint8_t>      proven(order.size(), 0);  // each slot written by its owning task
   // Budget scheduler: `settled` marks a def whose verdict is DEFINITIVE (Proven or
   // Refuted), for the straggler diagnosis. When `budget_on` (budget_mode=wall,
-  // timeout>0, >1 def), `base.timeout` is a soft TOTAL budget for cvc5/BMC SOLVER
-  // time — the part that can run forever — NOT wall-clock: only the time spent
-  // inside prove_equal accumulates into `solve_spent_ms`, so semdiff, encode, cache,
-  // and graph load are all excluded. Each def's per-query cap is the budget
-  // remaining (a 1s floor once spent, so a straggler still gets a quick attempt).
-  // It is a HINT/target — a bit over or under is fine. Off ⇒ each def keeps the
-  // full base.timeout per-query cap (pre-scheduler behavior).
+  // timeout>0, >1 def), `base.timeout` is a soft TOTAL WALL budget for the DAG's
+  // solving: each def's per-query cap is the wall time remaining since dispatch
+  // (see run_def — wall, not a sum of per-def times, so concurrent defs don't
+  // drain it jobs-times faster than real time; the TOP def is exempt and keeps
+  // the full cap). `solve_spent_ms` still accumulates prove_equal time for
+  // diagnostics. A 1s floor once spent, so a straggler still gets a quick
+  // attempt. It is a HINT/target — a bit over or under is fine. Off ⇒ each def
+  // keeps the full base.timeout per-query cap (pre-scheduler behavior).
   std::vector<uint8_t>      settled(order.size(), 0);
   bool                      budget_on = false;
   std::atomic<long long>    solve_spent_ms{0};
+  std::chrono::steady_clock::time_point budget_t0{};  // DAG dispatch start; the wall clock the budget draws from
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
   std::atomic<bool>         any_oversize{false};  // any def refused by the design-size gate -> hard error
@@ -551,12 +553,26 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
     livehd::lec::Lec_options o = base;
-    if (budget_on) {
-      // This def's per-query cap = the SOLVER budget remaining (1s floor once spent;
-      // 0 would read as UNBOUNDED to the engine). Only prior prove_equal time counts,
-      // so a run dominated by semdiff/encode still gets its full solver budget.
-      const long long spent_s = solve_spent_ms.load() / 1000;
-      o.timeout               = static_cast<int>(std::max<long long>(1, static_cast<long long>(base.timeout) - spent_s));
+    if (budget_on && name != top_key) {
+      // This def's per-query cap = the WALL budget remaining since the DAG
+      // dispatch began (1s floor once spent; 0 would read as UNBOUNDED to the
+      // engine). Draw down by WALL CLOCK, not by summing per-def solve times:
+      // defs run CONCURRENTLY under formal.jobs, and the old sum drained the
+      // budget jobs-times faster than real time — two 120s stragglers running
+      // side by side zeroed the budget for every def dispatched after them
+      // (the top got a 1s cap), even though only ~120s of real time had
+      // passed. Under wall accounting a def that proves instantly standalone
+      // is never starved by a concurrent straggler: any def dispatched inside
+      // the window sees the full remaining window.
+      //   The TOP def is exempt: it is the proof the user actually asked for,
+      // and it is scheduled LAST (leaves-first DAG), exactly where a soft
+      // total budget has nothing left. Starving it turns the whole run
+      // UNKNOWN after every block proved. One full per-query cap for one def
+      // keeps the run bounded (~2x timeout worst case), matching the
+      // pre-scheduler behavior a standalone --top run gives it.
+      const long long spent_s
+          = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - budget_t0).count();
+      o.timeout = static_cast<int>(std::max<long long>(1, static_cast<long long>(base.timeout) - spent_s));
     }
     if (name != top_key) {
       // Sidecar paths are resolved against the selected impl top. Descendant
@@ -579,6 +595,20 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
         if (auto ci = order_ix.find(c); ci != order_ix.end() && proven[ci->second] != 0) {
+          // A PROVEN child still must NOT collapse when its ref/impl port sets
+          // diverge the tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b`
+          // leaves vs one packed `req` bus): box correspondence is keyed on
+          // port NAMES, so the box would gate this parent to incomplete
+          // (Unknown). Leaving it out of the collapse set descends (flattens)
+          // it into the parent, where prove_equal's bundle compare points at
+          // the parent's own boundary take over. (Read-only probe of two maps
+          // populated before the task DAG runs — safe under the parallel run.)
+          auto rg = ref_by_name.find(c);
+          auto ig = impl_by_name.find(c);
+          if (rg != ref_by_name.end() && ig != impl_by_name.end()
+              && livehd::lec::io_bundle_split(rg->second, ig->second)) {
+            continue;  // proven, but box-incompatible port shapes -> descend it
+          }
           o.collapse.push_back(c);  // proven child -> sound black-box collapse
           coll.push_back(c);
         } else {
@@ -946,17 +976,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
   // ── Budget scheduler ──────────────────────────────────────────────────────
   // Under budget_mode "wall" with a finite timeout on a multi-def hierarchy,
-  // `base.timeout` is a soft TOTAL budget for cvc5/BMC SOLVER time: each def's
-  // per-query cap becomes the budget remaining (run_def, above), and only
-  // prove_equal time draws it down — so N hard defs share ~one budget of solver
-  // effort instead of one budget EACH (the D×T hazard), while semdiff/encode/load
-  // never eat into it. Fast defs (the common case) finish well under budget and
-  // still see the full cap, so a design that fits is never regressed; only a run
-  // that would out-solve `timeout` is reined in. Off — the full per-query cap,
-  // byte-identical to before — for the compile/rlimit tier (budget_mode!=wall), an
-  // unbounded budget (timeout==0), or a lone def. A single DAG pass: the verdict
-  // cache / Unknown-ledger and per-def progress stay exactly as before.
+  // `base.timeout` is a soft TOTAL WALL budget for the DAG's solving: each
+  // def's per-query cap becomes the wall time remaining since dispatch
+  // (run_def, above) — so N hard defs share ~one budget of solver effort
+  // instead of one budget EACH (the D×T hazard). Wall clock, not a sum of
+  // per-def solve times: under formal.jobs concurrency the sum drained the
+  // budget jobs-times faster than real time and starved every def dispatched
+  // after a straggler pair. The TOP def keeps the full per-query cap (it is
+  // the requested proof and runs last — see run_def). Fast defs (the common
+  // case) finish well under budget and still see the full cap, so a design
+  // that fits is never regressed; only a run that would out-solve `timeout`
+  // is reined in. Off — the full per-query cap, byte-identical to before —
+  // for the compile/rlimit tier (budget_mode!=wall), an unbounded budget
+  // (timeout==0), or a lone def. A single DAG pass: the verdict cache /
+  // Unknown-ledger and per-def progress stay exactly as before.
   budget_on = base.budget_mode == "wall" && base.timeout > 0 && order.size() > 1;
+  budget_t0 = std::chrono::steady_clock::now();
   dispatch_dag();
 
   // Diagnosis phase (formal.minetimeout): name the still-unproven defs so a

@@ -299,6 +299,14 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
   if (base.find('.') != std::string_view::npos || r.is_unbounded()) {
     return;
   }
+  // An SSA-version / compiler temp (`%x_0`): any decl envelope it carries is a
+  // ridden stamp adopted from a value bundle (e.g. a bit-select force's `uW`
+  // typespec on one if-arm), never a user declaration — a sibling arm's wider
+  // legal write must not be judged against it. The BASE name's own check (its
+  // real declared envelope) still runs at the merged write.
+  if (base.front() == '%') {
+    return;
+  }
   const auto env = decl_envelope_of(base);
   if (!env) {
     return;
@@ -742,7 +750,22 @@ void uPass_bitwidth::process_type_spec() {
   }
   Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
   e.immutable     = false;
-  e.decl_max      = *dmax;
-  e.decl_min      = *dmin;
+  // WIDEN-ONLY against an existing declared envelope: a per-version inline
+  // typespec (the `x = v#[lo..=hi]` bit-select force stamps the SSA version's
+  // width) must not NARROW an explicitly declared/init envelope — `mut x =
+  // 0ub????` is [0,15]; one if-arm writing `x = v#[0..=2]` would otherwise
+  // restamp [0,7] and a sibling arm's legal wider write then fails the
+  // declared-fit check.
+  const auto old = range_from_entry(e.decl_max, e.decl_min);
+  if (!old.is_unbounded()) {
+    if (auto nmax = const_to_i64(*dmax); nmax && old.max > *nmax) {
+      dmax = *Dlop::from_pyrope(std::to_string(old.max));
+    }
+    if (auto nmin = const_to_i64(*dmin); nmin && old.min < *nmin) {
+      dmin = *Dlop::from_pyrope(std::to_string(old.min));
+    }
+  }
+  e.decl_max = *dmax;
+  e.decl_min = *dmin;
   b->set(bundle_path::of_string("0"), std::move(e));
 }

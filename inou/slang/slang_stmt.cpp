@@ -125,8 +125,18 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // an integer so the result var is integer-kind. Otherwise a caller's
           // `f(x) != 0` later trips the bool-vs-int comparison type check.
           auto v = to_int_value(lower_rvalue(*re));
-          note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
-          builder_.create_assign_stmts(lname_of(*func_ret_sym_), v);
+          // A struct-typed return var is declared as a per-field bundle
+          // (inline_call -> declare_value_symbol), so a flat whole store would
+          // be dead: every read of the result routes through the leaves. Split
+          // the value onto the leaves (same as assign_to's NamedValue path);
+          // only a non-bundle result var takes the flat assign.
+          const bool saved_nb     = current_assign_nonblocking_;
+          current_assign_nonblocking_ = false;  // a function-body return is a blocking write
+          if (!assign_struct_whole_value(*func_ret_sym_, v, stmt.sourceRange.start())) {
+            note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
+            builder_.create_assign_stmts(lname_of(*func_ret_sym_), v);
+          }
+          current_assign_nonblocking_ = saved_nb;
           clear_pending_loc();
         }
         return;

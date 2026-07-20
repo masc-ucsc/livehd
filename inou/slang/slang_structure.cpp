@@ -37,7 +37,10 @@ namespace {
 // which the bundle path does not do (see is_scalar_struct_var).
 bool field_type_is_struct_free(const slang::ast::Type& type) {
   const auto& ct = type.getCanonicalType();
-  if (ct.isStruct()) {
+  // A packed UNION counts like a struct: a deep write `x.u.member = v` needs
+  // the flat whole-struct net to root its RMW exactly as a nested struct does
+  // (rooting on the detupled base wrote an undeclared flat net nobody reads).
+  if (ct.isStruct() || ct.isPackedUnion()) {
     return false;
   }
   if (ct.isPackedArray() || ct.isUnpackedArray()) {
@@ -681,11 +684,15 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
         io_bits   = ti.bits;
         io_signed = ti.is_signed;
       }
+      // M7: a qualifying packed-struct port becomes a TUPLE-typed io entry
+      // (bundle) — per-field leaf ports after the SSA flatten, not a flat bus.
+      const bool is_bundle = !is_flat_array && bundle_port_qualifies(port);
       // Provenance: a `[P-1:0]` dim naming a package param mints an imported
       // scalar alias (`pub type P_T = uN` in the package unit) the pyrope
-      // re-emission prints as the port's type.
+      // re-emission prints as the port's type. A bundle port skips the alias
+      // (its type slot is the field tuple, not a scalar width).
       std::optional<std::string> dim_alias;
-      if (!is_flat_array) {
+      if (!is_flat_array && !is_bundle) {
         dim_alias = port_dim_alias(port, io_bits, io_signed);
       }
 
@@ -707,13 +714,31 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
         declared_.insert(internal);  // io entries ARE the declaration
         if (is_out) {
           output_syms_.insert(internal);
-          output_info_.emplace(internal, std::pair<int, bool>{io_bits, io_signed});
+          // A bundle output stays OUT of output_info_ — the whole-port X-poison
+          // loop keys on it, and a bundle port gets per-FIELD poison instead.
+          if (!is_bundle) {
+            output_info_.emplace(internal, std::pair<int, bool>{io_bits, io_signed});
+          }
         } else {
           input_syms_.insert(internal);
         }
         if (is_flat_array) {
           flat_port_syms_.insert(internal);
           mem_info_.emplace(internal, flat_mi);
+        }
+        if (is_bundle) {
+          Struct_info si;
+          // Body accesses use the "hand-flattened twin" LEAF form (2-child
+          // store/read on the dotted leaf name `port.field`) — the exact form
+          // upass.ssa's port flatten rewrites tuple ops INTO. Emitting it
+          // directly rides the normal (battle-tested) scalar SSA: the tuple-op
+          // route versions top-level field stores but leaves if-arm stores on
+          // the base name and binds reads to the FIRST version, which breaks
+          // the Verilog always_comb idiom (poison + default + conditional
+          // overrides + field RMW).
+          si.is_tuple = false;
+          si.fields   = struct_port_fields(type);
+          bundle_port_info_.emplace(internal, std::move(si));
         }
       }
 
@@ -728,7 +753,21 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       ln.set_pending_srcid(mint_loc(port.location));
       ln.add_child(entry, Lnast_node::create_ref(var_name));
       ln.add_child(entry, Lnast_node::create_const("nil"));  // no default value
-      emit_prim_type_int(entry, io_bits, io_signed);
+      if (is_bundle) {
+        // Tuple type slot: tuple_add of per-field store(ref field, nil,
+        // prim_type_int) — node-for-node the prp2lnast emit_arg_type shape for
+        // `p:(q:u8,r:u8)`, which upass.ssa flatten_assign turns into dotted
+        // leaf io entries (`p.q`, `p.r`) in field order (first = MSB).
+        auto tup = ln.add_child(entry, Lnast_ntype::create_tuple_add());
+        for (const auto& f : struct_port_fields(port.getType())) {
+          auto fentry = ln.add_child(tup, Lnast_ntype::create_store());
+          ln.add_child(fentry, Lnast_node::create_ref(f.name));
+          ln.add_child(fentry, Lnast_node::create_const("nil"));
+          emit_prim_type_int(fentry, f.bits, f.is_signed);
+        }
+      } else {
+        emit_prim_type_int(entry, io_bits, io_signed);
+      }
       if (dim_alias) {
         ln.add_io_type_name(var_name, *dim_alias);
       }
@@ -963,9 +1002,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_inputs        = std::move(input_syms_);
   auto saved_outputs       = std::move(output_syms_);
   auto saved_output_info   = std::move(output_info_);
+  auto saved_bundle_ports  = std::move(bundle_port_info_);
+  auto saved_bundle_shadow = std::move(bundle_out_shadow_);
   auto saved_regs          = std::move(reg_syms_);
   auto saved_wires         = std::move(wire_syms_);
   auto saved_wire_split    = std::move(wire_split_tmp_);
+  auto saved_wire_flat     = std::move(wire_split_flat_);
   auto saved_latches       = std::move(latch_syms_);
   auto saved_mems          = std::move(mem_syms_);
   auto saved_declared      = std::move(declared_);
@@ -1000,9 +1042,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_.clear();
   output_syms_.clear();
   output_info_.clear();
+  bundle_port_info_.clear();
+  bundle_out_shadow_.clear();
   reg_syms_.clear();
   wire_syms_.clear();
   wire_split_tmp_.clear();
+  wire_split_flat_.clear();
   latch_syms_.clear();
   mem_syms_.clear();
   declared_.clear();
@@ -1206,50 +1251,10 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     }
   }
 
-  // X-default poison-init for every COMBINATIONAL (non-reg) output: emit
-  // `out = 0sb?` / `0ub?…?` at body top, BEFORE lower_members drives anything.
-  // A legal Verilog output the body never drives defaults to X — this makes that
-  // explicit (Pyrope would otherwise reject an undriven output). A real driver
-  // supersedes it (the coalescer DSE-drops it, or a conditional drive folds it to
-  // the mux ELSE arm = correct X-when-not-selected). This is what lets tolg drop
-  // its is_verilog_origin undriven-output leniency and keep the hard error for a
-  // genuinely-undriven PYROPE output. Output regs already have a q-pin driver, so
-  // they are excluded (a poison-init would double-drive). Deterministic order.
-  {
-    std::vector<const slang::ast::Symbol*> couts;
-    for (const auto* sym : output_syms_) {
-      if (reg_syms_.contains(sym) || !output_info_.contains(sym) || !sym_lname_.contains(sym)) {
-        continue;
-      }
-      // Skip an ESCAPED (`\`-quoted, i.e. dotted) output name — that is a
-      // struct/tuple LEAF (`p.q`), driven through a shadow-mut that already
-      // X-fills its undriven leaves. A whole-output poison here fights that
-      // machinery and re-emits as a malformed nested-backtick name. Only plain
-      // SCALAR outputs (which the body drives — or not — as a whole) get poison.
-      const auto& ln = sym_lname_.at(sym);
-      if (!ln.empty() && ln.front() == '`') {
-        continue;
-      }
-      couts.push_back(sym);
-    }
-    std::sort(couts.begin(), couts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
-    for (const auto* sym : couts) {
-      const auto [bits, is_signed] = output_info_.at(sym);
-      set_pending_loc(sym->location);
-      if (is_signed) {
-        builder_.create_assign_stmts(sym_lname_.at(sym), "0sb?");
-      } else {
-        std::string qmarks(static_cast<size_t>(bits > 0 ? bits : 1), '?');
-        builder_.create_assign_stmts(sym_lname_.at(sym), absl::StrCat("0ub", qmarks));
-      }
-      clear_pending_loc();
-    }
-  }
+  // The X-default poison-init for combinational outputs is emitted inside
+  // lower_members (after wire classification: a wire-classified output must
+  // NOT get the poison store — the wire is single-driver, and a split wire's
+  // accumulator carries the poison as its declare init instead).
 
   lower_members(*body);
 
@@ -1269,9 +1274,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_            = std::move(saved_inputs);
   output_syms_           = std::move(saved_outputs);
   output_info_           = std::move(saved_output_info);
+  bundle_port_info_      = std::move(saved_bundle_ports);
+  bundle_out_shadow_     = std::move(saved_bundle_shadow);
   reg_syms_              = std::move(saved_regs);
   wire_syms_            = std::move(saved_wires);
   wire_split_tmp_       = std::move(saved_wire_split);
+  wire_split_flat_      = std::move(saved_wire_flat);
   latch_syms_           = std::move(saved_latches);
   mem_syms_             = std::move(saved_mems);
   declared_              = std::move(saved_declared);
@@ -1613,6 +1621,52 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   reg_declared_.insert(&sym);
   declared_.insert(&sym);
 
+  // M7: a REG-driven bundle output port keeps its TUPLE io interface, but the
+  // body's flop is a flat SHADOW reg (`<port>_q`): every body access of the
+  // port symbol re-points to the shadow (today's flat output-reg lowering,
+  // resets and all), and a per-field bridge drives the tuple leaves from the
+  // shadow's q. The bundle_port_info_ entry is erased so body field accesses
+  // route flat (bit-slices of the shadow) instead of tuple ops on the port.
+  std::optional<Struct_info> bridge_si;
+  std::string                bridge_port;
+  bool                       flat_bridge = false;
+  auto mint_shadow = [&]() {
+    bridge_port        = lname_of(sym);
+    std::string shadow = absl::StrCat(bridge_port, "_q");
+    for (int n = 0; used_names_.contains(shadow); ++n) {
+      shadow = absl::StrCat(bridge_port, "_q", n);
+    }
+    used_names_.insert(shadow);
+    sym_lname_[&sym] = shadow;
+  };
+  auto plain_name = [&]() {
+    if (sym.name.empty() || std::isdigit(static_cast<unsigned char>(sym.name.front())) != 0) {
+      return false;
+    }
+    for (const char c : sym.name) {
+      if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_') {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (auto bit = bundle_port_info_.find(&sym); bit != bundle_port_info_.end()) {
+    bridge_si = std::move(bit->second);
+    bundle_port_info_.erase(bit);
+    mint_shadow();
+  } else if (output_syms_.contains(&sym) && sym_lname_.contains(&sym) && !options_.struct_port_bundles
+             && struct_port_bundle_ok(sym.getType()) && plain_name()) {
+    // M7 parity: the FLAT (graphs) flow gives a reg-driven struct OUTPUT port
+    // the SAME `<port>_q` shadow flop + comb bridge as the bundle flow. The
+    // qualification is the shared TYPE-ONLY rule, so the pyrope emission and
+    // the flat lg reference name this state IDENTICALLY — the LEC's tier-1
+    // name pairing then ties the two flops' free (no-reset) initial values
+    // (trans_top's f8_rom_response_o_q vs the ref's f8_rom_response_o: the
+    // unpaired inits diverged and refuted at step 1 on all-zero inputs).
+    flat_bridge = true;
+    mint_shadow();
+  }
+
   const auto& type = sym.getType();
   if (type.getCanonicalType().isUnpackedArray()) {
     declare_unpacked(sym, /*is_reg=*/true);
@@ -1693,6 +1747,21 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
                                 int_max_str(ti.bits, ti.is_signed),
                                 int_min_str(ti.bits, ti.is_signed),
                                 "nil");  // no reset by default; async patterns override via attrs
+  // M7 bridge: tuple output leaves driven combinationally from the shadow
+  // reg's q (order-free — a reg read by name is its committed value).
+  if (bridge_si) {
+    auto p = to_pattern(name, ti.bits, ti.is_signed);
+    for (const auto& f : bridge_si->fields) {
+      auto fv = extract_field(p, f.off, f.bits);
+      if (f.is_signed) {
+        fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
+      }
+      emit_leaf_store(absl::StrCat(bridge_port, ".", f.name), fv);
+    }
+  } else if (flat_bridge) {
+    // Flat-flow parity bridge: the whole port driven from the shadow's q.
+    builder_.create_assign_stmts(bridge_port, name);
+  }
   clear_pending_loc();
 }
 
@@ -1951,6 +2020,97 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
     }
   }
   return true;
+}
+
+bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
+  const auto& ct = t.getCanonicalType();
+  if (!ct.isStruct() || !ct.isIntegral()) {
+    return false;  // packed struct only: the PORT TYPE itself (not union/enum/array-of-struct)
+  }
+  bool has_field = false;
+  for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+    const auto& fct = f.getType().getCanonicalType();
+    if (!fct.isIntegral() || fct.isStruct() || fct.isPackedUnion()) {
+      return false;  // nested struct / union field — deferred, keep the flat port
+    }
+    if (fct.isPackedArray()) {
+      // A plain packed VECTOR (`logic [7:0]`, element = 1-bit scalar) is fine;
+      // a multi-dim packed array / array-of-anything-wider field is not.
+      const auto* et = fct.getArrayElementType();
+      if (et == nullptr || et->getBitWidth() != 1) {
+        return false;
+      }
+    }
+    if (fct.getBitWidth() == 0) {
+      return false;
+    }
+    has_field = true;
+  }
+  return has_field;
+}
+
+std::vector<Slang_context::Struct_info::Field> Slang_context::struct_port_fields(const slang::ast::Type& t) {
+  std::vector<Struct_info::Field> out;
+  const auto& st = t.getCanonicalType().as<slang::ast::PackedStructType>();
+  for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
+    auto fi = tinfo(f.getType());
+    out.push_back({std::string(f.name), static_cast<int64_t>(f.bitOffset), fi.bits, fi.is_signed});
+  }
+  return out;
+}
+
+bool Slang_context::bundle_port_qualifies(const slang::ast::PortSymbol& port) const {
+  if (!options_.struct_port_bundles) {
+    return false;
+  }
+  if (port.direction != slang::ast::ArgumentDirection::In && port.direction != slang::ast::ArgumentDirection::Out) {
+    return false;  // inout/ref excluded
+  }
+  // The io leaves are `<port>.<field>` dotted names — an escaped (backticked)
+  // port name cannot form them; keep such a port flat. Name-based but still
+  // deterministic (no body uses consulted), so def and call sites agree.
+  if (port.name.empty() || std::isdigit(static_cast<unsigned char>(port.name.front())) != 0) {
+    return false;
+  }
+  for (const char c : port.name) {
+    if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_') {
+      return false;
+    }
+  }
+  return struct_port_bundle_ok(port.getType());
+}
+
+const Slang_context::Struct_info* Slang_context::bundle_port_of(const slang::ast::Symbol& sym) const {
+  auto it = bundle_port_info_.find(&sym);
+  return it == bundle_port_info_.end() ? nullptr : &it->second;
+}
+
+std::string Slang_context::bundle_port_body_base(const slang::ast::Symbol& sym) {
+  if (auto it = bundle_out_shadow_.find(&sym); it != bundle_out_shadow_.end()) {
+    return it->second;
+  }
+  return lname_of(sym);
+}
+
+std::string Slang_context::read_bundle_port_whole(const slang::ast::ValueSymbol& sym) {
+  // Reconstruct the packed value from the field leaves (the inverse of the
+  // whole-port write decomposition): OR each leaf, shifted to its bit offset.
+  auto it = bundle_port_info_.find(&sym);
+  if (it == bundle_port_info_.end()) {
+    return "0";
+  }
+  const auto  fields = it->second.fields;  // copy: builder calls can rehash the map
+  auto        base   = bundle_port_body_base(sym);
+  std::string acc;
+  for (const auto& f : fields) {
+    auto raw    = read_leaf(absl::StrCat(base, ".", f.name));
+    auto placed = to_pattern(raw, f.bits, f.is_signed);
+    if (f.off != 0) {
+      placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+    }
+    acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
+  }
+  return acc.empty() ? std::string{"0"} : acc;
 }
 
 const Slang_context::Struct_info::Field* Slang_context::find_struct_field(const Struct_info& si,
@@ -2760,6 +2920,87 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     }
   }
 
+  // ── edge-sensitivity nets are wires ────────────────────────────────────────
+  // A DERIVED net named in an always_ff edge list (`negedge rst_int_ni`, a
+  // gated clock) becomes a reg ATTR reference (`reset_pin=ref net`,
+  // `clock_pin=ref net`). Attr semantics are net-like — the ref must bind the
+  // RESOLVED value, never an SSA version. As a `mut` the net carries a poison
+  // store plus its driver store, and the attr ref downstream binds the FIRST
+  // version — prim_rst_sync's reset_pin resolved to the poison and the flop
+  // lost its async reset entirely (`if (2'sb0?)` in the lowered Verilog, only
+  // on the GRAPHS flow: the pyrope round-trip happened to re-declare the net
+  // `wire`). Classify every such net a `wire` (single-driver; the split below
+  // handles a multiply-written one), so both flows carry the same
+  // unambiguous single-name net.
+  {
+    std::function<void(const slang::ast::Scope&)> scan_edges = [&](const slang::ast::Scope& sc) {
+      for (const auto& member : sc.members()) {
+        if (member.kind == SymbolKind::GenerateBlock) {
+          const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+          if (!gen.isUninstantiated) {
+            scan_edges(gen);
+          }
+          continue;
+        }
+        if (member.kind == SymbolKind::GenerateBlockArray) {
+          for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+            scan_edges(*entry);
+          }
+          continue;
+        }
+        if (member.kind != SymbolKind::ProceduralBlock) {
+          continue;
+        }
+        const auto& pbs = member.as<slang::ast::ProceduralBlockSymbol>();
+        if (pbs.procedureKind != slang::ast::ProceduralBlockKind::Always
+            && pbs.procedureKind != slang::ast::ProceduralBlockKind::AlwaysFF) {
+          continue;
+        }
+        const auto& stmt = pbs.getBody();
+        if (stmt.kind != StatementKind::Timed) {
+          continue;
+        }
+        auto note_edge_net = [&](const slang::ast::TimingControl& tc) {
+          if (tc.kind != slang::ast::TimingControlKind::SignalEvent) {
+            return;
+          }
+          const auto& sev = tc.as<slang::ast::SignalEventControl>();
+          if (sev.edge != slang::ast::EdgeKind::PosEdge && sev.edge != slang::ast::EdgeKind::NegEdge) {
+            return;
+          }
+          if (sev.expr.kind != ExpressionKind::NamedValue) {
+            return;
+          }
+          const auto& sym = sev.expr.as<slang::ast::NamedValueExpression>().symbol;
+          if (input_syms_.contains(&sym) || reg_syms_.contains(&sym) || declared_.contains(&sym)
+              || wire_syms_.contains(&sym)) {
+            return;  // ports/regs are already order-free names; pre-declared nets keep their form
+          }
+          const auto& ct = sym.getType().getCanonicalType();
+          if (!ct.isIntegral() || ct.isStruct() || ct.isPackedUnion()) {
+            return;  // plain scalar nets only (an edge source is 1-bit in practice)
+          }
+          const auto* psc          = sym.getParentScope();
+          const bool  module_level = psc != nullptr
+                                     && (&psc->asSymbol() == body_
+                                         || psc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+          if (module_level) {
+            wire_syms_.insert(&sym);
+          }
+        };
+        const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
+        if (timing.kind == slang::ast::TimingControlKind::EventList) {
+          for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
+            note_edge_net(*ev);
+          }
+        } else {
+          note_edge_net(timing);
+        }
+      }
+    };
+    scan_edges(scope);
+  }
+
   // ── wire SPLIT setup: a MULTIPLY-written wire needs a mut accumulator ───────
   // A wire net stored more than once cannot be a single-driver wire. Split it:
   // writes accumulate into `mut <net>__wtmp` (program-order last-wins), a final
@@ -2849,6 +3090,140 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       used_names_.insert(tmp);
       wire_split_tmp_[wsym] = std::move(tmp);
     }
+    // FLATTENED-AGGREGATE split: a wire-classified local whose representation
+    // is a single flattened MUT bus (declare_unpacked's flatten branch:
+    // flat_port_syms_ AND mem_syms_, pre-declared in lower_module BEFORE this
+    // classification could run). The scalar loop above skipped it, but its
+    // reads are exactly as position-dependent as a scalar's: a merge driver
+    // sorted before the writers reads the bus's INITIAL value
+    // (miss_handler_unit's `writeback_req_o |= mh_wb_req[i]` read mh_wb_req
+    // before the child instances wrote it). The existing mut IS the
+    // accumulator; readers are re-pointed to a fresh `<name>__wnet` wire whose
+    // single driver is the end-of-module bridge, and a WRITER driver's
+    // emission swaps back to the mut (the generic wire_split_tmp_ machinery,
+    // with the split's naming inverted — the pre-declared mut cannot become
+    // the wire). Split unconditionally: the bridge is always the wire's one
+    // driver, so the driver/store-count refinements don't apply.
+    for (const auto* wsym : wire_syms_) {
+      const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+      if (vs == nullptr || wire_split_tmp_.contains(wsym) || !declared_.contains(wsym)) {
+        continue;
+      }
+      if (!(flat_port_syms_.contains(vs) && mem_syms_.contains(vs) && mem_info_.contains(vs))
+          || input_syms_.contains(vs) || output_syms_.contains(vs)) {
+        continue;  // only local flattened buses (ports/memories keep their paths)
+      }
+      std::string orig = lname_of(*vs);
+      std::string stem = orig;
+      if (!stem.empty() && stem.front() == '`') {
+        stem = stem.substr(1, stem.size() - 2);
+      }
+      std::string wnet = absl::StrCat(stem, "__wnet");
+      for (int n = 0; used_names_.contains(wnet); ++n) {
+        wnet = absl::StrCat(stem, "__wnet", n);
+      }
+      used_names_.insert(wnet);
+      wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
+      wire_split_flat_.insert(wsym);
+      sym_lname_[wsym] = wnet;  // readers resolve through the wire
+    }
+  }
+
+  // X-default poison-init for every COMBINATIONAL (non-reg) output: emit
+  // `out = 0sb?` / `0ub?…?` before any driver. A legal Verilog output the body
+  // never drives defaults to X — this makes that explicit (Pyrope would
+  // otherwise reject an undriven output). A real driver supersedes it (the
+  // coalescer DSE-drops it, or a conditional drive folds it to the mux ELSE arm
+  // = correct X-when-not-selected). This is what lets tolg drop its
+  // is_verilog_origin undriven-output leniency and keep the hard error for a
+  // genuinely-undriven PYROPE output. Output regs already have a q-pin driver,
+  // so they are excluded (a poison-init would double-drive) — and so is a
+  // WIRE-classified output (a wire is single-driver; the poison store would be
+  // a second driver, and a SPLIT wire's accumulator already carries the poison
+  // as its declare init). Deterministic order.
+  {
+    std::vector<const slang::ast::Symbol*> couts;
+    for (const auto* sym : output_syms_) {
+      if (reg_syms_.contains(sym) || !output_info_.contains(sym) || !sym_lname_.contains(sym)
+          || wire_syms_.contains(sym)) {
+        continue;
+      }
+      // Skip an ESCAPED (`\`-quoted, i.e. dotted) output name — that is a
+      // struct/tuple LEAF (`p.q`), driven through a shadow-mut that already
+      // X-fills its undriven leaves. A whole-output poison here fights that
+      // machinery and re-emits as a malformed nested-backtick name. Only plain
+      // SCALAR outputs (which the body drives — or not — as a whole) get poison.
+      const auto& ln = sym_lname_.at(sym);
+      if (!ln.empty() && ln.front() == '`') {
+        continue;
+      }
+      couts.push_back(sym);
+    }
+    std::sort(couts.begin(), couts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : couts) {
+      const auto [bits, is_signed] = output_info_.at(sym);
+      set_pending_loc(sym->location);
+      if (is_signed) {
+        builder_.create_assign_stmts(sym_lname_.at(sym), "0sb?");
+      } else {
+        std::string qmarks(static_cast<size_t>(bits > 0 ? bits : 1), '?');
+        builder_.create_assign_stmts(sym_lname_.at(sym), absl::StrCat("0ub", qmarks));
+      }
+      clear_pending_loc();
+    }
+    // M7: every COMB bundle OUTPUT port drives a local per-field SHADOW
+    // accumulator (`<port>__bpo.<field>` mut leaves, poison-initialized like
+    // the flat-path outputs); the port leaves themselves get exactly ONE
+    // top-level store each — the end-of-module bridge below. This keeps the
+    // RECOMPILE of the emitted Pyrope on the safe side of upass.ssa's
+    // port-tuple flatten (>=2 top-level stores to an output tuple leaf make
+    // the version commit clobber every if-arm store — writeback_unit's
+    // l2_req_data_o refuted as constant 0). Reg-driven bundle ports were
+    // re-routed at declare_reg (their own single-store bridge), so they are
+    // no longer in bundle_port_info_ here.
+    std::vector<const slang::ast::Symbol*> bouts;
+    for (const auto& [sym, si] : bundle_port_info_) {
+      if (!output_syms_.contains(sym) || reg_syms_.contains(sym) || !sym_lname_.contains(sym)) {
+        continue;
+      }
+      bouts.push_back(sym);
+    }
+    std::sort(bouts.begin(), bouts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : bouts) {
+      const auto  fields = bundle_port_info_.at(sym).fields;  // copy (builder can rehash)
+      std::string stem   = sym_lname_.at(sym);
+      if (!stem.empty() && stem.front() == '`') {
+        stem = stem.substr(1, stem.size() - 2);
+      }
+      std::string shadow = absl::StrCat(stem, "__bpo");
+      for (int n = 0; used_names_.contains(shadow); ++n) {
+        shadow = absl::StrCat(stem, "__bpo", n);
+      }
+      used_names_.insert(shadow);
+      set_pending_loc(sym->location);
+      for (const auto& f : fields) {
+        auto leaf = absl::StrCat(shadow, ".", f.name);
+        builder_.create_declare_stmts(leaf, "mut", "", "");
+        if (f.is_signed) {
+          builder_.create_assign_stmts(leaf, "0sb?");
+        } else {
+          std::string qmarks(static_cast<size_t>(f.bits > 0 ? f.bits : 1), '?');
+          builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+        }
+      }
+      clear_pending_loc();
+      bundle_out_shadow_.emplace(sym, std::move(shadow));
+    }
   }
 
   // ── pass 4: emit ──────────────────────────────────────────────────────────
@@ -2861,6 +3236,16 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   for (const auto& [wsym, tmp] : wire_split_tmp_) {
     const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
     if (vs == nullptr) {
+      continue;
+    }
+    // A FLATTENED-AGGREGATE split: the mut accumulator is the ALREADY-declared
+    // flat bus — declare only the reader-side wire, at the bus's flat width.
+    if (wire_split_flat_.contains(wsym)) {
+      const auto& mi        = mem_info_.at(vs);
+      const int   flat_bits = mi.elem_bits * static_cast<int>(mi.size);
+      set_pending_loc(vs->location);
+      builder_.create_declare_stmts(lname_of(*vs), "wire", int_max_str(flat_bits, false), int_min_str(flat_bits, false));
+      clear_pending_loc();
       continue;
     }
     auto ti  = tinfo(vs->getType());
@@ -2975,6 +3360,37 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     set_pending_loc(vs->location);
     builder_.create_assign_stmts(lname_of(*vs), tmp);
     clear_pending_loc();
+  }
+
+  // M7 bundle-output bridges: `port.field = <shadow>.field`, ONE top-level
+  // store per port leaf, after every body driver has written the shadow.
+  // Deterministic order (pointer-keyed map iteration varies run-to-run).
+  {
+    std::vector<const slang::ast::Symbol*> bports;
+    for (const auto& [sym, shadow] : bundle_out_shadow_) {
+      bports.push_back(sym);
+    }
+    std::sort(bports.begin(), bports.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : bports) {
+      auto it = bundle_port_info_.find(sym);
+      if (it == bundle_port_info_.end() || !sym_lname_.contains(sym)) {
+        continue;
+      }
+      const auto fields = it->second.fields;  // copy (builder can rehash)
+      const auto shadow = bundle_out_shadow_.at(sym);
+      const auto base   = sym_lname_.at(sym);
+      set_pending_loc(sym->location);
+      for (const auto& f : fields) {
+        auto v = read_leaf(absl::StrCat(shadow, ".", f.name));
+        emit_leaf_store(absl::StrCat(base, ".", f.name), v);
+      }
+      clear_pending_loc();
+    }
   }
 }
 
@@ -3503,17 +3919,33 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
         continue;
       }
       auto name = lname_of(*sym);
-      if (!(clk_sym->name == "clk" || clk_sym->name == "clock")) {
-        auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-        ln.add_child(idx, Lnast_node::create_ref(name));
-        ln.add_child(idx, Lnast_node::create_const("clock_pin"));
-        ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
+      // A TUPLE memory is split by upass.detuple into per-field memories
+      // (`mem.field:[N]`), and detuple does not split attr_set — an attr on
+      // the BASE name is silently dropped, leaving the per-field memories on
+      // the implicit `clock` input (intpipe_csr_msgs' msg_port_conf.* ran on
+      // a phantom auto-created `clock` instead of clk_wr_i, on BOTH flows).
+      // Emit the clock attrs per FIELD, the same routing as the fwd=0 attr.
+      std::vector<std::string> targets;
+      if (auto mit = mem_info_.find(sym); mit != mem_info_.end() && mit->second.is_tuple) {
+        for (const auto& f : mit->second.fields) {
+          targets.push_back(absl::StrCat(name, ".", f.name));
+        }
+      } else {
+        targets.push_back(name);
       }
-      if (negedge) {
-        auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-        ln.add_child(idx, Lnast_node::create_ref(name));
-        ln.add_child(idx, Lnast_node::create_const("posclk"));
-        ln.add_child(idx, Lnast_node::create_const("false"));
+      for (const auto& tgt : targets) {
+        if (!(clk_sym->name == "clk" || clk_sym->name == "clock")) {
+          auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+          ln.add_child(idx, Lnast_node::create_ref(tgt));
+          ln.add_child(idx, Lnast_node::create_const("clock_pin"));
+          ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
+        }
+        if (negedge) {
+          auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+          ln.add_child(idx, Lnast_node::create_ref(tgt));
+          ln.add_child(idx, Lnast_node::create_const("posclk"));
+          ln.add_child(idx, Lnast_node::create_const("false"));
+        }
       }
     }
   }
@@ -3553,10 +3985,97 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   struct Out_conn {
     const slang::ast::PortSymbol* port;
     const slang::ast::Expression* expr;
+    bool                          bundle = false;  // child port is a tuple bundle (M7)
   };
   std::vector<std::pair<std::string, std::string>> in_args;  // (port, value)
   std::vector<Out_conn>                            outs;
   size_t                                           n_outputs_total = 0;
+  bool                                             any_bundle_out  = false;
+
+  // M7: an input connection to a child BUNDLE port passes a TUPLE literal —
+  // tuple_add(tmp, store(field, v)…), then the func_call named arg
+  // store(port, ref tmp). Field values are computed BEFORE the tuple_add node
+  // (the builder appends ops sequentially; interleaving would emit them after
+  // the literal). expr == nullptr is the unconnected-input x per field.
+  auto build_bundle_actual = [&](const slang::ast::PortSymbol& bport, const slang::ast::Expression* aexpr) -> std::string {
+    auto                     pfields = struct_port_fields(bport.getType());
+    std::vector<std::string> fvals;
+    fvals.reserve(pfields.size());
+    auto same_shape = [&](const std::vector<Struct_info::Field>& of) {
+      if (of.size() != pfields.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < pfields.size(); ++i) {
+        if (of[i].name != pfields[i].name || of[i].off != pfields[i].off || of[i].bits != pfields[i].bits
+            || of[i].is_signed != pfields[i].is_signed) {
+          return false;
+        }
+      }
+      return true;
+    };
+    bool done = false;
+    if (aexpr == nullptr) {  // unconnected bundle input: every field reads x
+      for (const auto& f : pfields) {
+        fvals.push_back(f.is_signed ? std::string("0sb?")
+                                    : absl::StrCat("0ub", std::string(static_cast<size_t>(f.bits), '?')));
+      }
+      done = true;
+    } else {
+      const slang::ast::Expression* pe = aexpr;
+      while (pe->kind == ExpressionKind::Conversion) {
+        pe = &pe->as<slang::ast::ConversionExpression>().operand();
+      }
+      if (pe->kind == ExpressionKind::NamedValue) {
+        const auto& asym = pe->as<slang::ast::NamedValueExpression>().symbol;
+        if (const auto* bsi = bundle_port_of(asym)) {
+          if (same_shape(bsi->fields)) {  // (b) the parent's OWN bundle port: per-leaf reads
+            auto aname = bundle_port_body_base(asym);
+            for (const auto& f : pfields) {
+              fvals.push_back(read_leaf(absl::StrCat(aname, ".", f.name)));
+            }
+            done = true;
+          }
+        } else if (is_scalar_struct_var(asym)) {  // (a) a local bundle struct var: per-leaf reads
+          if (!declared_.contains(&asym)) {
+            declare_value_symbol(asym, /*force_reg=*/false);
+          }
+          if (auto it = struct_var_info_.find(&asym); it != struct_var_info_.end() && same_shape(it->second.fields)) {
+            const bool a_is_tuple = it->second.is_tuple;
+            auto       aname      = lname_of(asym);
+            for (const auto& f : pfields) {
+              fvals.push_back(a_is_tuple ? read_struct_field_get(aname, f.name)
+                                         : read_leaf(absl::StrCat(aname, ".", f.name)));
+            }
+            done = true;
+          }
+        }
+      }
+    }
+    if (!done) {  // (c) generic: lower the actual flat, slice per field (always correct)
+      auto v  = to_int_value(lower_rvalue(*aexpr));
+      auto pi = flat_or_tinfo(bport.getType());
+      auto ei = flat_or_tinfo(*aexpr->type);
+      v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed);
+      auto p  = to_pattern(v, pi.bits, pi.is_signed);
+      for (const auto& f : pfields) {
+        auto fv = extract_field(p, f.off, f.bits);
+        if (f.is_signed) {
+          fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
+        }
+        fvals.push_back(fv);
+      }
+    }
+    auto& bln = *builder_.lnast;
+    auto  tup = builder_.add_child(Lnast_ntype::create_tuple_add());
+    auto  tmp = builder_.create_lnast_tmp();
+    bln.add_child(tup, Lnast_node::create_ref(tmp));
+    for (size_t i = 0; i < pfields.size(); ++i) {
+      auto st = bln.add_child(tup, Lnast_ntype::create_store());
+      bln.add_child(st, Lnast_node::create_ref(pfields[i].name));
+      builder_.add_value_child_pub(st, fvals[i]);
+    }
+    return tmp;
+  };
 
   for (const auto* conn : inst.getPortConnections()) {
     if (conn->port.kind != SymbolKind::Port) {
@@ -3573,16 +4092,27 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
                            + "'");
       return;
     }
+    // M7: the SAME type-only rule the child def used — parents and children
+    // stay consistent because neither consults body uses.
+    const bool bundle = bundle_port_qualifies(port);
     if (is_out) {
       ++n_outputs_total;
+      any_bundle_out |= bundle;
     }
 
     if (expr == nullptr) {  // unconnected
       if (!is_out) {
-        auto ti = flat_or_tinfo(port.getType());
-        // unconnected input reads x
-        std::string qmarks(static_cast<size_t>(ti.bits), '?');
-        in_args.emplace_back(std::string(port.name), absl::StrCat("0ub", qmarks));
+        if (bundle) {
+          set_pending_loc(inst.location);
+          auto tmp = build_bundle_actual(port, nullptr);
+          clear_pending_loc();
+          in_args.emplace_back(std::string(port.name), tmp);
+        } else {
+          auto ti = flat_or_tinfo(port.getType());
+          // unconnected input reads x
+          std::string qmarks(static_cast<size_t>(ti.bits), '?');
+          in_args.emplace_back(std::string(port.name), absl::StrCat("0ub", qmarks));
+        }
       }
       continue;
     }
@@ -3592,7 +4122,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       if (const auto* assign = expr->as_if<slang::ast::AssignmentExpression>()) {
         expr = &assign->left();
       }
-      outs.push_back({&port, expr});
+      outs.push_back({&port, expr, bundle});
+    } else if (bundle) {
+      set_pending_loc(expr->sourceRange);
+      auto tmp = build_bundle_actual(port, expr);
+      clear_pending_loc();
+      in_args.emplace_back(std::string(port.name), tmp);
     } else {
       set_pending_loc(expr->sourceRange);
       auto v  = to_int_value(lower_rvalue(*expr));
@@ -3622,9 +4157,36 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   }
 
   // Bind outputs: a single-output callee's result is the value itself;
-  // multi-output callees yield a tuple read by field name.
-  const bool single_out = n_outputs_total == 1;
+  // multi-output callees yield a tuple read by field name. A BUNDLE output is
+  // per-leaf dotted ports on the Sub, so even a lone bundle output makes the
+  // instance result MULTI-output (dotted tuple_get path, never bare result).
+  const bool single_out = n_outputs_total == 1 && !any_bundle_out;
   for (const auto& oc : outs) {
+    if (oc.bundle) {
+      // M7: read each leaf via ONE tuple_get with the DOTTED name (the form
+      // tolg matches via its quoted-string path), reassemble the flat value in
+      // packed order, and route through assign_to (which re-splits onto a
+      // bundle-var target's leaves when applicable).
+      auto        pfields = struct_port_fields(oc.port->getType());
+      std::string acc;
+      for (const auto& f : pfields) {
+        auto tg = builder_.add_child(Lnast_ntype::create_tuple_get());
+        auto t  = builder_.create_lnast_tmp();
+        ln.add_child(tg, Lnast_node::create_ref(t));
+        ln.add_child(tg, Lnast_node::create_ref(result));
+        ln.add_child(tg, Lnast_node::create_const(absl::StrCat(oc.port->name, ".", f.name)));
+        auto placed = to_pattern(t, f.bits, f.is_signed);
+        if (f.off != 0) {
+          placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+        }
+        acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
+      }
+      auto pi = flat_or_tinfo(oc.port->getType());
+      auto ei = flat_or_tinfo(*oc.expr->type);
+      assign_to(*oc.expr,
+                materialize_conversion(acc.empty() ? std::string{"0"} : acc, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
+      continue;
+    }
     std::string v;
     if (single_out) {
       v = result;

@@ -115,10 +115,17 @@ EOF
 grep -q 'blocked on unresolved import' "$W/r6.json" || fail "expected no-progress error: $(cat "$W/r6.json")"
 
 # Non-foldable pub value: rejected when the EXPORTING file elaborates.
-printf 'pub const bad = 0sb?\n' > "$W/nf.prp"
+# (A register read is runtime-valued at file scope — never a comptime constant.)
+printf 'reg r:u4 = 0\npub const bad = r\n' > "$W/nf.prp"
 "$LHD" compile "$W/nf.prp" --emit-dir ln:"$W/nf_ln/" --workdir "$W/w7" -q --result-json "$W/r7.json" 2>/dev/null
 [ $? -ne 0 ] || fail "non-foldable pub value must exit non-zero"
 grep -q 'not comptime-foldable' "$W/r7.json" || fail "expected pub-not-comptime error: $(cat "$W/r7.json")"
+
+# Unknown-bit (4-state) pub values ARE foldable constants: SV packages export
+# X-bearing params (e.g. `?`-pattern encodings), so `0sb?` must be accepted.
+printf 'pub const xish = 0sb?\n' > "$W/nfx.prp"
+"$LHD" compile "$W/nfx.prp" --emit-dir ln:"$W/nfx_ln/" --workdir "$W/w7x" -q --result-json "$W/r7x.json" 2>/dev/null
+[ $? -eq 0 ] || fail "unknown-bit pub value must be accepted: $(cat "$W/r7x.json")"
 
 # Ambiguous unit across two ln: inputs (§2): importing it errors, but a
 # non-imported collision is tolerated.

@@ -60,6 +60,13 @@ public:
     // requires the constprop preserve-mode + prp_writer package-import synthesis
     // (WIP), so a normal compile keeps folding as before.
     bool preserve_param_provenance = false;
+    // Emit a qualifying packed-struct PORT (struct_port_bundle_ok) as a Pyrope
+    // tuple/bundle port — a tuple-typed io entry plus tuple_get/field-store
+    // body accesses — instead of one flat bus. Defaulted ON by the CLI exactly
+    // when preserve_param_provenance defaults ON (pyrope-emitting, no-graphs
+    // compile); a graphs flow keeps flat ports (that flat lgraph is the LEC
+    // reference).
+    bool struct_port_bundles = false;
   };
 
   Slang_context() = default;
@@ -101,6 +108,17 @@ private:
   // emission, a driver that WRITES the net has sym_lname_ swapped to the tmp (so
   // its writes AND its own RMW reads hit the mut); other drivers read the wire.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> wire_split_tmp_;
+  // Subset of wire_split_tmp_ keys that are FLATTENED-AGGREGATE splits: a
+  // wire-classified local whose representation is a single flattened MUT bus
+  // (a comb struct/const-indexed array packed by declare_unpacked's flatten
+  // branch, pre-declared BEFORE the wire classification runs). The EXISTING
+  // mut is the accumulator; readers see a fresh `<name>__wnet` wire bridged
+  // once at the end (the inverse naming of the scalar split — the mut cannot
+  // be re-declared). Without this, a merge/mux driver sorted before the
+  // writers reads the bus's INITIAL value instead of the resolved net
+  // (minion_dcache_miss_handler_unit's `writeback_req_o |= mh_wb_req[i]`
+  // read mh_wb_req before the child instances wrote it — LEC-refuted).
+  absl::flat_hash_set<const slang::ast::Symbol*> wire_split_flat_;
   absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
@@ -340,6 +358,59 @@ private:
   // Reconstruct the packed value of a whole-struct read from its leaves.
   std::string read_struct_whole(const slang::ast::ValueSymbol& sym);
 
+  // ── packed-struct PORTS as tuple bundles (M7) ─────────────────────────────
+  // A qualifying packed-struct port is emitted as a TUPLE-typed io entry
+  // (store(port, nil, tuple_add(per-field store)) — the exact prp2lnast
+  // tuple-port shape upass.ssa flattens into dotted leaf ports). Body accesses
+  // use the "hand-flattened twin" LEAF form (2-child store/read + set_mask on
+  // the dotted leaf `port.field` — what SSA's port flatten rewrites tuple ops
+  // INTO), so they ride the normal scalar SSA: the tuple-op route versions
+  // top-level field stores but leaves if-arm stores on the base name and
+  // binds reads to the FIRST version, which breaks the always_comb idiom
+  // (poison + default + conditional overrides + field RMW). A whole-port read
+  // reassembles (shift/or of the leaves in packed order), a whole-port write
+  // splits per field. Keyed by the port's internalSymbol; fields in SV
+  // declaration order (first-declared = MSB — the LEC leaf↔flat-bus
+  // correspondence). A REG-driven bundle output port is re-routed at
+  // declare_reg time to a flat shadow reg bridged per-field onto the tuple
+  // leaves (the entry is erased here so body accesses go flat).
+  absl::flat_hash_map<const slang::ast::Symbol*, Struct_info> bundle_port_info_;
+  // TYPE-ONLY qualification, shared by the child def and every parent
+  // instantiation site (that determinism keeps the two consistent): the
+  // canonical port type is a packed STRUCT (not union/enum, not an array of
+  // structs), and every field is an integral scalar/packed vector/enum — no
+  // struct/union/multi-dim-array-typed fields (those keep today's flat port).
+  static bool struct_port_bundle_ok(const slang::ast::Type& t);
+  // Field list (SV declaration order, first = MSB) of a qualifying struct
+  // port type — the shared shape between emit_module_io and lower_instance.
+  static std::vector<Struct_info::Field> struct_port_fields(const slang::ast::Type& t);
+  // Full qualification of a port at def AND call sites (option + plain name +
+  // type rule). Deterministic: consults no body uses.
+  bool bundle_port_qualifies(const slang::ast::PortSymbol& port) const;
+  const Struct_info* bundle_port_of(const slang::ast::Symbol& sym) const;
+  // COMB bundle OUTPUT ports drive a local per-field SHADOW accumulator
+  // (`<port>__bpo.<field>` mut leaves, poison-initialized) and the port leaf
+  // gets exactly ONE top-level store — the end-of-module bridge
+  // `port.field = <shadow>.field`. Rationale: upass.ssa's port-tuple flatten
+  // (on the RECOMPILE of the emitted Pyrope) SSA-versions top-level stores to
+  // an output tuple leaf but leaves if-arm stores on the base name; with >=2
+  // top-level stores (poison + the SV `'0` default) the final version commit
+  // clobbers every arm write (minion_dcache_writeback_unit's l2_req_data_o
+  // refuted as constant 0). A local shadow rides the normal, proven scalar
+  // SSA; the single-store bridge is safe in both directions. Keyed by the
+  // port's internalSymbol; body reads AND writes of the port redirect here.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> bundle_out_shadow_;
+  // Body-access base name of a bundle port: the shadow for a comb output,
+  // the port name itself for inputs (and reg-bridged outputs, which are
+  // erased from bundle_port_info_ before any body access).
+  std::string bundle_port_body_base(const slang::ast::Symbol& sym);
+  // Whole-port value from per-field tuple_gets (mirror read_struct_whole).
+  std::string read_bundle_port_whole(const slang::ast::ValueSymbol& sym);
+  // Whole-port write: slice an already-lowered flat value onto the fields
+  // (mirror assign_struct_whole_value). false when sym is not a bundle port.
+  bool assign_bundle_port_whole_value(const slang::ast::ValueSymbol& sym, const std::string& value,
+                                      slang::SourceLocation loc);
+
   // ── statements (slang_stmt.cpp) ────────────────────────────────────────────
   void lower_statement(const slang::ast::Statement& stmt);
   void lower_conditional(const slang::ast::ConditionalStatement& stmt);
@@ -489,6 +560,11 @@ private:
   // base (caller then falls back to the unpacked/memory path or a diagnostic).
   bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out);
   void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
+  // Partial (bit-slice) write whose resolved root is a BUNDLE port: const
+  // offsets split per overlapped field (full cover = plain field store,
+  // partial = field-local splice); a dynamic offset reassembles the whole
+  // port, splices at the runtime position, and writes every field back.
+  void emit_bundle_port_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
 
   // `mem[addr][const-chunk] <= data`: a chunked masked memory write (the XS SRAM
   // models' byte/chunk write-enable idiom). Lowers to a memory write port whose

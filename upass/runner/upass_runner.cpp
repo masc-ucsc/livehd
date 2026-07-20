@@ -731,6 +731,60 @@ std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple
   return out;
 }
 
+void uPass_runner::record_runtime_tuple_slot_refs() {
+  // Cursor on tuple_add: [dst(ref), entry...] — entry is const | ref | store(key, val).
+  // See the .hpp comment: backfill slot→ref carriers constprop dropped for
+  // runtime-scalar REF fields that carry an ST bundle (locals/temps).
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
+    lm->restore_cursor(saved);
+    return;
+  }
+  const std::string dvar(lm->current_text());
+  auto consider = [&](const std::string& slot, std::string_view txt) {
+    if (auto it = symbol_table_.tuple_slot_ref.find(dvar); it != symbol_table_.tuple_slot_ref.end() && it->second.count(slot)) {
+      return;  // constprop already recorded this carrier
+    }
+    auto b = symbol_table_.get_bundle(txt);
+    if (!b) {
+      return;  // no bundle → constprop's own no-bundle case already handled it
+    }
+    if (!b->is_trivial_scalar()) {
+      return;  // genuine tuple: its runtime leaves were re-homed (dotted) by constprop
+    }
+    if (symbol_table_.known_const_scalar(txt)) {
+      return;  // comptime scalar: the field's bundle trivial is the authority
+    }
+    symbol_table_.tuple_slot_ref[dvar][slot] = std::string(txt);
+  };
+  int unnamed_pos = 0;
+  while (lm->move_to_sibling()) {
+    const auto t = lm->get_raw_ntype();
+    if (Lnast_ntype::is_const(t)) {
+      ++unnamed_pos;
+    } else if (Lnast_ntype::is_ref(t)) {
+      consider(std::to_string(unnamed_pos), lm->current_text());
+      ++unnamed_pos;
+    } else if (Lnast_ntype::is_store(t)) {
+      // Named field: store(ref(key), const/ref(val)) — named slots don't
+      // advance unnamed_pos (mirrors constprop's process_tuple_add).
+      const auto entry = lm->save_cursor();
+      if (lm->move_to_child()) {
+        const std::string key(lm->current_text());
+        if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+          consider(key, lm->current_text());
+        }
+      }
+      lm->restore_cursor(entry);
+    }
+  }
+  lm->restore_cursor(saved);
+}
+
 std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::string_view name) {
   // Declared kind + range from the shared derivation.
   const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), name);
@@ -2329,6 +2383,9 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   if (bits <= 0) {
     return;  // unknown width — nothing to declare
   }
+  if (symbol_table_.in_uncertain_scope()) {
+    return;  // one if-arm's cast/bit-select force must not become the target's DECLARED envelope
+  }
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -3294,7 +3351,8 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
                                      bool commit, std::string_view callee_name, const livehd::diag::Span& call_span,
                                      std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
                                      std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
-                                     std::vector<std::pair<std::string, Lnast_node>>& vararg_named) {
+                                     std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
+                                     bool* out_tuple_expanded) {
   const std::size_t nparams    = io.inputs.size();
   // A trailing `...args` var-arg param (always the LAST input) gathers every
   // actual not consumed by a fixed leading param into one synthesized tuple:
@@ -3308,6 +3366,9 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
   param_func.assign(nparams, std::string{});
   vararg_pos.clear();
   vararg_named.clear();
+  if (out_tuple_expanded != nullptr) {
+    *out_tuple_expanded = false;
+  }
 
   auto param_index = [&](std::string_view k) -> std::size_t {
     for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
@@ -3371,6 +3432,9 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
     for (const auto& [lidx, is_const, payload] : binds) {
       param_val[lidx] = is_const ? Lnast_node::create_const(payload) : Lnast_node::create_ref(payload);
       param_set[lidx] = true;
+    }
+    if (out_tuple_expanded != nullptr) {
+      *out_tuple_expanded = true;  // a Sub-bound callee must re-emit dotted NAMED actuals
     }
     return true;
   };
@@ -3949,8 +4013,13 @@ bool uPass_runner::try_inline_func_call() {
   std::vector<Lnast_node>                         param_val;
   std::vector<bool>                               param_set;
   std::vector<std::string>                        param_func;
+  // tuple_actual_expanded: this COMMIT bind expanded a tuple actual into
+  // flattened `<prefix>.<leaf>` params (the probe's expansion in
+  // signature_matches is a separate, discarded bind). A Sub-bound callee must
+  // then re-emit the call with the dotted NAMED binding below.
+  bool tuple_actual_expanded = false;
   bind_call_actuals(io, actuals, is_ctor_call, /*commit=*/true, callee_name, call_span, param_val, param_set, param_func,
-                    vararg_pos, vararg_named);
+                    vararg_pos, vararg_named, &tuple_actual_expanded);
   const std::size_t nparams    = io.inputs.size();
   const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
   const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;
@@ -4024,7 +4093,11 @@ bool uPass_runner::try_inline_func_call() {
     });
     const bool becomes_sub = is_pipe || (callee->get_lambda_kind() == "mod" && !has_self);
     const bool any_unnamed  = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return !a.is_named; });
-    if (becomes_sub && any_unnamed) {
+    // A tuple actual (even a NAMED one, `req=t`) was expanded field-by-field
+    // into the flattened `req.a`/`req.b` leaf params — a binding the source
+    // spelling cannot express for tolg (the store names `req`, which is not a
+    // port). Materialize it as dotted named actuals unconditionally.
+    if (becomes_sub && (any_unnamed || tuple_actual_expanded)) {
       std::vector<std::pair<std::string, Lnast_node>> named;
       named.reserve(nbind);
       for (std::size_t i = 0; i < nbind; ++i) {  // becomes_sub ⇒ no self slot
@@ -4172,6 +4245,26 @@ bool uPass_runner::try_inline_func_call() {
   // splice for a runtime-argument call so tolg emits a Sub module instance. An
   // all-constant call falls through and inlines, folding to a comptime value.
   if (consider_sub_instance && !all_actuals_const) {
+    // Same re-emit as the mod/pipe block above, deferred to HERE because a comb
+    // only becomes a Sub once the runtime-actual check settles it (an
+    // all-const call keeps the splice path so it folds to a comptime value —
+    // that path consumes the tuple expansion natively). A tuple actual was
+    // expanded into the flattened leaf params; the source spelling (a store
+    // naming the tuple, or a positional ref to a detupled variable) is not
+    // wireable by tolg, so materialize the resolved binding as dotted NAMED
+    // actuals. `!has_self`: a method comb is not a standalone Sub — keep the
+    // plain decline for it (pre-existing behavior).
+    if (tuple_actual_expanded && !has_self) {
+      std::vector<std::pair<std::string, Lnast_node>> named;
+      named.reserve(nbind);
+      for (std::size_t i = 0; i < nbind; ++i) {
+        if (param_set[i]) {
+          named.emplace_back(io.inputs[i].name, param_val[i]);
+        }
+      }
+      emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
+      return true;
+    }
     lm->restore_cursor(saved);
     return false;
   }
@@ -5676,6 +5769,19 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
         break;
       }
       a.key = std::string(lm->current_raw_text());  // param name — not renamed
+      // A backtick-escaped key (`` `port.leaf` `` — prp2lnast keeps the escape
+      // when the identifier carries a dot, e.g. a flattened tuple-port LEAF the
+      // prp_writer had to quote at a re-emitted call site) must match the
+      // callee's BARE dotted io name. Strip the escape unless the content
+      // genuinely needs it (whitespace) — the same rule as tolg's
+      // canon_io_name, so the runner and tolg agree on the port name.
+      if (a.key.size() >= 2 && a.key.front() == '`' && a.key.back() == '`') {
+        const std::string_view inner = std::string_view(a.key).substr(1, a.key.size() - 2);
+        const bool has_ws = std::any_of(inner.begin(), inner.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+        if (!has_ws) {
+          a.key = std::string(inner);
+        }
+      }
       // `f(ref x)` lowers to `assign(__ref_arg, x)` — a POSITIONAL pass-by-ref
       // actual, not a named one. Strip the marker so it binds by position and
       // the `ref` param's write-back fires (see the io.is_ref check at bind).
@@ -7664,7 +7770,15 @@ void uPass_runner::process_lnast() {
         process_drop_candidate(&upass::uPass::process_tuple_get, /*fold_all=*/false);
       }
       break;
-    A_OP(tuple_add)
+    // tuple_add is A_OP-shaped plus a runner post-step: after the dispatch
+    // (constprop rebuilt dst's bundle + slot→ref map) backfill the runtime
+    // slot carriers constprop drops for local/temp scalar field values — see
+    // record_runtime_tuple_slot_refs. Must run AFTER the dispatch (constprop
+    // erases + rebuilds tuple_slot_ref[dst] wholesale).
+    case Ntype::Lnast_ntype_tuple_add:
+      process_drop_candidate_push(PUSH_FN(tuple_add), /*fold_all=*/false);
+      record_runtime_tuple_slot_refs();
+      break;
     // the tuple_set node was deleted; field writes are now `store`
     // (≥3 children → process_tuple_set, handled in the store case above).
     // tuple_concat folds when every operand is a known scalar (string/int
@@ -7900,6 +8014,31 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
           break;
         }
         start = sp + 1;
+      }
+      // `mut x = 0ub????` (an X-pattern init — the Verilog-import poison of a
+      // net with no explicit type): the pattern's WIDTH is the declared
+      // envelope. Without it the var has no decl range, and a later
+      // per-version bit-select force (`x = v#[0..=2]` in one if-arm) would
+      // merge ITS narrower stamp in as the declared envelope — failing a
+      // sibling arm's legal wider write against a range the source never
+      // declared.
+      if (decl_max.is_invalid() && decl_min.is_invalid()
+          && (mode == upass::Mode::mut_kind || mode == upass::Mode::wire_kind) && lm->move_to_sibling()
+          && Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        const auto vt = lm->current_text();
+        if (vt.find('?') != std::string_view::npos) {
+          if (auto v = Dlop::from_pyrope(vt); v && v->has_unknowns() && v->get_bits() > 1) {
+            const bool sgn  = vt.size() > 1 && vt[1] == 's';
+            const auto bits = static_cast<uint32_t>(v->get_bits() - 1);
+            if (bits > 0) {
+              decl_max = upass::max_from_bits(bits, sgn);
+              decl_min = upass::min_from_bits(bits, sgn);
+              if (kind == upass::Kind::unknown) {
+                kind = upass::Kind::integer;
+              }
+            }
+          }
+        }
       }
     }
   }

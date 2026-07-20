@@ -169,6 +169,10 @@ private:
   // Per-variable type recorded by a `type_spec` statement, folded into the
   // variable's first declaration (`mut x:T = v`).
   std::unordered_map<std::string, std::string> type_specs_;
+  // 1-D declared array sizes (`x:[N]T`, any mode): write_store expands a whole
+  // array-to-array copy (`d = q`) into per-element stores (the recompile has
+  // no lowering for a multi-element store between memories).
+  std::unordered_map<std::string, int64_t> array_decl_size_;
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",
@@ -239,6 +243,21 @@ private:
   // the bare dotted path (not an escaped `` `io.field` ``), so the bundle/struct
   // info surfaces in the emitted Pyrope. On recompile detuple re-splits it.
   std::unordered_map<std::string, std::unordered_set<std::string>> bundle_fields_;
+  // ── io tuple-port regrouping (write_module pre-header scan) ──────────────
+  // upass.ssa flattened a tuple-typed PORT (`d:(x:u3, y:u5)`) into dotted leaf
+  // io entries (`d.x`, `d.y` — one store per leaf under the io tuple_add).
+  // collect_port_groups() regroups them: the header prints ONE entry per base
+  // (`d:(x:u3, y:u5)`, multi-level leaves re-nested) and bundle_fields_ makes
+  // every body access print the bare dotted path (`d.x`), so the emitted .prp
+  // recompiles (ssa re-flattens) to the IDENTICAL per-leaf lgraph interface.
+  // port_group_text_: FIRST-leaf io store nid -> the full rendered header
+  // entry (a mod output's single trailing `@[…]` included); port_group_skip_:
+  // the base's later leaf stores (already covered by the group entry). Keyed
+  // by nid so write_func_def's port lists (never scanned) keep the per-leaf
+  // printing unchanged.
+  std::unordered_map<int64_t, std::string> port_group_text_;
+  std::unordered_set<int64_t>              port_group_skip_;
+  void collect_port_groups(Lnast_nid io_nid, bool is_mod);
   // True if `name` is a known bundle field `base.field` (rendered unescaped).
   bool is_bundle_field(std::string_view name) const;
   bool is_imported_pkg_path(std::string_view name) const;  // `pkg.PARAM` on an imported package

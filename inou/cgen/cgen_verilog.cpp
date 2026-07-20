@@ -795,7 +795,12 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
 
 void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   note_src(fout, node);
-  auto iname = get_scaped_name(default_instance_name(node));
+  // Derived net names must be composed BEFORE escaping: an escaped identifier
+  // ends at its terminating space, so escape-then-append yields `\mem _data`
+  // (two tokens). Memory nodes now carry their RTL name (tolg set_name), which
+  // can be a Verilog keyword or a dotted bundle-field path.
+  const auto iraw  = std::string(default_instance_name(node));
+  auto       iname = get_scaped_name(iraw);
 
   int n_rd_ports = 0;
   int n_wr_ports = 0;
@@ -920,7 +925,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // driver (reserved pid) exposes the whole array. Emitted inline as a reg-array;
   // the cgen_memory_* wrappers cannot carry a runtime reset bus / update / read_all.
   if (!mem_update_dpin.is_invalid()) {
-    const auto aname      = absl::StrCat(iname, "_data");
+    const auto aname      = get_scaped_name(absl::StrCat(iraw, "_data"));
     const auto clock_dpin = port_vector.empty() ? hhds::Pin_class{} : port_vector[0].clock;
     const bool registered = !clock_dpin.is_invalid();
     const int  busw       = mem_size * mem_bits;
@@ -1184,7 +1189,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   } else {  // array
     // Distinct storage name: a zero-write-port array (ROM) puts its dout on
     // driver pid 0, whose wire is named after the node — `iname` itself.
-    const auto aname = absl::StrCat(iname, "_data");
+    const auto aname = get_scaped_name(absl::StrCat(iraw, "_data"));
     fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
 
     if (first_array_block) {
@@ -2040,7 +2045,11 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       }
       if (!dpin.is_invalid()) {
         note_src(fout, node);
-        fout->append(absl::StrCat(first_entry ? "" : ",", ".", io.decl->name, "(", get_wire_or_const(dpin), ")\n"));
+        // The port name must be escaped like the callee's own port DECLARATION
+        // (get_scaped_name): a tuple-typed port flattens to a dotted leaf name
+        // (`req.a`), which is only legal Verilog as `.\req.a (...)`.
+        fout->append(
+            absl::StrCat(first_entry ? "" : ",", ".", get_scaped_name(io.decl->name), "(", get_wire_or_const(dpin), ")\n"));
         first_entry = false;
       }
     }

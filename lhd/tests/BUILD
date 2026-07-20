@@ -424,6 +424,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression for SCALAR named-type aliases (`type W = u10; wire x:W`, local or
+# imported `pkg.W`) carrying their width to the declaration, plus the `pub type`
+# grammar needed to export a scalar alias from a package unit (just //lhd).
+sh_test(
+    name = "scalar_named_type_test",
+    size = "medium",
+    srcs = ["scalar_named_type_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for named-constant provenance in slang→Pyrope emission
 # (compile.slang.preserve_param_provenance): symbolic `pkg.PARAM` refs + a
 # `pub comptime const` package unit with REAL values under constprop=0 and =1,
@@ -445,6 +455,29 @@ sh_test(
     name = "slang_minion_features_test",
     size = "large",
     srcs = ["slang_minion_features_test.sh"],
+    data = ["//lhd"],
+)
+
+# Regression for the lec leaf<->flat-bus port correspondence: a design whose
+# tuple-typed ports compile to per-leaf dotted io (`req.a`, `req.b`) must
+# PROVE against the same design compiled with ONE flat packed bus port
+# (first-declared leaf = MSB, SV packed layout), REFUTE on real diffs, and
+# stay Unknown (not crash/prove) on width-sum mismatches (just //lhd).
+sh_test(
+    name = "lec_tuple_port_flat_test",
+    size = "large",
+    srcs = ["lec_tuple_port_flat_test.sh"],
+    data = ["//lhd"],
+)
+
+# Regression for tuple-typed-port CALL SITES: named tuple actuals on mod and
+# comb Sub calls (runner re-emits the leaf expansion as dotted named actuals),
+# dot-form multi-output instance reads (`r.rsp.sum`), and escaped dotted
+# instance-connection names in emitted Verilog (just //lhd).
+sh_test(
+    name = "tuple_port_callsite_test",
+    size = "large",
+    srcs = ["tuple_port_callsite_test.sh"],
     data = ["//lhd"],
 )
 

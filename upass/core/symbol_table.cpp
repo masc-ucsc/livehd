@@ -201,6 +201,20 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
                                     && (ne.decl_max.is_invalid() || !oe.decl_max.is_known_eq(ne.decl_max)))
                                    || (!oe.decl_min.is_invalid()
                                        && (ne.decl_min.is_invalid() || !oe.decl_min.is_known_eq(ne.decl_min))));
+        // A CONDITIONAL (if-arm) write must not have its value's ridden decl
+        // envelope BECOME the name's declared envelope: one arm's bit-select
+        // force (`x = v#[0..=2]`) would type an undeclared `mut x` as u3 and a
+        // sibling arm's wider legal write then fails the declared-fit check.
+        // Under uncertainty, strip a ridden envelope the name never declared.
+        const bool drop_ridden_decl = scalar_ok && in_uncertain_scope() && oe.decl_max.is_invalid()
+                                      && oe.decl_min.is_invalid()
+                                      && (!ne.decl_max.is_invalid() || !ne.decl_min.is_invalid());
+        // CONST-ness is likewise a NAME fact: `o = <const temp>` must not make
+        // the (never-const-declared) target single-bind — a later legal write
+        // (e.g. a partial `o#[lo..=hi] = v` on an output port) would trip the
+        // const-rebind check on a const-ness the source never declared.
+        const bool drop_ridden_mode
+            = old->get_mode() == upass::Mode::unknown && bundle->get_mode() == upass::Mode::const_kind;
         const bool need_kind = scalar_ok && oe.kind != upass::Kind::unknown && ne.kind != oe.kind;
         // "vbound" is the bind-tracking residual attr (attributes' const
         // single-bind / first-write gate): a NAME fact like mode, so it
@@ -215,7 +229,8 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
             need_attrs.emplace_back(k, fe.trivial);
           }
         }
-        if (need_mode || need_tn || need_decl || need_kind || !need_attrs.empty()) {
+        if (need_mode || need_tn || need_decl || need_kind || drop_ridden_decl || drop_ridden_mode
+            || !need_attrs.empty()) {
           if (bundle.use_count() > 1) {
             bundle = std::make_shared<Bundle>(*bundle);
           }
@@ -224,18 +239,24 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
           }
           if (need_mode) {
             bundle->set_mode(old->get_mode());  // declared mode is a NAME fact — overwrite ridden modes
+          } else if (drop_ridden_mode) {
+            bundle->set_mode(upass::Mode::unknown);  // the value's const-ness is not the name's declaration
           }
           if (need_tn) {
             bundle->set_type_name(old->get_type_name());
           }
-          if (need_decl || need_kind) {
+          if (need_decl || need_kind || drop_ridden_decl) {
             Bundle::Entry e = bundle->get_entry(bundle_path::of_string("0"));
             e.immutable     = false;
             if (!oe.decl_max.is_invalid()) {
               e.decl_max = oe.decl_max;  // declared envelope: old wins
+            } else if (drop_ridden_decl) {
+              e.decl_max = Bundle::invalid_lconst;  // conditional write: the value's envelope is not a declaration
             }
             if (!oe.decl_min.is_invalid()) {
               e.decl_min = oe.decl_min;
+            } else if (drop_ridden_decl) {
+              e.decl_min = Bundle::invalid_lconst;
             }
             if (oe.kind != upass::Kind::unknown) {
               e.kind = oe.kind;

@@ -481,6 +481,18 @@ protected:
   // Ordered (slot-key, is_positional) shape of tuple `name` for the runner's
   // tuple-for unroll. First pass that provides wins. See provide_tuple_shape.
   std::optional<std::vector<std::pair<std::string, bool>>> try_tuple_shape(std::string_view name);
+  // Post-step of process_lnast's tuple_add case (cursor on the tuple_add,
+  // AFTER the pass dispatch rebuilt dst's bundle + slot→ref map): backfill
+  // tuple_slot_ref entries for REF-valued fields whose value is a RUNTIME
+  // SCALAR carrying an ST bundle. Constprop only records a carrier when the
+  // ref has NO bundle at all (an input port); a local/temp (`const vh =
+  // fi#[4..=7]`, or an inline expression's tmp) holds a trivial-scalar bundle
+  // with no comptime value, so its field stores null and the runtime carrier
+  // name is lost — a later tuple-ACTUAL expansion (expand_tuple_actual) or
+  // dotted read then cannot resolve the leaf. Comptime scalars are skipped
+  // (the bundle trivial stays the authority) and genuine tuples are skipped
+  // (their runtime leaves were re-homed by constprop's propagate_sub_slot_refs).
+  void                                                     record_runtime_tuple_slot_refs();
 
   // ── pipe/mod/fluid template specialization ────────────────────
   // Called from try_inline_func_call at the pipe/mod decline point when the
@@ -639,11 +651,17 @@ protected:
   // commit=false returns false on the first rejection and forbids a tuple actual
   // from binding a lone scalar param (the overload-discrimination rule). Returns
   // true on a full successful bind.
+  // out_tuple_expanded (optional): set true when a tuple ACTUAL was expanded
+  // field-by-field into flattened `<prefix>.<leaf>` params (named `p=t` or
+  // positional `f(t)`). A Sub-bound callee (mod/pipe, or a comb kept as an
+  // instance under inline=false) must then re-emit the call with the dotted
+  // NAMED binding — the source spelling names no leaf port tolg could wire.
   bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call, bool commit,
                          std::string_view callee_name, const livehd::diag::Span& call_span,
                          std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
                          std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
-                         std::vector<std::pair<std::string, Lnast_node>>& vararg_named);
+                         std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
+                         bool* out_tuple_expanded = nullptr);
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
   // shape `init` overloads use. Returns those names in tuple order (only the

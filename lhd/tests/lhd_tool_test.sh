@@ -113,10 +113,10 @@ grep -qE ': (flop|memory)' "$W/ht.out" && fail "bare tree must NOT list register
 # module that owns them (one level past their instance line).
 P tree lg:"$W/hlg" --top "$HTOP" --target kind:register --target kind:memory >"$W/htk.out" \
   || fail "tool tree --target kind nonzero"
-# The flop now carries its RTL register name (tolg set_name); fall back format is
-# flop_<nid>. Match either an identifier-named flop or the synthesized default.
+# Flops and memories now carry their RTL names (tolg set_name); the fall-back
+# formats are flop_<nid>/memory_<nid>. Match either spelling.
 grep -qE '^    [A-Za-z_][A-Za-z0-9_]*  : flop' "$W/htk.out" || fail "kind:register must list a flop row: $(cat "$W/htk.out")"
-grep -qE '^    memory_[0-9]+  : memory' "$W/htk.out" || fail "kind:memory must list a memory row: $(cat "$W/htk.out")"
+grep -qE '^    [A-Za-z_][A-Za-z0-9_.]*  : memory' "$W/htk.out" || fail "kind:memory must list a memory row: $(cat "$W/htk.out")"
 
 # a single kind narrows to just that kind; an exact Ntype name (flop) matches too.
 P tree lg:"$W/hlg" --top "$HTOP" --target kind:memory >"$W/htm.out" || fail "tree kind:memory nonzero"

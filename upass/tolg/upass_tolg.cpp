@@ -2228,6 +2228,23 @@ private:
     }
 
     auto mem = make_node(Ntype_op::Memory);
+    // Stamp the declared RTL name on the Memory NODE (SSA suffix stripped),
+    // mirroring the flop path (~L1634): hhds get_hier_name() otherwise falls
+    // back to the positional `n<id>`, which forces pass/lec to pair memories
+    // ANONYMOUSLY by shape + occurrence ordinal — two front-ends that
+    // enumerate reads/memories in a different order then tie DIFFERENT
+    // logical arrays (or read ports) to one shared symbol and falsely refute.
+    // The reader's detupled per-field regs give unique names in both flows
+    // (e.g. `msg_port_conf.umode`).
+    {
+      std::string mem_base{name};
+      if (auto p = mem_base.find("___ssa_"); p != std::string::npos) {
+        mem_base.resize(p);
+      }
+      if (!mem_base.empty()) {
+        mem.set_name(std::string(canon_io_name(mem_base)));
+      }
+    }
     setup_sink_by_name(mem, "bits")
         .connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
     setup_sink_by_name(mem, "size")
@@ -2820,6 +2837,19 @@ private:
         fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << n_wr_cfg) - 1 : fwd);
 
     auto mem = make_node(Ntype_op::Memory);
+    // Stamp the RESULT name on the Memory node (same rationale as the
+    // array-declare site: a null name degrades pass/lec memory pairing to
+    // anonymous shape+ordinal). The __memory builtin's dst ref names the
+    // instance (`const m = __memory(cfg)`); strip any SSA suffix.
+    {
+      std::string mem_base{lnast_->get_name(dst)};
+      if (auto p = mem_base.find("___ssa_"); p != std::string::npos) {
+        mem_base.resize(p);
+      }
+      if (!mem_base.empty()) {
+        mem.set_name(std::string(canon_io_name(mem_base)));
+      }
+    }
     setup_sink_by_name(mem, "bits")
         .connect_driver(create_const(*g_, *Dlop::create_integer(bits)));
     setup_sink_by_name(mem, "size")
@@ -3002,22 +3032,36 @@ private:
       // output port's driver pin with the io-entry width/sign contract.
       if (auto srt = sub_results_.find(std::string(lnast_->get_name(src)));
           srt != sub_results_.end()) {
-        if (!Lnast_ntype::is_const(lnast_->get_type(idx)) ||
-            !lnast_->get_sibling_next(idx).is_invalid()) {
-          error_here("upass.tolg: a multi-output instance result is read by a "
-                     "single output-port name");
-          return;
-        }
-        // The index is a string CONST: a bracket read `inst["port"]` reaches
+        // The read may carry MULTIPLE indices: a tuple-typed output port
+        // flattens to a dotted leaf name (`rsp.sum`), and the dot-form read
+        // `inst.rsp.sum` arrives as a flat all-const index chain
+        // (tuple_get(dst, inst, 'rsp', 'sum')). Join the chain with '.' and
+        // match the FULL dotted output name (no suffix/partial matching —
+        // `inst.sum` stays a no-output error when the port is `rsp.sum`).
+        // Each index is a string CONST: a bracket read `inst["port"]` reaches
         // here with the surrounding quotes still on the name (`'rdata'`),
-        // while the dot form (`inst.port`) is bare — unquote before matching
-        // the output-port list (same trap as the quoted mod-import callee).
-        std::string_view pname = lnast_->get_name(idx);
-        if (pname.size() >= 2 &&
-            ((pname.front() == '\'' && pname.back() == '\'') ||
-             (pname.front() == '"' && pname.back() == '"'))) {
-          pname = pname.substr(1, pname.size() - 2);
+        // while the dot form (`inst.port`) is bare — unquote each component
+        // before matching (same trap as the quoted mod-import callee).
+        std::string joined;
+        for (auto ix = idx; !ix.is_invalid();
+             ix = lnast_->get_sibling_next(ix)) {
+          if (!Lnast_ntype::is_const(lnast_->get_type(ix))) {
+            error_here("upass.tolg: a multi-output instance result is read by "
+                       "a single output-port name");
+            return;
+          }
+          std::string_view comp = lnast_->get_name(ix);
+          if (comp.size() >= 2 &&
+              ((comp.front() == '\'' && comp.back() == '\'') ||
+               (comp.front() == '"' && comp.back() == '"'))) {
+            comp = comp.substr(1, comp.size() - 2);
+          }
+          if (!joined.empty()) {
+            joined += '.';
+          }
+          joined += comp;
         }
+        std::string_view pname = joined;
         const Lnast_io_entry *oe = nullptr;
         for (const auto &e : srt->second.outputs) {
           if ((e.name == pname)) {
@@ -3750,7 +3794,10 @@ private:
         if (an.is_invalid()) {
           continue;
         }
-        pname = std::string(lnast_->get_name(an));
+        // A named actual's key may ride backtick-escaped (`` `port.leaf` `` —
+        // a dotted flattened tuple-port leaf the prp_writer quoted); the
+        // GraphIO port names are BARE — canonicalize like every other io name.
+        pname = std::string(canon_io_name(lnast_->get_name(an)));
         val = lnast_->get_sibling_next(an);
         if (val.is_invalid()) {
           continue;

@@ -762,9 +762,20 @@ void uPass_constprop::process_assign() {
       // Unlike the uncertain case, acc HAS a definite runtime value (the
       // `acc = <ref>` store defines it), so CLEAR the stale trivial (empty
       // bundle → fold_ref returns nullopt, no scalar-value propagation) — reads
-      // after the block emit the `acc` wire. Straight-line same-scope
-      // reassignments don't need this: SSA versions them.
+      // after the block emit the `acc` wire.
       st().set(lhs_text, std::make_shared<Bundle>(std::string(lhs_text)));
+    } else if (st().has_trivial(lhs_text)) {
+      // Straight-line same-scope redefinition by an unknown-RUNTIME ref (no
+      // trivial, no bundle — an input port, an unfolded op temp, or an SSA
+      // version name). "SSA versions them" is NOT sufficient to skip this: the
+      // pre-branch carry-in `x = x___ssa_N` reassigns the BASE name (branch
+      // writes/merges stay on base), and the base IS read inside the arms — a
+      // stale declare-init trivial then feeds every in-arm RMW read
+      // (`x#[0..=2] = x#[0..=2] | 1` folded its get_mask base to the init 0
+      // and lowered the whole arm to the constant 1). The write REDEFINES the
+      // name with a runtime value: kill the stale comptime trivial so reads
+      // resolve to the wire.
+      st().set(lhs_text, Symbol_table::invalid_lconst);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Dlop v = current_pyrope_value();
@@ -1937,7 +1948,11 @@ void uPass_constprop::harvest_pub_values() {
       }
       for (const auto& [key, ep] : b->non_attr_entries()) {
         const auto& v = ep.trivial;
-        if (v.is_invalid() || v.has_unknowns()) {
+        // A bit-PATTERN with `?` bits (an SV parameter carrying don't-cares —
+        // instruction-encoding masks like `0ub???110?????0001011`) IS a
+        // comptime constant: export the pattern verbatim. Only a genuinely
+        // unresolved (invalid) value fails.
+        if (v.is_invalid()) {
           fail(p.name, key == "0" ? "not a known constant" : std::format("field `{}` is not a known constant", key));
         }
         if (key == "0") {  // trivial scalar slot — export under the bare name
@@ -3753,12 +3768,27 @@ void uPass_constprop::process_func_call() {
         result           = *Dlop::from_pyrope(v.is_known_true() ? (want_signed ? "-1" : "1") : "0");
         reinterpret_bits = 1;
         reinterpret_sign = want_signed;
+      } else if (v.is_bool()) {
+        // A bool with unknown bits (a compare over a poison/X-init value —
+        // e.g. a cone statement reading a net whose driver emits later):
+        // the reinterpret is a 1-bit unknown, not a type error.
+        result           = *Dlop::from_pyrope(want_signed ? "0sb?" : "0ub?");
+        reinterpret_bits = 1;
+        reinterpret_sign = want_signed;
       } else {
         uint32_t W = 0;
         if (!cast_arg_var.empty()) {
           if (auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), cast_arg_var); f) {
             W = f->bits;
           }
+        }
+        if (W == 0 && v.has_unknowns()) {
+          // A value with unknown bits (a compare/expression over a poison/X
+          // init — e.g. a relocated cone statement reading a net whose driver
+          // emits later): its ?-pattern already has a definite width, so
+          // reinterpret within it instead of erroring — the unknowns stay
+          // unknowns either way.
+          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_bits() - 1));
         }
         if (W == 0) {
           livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -3845,7 +3875,10 @@ void uPass_constprop::process_func_call() {
     type_bits = reinterpret_bits;
     type_sign = reinterpret_sign;
   }
-  if (type_bits > 0 && !result.is_string() && !result.is_nil()) {
+  // Not under an uncertain if-arm: one arm's bit-select force / sized cast
+  // must not become the target's DECLARED envelope (a sibling arm's wider
+  // legal write would then fail the declared-fit check).
+  if (type_bits > 0 && !result.is_string() && !result.is_nil() && !st().in_uncertain_scope()) {
     if (auto b = st().get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
       Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
       e.immutable     = false;
@@ -4892,6 +4925,23 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   const std::string var{dst_name};
   Dlop              input_val = operand_value(src[0]);
 
+  // A set_mask whose fold cannot complete still REDEFINES dst with a RUNTIME
+  // value: clear any stale trivial on the way out, or the NEXT foldable
+  // set_mask (or read) of the same name folds over the pre-write constant and
+  // silently DROPS this write. The slang+upass_ssa path chains in-arm partial
+  // writes through the BASE name (branch writes stay on base for the mux
+  // merge), so `o = '0; if (!sel) begin o[7:0] = a; o[15:12] = 4'hF; end`
+  // folded the arm to 0xF000 — `a` vanished (prp2lnast is immune only because
+  // its set_masks chain through fresh SSA temps). st().set also records the
+  // modification for the uncertain-arm invalidation, which such an in-arm
+  // write needs anyway.
+  auto decline_runtime_redefine = [&]() {
+    if (st().has_trivial(var)) {
+      st().set(var, Symbol_table::invalid_lconst);
+    }
+    return classify_vote();
+  };
+
   bool is_range = false;
   Dlop range_start;
   Dlop range_end;
@@ -4910,7 +4960,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   // written may carry unknown bits — set_mask_op tracks them bit-precisely.
   // Only the *mask* (which bits to write) must be concrete (see below).
   if (!is_numeric(input_val) || !is_numeric(new_val)) {
-    return classify_vote();
+    return decline_runtime_redefine();
   }
 
   Dlop final_mask;
@@ -4919,7 +4969,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
       // Open-ended `lo..`: bits lo and above. For set_mask we need a concrete
       // bitmask, but the upper bound isn't fixed. Skip — without a pinned
       // width there's no concrete mask to emit.
-      return classify_vote();
+      return decline_runtime_redefine();
     }
     // mask = ((1 << (end - start + 1)) - 1) << start — all Dlop arithmetic,
     // no to_i / width / range guards (mirrors apply_range_mask).
@@ -4932,7 +4982,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     // Dlop precondition on the bit-selection, not a value pre-filter — the
     // data operands (input_val/new_val) above already pass unknowns through.
     if (!foldable(mask)) {
-      return classify_vote();
+      return decline_runtime_redefine();
     }
     final_mask = mask;
   }

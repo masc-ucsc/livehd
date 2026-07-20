@@ -451,6 +451,17 @@ inline std::string lec_options_range_error(const Lec_options& o) {
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
 
+// Tuple-leaf <-> flat-bus port-shape divergence between a corresponding def
+// pair: TRUE when at least one port is declared FLAT (`base`, W bits) on one
+// side while the other side declares only LEAVES (`base.<field>` decls, any
+// nesting depth, whose widths sum to W) — the Pyrope tuple-port vs
+// SystemVerilog packed-bus lowering split. prove_equal() bridges the split
+// with bundle compare points at its own top-level boundary, but a collapsed
+// PROVEN child (a black box) is corresponded by port NAMES and cannot; the
+// hierarchical driver uses this predicate to leave such a child OUT of the
+// collapse set so it is descended (flattened into the parent) instead.
+bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl);
+
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
 // one task owns one child process, so the solver-process count is bounded by
 // formal.jobs and cvc5 instances never execute concurrently in threads.

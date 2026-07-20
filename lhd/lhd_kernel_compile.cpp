@@ -610,6 +610,19 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
                       "a graphs flow (lg/verilog/sim emit) folds package params; drop the flag or emit pyrope in a "
                       "separate invocation"};
     }
+    // Struct-port bundles ride the SAME default: qualifying packed-struct
+    // ports become Pyrope tuple ports only on the pyrope-emission path (the
+    // graphs flow keeps flat ports — that flat lgraph is the LEC reference).
+    auto bit = labels.find("struct_port_bundles");
+    if (bit == labels.end()) {
+      if (!needs_graphs && find_slot(opts.emit_dirs, "pyrope") != nullptr) {
+        labels["struct_port_bundles"] = "true";
+      }
+    } else if (needs_graphs && (bit->second == "1" || bit->second == "true")) {
+      throw Lhd_error{"io", "compile.slang.struct_port_bundles=true requires a pyrope-only emission",
+                      "a graphs flow (lg/verilog/sim emit) keeps flat struct ports; drop the flag or emit pyrope in a "
+                      "separate invocation"};
+    }
   }
   run_step("inou.slang", var, labels, opts, res);
   if (lnastfmt_enabled(opts)) {
