@@ -41,6 +41,9 @@ inline bool is_builtin_attr_name(std::string_view name) {
       "private", "size", "sign", "key", "crand", "rand", "loc", "file", "type",
       // Category B — LGraph wiring attrs
       "clock", "reset", "debug", "_debug", "async", "init", "clock_pin", "din", "enable", "negreset", "posclk",
+      // `enable_high` is the LATCH spelling of `posclk` (2f-latch M2): on a Latch
+      // pid 6 is the enable POLARITY, not a clock edge.
+      "enable_high",
       "reset_pin", "valid", "stop", "lat", "num", "addr", "fwd", "wensize", "rdport", "defer", "inputs", "outputs",
       // Category C — synthesis hints
       "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay", "max_load",

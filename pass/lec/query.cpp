@@ -337,6 +337,14 @@ std::string serialize_result(const Query_result& r) {
   for (const auto& d : r.cone_proven) {
     put_str(b, d);
   }
+  // Encoder-REFUSAL flag (2f-latch M0). This codec is the process boundary of
+  // the auto ind|bmc fork race, so a field missing here is SILENTLY LOST: the
+  // parent then sees unsupported=false and the CLI reports a clean exit-0
+  // "inconclusive" for a design the encoder never even encoded. Found exactly
+  // that way — `lhd lec` on a latch design still exited 0 after M0 because the
+  // flag died in the fork. Tail field: an older/truncated blob just leaves it
+  // false, which is the pre-existing behavior.
+  b.push_back(static_cast<char>(r.unsupported ? 1 : 0));
   return b;
 }
 
@@ -493,6 +501,11 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     }
     r.cone_proven.push_back(std::move(d));
   }
+  if (b.empty()) {
+    return true;  // best-effort tail: older blob, no refusal flag
+  }
+  r.unsupported = b.front() != 0;
+  b.remove_prefix(1);
   return true;
 }
 

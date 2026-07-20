@@ -416,7 +416,38 @@
   equiv pairs stay PROVEN; full suite 1411 pass, 0 fail.</li>
 
 <li><strong>M2 — IR: a latch gets a clock identity</strong> [SERIALIZATION POINT;
-  deps M0, M1]. Add <code>clock_pin</code> and <code>initial</code> to
+  deps M0, M1] — <strong>LANDED 2026-07-20, with a RULING that reshaped it</strong>.
+  <p><strong>USER RULING (2026-07-20): a latch has an ENABLE signal, and the only
+  question is whether it is active HIGH or active LOW.</strong> There is no
+  separate gate/clock identity to model — the gate IS the enable driver, so the
+  commit class reads <em>(enable net, edge-from-posclk)</em>. This collapses the
+  "posclk authoritative, cross-checked against the enable cone" design: there is
+  no second source of truth left to disagree with, so the cross-check is
+  unnecessary rather than unimplemented.</p>
+  <p><strong>And implementing the Pyrope-facing half as a bare polarity-pin flip
+  is a SILENT MISCOMPILE — measured, not theorised.</strong> tolg lowers
+  <code>if cond { l = d }</code> to BOTH <code>din = cond ? d : q</code> AND
+  <code>enable = cond</code>, so the enable is active-HIGH <em>by
+  construction</em>. Flipping only the polarity pin emits
+  <code>if (!cond) q &lt;= (cond ? d : q)</code>: while transparent
+  (<code>cond==0</code>) din resolves to <code>q</code>, so the latch writes
+  ITSELF forever and NEVER captures d. The emitted Verilog looks perfectly
+  reasonable. A symmetric before/after gate is structurally incapable of seeing
+  this — it was caught only by LEC-ing against an INDEPENDENT golden, which is
+  the cross-model gating rule earning its keep. So
+  <code>enable_high=false</code> is <strong>REFUSED</strong> from Pyrope with a
+  diagnostic pointing at the spelling that works
+  (<code>if !g { … }</code>, the shipped <code>latch_active_low</code>); the
+  polarity still lives on the CELL for the YOSYS importer, whose raw-D + EN
+  shape has no hold mux and for which the flip IS sound.</p>
+  <p><strong>Naming:</strong> pid 6 stays <code>posclk</code> in the IR even
+  though it means enable polarity on a latch. <code>find_sink_pin()</code>
+  resolves an unknown pin name to invalid <em>silently</em>, so a rename that
+  missed one consumer would drop the polarity without a word — the exact failure
+  class above. Pyrope source may spell it <code>enable_high</code>, which reads
+  correctly and maps to the same slot.</p>
+  <p>Original plan (kept for the record): Add <code>clock_pin</code> and
+  <code>initial</code> to
   <code>Ntype_op::Latch</code> (<code>graph/cell.cpp:261-268</code>), plus
   <code>reset_pin</code>/<code>negreset</code>/<code>async</code> for M7. Make
   <code>posclk</code> AUTHORITATIVE for transparency polarity, cross-checked
@@ -456,10 +487,42 @@
   <code>graph.hpp:568</code>) and <code>graph/cell.hpp:113</code> static_asserts
   Latch = 45 odd; flipping it ripples into abc/lec/semdiff/color/isabelle/lean.
   Also touches tolg, cgen_verilog, cgen_sim.
-  <br><em>Gate:</em> a Pyrope transparent-low latch carries posclk=false into the
-  lgraph and back out; a latch inside a pass.color+pass.partition+compile flow
-  emits clean Verilog (the '_o' port shape); an abc region containing a latch
-  compiles with the latch boxed, LEC-PROVEN vs pre-abc.</li>
+  <br><strong>What landed:</strong> all five reserved pins added to the Latch
+  cell at Flop-IDENTICAL pin ids (async 0, initial 1, clock_pin 2, negreset 5,
+  reset_pin 7) so every consumer that resolves a flop's control pins by name
+  resolves a latch's the same way. <code>initial</code> and the reset family
+  stay REFUSED by tolg: the pins exist, but no consumer reads them for a latch
+  yet, and wiring them would just move the silent drop from tolg to cgen —
+  the opposite of what M0 bought. M7 lifts that. All four consumer touches
+  landed (abc boundary + blast exclusion, bitwidth dispatch + q-width stamp,
+  partition <code>is_type_register</code>, semdiff commit-class fold — the fold
+  treats an ABSENT posclk and an explicit <code>true</code> identically, or the
+  two spellings of one cell would stop pairing).
+  <br><strong>Found while landing this — a real M0 HOLE, now closed:</strong>
+  <code>lhd lec</code> runs its ind|bmc portfolio in a FORKED race and ships
+  each engine's result through a hand-rolled wire codec. The refusal flag was
+  not in that codec, so it was silently dropped crossing the process boundary
+  and <code>lhd lec</code> on a latch design kept exiting 0 long after
+  <code>lhd formal verify</code> was fixed. <strong>Any new
+  <code>Query_result</code> field has this trap.</strong> Closing it exposed
+  that all six <code>prp-v2prp-latch_*</code> targets had been VACUOUS passes —
+  counted green on an exit-0 refusal with no verdict behind it. The harness now
+  distinguishes a REFUSAL (inconclusive: proves nothing, disproves nothing —
+  round-trip coverage still real, equivalence UNCHECKED) from a REFUTE, instead
+  of reporting "not equivalent" about a design nothing was ever compared on.
+  <br><em>Gate (met, with one honest exception):</em>
+  <code>lhd/tests/latch_clock_identity_test.sh</code> — the
+  <code>enable_high=false</code> refusal AND the correctness of the spelling it
+  recommends (PROVEN against an active-low golden, with a vacuity guard that the
+  same oracle REFUTES the flipped polarity); pass.abc maps a latch region (it
+  previously rejected the WHOLE region with "cell 'latch' has no combinational
+  bit-blast yet") and the latch survives NATIVE, never bit-blasted;
+  color+partition+compile emits Verilog iverilog accepts.
+  <strong>NOT met, and cannot be until M4:</strong> "LEC-PROVEN vs pre-abc" —
+  the native cvc5 encoder still refuses the Latch cell, so the post-abc netlist
+  is honestly UNKNOWN/exit-1 rather than proven. The flop-shaped twin of the
+  same design DOES prove through the identical flow, which is what establishes
+  the methodology (not the latch handling) is sound. Full suite 1412 pass.</li>
 
 <li><strong>M3 — shared commit-class classifier + THE CONTRACT CHECK</strong>
   [deps M2]. ONE analysis, three consumers (sim, LEC, timing). For every state

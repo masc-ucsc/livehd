@@ -259,11 +259,43 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       break;
     case Ntype_op::Latch:
+      // Pin ids are deliberately IDENTICAL to Flop's (2f-latch M2): a latch is
+      // modelled as a flop-with-enable that commits at the CLOSING edge of its
+      // transparent window, so every consumer that already resolves a flop's
+      // control pins by name resolves a latch's the same way and the shared
+      // commit-class analysis needs no per-op special case. `pipe_min`/
+      // `pipe_max` are deliberately absent: a latch has no pipeline depth.
+      //
+      // `posclk` ON A LATCH IS THE ENABLE POLARITY, NOT A CLOCK (user ruling,
+      // 2026-07-20). A latch has an `enable` signal and the only question is
+      // whether it is active HIGH or active LOW:
+      //     unset / true  -> enable is active HIGH: transparent while enable==1,
+      //                      so it COMMITS on that net's FALL
+      //     known-false   -> enable is active LOW:  transparent while enable==0,
+      //                      so it COMMITS on that net's RISE
+      // The name is inherited from Flop (where pid 6 genuinely means posedge)
+      // and is admittedly a poor fit here; it is kept ANYWAY because
+      // find_sink_pin() returns invalid SILENTLY for an unknown pin name, so a
+      // rename that missed one call site would silently drop the polarity —
+      // precisely the double-negation miscompile class this task exists to
+      // prevent. Pyrope source may spell the attribute `enable_high`, which
+      // reads correctly and maps here.
+      //
+      // NOTE there is no separate "gate net" pin: the gate IS the enable
+      // driver, so the commit class reads (enable net, edge-from-posclk). A
+      // second polarity/identity source would recreate the very disagreement
+      // the ruling above collapses. `clock_pin` is reserved (see below) but
+      // tolg still REFUSES it on a latch — no consumer gives it meaning yet.
       switch (pid) {
-          // No 1 to keep din at pos 3 (a,b,c)
+        case 0 : return "async";     // reserved for M7 (async set/reset latches)
+        case 1 : return "initial";   // reset / power-on value
+        case 2 : return "clock_pin"; // reserved; NOT the gate (the enable is)
+        // No 1 to keep din at pos 3 (a,b,c)
         case 3 : return "din";
         case 4 : return "enable";
-        case 6 : return "posclk";
+        case 5 : return "negreset";  // reserved for M7
+        case 6 : return "posclk";    // ENABLE POLARITY — see the note above
+        case 7 : return "reset_pin"; // reserved for M7
         default: return "invalid";
       }
       break;

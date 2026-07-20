@@ -453,8 +453,11 @@ void Partitioner::name_ports() {
         // width/sign -> broken Verilog (it also skips the port=node assign when
         // the names match). Give the port a distinct name so cgen emits a clean
         // `port = node` assign, exactly like a normal module's flop-driven output.
-        auto dop = gu::type_op_of(ports[i].driver.get_master_node());
-        if (dop == Ntype_op::Flop || dop == Ntype_op::Memory) {
+        // is_type_register, not an explicit Flop||Memory list (2f-latch M2): a
+        // LATCH-driven region output hit the exact broken-Verilog mode the
+        // comment above describes, because a latch also gets an emitted reg
+        // wire under its own name. Fflop is covered for the same reason.
+        if (gu::is_type_register(ports[i].driver.get_master_node())) {
           base += "_o";
         }
         std::string nm = base;

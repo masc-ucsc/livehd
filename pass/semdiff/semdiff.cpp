@@ -232,6 +232,24 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     c.is_mem = op == Ntype_op::Memory;
     c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
     c.kind   = hcombine(c.kind, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
+    // COMMIT CLASS folds into the identity for Flop AND Latch (2f-latch M2),
+    // mirroring the initial-value fold below. `posclk` means posedge-vs-negedge
+    // on a flop and enable-active-high-vs-low on a latch; either way two cells
+    // that commit on OPPOSITE edges are not the same state element and must not
+    // be keyed alike. This is keying HYGIENE, not a soundness hole — the
+    // compare-point obligation pass already catches a yosys-imported polarity
+    // flip functionally — but a wrong key wastes a pairing slot and produces a
+    // misleading diff.
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+      // Absent posclk == the default (posedge / active-high), so an unset pin
+      // and an explicit `true` must fold IDENTICALLY or the two spellings of
+      // the same cell would stop pairing.
+      bool pos = true;
+      if (auto pc = gu::get_driver_of_sink_name(node, "posclk"); !pc.is_invalid() && gu::is_const_pin(pc)) {
+        pos = !gu::hydrate_const(pc).is_known_false();
+      }
+      c.kind = hcombine(c.kind, hstr(pos ? "\x01commit+" : "\x01commit-"));
+    }
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
       // Reset/init value folds into the identity — the 2f-lec precondition:
       // state with differing reset values must never pair.

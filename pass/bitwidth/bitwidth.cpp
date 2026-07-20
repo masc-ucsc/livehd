@@ -1318,7 +1318,10 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
     // flop's port-0 driver already exists, so create_driver_pin(0) is a lookup).
     for (const auto& e : attr_dpin.out_edges()) {
       auto sink_node = e.sink.get_master_node();
-      if (!is_type_flop(sink_node)) {
+      // Latch included (2f-latch M2): like a flop, its q is driver pin 0 and
+      // takes the attr's width. (is_type_register is deliberately NOT used —
+      // it also admits Memory, whose pin 0 is not a state output.)
+      if (!is_type_flop(sink_node) && type_op_of(sink_node) != Ntype_op::Latch) {
         continue;
       }
       auto reg_qpin = sink_node.create_driver_pin(0);
@@ -1538,7 +1541,10 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         process_shl(node, inp_edges);
       } else if (op == Ntype_op::Not) {
         process_not(node, inp_edges);
-      } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+      } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+        // A Latch takes the same path (2f-latch M2): process_flop reads only
+        // `din` and `initial`, and both now exist on the Latch cell with the
+        // same pin ids. Before this a latch's q simply never got a width.
         process_flop(node);
       } else if (op == Ntype_op::Mux) {
         process_mux(node, inp_edges);

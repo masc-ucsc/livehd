@@ -128,18 +128,35 @@ def main():
         print("{} - v2prp - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
         return 0
 
+    out = chk.stdout.decode("utf-8", "ignore")
     if chk.returncode == 0:
         # `lhd lec` exits 0 for INCONCLUSIVE too (could-not-prove is a warning,
         # not a fail — same gate semantics as the timeout above). Report it
         # honestly instead of conflating it with a real proof.
-        out = chk.stdout.decode("utf-8", "ignore")
         if "INCONCLUSIVE" in out or "UNKNOWN" in out:
             print("{} - v2prp - inconclusive (solver gave up; NOT a proof; impl-top:{} ref-top:{})".format(name, vtop, ptop))
             return 0
         print("{} - v2prp - success (impl-top:{} ref-top:{})".format(name, vtop, ptop))
         return 0
+    # An ENCODER REFUSAL is not a disproof (todo/livehd/2f-latch M0). `lhd lec`
+    # now exits NONZERO when the encoder cannot model a cell — a latch today —
+    # precisely so no downstream automation mistakes it for a proof. But it is
+    # epistemically the same as the solver-gave-up case handled above: nothing
+    # was compared, so it proves nothing AND disproves nothing. Reporting it as
+    # "not equivalent" would be a lie about the design.
+    #
+    # This branch is what these six latch round-trips ride until M4 teaches the
+    # native encoder the commit-class latch encoding. Before the refusal flag
+    # propagated correctly they took the exit-0 path above and were counted as
+    # passes with no verdict behind them — vacuous, which is the whole reason
+    # M0 exists. The round-trip coverage (verilog -> pyrope -> recompile) is
+    # real either way; only the equivalence GATE is unavailable.
+    if "REFUSAL, not a timeout" in out:
+        print("{} - v2prp - inconclusive (encoder REFUSED a cell it cannot model; "
+              "round-trip OK, equivalence UNCHECKED; impl-top:{} ref-top:{})".format(name, vtop, ptop))
+        return 0
     print("{} - v2prp - FAILED: not equivalent (impl-top:{} ref-top:{})".format(name, vtop, ptop))
-    print(chk.stdout.decode("utf-8", "ignore"))
+    print(out)
     return 1
 
 

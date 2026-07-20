@@ -6375,6 +6375,9 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       "enable",
       "negreset",
       "posclk",
+      // Latch-facing spelling of `posclk` (2f-latch M2): on a Latch that pin is
+      // the ENABLE POLARITY, not a clock edge.
+      "enable_high",
       "reset_pin",
       "valid",
       "stop",

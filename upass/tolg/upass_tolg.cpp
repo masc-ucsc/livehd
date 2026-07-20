@@ -957,7 +957,13 @@ private:
       info.reset_pin_name = std::string(val);
     } else if ((key == "clock_pin")) {
       info.clock_pin_name = std::string(val);
-    } else if ((key == "posclk")) {
+    } else if ((key == "posclk") || (key == "enable_high")) {
+      // `enable_high` is the LATCH-facing spelling of the same pin (2f-latch
+      // M2): on a latch, pid 6 is the ENABLE POLARITY, not a clock edge, so
+      // `posclk` reads as a lie there. Both map to the same slot — the IR pin
+      // keeps the Flop-shared name because find_sink_pin() resolves an unknown
+      // name to invalid SILENTLY, and a rename that missed a consumer would
+      // drop the polarity without a word.
       info.has_posclk = true;
       info.posclk_val = val != "false" && val != "0";
     } else if ((key == "sync")) {
@@ -1166,47 +1172,83 @@ private:
       setup_sink_by_name(flop, "din").connect_driver(din);
 
       if (info.is_latch) {
-        // FAIL CLOSED on an attr this branch cannot honor (2f-latch M0). The
-        // Latch cell is a 3-pin skeleton (din/enable/posclk) and this branch
-        // `continue`s BEFORE the clock/posclk/reset/initial wiring below, so
-        // every one of these attrs used to be silently DISCARDED: a
+        // FAIL CLOSED on an attr this branch cannot honor (2f-latch M0), now
+        // narrowed to the ones M2 did NOT wire. Before M0 every one of these
+        // was silently DISCARDED: a
         // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]`
         // compiled exit 0, zero warnings, and emitted Verilog byte-identical to
         // a plain transparent-high latch. Authoring an attr that vanishes is
-        // worse than not having it. Each error is lifted as M2 wires the
-        // corresponding pin onto the cell.
+        // worse than not having it.
+        //
+        // Still refused: the reset family (M7 wires it; the pins are reserved
+        // on the cell already) and `clock_pin`. clock_pin stays refused BY
+        // DESIGN, not as a stub: a latch's gate IS its enable, so a second
+        // clock/gate identity would recreate exactly the two-sources-of-truth
+        // disagreement the enable-polarity ruling collapses. It is only
+        // reserved on the cell so a future ICG model has a slot if one is ever
+        // ruled in.
         {
           std::string_view dropped;
+          std::string_view why = "todo/livehd/2f-latch M7 wires the reset family";
           if (!info.clock_pin_name.empty()) {
             dropped = "clock_pin";
-          } else if (info.has_posclk) {
-            dropped = "posclk";
-          } else if (!info.initial_txt.empty() ||
-                     (!info.init_txt.empty() && info.init_txt != "nil")) {
-            // "nil" is the EXPLICIT no-reset marker (the slang reader stamps it
-            // on every latch declare), so there is no value being dropped —
-            // only a real init/initial is an error.
-            dropped = "init/initial";
+            why     = "a latch's gate IS its `enable` signal — write the "
+                      "transparency condition in the `if`, not as a clock";
+          } else if (info.has_posclk && !info.posclk_val) {
+            // ACTIVE-LOW ENABLE IS NOT EXPRESSIBLE IN THE PYROPE SHAPE, and
+            // wiring it as a bare pin flip is a SILENT MISCOMPILE (measured
+            // 2026-07-20 — this is exactly the "posclk double-negation" a
+            // symmetric before/after gate cannot see; it was caught only by
+            // LEC-ing against an independent golden).
+            //
+            // Why: tolg bakes the hold mux into din from the SAME condition,
+            //   din = cond ? d : q   and   enable = cond
+            // so the enable is active-HIGH *by construction*. Flipping only the
+            // polarity pin yields `if (!cond) q <= (cond ? d : q)`: while the
+            // latch is transparent (cond==0) din resolves to q, so it writes
+            // ITSELF forever and NEVER captures d. Emitting that would look
+            // perfectly reasonable in the Verilog.
+            //
+            // Making it sound would mean rebuilding din against the inverted
+            // condition. There is no need: `if !g { l = d }` already says
+            // active-low exactly, correctly, and is the shipped spelling of the
+            // live `latch_active_low` fixture. So the attribute is REFUSED here
+            // rather than half-honored. The CELL still carries the polarity
+            // (pid 6) for the YOSYS importer, whose raw-D + EN shape has no
+            // hold mux and for which the flip IS sound.
+            dropped = "enable_high=false (active-low enable)";
+            why     = "the Pyrope lowering builds `din = cond ? d : q` from the "
+                      "SAME condition, so the enable is active-high by "
+                      "construction and flipping only the polarity would make "
+                      "the latch write itself and never capture din — write the "
+                      "inverted condition instead: `if !g { ... }`";
           } else if (!info.reset_pin_name.empty()) {
             dropped = "reset_pin";
           } else if (info.has_sync) {
             dropped = "sync/async";
           } else if (info.negreset) {
             dropped = "negreset";
+          } else if (!info.initial_txt.empty() ||
+                     (!info.init_txt.empty() && info.init_txt != "nil")) {
+            // The `initial` PIN exists on the cell as of M2, but NO consumer
+            // reads it for a latch yet — cgen's process_latch emits no power-on
+            // value. Wiring it here would just move the silent drop from tolg
+            // to cgen, which is the opposite of what M0 bought. Keep refusing
+            // until M7 gives latch reset/initial an actual meaning.
+            // ("nil" is the explicit NO-reset marker the slang reader stamps on
+            // every latch declare — not a value, so never an error.)
+            dropped = "init/initial";
           }
           if (!dropped.empty()) {
             error_here("upass.tolg: latch '{}' carries '{}', which the Latch "
-                       "cell cannot represent yet (it has only din/enable/"
-                       "posclk) — the attribute would be SILENTLY DROPPED. "
-                       "Drop it, or use a flop (todo/livehd/2f-latch M2 adds "
-                       "these pins)",
-                       name, dropped);
+                       "cell cannot honor — the attribute would be SILENTLY "
+                       "DROPPED. {}",
+                       name, dropped, why);
             continue;
           }
         }
-        // A latch (Ntype_op::Latch) has no clock/reset/posclk: wire only its
-        // enable (the transparency condition; cgen process_latch emits
-        // `always @* if(enable) q = din`). din already carries the if-merge
+        // Wire the enable (the transparency condition; cgen process_latch emits
+        // `always_latch if(enable) q <= din`). din already carries the if-merge
         // `cond ? d : q`. Skip the const-false (never-written) enable.
         if (info.decl_mw == 0) {
           auto dit = mw_map_.find(din_key(name));

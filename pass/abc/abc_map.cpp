@@ -936,7 +936,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // are excluded from the boundary set there — EXCEPT registers demoted for a
     // region-internal (gated/derived) clock, which take this boundary path.
     bool flop_boundary = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n));
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && !flop_boundary) {
+    // A LATCH is a boundary in BOTH modes, unconditionally (2f-latch M2).
+    // TERMINOLOGY TRAP: an ABC/AIGER "latch" is an edge-triggered unit-delay
+    // register on an implicit global clock, NOT a level-sensitive latch — and
+    // ABC's BLIF reader silently DISCARDS the `.latch` control tokens. So
+    // letting a real latch cross into ABC in seq mode (the way a flop does)
+    // would not be an error, it would be a silent MISMODEL. Keeping it native
+    // means q feeds the mapped logic as a fresh PI and din/enable are cut as
+    // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
+    // cases below and fell into the bit-blast loop, aborting the whole region.
+    const bool latch_boundary = op == Ntype_op::Latch;
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && !flop_boundary && !latch_boundary) {
       continue;
     }
     if (op == Ntype_op::Div) {
@@ -1024,6 +1034,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       if (gu::is_type_flop(n)) {
         continue;  // flop: a 1-bit latch in seq mode, a native boundary in !seq mode -- never bit-blasted
+      }
+      if (op == Ntype_op::Latch) {
+        continue;  // level-sensitive latch: always a native boundary (2f-latch M2), never bit-blasted
       }
       pending.push_back(n);
     }

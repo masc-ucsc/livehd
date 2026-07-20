@@ -113,6 +113,34 @@ echo "ok: refusal is independent of formal.strict"
   || fail "formal_report.json missing on the refusal path (the report must exist on EVERY run)"
 echo "ok: formal_report.json still written on the refusal path"
 
+# ---- 2b: the SAME refusal through `lhd lec` ---------------------------------
+# Regression for a hole found while landing M2: `lhd lec` runs its ind|bmc
+# portfolio in a FORKED race and ships each engine's result back through a
+# hand-rolled wire codec. The refusal flag was not in that codec, so it was
+# silently dropped crossing the process boundary and the parent saw
+# unsupported=false — `lhd lec` on a latch design kept exiting 0 with
+# status:pass long after `lhd formal verify` had been fixed. Any future field on
+# Query_result has the same trap.
+cat > "$W/lecref.v" <<'EOF'
+module dut(input g, input [7:0] d, output reg [7:0] q);
+  always_latch begin
+    if (g)
+      q <= d;
+  end
+endmodule
+EOF
+cat > "$W/lecimpl.v" <<'EOF'
+module dut(input g, input [7:0] d, output reg [7:0] q);
+  always_latch begin
+    if (g)
+      q <= (d | 8'h0);
+  end
+endmodule
+EOF
+
+expect_fail_with "lec on a latch design (native encoder)" "unsupported" \
+  "$LHD" lec --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd"
+
 # ---- 3: sim on a latch names the LATCH, not a phantom comb loop --------------
 cat > "$W/lsim.prp" <<'EOF'
 pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {

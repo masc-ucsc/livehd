@@ -490,6 +490,29 @@ sh_test(
     ],
 )
 
+# LIVE test for todo/livehd/2f-latch M2 (landed 2026-07-20) — the latch's cell
+# identity and the consumers that had to learn about it. Its headline is a
+# NEGATIVE case: implementing Pyrope-authored active-low enable as a bare
+# polarity-pin flip is a SILENT MISCOMPILE (tolg bakes `din = cond ? d : q` from
+# the same condition, so a flipped enable makes the latch write ITSELF and never
+# capture din), and a symmetric before/after gate cannot see it — it was caught
+# only by LEC-ing against an independent golden. The attribute is therefore
+# REFUSED, and the test pins both the refusal and the correctness of the
+# spelling it recommends (`if !g`), including a vacuity guard that the oracle
+# really does REFUTE the opposite polarity. Also covers pass/abc treating a
+# Latch as a boundary (it used to reject the whole region) and a
+# color+partition+compile flow emitting elaborable Verilog.
+sh_test(
+    name = "latch_clock_identity_test",
+    size = "large",
+    srcs = ["latch_clock_identity_test.sh"],
+    data = [
+        "//inou/prp:abc_tests",  # the toy liberty library
+        "//inou/yosys:scripts",  # lgcheck: the polarity-discriminating oracle
+        "//lhd",
+    ],
+)
+
 # LIVE test for todo/livehd/2f-latch M1 (landed 2026-07-20) — latch Verilog
 # emission + round-trip. Both bugs M1 fixed were invisible to a yosys-only gate,
 # which is why the six live prp-equiv-latch_* pairs kept PROVING while the
