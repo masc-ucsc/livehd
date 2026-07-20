@@ -643,10 +643,34 @@
   In this encoder that means encoding each step TWICE, with the posedge Qs
   re-seeded to their next-state before the second pass. The live test reports it
   as a note and flips to an assertion when that lands.</p>
-  <p><strong>The LATCH encoding is also still open</strong> (the encoder refuses
-  the Latch cell, which is why M2's post-abc LEC gate is unmet and the two BMC
-  twins stay fixme). Everything below is the earlier record, kept because it
-  rules out approaches:</p>
+  <p><strong>THE LATCH ENCODING ITSELF WORKS — it is blocked on STATE
+  CORRESPONDENCE, not on the encoding.</strong> Built and measured 2026-07-20,
+  then reverted; the finding is worth more than the diff. Encoding a Latch
+  exactly like a Flop is correct and nearly free: M2 gave the cell Flop-identical
+  pin ids, and under end-of-cycle observation the flop next-state
+  <code>N = ITE(enable, din, Q)</code> with tolg's <code>din = en ? d : q</code>
+  IS transparency sampled at the end of the cycle — the same collapse that made
+  M5's sim half fall out. Four small edits (seed Latch state, skip the cut cell
+  in the comb walk and in the post-fixpoint completeness check, drop it from the
+  refusal) and <strong>both BMC twins <code>latch_verify_hold</code> and
+  <code>latch_verify_low</code> came back PROVEN.</strong></p>
+  <p>What stops it landing: six <code>prp-v2prp-latch_*</code> targets flip to
+  FALSE REFUTED. The counterexample is
+  <code>q(ref=254 impl=255)</code> at step 1 with the latch never enabled — free
+  INITIAL state that does not correspond. Dumped keys confirm it: the Pyrope
+  side keys the latch <code>l</code>, the round-tripped side keys it
+  <code>q</code> (the golden <code>.v</code> names the latch after its output
+  port). Tier-2 pairing DOES find <code>q</code>&harr;<code>l</code>, but the
+  confirm step re-solves pair-free and refutes there — correctly, because
+  unmatched free state diverges immediately.
+  <br>The aggravating factor is specific to latches: they normally have NO
+  reset, so there is no matched initial value to paper over an unmatched pair.
+  A reset-less FLOP renamed the same way would fail identically. So the work is
+  in the state-pairing layer (pair latches CONFIDENTLY, tier-1, rather than
+  uncertainly), not in the encoder — and it is why M2's post-abc LEC gate is
+  still unmet and the two BMC twins stay fixme.</p>
+  <p>Everything below is the earlier record, kept because it rules out
+  approaches:</p>
   <p><strong>(1) Folding the commit class into the state key is PROVABLY
   INSUFFICIENT — do not spend time on it.</strong> The task text below suggests
   "fold the commit class into the <code>canon_flop_name</code> keying". That was
