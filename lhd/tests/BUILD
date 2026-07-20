@@ -490,6 +490,26 @@ sh_test(
     ],
 )
 
+# LIVE test for todo/livehd/2f-latch M1 (landed 2026-07-20) — latch Verilog
+# emission + round-trip. Both bugs M1 fixed were invisible to a yosys-only gate,
+# which is why the six live prp-equiv-latch_* pairs kept PROVING while the
+# emitter was broken: (1) `process_latch` read din/enable through
+# get_wire_or_const, so a fanout-1 enable came out as a bare UNDECLARED
+# identifier — reproducible ONLY through the yosys importer, since tolg's hold
+# mux keeps a Pyrope latch's enable at fanout >= 2; (2) the emission was
+# `always @*` + blocking `=`, which our own slang reader reads back as plain
+# comb, so Verilog -> slang silently LOST the Latch cell. Both halves were
+# verified to fail on the pre-M1 emitter before landing.
+sh_test(
+    name = "latch_verilog_emission_test",
+    size = "large",
+    srcs = ["latch_verilog_emission_test.sh"],
+    data = [
+        "//inou/yosys:scripts",  # lgcheck, for the round-trip LEC leg
+        "//lhd",
+    ],
+)
+
 # LIVE fail-closed test for todo/livehd/2f-latch M0 (landed 2026-07-20). Every
 # shape it covers used to report SUCCESS while silently doing the wrong thing,
 # which makes every downstream gate vacuous: a latch design under `lhd formal

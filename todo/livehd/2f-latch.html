@@ -363,7 +363,8 @@
   and <code>errors/reg_in_comb_uninit.prp</code>. Full suite 1408 pass, 0 fail.</li>
 
 <li><strong>M1 — Verilog emission correctness + round-trip</strong> [no deps,
-  parallel with M0]. <code>inou/cgen/cgen_verilog.cpp</code> only.
+  parallel with M0] — <strong>LANDED 2026-07-20</strong>.
+  <code>inou/cgen/cgen_verilog.cpp</code> only.
   (1) <code>process_latch</code> reads din/enable with
   <code>get_wire_or_const</code> (<code>:664-665</code>) instead of
   <code>get_expression</code>, so an inlined single-fanout driver emits a bare
@@ -385,9 +386,34 @@
   <code>reg [8:0]</code> width inflation is the general unsigned magnitude+1
   stamp from tolg (<code>upass_tolg.cpp:1665-1668</code>), shared byte-identically
   with flops — not a cgen bug, not latch-specific, cosmetic today.)
-  <br><em>Gate:</em> every latch fixture passes <code>iverilog -g2012</code> (NOT
-  yosys-only — yosys masks bug 1); slang &rarr; Verilog &rarr; slang preserves the
-  Latch cell; the six live equiv pairs stay PROVEN.</li>
+  <br><strong>Landed, and one recon claim CORRECTED:</strong> bug 1 is
+  <em>not</em> reachable from Pyrope or slang at all. tolg bakes the hold mux
+  into din (<code>din = cond ? d : q</code>), so a Pyrope/slang latch's enable
+  condition ALWAYS has fanout &ge; 2 and always gets its own wire — the six
+  equiv pairs do not "dodge it by luck of their netlist shape", they
+  <em>cannot</em> hit it. Only the <strong>yosys importer</strong>, which wires
+  RAW D + EN with no hold mux, leaves the enable at fanout 1. Measured on the
+  pre-fix emitter through that path: iverilog says
+  <code>Unable to bind wire/reg/memory `eq_20'</code> and lgcheck
+  <strong>REFUTES</strong> the round-trip — an emitter bug reported as a
+  design-inequivalence verdict. Any future test for this MUST drive
+  <code>--reader yosys-verilog</code>; the same shape through the Pyrope front
+  end passes either way and proves nothing (this cost a bogus fixture before it
+  was caught by reverting the fix and re-running).
+  <br>Bug 3 (<code>create_locals</code> &rarr; <code>is_type_register</code>) is
+  fixed but is <strong>defensive only</strong>: both front ends give a latch's q
+  the hold-mux reader, and the yosys path DCEs a genuinely dead latch, so no
+  shipped path reaches an undeclared reader-less latch q today. Not claimed as
+  tested.
+  <br><em>Gate (met):</em> <code>lhd/tests/latch_verilog_emission_test.sh</code>
+  — the yosys-importer round-trip under BOTH iverilog and lgcheck, plus
+  <code>always_latch</code>/<code>&lt;=</code> form and a Verilog &rarr; slang
+  re-read that must recover <code>[latch=true]</code>, on both polarities. Each
+  half was verified to FAIL on the pre-M1 emitter before landing. The two yosys
+  fixtures were PROMOTED out of <code>fixme_</code> to
+  <code>inou/yosys/tests/{latch,nlatch}.v</code> (live
+  <code>yosys_compile-*</code> + slang ladder at tier <code>lec</code>). Six live
+  equiv pairs stay PROVEN; full suite 1411 pass, 0 fail.</li>
 
 <li><strong>M2 — IR: a latch gets a clock identity</strong> [SERIALIZATION POINT;
   deps M0, M1]. Add <code>clock_pin</code> and <code>initial</code> to

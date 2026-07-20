@@ -647,8 +647,9 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::N
 }
 
 // A level-sensitive latch (yosys $dlatch). Unlike a flop it has no `___next_`
-// combinational half: it is emitted directly as `always @* if (en) q = d;`,
-// which yosys re-reads as a $dlatch for LEC. The reader maps EN->enable,
+// combinational half: it is emitted directly as
+// `always_latch if (en) q <= d;`, which yosys re-reads as a $dlatch and our own
+// slang reader classifies into latch_syms_. The reader maps EN->enable,
 // D->din, and connects a const-0 `posclk` only for active-low enable
 // (EN_POLARITY==false), so a known-false posclk means the transparent level is
 // `!enable` (e.g. prim_clk_gate's `if (!clk_i)`).
@@ -661,8 +662,15 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   if (din_dpin.is_invalid() || en_dpin.is_invalid()) {
     return;  // malformed latch: leave the declared reg inert rather than emit garbage
   }
-  auto din    = get_wire_or_const(din_dpin);
-  auto enable = get_wire_or_const(en_dpin);
+  // VALUE context: get_expression, not get_wire_or_const (2f-latch M1). A
+  // computed, single-fanout din/enable driver is INLINED into pin2expr and
+  // never gets a wire of its own; get_wire_or_const ignores pin2expr and would
+  // emit its bare, undeclared name. iverilog rejects that outright, while yosys
+  // silently invents an implicit wire (reading X) and lgcheck then REFUTES the
+  // round-trip. The flop path already uses get_expression for exactly this
+  // reason (see process_flop and the `initial` pin's rationale comment).
+  auto din    = get_expression(din_dpin);
+  auto enable = get_expression(en_dpin);
 
   bool neg_en      = false;
   auto posclk_dpin = get_driver(find_sink_pin(node, "posclk"));
@@ -671,8 +679,15 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   }
 
   note_src(fout, node);
-  fout->append("always @* begin\n");
-  fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " = ", din, ";\n"));
+  // `always_latch` + NONBLOCKING `<=`, not `always @*` + blocking `=`
+  // (2f-latch M1). yosys re-infers a latch from either, but our own slang
+  // reader classifies a non-edge `always` with BLOCKING writes as plain
+  // combinational logic — so the old emission could not round-trip through our
+  // front end (Verilog -> slang lost the Latch cell entirely). `always_latch`
+  // also states the intent to every downstream tool instead of relying on
+  // inference.
+  fout->append("always_latch begin\n");
+  fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " <= ", din, ";\n"));
   fout->append("end\n");
 }
 
@@ -2472,12 +2487,16 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
     I(op != Ntype_op::Sub && op != Ntype_op::Memory);
 
-    if (!node.has_out_edges() && !is_type_flop(node)) {
+    if (!node.has_out_edges() && !is_type_register(node)) {
       continue;
     }
     // A flop whose Q has no readers is still emitted by create_registers (it always
     // assigns `q <= ___next_q`), so it MUST get its `reg` declaration here too —
     // otherwise the netlist references an undeclared name (e.g. a_exmem_valid).
+    // Same for a LATCH (2f-latch M1): create_registers calls process_latch
+    // unconditionally, so a reader-less latch Q used to have its assignment
+    // emitted with no declaration to go with it. is_type_register covers both;
+    // Memory cannot reach this line (asserted just above).
 
     auto        dpin         = node.get_driver_pin(0);
     std::string name         = get_scaped_name(pin_wire_name(dpin));

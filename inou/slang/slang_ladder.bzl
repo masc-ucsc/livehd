@@ -30,11 +30,13 @@ SLANG_LADDER = {
     "fixme_array": "lec",
     "fixme_async": "lec",
     "fixme_hier_test": "lec",
-    "fixme_latch": "lec",  # PROMOTED 2f-latch M0: the fixture (not LiveHD) was wrong — `output q` is a net,
-                           # procedurally written inside always_latch. Fixed to `output logic q`; now LECs.
+    "latch": "lec",  # PROMOTED 2f-latch M0/M1 (was fixme_latch, tier "error"): the FIXTURE was wrong —
+                     # `output q` is a net, procedurally written inside always_latch. Fixed to
+                     # `output logic q`; M1 then fixed cgen's undeclared-enable emission, so it LECs.
     "fixme_mem_offset": "verilog",  # capped: 46-entry array, slow memory LEC
     "fixme_multiport": "lec",
-    "fixme_nlatch": "lec",  # PROMOTED 2f-latch M0 with fixme_latch (transparent-LOW twin); same fixture fix.
+    "nlatch": "lec",  # PROMOTED with latch above (transparent-LOW twin) — the polarity the lgyosys
+                      # bounded miter actually discriminates, so its round-trip LEC is not vacuous.
     "fixme_nocheck_implicit_en": "lnast",  # byte-enable mem write (mem[a][chunk]<=…) now lowers (wensize); tolg comb-loops on the en?d:self self-read idiom
     "fixme_noloop": "lec",
     "fixme_paramods": "error",  # instance arrays / paramod shapes not lowered yet
