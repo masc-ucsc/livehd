@@ -3,7 +3,7 @@
 :type: simulation
 */
 
-// todo/livehd/2f-latch tracker (fixme) — GATED CLOCK, the sim half of the
+// todo/livehd/2f-latch — LIVE (promoted at M5). GATED CLOCK, the sim half of the
 // clock-blindness bug (LEC half: lhd/tests/lec_clock_blindness_test.sh). The
 // flop is clocked by `clk and en`: while en == 0 there is no rising edge and
 // the flop must HOLD. `lhd sim` today computes the gate expression as DEAD

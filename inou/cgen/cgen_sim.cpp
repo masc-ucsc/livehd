@@ -1063,6 +1063,78 @@ void Cgen_sim::save_gen_digests() {
   ofs << "}}\n";
 }
 
+// ICG FOLD (todo/livehd/2f-latch M5). A clock-gating cell's output is
+// `<clock> & <enable>`: it has a rising edge exactly on the reference clock's
+// rising edges where the enable is high. Since one sim tick IS one reference
+// period, that folds to "commit this tick iff every non-clock operand of the
+// gate is true" — no edge detection, no clock net in the scheduler. This is the
+// same abstraction LEC uses (CIRCT's arc.state has a native `enable` operand
+// for exactly this); nobody proves ICGs in industry practice, they normalize
+// them away.
+//
+// Returns the guard operand pins, or EMPTY when the cone is not a foldable ICG —
+// in which case the caller must REFUSE rather than silently commit every tick.
+// Empty is therefore "cannot fold", never "no guard needed"; a plain
+// (ungated) clock never reaches here.
+std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Node_class& flop, std::string_view clock_port) {
+  std::vector<hhds::Pin_class> guards;
+  auto                         clk_d = get_driver(find_sink_pin(flop, "clock_pin"));
+  if (clk_d.is_invalid()) {
+    return {};
+  }
+  auto n = clk_d.get_master_node();
+  if (type_op_of(n) != Ntype_op::And) {
+    return {};  // only the AND shape folds; anything else is refused
+  }
+  bool saw_clock = false;
+  for (const auto& e : n.inp_edges()) {
+    // See through tolg's identity port wrappers, exactly as the clock scan does.
+    auto p = e.driver;
+    for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+      auto pn = p.get_master_node();
+      if (type_op_of(pn) != Ntype_op::Get_mask) {
+        break;
+      }
+      auto ge = sorted_inp(pn);
+      if (ge.empty()) {
+        break;
+      }
+      if (ge.size() >= 2) {
+        if (!is_const_pin(ge[1].driver)) {
+          break;
+        }
+        auto mv = hydrate_const(ge[1].driver);
+        if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
+          break;
+        }
+      }
+      p = ge[0].driver;
+    }
+    if (!p.is_invalid() && livehd::graph_util::is_graph_input_pin(p)) {
+      const auto pn = pin_name_of(p);
+      // The reference clock, consumed by the tick itself. When the module has a
+      // RESOLVED clock port, require an exact match. When it does not — which is
+      // the normal case for an ICG design, because clock_input_of() only finds a
+      // clock by looking for a flop wired STRAIGHT to an input, and here the only
+      // flop is wired to the gate — fall back to the conventional names, the same
+      // fallback clock_input_of() itself uses. A miss is fail-CLOSED (the caller
+      // refuses with a diagnostic), never a silent commit-every-tick.
+      if (!clock_port.empty() ? (pn == clock_port) : (pn == "clk" || pn == "clock")) {
+        saw_clock = true;
+        continue;
+      }
+    }
+    guards.push_back(e.driver);  // an enable term: becomes part of the commit guard
+  }
+  // Both halves are required: without the reference clock this is not an ICG at
+  // all (it is some other derived clock), and without an enable there is
+  // nothing to gate on.
+  if (!saw_clock || guards.empty()) {
+    return {};
+  }
+  return guards;
+}
+
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
   tmp_cnt           = 0;
@@ -1221,28 +1293,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   std::sort(ios.begin(), ios.end(), [](const Io& a, const Io& b) { return a.port_id < b.port_id; });
 
-  // ---- fail closed on a Latch (2f-latch M0, lifted by M5) ----
-  // A Latch is neither collected as a flop (is_type_flop excludes it) nor walked
-  // as comb (is_type_register includes it), so its `q` is never bound and the
-  // schedule walk below dies with a `combinational-loop` error naming an
-  // internal node — a diagnostic that sends the reader hunting for a loop that
-  // does not exist. Say the real thing, BEFORE the walk, and stop: emitting a
-  // sim whose latch reads 0 forever would be a silent miscompile.
-  for (auto node : g->fast_class()) {
-    if (type_op_of(node) != Ntype_op::Latch) {
-      continue;
-    }
-    livehd::diag::err("inou.cgen.sim", "latch-unsupported", "unsupported")
-        .msg("module `{}` contains a level-sensitive latch (`{}`) that inou.cgen.sim cannot simulate yet", gname,
-             debug_name(node))
-        .hint(
-            "sim commits every state element in one unified per-tick loop and has no commit class for a latch (it "
-            "would read 0 forever); tracked as todo/livehd/2f-latch M5. Rewrite the latch as an enabled flop, or "
-            "simulate the emitted Verilog with an event-driven simulator")
-        .emit();
-    return;
-  }
-
   // ---- fail closed on a clock this scheduler cannot honor (2f-latch M0) ----
   // One step() == one full clock period and EVERY flop commits in ONE unified
   // loop, regardless of its `clock_pin`. Two shapes are therefore simulated
@@ -1255,6 +1305,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Both used to exit 0 with a plausible-looking VCD, which is the worst
   // possible outcome: a silently wrong waveform reads as a passing test.
   {
+    // The module's reference clock port: one tick IS one period of it, so it is
+    // the net an ICG fold consumes (see icg_guards).
+    const std::string clock_port = clock_input_of(g);
     // See through tolg's identity port wrappers (unary Get_mask width-adjust,
     // and the Get_mask(v,-1) to-positive idiom), same as clock_input_of().
     auto resolve_passthrough = [](hhds::Pin_class p) {
@@ -1294,14 +1347,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         clock_nets.insert(std::string{pin_name_of(d)});
         continue;
       }
-      // A clock_pin driven by LOGIC (an ICG's `clk & en`, any derived clock).
+      // A clock_pin driven by LOGIC. The ICG shape `clk & en` is FOLDED into a
+      // commit guard (2f-latch M5) — see icg_guards() — so only a derived clock
+      // we cannot fold is refused. Refusing matters: sim would otherwise commit
+      // the flop every tick with the gate as dead code, which is a silent
+      // miscompile, not a slowdown.
+      if (!icg_guards(node, clock_port).empty()) {
+        clock_nets.insert("\x01implicit");  // folded: commits on the reference clock, qualified
+        continue;
+      }
       livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
-          .msg("module `{}`: flop `{}` has a GATED or derived clock that inou.cgen.sim cannot honor yet", gname,
+          .msg("module `{}`: flop `{}` has a derived clock inou.cgen.sim cannot fold into a commit guard", gname,
                debug_name(node))
           .hint(
-              "sim commits every flop once per step() regardless of clock_pin, so a gated flop would LOAD on every "
-              "tick even while its gate says hold — a silent miscompile, not a slowdown; tracked as "
-              "todo/livehd/2f-latch M5. Model the gate as the flop's `enable` instead, or simulate the emitted "
+              "only the ICG shape `<clock> & <enable>` is folded (commit when the enable is high at the reference "
+              "edge); any other derived clock would be simulated as if it ticked every step, with the gate as dead "
+              "code — a silent miscompile. Model the gate as the flop's `enable` instead, or simulate the emitted "
               "Verilog with an event-driven simulator")
           .emit();
       return;
@@ -1333,10 +1394,30 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     int                      depth;          // pipe_min shift-register depth (>=1)
     std::vector<std::string> stages;         // depth-1 intermediate stage members (q is the last)
     bool                     posedge = true; // false = negedge flop (posclk known-false)
+    // ICG fold (2f-latch M5): non-clock operands of a `<clock> & <enable>` clock
+    // cone. Non-empty => this flop commits only in ticks where every guard is
+    // true. Empty => an ungated clock, i.e. commit every tick.
+    std::vector<hhds::Pin_class> clock_guards;
   };
   std::vector<Flop> flops;
   for (auto node : g->fast_class()) {
-    if (!is_type_flop(node)) {
+    // A LATCH rides the flop path (2f-latch M5). Under the no-time-borrowing
+    // scope ruling a latch is a flop-with-enable that commits at its window's
+    // closing edge, and for END-OF-TICK observation — the shared observation
+    // model for sim / BMC / Icarus — that collapses to exactly the flop update
+    // this emitter already performs. tolg has already baked the hold mux into
+    // din (`din = en ? d : q`) and wired `enable = en`, so
+    //     q_next = en ? din : q = en ? d : q
+    // which IS transparency sampled at the end of the tick. A master/slave pair
+    // needs no extra machinery either: the two latches sit on opposite phases,
+    // so only one of them updates in any given tick and the simultaneous
+    // commit-from-pre-tick-state below reproduces the one-cycle latency
+    // (verified against the iverilog-validated schedule in
+    // tests/sim/latch_sim_master_slave.prp).
+    //
+    // The Latch cell shares Flop's pin ids (M2), so every named lookup below —
+    // din, enable, and the absent reset/initial/pipe_min — resolves unchanged.
+    if (!is_type_flop(node) && type_op_of(node) != Ntype_op::Latch) {
       continue;
     }
     auto qpin  = node.get_driver_pin(0);
@@ -1344,7 +1425,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); !pm.is_invalid() && is_const_pin(pm)) {
       depth = std::max<int>(1, static_cast<int>(hydrate_const(pm).to_just_i64()));
     }
-    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}};
+    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, {}};
+    f.clock_guards = icg_guards(node, clock_input_of(g));
     // posedge (default) vs negedge clock: the comptime `posclk` pin, known-false
     // means negedge -- only matters for which sub-tick slot dumps its VCD data.
     if (auto pc = get_driver(find_sink_pin(node, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
@@ -2425,10 +2507,24 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // commit flops (+ pipe stages) at the clock edge
   for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append("    ", s, " = ", s, "_next;\n");
+    // ICG fold: a gated flop commits only in ticks where its gate's enable
+    // terms are true. Without this the gate is DEAD CODE and the flop loads
+    // every tick regardless — a silently wrong waveform (2f-latch M5).
+    std::string guard;
+    for (const auto& gp : f.clock_guards) {
+      absl::StrAppend(&guard, guard.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
     }
-    fout->append("    ", f.member, " = ", f.member, "_next;\n");
+    const std::string ind = guard.empty() ? "    " : "      ";
+    if (!guard.empty()) {
+      fout->append("    if (", guard, ") {  // gated clock: commit only when the ICG enable is high\n");
+    }
+    for (const auto& s : f.stages) {
+      fout->append(ind, s, " = ", s, "_next;\n");
+    }
+    fout->append(ind, f.member, " = ", f.member, "_next;\n");
+    if (!guard.empty()) {
+      fout->append("    }\n");
+    }
   }
 
   // memory edge: sync-read registers sample the CURRENT array (before writes),

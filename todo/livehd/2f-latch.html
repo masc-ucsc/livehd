@@ -660,8 +660,42 @@
   polarity oracle and against iverilog for anything edge-shaped; minion
   full-design LEC re-baselined.</li>
 
-<li><strong>M5 — simulation: the three-region tick</strong> [deps M3, parallel with
-  M4]. A tick is THREE REGIONS, not a sequence of per-edge calls: (1) evaluate
+<li><strong>M5 — simulation</strong> [deps M3, parallel with M4] —
+  <strong>PARTIALLY LANDED 2026-07-20: 4 of the 5 red trackers are green and
+  PROMOTED, WITHOUT the three-region restructure.</strong>
+  <p><strong>Latches needed no scheduler machinery at all.</strong> tolg has
+  already baked the hold mux into din (<code>din = en ? d : q</code>) and wired
+  <code>enable = en</code>, so the ordinary flop update
+  <code>q_next = en ? din : q = en ? d : q</code> IS transparency observed at
+  the END OF THE TICK — which is precisely the shared observation model. So a
+  Latch simply joins the <code>flops</code> vector (its cell shares Flop's pin
+  ids since M2, so every named lookup resolves unchanged) and
+  <code>latch_sim_hold</code> / <code>latch_sim_low</code> pass.
+  <code>latch_sim_master_slave</code>'s ONE-CYCLE latency also falls out for
+  free, from the OPPOSITE PHASES rather than from commit classes: <code>m</code>
+  is enabled while <code>!clk</code> and <code>s</code> while <code>clk</code>,
+  so only one updates per tick and the simultaneous commit-from-pre-tick-state
+  reproduces the iverilog schedule exactly. (That fixture's header warns a
+  "naive latch = flop" model gives TWO cycles — true of a model that ignores the
+  ENABLE; honoring it is what makes the machinery unnecessary.)</p>
+  <p><strong>The gated clock folds instead of being scheduled.</strong> An ICG's
+  output is <code>&lt;clock&gt; &amp; &lt;enable&gt;</code>, which has a rising
+  edge exactly on the reference clock's rises where the enable is high — and one
+  sim tick IS one reference period, so it collapses to "commit iff the non-clock
+  operands are true". No edge detection, no clock net in the scheduler. Any
+  derived clock that does NOT match that shape still FAILS CLOSED (M0's refusal,
+  now narrowed), because simulating it would commit every tick with the gate as
+  dead code.</p>
+  <p><strong>STILL RED: <code>flop_sim_posneg</code></strong>, and it is the one
+  that genuinely needs the restructure. A posedge stage feeding a NEGEDGE stage
+  on the same clock transfers in HALF a period, so the negedge stage must see
+  the POST-RISE value of the posedge stage within one tick. That means
+  evaluating the combinational region TWICE per tick (rise, then fall), which
+  the single-pass emitter cannot express by duplication: the comb section also
+  drives outputs and ADVANCES SUB-INSTANCES, so emitting it twice would
+  double-advance children. It needs the comb region factored into a callable
+  unit with the child-advance separated out — the real three-region tick.</p>
+  <p>Original plan: A tick is THREE REGIONS, not a sequence of per-edge calls: (1) evaluate
   every firing edge's next-state from PRE-TICK state, (2) commit all firing state,
   (3) evaluate the newly-opened region. <strong>Per-edge sequential calls are a
   silent off-by-one</strong> whenever two clocks toggle in the same tick — with
@@ -704,8 +738,18 @@
   negedge fix in the SAME commit (<code>_SIMEQ_FIXME = []</code> is the
   100%-green baseline to preserve). Do not add pos&rarr;neg cascades to _SIMEQ
   before this lands.
-  <br><em>Gate:</em> the five fixme sim trackers above go green and
-  <code>edge_negpos</code> stays green.</li>
+  <br><em>Gate (4 of 5):</em> <code>latch_sim_hold</code>,
+  <code>latch_sim_low</code>, <code>latch_sim_master_slave</code> and
+  <code>flop_sim_gated_clock</code> are green and PROMOTED to
+  <code>inou/prp/tests/sim/</code>; <code>edge_negpos</code> stays green;
+  <code>flop_sim_posneg</code> stays a fixme tracker with the reason above.
+  <code>latch_fail_closed_test.sh</code> was updated in the same commit: two of
+  its M0 refusals are now real support, so asserting them would be asserting a
+  bug — it now pins that the misleading pre-M0 diagnostics never return, and
+  that a NON-ICG derived clock still fails closed. Full suite 1417 pass.
+  <br>The simeq / <code>_SIMEQ_FIXME</code> re-bake and the hierarchical
+  per-edge advance listed under OPEN below were NOT needed for this half; they
+  belong with the two-phase tick.</li>
 
 <li><strong>M6 — multiple clocks as the generalization of phases</strong> [deps M5].
   Per-(clock, edge) schedules generalize to N clocks. Extend the <code>tick</code>

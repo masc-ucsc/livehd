@@ -3,7 +3,7 @@
 :type: simulation
 */
 
-// todo/livehd/2f-latch tracker (fixme) — THE ONE-CYCLE-LATENCY TEST. A
+// todo/livehd/2f-latch — LIVE (promoted at M5). THE ONE-CYCLE-LATENCY TEST. A
 // master/slave latch pair on opposite phases of `clk` IS a posedge flop: d
 // presented while clk is low must appear on q ONE full clk period later, not
 // two. Under the no-time-borrowing scope ruling this must come out right from
@@ -11,6 +11,18 @@
 // RISE, slave transparent-high commits at the FALL) — a naive "latch = flop"
 // model without commit classes gives TWO cycles, silently. Flips green at M5
 // (and depends on M3's classifier). Must NOT be fixed by modeling transparency.
+//
+// HOW M5 ACTUALLY SATISFIES THIS (the header's warning above stands, but the
+// resolution is subtler than "add commit classes to the scheduler"): a latch
+// rides the ordinary flop commit path, because tolg has ALREADY baked the hold
+// mux into din (`din = en ? d : q`) and wired `enable = en`. So
+// `q_next = en ? din : q = en ? d : q`, which IS transparency observed at the
+// end of the tick. The one-cycle latency then falls out of the OPPOSITE PHASES
+// rather than from any scheduler machinery: `m` is enabled while `!clk` and `s`
+// while `clk`, so only ONE of the two updates in any tick, and the simultaneous
+// commit-from-pre-tick-state gives exactly the iverilog schedule below. The
+// "naive latch = flop gives two cycles" failure is the model that IGNORES the
+// enable; honoring it is what makes commit classes unnecessary here.
 //
 // `clk` here is a DATA input toggled by the test (one poke per half-period, so
 // one full clk cycle = two ticks). Asserts observe q only while the slave is

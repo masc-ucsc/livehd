@@ -3,7 +3,7 @@
 :type: simulation
 */
 
-// todo/livehd/2f-latch tracker (fixme). Simulation of a transparent-LOW latch
+// todo/livehd/2f-latch — LIVE (promoted at M5). Simulation of a transparent-LOW latch
 // (open while the gate is 0, commits at the RISE of the gate) — the polarity
 // of every ICG enable latch and every master half of a master/slave pair.
 // Mirror of latch_sim_hold; same assert-visibility rule (observe q only while

@@ -19,11 +19,13 @@
 #   2. the same design at the DEFAULT settings must not become clean merely
 #      because `formal.strict` is off (the regression this guards).
 #   3. `lhd sim` on a latch — used to die with a misleading `combinational-loop`
-#      error naming an internal node, sending the reader after a loop that does
-#      not exist.
-#   4. `lhd sim` on a GATED-clock flop — sim commits every flop once per step()
-#      regardless of clock_pin, so the gate is dead code and the flop LOADS
-#      every tick. Silently wrong waveform, exit 0. (Lifted by M5.)
+#      error naming an internal node. LIFTED BY M5 (latches now simulate); what
+#      remains here is that the misleading diagnostic never returns.
+#   4. `lhd sim` on a GATED-clock flop — the gate was dead code and the flop
+#      LOADED every tick, a silently wrong waveform at exit 0. LIFTED BY M5 for
+#      the ICG shape `<clock> & <enable>`, which folds into a commit guard. A
+#      derived clock that does NOT fold must still fail closed, and that is now
+#      the case this file pins.
 #   5. `lhd sim` on a TWO-CLOCK design — all state advances as if it shared one
 #      clock and only the first net reaches the VCD. Silently wrong, exit 0.
 #      (Lifted by M6.)
@@ -141,7 +143,15 @@ EOF
 expect_fail_with "lec on a latch design (native encoder)" "unsupported" \
   "$LHD" lec --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd"
 
-# ---- 3: sim on a latch names the LATCH, not a phantom comb loop --------------
+# ---- 3 + 4: LIFTED BY M5 — these two refusals are now real support ----------
+# M0 made `lhd sim` REFUSE a latch (it used to die with a misleading
+# `combinational-loop` error naming an internal node) and REFUSE a gated-clock
+# flop (the gate was dead code, so the flop loaded every tick — a silently wrong
+# waveform). M5 replaced both refusals with actual simulation, so asserting the
+# refusals here would now be asserting a BUG. The positive behavior is pinned by
+# the promoted trackers in inou/prp/tests/sim/ (latch_sim_hold, latch_sim_low,
+# latch_sim_master_slave, flop_sim_gated_clock); all this file still owes is
+# that the two misleading OLD failure modes never come back.
 cat > "$W/lsim.prp" <<'EOF'
 pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
   reg l:u8:[latch=true]
@@ -150,17 +160,28 @@ pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
     l = d
   }
 }
+
+test lhold8.opens_and_holds {
+  mut acc = lhold8
+  tick 3 {
+    acc.en = clock == 0
+    acc.d  = 5
+    step
+    // Observation-visibility rule: read q only at CLOSED ticks, after at least
+    // one closing edge. c1 and c2 are both closed and must show the captured 5.
+    assert((clock >= 1) implies (acc.q == 5), "latch captured 5 and holds it")
+  }
+}
 EOF
 
-expect_fail_with "sim on a latch" "latch-unsupported" \
-  "$LHD" sim "$W/lsim.prp" --setup-only --workdir "$W/swd"
-
-out="$("$LHD" sim "$W/lsim.prp" --setup-only --workdir "$W/swd2" 2>&1)"
+out="$("$LHD" sim "$W/lsim.prp" --setup-only --workdir "$W/swd" 2>&1)" || {
+  echo "$out" | tail -3
+  fail "sim now REFUSES a latch again — M5 support regressed"
+}
 grep -q "combinational-loop" <<<"$out" \
-  && fail "sim still reports the MISLEADING combinational-loop error for a latch"
-echo "ok: the phantom combinational-loop diagnostic is gone"
+  && fail "sim reports the MISLEADING combinational-loop error for a latch (the pre-M0 failure mode is back)"
+echo "ok: a latch simulates, and the phantom combinational-loop diagnostic stays gone"
 
-# ---- 4: sim on a gated-clock flop -------------------------------------------
 cat > "$W/gated.prp" <<'EOF'
 pub mod gate8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
   wire gclk:bool = nil
@@ -169,10 +190,45 @@ pub mod gate8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
   q = f
   f = d
 }
+
+test gate8.holds_while_gated {
+  mut acc = gate8
+  tick 3 {
+    acc.en = clock == 0
+    acc.d  = if clock == 0 { 5 } else { 99 }
+    step
+    assert((clock >= 1) implies (acc.q == 5), "en=0: no edge on the gated clock, flop HOLDS")
+  }
+}
 EOF
 
-expect_fail_with "sim on a gated-clock flop" "gated-clock-unsupported" \
-  "$LHD" sim "$W/gated.prp" --setup-only --workdir "$W/gwd"
+"$LHD" sim "$W/gated.prp" --setup-only --workdir "$W/gwd" >"$W/gated.log" 2>&1 \
+  || { tail -3 "$W/gated.log"; fail "sim now REFUSES an ICG-shaped gated clock again — the M5 fold regressed"; }
+echo "ok: an ICG-shaped gated clock folds into a commit guard"
+
+# A derived clock that is NOT the foldable ICG shape must STILL fail closed:
+# simulating it would commit every tick with the gate as dead code.
+cat > "$W/derived.prp" <<'EOF'
+pub mod der8(clk:bool, sel:bool, d:u8) -> (q:u8@[1]) {
+  wire dclk:bool = nil
+  dclk = clk != sel
+  reg f:u8:[clock_pin=ref dclk] = 0
+  q = f
+  f = d
+}
+
+test der8.smoke {
+  mut acc = der8
+  tick 2 {
+    acc.sel = false
+    acc.d   = 1
+    step
+  }
+}
+EOF
+
+expect_fail_with "sim on a NON-ICG derived clock" "gated-clock-unsupported" \
+  "$LHD" sim "$W/derived.prp" --setup-only --workdir "$W/dwd"
 
 # ---- 5: sim on a two-clock design -------------------------------------------
 cat > "$W/twoclk.prp" <<'EOF'

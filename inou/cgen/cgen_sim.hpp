@@ -81,6 +81,10 @@ private:
                               // false = plain edge-aligned updates (no X, no delay)
 
 public:
+  // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
+  // when the cone is not a foldable ICG (2f-latch M5).
+  static std::vector<hhds::Pin_class> icg_guards(const hhds::Node_class& flop, std::string_view clock_port);
+
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay)
       : odir(_odir), vcd_file(_vcd), top(_top),
