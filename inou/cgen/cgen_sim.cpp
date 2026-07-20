@@ -1367,23 +1367,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           .emit();
       return;
     }
-    if (clock_nets.size() >= 2) {
-      std::vector<std::string> names(clock_nets.begin(), clock_nets.end());
-      std::sort(names.begin(), names.end());  // hash-set order would make the message run-varying
-      std::string net_list;
-      for (const auto& n : names) {
-        absl::StrAppend(&net_list, net_list.empty() ? "" : ", ", n == "\x01implicit" ? "<implicit clock>" : n);
-      }
-      livehd::diag::err("inou.cgen.sim", "multi-clock-unsupported", "unsupported")
-          .msg("module `{}` has state on {} distinct clock nets ({}); inou.cgen.sim is single-clock", gname,
-               names.size(), net_list)
-          .hint(
-              "one step() advances ALL state as if it shared one clock, and only the first net reaches the VCD (the "
-              "others degrade to poked data), so a multi-clock design is silently mis-simulated; tracked as "
-              "todo/livehd/2f-latch M6")
-          .emit();
-      return;
-    }
+    // MULTI-CLOCK is supported as of M6 — the M0 refusal here is LIFTED. State
+    // on a net other than the reference clock commits on a detected EDGE of
+    // that net (see Flop::sec_clock), so a second clock is simply a data input
+    // the testbench toggles. What is NOT lifted is a derived clock we cannot
+    // fold (handled above): that still fails closed, because there is no net to
+    // detect an edge on without inventing one.
+    (void)clock_nets;
   }
 
   // ---- flops (Flop cells; Latch/Memory -> later phase) ----
@@ -1398,6 +1388,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // cone. Non-empty => this flop commits only in ticks where every guard is
     // true. Empty => an ungated clock, i.e. commit every tick.
     std::vector<hhds::Pin_class> clock_guards;
+    // SECONDARY CLOCK (2f-latch M6). Invalid => this flop rides the module's
+    // REFERENCE clock, one edge per tick, exactly as before. Valid => the flop
+    // hangs on a DIFFERENT clock net (a second clock port the testbench drives
+    // as data), so it commits only on a detected edge of that net, tracked by
+    // `prev_member`.
+    hhds::Pin_class sec_clock;
+    std::string     prev_member;
   };
   std::vector<Flop> flops;
   for (auto node : g->fast_class()) {
@@ -1425,8 +1422,34 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); !pm.is_invalid() && is_const_pin(pm)) {
       depth = std::max<int>(1, static_cast<int>(hydrate_const(pm).to_just_i64()));
     }
-    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, {}};
-    f.clock_guards = icg_guards(node, clock_input_of(g));
+    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, {}, {}, {}};
+    const std::string ref_clock = clock_input_of(g);
+    f.clock_guards              = icg_guards(node, ref_clock);
+    // SECONDARY CLOCK (2f-latch M6): a clock_pin wired to a graph input that is
+    // NOT the module's reference clock. One tick is one period of the REFERENCE
+    // clock, so a second clock cannot also tick once per call — it is a signal
+    // the testbench drives, and its flops commit on a detected edge of it.
+    if (f.clock_guards.empty()) {
+      auto cd = get_driver(find_sink_pin(node, "clock_pin"));
+      for (int hops = 0; hops < 8 && !cd.is_invalid(); ++hops) {
+        auto cn = cd.get_master_node();
+        if (type_op_of(cn) != Ntype_op::Get_mask) {
+          break;
+        }
+        auto ce = sorted_inp(cn);
+        if (ce.empty()) {
+          break;
+        }
+        if (ce.size() >= 2 && !is_const_pin(ce[1].driver)) {
+          break;
+        }
+        cd = ce[0].driver;
+      }
+      if (!cd.is_invalid() && livehd::graph_util::is_graph_input_pin(cd) && std::string{pin_name_of(cd)} != ref_clock) {
+        f.sec_clock   = get_driver(find_sink_pin(node, "clock_pin"));
+        f.prev_member = absl::StrCat("__clkprev_", cpp_id(std::string{pin_name_of(cd)}));
+      }
+    }
     // posedge (default) vs negedge clock: the comptime `posclk` pin, known-false
     // means negedge -- only matters for which sub-tick slot dumps its VCD data.
     if (auto pc = get_driver(find_sink_pin(node, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
@@ -1621,6 +1644,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       hout->append("  Slop<", std::to_string(f.bits), "> ", s, "{};  // pipe stage\n");
     }
     hout->append("  Slop<", std::to_string(f.bits), "> ", f.member, "{};  // flop\n");
+  }
+  // Previous-value bit per SECONDARY clock net (2f-latch M6), deduped: every
+  // flop on the same net shares one, which is also what makes them commit
+  // together on that net's edge.
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (f.prev_member.empty() || !emitted.insert(f.prev_member).second) {
+        continue;
+      }
+      hout->append("  bool ", f.prev_member, "{false};  // previous level of a secondary clock net\n");
+    }
   }
   for (const auto& m : mems) {
     hout->append(absl::StrCat("  std::array<Slop<", m.bits, ">, ", m.size, "> ", m.member, "{};  // memory\n"));
@@ -2538,6 +2573,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (const auto& gp : f.clock_guards) {
       absl::StrAppend(&guard, guard.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
     }
+    // SECONDARY clock (2f-latch M6): commit only on a detected EDGE of this
+    // flop's own clock net. One tick is one period of the REFERENCE clock, so a
+    // second clock cannot also tick once per call — it is a signal the
+    // testbench drives, and an edge is a level change between ticks. All flops
+    // on one net share the prev bit, so they commit together; and because every
+    // secondary commit reads PRE-TICK state, two clocks whose edges land in the
+    // same tick both sample pre-edge values, which is what IEEE 1800 requires
+    // for coincident edges.
+    if (!f.sec_clock.is_invalid()) {
+      const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
+      absl::StrAppend(&guard, guard.empty() ? "" : " && ",
+                      f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")")
+                                : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
+    }
     const std::string ind = guard.empty() ? "    " : "      ";
     if (!guard.empty()) {
       fout->append("    if (", guard, ") {  // gated clock: commit only when the ICG enable is high\n");
@@ -2548,6 +2597,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(ind, f.member, " = ", f.member, "_next;\n");
     if (!guard.empty()) {
       fout->append("    }\n");
+    }
+  }
+
+  // Secondary-clock levels for the NEXT tick's edge detection. Updated after
+  // every commit that reads them, so an edge is seen exactly once (2f-latch M6).
+  {
+    absl::flat_hash_set<std::string> done;
+    for (const auto& f : flops) {
+      if (f.prev_member.empty() || !done.insert(f.prev_member).second) {
+        continue;
+      }
+      fout->append("    ", f.prev_member, " = (", operand(f.sec_clock, 1), ").is_known_true();\n");
     }
   }
 

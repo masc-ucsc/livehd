@@ -26,9 +26,10 @@
 #      the ICG shape `<clock> & <enable>`, which folds into a commit guard. A
 #      derived clock that does NOT fold must still fail closed, and that is now
 #      the case this file pins.
-#   5. `lhd sim` on a TWO-CLOCK design — all state advances as if it shared one
-#      clock and only the first net reaches the VCD. Silently wrong, exit 0.
-#      (Lifted by M6.)
+#   5. `lhd sim` on a TWO-CLOCK design — all state advanced as if it shared one
+#      clock and only the first net reached the VCD, silently wrong at exit 0.
+#      LIFTED BY M6 (non-reference clock nets get real edge detection); what
+#      remains here is that the refusal does not come back.
 #
 # Cases 4 and 5 are about FLOPS, not latches: they are here because an ICG is
 # `latch + gated clock`, so latch support that ignores the gate ships the most
@@ -230,19 +231,38 @@ EOF
 expect_fail_with "sim on a NON-ICG derived clock" "gated-clock-unsupported" \
   "$LHD" sim "$W/derived.prp" --setup-only --workdir "$W/dwd"
 
-# ---- 5: sim on a two-clock design -------------------------------------------
+# ---- 5: LIFTED BY M6 — a second clock domain now simulates -------------------
+# M0 REFUSED a design with state on two clock nets, because every clock was
+# advanced as if it were the one clock (and only the first reached the VCD). M6
+# gives non-reference clock nets real edge detection, so this is now supported
+# and asserting the refusal would be asserting a bug. The VALUE semantics —
+# including pre-edge sampling on a coincident tick — are pinned by
+# inou/prp/tests/sim/multiclock_two_domain.prp against an iverilog golden; all
+# this file owes is that the refusal is gone.
 cat > "$W/twoclk.prp" <<'EOF'
-pub mod twoclk(clka:bool, clkb:bool, d:u8) -> (q:u8@[1]) {
-  reg ra:u8:[clock_pin=clka] = 0
-  reg rb:u8:[clock_pin=clkb] = 0
+pub mod twoclk(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
+  reg ra:u8 = 0
+  reg rb:u8:[clock_pin=ref clkb] = 0
+  qa = ra
+  qb = rb
   ra = d
   rb = ra
-  q = rb
+}
+
+test twoclk.second_domain_holds {
+  mut acc = twoclk
+  tick 3 {
+    acc.d    = 7
+    acc.clkb = false          // never toggles: the second domain must HOLD
+    step
+    assert(acc.qb == 0, "no clkb edge: the second domain never commits")
+  }
 }
 EOF
 
-expect_fail_with "sim on a two-clock design" "multi-clock-unsupported" \
-  "$LHD" sim "$W/twoclk.prp" --setup-only --workdir "$W/twd"
+"$LHD" sim "$W/twoclk.prp" --setup-only --workdir "$W/twd" >"$W/twd.log" 2>&1 \
+  || { tail -3 "$W/twd.log"; fail "sim now REFUSES a two-clock design again — the M6 support regressed"; }
+echo "ok: a second clock domain simulates (M0 refusal lifted by M6)"
 
 # ---- guard: a plain SINGLE-clock design must still simulate ------------------
 # The two refusals above are narrow. If they over-trigger, every ordinary design

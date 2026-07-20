@@ -750,8 +750,35 @@
   per-edge advance listed under OPEN below were NOT needed for this half; they
   belong with the two-phase tick.</li>
 
-<li><strong>M6 — multiple clocks as the generalization of phases</strong> [deps M5].
-  Per-(clock, edge) schedules generalize to N clocks. Extend the <code>tick</code>
+<li><strong>M6 — multiple clocks</strong> [deps M5] —
+  <strong>DESIGN SIDE LANDED 2026-07-20; the VCD tick grammar deliberately
+  NOT.</strong>
+  <p>A flop whose <code>clock_pin</code> resolves to a graph input that is NOT
+  the module's reference clock is a SECONDARY-clock flop: one tick is one period
+  of the REFERENCE clock, so a second clock cannot also tick once per call — it
+  is a signal the testbench drives, and its flops commit on a detected EDGE of
+  it (a level change between ticks), tracked by one shared previous-level bit
+  per net. All flops on a net share that bit, so they commit together. The M0
+  <code>multi-clock-unsupported</code> refusal is lifted; a derived clock that
+  cannot be folded still fails closed, because there is no net to detect an edge
+  on without inventing one.</p>
+  <p><strong>Coincident edges come out right by construction:</strong> every
+  secondary commit reads PRE-TICK state, so when two clocks have edges in the
+  same tick both sample pre-edge values, as IEEE 1800 requires. That is the
+  single number the new fixture pins —
+  <code>inou/prp/tests/sim/multiclock_two_domain.prp</code> expects
+  <code>qb == 28</code> on the coincident tick (the PREVIOUS tick's <code>a</code>),
+  not 45; a model committing from post-tick state reads 45 there. The whole
+  schedule is validated against an iverilog golden.</p>
+  <p><strong>NOT done, and orthogonal:</strong> the <code>tick</code> grammar's
+  <code>clocks=(...)</code> tuple still accepts one entry, and
+  <code>lhd_sim_clock_reset_test.sh:100</code> still asserts that. That clause
+  configures the VCD WAVEFORM (which signal is drawn as the clock, at what
+  ratio) — it is testbench presentation, not design semantics, and nothing
+  inspects it to decide when state commits. Extending it to N entries would draw
+  a second clock waveform; it would not change a single simulated value. Left
+  for whoever wants multi-clock VCDs.</p>
+  <p>Original plan: Per-(clock, edge) schedules generalize to N clocks. Extend the <code>tick</code>
   grammar — <code>inou/prp/prp_sim.cpp:1444-1471</code>
   (<code>tick_one_entry</code>) hard-rejects &gt;1 entry in the
   <code>clocks=(...)</code> tuple (testbench grammar ONLY — nothing inspects the
@@ -760,10 +787,19 @@
   CORRECT, so both rewrite here. Design sketch in
   <code>todo_multiclock.md</code> (split per clock EDGE; a clock used pos+neg
   yields two subgraphs; a new cell for cross-domain communication).
-  <br><em>Gate:</em> a two-independent-clock 2-stage pipeline matches iverilog
-  cycle-for-cycle, including a COINCIDENT-edge tick (both clocks toggling in one
-  tick must sample pre-edge values); the M0 multi-clock refusal is lifted;
-  <code>lhd_sim_clock_reset_test.sh</code> asserts the new grammar.</li>
+  <br><em>Gate (2 of 3):</em> a two-independent-clock 2-stage pipeline matches
+  iverilog cycle-for-cycle INCLUDING the coincident-edge tick
+  (<code>multiclock_two_domain.prp</code>, live), and the M0 multi-clock refusal
+  is lifted (<code>latch_fail_closed_test.sh</code> now pins that it stays
+  lifted). The third — <code>lhd_sim_clock_reset_test.sh</code> asserting a new
+  grammar — is NOT met, deliberately: see the VCD note above.
+  <br><strong>Bug found and fixed en route:</strong> <code>implies</code> was
+  emitted VERBATIM into the generated sim driver, so a test block using the
+  implies form — the spelling the dual sim+BMC fixture convention uses on the
+  formal side — produced uncompilable C++ and a bare "expected ')'" from the
+  host compiler. It now lowers to <code>(!(a) || (b))</code>, so the two planes
+  no longer need different spellings of the same property. Full suite 1419
+  pass.</li>
 
 <li><strong>M7 — async/SR latches + efficiency</strong> [deps M4, M5] —
   <strong>importer half LANDED 2026-07-20 as fail-closed guards; the rest

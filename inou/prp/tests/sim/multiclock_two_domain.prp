@@ -1,0 +1,52 @@
+/*
+:name: multiclock_two_domain
+:type: simulation
+*/
+
+// todo/livehd/2f-latch M6 — TWO INDEPENDENT CLOCK DOMAINS in simulation.
+//
+// Stage `a` hangs on the module's REFERENCE clock (no clock_pin: one tick IS
+// one period of it, so it commits every tick). Stage `b` hangs on `clkb`, a
+// SECOND clock the testbench drives as data — so it commits only on a detected
+// RISING EDGE of clkb, i.e. a level change between ticks. Before M6 this design
+// was REFUSED outright (`multi-clock-unsupported`), and before M0 it was
+// silently mis-simulated: every clock was advanced as if it were the one clock,
+// so `b` loaded every tick and only the first net reached the VCD.
+//
+// Both commits read PRE-TICK state, which is what makes a COINCIDENT tick right:
+// when two clocks have edges in the same tick, IEEE 1800 has both nonblocking
+// assignments sample pre-edge values. Here k=2 and k=4 are exactly that case —
+// clkb rises in a tick where the reference stage also commits — and `b` must see
+// the PREVIOUS tick's `a`, not the one `a` takes this tick.
+//
+// SCHEDULE VALIDATED AGAINST IVERILOG (independent-oracle rule; the golden
+// toggles clkb at k=2 and k=4 and samples after both stages settle):
+//     k :  0   1   2   3   4   5
+//     a : 11  28  45  62  79  96
+//     b :  0   0  28  28  62  62
+// Note b=28 at k=2 (a's k=1 value), NOT 45 — that single number is the whole
+// coincident-edge property, and a model that committed b from post-tick state
+// would read 45 here.
+pub mod two_dom(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
+  reg a:u8 = 0
+  reg b:u8:[clock_pin=ref clkb] = 0
+  qa = a
+  qb = b
+  a = d
+  b = a
+}
+
+test two_dom.independent_domains {
+  mut acc = two_dom
+  tick 6 {
+    acc.d    = 11 + (17 * clock)     // distinct every tick (max 96, fits u8)
+    acc.clkb = (clock == 2) or (clock == 4)
+    step
+    assert(acc.qa == 11 + (17 * clock), "the reference-clock stage commits every tick")
+    // b holds across every tick with no clkb rise, and on a rise takes the
+    // PREVIOUS tick's a (pre-edge sampling).
+    assert((clock <= 1) implies (acc.qb == 0), "no clkb edge yet: the second domain holds its init")
+    assert(((clock == 2) or (clock == 3)) implies (acc.qb == 28), "clkb rise at k=2 sampled a from k=1, not k=2")
+    assert((clock >= 4) implies (acc.qb == 62), "clkb rise at k=4 sampled a from k=3")
+  }
+}

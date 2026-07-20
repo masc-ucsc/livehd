@@ -1096,6 +1096,39 @@ private:
     if (nc == 1) {
       return expr(ts_node_named_child(n, 0));
     }
+    // `a implies b` has no infix C++ spelling, so it cannot ride the
+    // operand/operator loop below — it needs the LHS negated, which means
+    // knowing the operator BEFORE emitting the operands. Rewrite the whole
+    // sequence as `(!(a) || (b))`.
+    //
+    // It used to fall through map_op() unchanged and be emitted VERBATIM into
+    // the driver, so a test block using the implies form (the spelling the
+    // dual sim+BMC fixture convention uses on the formal side) produced
+    // uncompilable C++ and a bare "expected ')'" from the host compiler
+    // (2f-latch M6). The two planes should not need different spellings of the
+    // same property.
+    {
+      std::vector<TSNode> parts;
+      int                 implies_at = -1;
+      for (TSNode c : ts_node_named_children(n)) {
+        auto t = ntype(c);
+        const bool is_op = t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op"
+                           || t == "binary_logical_op" || t == "binary_step_op";
+        if (is_op && text_of(src_, c) == "implies") {
+          implies_at = static_cast<int>(parts.size());
+          continue;
+        }
+        if (is_op) {
+          parts.clear();       // a mixed chain: not a simple `a implies b`
+          implies_at = -1;
+          break;
+        }
+        parts.push_back(c);
+      }
+      if (implies_at == 1 && parts.size() == 2) {
+        return "(!(" + expr(parts[0]) + ") || (" + expr(parts[1]) + "))";
+      }
+    }
     std::string out = "(";
     for (TSNode c : ts_node_named_children(n)) {
       auto t = ntype(c);
