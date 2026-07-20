@@ -348,7 +348,17 @@ void sim_command(Options& opts, Result& res) {
   }
 
   const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
-  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O1 -I{} -I{} -I{}",
+  // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). MEASURED: compile
+  // time is IDENTICAL at -O1/-O2/-O3 (0.85s for a small driver, three runs
+  // each) because it is dominated by parsing the Slop/hlop headers, not by
+  // optimization — so the usual "higher -O costs build time" trade-off simply
+  // does not apply to this generated code, and the level is free to raise.
+  // NOT measured, and deliberately not claimed: a runtime speedup on a
+  // representative design. Every fixture in-tree is a few ticks of tiny logic,
+  // and a synthetic 200k-tick attempt was optimized away by the host compiler
+  // before it could be timed. -O2 is chosen over -O3 because -O3 measured no
+  // better here and inflates code size on generated straight-line arithmetic.
+  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O2 -I{} -I{} -I{}",
                                       shell_quote(cxx),
                                       shell_quote(simdir),
                                       shell_quote(hlop_inc),

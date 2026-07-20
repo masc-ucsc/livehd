@@ -821,6 +821,27 @@
   <code>lhd compile --reader yosys-verilog</code> today. The guards cost nothing
   while unreachable and prevent a silent drop if a script change or a
   pre-synthesized netlist makes them reachable.</p>
+  <p><strong>Efficiency item (b) also landed: the host sim compile is
+  <code>-O2</code>, not <code>-O1</code></strong> (<code>lhd_kernel_sim.cpp</code>).
+  MEASURED: compile time is IDENTICAL at -O1/-O2/-O3 (0.85s for a small driver,
+  three runs each) because it is dominated by parsing the Slop/hlop headers, not
+  by optimization — the usual "higher -O costs build time" trade-off does not
+  apply to this generated code, so the level is free to raise. NOT measured and
+  deliberately NOT claimed: a runtime speedup on a representative design. Every
+  in-tree fixture is a few ticks of tiny logic, and a synthetic 200k-tick
+  attempt was optimized away by the host compiler before it could be timed.
+  -O2 over -O3 because -O3 measured no better and inflates code size on
+  generated straight-line arithmetic.</p>
+  <p><strong>Efficiency item (a) — killing the <code>step()</code>+<code>peek()</code>
+  double <code>cycle()</code> — is NOT the one-liner the ">1.5x, available
+  TODAY" note suggests.</strong> <code>peek()</code> snapshots all state, runs a
+  FULL <code>cycle()</code>, and rolls back, purely because <code>cycle()</code>
+  computes its outputs BEFORE the commit and therefore returns pre-edge values.
+  Making <code>cycle()</code> return post-commit outputs would remove the second
+  call, but that same pre-commit contract is what the VCD dump and the
+  Moore/Mealy sub-instance handling are built on (the deferred-Moore path and
+  the <code>peek()</code> pre-binding both depend on it), so it is a
+  sub-instance-semantics change, not a reordering. Left deliberately.</p>
   <p>Original plan: yosys
   importer: fix the <code>$dlatchsr</code> 7-char <code>strncmp</code> SET/CLR drop
   and dispatch <code>$adlatch</code> (today a SILENT catch-all drop to an Invalid
