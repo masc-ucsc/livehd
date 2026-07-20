@@ -796,14 +796,24 @@
   <code>qb == 28</code> on the coincident tick (the PREVIOUS tick's <code>a</code>),
   not 45; a model committing from post-tick state reads 45 there. The whole
   schedule is validated against an iverilog golden.</p>
-  <p><strong>NOT done, and orthogonal:</strong> the <code>tick</code> grammar's
-  <code>clocks=(...)</code> tuple still accepts one entry, and
-  <code>lhd_sim_clock_reset_test.sh:100</code> still asserts that. That clause
-  configures the VCD WAVEFORM (which signal is drawn as the clock, at what
-  ratio) — it is testbench presentation, not design semantics, and nothing
-  inspects it to decide when state commits. Extending it to N entries would draw
-  a second clock waveform; it would not change a single simulated value. Left
-  for whoever wants multi-clock VCDs.</p>
+  <p><strong>The <code>tick clocks=(...)</code> grammar keeps ONE entry, and
+  that is now the RIGHT answer rather than a limitation.</strong> The clause
+  names the tick LOOP VARIABLE (and sets a VCD ratio), and a tick loop has
+  exactly one counter — so a second entry has no meaning, it is not
+  unimplemented. Multi-clock designs need nothing from this clause: the second
+  clock is driven as an ordinary input and its registers carry
+  <code>clock_pin=ref clkb</code>.
+  <br>What WAS wrong is the diagnostic. It read "only a single clock is
+  supported for now", which after M6 is simply FALSE and would send a user
+  working around a limitation that no longer exists. It now states the real
+  reason (one loop counter), says explicitly that this is NOT a multi-clock
+  limitation, and points at the supported spelling plus
+  <code>multiclock_two_domain.prp</code>.
+  <code>lhd_sim_clock_reset_test.sh</code> asserts both halves of the new
+  message.
+  <br>Still NOT built, and cosmetic: drawing a SECOND clock waveform in the VCD
+  (per-clock <code>__clk_name</code>/<code>__clk_ratio</code> members and the
+  matching dump). It would not change a single simulated value.</p>
   <p>Original plan: Per-(clock, edge) schedules generalize to N clocks. Extend the <code>tick</code>
   grammar — <code>inou/prp/prp_sim.cpp:1444-1471</code>
   (<code>tick_one_entry</code>) hard-rejects &gt;1 entry in the
@@ -813,12 +823,13 @@
   CORRECT, so both rewrite here. Design sketch in
   <code>todo_multiclock.md</code> (split per clock EDGE; a clock used pos+neg
   yields two subgraphs; a new cell for cross-domain communication).
-  <br><em>Gate (2 of 3):</em> a two-independent-clock 2-stage pipeline matches
+  <br><em>Gate (MET):</em> a two-independent-clock 2-stage pipeline matches
   iverilog cycle-for-cycle INCLUDING the coincident-edge tick
-  (<code>multiclock_two_domain.prp</code>, live), and the M0 multi-clock refusal
-  is lifted (<code>latch_fail_closed_test.sh</code> now pins that it stays
-  lifted). The third — <code>lhd_sim_clock_reset_test.sh</code> asserting a new
-  grammar — is NOT met, deliberately: see the VCD note above.
+  (<code>multiclock_two_domain.prp</code>, live); the M0 multi-clock refusal is
+  lifted (<code>latch_fail_closed_test.sh</code> pins that it stays lifted); and
+  <code>lhd_sim_clock_reset_test.sh</code> asserts the corrected
+  <code>clocks=(...)</code> diagnostic. The grammar itself keeps one entry by
+  design — see above.
   <br><strong>Bug found and fixed en route:</strong> <code>implies</code> was
   emitted VERBATIM into the generated sim driver, so a test block using the
   implies form — the spelling the dual sim+BMC fixture convention uses on the

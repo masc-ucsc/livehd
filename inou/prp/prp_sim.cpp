@@ -1491,6 +1491,21 @@ private:
       fail(std::string("tick ") + what + " clause needs a `name=value` entry");
     }
     if (seen > 1) {
+      // The message used to read "only a single clock is supported for now",
+      // which is now MISLEADING: multi-clock designs ARE simulated as of
+      // todo/livehd/2f-latch M6 — a second clock is driven as an ordinary data
+      // input and its state commits on a detected edge of that net (see
+      // tests/sim/multiclock_two_domain.prp). What this clause controls is the
+      // VCD waveform plus the tick LOOP VARIABLE, and a tick loop has exactly
+      // one counter, so a second entry has no meaning here rather than being
+      // unimplemented. Say that, so nobody reads the old text as "LiveHD cannot
+      // do multiple clocks" and works around a limitation that is gone.
+      if (std::string_view(what) == "clock") {
+        fail("a `tick` has ONE loop counter, so `clocks=(...)` takes ONE entry (got " + std::to_string(seen)
+             + "). This is NOT a multi-clock limitation: drive the second clock as an ordinary input "
+               "(`acc.clkb = ...`) and give its registers `clock_pin=ref clkb` — they commit on that net's edges. "
+               "See inou/prp/tests/sim/multiclock_two_domain.prp");
+      }
       fail(std::string("only a single ") + what + " is supported for now (got " + std::to_string(seen) + ")");
     }
     TSNode an = field(entry, "lvalue");

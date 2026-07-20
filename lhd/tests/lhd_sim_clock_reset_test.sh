@@ -97,7 +97,13 @@ EOF
   echo "$out" | grep -q "$2" || fail "$3 lacked '$2': $out"
 }
 expect_err '  tick 4 { acc.enable = true; v = acc.value }'           'must advance the clock with' 'tick body with no step'
-expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'only a single clock'         'two clocks'
+# A second `clocks=` entry is rejected because a tick has ONE loop counter --
+# NOT because LiveHD is single-clock. Multi-clock designs simulate as of
+# 2f-latch M6 (drive the second clock as an input; see
+# inou/prp/tests/sim/multiclock_two_domain.prp). The message must say so, or a
+# user works around a limitation that no longer exists.
+expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'ONE loop counter'            'two clocks'
+expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'NOT a multi-clock limitation' 'two clocks (points at the supported form)'
 expect_err '  tick 4 { acc.value = 1; step }'                        'cannot poke output'          'poke an output'
 expect_err '  tick 4 { acc.nope = 1; step }'                         'unknown field'               'poke an unknown field'
 
