@@ -210,25 +210,6 @@ cc_test(
         # tolg errors "wire 'io.a' is never driven" on valid code. See the
         # fixture header for the root-cause chain and fix direction.
         "wire_field_const_store",
-        # todo/livehd/2f-latch sim tracker (:type: simulation). Every assert
-        # schedule is validated against iverilog on the matching golden.
-        # PROMOTED to tests/sim/ at M5: latch_sim_hold, latch_sim_low,
-        # latch_sim_master_slave (latches ride the flop commit path — tolg's
-        # `din = en ? d : q` IS end-of-tick transparency) and
-        # flop_sim_gated_clock (the ICG shape `<clock> & <enable>` folds into a
-        # commit guard).
-        #
-        # STILL RED — needs the two-phase tick M5 did not land:
-        #   flop_sim_posneg -> a posedge stage feeding a NEGEDGE stage on the
-        #     same clock transfers in HALF a period, so the negedge stage must
-        #     see the post-rise value of the posedge stage within one tick. That
-        #     requires evaluating the combinational region TWICE per tick (rise,
-        #     then fall), which the single-pass emitter cannot express: the comb
-        #     section also drives outputs and advances sub-instances, so it
-        #     cannot simply be emitted twice.
-        # The AGREEING mixed-edge direction (neg->pos) runs LIVE as
-        # tests/sim/edge_negpos.prp so any future rework cannot regress it.
-        "flop_sim_posneg",
         # todo/livehd/2f-latch BMC twins (:type: verify) of the sim trackers
         # above — the SAME self-checking properties as design-body asserts for
         # `lhd formal verify` (stated twice because test-block asserts are

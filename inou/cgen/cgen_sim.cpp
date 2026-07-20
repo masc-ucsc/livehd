@@ -2386,10 +2386,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     cycle_reported_ = true;
   }
 
-  // flop next-state (all computed from current state before any commit). Each
-  // stage/q: reset ? rstval : (enable ? value_in : hold), mirroring cgen's
-  // always block. value_in = din for stage0, the previous stage otherwise.
-  for (const auto& f : flops) {
+  // flop next-state. Each stage/q: reset ? rstval : (enable ? value_in : hold),
+  // mirroring cgen's always block. value_in = din for stage0, the previous
+  // stage otherwise.
+  //
+  // TWO-PHASE TICK (todo/livehd/2f-latch M5). One tick is one clock PERIOD, and
+  // a period contains a RISE then a FALL. Posedge state is evaluated here (from
+  // pre-tick state) and committed below; NEGEDGE state is evaluated afterwards,
+  // in the second phase, so it observes the POST-RISE value of anything the
+  // posedge half just committed. That is the half-cycle transfer: a posedge
+  // stage feeding a negedge stage on the same clock hands over WITHIN one
+  // period, which the old single-phase commit turned into a full-cycle lag.
+  //
+  // A design with no negedge flop emits byte-for-byte what it did before: the
+  // partition below is the whole difference, and the second phase is skipped.
+  auto emit_flop_next = [&](const Flop& f) {
     auto din  = get_driver(find_sink_pin(f.node, "din"));
     auto rstp = get_driver(find_sink_pin(f.node, "reset_pin"));
     auto initp = get_driver(find_sink_pin(f.node, "initial"));
@@ -2428,6 +2439,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("    auto ", f.stages[i], "_next = ", next_of(f.stages[i - 1], f.stages[i]), ";\n");
       }
       fout->append("    auto ", f.member, "_next = ", next_of(f.stages.back(), f.member), ";\n");
+    }
+  };
+
+  // PHASE 1 (the rise): posedge state only.
+  bool any_negedge = false;
+  for (const auto& f : flops) {
+    if (f.posedge) {
+      emit_flop_next(f);
+    } else {
+      any_negedge = true;
     }
   }
 
@@ -2505,8 +2526,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // or not a trace is dumped. The member exists on every module.
   fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
 
-  // commit flops (+ pipe stages) at the clock edge
+  // commit flops (+ pipe stages) at the clock edge (PHASE 1: the rise)
   for (const auto& f : flops) {
+    if (!f.posedge) {
+      continue;  // negedge state commits in phase 2, below
+    }
     // ICG fold: a gated flop commits only in ticks where its gate's enable
     // terms are true. Without this the gate is DEAD CODE and the flop loads
     // every tick regardless — a silently wrong waveform (2f-latch M5).
@@ -2524,6 +2548,90 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(ind, f.member, " = ", f.member, "_next;\n");
     if (!guard.empty()) {
       fout->append("    }\n");
+    }
+  }
+
+  // PHASE 2 (the fall): negedge state, evaluated AFTER the rise committed.
+  //
+  // Anything reachable from a posedge flop's Q has a stale binding now — its
+  // pin2var entry names a temporary computed from the PRE-rise members. Drop
+  // those bindings so ensure_ready() re-emits the cone into fresh temporaries;
+  // a flop's Q is bound directly to its C++ member, so the re-emitted
+  // expressions read the just-committed values with no extra plumbing.
+  //
+  // A Sub instance in that cone is REFUSED rather than re-emitted: emit_sub_call
+  // advances the child's state, so re-running it inside one tick would
+  // double-advance it. That is a silent wrong answer, so it fails closed.
+  if (any_negedge) {
+    absl::flat_hash_set<hhds::Class_index> stale;
+    {
+      std::vector<hhds::Pin_class> work;
+      for (const auto& f : flops) {
+        if (f.posedge) {
+          work.push_back(f.node.get_driver_pin(0));
+        }
+      }
+      absl::flat_hash_set<hhds::Class_index> seen;
+      bool                                   hit_sub = false;
+      while (!work.empty()) {
+        auto p = work.back();
+        work.pop_back();
+        if (p.is_invalid() || !seen.insert(p.get_class_index()).second) {
+          continue;
+        }
+        for (const auto& e : p.out_edges()) {
+          auto sn = e.sink.get_master_node();
+          if (type_op_of(sn) == Ntype_op::Sub) {
+            hit_sub = true;
+            continue;
+          }
+          if (is_type_register(sn) || Ntype::has_multiple_driver_pins(type_op_of(sn))) {
+            continue;  // stop at state / multi-driver cells
+          }
+          auto dp = sn.get_driver_pin(0);
+          if (dp.is_invalid()) {
+            continue;
+          }
+          stale.insert(dp.get_class_index());
+          work.push_back(dp);
+        }
+      }
+      if (hit_sub) {
+        livehd::diag::err("inou.cgen.sim", "negedge-through-instance", "unsupported")
+            .msg("module `{}` has a NEGEDGE state element whose data crosses a sub-instance in the same tick", gname)
+            .hint(
+                "the half-cycle (rise-then-fall) transfer re-evaluates the combinational region after the rise, but a "
+                "sub-instance call also ADVANCES the child's state — re-running it inside one tick would advance it "
+                "twice. Flatten the instance for sim, or move the negedge element out of its fanout; tracked as "
+                "todo/livehd/2f-latch M5")
+            .emit();
+        return;
+      }
+    }
+    for (auto ci : stale) {
+      pin2var.erase(ci);
+      prefetch_seen.erase(ci);
+    }
+    for (const auto& f : flops) {
+      if (f.posedge) {
+        continue;
+      }
+      ensure_ready(get_driver(find_sink_pin(f.node, "din")));
+    }
+    for (const auto& f : flops) {
+      if (f.posedge) {
+        continue;
+      }
+      emit_flop_next(f);
+    }
+    for (const auto& f : flops) {
+      if (f.posedge) {
+        continue;
+      }
+      for (const auto& st : f.stages) {
+        fout->append("    ", st, " = ", st, "_next;\n");
+      }
+      fout->append("    ", f.member, " = ", f.member, "_next;  // negedge: commits at the FALL\n");
     }
   }
 

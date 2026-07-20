@@ -3,14 +3,26 @@
 :type: simulation
 */
 
-// todo/livehd/2f-latch tracker (fixme) — MIXED-EDGE FLOPS, the half-cycle
+// todo/livehd/2f-latch — LIVE (promoted at M5). MIXED-EDGE FLOPS, the half-cycle
 // transfer. A posedge flop feeds a negedge flop on the SAME clock: the second
 // stage samples at the falling edge, half a cycle after the first stage loaded,
 // so at every end-of-period observation qb == qa (Icarus, settled sampling
 // after both edges — verified). `lhd sim` today commits ALL flops in ONE
 // unified loop (cgen_sim.cpp:2322; posclk only picks a VCD slot), so the chain
-// behaves as two posedge stages and qb lags qa by a full cycle: the assert
-// FAILS. Flips green at M5 (per-(clock,edge) commit regions).
+// behaved as two posedge stages and qb lagged qa by a full cycle.
+//
+// FIXED by the TWO-PHASE TICK: one tick is one clock PERIOD containing a RISE
+// then a FALL. Posedge state is evaluated from pre-tick state and committed;
+// then anything reachable from a posedge Q has its cached binding DROPPED and
+// the cone is re-emitted, so negedge state observes the post-rise values. A
+// flop's Q is bound directly to its C++ member, so the re-emitted expressions
+// read the just-committed values with no extra plumbing. A design with no
+// negedge flop emits byte-for-byte what it did before.
+//
+// The mirror direction (neg->pos, tests/sim/edge_negpos.prp) must stay a FULL
+// cycle: the rise happens before the fall in the same period, so a posedge
+// stage reads the negedge stage's PREVIOUS-period value. Both directions are
+// live, which is what keeps this from being fixed in one direction only.
 //
 // NOTE: no in-repo FORMAL oracle can see this bug either — lgcheck/lgyosys is
 // edge-blind for flops (falsely proves negedge==posedge), and the native cvc5

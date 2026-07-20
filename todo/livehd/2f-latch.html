@@ -661,8 +661,7 @@
   full-design LEC re-baselined.</li>
 
 <li><strong>M5 — simulation</strong> [deps M3, parallel with M4] —
-  <strong>PARTIALLY LANDED 2026-07-20: 4 of the 5 red trackers are green and
-  PROMOTED, WITHOUT the three-region restructure.</strong>
+  <strong>LANDED 2026-07-20: all 5 red trackers are green and PROMOTED.</strong>
   <p><strong>Latches needed no scheduler machinery at all.</strong> tolg has
   already baked the hold mux into din (<code>din = en ? d : q</code>) and wired
   <code>enable = en</code>, so the ordinary flop update
@@ -738,15 +737,15 @@
   negedge fix in the SAME commit (<code>_SIMEQ_FIXME = []</code> is the
   100%-green baseline to preserve). Do not add pos&rarr;neg cascades to _SIMEQ
   before this lands.
-  <br><em>Gate (4 of 5):</em> <code>latch_sim_hold</code>,
-  <code>latch_sim_low</code>, <code>latch_sim_master_slave</code> and
-  <code>flop_sim_gated_clock</code> are green and PROMOTED to
-  <code>inou/prp/tests/sim/</code>; <code>edge_negpos</code> stays green;
-  <code>flop_sim_posneg</code> stays a fixme tracker with the reason above.
-  <code>latch_fail_closed_test.sh</code> was updated in the same commit: two of
-  its M0 refusals are now real support, so asserting them would be asserting a
-  bug — it now pins that the misleading pre-M0 diagnostics never return, and
-  that a NON-ICG derived clock still fails closed. Full suite 1417 pass.
+  <br><em>Gate (MET, 5 of 5):</em> <code>flop_sim_posneg</code>,
+  <code>latch_sim_hold</code>, <code>latch_sim_low</code>,
+  <code>latch_sim_master_slave</code> and <code>flop_sim_gated_clock</code> are
+  all green and PROMOTED to <code>inou/prp/tests/sim/</code>, and
+  <code>edge_negpos</code> stays green.
+  <code>latch_fail_closed_test.sh</code> was updated alongside: two of its M0
+  refusals are now real support, so asserting them would be asserting a bug — it
+  now pins that the misleading pre-M0 diagnostics never return, and that a
+  NON-ICG derived clock still fails closed. Full suite 1418 pass.
   <br>The simeq / <code>_SIMEQ_FIXME</code> re-bake and the hierarchical
   per-edge advance listed under OPEN below were NOT needed for this half; they
   belong with the two-phase tick.</li>
