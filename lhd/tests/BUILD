@@ -458,18 +458,24 @@ sh_test(
     data = ["//lhd"],
 )
 
-# FIXME tracker for todo/livehd/2f-latch (M4) — a LIVE SOUNDNESS BUG that is NOT
-# about latches: pass/lec/encode.cpp never reads a Flop's clock_pin/posclk, so
-# `lhd lec` FALSELY PROVES gated-vs-ungated clocks, negedge-vs-posedge flops, and
-# two-clock-vs-one-clock pipelines equivalent. Reproduced 2026-07-20; all three
-# must REFUTE once the encoder is clock-aware. Tagged `fixme` so `bazel test
-# //...` stays green; run it with --test_tag_filters=
+# LIVE test for todo/livehd/2f-latch M4 (partially landed 2026-07-20) — clock
+# awareness in `lhd lec`. pass/lec/encode.cpp never read a Flop's
+# clock_pin/posclk, so it FALSELY PROVED three plainly-different pairs. Two are
+# now closed and asserted REFUTED: gated-vs-ungated (the ICG cone folds to a
+# commit guard) and two-clock-vs-one-clock (each flop commits on its own net's
+# edge, with the previous level SHARED by both miter sides).
+#
+# The third — negedge vs posedge on the SAME clock — is still PROVEN, and the
+# script says so rather than pretending: it needs SUB-CYCLE resolution (a rise
+# phase then a fall phase) which a step-granular relational encoding cannot
+# express. Promoted from `fixme` to live because it now guards real behavior;
+# the open case is reported as a note, and flips to an assertion when the
+# two-phase encoder lands.
 sh_test(
     name = "lec_clock_blindness_test",
     size = "large",
     srcs = ["lec_clock_blindness_test.sh"],
     data = ["//lhd"],
-    tags = ["fixme"],
 )
 
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys

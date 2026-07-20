@@ -602,9 +602,51 @@
   what M4/M5 believe. Full suite 1413 pass.</li>
 
 <li><strong>M4 — LEC: clock awareness + latch encoding</strong> [deps M3, parallel
-  with M5] — <strong>NOT LANDED. Two approaches were built and MEASURED
-  2026-07-20; both are recorded here so the next attempt starts from the
-  evidence instead of re-deriving it.</strong>
+  with M5] — <strong>TWO of the three clock-blindness holes CLOSED 2026-07-20;
+  the third and the latch encoding remain, with the reasons measured rather than
+  guessed.</strong>
+  <p><strong>WHAT LANDED, and why it is exactly this narrow.</strong> The BMC's
+  reset prologue assumes ONE STEP = ONE COMMIT. Gate a commit on a real clock
+  edge and a prologue step where the clock does not toggle commits NOTHING, so a
+  SYNC reset never lands — that is what produced ~40 false REFUTEDs on the
+  earlier attempts. So gating is applied ONLY where that assumption is ALREADY
+  false, never to a plain flop on a design's single clock:</p>
+  <ul class="subtasks">
+  <li><strong>ICG cone</strong> <code>&lt;clock-input&gt; &amp; &lt;enables&gt;</code>
+    &rarr; folds to "commit iff the enables are true". It rises exactly on the
+    reference rises where the enables are high, and one step IS one reference
+    period, so no edge detection and no prologue interaction. <em>gated vs
+    ungated now REFUTES.</em> <strong>TRAP:</strong> both operands of
+    <code>clk &amp; en</code> are graph inputs, so "is it an input?" cannot tell
+    the clock from the enable — classifying <code>en</code> as a clock too left
+    no guards and silently produced no gating at all. Match by NAME against the
+    nets the design already uses as clocks, falling back to the conventional
+    spellings.</li>
+  <li><strong>Two or more clock INPUT nets</strong> &rarr; "the one clock" does
+    not exist, so each flop commits on a detected edge of its own net.
+    <em>two-clock vs one-clock now REFUTES.</em> The previous level must be
+    SHARED by both sides of the miter (keyed by FRAME — drop a leading
+    'r'/'i' from the caller's prefix); seeded per side, the solver picks
+    opposite initial levels and refutes equivalent designs.</li>
+  </ul>
+  <p>A single-clock design gets NO gating term and encodes byte-for-byte as
+  before, which is what bounds the blast radius: <strong>full suite 1427 pass,
+  ZERO regressions.</strong> <code>lec_clock_blindness_test.sh</code> is
+  PROMOTED out of fixme and live.</p>
+  <p><strong>STILL BLIND: negedge vs posedge on the SAME clock</strong>, and it
+  cannot be fixed by this mechanism. Gating needs a condition that DIFFERS
+  between the two designs, and with one shared clock a posedge and a negedge
+  flop each commit exactly once per step — they differ only in WHERE in the
+  step, which a step-granular relational encoding cannot express. It needs
+  SUB-CYCLE resolution: a rise phase then a fall phase with the negedge side
+  reading POST-RISE values — the two-phase tick <code>lhd sim</code> got in M5.
+  In this encoder that means encoding each step TWICE, with the posedge Qs
+  re-seeded to their next-state before the second pass. The live test reports it
+  as a note and flips to an assertion when that lands.</p>
+  <p><strong>The LATCH encoding is also still open</strong> (the encoder refuses
+  the Latch cell, which is why M2's post-abc LEC gate is unmet and the two BMC
+  twins stay fixme). Everything below is the earlier record, kept because it
+  rules out approaches:</p>
   <p><strong>(1) Folding the commit class into the state key is PROVABLY
   INSUFFICIENT — do not spend time on it.</strong> The task text below suggests
   "fold the commit class into the <code>canon_flop_name</code> keying". That was

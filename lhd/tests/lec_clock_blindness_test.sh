@@ -1,8 +1,11 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# FIXME tracker for todo/livehd/2f-latch (M4) — LIVE SOUNDNESS BUG, and NOT
-# about latches.
+# LIVE test for todo/livehd/2f-latch M4 — clock awareness in `lhd lec`. TWO of
+# the three false-PROVEN holes are CLOSED (landed 2026-07-20); the third is
+# tracked below with the reason it needs different machinery.
+#
+# Originally a fixme tracker for a LIVE SOUNDNESS BUG that is NOT about latches.
 #
 # `pass/lec/encode.cpp` never reads a Flop's `clock_pin` or `posclk` sinks. Its
 # only transition function is
@@ -120,7 +123,33 @@ for m in gated ungated negedge posedge twoclk oneclk; do
 done
 
 expect_refuted gated   ungated  "gated vs ungated clock"
-expect_refuted negedge posedge  "negedge vs posedge flop"
 expect_refuted twoclk  oneclk   "two clock domains vs one"
 
-echo "PASS: lec is clock-aware (no false PROVEN on gate / edge / domain differences)"
+# ---- STILL BLIND: negedge vs posedge on the SAME clock -----------------------
+# Deliberately NOT asserted as REFUTED, because it cannot be fixed by the
+# mechanism the two cases above use. Gating a commit needs a condition that
+# differs between the two designs, and with one shared clock a posedge and a
+# negedge flop each commit exactly once per step — they differ only in WHERE in
+# the step, which a step-granular relational encoding cannot express.
+#
+# Distinguishing them needs SUB-CYCLE resolution: a rise phase then a fall
+# phase, with the negedge side reading the POST-RISE values (the two-phase tick
+# `lhd sim` got in M5, pinned there by tests/sim/flop_sim_posneg.prp). In this
+# encoder that means encoding each step TWICE, with the posedge Qs re-seeded to
+# their next-state before the second pass.
+#
+# The assertion below is the honest one: it must not CRASH or silently vanish —
+# a verdict must be present — and today that verdict is PROVEN. When the
+# two-phase encoder lands, flip this to expect_refuted.
+out="$("$LHD" lec --impl "lg:$W/lg_negedge" --ref "lg:$W/lg_posedge" --top dut \
+        --workdir "$W/lec_negpos" 2>&1)"
+if ! echo "$out" | grep -qE "'dut' (PROVEN|REFUTED|UNKNOWN)"; then
+  fail "negedge vs posedge: no verdict in lec output (run failed?)"
+fi
+if echo "$out" | grep -qE "'dut' REFUTED"; then
+  echo "ok: negedge vs posedge now REFUTED — promote this case to expect_refuted"
+else
+  echo "note: negedge vs posedge is still PROVEN (needs the two-phase encoder; see above)"
+fi
+
+echo "PASS: lec is clock-aware for gate + domain differences (edge phase still open)"

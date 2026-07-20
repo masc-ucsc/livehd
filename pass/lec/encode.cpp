@@ -170,6 +170,14 @@ Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
   return tm.mkTerm(op, {v.x_mask});
 }
 
+std::string Encoder::frame_tag(std::string_view prefix) {
+  // "r3_" / "i3_" -> "3_" (same frame, opposite sides); "" -> "" (inductive).
+  if (!prefix.empty() && (prefix.front() == 'r' || prefix.front() == 'i')) {
+    prefix.remove_prefix(1);
+  }
+  return std::string(prefix);
+}
+
 std::string Encoder::flop_key(std::string_view hier) const {
   std::string c = canon_flop_name(hier);
   if (name_alias_ != nullptr) {
@@ -2004,6 +2012,72 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return {};
   };
+  // ---- CLOCK AWARENESS (todo/livehd/2f-latch M4) ----------------------------
+  // This encoder never read `clock_pin` or `posclk`: the sink classifier
+  // DISCARDED them, so the transition function was
+  //     N = ITE(reset, initial, ITE(enable, din, Q))
+  // and `lhd lec` FALSELY PROVED gated == ungated and two-clock == one-clock.
+  //
+  // SCOPE, and why it is this narrow. The BMC's reset prologue assumes ONE STEP
+  // = ONE COMMIT; gate a commit on a real edge and a prologue step where the
+  // clock does not toggle commits NOTHING, so a SYNC reset never lands. (Root
+  // cause of ~40 false REFUTEDs on an earlier attempt: a one-flop design vs its
+  // own round-trip, where the Pyrope side carries a reset_pin and the
+  // round-tripped Verilog spells the same reset as `always @(posedge clock) if
+  // (reset)`.) So gating is applied ONLY where that assumption is ALREADY
+  // false — never to a plain flop on the design's single clock:
+  //
+  //   * an ICG clock cone `<clock-input> & <enables>`: it rises exactly on the
+  //     reference rises where the enables are high, and one step IS one
+  //     reference period, so it folds to "commit iff the enables are true". No
+  //     edge detection, no prologue interaction. (Same fold sim uses.)
+  //   * a design with TWO OR MORE distinct clock INPUT nets: "the one clock"
+  //     does not exist, so each flop commits on a detected edge of its own net.
+  //
+  // A single-clock design gets NO gating term at all and encodes byte-for-byte
+  // as before — which is what bounds the blast radius to the designs this is
+  // meant to change.
+  //
+  // NOT closed by this: negedge-vs-posedge on the SAME clock. Distinguishing
+  // those needs sub-cycle resolution (a rise phase then a fall phase, with the
+  // negedge side reading post-rise values), i.e. the two-phase tick sim got in
+  // M5. In a relational encoding that means encoding each step TWICE with the
+  // posedge Qs re-seeded to their next-state — real work, and deliberately not
+  // attempted here.
+  auto resolve_clk_input = [](hhds::Pin_class p) -> hhds::Pin_class {
+    for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+      if (gu::is_graph_input_pin(p)) {
+        return p;
+      }
+      auto n = p.get_master_node();
+      if (gu::type_op_of(n) != Ntype_op::Get_mask) {
+        return {};
+      }
+      hhds::Pin_class a;
+      for (const auto& e : n.inp_edges()) {
+        if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
+          a = e.driver;
+        }
+      }
+      p = a;
+    }
+    return {};
+  };
+  // Distinct clock INPUT nets across this design's flops.
+  absl::flat_hash_set<std::string> clk_inputs;
+  for (const auto& fn : flops) {
+    for (const auto& e : fn.inp_edges()) {
+      if (e.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
+        continue;
+      }
+      if (auto ci = resolve_clk_input(e.driver); !ci.is_invalid()) {
+        clk_inputs.insert(std::string(gu::pin_name_of(ci)));
+      }
+      break;
+    }
+  }
+  const bool multi_clock = clk_inputs.size() >= 2;
+
   for (size_t fi = 0; fi < flops.size(); ++fi) {
     const auto& node  = flops[fi];
     const int   depth = flop_depths[fi];
@@ -2095,6 +2169,81 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
     }
+    // Commit condition for the two shapes where "one step = one commit" is
+    // already false (see the SCOPE note above). Null => commit every step, i.e.
+    // exactly the previous behavior.
+    Term commits;
+    if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
+      auto        cn      = clk_d.get_master_node();
+      const auto  cop     = gu::type_op_of(cn);
+      const auto  clk_in  = resolve_clk_input(clk_d);
+      if (cop == Ntype_op::And && clk_in.is_invalid()) {
+        // ICG: `<clock-input> & <enables>` -> commit iff every non-clock
+        // operand is true. Requires one operand to BE a clock input, or this is
+        // some other derived clock and is left ungated (sound: unchanged).
+        // EXACTLY ONE operand is the clock; the rest are enables. Both are
+        // graph inputs in the canonical `clk & en`, so "is it an input?" cannot
+        // tell them apart — that mistake classified `en` as a clock too, left
+        // no guards, and silently produced no gating at all. Match by NAME
+        // against the nets this design already uses as clocks, falling back to
+        // the conventional spellings when (as in a pure-ICG design) no flop is
+        // wired straight to a clock input. A miss just leaves the flop ungated,
+        // i.e. the previous behavior — never a wrong verdict.
+        auto is_clock_operand = [&](const hhds::Pin_class& d) {
+          auto ci = resolve_clk_input(d);
+          if (ci.is_invalid()) {
+            return false;
+          }
+          const std::string nm{gu::pin_name_of(ci)};
+          return clk_inputs.empty() ? (nm == "clk" || nm == "clock") : clk_inputs.count(nm) > 0;
+        };
+        bool              saw_clock = false;
+        std::vector<Term> guards;
+        bool              gok = true;
+        for (const auto& e : cn.inp_edges()) {
+          if (!saw_clock && is_clock_operand(e.driver)) {
+            saw_clock = true;
+            continue;
+          }
+          bool ok2 = true;
+          Val  gv  = driver_val(e.driver, ok2);
+          if (!ok2 || gv.term.isNull()) {
+            gok = false;
+            break;
+          }
+          guards.push_back(tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)}));
+        }
+        if (gok && saw_clock && !guards.empty()) {
+          commits = guards.size() == 1 ? guards[0] : tm_.mkTerm(Kind::AND, guards);
+        }
+      } else if (multi_clock && !clk_in.is_invalid()) {
+        // Two or more clock inputs: no net is "the" clock, soeach flop commits on
+        // a detected edge of its own. The previous level is SHARED by both
+        // sides of the miter (clk_prev_) — without that the solver simply picks
+        // opposite initial levels and refutes equivalent designs.
+        bool cok = true;
+        Val  cv  = driver_val(clk_d, cok);
+        if (cok && !cv.term.isNull()) {
+          const Term        cur_hot = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
+          const std::string pkey    = std::string("\x01clkprev:") + std::string(gu::pin_name_of(clk_in));
+          const std::string ckey    = frame_tag(prefix) + pkey;
+          auto              pit     = clk_prev_.find(ckey);
+          if (pit == clk_prev_.end()) {
+            pit = clk_prev_.emplace(ckey, seed_state(pkey, 1, false)).first;
+          }
+          const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
+          bool       posedge  = true;
+          if (auto pc = hier_sink_driver(node, "posclk"); !pc.is_invalid() && gu::is_const_pin(pc)) {
+            posedge = !gu::hydrate_const(pc).is_known_false();
+          }
+          commits = posedge ? tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot})
+                            : tm_.mkTerm(Kind::AND, {prev_hot, tm_.mkTerm(Kind::NOT, {cur_hot})});
+          out.outputs[std::string("\x01nxt:") + pkey]
+              = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+        }
+      }
+    }
+
     for (int k = 0; k < depth; ++k) {
       const Term& self   = stage_cur(k);
       Term        source = (k == 0) ? (has_din ? din : self) : stage_cur(k - 1);
@@ -2103,6 +2252,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         nval = self;  // never writes -> hold
       } else if (has_enable) {
         nval = tm_.mkTerm(Kind::ITE, {en_hot, source, self});
+      }
+      // No commit this step => HOLD. Placed INSIDE the reset ITE below so a
+      // reset still overrides, matching the shape this encoder already had.
+      if (!commits.isNull()) {
+        nval = tm_.mkTerm(Kind::ITE, {commits, nval, self});
       }
       if (has_reset) {
         nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});

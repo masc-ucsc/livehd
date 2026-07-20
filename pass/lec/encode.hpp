@@ -393,6 +393,20 @@ private:
   // for a flop. Used for both its current-state lookup and its next-state output.
   std::string flop_key(std::string_view hier) const;
 
+  // Clock-edge state (2f-latch M4). A commit CLASS that is NOT "the one clock,
+  // every step" carries a 1-bit previous-level element so its commit can be a
+  // real EDGE. It is an artifact of the ENCODING, not a design register, so it
+  // must be IDENTICAL on both sides of the miter: seeded per side, the solver
+  // starts ref at 1 and impl at 0, sees a rise on one side only, and REFUTES
+  // two equivalent designs (measured — that was the first of three root causes).
+  //
+  // Keyed by FRAME + class: the caller's prefix is "r<cyc>_" / "i<cyc>_" for the
+  // two sides of a per-cycle miter and "" for the single-shot inductive one, so
+  // dropping a leading 'r'/'i' yields a tag shared between SIDES but distinct
+  // across CYCLES — exactly the sharing this needs.
+  mutable absl::flat_hash_map<std::string, Val> clk_prev_;
+  [[nodiscard]] static std::string frame_tag(std::string_view prefix);
+
   cvc5::TermManager&                                  tm_;
   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_       = nullptr;
   const Io_name_map<Val>*                             shared_bbox_   = nullptr;
