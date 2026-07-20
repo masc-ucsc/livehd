@@ -848,16 +848,23 @@
   catch-all <code>log()</code>, leaving an untyped <code>Ntype_op::Invalid</code>
   node at exit 0 — now errors too. A silent drop is strictly worse than an abort:
   everything downstream reasons about a design missing a register.</p>
-  <p><strong>Stated so nobody trusts a test that does not exist: these guards are
-  DEFENSIVE and were NOT reproduced end-to-end.</strong> This reader's yosys
-  script runs <code>proc -ifx</code> plus the opt passes, which LOWER a
-  behavioural set/reset latch into a plain <code>$dlatch</code> with set/clear
-  folded into D and EN — verified, and that lowering round-trips LEC-PROVEN. No
-  source was found that delivers a literal <code>$dlatchsr</code>/<code>$adlatch</code>
-  to the importer, so the branches appear unreachable through
-  <code>lhd compile --reader yosys-verilog</code> today. The guards cost nothing
-  while unreachable and prevent a silent drop if a script change or a
-  pre-synthesized netlist makes them reachable.</p>
+  <p><strong>Those guards are UNREACHABLE today, and that is now PINNED rather
+  than merely asserted.</strong> This reader's yosys script runs
+  <code>proc -ifx</code> plus the opt passes, which LOWER a behavioural
+  async-reset or set/reset latch into a plain <code>$dlatch</code> with the
+  reset/set/clear folded into D and EN, before the importer ever sees a cell.
+  Supporting <code>$adlatch</code>/<code>$dlatchsr</code> would therefore be
+  DEAD, UNTESTABLE code — so the hard errors are the correct landing state, and
+  the real question ("is anything lost?") is answered by test instead of by
+  argument.</p>
+  <p><code>inou/yosys/tests/latch_async.v</code> and <code>latch_sr.v</code> are
+  live <code>yosys_compile-*</code> targets (and slang ladder tier
+  <code>lec</code>) that assert BOTH halves: the fold is <strong>LOSSLESS</strong>
+  — each round-trip LEC-PROVES against its own source — and the situation has
+  not CHANGED. If a future yosys script or version starts delivering a real
+  <code>$adlatch</code>/<code>$dlatchsr</code>, the importer's guard fires and
+  these go red, so whoever changed it learns that latch set/reset support now
+  needs writing, instead of discovering a silently dropped register later.</p>
   <p><strong>LATCH RESET SEMANTICS LANDED.</strong> A latch's reset is
   inherently ASYNCHRONOUS — there is no clock edge to synchronize to — so it is
   emitted as the FIRST branch, ahead of the transparency test (the

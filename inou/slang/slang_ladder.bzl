@@ -37,6 +37,12 @@ SLANG_LADDER = {
     "fixme_multiport": "lec",
     "nlatch": "lec",  # PROMOTED with latch above (transparent-LOW twin) — the polarity the lgyosys
                       # bounded miter actually discriminates, so its round-trip LEC is not vacuous.
+    # 2f-latch M7: async-reset and set/reset latches. yosys folds both into a
+    # plain $dlatch before the importer sees a cell (verified LOSSLESS), so these
+    # pin that the fold stays lossless AND that the importer's $adlatch /
+    # $dlatchsr hard-error guards stay unreachable.
+    "latch_async": "lec",
+    "latch_sr": "lec",
     "fixme_nocheck_implicit_en": "lnast",  # byte-enable mem write (mem[a][chunk]<=…) now lowers (wensize); tolg comb-loops on the en?d:self self-read idiom
     "fixme_noloop": "lec",
     "fixme_paramods": "error",  # instance arrays / paramod shapes not lowered yet
