@@ -766,7 +766,27 @@
   tick must sample pre-edge values); the M0 multi-clock refusal is lifted;
   <code>lhd_sim_clock_reset_test.sh</code> asserts the new grammar.</li>
 
-<li><strong>M7 — async/SR latches + efficiency</strong> [deps M4, M5]. yosys
+<li><strong>M7 — async/SR latches + efficiency</strong> [deps M4, M5] —
+  <strong>importer half LANDED 2026-07-20 as fail-closed guards; the rest
+  open.</strong>
+  <p>Both silent drops are now hard errors. <code>$dlatchsr</code> gets its own
+  branch BEFORE the <code>$dlatch</code> test (the 7-char <code>strncmp</code> is
+  a PREFIX match, which is exactly how it used to fall through and lose SET/CLR),
+  and <code>$adlatch</code> — which matched no branch at all and reached the
+  catch-all <code>log()</code>, leaving an untyped <code>Ntype_op::Invalid</code>
+  node at exit 0 — now errors too. A silent drop is strictly worse than an abort:
+  everything downstream reasons about a design missing a register.</p>
+  <p><strong>Stated so nobody trusts a test that does not exist: these guards are
+  DEFENSIVE and were NOT reproduced end-to-end.</strong> This reader's yosys
+  script runs <code>proc -ifx</code> plus the opt passes, which LOWER a
+  behavioural set/reset latch into a plain <code>$dlatch</code> with set/clear
+  folded into D and EN — verified, and that lowering round-trips LEC-PROVEN. No
+  source was found that delivers a literal <code>$dlatchsr</code>/<code>$adlatch</code>
+  to the importer, so the branches appear unreachable through
+  <code>lhd compile --reader yosys-verilog</code> today. The guards cost nothing
+  while unreachable and prevent a silent drop if a script change or a
+  pre-synthesized netlist makes them reachable.</p>
+  <p>Original plan: yosys
   importer: fix the <code>$dlatchsr</code> 7-char <code>strncmp</code> SET/CLR drop
   and dispatch <code>$adlatch</code> (today a SILENT catch-all drop to an Invalid
   node — see State of play; make it at least a hard error first, then support

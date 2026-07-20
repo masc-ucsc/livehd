@@ -2156,6 +2156,36 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
       auto flop_dpin = get_dpin(g, cell, ID::D);
       setup_sink_by_name(exit_node, "din").connect_driver(flop_dpin);
+    } else if (std::strncmp(cell->type.c_str(), "$dlatchsr", 9) == 0) {
+      // MUST precede the "$dlatch" test below: strncmp(..., 7) is a PREFIX
+      // match, so $dlatchsr used to fall into the plain-$dlatch branch, which
+      // wires only D and EN — silently DROPPING the SET and CLR ports. The
+      // resulting latch looks fine and ignores its set/clear entirely. Fail
+      // closed until the Latch cell carries set/clear (todo/livehd/2f-latch M7;
+      // the reset-family pins are reserved on the cell as of M2).
+      //
+      // DEFENSIVE, AND NOT REPRODUCED END-TO-END (stated so nobody trusts a
+      // test that does not exist): this reader's yosys script runs `proc -ifx`
+      // plus the opt passes, which LOWER a behavioural set/reset latch into a
+      // plain $dlatch with the set/clear folded into D and EN — verified, and
+      // that lowering round-trips LEC-PROVEN. So no source was found that
+      // delivers a literal $dlatchsr here. The guard costs nothing while the
+      // branch is unreachable and prevents a silent drop if a future script
+      // change (or a pre-synthesized netlist) makes it reachable.
+      log_error(
+          "$dlatchsr (set/reset latch) is not supported: the Latch cell has no SET/CLR yet, and importing it as a "
+          "plain $dlatch would SILENTLY DROP them (cell %s). See todo/livehd/2f-latch M7.\n",
+          cell->type.c_str());
+    } else if (std::strncmp(cell->type.c_str(), "$adlatch", 8) == 0) {
+      // $adlatch matches NO dispatch branch (it is not a "$dlatch" prefix — the
+      // 'a' differs at index 1), so it used to reach the catch-all `log()` far
+      // below: a plain message, exit 0, and an UNTYPED Ntype_op::Invalid node
+      // left in the graph. A silent drop is strictly worse than an abort, since
+      // everything downstream then reasons about a design missing a register.
+      log_error(
+          "$adlatch (async-reset latch) is not supported: the Latch cell has no async reset yet, and it was "
+          "previously dropped SILENTLY as an untyped node (cell %s). See todo/livehd/2f-latch M7.\n",
+          cell->type.c_str());
     } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       set_type_op(exit_node, Ntype_op::Latch);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
