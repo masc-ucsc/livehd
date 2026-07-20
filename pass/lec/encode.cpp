@@ -343,6 +343,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return out;
   };
+  // A structural REFUSAL: a cell or shape this encoder does not model. Distinct
+  // from the budget-out `fail`s (see Encoded::unsupported) — a refusal decides
+  // nothing and a bigger `formal.timeout` cannot change that, so the CLI turns
+  // it into a hard error instead of an exit-0 "inconclusive" warning (2f-latch
+  // M0: a latch design used to report status:pass, making every gate vacuous).
+  auto fail_unsupported = [&](const std::string& msg) -> Encoded& {
+    const bool first = out.ok;
+    fail(msg);
+    if (first) {
+      out.unsupported = true;
+    }
+    return out;
+  };
 
   // Budget-aware encode (2f-lec): a fresh top-level encode() call (sub_depth_==0)
   // arms a `budget_seconds_`-long deadline; a recursive Sub-flatten re-entry
@@ -829,7 +842,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
       // Still out of scope: Fflop (no reset model yet), latches.
       if (op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-        return fail("sequential op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
+        return fail_unsupported("sequential op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
       }
       if (done.contains(nodekey(node))) {
         continue;  // already encoded in an earlier fixpoint pass
@@ -914,7 +927,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         Encoded sub_out = encode(def, &bound, std::format("{}{}.", prefix, static_cast<uint64_t>(node.get_debug_nid())));
         --sub_depth_;
         if (!sub_out.ok) {
-          return fail("Sub def '" + std::string(def->get_name()) + "' encode failed: " + sub_out.error);
+          // A refusal inside the child IS a refusal of the parent (the parent's
+          // encoding is incomplete for the same non-budget reason), so carry the
+          // classification across the boundary instead of demoting it to a
+          // budget-out.
+          const std::string msg = "Sub def '" + std::string(def->get_name()) + "' encode failed: " + sub_out.error;
+          return sub_out.unsupported ? fail_unsupported(msg) : fail(msg);
         }
         for (const auto& e : node.out_edges()) {
           auto dp  = e.driver;
@@ -1459,15 +1477,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
         if (pos_pin.is_invalid() || !gu::is_const_pin(pos_pin)) {
-          return fail("Sext with non-constant position not supported (M1)");
+          return fail_unsupported("Sext with non-constant position not supported (M1)");
         }
         Dlop posc = gu::hydrate_const(pos_pin);
         if (!posc.is_just_i64()) {
-          return fail("Sext position too wide (M1)");
+          return fail_unsupported("Sext position too wide (M1)");
         }
         int pos = static_cast<int>(posc.to_just_i64());
         if (pos < 1) {
-          return fail("Sext position out of range (M1)");
+          return fail_unsupported("Sext position out of range (M1)");
         }
         // pos may exceed the operand's stored width: the bits at/above a.width
         // are a's natural extension (sign-replicated if signed, else zero), so
@@ -1497,7 +1515,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
         if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
-          return fail("Get_mask with non-constant mask not supported (M1)");
+          return fail_unsupported("Get_mask with non-constant mask not supported (M1)");
         }
         Dlop mask = gu::hydrate_const(mask_pin);
         if (mask.is_just_i64() && mask.to_just_i64() == -1) {
@@ -1509,7 +1527,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         auto range = mask.get_mask_range();  // [begin, end)
         int  rb = range.first, re = range.second;
         if (rb < 0 || re <= rb) {
-          return fail("Get_mask non-contiguous mask not supported (M1)");
+          return fail_unsupported("Get_mask non-contiguous mask not supported (M1)");
         }
         // Bits at/above the operand width are its sign/zero extension (matching
         // the bit-blast's per-bit extension, lec.md bit-width trap), so widen
@@ -1529,7 +1547,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
         if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
-          return fail("Set_mask with non-constant mask not supported (M1)");
+          return fail_unsupported("Set_mask with non-constant mask not supported (M1)");
         }
         if (pid(0).empty()) {
           return fail("Set_mask missing a");
@@ -1672,7 +1690,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         break;
       }
-      default: return fail("unsupported op '" + std::string(Ntype::get_name(op)) + "' (M1)");
+      default: return fail_unsupported("unsupported op '" + std::string(Ntype::get_name(op)) + "' (M1)");
     }
 
       if (result.isNull()) {

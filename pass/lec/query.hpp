@@ -63,6 +63,14 @@ struct Query_result {
   // lec.strict, exactly as pass.abc does. See Lec_options::allow_oversize.
   bool oversize_refused = false;
 
+  // The ENCODER refused a cell/shape it does not model (Encoded::unsupported) —
+  // e.g. a Latch, an unknown op. Like oversize_refused (and unlike a solver
+  // give-up) this decided NOTHING and no extra budget can change it, so a driver
+  // must exit non-zero regardless of formal.strict: an exit-0 "inconclusive"
+  // here is read downstream as "verified", which makes every gate built on this
+  // run vacuous (2f-latch M0).
+  bool unsupported = false;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;
@@ -545,6 +553,7 @@ struct Verify_result {
   Verdict     verdict = Verdict::Unknown;
   std::string detail;
   bool        oversize_refused = false;  // design-size gate refused (see Query_result::oversize_refused)
+  bool        unsupported      = false;  // encoder REFUSED a cell/shape (see Query_result::unsupported)
   int         checked_steps = 0;   // bound actually run
   int         reset_hold    = 0;   // after_reset prologue length (incl. pipeline flush)
   bool        reset_detected = false;  // a reset prologue actually pinned state[0] (a primary reset input

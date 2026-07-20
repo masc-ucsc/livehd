@@ -1166,6 +1166,44 @@ private:
       setup_sink_by_name(flop, "din").connect_driver(din);
 
       if (info.is_latch) {
+        // FAIL CLOSED on an attr this branch cannot honor (2f-latch M0). The
+        // Latch cell is a 3-pin skeleton (din/enable/posclk) and this branch
+        // `continue`s BEFORE the clock/posclk/reset/initial wiring below, so
+        // every one of these attrs used to be silently DISCARDED: a
+        // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]`
+        // compiled exit 0, zero warnings, and emitted Verilog byte-identical to
+        // a plain transparent-high latch. Authoring an attr that vanishes is
+        // worse than not having it. Each error is lifted as M2 wires the
+        // corresponding pin onto the cell.
+        {
+          std::string_view dropped;
+          if (!info.clock_pin_name.empty()) {
+            dropped = "clock_pin";
+          } else if (info.has_posclk) {
+            dropped = "posclk";
+          } else if (!info.initial_txt.empty() ||
+                     (!info.init_txt.empty() && info.init_txt != "nil")) {
+            // "nil" is the EXPLICIT no-reset marker (the slang reader stamps it
+            // on every latch declare), so there is no value being dropped —
+            // only a real init/initial is an error.
+            dropped = "init/initial";
+          } else if (!info.reset_pin_name.empty()) {
+            dropped = "reset_pin";
+          } else if (info.has_sync) {
+            dropped = "sync/async";
+          } else if (info.negreset) {
+            dropped = "negreset";
+          }
+          if (!dropped.empty()) {
+            error_here("upass.tolg: latch '{}' carries '{}', which the Latch "
+                       "cell cannot represent yet (it has only din/enable/"
+                       "posclk) — the attribute would be SILENTLY DROPPED. "
+                       "Drop it, or use a flop (todo/livehd/2f-latch M2 adds "
+                       "these pins)",
+                       name, dropped);
+            continue;
+          }
+        }
         // A latch (Ntype_op::Latch) has no clock/reset/posclk: wire only its
         // enable (the transparency condition; cgen process_latch emits
         // `always @* if(enable) q = din`). din already carries the if-merge

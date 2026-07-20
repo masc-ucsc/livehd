@@ -490,6 +490,23 @@ sh_test(
     ],
 )
 
+# LIVE fail-closed test for todo/livehd/2f-latch M0 (landed 2026-07-20). Every
+# shape it covers used to report SUCCESS while silently doing the wrong thing,
+# which makes every downstream gate vacuous: a latch design under `lhd formal
+# verify` exited 0 on an ENCODER REFUSAL (distinct from a solver give-up — no
+# budget can help, so `formal.strict` must not be needed to see it); `lhd sim`
+# on a latch died with a misleading `combinational-loop` error naming an
+# internal node; and a gated-clock or two-clock design simulated to a
+# plausible-looking WRONG waveform at exit 0. Asserts the diagnostic CODE, not
+# just the nonzero exit (a crash also exits nonzero), and pins the negative side
+# too: an ordinary single-clock design must still simulate.
+sh_test(
+    name = "latch_fail_closed_test",
+    size = "large",
+    srcs = ["latch_fail_closed_test.sh"],
+    data = ["//lhd"],
+)
+
 # FIXME tracker for todo/livehd/2f-latch (M3) — the latch CONTRACT CHECK. The
 # flop-with-enable/commit-class latch model is an abstraction with a
 # precondition (no time borrowing); M3 must fail closed with a directed

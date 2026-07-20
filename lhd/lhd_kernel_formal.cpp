@@ -505,6 +505,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
   std::atomic<bool>         any_oversize{false};  // any def refused by the design-size gate -> hard error
+  std::atomic<bool>         any_unsupported{false};  // any def the ENCODER refused (unmodeled cell) -> hard error
   std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
   std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
   std::mutex                report_mutex;
@@ -921,6 +922,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if (r.oversize_refused) {
       any_oversize.store(true);
     }
+    if (r.unsupported) {
+      any_unsupported.store(true);
+    }
     {
       std::lock_guard report_lock(report_mutex);
       // Keep the FIRST refute (leaves-first => the deepest one): it is both the
@@ -1053,6 +1057,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // the whole run, so surface it on the aggregate regardless of which def hit it.
   if (any_oversize.load()) {
     top_result.oversize_refused = true;
+  }
+  // Same reasoning for an ENCODER refusal on any def: that def was never
+  // compared, so the hierarchical proof has a hole. Surface it on the aggregate
+  // so the CLI hard-fails instead of reporting a clean inconclusive (M0).
+  if (any_unsupported.load()) {
+    top_result.unsupported = true;
   }
   return top_result;
 }
@@ -2479,6 +2489,18 @@ void lec_command(Options& opts, Result& res) {
       // `auto` run whose ind refuted while bmc could not clear it). Otherwise emit a
       // loud inconclusive warning and exit cleanly: an UNKNOWN proves nothing, but it
       // also disproves nothing, so it must not be conflated with REFUTED.
+      // An encoder REFUSAL (a cell the encoder does not model) is NOT the solver
+      // giving up: nothing was compared, so the miter decided nothing and no
+      // extra budget can change it. Hard-fail regardless of `formal.strict`, or
+      // the exit-0 "inconclusive" reads as a PASS and every gate built on this
+      // run is vacuous (2f-latch M0).
+      if (r.unsupported) {
+        throw Lhd_error{"unsupported",
+                        std::format("lec REFUSED '{}': the encoder does not model a cell in this design", impl_g->get_name()),
+                        std::format("{}. This is a REFUSAL, not a timeout: nothing was compared, so the run proves "
+                                    "nothing. Raising formal.timeout cannot help.",
+                                    r.detail)};
+      }
       if (o.strict || !r.witness.empty()) {
         throw Lhd_error{"unsupported",
                         std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
@@ -3598,6 +3620,20 @@ void formal_verify_command(Options& opts, Result& res) {
                     "the per-cycle input trace above reproduces it from reset"};
   }
   if (r.verdict == livehd::lec::Verdict::Unknown) {
+    // An encoder REFUSAL is not a solver give-up: no obligation was ever
+    // encoded, so the run proved nothing and a bigger budget cannot change
+    // that. It must be a hard error regardless of `formal.strict` — an exit-0
+    // warning here reads downstream as "verified" and makes every gate built on
+    // this run vacuous (2f-latch M0). The report is already written above, so
+    // the agent-loop artifact still exists on this path.
+    if (r.unsupported) {
+      throw Lhd_error{"unsupported",
+                      std::format("formal verify REFUSED '{}': the encoder does not model a cell in this design",
+                                  g->get_name()),
+                      std::format("{}. This is a REFUSAL, not a timeout: no obligation was checked, so the run proves "
+                                  "nothing. Raising formal.timeout cannot help.",
+                                  r.detail)};
+    }
     if (o.strict) {
       throw Lhd_error{"unsupported", std::format("formal verify could not decide '{}'", g->get_name()), r.detail};
     }

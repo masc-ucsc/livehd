@@ -901,6 +901,9 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   r.verdict    = Verdict::Unknown;
   r.engine     = "auto(ind|bmc)";
   r.elapsed_ms = total_ms;
+  // Both engines share ONE encoder, so a refusal on either leg means the design
+  // was never encoded — carry it so the CLI hard-fails instead of warning (M0).
+  r.unsupported = ind.unsupported || bmc.unsupported;
   // A sub-millisecond-to-low-ms Unknown is almost never the solver genuinely
   // giving up — it's usually a structural encode failure (unsupported op, an
   // unresolved combinational-cycle-looking operand) or a now-caught engine
@@ -3271,15 +3274,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
       if (!re.ok) {
-        res.verdict  = Verdict::Unknown;
-        res.detail  += "; ref encode failed: " + re.error;
+        res.verdict     = Verdict::Unknown;
+        res.unsupported = re.unsupported;
+        res.detail     += "; ref encode failed: " + re.error;
         return res;
       }
       enc.set_box_keys(&impl_box_keys);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
-        res.verdict  = Verdict::Unknown;
-        res.detail   += "; impl encode failed: " + ie.error;
+        res.verdict     = Verdict::Unknown;
+        res.unsupported = ie.unsupported;
+        res.detail     += "; impl encode failed: " + ie.error;
         return res;
       }
       // F7: the impl-side flop decl locations (same key set every cycle) — the impl
@@ -4050,15 +4055,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
-    res.verdict  = Verdict::Unknown;
-    res.detail  += "; ref encode failed: " + re.error;
+    res.verdict     = Verdict::Unknown;
+    res.unsupported = re.unsupported;
+    res.detail     += "; ref encode failed: " + re.error;
     return res;
   }
   enc.set_box_keys(&impl_box_keys);
   Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
-    res.verdict  = Verdict::Unknown;
-    res.detail  += "; impl encode failed: " + ie.error;
+    res.verdict     = Verdict::Unknown;
+    res.unsupported = ie.unsupported;
+    res.detail     += "; impl encode failed: " + ie.error;
     return res;
   }
   // Tie deferred memory-read douts to their select(array, addr) values.
@@ -5250,6 +5257,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     m.detail = "auto verify: raced bmc-first(bound=" + std::to_string(A.checked_steps) + ") | ind-first(bound="
              + std::to_string(B.checked_steps) + "), " + std::to_string(n_ind_unbounded)
              + " obligation(s) proven unbounded by induction-first; bmc-first: " + A.detail + " || ind-first: " + B.detail;
+    m.unsupported = A.unsupported || B.unsupported;  // shared encoder (2f-latch M0)
     m.elapsed_ms = now_ms(t0);
     return m;
   }
@@ -5284,7 +5292,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         }
       }
     }
-    m.vacuous = m.vacuous || r1.vacuous;
+    m.vacuous     = m.vacuous || r1.vacuous;
+    m.unsupported = m.unsupported || r1.unsupported;
     if (r1.verdict == Verdict::Refuted || m.verdict == Verdict::Refuted) {
       m.verdict = Verdict::Refuted;
     } else if (r1.verdict == Verdict::Unknown || m.verdict == Verdict::Unknown) {
@@ -5965,7 +5974,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
 
     Encoded e = enc.encode(design, &sh, "d" + std::to_string(cyc) + "_", &mem, &reads);
     if (!e.ok) {
-      res.verdict = Verdict::Unknown;
+      res.verdict     = Verdict::Unknown;
+      res.unsupported = e.unsupported;  // refusal, not a budget-out (2f-latch M0)
       res.detail += "; encode failed: " + e.error;
       res.elapsed_ms = now_ms(t0);
       return res;

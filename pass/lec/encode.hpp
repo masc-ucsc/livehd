@@ -46,6 +46,18 @@ struct Encoded {
   bool        ok = true;
   std::string error;  // first unsupported-op / structural error, when !ok
 
+  // REFUSAL vs GIVE-UP (2f-latch M0). `ok == false` covers two very different
+  // outcomes that used to be indistinguishable downstream:
+  //   * unsupported == true  — the encoder REFUSES: a cell/shape it does not
+  //     model (a Latch, a non-constant Get_mask, an unknown op). Re-running with
+  //     a bigger budget cannot help; the query decided NOTHING and every gate
+  //     built on it is VACUOUS. The CLI hard-fails these regardless of
+  //     `formal.strict`, because a silent exit-0 here reads as "verified".
+  //   * unsupported == false — the encoder ran out of BUDGET (formal.timeout).
+  //     That is the ordinary inconclusive: a bigger budget may decide it, and
+  //     the deferred-warning policy (could-not-prove => warning) applies.
+  bool unsupported = false;
+
   // Graph IO, by declared port name (case-sensitive ref/impl pairing).
   Io_name_map<Val> inputs;
   Io_name_map<Val> outputs;

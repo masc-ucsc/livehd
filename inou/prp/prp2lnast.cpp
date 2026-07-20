@@ -2273,6 +2273,22 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
     check_pub_value_decl(decl_node, kind);
   }
 
+  // A `comb` may not declare a `reg` — same ruling as the assignment form
+  // (process_lvalue_for_assign), which used to be the ONLY site that checked.
+  // Keying the check on the initializer left a hole: an UNINITIALIZED
+  // `reg r:u8` (this path — a declaration_statement has no rvalue) sailed
+  // through and only surfaced far downstream as tolg's baffling "instance of
+  // clocked 'c' but 'top' has no clock to forward (needs_clock bug)". A latch
+  // (`reg l:u8:[latch=true]`) is spelled `reg`, so it is covered here too
+  // (2f-latch M0; the six latch fixtures moved to `pub mod` for this reason).
+  if (kind == "reg" && !lambda_kind_stack_.empty() && lambda_kind_stack_.back() == "comb") {
+    report_error(decl_node,
+                 "reg-in-comb",
+                 "type",
+                 "a `comb` may not declare a `reg` (combinational logic holds no state)",
+                 "move the register into a `pipe`/`mod` body, or pass the value through an output");
+  }
+
   // For each typed_identifier in the lvalue, emit: attr_set <ref> "type" kind
   auto emit_decl_attrs = [&](TSNode ti) {
     TSNode id = child_by_field(ti, "identifier");

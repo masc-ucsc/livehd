@@ -1221,6 +1221,110 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   std::sort(ios.begin(), ios.end(), [](const Io& a, const Io& b) { return a.port_id < b.port_id; });
 
+  // ---- fail closed on a Latch (2f-latch M0, lifted by M5) ----
+  // A Latch is neither collected as a flop (is_type_flop excludes it) nor walked
+  // as comb (is_type_register includes it), so its `q` is never bound and the
+  // schedule walk below dies with a `combinational-loop` error naming an
+  // internal node — a diagnostic that sends the reader hunting for a loop that
+  // does not exist. Say the real thing, BEFORE the walk, and stop: emitting a
+  // sim whose latch reads 0 forever would be a silent miscompile.
+  for (auto node : g->fast_class()) {
+    if (type_op_of(node) != Ntype_op::Latch) {
+      continue;
+    }
+    livehd::diag::err("inou.cgen.sim", "latch-unsupported", "unsupported")
+        .msg("module `{}` contains a level-sensitive latch (`{}`) that inou.cgen.sim cannot simulate yet", gname,
+             debug_name(node))
+        .hint(
+            "sim commits every state element in one unified per-tick loop and has no commit class for a latch (it "
+            "would read 0 forever); tracked as todo/livehd/2f-latch M5. Rewrite the latch as an enabled flop, or "
+            "simulate the emitted Verilog with an event-driven simulator")
+        .emit();
+    return;
+  }
+
+  // ---- fail closed on a clock this scheduler cannot honor (2f-latch M0) ----
+  // One step() == one full clock period and EVERY flop commits in ONE unified
+  // loop, regardless of its `clock_pin`. Two shapes are therefore simulated
+  // wrong today while reporting success:
+  //   * a GATED / derived clock — the gate is dead code, so the flop loads every
+  //     tick even when the gate says hold (lifted by M5, which honors clock_pin);
+  //   * TWO OR MORE distinct clock nets — every clock is advanced as if it were
+  //     the one clock, and clock_input_of() keeps only the first flop's net for
+  //     the VCD while the rest degrade to poked data (lifted by M6).
+  // Both used to exit 0 with a plausible-looking VCD, which is the worst
+  // possible outcome: a silently wrong waveform reads as a passing test.
+  {
+    // See through tolg's identity port wrappers (unary Get_mask width-adjust,
+    // and the Get_mask(v,-1) to-positive idiom), same as clock_input_of().
+    auto resolve_passthrough = [](hhds::Pin_class p) {
+      for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+        auto n = p.get_master_node();
+        if (type_op_of(n) != Ntype_op::Get_mask) {
+          break;
+        }
+        auto e = sorted_inp(n);
+        if (e.empty()) {
+          break;
+        }
+        if (e.size() >= 2) {
+          if (!is_const_pin(e[1].driver)) {
+            break;
+          }
+          auto mv = hydrate_const(e[1].driver);
+          if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
+            break;
+          }
+        }
+        p = e[0].driver;
+      }
+      return p;
+    };
+    absl::flat_hash_set<std::string> clock_nets;  // distinct clock nets driving state
+    for (auto node : g->fast_class()) {
+      if (!is_type_flop(node)) {
+        continue;
+      }
+      auto d = resolve_passthrough(get_driver(find_sink_pin(node, "clock_pin")));
+      if (d.is_invalid()) {
+        clock_nets.insert("\x01implicit");  // no clock_pin => the module's implicit clock
+        continue;
+      }
+      if (livehd::graph_util::is_graph_input_pin(d)) {
+        clock_nets.insert(std::string{pin_name_of(d)});
+        continue;
+      }
+      // A clock_pin driven by LOGIC (an ICG's `clk & en`, any derived clock).
+      livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
+          .msg("module `{}`: flop `{}` has a GATED or derived clock that inou.cgen.sim cannot honor yet", gname,
+               debug_name(node))
+          .hint(
+              "sim commits every flop once per step() regardless of clock_pin, so a gated flop would LOAD on every "
+              "tick even while its gate says hold — a silent miscompile, not a slowdown; tracked as "
+              "todo/livehd/2f-latch M5. Model the gate as the flop's `enable` instead, or simulate the emitted "
+              "Verilog with an event-driven simulator")
+          .emit();
+      return;
+    }
+    if (clock_nets.size() >= 2) {
+      std::vector<std::string> names(clock_nets.begin(), clock_nets.end());
+      std::sort(names.begin(), names.end());  // hash-set order would make the message run-varying
+      std::string net_list;
+      for (const auto& n : names) {
+        absl::StrAppend(&net_list, net_list.empty() ? "" : ", ", n == "\x01implicit" ? "<implicit clock>" : n);
+      }
+      livehd::diag::err("inou.cgen.sim", "multi-clock-unsupported", "unsupported")
+          .msg("module `{}` has state on {} distinct clock nets ({}); inou.cgen.sim is single-clock", gname,
+               names.size(), net_list)
+          .hint(
+              "one step() advances ALL state as if it shared one clock, and only the first net reaches the VCD (the "
+              "others degrade to poked data), so a multi-clock design is silently mis-simulated; tracked as "
+              "todo/livehd/2f-latch M6")
+          .emit();
+      return;
+    }
+  }
+
   // ---- flops (Flop cells; Latch/Memory -> later phase) ----
   struct Flop {
     hhds::Node_class         node;

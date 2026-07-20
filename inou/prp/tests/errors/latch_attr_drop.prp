@@ -1,0 +1,31 @@
+/*
+:name: latch_attr_drop
+:type: error
+:tolg: 1
+:error: SILENTLY DROPPED
+*/
+// todo/livehd/2f-latch M0 fail-closed test.
+//
+// The Latch cell is a 3-pin skeleton (din / enable / posclk — graph/cell.cpp),
+// and tolg's finalize_regs latch branch `continue`s BEFORE the clock / posclk /
+// reset / initial wiring that flops get. So every one of those attributes used
+// to be SILENTLY DISCARDED: this exact declaration compiled exit 0 with zero
+// warnings and emitted Verilog byte-identical to a plain transparent-high latch
+// — the author's `clock_pin`, `posclk` and `init` simply evaporated.
+//
+// An attribute that vanishes without a word is worse than one that is not
+// supported, so tolg now REFUSES. The error is lifted attribute by attribute as
+// M2 adds the corresponding pins to the cell.
+//
+// Guarded shapes (any one of these alone must error): clock_pin, posclk,
+// init/initial, reset_pin, sync/async, negreset. NOTE `init=nil` is NOT an
+// error — "nil" is the explicit NO-reset marker the slang reader stamps on
+// every latch declare, so nothing is being dropped there (that exemption is
+// what keeps the six live latch equiv goldens compiling).
+pub mod ldrop(en:bool, d:u8, ck2:bool) -> (q:u8@[0]) {
+  reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]
+  if en {
+    l = d
+  }
+  q = l
+}

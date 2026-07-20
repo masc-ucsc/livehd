@@ -279,8 +279,9 @@
 
 <ul class="subtasks">
 
-<li><strong>M0 — fail closed, tell the truth, clear stale fixmes</strong> [no deps].
-  Everything here turns a silent lie into a diagnostic:
+<li><strong>M0 — fail closed, tell the truth, clear stale fixmes</strong> [no deps]
+  — <strong>LANDED 2026-07-20</strong>. Everything here turns a silent lie into a
+  diagnostic:
   <ol>
   <li>An encoder refusal must be distinguishable from a solver timeout and must
     exit NONZERO regardless of <code>formal.strict</code> — today a latch design
@@ -311,9 +312,55 @@
   rewritten to the shipped spelling and PROMOTED (both directions);
   the lgyosys-verdict contradiction resolved (same cascade, bounded-miter stage
   decides) and pinned by the live <code>lec_latch_polarity_test.sh</code>.
-  <br><em>Gate:</em> a latch design under the default solver exits nonzero with a
-  real diagnostic; a latch sim attempt says "latch unsupported"; the four
-  fail-closed shapes above each have a red-today negative test.</li>
+  <br><strong>How each item landed:</strong>
+  <ol>
+  <li>New <code>Encoded::unsupported</code> / <code>Query_result::unsupported</code>
+    / <code>Verify_result::unsupported</code> flag separates a structural
+    REFUSAL (a cell the encoder does not model) from a BUDGET-out. Set by a new
+    <code>fail_unsupported()</code> at the "not supported" sites in
+    <code>encode.cpp</code> (Latch/Fflop, non-const Sext/Get_mask/Set_mask,
+    unknown op), carried across the Sub-flatten boundary, merged through
+    <code>make_inconclusive</code> / the auto-verify race / the
+    <code>full</code>-phase merge / the hierarchical aggregate, and hard-failed
+    in BOTH CLI paths regardless of <code>formal.strict</code>. The report is
+    still written on the fail path.</li>
+  <li>Latch scan in <code>Cgen_sim::do_from_graph</code> BEFORE the schedule
+    walk emits <code>latch-unsupported</code> and returns; the phantom
+    <code>combinational-loop</code> error is gone.</li>
+  <li>Same place: the flop clock cone is resolved through tolg's identity port
+    wrappers. Driven by LOGIC &rarr; <code>gated-clock-unsupported</code>;
+    &ge; 2 distinct clock nets &rarr; <code>multi-clock-unsupported</code>
+    (net names sorted — a hash-set order would make the message run-varying).</li>
+  <li><code>finalize_regs</code>' latch branch now ERRORS on
+    <code>clock_pin</code> / <code>posclk</code> / <code>init</code> /
+    <code>initial</code> / <code>reset_pin</code> / <code>sync</code> /
+    <code>async</code> / <code>negreset</code>. <strong>TRAP:</strong>
+    <code>init_txt == "nil"</code> is the EXPLICIT no-reset marker the slang
+    reader stamps on every latch declare — exempting it is what keeps the six
+    live latch goldens compiling (caught by them going red).</li>
+  <li>The reg-in-comb check was duplicated into
+    <code>process_declaration_statement</code> (the bare-declare path). Keying
+    it on the initializer had left the UNINITIALIZED case surfacing far
+    downstream as tolg's baffling "needs_clock bug".</li>
+  <li><strong>Better than a relabel:</strong> the two yosys fixtures were not
+    latch debt at all — <code>output q</code> is a NET, procedurally written
+    inside <code>always_latch</code>, which iverilog and our own slang reader
+    both correctly reject per IEEE 1800. The FIXTURES were wrong, LiveHD was
+    right. Fixed to <code>output logic q</code>; both then reach the STRONGEST
+    slang ladder tier, so <code>slang_ladder.bzl</code> promotes them
+    <code>error &rarr; lec</code> (2 tests gained). They stay
+    <code>fixme_</code>-prefixed on the yosys-reader side, where the header now
+    records the REAL blocker: cgen emits a bare undeclared <code>eq_20</code>
+    for the inlined enable — <strong>a live reproducer of M1 bug 1</strong>,
+    promote to <code>latch.v</code>/<code>nlatch.v</code> when M1 lands.</li>
+  </ol>
+  <em>Gate (met):</em> <code>lhd/tests/latch_fail_closed_test.sh</code> is LIVE
+  and covers all five refusals plus the negative side (an ordinary single-clock
+  design must still simulate — the checks must not over-trigger); it asserts the
+  diagnostic CODE, not just a nonzero exit, since a crash also exits nonzero.
+  Compile-error fixtures <code>errors/latch_attr_drop.prp</code> (needs
+  <code>:tolg: 1</code> — the error-test harness stops before tolg by default)
+  and <code>errors/reg_in_comb_uninit.prp</code>. Full suite 1408 pass, 0 fail.</li>
 
 <li><strong>M1 — Verilog emission correctness + round-trip</strong> [no deps,
   parallel with M0]. <code>inou/cgen/cgen_verilog.cpp</code> only.
