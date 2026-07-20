@@ -14,6 +14,7 @@
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
+#include "latch_contract.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
@@ -1298,6 +1299,18 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     Eprp_var::Eprp_dict labels;
     merge_sets(opts, set_name, labels);
     run_step(method, var, labels, opts, res);
+  }
+
+  // THE LATCH CONTRACT CHECK (todo/livehd/2f-latch M3). Modelling a latch as a
+  // flop-with-enable that commits at its window's closing edge is an
+  // abstraction with a PRECONDITION — no time borrowing — and a precondition
+  // must be CHECKED, never assumed. It runs after the recipe passes (so it sees
+  // the optimized graph the back end will actually consume) and BEFORE anything
+  // that relies on the abstraction. Designs with no latch pay one type scan.
+  for (const auto& gref : var.graphs) {
+    if (!livehd::latch_contract::check(gref.get())) {
+      throw classify_engine_failure("latch contract violation");
+    }
   }
 
   // pass.formal — single-design property checks (assert / assume / Hotmux

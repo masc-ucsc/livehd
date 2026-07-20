@@ -19,6 +19,7 @@ cc_library(
     srcs = [
         "cell.cpp",
         "const_pin.cpp",
+        "latch_contract.cpp",
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
         "split_selfref.cpp",
@@ -28,6 +29,7 @@ cc_library(
         "attrs.hpp",
         "cell.hpp",
         "graph_library_singleton.hpp",
+        "latch_contract.hpp",
         "inline_sub.hpp",
         "node_util.hpp",
         "split_selfref.hpp",

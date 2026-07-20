@@ -525,7 +525,31 @@
   the methodology (not the latch handling) is sound. Full suite 1412 pass.</li>
 
 <li><strong>M3 — shared commit-class classifier + THE CONTRACT CHECK</strong>
-  [deps M2]. ONE analysis, three consumers (sim, LEC, timing). For every state
+  [deps M2] — <strong>LANDED 2026-07-20</strong> as
+  <code>graph/latch_contract.{hpp,cpp}</code>, called from
+  <code>lhd_kernel_compile.cpp</code> after the recipe passes (so it sees the
+  graph the back end actually consumes).
+  <p><strong>The classifier resolves an enable/clock cone back to a ROOT NET
+  plus a parity</strong>, walking the shapes tolg emits for a boolean control
+  (<code>Mux(s,0,1)</code>, <code>EQ(x,0)</code>/<code>EQ(x,1)</code>,
+  <code>Not</code>, <code>Get_mask</code>/<code>Sext</code>). That is the whole
+  trick: tolg gives every latch its OWN mux/eq nodes, so comparing enable driver
+  pins would make a master/slave pair look like two unrelated latches and rule C
+  could never fire. Resolved to a root, <code>if clk</code> and
+  <code>if !clk</code> land on the same net at opposite parity. An
+  undecodable cone resolves to itself, so it compares UNEQUAL — the check can
+  fail to fire, never fire spuriously.</p>
+  <p><strong>Rules 3 and 4 deliberately NOT implemented.</strong> Rule 3 ("a
+  clock-gated latch's gate must be a recognizable clock-phase expression") does
+  not survive the M2 user ruling that a latch is simply an enable that is active
+  high or low: a DATA-gated latch (the shipped <code>latch_hold_basic</code>) is
+  legitimate, and the self-gated shape rule 3 was meant to catch is already
+  rule A. This also dissolves the "two latch classes (confirm before
+  implementing)" proposal — there is one class. Rule 4 (coincident-edge latch
+  &rarr; flop, the US7624363 L1-buffer case) needs a flop-side consumer;
+  <code>commit_class_of()</code> already returns the flop commit class, so it is
+  a small addition once M4 lands.</p>
+  <p>Original plan: ONE analysis, three consumers (sim, LEC, timing). For every state
   element compute its commit class <code>(clock net, edge)</code>: posedge flop
   &rarr; (clk, RISE); negedge flop &rarr; (clk, FALL); transparent-HIGH latch
   &rarr; (gate, FALL); transparent-LOW latch &rarr; (gate, RISE).
@@ -562,11 +586,20 @@
   shape has raw D and no such path).
   <br>A violation is a named error — <strong>never</strong> a silent
   flop-with-enable approximation.
-  <br><em>Gate:</em> master/slave accepted and classified onto opposite edges;
-  <code>lhd/tests/latch_contract_check_test.sh</code> (written, fixme) goes
-  green — its three shapes (self-gated latch, Q&rarr;own-D, simultaneous-
-  transparent pair) each REJECTED with the directed diagnostic; add a rule-4
-  coincident-edge shape when the diagnostic exists.</li>
+  <br><em>Gate (met):</em> <code>lhd/tests/latch_contract_check_test.sh</code>
+  PROMOTED out of fixme and live. All three shapes REJECTED with three
+  <strong>DISTINCT</strong> rule diagnostics (the test asserts the rules differ —
+  three identical messages would mean the checker collapsed to one test).
+  <br><strong>The ACCEPTANCE half is what makes it a real test</strong> — a
+  checker that rejects everything passes all three rejections. It pins that
+  master/slave is accepted, that every shipped latch fixture still compiles, and
+  — the sharpest discriminator available — that a same-phase twin of the
+  master/slave design <strong>differing by exactly ONE <code>!</code></strong>
+  flips the verdict. Both-accept or both-reject means rule C has gone blind.
+  Rule C compares commit classes through the PUBLIC
+  <code>commit_class_of()</code>, so there is one notion of "when does this
+  commit" in the tree rather than a checker-private copy that can drift from
+  what M4/M5 believe. Full suite 1413 pass.</li>
 
 <li><strong>M4 — LEC: clock awareness + latch encoding</strong> [deps M3, parallel
   with M5]. First close the clock-blindness holes (a standalone soundness fix):

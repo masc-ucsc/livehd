@@ -550,18 +550,27 @@ sh_test(
     data = ["//lhd"],
 )
 
-# FIXME tracker for todo/livehd/2f-latch (M3) — the latch CONTRACT CHECK. The
-# flop-with-enable/commit-class latch model is an abstraction with a
-# precondition (no time borrowing); M3 must fail closed with a directed
-# diagnostic on the three violation shapes (self-gated latch, Q->own-D comb
-# path, comb path between simultaneously-transparent latches). All three
-# compile clean and silently mis-lower today; the script fails until M3 lands.
+# LIVE test for todo/livehd/2f-latch M3 (landed 2026-07-20) — the latch CONTRACT
+# CHECK. The flop-with-enable/commit-class latch model is an abstraction with a
+# PRECONDITION (no time borrowing), so the precondition is checked, never
+# assumed: graph/latch_contract.cpp fails closed with a distinct diagnostic on
+# each of the three violation shapes (self-timed gate, Q->own-D comb path, comb
+# path between simultaneously-transparent latches).
+#
+# The ACCEPTANCE half is what makes it a real test — a checker that rejects
+# everything passes all three rejections. It pins that a master/slave pair
+# (opposite phases of one gate, with a comb path between them) is ACCEPTED, that
+# every shipped latch fixture still compiles, and — the sharpest discriminator —
+# that a same-phase twin of that master/slave design differing by exactly ONE
+# `!` flips the verdict. Both-accept or both-reject means rule C has gone blind.
 sh_test(
     name = "latch_contract_check_test",
     size = "large",
     srcs = ["latch_contract_check_test.sh"],
-    data = ["//lhd"],
-    tags = ["fixme"],
+    data = [
+        "//inou/prp:equiv_tests",  # the shipped latch fixtures must keep compiling
+        "//lhd",
+    ],
 )
 
 # Regression for the lec leaf<->flat-bus port correspondence: a design whose
