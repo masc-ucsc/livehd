@@ -37,6 +37,20 @@ void Inou_cgen::setup() {
                         "VCD data settles a few ticks after each clock edge, with X during the settle window "
                         "(sim.vcd_fake_delay); false = plain edge-aligned updates (no X, no delay)",
                         "true");
+  // Host-build include roots for the generated driver. Normally resolved
+  // automatically — bazel runfiles, or the sibling ../hlop and ../iassert of a
+  // source checkout — so these are only needed to point the sim build at a
+  // DIFFERENT checkout, which is how you test new slop/vcd_writer code without
+  // reinstalling it. Registered (not just read from --set) so they are
+  // discoverable via `lhd list options compile.cgen`.
+  m2.add_label_optional("sim_hlop_dir",
+                        "hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp); "
+                        "empty = auto (bazel runfiles, else the sibling ../hlop) — set it to test a WIP hlop",
+                        "");
+  m2.add_label_optional("sim_iassert_dir",
+                        "iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp "
+                        "pulls in); empty = auto (bazel runfiles, else the sibling ../iassert/src)",
+                        "");
   register_inou("cgen", m2);
 }
 
