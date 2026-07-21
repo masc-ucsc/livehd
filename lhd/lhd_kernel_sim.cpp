@@ -342,7 +342,8 @@ void sim_command(Options& opts, Result& res) {
       std::print(
           "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp), or export "
           "RUNFILES_DIR=<...>/lhd.runfiles to run it by hand; a source checkout resolves them from the sibling "
-          "../hlop and ../iassert\n");
+          "../hlop and ../iassert, and --set compile.cgen.sim_hlop_dir=DIR / "
+          "--set compile.cgen.sim_iassert_dir=DIR point at an explicit checkout\n");
       std::fflush(stdout);
     }
     return;
