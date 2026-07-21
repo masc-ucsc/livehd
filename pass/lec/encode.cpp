@@ -112,6 +112,28 @@ Term bv_extract(cvc5::TermManager& tm, const Term& t, int hi, int lo) {
   return tm.mkTerm(op, {t});
 }
 
+// Selector test for ONE arm of a Mux/Hotmux. Mux compares the selector against
+// the arm index; Hotmux tests that arm's one-hot bit.
+//
+// The hot bit is tested with EXTRACT rather than by comparing against a `1 << k`
+// constant. That constant is undefined behaviour for k >= 64 (the shift count is
+// masked mod 64 on arm64/x86, so arm 64 aliases arm 0) and is unrepresentable
+// through a uint64_t-valued bv_const in the first place. The result was that
+// EVERY arm above 63 silently fell through to the default arm — which both
+// false-REFUTES a correct design and, far worse, false-PROVES two designs that
+// differ only above arm 63. A 128-entry `match` (a ROM/decode table) is enough
+// to hit it. Returns a null Term if the arm index is past the selector width,
+// so a malformed graph degrades to UNKNOWN instead of dropping the arm.
+Term mux_arm_cond(cvc5::TermManager& tm, bool hotmux, const Term& sel, int sel_width, int k) {
+  if (!hotmux) {
+    return tm.mkTerm(Kind::EQUAL, {sel, bv_const(tm, sel_width, static_cast<uint64_t>(k))});
+  }
+  if (k >= sel_width) {
+    return Term();
+  }
+  return tm.mkTerm(Kind::EQUAL, {bv_extract(tm, sel, k, k), bv_const(tm, 1, 1)});
+}
+
 }  // namespace
 
 // Real bus width of a pin: bits attribute is the signed magnitude+1 count;
@@ -1692,9 +1714,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // default else = last arm (covers in-range exactly + out-of-range det.)
         result = fit(arms.back(), W);
         for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-          int64_t key  = (op == Ntype_op::Mux) ? k : (int64_t{1} << k);
-          Term    cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(tm_, sel.width, static_cast<uint64_t>(key))});
-          result       = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
+          Term cond = mux_arm_cond(tm_, op == Ntype_op::Hotmux, sel.term, sel.width, k);
+          if (cond.isNull()) {
+            return fail_unsupported("Hotmux arm index past the selector width");
+          }
+          result = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
         }
         break;
       }
@@ -1741,9 +1765,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               };
               Term u = arm_xm(arms.back());
               for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-                int64_t key  = (op == Ntype_op::Mux) ? k : (int64_t{1} << k);
-                Term    cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(tm_, sel.width, static_cast<uint64_t>(key))});
-                u            = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
+                Term cond = mux_arm_cond(tm_, op == Ntype_op::Hotmux, sel.term, sel.width, k);
+                if (cond.isNull()) {
+                  return fail_unsupported("Hotmux arm index past the selector width");
+                }
+                u = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
               }
               out_val.x_mask = u;
             }

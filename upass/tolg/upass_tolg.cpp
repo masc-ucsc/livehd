@@ -4719,6 +4719,21 @@ private:
     record(lnast_->get_name(dst), drv, mw > 0 ? mw : 1);
   }
 
+  // `~x` — bitwise NOT (the only unary lowered through here).
+  //
+  // The operand is carried in the unsigned convention: `mw` magnitude bits plus
+  // a leading 0 sign bit, so mw+1 stored bits. Flipping every bit necessarily
+  // SETS that sign bit, so the result is always negative — range
+  // [-(2^mw), -1] — and has to be stamped SIGNED across all mw+1 bits, the same
+  // shape lower_sext() uses for its signed result.
+  //
+  // Binding it through bind_result() stamped it UNSIGNED instead, and an
+  // unsigned pin is defined to drop its spare sign bit. Consumers then
+  // disagreed about that top bit: the LEC read one bit too few, and abc
+  // zero-filled a widening that had to sign-extend — `(~ec)#[0..=9]` mapped to
+  // 511 where the RTL says 1023, i.e. a genuinely wrong netlist. (cgen emits an
+  // explicitly signed net and so stayed correct, which is what made this look
+  // like an abc-only bug.)
   void lower_unary(const Lnast_nid &nid, Ntype_op op) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -4731,7 +4746,11 @@ private:
     auto v = leaf(a);
     auto node = make_node(op);
     setup_sink_by_name(node, "a").connect_driver(v.pin);
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), v.mw);
+    const int32_t m = v.mw > 0 ? v.mw : 1;
+    auto drv = node.create_driver_pin(0);
+    set_bits(drv, m + 1);
+    set_sign(drv);
+    record(lnast_->get_name(dst), drv, m + 1);
   }
 
   // `!x` is a LOGICAL (boolean) not: a clean 1-bit boolean, lowered as `x == 0`

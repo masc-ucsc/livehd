@@ -3,6 +3,7 @@
 #include "cgen_sim.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <print>
@@ -70,6 +71,14 @@ const char* op_name(Ntype_op op) {
   }
 }
 }  // namespace
+
+std::string Cgen_sim::cpp_port_path(std::string_view name) {
+  const auto dot = name.find('.');
+  if (dot == std::string_view::npos) {
+    return cpp_id(name);
+  }
+  return absl::StrCat(cpp_id(name.substr(0, dot)), ".", cpp_id(name.substr(dot + 1)));
+}
 
 std::string Cgen_sim::cpp_id(std::string_view name) {
   std::string r;
@@ -1275,13 +1284,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     bool        is_input;
     uint32_t    port_id;
   };
+  // C++ access path for a port. A tuple leaf keeps its dot — it is a member of
+  // the nested struct emitted for the tuple below — so the RTL name and the C++
+  // path stay the same text; only the individual segments are mangled.
   std::vector<Io> ios;
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      ios.push_back({cpp_id(d.name), std::string{d.name}, 0, true, static_cast<uint32_t>(d.port_id)});
+      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, true, static_cast<uint32_t>(d.port_id)});
     }
     for (const auto& d : gio->get_output_pin_decls()) {
-      ios.push_back({cpp_id(d.name), std::string{d.name}, 0, false, static_cast<uint32_t>(d.port_id)});
+      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, false, static_cast<uint32_t>(d.port_id)});
     }
   }
   for (auto& io : ios) {
@@ -1670,18 +1682,52 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
 
   // ---- In / Out ----
+  // A tuple/struct-packed port flattens to dotted leaves (`io_in.pc`), which is
+  // not a legal C++ member name. Rather than mangle the dot away and make every
+  // consumer re-derive the grouping, MIRROR the tuple as a nested struct:
+  //
+  //     struct In {
+  //       struct { Slop<32> instruction{}; Slop<1> isValid{}; } io_in{};
+  //     };
+  //
+  // so the RTL path and the C++ path are the same text — `in.io_in.instruction`
+  // — and a testbench addressing `acc.io_in.instruction` needs no translation
+  // (inou/prp/prp_sim.cpp). Leaves keep declaration order, which is packed
+  // order (first member = most significant), so the aggregate can also be
+  // read/written as one value. A port with no dot emits exactly as before.
+  auto emit_io_block = [&](bool want_input) {
+    std::string open_group;  // tuple prefix currently open, "" = none
+    for (const auto& io : ios) {
+      if (io.is_input != want_input) {
+        continue;
+      }
+      const auto  dot   = io.raw.find('.');
+      std::string group = dot == std::string::npos ? std::string{} : io.raw.substr(0, dot);
+      if (group != open_group) {
+        if (!open_group.empty()) {
+          hout->append("    } ", open_group, "{};\n");
+        }
+        if (!group.empty()) {
+          hout->append("    struct {\n");
+        }
+        open_group = group;
+      }
+      if (group.empty()) {
+        hout->append("    Slop<", std::to_string(io.bits), "> ", io.field, "{};\n");
+      } else {
+        // nested leaf: the segment after the group prefix (io.field is
+        // "<group>.<leaf>", so take what follows its dot)
+        hout->append("      Slop<", std::to_string(io.bits), "> ", io.field.substr(io.field.find('.') + 1), "{};\n");
+      }
+    }
+    if (!open_group.empty()) {
+      hout->append("    } ", open_group, "{};\n");
+    }
+  };
   hout->append("  struct In {\n");
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      hout->append("    Slop<", std::to_string(io.bits), "> ", io.field, "{};\n");
-    }
-  }
+  emit_io_block(true);
   hout->append("  };\n  struct Out {\n");
-  for (const auto& io : ios) {
-    if (!io.is_input) {
-      hout->append("    Slop<", std::to_string(io.bits), "> ", io.field, "{};\n");
-    }
-  }
+  emit_io_block(false);
   hout->append("  };\n");
 
   // Persistent input latch. The testbench pokes inputs (`acc.x = v` -> __in.x)
@@ -2180,13 +2226,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               .emit();
           cycle_reported_ = true;
         }
-        fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(d.name), " = ", operand(drv, wb), ";\n"));
+        fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_port_path(d.name), " = ", operand(drv, wb), ";\n"));
       }
       fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
       for (const auto& d : sio->get_output_pin_decls()) {
         auto opin = find_driver_pin(node, d.name);
         if (!opin.is_invalid()) {
-          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_id(d.name));
+          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_port_path(d.name));
         }
       }
       break;
@@ -2477,6 +2523,51 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   };
 
+  // Every driver pin emit_flop_next() will dereference. PHASE 2 drops the
+  // bindings of everything reachable from a posedge Q, so each of these cones
+  // has to be re-readied there — readying only `din` left a latch-qualified
+  // enable unbound and operand() substituted a silent constant 0 into the
+  // commit guard. (`negreset` is absent: it is only ever read as a constant.)
+  static constexpr std::array<const char*, 4> flop_operand_ports{"din", "enable", "reset_pin", "initial"};
+
+  // Commit one state element's next value under its ICG gate and/or its
+  // secondary clock's edge. BOTH phases use this: a gated or secondary-clocked
+  // flop needs the same guard whichever edge it commits on.
+  auto commit_state = [&](const auto& f) {
+    // ICG fold: a gated flop commits only in ticks where its gate's enable
+    // terms are true. Without this the gate is DEAD CODE and the flop loads
+    // every tick regardless — a silently wrong waveform (2f-latch M5).
+    std::string guard;
+    for (const auto& gp : f.clock_guards) {
+      absl::StrAppend(&guard, guard.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
+    }
+    // SECONDARY clock (2f-latch M6): commit only on a detected EDGE of this
+    // flop's own clock net. One tick is one period of the REFERENCE clock, so a
+    // second clock cannot also tick once per call — it is a signal the
+    // testbench drives, and an edge is a level change between ticks. All flops
+    // on one net share the prev bit, so they commit together; and because every
+    // secondary commit reads PRE-TICK state, two clocks whose edges land in the
+    // same tick both sample pre-edge values, which is what IEEE 1800 requires
+    // for coincident edges.
+    if (!f.sec_clock.is_invalid()) {
+      const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
+      absl::StrAppend(&guard, guard.empty() ? "" : " && ",
+                      f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")")
+                                : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
+    }
+    const std::string ind = guard.empty() ? "    " : "      ";
+    if (!guard.empty()) {
+      fout->append("    if (", guard, ") {  // gated clock: commit only when the ICG enable is high\n");
+    }
+    for (const auto& s : f.stages) {
+      fout->append(ind, s, " = ", s, "_next;\n");
+    }
+    fout->append(ind, f.member, " = ", f.member, f.posedge ? "_next;\n" : "_next;  // negedge: commits at the FALL\n");
+    if (!guard.empty()) {
+      fout->append("    }\n");
+    }
+  };
+
   // PHASE 1 (the rise): posedge state only.
   bool any_negedge = false;
   for (const auto& f : flops) {
@@ -2566,38 +2657,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!f.posedge) {
       continue;  // negedge state commits in phase 2, below
     }
-    // ICG fold: a gated flop commits only in ticks where its gate's enable
-    // terms are true. Without this the gate is DEAD CODE and the flop loads
-    // every tick regardless — a silently wrong waveform (2f-latch M5).
-    std::string guard;
-    for (const auto& gp : f.clock_guards) {
-      absl::StrAppend(&guard, guard.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
-    }
-    // SECONDARY clock (2f-latch M6): commit only on a detected EDGE of this
-    // flop's own clock net. One tick is one period of the REFERENCE clock, so a
-    // second clock cannot also tick once per call — it is a signal the
-    // testbench drives, and an edge is a level change between ticks. All flops
-    // on one net share the prev bit, so they commit together; and because every
-    // secondary commit reads PRE-TICK state, two clocks whose edges land in the
-    // same tick both sample pre-edge values, which is what IEEE 1800 requires
-    // for coincident edges.
-    if (!f.sec_clock.is_invalid()) {
-      const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
-      absl::StrAppend(&guard, guard.empty() ? "" : " && ",
-                      f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")")
-                                : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
-    }
-    const std::string ind = guard.empty() ? "    " : "      ";
-    if (!guard.empty()) {
-      fout->append("    if (", guard, ") {  // gated clock: commit only when the ICG enable is high\n");
-    }
-    for (const auto& s : f.stages) {
-      fout->append(ind, s, " = ", s, "_next;\n");
-    }
-    fout->append(ind, f.member, " = ", f.member, "_next;\n");
-    if (!guard.empty()) {
-      fout->append("    }\n");
-    }
+    commit_state(f);
   }
 
   // Secondary-clock levels for the NEXT tick's edge detection. Updated after
@@ -2673,11 +2733,24 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       pin2var.erase(ci);
       prefetch_seen.erase(ci);
     }
+    // Re-ready EVERY cone the negedge emission below will read: the four
+    // operand ports of emit_flop_next(), plus the ICG guards and secondary
+    // clock that commit_state() reads. Readying only `din` is not enough — a
+    // reg-file whose write strobe is a transparent latch AND-ed with posedge
+    // state leaves `enable` in the erased set, and operand() then substitutes a
+    // constant 0 into the commit guard, so the flop silently never loads.
+    // ensure_ready() no-ops on invalid and const pins, so absent ports are free.
     for (const auto& f : flops) {
       if (f.posedge) {
         continue;
       }
-      ensure_ready(get_driver(find_sink_pin(f.node, "din")));
+      for (const auto* port : flop_operand_ports) {
+        ensure_ready(get_driver(find_sink_pin(f.node, port)));
+      }
+      for (const auto& gp : f.clock_guards) {
+        ensure_ready(gp);
+      }
+      ensure_ready(f.sec_clock);
     }
     for (const auto& f : flops) {
       if (f.posedge) {
@@ -2689,11 +2762,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (f.posedge) {
         continue;
       }
-      for (const auto& st : f.stages) {
-        fout->append("    ", st, " = ", st, "_next;\n");
-      }
-      fout->append("    ", f.member, " = ", f.member, "_next;  // negedge: commits at the FALL\n");
+      commit_state(f);
     }
+  }
+
+  // Fail closed on a PHASE-2 substitution. Stage 0 above already cleared this
+  // graph of real combinational cycles, so an operand that is STILL unbound
+  // here is not a loop: it is a negedge cone that phase 2 dropped and did not
+  // re-ready, and operand() has quietly put a 0 in its place. Emitting that
+  // would be a silently wrong sim (the failure mode the whole fail-closed pass
+  // exists to prevent), so refuse instead.
+  if (cycle_unresolved_ && !cycle_reported_) {
+    livehd::diag::err("inou.cgen.sim", "negedge-operand-unresolved", "internal")
+        .msg("module `{}` has a NEGEDGE state element whose operand {} could not be re-resolved after the rise",
+             gname,
+             cycle_first_label_.empty() ? std::string{"(unnamed)"} : cycle_first_label_)
+        .hint(
+            "the two-phase tick drops the pin2var bindings reachable from a posedge Q and re-emits them via "
+            "ensure_ready(); every pin the negedge emission reads (din, enable, reset_pin, initial, the ICG "
+            "clock_guards and any secondary clock) must be re-readied — tracked as todo/livehd/2f-latch M5")
+        .emit();
+    cycle_reported_ = true;
+    return;
   }
 
   // memory edge: sync-read registers sample the CURRENT array (before writes),

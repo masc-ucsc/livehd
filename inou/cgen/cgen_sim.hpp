@@ -43,6 +43,13 @@ private:
   std::string cycle_first_label_;         // first offending value (for the generic message)
 
   static std::string     cpp_id(std::string_view name);  // sanitize to a valid C++ identifier
+  // C++ access path of a PORT. A tuple/struct-packed port flattens to dotted
+  // leaves ("io_in.pc"), which are mirrored as a nested struct, so the dot is
+  // KEPT and only the segments are sanitized. Every producer and consumer of a
+  // port name (this module's In/Out structs, and a parent driving or reading a
+  // sub-instance) must agree on this, or the parent names a field the child
+  // never emitted.
+  static std::string     cpp_port_path(std::string_view name);
   static hhds::Pin_class get_driver(const hhds::Pin_class& sink);
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);
   static hhds::Pin_class find_driver_pin(const hhds::Node_class& node, std::string_view name);

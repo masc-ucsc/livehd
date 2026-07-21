@@ -1380,14 +1380,17 @@ std::string find_header_in_runfiles(std::string_view header) {
   return result;
 }
 
-// hlop checkout for the generated MODULE.bazel: --set compile.cgen.sim_hlop=PATH
-// wins; else the sibling ../hlop of the CWD (the dev layout).
+// hlop checkout for the generated MODULE.bazel: the sibling ../hlop of the CWD
+// (the dev layout). Under bazel the runfiles fallback in
+// sim_hlop_include_dir() is what actually resolves the headers.
+//
+// There used to be a `--set compile.cgen.sim_hlop=PATH` override here. It was
+// never registered in the options registry, so passing it was rejected as an
+// unknown flag — i.e. the override had been dead for as long as the registry
+// has existed, and the two fallbacks covered every real layout. Removed rather
+// than registered.
 std::string sim_hlop_path(const Options& opts) {
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "compile.cgen.sim_hlop" && !v.empty()) {
-      return v;
-    }
-  }
+  (void)opts;
   std::error_code ec;
   auto            p = std::filesystem::weakly_canonical(std::filesystem::current_path(ec) / ".." / "hlop", ec);
   return p.empty() ? std::string{"../hlop"} : p.string();
@@ -1408,15 +1411,11 @@ std::string sim_hlop_include_dir(const Options& opts) {
 }
 
 // The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
-// in). `--set compile.cgen.sim_iassert=DIR` wins; else the sibling `../iassert`
-// of the hlop root / CWD, where the header lives under `src/`. Empty -> not found.
+// in): the sibling `../iassert` of the hlop root / CWD, where the header lives
+// under `src/`, else the bazel runfiles. Empty -> not found. (The dead
+// `--set compile.cgen.sim_iassert=DIR` override was removed with sim_hlop's.)
 std::string sim_iassert_include_dir(const Options& opts) {
   std::vector<std::string> cands;
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "compile.cgen.sim_iassert" && !v.empty()) {
-      cands.push_back(v);
-    }
-  }
   std::error_code ec;
   const auto      hlop_root = std::filesystem::path(sim_hlop_path(opts));
   for (const auto& base : {hlop_root.parent_path(), std::filesystem::current_path(ec) / ".."}) {

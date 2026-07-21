@@ -4,6 +4,11 @@
 is intentionally modeled after `pass.isabelle`, but it is a separate pass and a
 separate proof stack.
 
+In macos, you may need to install Lean 4:
+```
+brew install elan
+```
+
 ## Current Implementation State
 
 - `formal/lean` builds a Lean package named `LeanSemanticPrimitives`.

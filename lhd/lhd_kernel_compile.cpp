@@ -214,21 +214,10 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
     w->add_child(a, Lnast_node::create_ref(p.name));
     w->add_child(a, Lnast_node::create_const("__pub"));
     w->add_child(a, Lnast_node::create_const(std::format("'{}'", p.kind)));
-    // A scalar `pub type` alias already stored its "MAX|MIN" face in the
-    // pub_values loop above — a second store here would clobber it (the face
-    // is what build_namespace re-ranges the entry from on reload).
-    if (p.kind == "type") {
-      bool has_face = false;
-      for (const auto& [path, text] : ln->get_pub_values()) {
-        if (path == p.name) {
-          has_face = true;
-          break;
-        }
-      }
-      if (has_face) {
-        continue;
-      }
-    }
+    // A `pub type` needs no special case: it stores the same provenance string
+    // as every other non-value pub. Its RANGE is not carried here at all — it
+    // is read structurally off the exporting unit's
+    // `declare(name, prim_type_int(max,min), 'type')` via Lnast::pub_type_face.
     auto s = w->add_child(stmts, Lnast_ntype::create_store());
     w->set_srcid(s, wid);
     w->add_child(s, Lnast_node::create_ref(p.name));
@@ -1005,11 +994,6 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
 // every selected unit. `tokens` are the input tokens (the verb stripped).
 void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens) {
   auto in = classify_ln_inputs(tokens, "tool cat");
-  for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
-    if (d.kind == "ln") {
-      in.ln_dirs.push_back(d.path);
-    }
-  }
   auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
   for (const auto& ln : units) {  // bare Lnast::dump concatenation (true cat)
     std::ostringstream oss;
@@ -1344,13 +1328,29 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
 
   if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
     if (lib_path.empty() || var.graphs.empty()) {
-      throw Lhd_error{"config", "no graphs to save into --emit-dir lg:", "the input produced no synthesizable modules"};
+      // A type/constant-only unit (a `_pkg` file) legitimately has no lgraph.
+      // Emitting an EMPTY library is the honest outcome — the request was
+      // satisfied, there was simply nothing to put in it — so warn and exit 0
+      // rather than fail. Failing here forced every batch caller that emits
+      // `ln:`+`lg:` per file to string-match this message to tell a real error
+      // from an empty package. It is the LINK step that should notice a module
+      // is missing, not the per-file emit.
+      livehd::diag::warn("lhd.compile", "empty-lg-emit", "io")
+          .msg("--emit-dir lg: produced no graphs — the input has no synthesizable modules")
+          .hint("expected for a type/constant-only unit; the library is written empty")
+          .emit();
+      if (!lib_path.empty()) {
+        TRACE_EVENT("pass", "lg.save");
+        livehd::Hhds_graph_library::save(lib_path);
+      }
+      res.outputs.push_back(lg_out->path);
+    } else {
+      // By construction lib_path == the lg output dir whenever one was
+      // declared (tolg/copy targeted it), so saving the library is the emit.
+      TRACE_EVENT("pass", "lg.save");
+      livehd::Hhds_graph_library::save(lib_path);
+      res.outputs.push_back(lg_out->path);
     }
-    // By construction lib_path == the lg output dir whenever one was
-    // declared (tolg/copy targeted it), so saving the library is the emit.
-    TRACE_EVENT("pass", "lg.save");
-    livehd::Hhds_graph_library::save(lib_path);
-    res.outputs.push_back(lg_out->path);
   }
 
   emit_isabelle_outputs(opts, res, var);

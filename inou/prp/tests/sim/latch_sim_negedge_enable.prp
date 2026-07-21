@@ -1,0 +1,87 @@
+/*
+:name: latch_sim_negedge_enable
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — LIVE (promoted at M5, regression added after the
+// PHASE-2 operand fix). A transparent latch QUALIFYING a negedge flop's
+// ENABLE — the register-file write-strobe shape, and the one that slipped
+// through every other latch/negedge tracker.
+//
+// The two-phase tick drops the pin2var binding of everything reachable from a
+// posedge Q and re-emits that cone so negedge state observes post-rise values.
+// It used to re-ready only the negedge flop's `din`. Here the enable is
+// `lat and armed`: that AND is in the posedge cone (via `armed`), so its
+// binding was erased and never rebuilt, and operand() substituted a silent
+// constant 0 into the commit guard — `nf` never loaded and q stayed 0, with
+// NO diagnostic. cgen_sim.cpp now re-readies every pin the negedge emission
+// reads (din, enable, reset_pin, initial, the ICG guards, any secondary
+// clock), and fails closed if one is still unresolved after phase 2.
+//
+// Note the enable must sit behind a comb node that is ALSO in the posedge
+// cone: wiring the latch Q straight to `enable` binds it to the latch's own
+// member and hides the bug.
+//
+// Values verified against Icarus (see the header of the equivalent .v used
+// offline): the latch and the flop each gate one cycle, so q holds at BOTH
+// c=2 (enable drops via the LATCH) and c=3 (via the FLOP).
+pub mod negen8(clk:bool, g:bool, wen:bool, arm:bool, d:u8) -> (q:u8@[0]) {
+  reg lat:bool:[latch=true]                        // transparent: open while g is 0
+  if !g {
+    lat = wen
+  }
+  reg armed:bool = false                           // POSEDGE flop: puts the AND in `stale`
+  armed = arm
+  wire en:bool = nil
+  en = lat and armed                               // the cone phase 2 used to drop
+  reg nf:u8:[clock_pin=ref clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified
+  if en {
+    nf = d
+  }
+  q = nf
+}
+
+test negen8.latch_qualified_negedge_enable {
+  mut acc = negen8
+  tick 5 {
+    // c0: latch open on wen=1, flop armed        -> load 42
+    // c1: latch CLOSED still holding 1, armed    -> load 99
+    // c2: latch reopens on wen=0                 -> enable drops via the LATCH
+    // c3: latch open on wen=1 but disarmed       -> enable drops via the FLOP
+    // c4: both high again                        -> load 13
+    mut gv:bool = false
+    mut wv:bool = true
+    mut av:bool = true
+    mut dv:u8   = 42
+    if clock == 1 {
+      gv = true
+      wv = false
+      dv = 99
+    } elif clock == 2 {
+      wv = false
+      dv = 7
+    } elif clock == 3 {
+      av = false
+      dv = 55
+    } elif clock == 4 {
+      dv = 13
+    }
+    acc.g   = gv
+    acc.wen = wv
+    acc.arm = av
+    acc.d   = dv
+    step
+    if clock == 0 {
+      assert(acc.q == 42, "latch-qualified enable loaded the negedge flop")
+    }
+    if clock == 1 {
+      assert(acc.q == 99, "closed latch still holds the enable high")
+    }
+    if (clock == 2) or (clock == 3) {
+      assert(acc.q == 99, "enable dropped (latch at c2, flop at c3): q holds")
+    }
+    if clock == 4 {
+      assert(acc.q == 13, "enable re-asserted: q loads again")
+    }
+  }
+}

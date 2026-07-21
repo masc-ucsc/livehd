@@ -72,7 +72,7 @@ void sim_command(Options& opts, Result& res) {
       res.status        = "fail";
       res.error_class   = "usage";
       res.error_message = err;
-      res.exit_code     = 1;
+      res.exit_code     = exit_code_for(res.error_class);
       return;
     }
     if (pretty) {
@@ -117,6 +117,16 @@ void sim_command(Options& opts, Result& res) {
     simroot = buf.data();
   }
   const std::string simdir = simroot + "/sim";
+
+  // --run-only against a workdir that holds no prior --setup-only build has
+  // nothing to run. Say so instead of proceeding into a confusing downstream
+  // failure (a missing driver source reads as a codegen bug, not a stale or
+  // mistyped --workdir).
+  if (run_only && !fs::exists(simdir)) {
+    throw Lhd_error{"missing_file",
+                    std::format("--run-only found no sim build in '{}'", simroot),
+                    "run `lhd sim <tb.prp> --setup-only --workdir <dir>` first, or check --workdir points at that dir"};
+  }
 
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
   // path is absolute (the driver binary is run from the caller's cwd), and when
@@ -206,7 +216,7 @@ void sim_command(Options& opts, Result& res) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
-      res.exit_code     = 1;
+      res.exit_code     = exit_code_for(res.error_class);
       return;
     }
     // Also append a single `drv` cc_binary so the generated dir stays
@@ -259,25 +269,35 @@ void sim_command(Options& opts, Result& res) {
     res.status        = "fail";
     res.error_class   = "usage";
     res.error_message = std::format("no generated sim driver in {} (run --setup-only --workdir {} first)", simdir, simroot);
-    res.exit_code     = 1;
+    res.exit_code     = exit_code_for(res.error_class);
     return;
   }
   // A VCD request against a prior --setup-only that was generated WITHOUT VCD (the
   // driver lacks the trace machinery) would silently produce no waveform — reject
   // it so the user regenerates instead. The `vcd::global_timestamp` line is emitted
   // iff VCD codegen was on (prp_sim).
-  if (run_only && vcd_on) {
+  if (run_only) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
     dss << dfs.rdbuf();
-    if (dss.str().find("vcd::global_timestamp") == std::string::npos) {
+    const bool baked_vcd = dss.str().find("vcd::global_timestamp") != std::string::npos;
+    if (vcd_on && !baked_vcd) {
       res.status        = "fail";
       res.error_class   = "usage";
       res.error_message
           = "this --run-only sim was generated without VCD; re-run without --run-only (or "
                           "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
-      res.exit_code     = 1;
+      res.exit_code     = exit_code_for(res.error_class);
       return;
+    }
+    // PERSIST the setup-time decision. sim.vcd is a DRIVER-AFFECTING setting:
+    // setup bakes the trace machinery in, and the run phase has to link hlop's
+    // vcd_writer.cpp to satisfy it. Requiring the flag again on the run
+    // invocation made the honest two-phase sequence die at link time with an
+    // undefined `__vcd_init()`, so every caller had to repeat the flag. The
+    // driver source already records what was baked — use it.
+    if (baked_vcd && !vcd_on) {
+      vcd_on = true;
     }
   }
   // Same staleness trap for the VCD style: sim.vcdfakedelay is BAKED at setup
@@ -305,7 +325,7 @@ void sim_command(Options& opts, Result& res) {
           "this --run-only sim was generated with sim.vcd_fake_delay={}; the style is baked "
                                       "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
                                       baked_fakedelay ? "true" : "false");
-      res.exit_code     = 1;
+      res.exit_code     = exit_code_for(res.error_class);
       return;
     }
   }
@@ -317,9 +337,12 @@ void sim_command(Options& opts, Result& res) {
     res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
                                     hlop_inc.empty() ? "<not found>" : hlop_inc,
                                     iassert_inc.empty() ? "<not found>" : iassert_inc);
-    res.exit_code     = 1;
+    res.exit_code     = exit_code_for(res.error_class);
     if (pretty) {
-      std::print("  hint: --set compile.cgen.sim_hlop=/path/to/hlop  --set compile.cgen.sim_iassert=/path/to/iassert/src\n");
+      std::print(
+          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp), or export "
+          "RUNFILES_DIR=<...>/lhd.runfiles to run it by hand; a source checkout resolves them from the sibling "
+          "../hlop and ../iassert\n");
       std::fflush(stdout);
     }
     return;
@@ -400,7 +423,7 @@ void sim_command(Options& opts, Result& res) {
     res.error_message = std::format("the sim driver failed to compile ({}): {}",
                                     build_log,
                                     first_err.empty() ? std::string{"see the log"} : first_err);
-    res.exit_code     = 1;
+    res.exit_code     = exit_code_for(res.error_class);
     if (pretty) {
       std::istringstream iss(build_out);
       std::string        ln;
@@ -625,14 +648,14 @@ void sim_command(Options& opts, Result& res) {
     res.error_class   = "usage";
     res.error_message = (!test_sel.empty() && n_run == 0) ? std::format("no test matched '{}' in {}", test_sel, file)
                                                           : std::format("the sim driver rejected an argument in {}", file);
-    res.exit_code     = 1;
+    res.exit_code     = exit_code_for(res.error_class);
   } else {
     // rc == 1 (a test's assert fired) or rc < 0 (the driver crashed / signaled).
     res.status        = "fail";
     res.error_class   = "assert";
     res.error_message = (n_fail > 0 && n_run > 0) ? std::format("{} of {} test(s) failed", n_fail, n_run)
                                                   : std::format("the sim driver exited with code {}", rc);
-    res.exit_code     = 1;
+    res.exit_code     = exit_code_for(res.error_class);
   }
 }
 

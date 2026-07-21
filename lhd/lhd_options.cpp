@@ -362,7 +362,14 @@ Options parse_args(int argc, char** argv) {
     } else if (a == "--in") {
       opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--in-dir") {
-      opts.in_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
+      // Retired: an undocumented alias for a POSITIONAL `ln:DIR`/`lg:DIR` (both
+      // land in opts.in_dirs, so it never did anything the positional form does
+      // not). `lhd compile --help` has always documented inputs as positional.
+      // Kept registered — and rejected — so anyone still passing it is told the
+      // spelling rather than getting a bare "unknown option".
+      throw Lhd_error{"usage",
+                      "--in-dir is not needed — pass IR inputs positionally, as `ln:DIR` or `lg:DIR`",
+                      "e.g. `lhd compile dep.prp ln:pkg_lns/ --emit-dir lg:out` (see `lhd compile --help`)"};
     } else if (a == "--lib") {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--collapse") {  // lec: proven def(s) to force-blackbox (repeatable / comma-sep)
@@ -453,7 +460,23 @@ Options parse_args(int argc, char** argv) {
       // Canonicalize the key against the command path seen so far so an
       // abbreviated key (`adder` after `pass abc`) resolves to `pass.abc.adder`
       // (2h-set_path). Fully-qualified keys pass through unchanged.
-      opts.sets.emplace_back(canonical_set_key(kv.substr(0, pos), cmd_path), kv.substr(pos + 1));
+      auto key = canonical_set_key(kv.substr(0, pos), cmd_path);
+      auto val = kv.substr(pos + 1);
+      // One argv carrying the same flag with two DIFFERENT values is always a
+      // mistake: which one wins is an implementation detail, so silently
+      // picking one makes the command mean something its author did not write.
+      // A caller layering an override on a base command must COLLAPSE the two
+      // before building argv (see _set_override in inou/prp/tests/prplib.py),
+      // not rely on last-wins. Repeating the SAME value is harmless and
+      // accepted — a script may legitimately pass a default twice.
+      for (const auto& [k, v] : opts.sets) {
+        if (k == key && v != val) {
+          throw Lhd_error{"usage",
+                          std::format("--set {} given twice with different values ('{}' then '{}')", key, v, val),
+                          "drop one — repeating a flag with the SAME value is fine, but two values are ambiguous"};
+        }
+      }
+      opts.sets.emplace_back(std::move(key), std::move(val));
     } else if (a == "--dump") {
       // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
       std::string v{need_value(a, i, argc, argv)};

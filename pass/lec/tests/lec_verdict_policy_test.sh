@@ -64,7 +64,15 @@ endmodule
 EOF
 
 run() {  # $1=label $2..=lhd args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false --set formal.timeout=2 --workdir "$WORK/w_$1" 2>&1); RC=$?
+  # The default timeout is only supplied when the CALLER did not pass one.
+  # It used to be appended unconditionally, so a caller's explicit
+  # `--set formal.timeout=20` was silently overridden by this 2 (last-wins) —
+  # the override never took effect. lhd now rejects the duplicate outright.
+  local to=(--set formal.timeout=2)
+  case " ${*:2} " in
+    *" --set formal.timeout="*) to=() ;;
+  esac
+  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) UNKNOWN, default policy -> clean exit 0 + a warning, verdict UNKNOWN

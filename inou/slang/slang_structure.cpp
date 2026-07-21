@@ -890,7 +890,11 @@ std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortS
   }
   std::string pkg_name(pkg->name);
   std::string alias = ident + "_T";
-  referenced_pkg_types_[pkg_name][alias] = {absl::StrCat(mask_text(bits), "|0"), absl::StrCat("u", bits)};
+  // .first is the alias's MAX (its min is 0 — these are always `uN` port dims),
+  // .second its `uN` print text. The max is emitted as the declare's
+  // prim_type_int bound, which is where every consumer reads the range from; it
+  // is never packed into a single "MAX|MIN" string.
+  referenced_pkg_types_[pkg_name][alias] = {mask_text(bits), absl::StrCat("u", bits)};
   // the driving param itself also exports (`pub comptime const SEL_W = 4`
   // next to `pub type SEL_W_T = u4`) — width provenance reads best in pairs
   referenced_pkg_params_[pkg_name][ident] = const_text(cv->integer());

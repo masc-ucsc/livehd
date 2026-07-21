@@ -66,4 +66,31 @@ $LHD compile "$W/tuple.prp" --top tup --workdir "$W/tw" -q \
   || fail "tuple named type regressed (scalar-range borrow must skip aggregates)"
 echo "PASS: tuple named types are unaffected by the scalar-alias borrow"
 
+# ── (4) a `pub type` alias survives a two-invocation `ln:` round-trip ────────
+# The alias's range is STRUCTURAL: it lives in the exporting unit's
+# `declare(name, prim_type_int(max,min), 'type')` and is read back through
+# Lnast::pub_type_face. It used to be duplicated into pub_values as a packed
+# "MAX|MIN" string, which the importer replayed as a `const` and could not
+# parse back ("encoding could not use |"), so ANY package with a `pub type`
+# broke `ln:` reuse. lhd_import_test covers ln: round-trips but has no
+# `pub type`, which is exactly why that shipped.
+$LHD compile "$W/pkg.prp" --emit-dir "ln:$W/ln_pkg" --workdir "$W/lnw" -q \
+  || fail "`pub type` package unit did not emit an ln: unit"
+if $LHD tool cat "ln:$W/ln_pkg" 2>&1 | grep -q '|'; then
+  $LHD tool cat "ln:$W/ln_pkg" 2>&1 | grep '|' >&2
+  fail "a packed MAX|MIN face is back in the emitted ln: unit"
+fi
+# Isolate the importer: only use.prp + the ln: unit, so sibling discovery of
+# pkg.prp cannot mask a broken round-trip.
+mkdir -p "$W/iso"
+cp "$W/use.prp" "$W/iso/"
+cp -r "$W/ln_pkg" "$W/iso/"
+$LHD compile "$W/iso/use.prp" "ln:$W/iso/ln_pkg" --top use_pkg --workdir "$W/iso/rw" -q \
+  2>"$W/iso.err" || { cat "$W/iso.err" >&2; fail "pub type alias did not survive the ln: round-trip"; }
+if grep -q 'could not use' "$W/iso.err"; then
+  cat "$W/iso.err" >&2
+  fail "the ln: importer still cannot parse a pub type export"
+fi
+echo "PASS: pub type scalar alias survives an ln: round-trip"
+
 echo "PASS: all scalar named-type regressions"

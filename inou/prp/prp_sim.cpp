@@ -67,6 +67,7 @@ bool parse_hpp(const std::string& path, Dut& d) {
   std::string        line;
   int                in_block = 0;  // 0 none, 1 In, 2 Out
   bool               got_cls  = false;
+  size_t             group_start = 0;  // first leaf of the tuple port being parsed
   while (std::getline(iss, line)) {
     auto sw = line.find("struct ");
     if (sw != std::string::npos) {
@@ -75,6 +76,12 @@ bool parse_hpp(const std::string& path, Dut& d) {
       auto name = rest.substr(0, sp);
       if (name.find(';') != std::string::npos) {
         continue;  // a forward declaration (e.g. `struct Signal;`), not the DUT struct
+      }
+      if (name.empty() && in_block != 0) {
+        // an ANONYMOUS `struct {` inside In/Out opens a tuple port; remember
+        // where its leaves start so the `} <name>{};` close can prefix them
+        group_start = (in_block == 1 ? d.inputs : d.outputs).size();
+        continue;
       }
       if (name == "In") {
         in_block = 1;
@@ -92,7 +99,21 @@ bool parse_hpp(const std::string& path, Dut& d) {
     }
     if (in_block != 0) {
       size_t nb = line.find_first_not_of(" \t");
-      if (nb != std::string::npos && line[nb] == '}') {  // a line that *starts* with '}' closes the struct
+      if (nb != std::string::npos && line[nb] == '}') {
+        // `} name{};` closes a TUPLE port's nested struct (cgen mirrors a
+        // tuple/struct-packed port as a nested struct so the RTL path and the
+        // C++ path are the same text). Its leaves were buffered without a
+        // prefix; stamp the tuple name on them now. A bare `}` closes In/Out.
+        size_t b2 = line.find_first_not_of(" \t", nb + 1);
+        size_t e2 = b2 == std::string::npos ? b2 : line.find_first_of("{ \t;", b2);
+        if (b2 != std::string::npos && e2 != std::string::npos && e2 > b2) {
+          const std::string tname = line.substr(b2, e2 - b2);
+          auto&             dst   = (in_block == 1 ? d.inputs : d.outputs);
+          for (size_t k = group_start; k < dst.size(); ++k) {
+            dst[k] = tname + "." + dst[k];
+          }
+          continue;
+        }
         in_block = 0;
         continue;
       }
@@ -745,13 +766,45 @@ private:
       return false;
     }
     base = text_of(src_, ts_node_named_child(n, 0));
-    fld  = text_of(src_, ts_node_named_child(n, 1));
+    // `acc.io_in.pc` (a tuple port's leaf, or a hierarchical state path) may
+    // arrive either FLAT — one dot_expression with N children — or nested as
+    // dot(dot(acc, io_in), pc). Either way the instance is the leftmost
+    // segment and everything after it is the field path.
+    fld.clear();
+    for (uint32_t k = 1; k < ts_node_named_child_count(n); ++k) {
+      if (!fld.empty()) {
+        fld += ".";
+      }
+      fld += text_of(src_, ts_node_named_child(n, k));
+    }
+    if (inst_of_var.count(base) == 0) {
+      if (auto dot = base.find('.'); dot != std::string::npos && inst_of_var.count(base.substr(0, dot)) != 0) {
+        fld  = base.substr(dot + 1) + "." + fld;
+        base = base.substr(0, dot);
+      }
+    }
     return inst_of_var.count(base) != 0;
   }
 
   // C++ accessor for `acc.fld`: __in.fld (input), __out.fld (output), or fld
   // (struct-scope reg). `write` rejects read-only targets.
   std::string field_access(const std::string& var, const std::string& fld, bool write) {
+    // A tuple/struct-packed port is a nested struct in the generated header, so
+    // its leaf path IS the C++ path (`acc.io_in.pc` -> `__in.io_in.pc`). Check
+    // the port lists before the hierarchical-state walk below, which would
+    // otherwise read `io_in` as a sub-instance and reject the write.
+    {
+      const Dut& td = duts_.at(inst_of_var.at(var));
+      if (td.has_input(fld)) {
+        return var + ".__in." + fld;
+      }
+      if (td.has_output(fld)) {
+        if (write) {
+          fail("cannot poke output '" + var + "." + fld + "' (outputs are read-only)");
+        }
+        return var + ".peek(" + var + ".__in)." + fld;
+      }
+    }
     if (fld.find('.') != std::string::npos) {
       // Hierarchical state path `acc.sub[.sub...].leaf[idx]` (READ-only):
       // each intermediate segment names a sub-instance member of the current

@@ -1020,11 +1020,6 @@ void tool_tree_ln_print(const Ln_tree_row& row, const std::string& prefix, bool 
 
 void tool_tree_ln(Options& opts, Result& res, const std::vector<std::string>& ln_tokens) {
   auto in = classify_ln_inputs(ln_tokens, "tool tree");
-  for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
-    if (d.kind == "ln") {
-      in.ln_dirs.push_back(d.path);
-    }
-  }
   auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
   if (units.empty()) {
     throw Lhd_error{"config", "ln: input holds no matching units", "check --top"};
@@ -1114,11 +1109,6 @@ void tool_command(Options& opts, Result& res) {
       ln_tokens.push_back(t);
     } else {
       filters.push_back(parse_tool_filter(t));
-    }
-  }
-  for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
-    if (d.kind == "ln") {
-      ln_tokens.push_back("ln:" + d.path);
     }
   }
   for (const auto& d : opts.ins) {  // --in lg:DIR spelling

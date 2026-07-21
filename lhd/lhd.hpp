@@ -158,6 +158,13 @@ struct Options {
   Diag_fmt diag_fmt = default_diag_fmt();
 };
 
+// Process exit code for an error class. 0 is success and EVERY failure stays
+// non-zero, so `cmd || handle` keeps working; the distinct values let a caller
+// tell WHY without parsing stdout — notably `assert` (the tool worked, the
+// DESIGN failed) apart from `usage`/`missing_file` (the invocation was wrong).
+// Unknown and `internal` stay 1, the historical value.
+int exit_code_for(std::string_view error_class);
+
 // The structured result envelope (future_cli.md "Result schema"). Written as
 // one JSON object to --result-json (else stdout).
 struct Result {

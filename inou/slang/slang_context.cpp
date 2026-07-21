@@ -236,12 +236,14 @@ void Slang_context::emit_package_units() {
       }
     }
     // Port-dim scalar type aliases (`pub type VPU_FCMD_SZ_T = u7`): pub kind
-    // "type"; the "MAX|MIN" face rides pub_values (the import machinery binds a
-    // ranged entry from it), the `uN` print text rides package_const_types_.
+    // "type", carrying NO value. The range is emitted structurally, as the
+    // declare's `prim_type_int(max, 0)` — the same shape the Pyrope front-end
+    // produces — so the import machinery reads it off the tree via
+    // Lnast::pub_type_face. The `uN` print text rides package_const_types_.
     if (auto tit = referenced_pkg_types_.find(pkg_name); tit != referenced_pkg_types_.end()) {
       for (const auto& [alias, face_text] : tit->second) {
+        builder_.create_declare_stmts(alias, "type", face_text.first, "0");
         builder_.lnast->add_pub(alias, "type");
-        pub_vals.emplace_back(alias, face_text.first);
         type_m.emplace(alias, face_text.second);
       }
     }

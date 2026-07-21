@@ -1,0 +1,239 @@
+/*
+:name: hotmux_arm64
+:type: verify
+:top_module: hotmux_arm64
+:verify_bound: 4
+:verify_proven: 1
+:verify_refuted: 1
+*/
+// SOUNDNESS regression: a Hotmux with MORE THAN 64 arms.
+//
+// The one-hot arm-select condition used to be built as `int64_t{1} << k`, which
+// is undefined for k >= 64 (the shift count is masked mod 64, so arm 64 aliases
+// arm 0) and was then squeezed through a uint64_t-valued bv_const that cannot
+// represent a one-hot bit above 63 at all. Every arm from 64 up became
+// unreachable in the SMT model and silently fell through to the `else` arm.
+//
+// That produced FALSE PROOFS, not just false refutations: two designs differing
+// only above arm 63 were reported "PROVEN equivalent", and an assert that only
+// arm >= 64 can violate came back PROVEN. Any 128-entry `match` -- an ordinary
+// ROM or instruction decoder -- is enough to hit it. Found via minion's
+// trans_rcp_rom_case_* / vpu_decoder blocks (lhdsuite).
+//
+// The value 0xbad is produced by arm 64 and by NO other arm, so the first
+// assert is refutable ONLY if arm 64 is modelled. If the arm is dropped it
+// reads as PROVEN and this test fails on the count. Fixed in pass/lec/encode.cpp
+// (mux_arm_cond) and pass/formal/prove.cpp: test the selector bit with EXTRACT
+// instead of materialising a wide one-hot constant.
+pub mod hotmux_arm64(clock:u1, reset:u1, idx:u8) -> (o:u16@[1]) {
+  mut v = 0
+  match idx#[0..=6] {
+    == 0 {
+      v = 1
+    }
+    == 1 {
+      v = 2
+    }
+    == 2 {
+      v = 3
+    }
+    == 3 {
+      v = 4
+    }
+    == 4 {
+      v = 5
+    }
+    == 5 {
+      v = 6
+    }
+    == 6 {
+      v = 7
+    }
+    == 7 {
+      v = 8
+    }
+    == 8 {
+      v = 9
+    }
+    == 9 {
+      v = 10
+    }
+    == 10 {
+      v = 11
+    }
+    == 11 {
+      v = 12
+    }
+    == 12 {
+      v = 13
+    }
+    == 13 {
+      v = 14
+    }
+    == 14 {
+      v = 15
+    }
+    == 15 {
+      v = 16
+    }
+    == 16 {
+      v = 17
+    }
+    == 17 {
+      v = 18
+    }
+    == 18 {
+      v = 19
+    }
+    == 19 {
+      v = 20
+    }
+    == 20 {
+      v = 21
+    }
+    == 21 {
+      v = 22
+    }
+    == 22 {
+      v = 23
+    }
+    == 23 {
+      v = 24
+    }
+    == 24 {
+      v = 25
+    }
+    == 25 {
+      v = 26
+    }
+    == 26 {
+      v = 27
+    }
+    == 27 {
+      v = 28
+    }
+    == 28 {
+      v = 29
+    }
+    == 29 {
+      v = 30
+    }
+    == 30 {
+      v = 31
+    }
+    == 31 {
+      v = 32
+    }
+    == 32 {
+      v = 33
+    }
+    == 33 {
+      v = 34
+    }
+    == 34 {
+      v = 35
+    }
+    == 35 {
+      v = 36
+    }
+    == 36 {
+      v = 37
+    }
+    == 37 {
+      v = 38
+    }
+    == 38 {
+      v = 39
+    }
+    == 39 {
+      v = 40
+    }
+    == 40 {
+      v = 41
+    }
+    == 41 {
+      v = 42
+    }
+    == 42 {
+      v = 43
+    }
+    == 43 {
+      v = 44
+    }
+    == 44 {
+      v = 45
+    }
+    == 45 {
+      v = 46
+    }
+    == 46 {
+      v = 47
+    }
+    == 47 {
+      v = 48
+    }
+    == 48 {
+      v = 49
+    }
+    == 49 {
+      v = 50
+    }
+    == 50 {
+      v = 51
+    }
+    == 51 {
+      v = 52
+    }
+    == 52 {
+      v = 53
+    }
+    == 53 {
+      v = 54
+    }
+    == 54 {
+      v = 55
+    }
+    == 55 {
+      v = 56
+    }
+    == 56 {
+      v = 57
+    }
+    == 57 {
+      v = 58
+    }
+    == 58 {
+      v = 59
+    }
+    == 59 {
+      v = 60
+    }
+    == 60 {
+      v = 61
+    }
+    == 61 {
+      v = 62
+    }
+    == 62 {
+      v = 63
+    }
+    == 63 {
+      v = 64
+    }
+    == 64 {
+      v = 0xbad
+    }
+    else {
+      v = 0
+    }
+  }
+  reg r:u16 = 0
+  r = v#[0..=15]
+  o = r
+}
+
+formal hm.props {
+  mut acc = hotmux_arm64
+  assert(acc.r != 0xbad, "arm 64 is REACHABLE and must refute")  // REFUTED at idx=64
+  assert(acc.r <= 0xbad, "every arm value is in range")          // PROVEN
+}

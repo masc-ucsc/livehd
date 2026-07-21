@@ -253,18 +253,20 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
                              const std::vector<std::pair<std::string, std::string>>& values,
                              const std::vector<Lnast_pub_entry>&                     pubs) {
     auto b = std::make_shared<Bundle>(dst);
-    // A scalar `pub type` alias rides pub_values as a "MAX|MIN" range face —
-    // NOT a value; it binds below as a RANGED entry so an importer's
-    // `x:pkg.X` declare-borrow (upass_runner bake_decl_pre_step) enforces the
-    // alias width.
-    std::set<std::string, std::less<>> type_names;
-    for (const auto& p : pubs) {
-      if (p.kind == "type") {
-        type_names.insert(p.name);
-      }
+    // The exporting unit's own tree — the single source of truth for a
+    // `pub type` alias's range (its `declare(name, prim_type_int(max,min),
+    // 'type')`). It is always registered next to its `.__pub` wrapper:
+    // save_ln_dir publishes both, load_ln_dir adopts both, and load restores
+    // the pub_list that pub_type_face keys off.
+    std::shared_ptr<Lnast> src_tree;
+    if (const auto sit = function_registry.find(std::string(unit)); sit != function_registry.end()) {
+      src_tree = sit->second;
     }
     for (const auto& [path, val_text] : values) {
-      if (type_names.count(path) != 0u) {
+      // A pre-fix `ln:` dir may still carry a packed "MAX|MIN" type face here.
+      // It is not a value and Dlop::from_pyrope would throw on the '|', so skip
+      // it; the range is taken from the tree below.
+      if (val_text.find('|') != std::string::npos) {
         continue;
       }
       b->set(bundle_path::of_string(path), *Dlop::from_pyrope(val_text));
@@ -273,21 +275,15 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
       if (p.kind == "value") {
         continue;
       }
-      if (p.kind == "type") {
-        std::string face;
-        for (const auto& [path, val_text] : values) {
-          if (path == p.name) {
-            face = val_text;
-            break;
-          }
-        }
-        if (auto bar = face.find('|'); bar != std::string::npos) {
-          auto mx = Dlop::from_pyrope(face.substr(0, bar));
-          auto mn = Dlop::from_pyrope(face.substr(bar + 1));
+      if (p.kind == "type" && src_tree) {
+        // Bind a RANGED entry so an importer's `x:pkg.X` declare-borrow
+        // (upass_runner bake_decl_pre_step) enforces the alias width.
+        std::string max_txt;
+        std::string min_txt;
+        if (src_tree->pub_type_face(p.name, max_txt, min_txt)) {
+          auto mx = Dlop::from_pyrope(max_txt);
+          auto mn = Dlop::from_pyrope(min_txt);
           if (mx && mn) {
-            if (getenv("LHD_DBG_BORROW") != nullptr) {
-              fprintf(stderr, "BINDNS type %s.%s face=%s dst=%s\n", std::string(unit).c_str(), p.name.c_str(), face.c_str(), dst.c_str());
-            }
             Bundle::Entry e(false, str_const(absl::StrCat(unit, ".", p.name)));
             e.decl_max = *mx;
             e.decl_min = *mn;
@@ -296,7 +292,8 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
             continue;
           }
         }
-        // face-less (tuple/opaque alias): keep the provenance-string bind below
+        // rangeless alias (tuple/opaque, or a width the declare left
+        // prim_type_none): keep the provenance-string bind below
       }
       b->set(bundle_path::of_string(p.name), str_const(absl::StrCat(unit, ".", p.name)));
       b->set_attr(p.name, "pub", str_const(p.kind));

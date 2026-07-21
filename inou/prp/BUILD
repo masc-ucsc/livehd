@@ -205,6 +205,13 @@ cc_test(
         "generic_named_bind",
         "generic_default_arg",
         "input_default",
+        # A VECTOR port (unnamed/positional tuple, or an array) has no lowering
+        # in either direction. Counterpart of tests/sim/tuple_io_ports.prp,
+        # which covers the NAMED tuple and passes: a named tuple's field order
+        # is not guaranteed so its leaves may only be addressed by name, while
+        # an unnamed entry is the one aggregate with a defined order and so the
+        # only one that could be indexed/packed as a vector.
+        "vector_io_ports",
         # Known BUG tracker (not TBD): const store to a wire-BUNDLE field is
         # folded+dropped (detupled dotted declare loses its wire mode), then
         # tolg errors "wire 'io.a' is never driven" on valid code. See the

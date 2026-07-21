@@ -18,7 +18,7 @@ namespace {
 
 void mark_failed(lhd::Result& res, const lhd::Lhd_error& e) {
   res.status        = "fail";
-  res.exit_code     = 1;
+  res.exit_code     = lhd::exit_code_for(e.cls);
   res.error_class   = e.cls;
   res.error_message = e.msg;
   res.error_hint    = e.hint;

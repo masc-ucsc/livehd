@@ -1,0 +1,91 @@
+/*
+:name: tuple_io_ports
+:type: simulation
+*/
+
+// TUPLE PORTS, addressed from a testbench — on BOTH sides of the interface.
+//
+// A tuple (or a Verilog `struct packed`) port flattens to dotted leaves:
+// `cmd:(op:u4, data:u16)` becomes the ports `cmd.op` and `cmd.data`, and the
+// lgraph never sees the tuple. A dot is not a legal C++ member name, so this
+// used to be mangled away to `cmd_op` and a `test` block could then address
+// the port under NO spelling — not the aggregate, not the leaf, not flat —
+// failing with "unknown field 'cmd' on instance 'acc'". That is what blocked
+// simulating any slang re-emission of RTL with struct-packed ports.
+//
+// cgen now MIRRORS the tuple as a nested struct in the generated header:
+//
+//     struct In { struct { Slop<4> op{}; Slop<16> data{}; } cmd{}; };
+//
+// so the RTL path and the C++ path are the same text and `acc.cmd.op` needs no
+// translation at all. Leaves keep declaration order, which is packed order
+// (first member = most significant).
+//
+// This fixture pins BOTH directions — a tuple INPUT that is driven and a tuple
+// OUTPUT that is read — plus a scalar port alongside them, so a mixed
+// interface stays correct. Each tick adds cmd.data + cmd.op = 11 to the
+// accumulator, so after the tick at `clock` the sum is 11*(clock+1).
+pub mod tuple_io(clk:bool, cmd:(op:u4, data:u16), en:bool) -> (res:(sum:u20, seen:u1)@[0]) {
+  reg total:u20 = 0
+  reg hit:u1 = 0
+  if en {
+    total = total + cmd.data + cmd.op
+    hit = 1
+  }
+  res.sum = total
+  res.seen = hit
+}
+
+test tuple_io.drive_and_read {
+  mut acc = tuple_io
+  tick 4 {
+    // drive the LEAVES of a tuple input, next to a plain scalar port
+    acc.en = 1
+    acc.cmd.op = 1
+    acc.cmd.data = 10
+    step
+    // read the LEAVES of a tuple output
+    assert(acc.res.sum == 11 * (clock + 1), "tuple input drove the accumulator")
+    assert(acc.res.seen == 1, "tuple output leaf reads the enable flag")
+  }
+}
+
+test tuple_io.leaves_are_independent {
+  mut acc = tuple_io
+  tick 3 {
+    // holding en low must freeze the accumulator even while the tuple input
+    // leaves are being driven — i.e. the leaves are distinct ports, not one
+    // aliased blob
+    acc.en = 0
+    acc.cmd.op = 7
+    acc.cmd.data = 900
+    step
+    assert(acc.res.sum == 0, "disabled: tuple input leaves drive nothing")
+    assert(acc.res.seen == 0, "disabled: tuple output leaf stays low")
+  }
+}
+
+// TWO tuple ports with a scalar BETWEEN them, plus a tuple output — the shape
+// that catches leaf/port mis-association. The generated header emits one
+// nested struct per tuple, so a reader that mistakes where a group starts (or
+// forgets to close one) silently attributes `mid`, or another tuple's leaves,
+// to the wrong port. Every field here is distinct and prime-weighted so any
+// such mix-up changes the sum.
+pub mod tuple_pair(clk:bool, lhs:(a:u8, b:u8), mid:u8, rhs:(c:u8, d:u8)) -> (sums:(lo:u12, hi:u12)@[0]) {
+  sums.lo = lhs.a + (lhs.b * 3) + mid
+  sums.hi = rhs.c + (rhs.d * 5) + mid
+}
+
+test tuple_pair.two_tuples_and_a_scalar {
+  mut acc = tuple_pair
+  tick 2 {
+    acc.lhs.a = 1
+    acc.lhs.b = 2
+    acc.mid   = 10
+    acc.rhs.c = 4
+    acc.rhs.d = 8
+    step
+    assert(acc.sums.lo == 17, "lhs tuple + scalar: 1 + 2*3 + 10")
+    assert(acc.sums.hi == 54, "rhs tuple + scalar: 4 + 8*5 + 10")
+  }
+}

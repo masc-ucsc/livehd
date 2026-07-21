@@ -562,9 +562,21 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       }
       result = lec::fit_to(tm_, arms.back(), W);
       for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
-        int64_t key  = (op == Ntype_op::Mux) ? k : (int64_t{1} << k);
-        Term    cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(sel.width, static_cast<uint64_t>(key))});
-        result       = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, arms[k], W), result});
+        // Hotmux tests its one-hot bit via EXTRACT, never against a `1 << k`
+        // constant: that is UB for k >= 64 and unrepresentable in a uint64_t,
+        // which silently drops every arm above 63 (see the same fix and the
+        // full rationale in pass/lec/encode.cpp's mux_arm_cond).
+        Term cond;
+        if (op == Ntype_op::Mux) {
+          cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(sel.width, static_cast<uint64_t>(k))});
+        } else {
+          if (k >= sel.width) {
+            enc_unsupported_ = true;
+            return std::nullopt;
+          }
+          cond = tm_.mkTerm(Kind::EQUAL, {bv_extract(sel.term, k, k), bv_const(1, 1)});
+        }
+        result = tm_.mkTerm(Kind::ITE, {cond, lec::fit_to(tm_, arms[k], W), result});
       }
       break;
     }

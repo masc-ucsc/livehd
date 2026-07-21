@@ -285,31 +285,41 @@ void Bitwidth::process_ror(hhds::Node_class& node, livehd::graph_util::Edge_vec&
 void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
 
+  // ~x == -x-1 is monotonically DECREASING, so the operand's max maps to the
+  // result's MIN and its min to the result's MAX.
+  //
+  // Seed from the first operand rather than from a default-constructed Dlop.
+  // The defaults sit at 0 and were only ever widened outward, so for a
+  // non-negative operand (~x always negative) max_val never came down off 0:
+  // the range came out as [~pmax, 0] instead of [~pmax, ~pmin], which
+  // is_always_positive()/set_bits_sign() then read as UNSIGNED. That single
+  // wrong attribute made three consumers disagree about the spare sign bit --
+  // the LEC took one bit less than the pin declares, cgen emitted a correct
+  // signed net, and abc zero-filled the widening where it had to sign-extend
+  // (`(~ec)#[0..=9]` mapped to 511 instead of 1023).
   Dlop max_val;
   Dlop min_val;
+  bool seeded = false;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
-    if (it != bwmap.end()) {
-      auto pmax        = it->second.get_max();
-      auto pmin        = it->second.get_min();
-      auto pmax_1scomp = pmax.not_op();
-      auto pmin_1scomp = pmin.not_op();
-      if (pmax_1scomp->gt_op(max_val)->is_known_true()) {
-        max_val = pmax_1scomp;
-      }
-      if (pmin_1scomp->gt_op(max_val)->is_known_true()) {
-        max_val = pmin_1scomp;
-      }
-      if (pmax_1scomp->lt_op(min_val)->is_known_true()) {
-        min_val = pmax_1scomp;
-      }
-      if (pmin_1scomp->lt_op(min_val)->is_known_true()) {
-        min_val = pmin_1scomp;
-      }
-    } else {
+    if (it == bwmap.end()) {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
       return;
+    }
+    auto lo = it->second.get_max().not_op();  // ~max is the SMALLEST result
+    auto hi = it->second.get_min().not_op();  // ~min is the LARGEST result
+    if (!seeded) {
+      min_val = lo;
+      max_val = hi;
+      seeded  = true;
+      continue;
+    }
+    if (lo->lt_op(min_val)->is_known_true()) {
+      min_val = lo;
+    }
+    if (hi->gt_op(max_val)->is_known_true()) {
+      max_val = hi;
     }
   }
 

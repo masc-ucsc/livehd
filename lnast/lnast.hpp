@@ -593,11 +593,14 @@ public:
   }
   const absl::flat_hash_map<std::string, std::string>& get_io_type_names() const noexcept { return io_type_names_; }
 
-  // Scalar `pub type` alias face of THIS unit: the "MAX|MIN" range texts for
-  // `member`, from pub_values ("MAX|MIN", stamped by the constprop harvest or
-  // the slang reader) or — before the exporter's harvest ran (unit order is
-  // arbitrary) — from its `declare(member, prim_type_int(max,min), 'type')`
-  // statement. False when `member` is not a scalar type export.
+  // Declared range of a scalar `pub type` alias of THIS unit, read from its
+  // `declare(member, prim_type_int(max,min), 'type')` statement — the single
+  // source of truth. A type's range is structural, so it is never stored
+  // alongside the tree: it used to be duplicated into pub_values as a packed
+  // "MAX|MIN" string (and that string, replayed as a `const`, could not be
+  // parsed back by Dlop::from_pyrope, which is what broke `ln:` reuse of any
+  // package with a `pub type`). False when `member` is not a scalar type
+  // export — a tuple/opaque alias, or a width the declare left prim_type_none.
   bool pub_type_face(std::string_view member, std::string& max_txt, std::string& min_txt) const {
     bool is_type = false;
     for (const auto& p : get_pub_list()) {
@@ -608,18 +611,6 @@ public:
     }
     if (!is_type) {
       return false;
-    }
-    for (const auto& [path, face] : pub_values_) {
-      if (path != member) {
-        continue;
-      }
-      const auto bar = face.find('|');
-      if (bar == std::string::npos) {
-        return false;
-      }
-      max_txt = face.substr(0, bar);
-      min_txt = face.substr(bar + 1);
-      return true;
     }
     auto root = get_root();
     for (auto c = get_child(root); !c.is_invalid(); c = get_sibling_next(c)) {

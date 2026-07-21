@@ -103,6 +103,25 @@ class PrpRunner:
         cmd += ['--set', 'upass.verifier=false', '--set', 'upass.tolg=false']
         return cmd
 
+    @staticmethod
+    def _set_override(cmd, key, value):
+        """Set `--set key=value`, REPLACING any earlier value for the same key.
+
+        Composing on top of a base builder (lhd_upass) used to just append the
+        override, leaving one argv holding both `upass.verifier=false` and
+        `=true` and relying on last-wins. That is ambiguous to anyone reading
+        the command, so lhd now rejects a repeated key with a different value;
+        collapse it here instead.
+        """
+        out, i = [], 0
+        while i < len(cmd):
+            if cmd[i] == '--set' and i + 1 < len(cmd) and cmd[i + 1].split('=')[0] == key:
+                i += 2
+                continue
+            out.append(cmd[i])
+            i += 1
+        return out + ['--set', '{}={}'.format(key, value)]
+
     def lhd_comptime(self, test, mode):
         # Pure compile-time program: every cassert must resolve. The verifier
         # (lhd default: off) is turned ON, mirroring the old bare pass.upass
@@ -115,8 +134,7 @@ class PrpRunner:
         #   :verifier_fail: N   — expected count of known-false casserts
         # When set, the verifier end_run compares its tally and fails the
         # test if they don't match. -1 or absent disables the check.
-        cmd = self.lhd_upass(test, mode)
-        cmd += ['--set', 'upass.verifier=true']
+        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
         for tag in ('verifier_pass', 'verifier_fail', 'verifier_include_funcs'):
             if tag in test.params:
                 cmd += ['--set', 'upass.{}={}'.format(tag, test.params[tag])]
@@ -134,8 +152,7 @@ class PrpRunner:
         # the LNAST->LGraph lowering (recipe O0 + lg: emit) so errors that
         # only fire at tolg (e.g. a func_call with no hardware lowering) are
         # exercisable as error tests.
-        cmd = self.lhd_upass(test, mode)
-        cmd += ['--set', 'upass.verifier=true']
+        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
         if test.params.get('tolg'):
             cmd += ['--recipe', 'O0', '--emit-dir',
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]

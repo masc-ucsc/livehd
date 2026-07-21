@@ -21,7 +21,7 @@ constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
-    R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported"])json";
+    R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert"])json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -1208,6 +1208,50 @@ int run_meta_command(const Options& opts) {
     return describe_command(opts);
   }
   return help_command(opts);
+}
+
+}  // namespace lhd
+
+namespace lhd {
+
+// Distinct process exit codes per error class (see lhd.hpp). Every failure is
+// non-zero so `cmd || handle` is unchanged; the values let a caller tell an
+// invocation mistake (usage/missing_file/config) from a tool limitation
+// (unsupported/timeout) from a DESIGN result (assert/equiv_fail — the tool ran
+// correctly and the design is what failed). `internal` and anything unknown
+// keep 1, the historical catch-all, so a new class is never silently mapped.
+int exit_code_for(std::string_view error_class) {
+  if (error_class == "usage") {
+    return 2;
+  }
+  if (error_class == "missing_file") {
+    return 3;
+  }
+  if (error_class == "config") {
+    return 4;
+  }
+  if (error_class == "dependency") {
+    return 5;
+  }
+  if (error_class == "syntax") {
+    return 6;
+  }
+  if (error_class == "unsupported") {
+    return 7;
+  }
+  if (error_class == "timeout") {
+    return 8;
+  }
+  if (error_class == "signal") {
+    return 9;
+  }
+  if (error_class == "equiv_fail") {
+    return 10;
+  }
+  if (error_class == "assert") {
+    return 11;  // a testbench assert fired: the DESIGN failed, not the tool
+  }
+  return 1;  // internal, and any class not listed above
 }
 
 }  // namespace lhd

@@ -1,0 +1,35 @@
+/*
+:name: vector_io_ports
+:type: compile
+*/
+
+// TBD tracker: a VECTOR port — an unnamed/positional tuple, or an array — has
+// no lowering, in either direction.
+//
+// This is the counterpart of tests/sim/tuple_io_ports.prp, which covers the
+// NAMED tuple and passes. The distinction matters and is why both exist: a
+// named tuple's field order is alphabetical but NOT guaranteed, so its leaves
+// may only ever be addressed BY NAME. An unnamed/positional entry is the one
+// aggregate that does carry a defined order, so it is the only shape that
+// could legitimately be indexed — or packed — as a vector. None of it lowers
+// yet, so `lhd sim` has nothing to address and no ordered-aggregate support
+// can be built on top.
+//
+// Today's exact diagnostics (all from `lhd compile`, no sim involved):
+//
+//   positional tuple IN, `v:(u4, u8)` read as `v[0]`
+//     upass.tolg: unresolved reference '%o_0' — it has no driver (often an
+//     unassigned variable or a value that resolved to nil)
+//
+//   array IN, `v:[2]u8` read as `v[0]`      -> the same "resolved to nil"
+//
+//   array OUT, `o:[2]u8` written as `o[0]`
+//     upass.tolg: tuple/field store to 'o' has no hardware lowering — the
+//     elaboration left a multi-element store that cannot be turned into wires
+//
+// The input side fails first, so that is what this fixture pins. Flip it to
+// tests/sim/ with a driving testbench (and add the array-output half) once
+// positional aggregates lower.
+pub comb vector_io(v:(u4, u8)) -> (o:u12) {
+  o = v[0] + v[1]
+}
