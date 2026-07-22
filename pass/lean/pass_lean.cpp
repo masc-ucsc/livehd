@@ -8,9 +8,11 @@
 #include "pass_lean.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -54,6 +56,29 @@ LeanCertWFFallback parse_cert_wf_fallback(std::string_view mode) {
     return LeanCertWFFallback::Eval;
   }
   return LeanCertWFFallback::Fail;
+}
+
+// Parse the max_width knob. "0"/"unlimited"/"inf"/"none" (case-insensitive) mean
+// no cap -> SIZE_MAX (every `w > max_width` guard is then always-false, so the
+// upper bound is disabled while the separate `w == 0` unsized-node check stays).
+// A positive integer sets that cap; empty/garbage falls back to the default.
+size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
+  if (s.empty()) {
+    return dflt;
+  }
+  std::string l(s);
+  for (auto& c : l) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  if (l == "unlimited" || l == "inf" || l == "none" || l == "0") {
+    return std::numeric_limits<size_t>::max();
+  }
+  try {
+    size_t v = std::stoul(l);
+    return v == 0 ? std::numeric_limits<size_t>::max() : v;
+  } catch (...) {
+    return dflt;
+  }
 }
 
 const std::unordered_set<std::string> kLeanReserved = {
@@ -909,16 +934,7 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
     cert_chunk_limit = 0;
   }
 
-  auto mw = var.get("max_width");
-  if (!mw.empty()) {
-    try {
-      max_width = std::stoul(std::string(mw));
-    } catch (...) {
-      max_width = 1024;
-    }
-  } else {
-    max_width = 1024;
-  }
+  max_width = parse_max_width(var.get("max_width"));
 }
 
 void Pass_lean::setup() {
@@ -930,7 +946,7 @@ void Pass_lean::setup() {
   m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)", "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
-  m1.add_label_optional("max_width", "Hard cap on node Bits width.", "1024");
+  m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
   m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked.", "25");

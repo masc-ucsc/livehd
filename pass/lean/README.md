@@ -167,6 +167,32 @@ bazel build //pass/lean:pass_lean
 bazel build //lhd:lhd
 ```
 
+## Node bit-width cap (`max_width`)
+
+The pass emits the typed fast model as `BitVec w` at each node's real (finite)
+width `w`.  `--set lean.max_width=N` caps `w`; the **default is 1024**.  That
+default is a pass-level *proof-tractability* guard, **not** a LiveHD limit
+(LiveHD's `bits` attribute is a finite `int32`, i.e. widths up to ~2^31), and it
+exists only because `native_decide` / `by eval` blow up on very wide words.
+
+To accept whatever finite width a node carries — matching LiveHD's own
+finite-but-unbounded widths — pass `0` or `unlimited`:
+
+```bash
+--set lean.max_width=0            # or: unlimited / inf / none
+```
+
+Notes:
+- Constant *value* arbitrary precision is independent of this knob and always on
+  (decimal string → Lean `Int` → `BitVec.ofInt w`, reduced mod 2^w).
+- With no cap the emitted `BitVec w` definitions still typecheck at any finite
+  width, but `native_decide` / `by eval` oracle proofs may be intractable for
+  very wide words; the certificate `BV (Nat, Int)` bignum path is the
+  width-agnostic reasoning vehicle.
+- `w == 0` (an unsized node) is still a hard error even under `unlimited` —
+  unsized is not the same as unlimited.
+- `pass.isabelle` has the identical knob: `--set isabelle.max_width=0`.
+
 ## Smoke Test
 
 The current shell emitter can be tested without touching root-level temporary
