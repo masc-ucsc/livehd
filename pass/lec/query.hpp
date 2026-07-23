@@ -300,6 +300,25 @@ struct Lec_options {
   // The bottom-up hierarchical driver fills this with its per-round proven set.
   std::vector<std::string> collapse;
 
+  // Trusted-module assume-equal blackbox (`lhd lec --trust <def>` / lec.trust):
+  // module-def names ASSUMED equivalent WITHOUT a proof — the escape hatch for a
+  // cell the encoder cannot yet model (a Latch: "sequential op 'latch' not
+  // supported yet"). The bottom-up driver skips proving these defs entirely and
+  // force-blackboxes their instances in every parent (it seeds them into the
+  // effective `collapse` set, so the encoder treats them exactly like a proven
+  // collapse — outputs become shared UF(inputs), inputs stay miter compare
+  // points), and — unlike a proven collapse — KEEPS them boxed through the
+  // flat-confirm re-solve of a refute elsewhere, so a real counterexample in an
+  // untrusted cone is still reported (never re-flattened into the unmodeled
+  // cell). Boxing over-approximates, so a PASS under trust is a real PASS
+  // (modulo the trusted internals) while a refute can only be spurious at a box
+  // boundary, never a missed bug outside the trusted cones. The encoder never
+  // reads this field — only the driver does; it is a DISCLOSED assumption, so a
+  // top proven with a non-empty trust list is reported "PROVEN under N trusted
+  // def(s)", never a silent unconditional pass. Matched by entity name (or
+  // either side's full spelling), like collapse.
+  std::vector<std::string> trust;
+
   // Structural def-diff reduction (`lec.semdiff`, M3): the semdiff matching
   // algorithm to run per module BEFORE the solver — `none` (default, always LEC)
   // or `structural` (pass/semdiff::structural_match). A def whose ref/impl are

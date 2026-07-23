@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <numeric>
 #include <print>
@@ -162,6 +164,19 @@ std::string Mapper::seq_flow() const {
   f             = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
   f             = flag_subst(std::move(f), "{L}", 'L', opts_.load);
   return f;
+}
+
+std::string Mapper::resolve_recipe() const {
+  // Verbatim, not a hash: a hash collision here would reuse a netlist mapped
+  // under a different recipe. Both flow strings are pinned (map_region picks one
+  // by mode, and the mode is in the salt); '|' separates fields that never
+  // contain '|'.
+  return std::format("comb={}|seq={}|adder={}|block={}|mult={}",
+                     comb_flow(),
+                     seq_flow(),
+                     static_cast<int>(opts_.adder),
+                     opts_.block_size,
+                     static_cast<int>(opts_.multiplier));
 }
 
 bool Mapper::start() {
@@ -484,6 +499,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return;
   }
 
+  // Per-region wall time: the only way to tell a cache that hits a lot from a
+  // cache that saves time. A hit on a 200ms region and a miss on a 200s one
+  // count the same in hits/misses and nothing alike in the total.
+  const auto t_start  = std::chrono::steady_clock::now();
+  const auto since    = [&t_start] {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
+  };
+
   // Per-region option overrides (2opt-freq C): overlay onto opts_ for the
   // duration of this region (every helper below reads opts_), restored on
   // every exit path.
@@ -495,44 +518,59 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   } opts_restore{&opts_, &saved_opts};
   apply_region_overrides(rb);
 
-  // Incremental reuse (2opt-incr A+C): digest the region against the RESOLVED
-  // per-region recipe; a hit clones the previously mapped netlist into rb.body
-  // and ABC never starts. This runs before any ABC allocation on purpose --
-  // the whole point is that a hit costs a hash and a flat clone.
-  Region_digest incr_dig;
-  if (incr_ != nullptr) {
-    incr_dig = region_digest(
-        rb,
-        incr_opts_hash(comb_flow(), seq_flow(), static_cast<int>(opts_.adder), opts_.block_size, static_cast<int>(opts_.multiplier)));
-    if (const auto* row = incr_->lookup(incr_dig); row != nullptr && incr_->reuse(rb, incr_dig, *row, outlib_)) {
-      Region_qor q;
-      q.module       = rb.module_name;
-      q.color        = rb.color;
-      q.gates        = row->gates;
-      q.area         = row->area;
-      q.delay        = row->delay;
-      q.crit_src     = row->crit_src;
-      q.div_blackbox = row->div_blackbox;
-      if (row->crit_out_rank >= 0 && static_cast<size_t>(row->crit_out_rank) < incr_dig.out_by_rank.size()) {
-        // The cache stores the critical output's canonical RANK: port names
-        // shift with nids across runs, the rank does not.
-        q.crit_output = rb.outputs[incr_dig.out_by_rank[static_cast<size_t>(row->crit_out_rank)]].name;
+  // Incremental reuse (2opt-incr A+C), lgraph-compare edition: the PARTITIONER
+  // rebuilt the region's pre-ABC logic into a throwaway lib (rb.pre_body, via the
+  // SAME build_module construction the classic path uses -- a byte-stable
+  // compare artifact, unlike a hand re-derivation which drifts). Structurally
+  // compare it (plus the resolved recipe) against the cache, and on a match
+  // REPLACE this region's body with the cached mapped netlist IN PLACE -- ABC
+  // never starts. `recipe`/`pre_g` live to the store site below (a miss
+  // snapshots them). Null when reuse-ineligible or flattening (uncacheable).
+  const std::string recipe = resolve_recipe();
+  hhds::Graph*      pre_g   = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
+  // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
+  // fast diagnostic for why a region misses on a comment edit.
+  if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
+    bool hit = false;
+    if (pre_g != nullptr) {
+      hit = incr_->lookup_compare(rb, pre_g, recipe).hit;
+      incr_->store_pre(rb, *rb.pre_lib, rb.pre_name, recipe);
+    }
+    std::print("COMPARE {} {}\n", rb.module_name,
+               !rb.reuse_eligible ? "INELIGIBLE" : (pre_g == nullptr ? "REBUILD-FAIL" : (hit ? "HIT" : "MISS")));
+    Region_qor q;
+    q.module = rb.module_name;
+    q.color  = rb.color;
+    q.cache  = hit ? "hit" : "miss";
+    qor_.push_back(std::move(q));
+    return;
+  }
+  if (incr_ != nullptr && rb.reuse_eligible) {
+    if (pre_g != nullptr) {
+      auto res = incr_->lookup_compare(rb, pre_g, recipe);
+      if (res.hit && incr_->reuse_hit(rb, res, outlib_)) {
+        Region_qor q;
+        q.module       = rb.module_name;
+        q.color        = rb.color;
+        q.gates        = res.row->gates;
+        q.area         = res.row->area;
+        q.delay        = res.row->delay;
+        q.crit_src     = res.row->crit_src;
+        q.crit_output  = res.crit_output;
+        q.div_blackbox = res.row->div_blackbox;
+        q.cache        = "hit";
+        q.ms           = since();
+        std::print("[pass.abc] region '{}': cache hit -- {} gates, area {:.2f}, delay {:.2f} ({:.0f} ms)\n",
+                   rb.module_name,
+                   q.gates,
+                   q.area,
+                   q.delay,
+                   q.ms);
+        qor_.push_back(std::move(q));
+        return;
       }
-      std::print("[pass.abc] region '{}': cache hit -- {} gates, area {:.2f}, delay {:.2f}\n",
-                 rb.module_name,
-                 q.gates,
-                 q.area,
-                 q.delay);
-      qor_.push_back(std::move(q));
-      return;
     }
-    incr_->note_miss(incr_dig.valid);
-    if (!incr_dig.valid) {
-      // Not verbose-gated: an uncacheable region pays for ABC on EVERY
-      // iteration, and the reason (usually anonymous state in the RTL) is
-      // actionable. One line per region per run.
-      std::print("[pass.abc] region '{}': uncacheable -- {}\n", rb.module_name, incr_dig.refused);
-    }
+    incr_->note_miss();
   }
 
   auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
@@ -2437,12 +2475,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}{}\n", rb.module_name, q.gates, q.area, q.delay, crit);
   }
 
-  // rb.body now holds the complete mapped netlist: snapshot it into the cache
-  // so the next run's identical region is a clone, not an ABC run. A refused
-  // digest (anonymous state, ambiguous boundary) was already counted above.
-  if (incr_ != nullptr && incr_dig.valid) {
-    incr_->store(rb, incr_dig, qor_.back());
+  // rb.body now holds the complete mapped netlist: snapshot it (and the pre-abc
+  // body built above) into the cache so the next run's identical region is a
+  // whole-module copy, not an ABC run. A region whose pre-body could not be
+  // rebuilt (pre_g == nullptr) is uncacheable and simply re-maps next time.
+  if (incr_ != nullptr && pre_g != nullptr) {
+    incr_->store(rb, *rb.pre_lib, rb.pre_name, qor_.back(), recipe, outlib_);
   }
+  qor_.back().cache = "miss";
+  qor_.back().ms    = since();
   Abc_NtkDelete(mapped);
 }
 

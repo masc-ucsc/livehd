@@ -258,6 +258,40 @@ static std::string lec_entity_of(std::string_view n) {
   return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
 }
 
+// If a refute's FIRST diverging signal is a TRUSTED box's input
+// ("bbin:<def>#inst:sig"), return that trusted def; else "". A trust box asserts
+// every leaf input equal, INCLUDING functional don't-cares (a write-data bit
+// while the write is disabled), and the trusted leaf cannot be flattened to tell
+// a don't-care from a real difference — so such a refute is NOT a sound disproof
+// (the same discipline as "refuted under uncertain pairs is never final"). The
+// caller degrades it to Unknown, keeping the witness. A genuine refute diverges
+// at a normal signal first, so its "(ref=" precedes any "bbin:" and this returns
+// "" — bug detection outside the trusted cones is intact.
+static std::string lec_refute_trusted_box(const std::string& w, const absl::flat_hash_set<std::string>& trust_set) {
+  if (trust_set.empty()) {
+    return "";
+  }
+  auto b = w.find("bbin:");
+  if (b == std::string::npos) {
+    return "";
+  }
+  if (auto r0 = w.find("(ref="); r0 != std::string::npos && r0 < b) {
+    return "";  // the first divergence is a normal signal, not this box input
+  }
+  auto        start = b + 5;
+  auto        end   = w.find('#', start);
+  if (end == std::string::npos) {
+    end = w.find_first_of(":( ", start);
+  }
+  std::string full = w.substr(start, end == std::string::npos ? std::string::npos : end - start);
+  if (trust_set.count(full) > 0) {
+    return full;
+  }
+  auto        d   = full.rfind('.');
+  std::string ent = d == std::string::npos ? full : full.substr(d + 1);
+  return trust_set.count(ent) > 0 ? ent : "";
+}
+
 // A get_hier_name() debug-nid fallback ("n<id>") — never persisted in a pair
 // hint: nids shift across recompiles, and hint re-validation could then bind
 // the wrong flop.
@@ -351,6 +385,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   auto entity_of = [](std::string_view n) -> std::string {
     auto d = n.rfind('.');
     return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
+  };
+  // formal.lec.trust set: def keys ASSUMED equal without a proof. Matched by the
+  // canonical (entity) key the DAG uses, or by either side's full spelling.
+  const absl::flat_hash_set<std::string> trust_set(base.trust.begin(), base.trust.end());
+  auto is_trusted = [&](std::string_view key) -> bool {
+    if (trust_set.empty()) {
+      return false;
+    }
+    return trust_set.count(std::string{key}) > 0 || trust_set.count(entity_of(key)) > 0;
   };
   absl::flat_hash_map<std::string, int> ref_ent_cnt, impl_ent_cnt;
   for (auto& g : ref_var.graphs) {
@@ -508,6 +551,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::atomic<bool>         any_unsupported{false};  // any def the ENCODER refused (unmodeled cell) -> hard error
   std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
   std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
+  std::atomic<int>          trusted_count{0};  // defs ASSUMED equal (formal.lec.trust; never solved)
   std::mutex                report_mutex;
   // Refuted-descendant bookkeeping (fail-fast). `refuted` marks a def the solver
   // itself refuted; `tainted` marks one skipped because a child (transitively) was
@@ -524,6 +568,26 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       return;  // definitively decided in an earlier round — do not re-solve
     }
     const auto&              name = order[def_ix];
+
+    // formal.lec.trust: a def ASSUMED equal WITHOUT a proof — the escape hatch for
+    // a cell the encoder cannot model yet (a Latch). Skip solving it entirely and
+    // mark it proven-by-assumption so parents black-box it via the proven-child
+    // path below; it is NOT written to the verdict cache (an assumption, not a
+    // verdict). The top is never trusted (refused at the CLI). A latch inside an
+    // UNtrusted def still refuses — only listed defs are excused.
+    if (name != top_key && is_trusted(name)) {
+      proven[def_ix]  = 1;
+      settled[def_ix] = 1;
+      trusted_count.fetch_add(1, std::memory_order_relaxed);
+      std::lock_guard report_lock(report_mutex);
+      livehd::diag::info("pass.lec", "lec-block-trusted", "progress")
+          .msg("lec block '{}' trusted", name)
+          .verdict("trusted")
+          .attr("detail", "assumed equal WITHOUT proof (formal.lec.trust): the encoder does not model a cell in it")
+          .emit();
+      std::print("lec[hier]: '{}' TRUSTED (assumed equal, NOT proven)\n", name);
+      return;
+    }
 
     // Fail-fast on a refuted descendant (formal.lec.hier_refute=fail, the default).
     // Only a PROVEN child black-boxes (see the collapse set below), so a def over
@@ -591,10 +655,19 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // child black-boxes; a non-proven child is left OUT of the collapse set ->
     // flattened (descended).
     o.collapse.clear();
-    std::vector<std::string> coll;
+    // TRUSTED defs are always boxed, at ANY depth in this cone: the encoder
+    // matches a collapse name hierarchically, so seeding the whole trust list
+    // also covers a trusted grandchild reached through a flattened (non-proven)
+    // intermediate. These boxes are NOT confirmed away in the flat retry below —
+    // they cover the cell the encoder cannot model.
+    o.collapse.insert(o.collapse.end(), base.trust.begin(), base.trust.end());
+    std::vector<std::string> coll;  // SPECULATIVE proven-child boxes only (the retry confirms these; trust is excluded)
     bool                     kids_proven = true;
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
+        if (is_trusted(c)) {
+          continue;  // already force-boxed via the trust seed above; an assumption, so it never flips kids_proven
+        }
         if (auto ci = order_ix.find(c); ci != order_ix.end() && proven[ci->second] != 0) {
           // A PROVEN child still must NOT collapse when its ref/impl port sets
           // diverge the tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b`
@@ -858,7 +931,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                    refuted_under_collapse ? "confirmation" : "retry (UF boxes disable the eager bit-blaster)");
       }
       livehd::lec::Lec_options oflat = o;
-      oflat.collapse.clear();
+      // Drop the SPECULATIVE proven-child boxes being confirmed, but KEEP the
+      // TRUSTED boxes: they cover a cell the encoder cannot model (a Latch), so
+      // re-flattening them would refuse the whole miter (exit 7) and destroy the
+      // real counterexample this confirm is meant to validate. Only when the
+      // trust list is empty is this the original full clear.
+      oflat.collapse.assign(base.trust.begin(), base.trust.end());
       auto rf       = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
       if (refuted_under_collapse) {
@@ -873,6 +951,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         r             = std::move(rf);
       } else {
         r.detail += "; flat retry (collapse cleared) also inconclusive";
+      }
+    }
+    // A refute that turns on a TRUSTED box input is not a sound disproof (the
+    // trusted leaf may ignore that input): degrade it to Unknown, keeping the
+    // witness for diagnosis. Under strict (and any witness-carrying Unknown) this
+    // is still a hard fail — just an honest "inconclusive at a trusted boundary",
+    // not a false "not equivalent".
+    if (r.verdict == Verdict::Refuted) {
+      if (std::string tb = lec_refute_trusted_box(r.witness, trust_set); !tb.empty()) {
+        r.verdict = Verdict::Unknown;
+        r.detail  = std::format(
+            "INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — a trust box asserts every leaf input "
+            "equal incl. functional don't-cares, and the trusted leaf cannot be flattened to tell them apart, so "
+            "this is not a disproof; {}",
+            tb,
+            r.detail);
       }
     }
     disclose_lec_helpers(r, o);
@@ -1016,17 +1110,25 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   }
 
-  const int proven_count = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
+  // proven[] marks a TRUSTED def proven-by-assumption too (so parents box it), so
+  // separate the two: report only defs actually PROVEN, and disclose the trusted
+  // (assumed-equal) count apart — a trusted def was never solved, cached, or
+  // semdiff-matched, so it must not inflate any of those figures.
+  const int proven_count  = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
+  const int trusted_total = trusted_count.load();
+  const int really_proven = proven_count - trusted_total;
 
-  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via cache, {} via semdiff, {} via solver)\n",
-             proven_count,
-             order.size(),
+  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via cache, {} via semdiff, {} via solver){}\n",
+             really_proven,
+             static_cast<int>(order.size()) - trusted_total,
              cache_count.load(),
              semdiff_count.load(),
-             proven_count - semdiff_count.load() - cache_count.load());
-  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} cache:{} semdiff:{}",
+             really_proven - semdiff_count.load() - cache_count.load(),
+             trusted_total > 0 ? std::format("; {} def(s) TRUSTED (assumed equal, NOT proven)", trusted_total) : std::string{});
+  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} trusted:{} cache:{} semdiff:{}",
                                             order.size(),
-                                            proven_count,
+                                            really_proven,
+                                            trusted_total,
                                             cache_count.load(),
                                             semdiff_count.load()));
 
@@ -2083,6 +2185,40 @@ void lec_command(Options& opts, Result& res) {
     }
   }
 
+  // formal.lec.trust: def names ASSUMED equal WITHOUT a proof (the latch escape
+  // hatch). Union of the --trust flags and `--set formal.lec.trust=a,b,c`. The
+  // bottom-up driver (lec_hierarchical) skips proving these defs and keeps them
+  // boxed even through a refute's flat-confirm; seed them into o.collapse now so
+  // the flat (non-hier) path black-boxes them too — the hier driver rebuilds its
+  // own per-def collapse set and re-seeds trust there.
+  o.trust = opts.trust;
+  if (std::string ts = label("trust", ""); !ts.empty()) {
+    size_t pos = 0;
+    while (pos < ts.size()) {
+      size_t c   = ts.find(',', pos);
+      size_t end = c == std::string::npos ? ts.size() : c;
+      if (end > pos) {
+        o.trust.emplace_back(ts.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
+  if (!o.trust.empty()) {
+    // Trusting the TOP module would assume the WHOLE design equivalent — a
+    // vacuous pass. Refuse it: the trust list may only name INTERNAL defs.
+    const std::string top_entity = lec_entity_of(ref_g->get_name());
+    for (const auto& t : o.trust) {
+      if (t == top_entity || t == ref_g->get_name() || t == impl_g->get_name() || t == opts.top) {
+        throw Lhd_error{"usage",
+                        std::format("formal.lec.trust names the top module '{}': that assumes the whole design "
+                                    "equivalent (a vacuous pass)",
+                                    t),
+                        "trust only INTERNAL defs the encoder cannot model yet (e.g. latch modules)"};
+      }
+    }
+    o.collapse.insert(o.collapse.end(), o.trust.begin(), o.trust.end());
+  }
+
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
   }
@@ -2372,12 +2508,28 @@ void lec_command(Options& opts, Result& res) {
         // confirm FLAT before letting the exit policy report a fail.
         std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(), o.collapse.size());
         livehd::lec::Lec_options oflat = o;
-        oflat.collapse.clear();
+        // Keep TRUSTED boxes (unmodeled cells); drop only the manual --collapse
+        // boxes being confirmed. Clearing trust would re-flatten a latch and turn
+        // this real counterexample into an encoder refusal (exit 7).
+        oflat.collapse.assign(o.trust.begin(), o.trust.end());
         auto rf       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
         rf.detail     = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                         + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
         r             = std::move(rf);
+      }
+      // Same trusted-box discipline as the hierarchical driver: a refute that
+      // turns on a trusted box input is not a disproof (the leaf may treat it as
+      // don't-care and cannot be flattened) — degrade to Unknown, keep witness.
+      if (r.verdict == livehd::lec::Verdict::Refuted) {
+        absl::flat_hash_set<std::string> trust_set(o.trust.begin(), o.trust.end());
+        if (std::string tb = lec_refute_trusted_box(r.witness, trust_set); !tb.empty()) {
+          r.verdict = livehd::lec::Verdict::Unknown;
+          r.detail  = std::format("INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — trust asserts all leaf "
+                                  "inputs equal incl. don't-cares, not flattenable, so not a disproof; {}",
+                                  tb,
+                                  r.detail);
+        }
       }
     }
     disclose_lec_helpers(r, o);
@@ -2422,6 +2574,15 @@ void lec_command(Options& opts, Result& res) {
   if (r.oversize_refused) {
     throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), r.detail),
                     "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+  }
+
+  // A PROVEN verdict obtained with a non-empty trust list is CONDITIONAL on those
+  // assumptions — disclose it on the verdict line and in the machine-readable
+  // detail (envelope/JSON), so a trust-assisted pass is never read as an
+  // unconditional proof. A REFUTED/UNKNOWN needs no such caveat (a refute is a
+  // real counterexample outside the trusted cones; an unknown proves nothing).
+  if (r.verdict == livehd::lec::Verdict::Proven && !o.trust.empty()) {
+    r.detail += std::format("; PROVEN under {} trusted def(s) (assumed equal, NOT proven — formal.lec.trust)", o.trust.size());
   }
 
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;

@@ -383,6 +383,17 @@ Options parse_args(int argc, char** argv) {
         }
         pos = end + 1;
       }
+    } else if (a == "--trust") {  // lec: def(s) ASSUMED equal without proof (latch escape hatch; repeatable / comma-sep)
+      std::string v{need_value(a, i, argc, argv)};
+      size_t      pos = 0;
+      while (pos < v.size()) {
+        size_t c   = v.find(',', pos);
+        size_t end = c == std::string::npos ? v.size() : c;
+        if (end > pos) {
+          opts.trust.emplace_back(v.substr(pos, end - pos));
+        }
+        pos = end + 1;
+      }
     } else if (a == "--top") {
       opts.top = need_value(a, i, argc, argv);
     } else if (a == "--target") {  // `lhd tool`: node|pin|edge|all, or tree's kind:<X>

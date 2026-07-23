@@ -93,6 +93,11 @@ struct Region_qor {
   // gates/area/delay under-report — the score is partial until the div is
   // strength-reduced away. Surfaced so an agent never trusts a blind score.
   int div_blackbox = 0;
+  // Where this region's wall time went, and whether the incremental cache was
+  // able to take it. Without these two, "the cache hit 199 of 264 regions" says
+  // nothing about whether the run got faster — the misses can hold all the time.
+  double      ms    = 0.0;   // wall ms this region spent in map_region
+  const char* cache = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
@@ -116,6 +121,9 @@ public:
   // digests each region first and clones the previously mapped netlist on a
   // hit instead of running ABC. nullptr = every region maps normally.
   void set_incr(Incr_cache* c) { incr_ = c; }
+  // Whether incremental caching is active -- the partitioner uses this to decide
+  // whether to build each region's pre-body (the cache's compare artifact).
+  [[nodiscard]] bool incremental() const { return incr_ != nullptr; }
 
   // CLI-level per-region overrides (--set pass.abc.region_opts). Graph-embedded
   // overrides (coloring_info "region_opts") are read per region in map_region.
@@ -156,6 +164,12 @@ private:
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;
+
+  // The resolved per-region ABC recipe, serialized VERBATIM for the incremental
+  // cache's recipe gate: the pre-ABC lgraph does not encode it, so two regions
+  // with equal logic but different flow/arch must never share a cached netlist.
+  // Call after apply_region_overrides so it reflects region_opts.
+  [[nodiscard]] std::string resolve_recipe() const;
 
   // Overlay any per-region overrides for rb.color onto opts_ (caller saves and
   // restores opts_ around the region).

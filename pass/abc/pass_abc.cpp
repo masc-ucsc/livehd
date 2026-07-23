@@ -167,10 +167,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   double tarea  = 0.0;
   int    tdivbb = 0;  // blackboxed div/mod cones (the score under-reports)
   int    worst  = -1;  // index of the region with the worst delay
+  // Where the run's time went, split by what the cache did with each region.
+  // hits/misses alone cannot distinguish "the cache saved nothing" from "the
+  // cache saved everything there was to save" — these can.
+  double hit_ms = 0.0, miss_ms = 0.0;
   for (size_t r = 0; r < qor.size(); ++r) {
     tgates += qor[r].gates;
     tarea += qor[r].area;
     tdivbb += qor[r].div_blackbox;
+    (std::string_view{qor[r].cache} == "hit" ? hit_ms : miss_ms) += qor[r].ms;
     if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
       worst = static_cast<int>(r);
     }
@@ -189,6 +194,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   }
   std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}{}\n", qor.size(), tgates, tarea, crit,
              tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
+
+  if (incr != nullptr) {
+    // The number that actually answers "did incremental help": what the
+    // non-reused regions cost. A high hit RATE over cheap regions is not a
+    // speedup, and only this line makes that visible.
+    std::print("pass.abc incremental: {} hit ({:.1f}s), {} miss ({:.1f}s)\n",
+               incr->hits(),
+               hit_ms / 1000.0,
+               incr->misses(),
+               miss_ms / 1000.0);
+  }
 
   if (qor_path.empty()) {
     return;
@@ -217,11 +233,11 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   if (incr != nullptr) {
     // The agent loop reads its "did the edit change anything" answer here: a
     // NoChange edit is hits == regions, misses == 0, in O(#regions) lookups.
-    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"stored\":{},\"uncacheable\":{}}}",
+    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"hit_ms\":{:.1f},\"miss_ms\":{:.1f}}}",
                      incr->hits(),
                      incr->misses(),
-                     incr->stores(),
-                     incr->refused());
+                     hit_ms,
+                     miss_ms);
   }
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
@@ -229,7 +245,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (r != 0) {
       j += ",";
     }
-    j += std::format("{{\"module\":\"{}\",\"color\":{},\"gates\":{},\"area\":{:.4f}", jesc(q.module), q.color, q.gates, q.area);
+    j += std::format("{{\"module\":\"{}\",\"color\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f}",
+                     jesc(q.module),
+                     q.color,
+                     q.gates,
+                     q.area,
+                     q.ms);
+    if (q.cache[0] != '\0') {
+      j += std::format(",\"cache\":\"{}\"", q.cache);
+    }
     if (q.div_blackbox > 0) {
       j += std::format(",\"div_blackbox\":{}", q.div_blackbox);
     }
@@ -458,7 +482,8 @@ void Pass_abc::work(Eprp_var& var) {
       top,
       dbg,
       [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); },
-      flatten);
+      flatten,
+      /*want_pre_bodies=*/mapper.incremental());
 
   mapper.stop();
 
@@ -483,12 +508,7 @@ void Pass_abc::work(Eprp_var& var) {
     // Persist before reporting: a crash between the two loses a line of text,
     // not the snapshot work. save() is a no-op when nothing was stored.
     incr->save();
-    std::print("pass.abc cache: {} hit(s), {} miss(es), {} stored{} ({})\n",
-               incr->hits(),
-               incr->misses(),
-               incr->stores(),
-               incr->refused() == 0 ? std::string{} : std::format(", {} uncacheable", incr->refused()),
-               incr->dir());
+    std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
   emit_qor(mapper.qor(), top, opts, qor_path, incr.get());

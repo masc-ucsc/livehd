@@ -68,9 +68,13 @@ bool is_state(Ntype_op op) {
 // not-loop_break Sub is not hoisted, gets a normal structural fsig, and needs no
 // seed). IO is NOT here: it is two singleton nodes below kFirstUserNodeIdx that
 // forward_class never emits, and its pins already resolve by name.
-bool is_cut(const hhds::Node_class& node) {
+bool is_cut(const hhds::Node_class& node, bool blackbox_subs = false) {
   auto op = gu::type_op_of(node);  // LINK-based: set_subnode re-stamps the raw type
-  return is_state(op) || (op == Ntype_op::Sub && node.is_loop_break());
+  // blackbox_subs (incremental region reuse): EVERY Sub is a cut point, not just
+  // loop_break ones -- its inputs are still folded here (input rewiring is caught)
+  // but its outputs are seeded sources, so a comb loop through a submodule breaks
+  // and the compare keys on the Sub's IO wiring, not its (separately-cached) body.
+  return is_state(op) || (op == Ntype_op::Sub && (blackbox_subs || node.is_loop_break()));
 }
 
 // Name-normalization mirror of pass/lec/encode.cpp's flop_state_key (kept local
@@ -908,6 +912,55 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     s.fvals.insert(h);
   }
 
+  // ---- Forward fixpoint. forward_class emits in the WORD-LEVEL graph's order,
+  // which can be cyclic even when the region is acyclic once cut points (seeded
+  // Subs / state cells) act as sources -- e.g. a packed struct read+written by
+  // disjoint Get_mask/Set_mask ranges is a word-level self-loop but a bit-level
+  // DAG. In that order a node may be visited before its fanin was signed and left
+  // a frontier, spuriously stranding its (and its cone's) obligations as
+  // cut_unknown. Re-sweep until no new signature appears: an order-only frontier
+  // resolves once its inputs are ready; a node in a GENUINE combinational loop
+  // never does and correctly stays a frontier. The result is order-invariant
+  // (each fsig is a pure fold of its inputs' fsigs), so both compare sides
+  // converge identically. The cap MUST scale with node count: a chain visited in
+  // reverse by forward_class resolves one node per sweep, so up to |order| sweeps
+  // are needed; a fixed cap would stop two same-structure sides at DIFFERENT
+  // partial states (different nid order) and desync their decidability. The
+  // no-change break is the real terminator (monotone: sweeps only add fsigs); +8
+  // is slack.
+  for (size_t iter = 0, cap = s.order.size() + 8; iter < cap; ++iter) {
+    bool changed = false;
+    for (const auto& node : s.order) {
+      auto ci = node.get_class_index();
+      if (s.fsig.contains(ci)) {
+        continue;
+      }
+      auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Nconst || is_state(op)) {
+        continue;  // const already signed; unseeded state is a real frontier
+      }
+      bool                                           ready = true;
+      absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
+      for (const auto& e : node.inp_edges()) {
+        uint64_t dsig = 0;
+        if (!resolve_driver(s, e.driver, dsig)) {
+          ready = false;
+          break;
+        }
+        by_port[e.sink.get_port_id()].push_back(dsig);
+      }
+      if (!ready) {
+        continue;
+      }
+      s.fsig[ci] = fold_operands(node_kind_key(node), by_port);
+      s.fvals.insert(s.fsig[ci]);
+      changed = true;
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
   // ---- Backward pass: outputs -> inputs (reverse topological). A node is ready
   // when every fanout signal already has a backward signature.
   for (auto it = s.order.rbegin(); it != s.order.rend(); ++it) {
@@ -1027,10 +1080,50 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
     if (opts.matching_names) {
       auto seed_cut_subs = [&](hhds::Graph* g, absl::flat_hash_map<hhds::Class_index, uint64_t>& seeds) {
         for (auto node : g->forward_class()) {
-          if (gu::type_op_of(node) != Ntype_op::Sub || !node.is_loop_break()) {
+          if (gu::type_op_of(node) != Ntype_op::Sub) {
             continue;
           }
-          seeds.emplace(node.get_class_index(), hcombine(hstr("\x01sub"), hstr(cut_point_key(g, node))));
+          // loop_break Subs are always cut points; blackbox_subs makes EVERY Sub
+          // one (incremental region reuse -- see is_cut).
+          if (!opts.blackbox_subs && !node.is_loop_break()) {
+            continue;
+          }
+          uint64_t seed = hcombine(hstr("\x01sub"), hstr(cut_point_key(g, node)));
+          if (opts.blackbox_subs) {
+            // The two blackbox Subs must share an IDENTICAL interface: same def
+            // AND every port's name/id/width/sign. An interface change (a resized
+            // or added/removed/renamed port) invalidates the parent's wiring to
+            // the child, so it MUST break the seed here and miss -- blackboxing
+            // hides the child's body, never its boundary.
+            if (auto io = node.get_subnode_io()) {
+              // Def identity by NAME, not get_subnode_gid(): a body-less pre-body
+              // decl is assigned a CREATION-ORDER gid that drifts across recompiles
+              // (it poisoned every downstream fold -> cut_violated cascade). The
+              // name is content-stable. IO folded order-INDEPENDENTLY (XOR): decl
+              // iteration order is not guaranteed stable and each port already
+              // carries its own port_id, so the XOR is a faithful set signature.
+              seed = hcombine(seed, hstr(io->get_name()));
+              uint64_t io_acc     = 0;
+              auto     fold_decls = [&](const auto& decls, uint64_t tag) {
+                for (const auto& p : decls) {
+                  // Key each port by its declared NAME, never its port_id: a
+                  // port_id is a node-id-like handle the cache round-trip
+                  // (copy_from/save/load) can reassign, so the cached and fresh
+                  // pre-bodies would disagree on an unchanged region. The name is
+                  // content-stable and already unique, so it is the faithful (and
+                  // round-trip-safe) port identity. XOR => order-independent.
+                  uint64_t ph = hcombine(tag, hstr(p.name));
+                  ph          = hcombine(ph, static_cast<uint64_t>(p.bits));
+                  ph          = hcombine(ph, p.unsign ? 1ULL : 2ULL);
+                  io_acc ^= ph;
+                }
+              };
+              fold_decls(io->get_input_pin_decls(), hstr("\x01i"));
+              fold_decls(io->get_output_pin_decls(), hstr("\x01o"));
+              seed = hcombine(seed, io_acc);
+            }
+          }
+          seeds.emplace(node.get_class_index(), seed);
         }
       };
       seed_cut_subs(a, seeds_a);
@@ -1055,7 +1148,7 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
     auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k,
                             absl::flat_hash_set<std::string>& u) {
       for (const auto& node : s.order) {
-        if (!is_cut(node)) {
+        if (!is_cut(node, opts.blackbox_subs)) {
           continue;
         }
         uint64_t csig = 0;

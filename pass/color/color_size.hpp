@@ -74,7 +74,10 @@ struct Size_window_stats {
 // Weights are MAPPABLE gate equivalents (graph_util::mappable_ge_weight): a
 // Sub counts ~1, since its logic is weighed in its own def's regions -- port-bit
 // weights let zero-logic glue+instance regions dodge the floor forever.
+// `name_weight` (default 1 = off) tilts the merge toward absorbing anonymous
+// (nid-named) crossings so surviving boundaries land on stable names -- see
+// Color_opts::name_weight. Direct callers/tests get the neutral default.
 [[nodiscard]] Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_ge, uint64_t max_ge,
-                                        Size_window_stats* st = nullptr);
+                                        Size_window_stats* st = nullptr, int name_weight = 1);
 
 }  // namespace livehd::color

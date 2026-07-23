@@ -481,6 +481,21 @@ void Pass_upass::work(Eprp_var& var) {
       continue;
     }
 
+    // A `<unit>.__pub` wrapper is a synthetic, durable pub INDEX loaded from an
+    // `ln:` dir — the importer reads its `store(pub, value)` / attr_set leaves
+    // to bind an `import("unit")` namespace (upass.call_resolver). It is data,
+    // not a compilable unit: walking it here folds each file-scope pub `store`
+    // into the symbol table and, since nothing in the wrapper READS the name,
+    // the fold does not re-emit it, so replace_body() below leaves the wrapper
+    // EMPTY. A later `import("unit")` then binds an empty namespace and every
+    // `unit.CONST` reads nil. Leave the wrapper's body intact for the reader;
+    // it is already excluded from tolg. (This is why a package's `pub const`
+    // was lost across `ln:` reuse — the value survived on disk and at load, and
+    // was gutted here.)
+    if (ln->get_top_module_name().ends_with(".__pub")) {
+      continue;
+    }
+
     TRACE_EVENT("pass", "upass.runner", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider: diagnostics emitted while this unit is walked render
     // their caret excerpt through the unit's locator (hash-validated bytes).

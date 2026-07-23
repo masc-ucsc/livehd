@@ -17,6 +17,14 @@ namespace livehd::color {
 namespace {
 
 using livehd::graph_util::bits_of;
+
+// Would pass_partition give this crossing driver a stable (recompile-invariant)
+// port name? Mirrors wire_name: a graph input, a user-named pin, or a named
+// master node (register/instance). Anything else falls to <op>_<nid>.
+[[nodiscard]] bool crossing_is_nameable(const hhds::Pin_class& d) {
+  namespace gu = livehd::graph_util;
+  return gu::is_graph_input_pin(d) || !gu::pin_name_of(d).empty() || gu::has_name(d.get_master_node());
+}
 // The window weighs what ABC will BLAST, not what the region touches: a Sub
 // counts ~1 (node_util mappable_ge_weight). With Sub port bits in the weight,
 // a 2-node glue+instance region "weighs" thousands of GE, dodges the min floor
@@ -46,7 +54,7 @@ constexpr size_t kActor_degree_cap = 4096;
 // quadratic).
 class Region_graph {
 public:
-  Region_graph(hhds::Graph* g, const Node2Id& node2id);
+  Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weight = 1);
 
   [[nodiscard]] size_t   size() const { return weight_.size(); }
   [[nodiscard]] bool     alive(int r) const { return alive_[r]; }
@@ -83,7 +91,7 @@ private:
   absl::flat_hash_map<hhds::Node_class, int>       node2region_;
 };
 
-Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id) {
+Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weight) {
   // 1. Components: two same-id nodes joined by a direct edge are one region. This
   //    is split_continuous's rule -- a color that is two disjoint clouds is two
   //    regions to pass.partition, so it must be two vertices here too.
@@ -139,7 +147,13 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id) {
       if (sit == node2region_.end() || sit->second == r) {
         continue;
       }
-      const auto bits = static_cast<uint64_t>(std::max(bits_of(e.driver), 1));
+      uint64_t bits = static_cast<uint64_t>(std::max(bits_of(e.driver), 1));
+      // Name-weight tilt: an anonymous crossing (would mint `<op>_<nid>`) binds
+      // name_weight x tighter, so the window prefers to swallow it; a nameable
+      // crossing keeps its plain weight and is likelier to survive as a boundary.
+      if (name_weight > 1 && !crossing_is_nameable(e.driver)) {
+        bits *= static_cast<uint64_t>(name_weight);
+      }
       adj_[r][sit->second] += bits;
       adj_[sit->second][r] += bits;
     }
@@ -506,11 +520,12 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
 
 }  // namespace
 
-Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_ge, uint64_t max_ge, Size_window_stats* st) {
+Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_ge, uint64_t max_ge, Size_window_stats* st,
+                          int name_weight) {
   Size_window_stats local;
   Size_window_stats& s = st == nullptr ? local : *st;
 
-  Region_graph rg(g, node2id);
+  Region_graph rg(g, node2id, name_weight);
   s.regions_in = rg.size();
 
   // Split BEFORE merge. Splitting an over-max region manufactures fresh small

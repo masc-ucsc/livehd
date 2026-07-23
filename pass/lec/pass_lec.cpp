@@ -87,6 +87,17 @@ void Pass_lec::setup() {
                        "proven-module black-box collapse: comma-separated def names forced to the sound "
                        "blackbox path even when --lib could flatten them (the bottom-up driver's proven set)",
                        "");
+  m.add_label_optional("trust",
+                       "trusted-module assume-equal blackbox: comma-separated def names ASSUMED equivalent "
+                       "WITHOUT a proof — the escape hatch for a cell the encoder cannot model yet (a Latch: "
+                       "'sequential op latch not supported yet'). The bottom-up driver SKIPS proving these "
+                       "defs and force-blackboxes their instances (outputs become free UF(inputs), inputs "
+                       "stay compare points), keeping them boxed even through a refute's flat-confirm so a "
+                       "real counterexample OUTSIDE the trusted cones is still reported. Boxing "
+                       "over-approximates: a PASS under trust is a real pass modulo the trusted internals, and "
+                       "a top proven with a non-empty trust list is DISCLOSED ('PROVEN under N trusted "
+                       "def(s)'), never a silent unconditional pass. Trusting the top itself is refused",
+                       "");
   m.add_label_optional("hier",
                        "bottom-up hierarchical decomposition (default true): topo-order the module-def DAG, "
                        "LEC each def leaves-first under the engine, and collapse already-proven children into "
@@ -225,6 +236,24 @@ void Pass_lec::lec(Eprp_var& var) {
       }
       pos = end + 1;
     }
+  }
+  // formal.lec.trust: comma-separated def names ASSUMED equal without a proof.
+  // This low-level single-pair path has no bottom-up driver, so it cannot skip
+  // proving a def or keep a box through a flat-confirm — trust degenerates to the
+  // same encoder blackbox as collapse here (the driver semantics live in
+  // lhd_kernel_formal.cpp's lec_hierarchical). Boxing over-approximates, so this
+  // is sound: a PASS is real, a refute at a box boundary can only be spurious.
+  if (std::string ts{var.get("trust", "")}; !ts.empty()) {
+    size_t pos = 0;
+    while (pos < ts.size()) {
+      size_t c   = ts.find(',', pos);
+      size_t end = c == std::string::npos ? ts.size() : c;
+      if (end > pos) {
+        o.trust.emplace_back(ts.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+    o.collapse.insert(o.collapse.end(), o.trust.begin(), o.trust.end());
   }
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {

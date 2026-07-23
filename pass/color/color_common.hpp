@@ -143,6 +143,17 @@ struct Color_opts {
   uint64_t min_ge = 0;
   uint64_t max_ge = 0;
 
+  // Name-boundary tilt for the size window. A crossing whose driver would give a
+  // STABLE port name (graph input / named pin / named register) keeps its plain
+  // bit weight; an ANONYMOUS crossing (a Mult/Div/mask intermediate that
+  // pass.partition would name `<op>_<nid>`) has its crossing weight multiplied
+  // by this, so the Best-Choice merge binds those regions tighter and swallows
+  // the anonymous cut -- leaving surviving boundaries name-stable, which the
+  // incremental cache can order across a recompile. 1 = off. Measured QoR-
+  // neutral (minion: delay unchanged, area/gates -0.25%). Inert here (1) like
+  // min_ge/max_ge; the shipped policy (4) lives on the pass.color CLI label.
+  int name_weight = 1;
+
   // `--stats` sink for the def currently being colored, or nullptr. It rides on
   // the options so every algorithm reports without each one growing a
   // parameter; the driver re-points it per def and owns the cross-def

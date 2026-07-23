@@ -2,8 +2,10 @@
 
 #include "pass_color.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <print>
 #include <string>
@@ -74,6 +76,12 @@ void Pass_color::setup() {
                        "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
                        "it). Rewrites the design; needs min_ge>0 and hier=true. false leaves tiny defs their own regions",
                        "true");
+  m.add_label_optional("name_weight",
+                       "synth: in the size window, bind a region N x tighter across an ANONYMOUS crossing (one that "
+                       "pass.partition would name `<op>_<nid>` -- a Mult/Div/mask intermediate) so the merge swallows it "
+                       "and surviving boundaries land on STABLE names the incremental cache can reuse. 1 = off. QoR-"
+                       "neutral at the default",
+                       "4");
   m.add_label_optional("instance", "path: comma-separated seed instance names (forward-only)", "");
   m.add_label_optional("min_count",
                        "reduce: occurrences a repeated subgraph needs before it is extracted as a shared def",
@@ -135,7 +143,8 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{}", var.get("synth_alg", "synth"), opts.min_ge, opts.max_ge);
+    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}", var.get("synth_alg", "synth"),
+                     opts.min_ge, opts.max_ge, opts.name_weight);
     if (opts.min_ge != 0) {
       // The window bin-packs isolated under-min leftovers, so a color id MAY
       // span several disconnected clouds. pass.partition keys its same-color
@@ -223,6 +232,7 @@ void Pass_color::color(Eprp_var& var) {
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
   opts.min_ge       = parse_ge_bound(var, "min_ge", "1000");
   opts.max_ge       = parse_ge_bound(var, "max_ge", "30000000");
+  opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")

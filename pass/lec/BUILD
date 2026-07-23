@@ -245,6 +245,18 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 UF+BV solver on compiled RTL
 )
 
+# Trusted-module assume-equal (`lhd lec --trust <def>` / formal.lec.trust): a def
+# ASSUMED equal without a proof — the escape hatch for a cell the encoder cannot
+# model (a latch). The driver skips proving it and boxes its instances so the
+# rest proves; the assumption is disclosed, a real diff OUTSIDE the trusted cone
+# still refutes, and trusting the top is refused.
+sh_test(
+    name = "lec_trust_test",
+    srcs = ["tests/lec_trust_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver on compiled RTL
+)
+
 # Bottom-up hierarchical driver (lec.hier=true): topo-order the def DAG,
 # LEC leaves-first under auto, collapse proven children into parents, and flatten
 # an unprovable child into its parent (CEGAR fallback).

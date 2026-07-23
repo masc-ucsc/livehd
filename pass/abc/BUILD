@@ -19,6 +19,7 @@ cc_library(
         "//pass/cost:host_mem",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
+        "//pass/semdiff:semdiff",
         "@abc",
         "@abseil-cpp//absl/container:node_hash_map",
         "@rapidjson",

@@ -31,6 +31,14 @@ struct Semdiff_options {
   bool        matching_names = false;         // anchor internal flops/mems by hier name
   bool        state_pairing  = false;         // tier-2: full-match (SRP/ERP signature) pairing
                                               // of name-unmatched state cells (2f-lec consumer)
+  // Treat EVERY Sub as an opaque blackbox cut point (not just is_loop_break ones):
+  // its outputs are seeded sources, its inputs still folded as a compare-point
+  // obligation. Breaks combinational loops that run THROUGH a submodule and keys
+  // the match on the Sub's IO wiring, not its internals. For incremental abc
+  // region reuse ONLY -- a child body is a separate cache entry, so a child edit
+  // must not invalidate the parent (mirrors the digest path's interface mode).
+  // UNSOUND for general LEC, where a comb Sub's input->output relation matters.
+  bool        blackbox_subs  = false;
   // Explicit cross-side state correspondence supplied by the caller (lec.match):
   // {a_name, b_name} raw hier names. Each resolvable pair becomes a tier-1
   // anchor (a resolved point) exactly like a name match, so the tier-2

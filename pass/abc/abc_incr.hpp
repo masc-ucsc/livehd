@@ -1,42 +1,31 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// INCREMENTAL pass.abc (todo/livehd/2opt-incr.html subtasks A + C).
+// INCREMENTAL pass.abc (todo/livehd/2opt-incr.html subtasks A + C) -- lgraph
+// compare edition.
 //
 // The decision-oracle loop is: edit a little RTL, resynthesize, compare QoR.
 // A full pass.abc pays ABC for every region on every iteration, but a small
-// edit changes a handful of regions — the rest map to byte-identical netlists.
-// This engine gives each region a CANONICAL 128-BIT DIGEST of everything that
-// determines its mapping (logic, boundary, resolved per-region ABC options)
-// and keeps a persistent cache directory of previously mapped region bodies,
-// content-addressed by that digest. On a hit the cached netlist is cloned into
-// the fresh region module and ABC never runs; the LiveSynth lineage's diff --
-// 83-95% of its live runtime, and the step both commercial flows fail at (24
-// of Anubis's 144 changes are no-ops they re-synthesize anyway) -- becomes a
-// hash lookup.
+// edit changes a handful of regions -- the rest map to identical netlists.
+//
+// This engine keeps, per region (keyed by its module name <top>__c<color>), a
+// persistent cache of two bodies: the region's PRE-ABC logic and its mapped
+// netlist. On the next run it rebuilds the fresh pre-ABC region and asks
+// semdiff::structural_identical whether it matches the cached one (name-blind on
+// internal temporaries, name-anchored on the IO ports the partitioner now names
+// content-stably, and on state cells) AND whether the resolved ABC recipe is
+// byte-identical. If both hold, the cached mapped body REPLACES the fresh region
+// module in place (hhds copy_body_from -- no clone, no port stitch) and ABC
+// never runs.
 //
 // The cache is a SPEEDUP, never an oracle of record: a miss only costs an ABC
-// run, and anything the digest cannot canonicalize REFUSES to cache rather
-// than risk a wrong reuse (the semdiff/cone_digest refusal discipline).
-//
-// What the digest folds (soundness inventory):
-//   * every region node: op, driver widths/signs, sink-port-grouped fanin
-//     (commutative-normalized within a port class, the fold_operands rule),
-//     constant values, Sub target names, instance names when present;
-//   * stateful nodes (Flop/Latch/Fflop/Memory) are anchored by their NAME --
-//     read-back rebuilds registers under the original name and LEC pairs flops
-//     by name, so the name is part of the function. Anonymous state => refuse;
-//   * the boundary: each crossing input as (bits, sign) refined by its fanout
-//     structure (Weisfeiler-Lehman rounds); each output as (driver sig, port,
-//     bits, sign). Two boundary pins the refinement cannot tell apart would
-//     make the cached-port -> fresh-port stitch ambiguous -- a swapped stitch
-//     is a MISCOMPILE -- so ambiguity => refuse;
-//   * the resolved per-region ABC recipe (flow with {D}/{L} substituted,
-//     adder/multiplier architecture, block size).
-// Library content, register/memory mapping mode and the DFF cell are global,
-// so they salt the whole cache file instead (Incr_cache::make_salt).
+// run. Soundness rests on (a) the partitioner's content-stable port names +
+// its reuse_eligible refusal of automorphic boundaries, and (b) the structural
+// compare -- a real node-set bijection with all compare-point obligations
+// discharged, not a hash whose collision would be a miscompile.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,112 +38,103 @@ namespace livehd::abc {
 
 struct Region_qor;  // abc_map.hpp
 
-// Canonical digest of one region, plus the canonical boundary ranking that a
-// reuse needs to stitch cached module ports onto the freshly named ones.
-// `valid == false` means "do not cache": anonymous state, ambiguous boundary,
-// or a port list that does not match the crossing-pin walk.
-struct Region_digest {
-  uint64_t h0 = 0, h1 = 0;  // two independent lanes; a collision is a miscompile
-  bool     valid = false;
-  // Why valid == false, for the verbose miss report ("" when valid). A region
-  // that never caches is a standing tax on every iteration; the reason is what
-  // lets someone fix the RTL (name the state) or the engine.
-  const char* refused = "";
-
-  // in_by_rank[r] = index into Region_body::inputs of the port whose external
-  // driver holds canonical rank r (ranks are sorted boundary tokens, a pure
-  // function of the region content -- NOT of nids, names or port order, all of
-  // which shift under an edit). Same for outputs.
-  std::vector<size_t> in_by_rank;
-  std::vector<size_t> out_by_rank;
-
-  [[nodiscard]] std::string hex() const;  // 32 hex chars
-};
-
-// Compute the digest. `opts_sig` is the caller's hash of the RESOLVED
-// region-mapping options (post region_opts overlay) -- two regions with equal
-// logic but different ABC recipes must never share a cache row.
-[[nodiscard]] Region_digest region_digest(const livehd::partition::Region_body& rb, uint64_t opts_sig);
-
-// Hash of the per-region ABC recipe, for `opts_sig`: the two resolved flow
-// strings ({D}/{L} already substituted) plus the arithmetic architecture.
-[[nodiscard]] uint64_t incr_opts_hash(std::string_view comb_flow, std::string_view seq_flow, int adder, int block_size,
-                                      int multiplier);
-
 // The persistent cache: a directory holding
-//   * abc_cache.json  -- {schema, salt, regions: {digest: {module, in[], out[], qor...}}}
-//   * an hhds GraphLibrary of cached region bodies, one module per digest
-//     (content-addressed name "r_<digest>"), liberty-cell/child IO decls cloned
-//     opaque.
-// Load is salt-gated: a mismatch starts the metadata empty (stale module
-// bodies linger in the library harmlessly -- they are unreachable without a
-// row, and a later store under the same name replaces the body).
+//   * abc_cache.json -- {schema, salt, regions: {module_name: {module, pre,
+//     recipe, in[], out[], qor...}}}
+//   * an hhds GraphLibrary with, per cached region, the MAPPED body (name ==
+//     module_name) and its PRE-ABC body (name "p_"+module_name).
 class Incr_cache {
 public:
   struct Row {
-    std::string              module;  // module name inside the cache library
-    std::vector<std::string> in;      // cached-module input port name per canonical rank
-    std::vector<std::string> out;     // cached-module output port name per canonical rank
-    // Cached Region_qor payload (module/color are per-run, re-stamped on hit).
-    int         gates = 0;
-    double      area  = 0.0;
-    float       delay = -1.0f;
-    int         crit_out_rank = -1;  // canonical rank of the critical output, -1 = none
-    std::string crit_src;
-    int         div_blackbox = 0;
+    std::string              module;   // cache-lib name of the mapped body (== module_name)
+    std::string              pre;      // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string              recipe;   // verbatim resolved ABC recipe (the recipe gate)
+    std::vector<std::string> in, out;  // cached module port names (existence-checked on reuse)
+    int                      gates = 0;
+    double                   area  = 0.0;
+    float                    delay = -1.0f;
+    std::string              crit_output;  // region output port with the worst arrival (a name)
+    std::string              crit_src;
+    int                      div_blackbox = 0;
   };
 
-  // Opens (creates) the cache directory and loads abc_cache.json when its salt
-  // matches. The library singleton is opened lazily on first body access.
+  struct Compare_result {
+    bool        hit = false;
+    const Row*  row = nullptr;
+    std::string crit_output;
+  };
+
   Incr_cache(std::string dir, uint64_t salt);
 
-  [[nodiscard]] const Row* lookup(const Region_digest& d) const;
+  // Miss (default result) unless ALL hold: rb.reuse_eligible, a row keyed by
+  // rb.module_name exists, its recipe matches VERBATIM, the cached pre-abc body
+  // is structurally identical to `pre_body` (semdiff::structural_identical,
+  // matching_names), and every cached port name still exists on the fresh region.
+  [[nodiscard]] Compare_result lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
+                                              std::string_view recipe);
 
-  // Record a freshly mapped region: clone rb.body into the cache library under
-  // the content-addressed name and add the metadata row. Failures warn and
-  // skip (the cache is only ever a speedup).
-  void store(const livehd::partition::Region_body& rb, const Region_digest& d, const Region_qor& q);
+  // Snapshot a freshly mapped region: copy rb.body (mapped, in `outlib`, under
+  // module_name) and `pre_body` (in `pre_lib`, under `pre_name`) into the cache
+  // library, and add the metadata row. Best-effort; returns false on failure.
+  bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
+             const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib);
 
-  // Clone the cached module's body into rb.body (whose IO is already declared
-  // and materialized by the partitioner), mapping cached port names to the
-  // fresh ones through the canonical ranks. Returns false (and the caller maps
-  // normally) when the cached module is missing or malformed.
-  [[nodiscard]] bool reuse(const livehd::partition::Region_body& rb, const Region_digest& d, const Row& row,
-                           hhds::GraphLibrary* outlib);
+  // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
+  // (no mapped body, no ABC), so a second compare-only run can exercise the
+  // rebuild/copy/save/load/compare path without paying for ABC.
+  bool store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
+                 std::string_view recipe);
 
-  // Persist abc_cache.json (atomic tmp+rename) and the cache library. No-op
-  // when nothing was stored.
+  // Fill rb.body (the freshly-partitioned region shell in `outlib`) IN PLACE from
+  // the cached mapped body -- no clone, no port stitch, name-hash gid preserved.
+  // Returns false if the cached body is missing.
+  [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res,
+                               hhds::GraphLibrary* outlib);
+
+  // Persist abc_cache.json (atomic tmp+rename) and the cache library. No-op when
+  // nothing was stored.
   void save();
 
-  [[nodiscard]] int hits() const { return hits_; }
-  [[nodiscard]] int misses() const { return misses_; }
-  [[nodiscard]] int stores() const { return stores_; }
-  [[nodiscard]] int refused() const { return refused_; }
-  void note_miss(bool digest_valid) {
-    ++misses_;
-    if (!digest_valid) {
-      ++refused_;
-    }
-  }
+  [[nodiscard]] int  hits() const { return hits_; }
+  [[nodiscard]] int  misses() const { return misses_; }
+  void               note_miss() { ++misses_; }
 
   [[nodiscard]] const std::string& dir() const { return dir_; }
 
-  // Salt for the whole cache: the global inputs a region digest does not see.
-  // Library CONTENT (not path -- the same path with edited cells must miss),
-  // sequential-mapping mode, DFF cell choice, assume feeding, plus a schema
-  // constant bumped when the mapper's read-back changes shape.
+  // Salt for the whole cache: the global inputs the per-region compare does not
+  // see. Library CONTENT, sequential-mapping mode, DFF cell, assume feeding,
+  // plus a schema tag bumped when the mapper's read-back or the cache shape
+  // changes.
   [[nodiscard]] static uint64_t make_salt(std::string_view library_path, bool map_register, bool map_memory,
                                           std::string_view dff_cell, bool use_proven_assume, bool use_all_assume);
 
 private:
   std::string dir_;
-  uint64_t    salt_ = 0;
+  std::string pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
+  uint64_t    salt_  = 0;
   bool        dirty_ = false;
-  int         hits_ = 0, misses_ = 0, stores_ = 0, refused_ = 0;
+  int         hits_ = 0, misses_ = 0;
 
-  absl::flat_hash_map<std::string, Row> rows_;  // digest hex -> row
+  absl::flat_hash_map<std::string, Row> rows_;  // module_name -> row
 
+  // The cache is TWO libraries, deliberately kept in separate namespaces:
+  //   lib()            -- the MAPPED region bodies (reuse_hit fills from here).
+  //   cached_pre_lib() -- the PRE-ABC bodies + their body-less Sub child decls
+  //                       (the structural compare reads from here).
+  // They must not share one library: a mapped child body and a parent pre-body's
+  // Sub child decl have the SAME module name but DIFFERENT port names (mapped =
+  // partition-boundary names, pre = original def names), so merging them makes the
+  // cached pre-body's Subs resolve to the wrong IO and the compare mismatches the
+  // fresh side. Separate libs => both compare sides resolve the body-less decls.
   [[nodiscard]] hhds::GraphLibrary& lib();
+  [[nodiscard]] hhds::GraphLibrary& cached_pre_lib();
+
+  // Copy the pre-body's body-less Sub child decls into cached_pre_lib() next to the
+  // pre-body, so the cached copy is self-contained (its Subs resolve
+  // get_subnode_io()). Without it the structural compare's IO signature is
+  // asymmetric cached-vs-fresh -> spurious cut_violated. `src_pre_lib` is the
+  // partitioner's throwaway lib holding the fresh pre-body. No-op if rb.pre_body null.
+  void copy_pre_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& src_pre_lib);
 };
 
 }  // namespace livehd::abc

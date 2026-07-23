@@ -114,6 +114,12 @@ struct Options {
   // proven equivalent, forced to the sound black-box path even when --lib could
   // flatten them (proven-module collapse — the parent stops re-solving them).
   std::vector<std::string> collapse;
+  // lec --trust <def> (repeatable): module-def names ASSUMED equivalent without a
+  // proof — the escape hatch for a cell the encoder cannot yet model (a Latch).
+  // The driver skips proving them and force-blackboxes their instances, keeping
+  // them boxed even through a refute's flat-confirm; a top proven under a
+  // non-empty trust list is disclosed, never a silent unconditional pass.
+  std::vector<std::string> trust;
 
   // `lhd pyrope fmt` formatter knobs (clang-format-like). Consumed only by the
   // pyrope command; harmless defaults elsewhere.
@@ -253,6 +259,13 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
     {"vcd_fake_delay", "true", Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
      "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
+    {"hlop_dir", "", Sim_set_option::Kind::bool_or_file,
+     "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
+     "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
+     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
+    {"iassert_dir", "", Sim_set_option::Kind::bool_or_file,
+     "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
+     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"},
     {"cgen_color", "true", Sim_set_option::Kind::boolean,
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "

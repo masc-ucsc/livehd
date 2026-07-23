@@ -152,7 +152,7 @@ void Color_synth::label(hhds::Graph* g) {
   Color_opts o = opts;
   if (opts.min_ge != 0 || opts.max_ge != 0) {
     Size_window_stats st;
-    flat_node2id = apply_size_window(g, flat_node2id, opts.min_ge, opts.max_ge, &st);
+    flat_node2id = apply_size_window(g, flat_node2id, opts.min_ge, opts.max_ge, &st, opts.name_weight);
     o.continuous = false;
     if (opts.verbose) {
       std::print(stderr,
