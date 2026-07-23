@@ -249,40 +249,75 @@ a mistranslation like the historical `Get_mask(a,-1)` bug would be REFUTED here.
 
 ## DINO Lean Gate
 
-Generate the three DINO CPU models:
+**Status — all three DINO CPUs convert RTL → Lean model today.** Each emitted
+`<Top>_Lgraph.lean` has typed `<Top>_in` / `<Top>_out` / `<Top>_state` structures
+(fixed-width `BitVec n`), the `<Top>_comb` / `<Top>_next` / `<Top>_step` fast
+model, and (with `emit_cert=true`) the graph certificate + `evalGraph`-correct
+instantiation.
+
+| Design | Lean model | Lean typecheck | RTL ≡ LGraph (LEC gate) |
+|---|---|---|---|
+| SingleCycleCPU | ~19k lines | model+cert typechecks (~3 min, ~6 GB) | PROVEN — 42 flop-cut miters, cvc5 |
+| PipelinedCPU | ~20k lines | model+cert typechecks (~3.7 min, ~6.5 GB) | PROVEN — 73 flop-cut miters, cvc5 |
+| PipelinedDualIssueCPU | ~42k lines | **model-only** typechecks (~10 min, ~10 GB); full model+cert is the current scaling target (split generated files) | PROVEN — 106 flop-cut miters, cvc5 |
+
+> Option namespace note: the `pass.lean` knobs are `formal.lean.*`
+> (e.g. `formal.lean.emit_cert`), **not** the old `lean.*`.
+
+### A. Generate one design directly (fastest, self-contained)
 
 ```bash
 cd <livehd-new>
-RUN_LEAN=false \
+SC=<chisel-build>/build_singlecyclecpu_d          # dir holding SingleCycleCPU*.sv
+OUT=generated/dino_readme_ex
+mkdir -p "$OUT/work" "$OUT/lean"
+
+./bazel-bin/lhd/lhd compile verilog "$SC"/*.sv \
+  --reader yosys-verilog --top SingleCycleCPU \
+  --workdir "$OUT/work" --emit-dir lean:"$OUT/lean" \
+  --set yosys.setundef=zero \
+  --set formal.lean.strict=true \
+  --set formal.lean.emit_cert=true          # false = model-only (faster to typecheck)
+# -> $OUT/lean/SingleCycleCPU_Lgraph.lean
+#    (add --set formal.lean.max_width=0 for unlimited width; see the max_width section)
+```
+
+Swap `--top PipelinedCPU` / `PipelinedDualIssueCPU` (and their `build_*_d` dirs)
+for the other two designs.
+
+### B. Generate all three via the pipeline script (LEC gate → generate → typecheck)
+
+```bash
+cd <livehd-new>
 LEAN_EMIT_CERT=true \
 OUT=<livehd-new>/generated/dino_lgraph_lean_dev \
 scripts/run_dino_lgraph_lean.sh
 ```
 
-Then typecheck individual generated designs from the Lean package directory:
+This runs the RTL≡LGraph **LEC gate first** (aborts on REFUTED), then `pass.lean`,
+then typechecks each model. Useful env: `RUN_LEC_GATE=false` (skip gate),
+`RUN_LEAN=false` (skip typecheck / model-only), `LEAN_EMIT_CERT=false`
+(model-only emission), `LEAN_MAX_WIDTH=0` (unlimited width).
+
+### C. Typecheck a generated design by hand
 
 ```bash
 cd <livehd-new>/formal/lean
-ELAN_HOME=<project-local-elan-home> \
 TMPDIR=<livehd-new>/generated/dino_lgraph_lean_dev/runtime_tmp \
-TMP=<livehd-new>/generated/dino_lgraph_lean_dev/runtime_tmp \
-TEMP=<livehd-new>/generated/dino_lgraph_lean_dev/runtime_tmp \
 lake env lean <livehd-new>/generated/dino_lgraph_lean_dev/lean/SingleCycleCPU_Lgraph.lean
 ```
 
-Measured status on the current generated DINO artifacts:
-
-- `SingleCycleCPU_Lgraph.lean`: typechecks, about 3:11 wall time and 5.9 GB RSS.
-- `PipelinedCPU_Lgraph.lean`: typechecks, about 3:40 wall time and 6.5 GB RSS.
-- `PipelinedDualIssueCPU_Lgraph.lean`: model-only generation and typechecking
-  succeed with `LEAN_EMIT_CERT=false`, about 9:44 wall time and 9.9 GB RSS.
-  Full model+certificate Lean typechecking was stopped after more than
-  22 minutes.  This is the next scaling target and should be addressed by
-  splitting generated model/cert data into smaller files or sections.
-
 ## CVA6 Lean Gate
 
-Use module-level stress first:
+**Status — partial.** CVA6 modules compile RTL → LGraph and reach `pass.lean`,
+but full Lean model generation is **not** a passing gate yet: memory-bearing
+modules (SRAMs, cache regbanks) contain `Ntype_op::Memory` nodes, which
+`pass.lean` still rejects in strict mode — the function-valued memory emission +
+certificates are ported in `pass.isabelle` but not yet in `pass.lean` (see
+"Remaining Implementation Work" item 3). `tc_sram` is exactly such a module and
+stops at the Memory node.
+
+Module-level stress (front-end + `pass.lean` up to the Memory limit):
 
 ```bash
 cd <livehd-new>
@@ -292,7 +327,7 @@ LEAN_EMIT_CERT=true \
 scripts/run_cva6_module_lean_stress.sh
 ```
 
-Use the full-core stress runner only as a completeness probe:
+Full-core stress runner (completeness probe only):
 
 ```bash
 cd <livehd-new>
@@ -301,7 +336,8 @@ CVA6_BLACKBOX_MODULES="fpnew_top fpnew_top_multi" \
 scripts/run_cva6_complex_lean_stress.sh
 ```
 
-Current expected CVA6 result: compilation reaches `pass.lean` until an explicit
-unsupported construct is encountered.  Full CVA6 Lean model generation is not a
-passing gate yet because `Ntype_op::Memory` emission/certificates still need to
-be ported from the Isabelle path.
+To generate a Lean model for a **non-memory** CVA6 module directly (e.g. an ALU),
+use the same one-liner as DINO example A with the module's filelist/top and
+`--set formal.lean.*` knobs. A memory-bearing module needs the pending Memory
+port (or `--set formal.lean.strict=false` to emit `undefined` stubs for
+inspection only — those will not typecheck downstream).

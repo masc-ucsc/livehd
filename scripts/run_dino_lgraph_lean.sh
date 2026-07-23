@@ -85,10 +85,10 @@ run_design() {
     --emit-dir lg:"$lg" \
     --emit-dir lean:"$LEAN_DIR" \
     --set yosys.setundef=zero \
-    --set lean.strict="$STRICT" \
-    --set lean.normalize=true \
-    --set lean.emit_cert="$EMIT_CERT" \
-    --set lean.max_width="$MAX_WIDTH" \
+    --set formal.lean.strict="$STRICT" \
+    --set formal.lean.normalize=true \
+    --set formal.lean.emit_cert="$EMIT_CERT" \
+    --set formal.lean.max_width="$MAX_WIDTH" \
     > "$log" 2>&1
   local status=$?
   set -e

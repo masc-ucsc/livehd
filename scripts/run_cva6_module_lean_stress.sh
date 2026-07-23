@@ -132,10 +132,10 @@ set +e
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
-  --set lean.strict=true \
-  --set lean.normalize=true \
-  --set lean.emit_cert="$EMIT_CERT" \
-  --set lean.max_width=1048576 \
+  --set formal.lean.strict=true \
+  --set formal.lean.normalize=true \
+  --set formal.lean.emit_cert="$EMIT_CERT" \
+  --set formal.lean.max_width=1048576 \
   -- \
   "${SLANG_FLAGS[@]}" \
   > "$RUN_LOG" 2>&1
