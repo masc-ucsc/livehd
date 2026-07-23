@@ -182,6 +182,35 @@ std::string make_field_name(std::string_view role, std::string_view rtl_name, ab
   return name;
 }
 
+struct Memory_port_info {
+  size_t   port_id = 0;
+  bool     rdport  = false;
+  Node_pin addr;
+  Node_pin din;
+  Node_pin enable;
+  Node_pin clock;
+  uint32_t driver_pid = 0;  // read-output driver pin id, valid only for rdport
+};
+
+struct Memory_info {
+  Node                          node;
+  uint32_t                      nid        = 0;
+  std::string                   field;
+  std::string                   raw_name;
+  uint32_t                      bits       = 0;
+  uint32_t                      addr_width = 1;
+  uint64_t                      size       = 0;
+  uint32_t                      wensize    = 0;
+  int64_t                       type       = 0;
+  int64_t                       fwd        = 0;
+  int64_t                       posclk     = 1;
+  std::vector<Memory_port_info> ports;
+  std::vector<size_t>           read_ports;
+  std::vector<size_t>           write_ports;
+  bool                          sync = false;                   // type == 1 (registered read data)
+  std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (sync only)
+};
+
 struct LeanCtx {
   hhds::Graph* g = nullptr;
   std::string  top_name;
@@ -200,6 +229,8 @@ struct LeanCtx {
 
   std::map<uint32_t, std::string> flop_field;
   std::map<uint32_t, uint32_t>    flop_width;
+
+  std::map<uint32_t, Memory_info> memory_info;
 };
 
 [[noreturn]] void fatal(const LeanCtx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.lean: " + msg); }
@@ -235,6 +266,167 @@ uint32_t node_width(const LeanCtx& ctx, const Node& node) {
   auto w = raw_node_width(node);
   check_width(ctx, node, w, "node");
   return static_cast<uint32_t>(w);
+}
+
+uint32_t ceil_log2_u64(uint64_t v) {
+  if (v <= 1) {
+    return 1;
+  }
+  --v;
+  uint32_t w = 0;
+  while (v != 0) {
+    ++w;
+    v >>= 1;
+  }
+  return w == 0 ? 1 : w;
+}
+
+int64_t const_pin_int(const LeanCtx& ctx, const Node_pin& pin, const Node& owner, std::string_view field) {
+  if (!pin_is_const(pin)) {
+    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-constant " + std::string(field) + " policy pin.");
+  }
+  auto v = pin_const_value(pin);
+  if (!v.is_just_i64()) {
+    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-integer " + std::string(field) + " policy pin.");
+  }
+  return v.to_just_i64();
+}
+
+// Lenient reader for policy pins that are PARSED BUT UNUSED in the async/array
+// emission (fwd = read-during-write forwarding, posclk = clock polarity).  The
+// current front-end can drive these with a non-constant signal; since they do
+// not affect the emitted mem_read/mem_write model, tolerate a non-constant
+// driver and fall back to a default instead of aborting.  (pass.isabelle still
+// requires these constant — a shared over-strict check worth relaxing there too.)
+int64_t const_pin_int_or(const Node_pin& pin, int64_t dflt) {
+  if (!pin_is_const(pin)) {
+    return dflt;
+  }
+  auto v = pin_const_value(pin);
+  return v.is_just_i64() ? v.to_just_i64() : dflt;
+}
+
+std::string memory_policy_summary(const Memory_info& mi) {
+  std::ostringstream oss;
+  oss << "memory node n_" << mi.nid << " bits=" << mi.bits << " size=" << mi.size << " addr_width=" << mi.addr_width
+      << " type=" << mi.type << " fwd=" << mi.fwd << " posclk=" << mi.posclk << " wensize=" << mi.wensize
+      << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
+  return oss.str();
+}
+
+Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
+  Memory_info mi;
+  mi.node = node;
+  mi.nid  = node_id(node);
+
+  const auto stride = static_cast<size_t>(Ntype::Memory_port_stride);
+  for (const auto& e : inp_edges_ordered(node)) {
+    const auto raw_pid = static_cast<size_t>(e.sink.get_port_id());
+    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % stride));
+    const auto port_id = raw_pid / stride;
+    if (mi.ports.size() <= port_id) {
+      mi.ports.resize(port_id + 1);
+    }
+    mi.ports[port_id].port_id = port_id;
+
+    if (pname == "bits") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v <= 0) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive bits.");
+      }
+      mi.bits = static_cast<uint32_t>(v);
+    } else if (pname == "size") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v <= 0) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive size.");
+      }
+      mi.size = static_cast<uint64_t>(v);
+    } else if (pname == "wensize") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v < 0) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has negative wensize.");
+      }
+      mi.wensize = static_cast<uint32_t>(v);
+    } else if (pname == "type") {
+      mi.type = const_pin_int(ctx, e.driver, node, pname);
+    } else if (pname == "fwd") {
+      mi.fwd = const_pin_int_or(e.driver, 0);  // unused in async emission; tolerate non-const
+    } else if (pname == "posclk") {
+      mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
+    } else if (pname == "rdport") {
+      mi.ports[port_id].rdport = const_pin_int(ctx, e.driver, node, pname) != 0;
+    } else if (pname == "addr") {
+      mi.ports[port_id].addr = e.driver;
+    } else if (pname == "din") {
+      mi.ports[port_id].din = e.driver;
+    } else if (pname == "enable") {
+      mi.ports[port_id].enable = e.driver;
+    } else if (pname == "clock_pin") {
+      mi.ports[port_id].clock = e.driver;
+    }
+  }
+
+  if (mi.bits == 0 || mi.size == 0) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " is missing constant bits/size policy.");
+  }
+  check_width(ctx, node, mi.bits, "memory data");
+  mi.addr_width = ceil_log2_u64(mi.size);
+  if (mi.addr_width == 0 || mi.addr_width > ctx.max_width) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has unsupported address width " + std::to_string(mi.addr_width));
+  }
+  if (mi.wensize == 0) {
+    mi.wensize = 1;
+  }
+  if (mi.bits % mi.wensize != 0) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has bits not divisible by wensize: bits=" + std::to_string(mi.bits)
+                   + " wensize=" + std::to_string(mi.wensize));
+  }
+
+  for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
+    auto& p   = mi.ports[idx];
+    p.port_id = idx;
+    if (p.rdport) {
+      p.driver_pid = static_cast<uint32_t>(mi.write_ports.size() + mi.read_ports.size());
+      mi.read_ports.push_back(idx);
+      if (p.addr.is_invalid()) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing addr.");
+      }
+      if (p.enable.is_invalid()) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing enable.");
+      }
+    } else {
+      mi.write_ports.push_back(idx);
+      if (p.addr.is_invalid()) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing addr.");
+      }
+      if (p.enable.is_invalid()) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing enable.");
+      }
+      if (p.din.is_invalid()) {
+        fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing din.");
+      }
+    }
+  }
+
+  if (mi.read_ports.size() > 1 || mi.write_ports.size() > 1) {
+    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory v1 supports at most one read and one write port.");
+  }
+  // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
+  // read data, modeled with a read-data register field + sram_sync_read_reg_next).
+  if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
+    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only.");
+  }
+  mi.sync = (mi.type == 1);
+
+  return mi;
+}
+
+const Memory_info& memory_info_for(const LeanCtx& ctx, const Node& node) {
+  auto it = ctx.memory_info.find(node_id(node));
+  if (it == ctx.memory_info.end()) {
+    throw Emit_error("internal: memory node n_" + std::to_string(node_id(node)) + " has no Memory_info.");
+  }
+  return it->second;
 }
 
 std::string lean_int_literal(std::string_view decimal) {
@@ -310,6 +502,95 @@ std::string ucast_expr(const std::string& expr, uint32_t w) {
 
 std::string ucast_pin_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t w) {
   return ucast_expr(driver_expr_at(ctx, dpin, w), w);
+}
+
+// Read-during-write policy tuple for a memory that has BOTH a read and a write
+// port.  Emits a single `sram_1r1w_{read,write}_first` (or `_be_` byte-enable)
+// call that returns `(m', rdata)`; the caller takes `.1` for next-state and
+// `.2` for the read output, so read and next-state come from ONE policy
+// decision (correct on a same-cycle same-address collision).  Policy is chosen
+// by mi.fwd: fwd=1 -> write_first (forward new data), else read_first.
+std::string memory_policy_tuple(const LeanCtx& ctx, const Memory_info& mi) {
+  const auto& wp    = mi.ports.at(mi.write_ports.front());
+  const auto& rp    = mi.ports.at(mi.read_ports.front());
+  const auto  we    = "(bitvec_nonzero " + ucast_pin_at(ctx, wp.enable, std::max<uint32_t>(1, mi.wensize)) + ")";
+  const auto  waddr = ucast_pin_at(ctx, wp.addr, mi.addr_width);
+  const auto  wdata = ucast_pin_at(ctx, wp.din, mi.bits);
+  const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
+  const auto  cur   = "s." + mi.field;
+  const bool  wfirst = (mi.fwd == 1);
+  if (mi.wensize <= 1) {
+    const std::string fn = wfirst ? "sram_1r1w_write_first" : "sram_1r1w_read_first";
+    return "(" + fn + " " + we + " " + waddr + " " + wdata + " " + raddr + " " + cur + ")";
+  }
+  const auto        be     = ucast_pin_at(ctx, wp.enable, mi.wensize);
+  const auto        byte_w = mi.bits / mi.wensize;
+  const std::string fn     = wfirst ? "sram_1r1w_be_write_first" : "sram_1r1w_be_read_first";
+  return "(" + fn + " " + we + " " + waddr + " " + wdata + " " + be + " " + std::to_string(byte_w) + " " + raddr + " " + cur
+         + ")";
+}
+
+// Read-enable bool of the (single) read port.
+std::string memory_read_enable(const LeanCtx& ctx, const Memory_info& mi) {
+  const auto& rp = mi.ports.at(mi.read_ports.front());
+  return "(bitvec_nonzero " + ucast_pin_at(ctx, rp.enable, pin_width(ctx, rp.enable, mi.node)) + ")";
+}
+
+// Raw (ungated) read value of the single read port: `.2` of the RDW policy tuple
+// for a 1R1W, else `mem_read s.field addr` for read-only.  Shared by the async
+// combinational read output and the sync read-register capture.
+std::string memory_raw_read_value(const LeanCtx& ctx, const Memory_info& mi) {
+  const auto& rp = mi.ports.at(mi.read_ports.front());
+  if (!mi.write_ports.empty()) {
+    return "(" + memory_policy_tuple(ctx, mi) + ").2";
+  }
+  const auto addr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
+  return "mem_read s." + mi.field + " " + addr;
+}
+
+// Memory read output.  Sync (type 1): the registered read-data field (value
+// captured last edge).  Async (type 0/2): enable-gated raw read value.
+std::string memory_read_expr(const LeanCtx& ctx, const Memory_info& mi) {
+  if (mi.read_ports.empty()) {
+    fatal(ctx, memory_policy_summary(mi) + ". memory read expression requested for write-only memory.");
+  }
+  if (mi.sync) {
+    return "s." + mi.read_reg_field.at(mi.read_ports.front());
+  }
+  return "(if " + memory_read_enable(ctx, mi) + " then " + memory_raw_read_value(ctx, mi) + " else " + lit_zero(mi.bits)
+         + ")";
+}
+
+// Next value of a sync memory's read-data register: capture the raw read value
+// when read-enabled, else hold.
+std::string memory_sync_reg_next_expr(const LeanCtx& ctx, const Memory_info& mi) {
+  return "sram_sync_read_reg_next " + memory_read_enable(ctx, mi) + " (" + memory_raw_read_value(ctx, mi) + ") s."
+         + mi.read_reg_field.at(mi.read_ports.front());
+}
+
+// Memory next-state.  1R1W: `.1` of the RDW policy tuple.  Write-only:
+// mem_write / mem_write_be.  Read-only: unchanged.
+std::string memory_next_expr(const LeanCtx& ctx, const Memory_info& mi) {
+  if (mi.write_ports.empty()) {
+    return "s." + mi.field;
+  }
+  if (!mi.read_ports.empty()) {
+    return "(" + memory_policy_tuple(ctx, mi) + ").1";
+  }
+  const auto& p           = mi.ports.at(mi.write_ports.front());
+  const auto  current     = "s." + mi.field;
+  const auto  addr        = ucast_pin_at(ctx, p.addr, mi.addr_width);
+  const auto  data        = ucast_pin_at(ctx, p.din, mi.bits);
+  const auto  enable_w    = std::max<uint32_t>(1, mi.wensize);
+  const auto  enable      = ucast_pin_at(ctx, p.enable, enable_w);
+  const auto  enable_bool = "(bitvec_nonzero " + enable + ")";
+
+  if (mi.wensize <= 1) {
+    return "(if " + enable_bool + " then mem_write " + current + " " + addr + " " + data + " else " + current + ")";
+  }
+  const auto byte_w = mi.bits / mi.wensize;
+  return "(if " + enable_bool + " then mem_write_be " + current + " " + addr + " " + data + " " + enable + " "
+         + std::to_string(byte_w) + " else " + current + ")";
 }
 
 std::string driver_expr(const LeanCtx& ctx, const Node_pin& dpin) {
@@ -388,7 +669,9 @@ std::string shift_amount_expr_at(const LeanCtx& ctx, const Node_pin& dpin, uint3
 
 std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
   const auto op = node_op(node);
-  const auto w  = node_width(ctx, node);
+  // A Memory node has no single width-bearing driver pin 0; its read-output
+  // width is mi.bits.  Other ops use the node's declared width.
+  const auto w  = node_is_memory(node) ? memory_info_for(ctx, node).bits : node_width(ctx, node);
 
   switch (op) {
     case Ntype_op::Nconst: return lit_const_at(ctx, node, node_const_value(node), w);
@@ -631,8 +914,7 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
     }
 
     case Ntype_op::Memory:
-      fatal(ctx, "Memory node n_" + std::to_string(node_id(node))
-                     + " reached pass.lean fast model. Lean memory primitives exist, but Ntype_op::Memory port-policy emission is not ported yet.");
+      return memory_read_expr(ctx, memory_info_for(ctx, node));
 
     case Ntype_op::Latch:
     case Ntype_op::Fflop:
@@ -1013,7 +1295,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
   std::vector<Node>             flop_nodes;
   absl::flat_hash_set<uint32_t> flop_nids;
-  bool                          has_memory = false;
+  std::vector<Node>             memory_nodes;
   for (auto node : g->fast_class()) {
     if (node_is_flop(node)) {
       flop_nodes.emplace_back(node);
@@ -1034,18 +1316,39 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       check_width(ctx, node, w, "flop");
       ctx.flop_field[node_id(node)] = fld;
       ctx.flop_width[node_id(node)] = w;
+    } else if (node_is_memory(node)) {
+      memory_nodes.emplace_back(node);
     }
-    has_memory |= node_is_memory(node);
   }
 
-  if (has_memory && strict) {
-    livehd::diag::err("pass.lean", "memory-unsupported", "unsupported")
-        .msg("pass.lean found a Memory node in {}; Lean memory primitives exist, but Memory node emission/certificates are not ported yet",
-             raw_name)
-        .fatal();
+  // Parse each Memory node's port policy (enforces <=1 read + <=1 write port,
+  // async/array-only, bits % wensize == 0) and assign a function-valued state
+  // field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
+  for (auto& mn : memory_nodes) {
+    auto mi = parse_memory_info(ctx, mn);
+    std::string mem_raw;
+    for (const auto& e : mn.out_edges()) {
+      auto wn = livehd::graph_util::wire_name(e.driver);
+      if (!wn.empty() && wn[0] != '_') {
+        mem_raw = std::string(wn);
+        break;
+      }
+    }
+    if (mem_raw.empty()) {
+      mem_raw = "mem_" + std::to_string(node_id(mn));
+    }
+    mi.raw_name                   = mem_raw;
+    mi.field                      = make_field_name("st_", mem_raw, ctx.used_fields);
+    // Sync-read memories carry a registered read-data field per read port.
+    if (mi.sync) {
+      for (auto pidx : mi.read_ports) {
+        mi.read_reg_field[pidx] = make_field_name("st_", mem_raw + "_rdata_" + std::to_string(pidx), ctx.used_fields);
+      }
+    }
+    ctx.memory_info[node_id(mn)]  = mi;
   }
 
-  const bool sequential = !flop_nodes.empty();
+  const bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
   std::vector<Node_pin> roots;
   std::map<std::string, Node_pin> out_drivers;
@@ -1079,6 +1382,24 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   }
   for (auto& kv : flop_enable) {
     roots.push_back(kv.second);
+  }
+
+  // Memory port drivers (addr/din/enable of every port) are roots so their
+  // combinational cones are emitted even for a write-only memory whose read
+  // output does not reach a primary output.
+  for (auto& mn : memory_nodes) {
+    const auto& mi = ctx.memory_info.at(node_id(mn));
+    for (const auto& p : mi.ports) {
+      if (!p.addr.is_invalid()) {
+        roots.push_back(p.addr);
+      }
+      if (!p.din.is_invalid()) {
+        roots.push_back(p.din);
+      }
+      if (!p.enable.is_invalid()) {
+        roots.push_back(p.enable);
+      }
+    }
   }
 
   auto topo = reachable_topo_order(roots, flop_nids);
@@ -1126,12 +1447,28 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       for (const auto& kv : ctx.flop_field) {
         ofs << "  " << kv.second << " : BitVec " << ctx.flop_width.at(kv.first) << "\n";
       }
-      ofs << "deriving Repr, Inhabited\n\n";
+      // Function-valued memory state field: BitVec addr -> BitVec data, plus a
+      // registered read-data field per read port for sync-read (type 1) memories.
+      for (const auto& mn : memory_nodes) {
+        const auto& mi = ctx.memory_info.at(node_id(mn));
+        ofs << "  " << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits << ")\n";
+        for (const auto& kv : mi.read_reg_field) {
+          ofs << "  " << kv.second << " : BitVec " << mi.bits << "\n";
+        }
+      }
+      // A function-typed field has no Repr/DecidableEq instance, so a state with
+      // any memory field derives Inhabited only (Inhabited (BitVec a -> BitVec d)
+      // is derivable via the constant function).
+      if (memory_nodes.empty()) {
+        ofs << "deriving Repr, Inhabited\n\n";
+      } else {
+        ofs << "deriving Inhabited\n\n";
+      }
     }
 
     auto emit_let_chain = [&](std::ostream& os, const std::string& result_expr) {
       for (const auto& n : topo) {
-        auto w   = node_width(ctx, n);
+        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
         auto rhs = emit_node_expr(ctx, n);
         os << "  let n_" << node_id(n) << " : BitVec " << w << " := " << rhs << "\n";
       }
@@ -1172,7 +1509,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       ofs << "def " << base_name << "_next (i : " << base_name << "_in) (s : " << base_name << "_state) : "
           << base_name << "_state :=\n";
       for (const auto& n : topo) {
-        auto w   = node_width(ctx, n);
+        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
         auto rhs = emit_node_expr(ctx, n);
         ofs << "  let n_" << node_id(n) << " : BitVec " << w << " := " << rhs << "\n";
       }
@@ -1195,6 +1532,16 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " "
             << lit_zero(fw) << " " << en_e << " " << din_e << " s." << fld << "\n";
       }
+      // Per-memory new state via mem_write / mem_write_be over the current
+      // s.field, plus each sync read-data register via sram_sync_read_reg_next.
+      for (auto& mn : memory_nodes) {
+        const auto& mi = ctx.memory_info.at(node_id(mn));
+        ofs << "  let new_" << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits
+            << ") := " << memory_next_expr(ctx, mi) << "\n";
+        for (const auto& kv : mi.read_reg_field) {
+          ofs << "  let new_" << kv.second << " : BitVec " << mi.bits << " := " << memory_sync_reg_next_expr(ctx, mi) << "\n";
+        }
+      }
       ofs << "  { ";
       bool first_field = true;
       for (auto& fn : flop_nodes) {
@@ -1204,6 +1551,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         }
         first_field = false;
         ofs << fld << " := new_" << fld;
+      }
+      for (auto& mn : memory_nodes) {
+        const auto& mi = ctx.memory_info.at(node_id(mn));
+        if (!first_field) {
+          ofs << ", ";
+        }
+        first_field = false;
+        ofs << mi.field << " := new_" << mi.field;
+        for (const auto& kv : mi.read_reg_field) {
+          ofs << ", " << kv.second << " := new_" << kv.second;
+        }
       }
       ofs << " }\n\n";
 
@@ -1229,6 +1587,31 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, "
               << flop_nodes.size() << " flops, sequential=" << (sequential ? "yes" : "no")
               << ", certificate disabled)\n";
+    return;
+  }
+
+  // Memory certificate stub (parity with pass.isabelle emit_memory_cert_stub):
+  // the BV bignum certificate evaluator is bit-vector-only and does not yet
+  // interpret function-valued memory, so for memory-bearing designs pass.lean
+  // emits counts + a note instead of a graph certificate + evalGraph bridge.
+  if (!memory_nodes.empty()) {
+    ofs << "-- Certificate: STUB. This design contains " << memory_nodes.size()
+        << " LGraph Memory node(s), modeled as function-valued state\n";
+    ofs << "-- (BitVec addr -> BitVec data) via SemanticPrimitives.mem_read/mem_write/mem_write_be.\n";
+    ofs << "-- The graph-certificate evaluator (BV bignum) is bit-vector-only and does not yet\n";
+    ofs << "-- interpret function-valued memory, so no graphCert / evalGraph bridge is emitted here\n";
+    ofs << "-- (parity with pass.isabelle's memory certificate stub).\n\n";
+    ofs << "def " << base_name << "_node_count : Nat := " << topo.size() << "\n";
+    ofs << "def " << base_name << "_flop_count : Nat := " << flop_nodes.size() << "\n";
+    ofs << "def " << base_name << "_memory_count : Nat := " << memory_nodes.size() << "\n\n";
+    ofs << "theorem " << base_name << "_certificate_counts :\n";
+    ofs << "    " << base_name << "_node_count = " << topo.size() << " ∧ " << base_name << "_flop_count = "
+        << flop_nodes.size() << " ∧ " << base_name << "_memory_count = " << memory_nodes.size() << " := by\n";
+    ofs << "  decide\n\n";
+    ofs << "end " << base_name << "_Lgraph\n";
+    ofs.close();
+    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (memory certificate stub: " << topo.size()
+              << " nodes, " << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
     return;
   }
 

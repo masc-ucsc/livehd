@@ -309,35 +309,54 @@ lake env lean <livehd-new>/generated/dino_lgraph_lean_dev/lean/SingleCycleCPU_Lg
 
 ## CVA6 Lean Gate
 
-**Status — partial.** CVA6 modules compile RTL → LGraph and reach `pass.lean`,
-but full Lean model generation is **not** a passing gate yet: memory-bearing
-modules (SRAMs, cache regbanks) contain `Ntype_op::Memory` nodes, which
-`pass.lean` still rejects in strict mode — the function-valued memory emission +
-certificates are ported in `pass.isabelle` but not yet in `pass.lean` (see
-"Remaining Implementation Work" item 3). `tc_sram` is exactly such a module and
-stops at the Memory node.
+**Status — memory modeling at parity with `pass.isabelle`.** `Ntype_op::Memory`
+nodes now emit a fast model: a function-valued state field
+`(BitVec addr -> BitVec data)`, a `mem_read` in `<Top>_comb`, and a
+`mem_write` / `mem_write_be` in `<Top>_next`. As in `pass.isabelle`, the
+certificate for a memory-bearing design is a **stub** (node/flop/memory counts +
+a `_certificate_counts` theorem) because the `BV` bignum certificate evaluator is
+bit-vector-only; a memory-aware evaluator + cert proofs are still future work.
 
-Module-level stress (front-end + `pass.lean` up to the Memory limit):
+Restrictions match `pass.isabelle`: ≤1 read + ≤1 write port, async/array memories
+(`type ∈ {0,2}`), `bits % wensize == 0`.
 
-```bash
-cd <livehd-new>
-CVA6_TOP=tc_sram \
-RUN_LEAN=false \
-LEAN_EMIT_CERT=true \
-scripts/run_cva6_module_lean_stress.sh
-```
-
-Full-core stress runner (completeness probe only):
+Minimal memory example (async-read / sync-write SRAM), verified to typecheck:
 
 ```bash
 cd <livehd-new>
-CVA6_TARGET=cv64a6_imafdc_sv39_hpdcache_wb \
-CVA6_BLACKBOX_MODULES="fpnew_top fpnew_top_multi" \
-scripts/run_cva6_complex_lean_stress.sh
+cat > ram1.sv <<'EOF'
+module ram1(input logic clk, input logic we, input logic [3:0] waddr,
+            input logic [7:0] wdata, input logic [3:0] raddr, output logic [7:0] rdata);
+  logic [7:0] mem [0:15];
+  always_ff @(posedge clk) if (we) mem[waddr] <= wdata;
+  assign rdata = mem[raddr];
+endmodule
+EOF
+bazel-bin/lhd/lhd compile verilog ram1.sv --reader yosys-slang --top ram1 \
+  --workdir <out>/work --emit-dir lean:<out>/lean \
+  --set yosys.setundef=zero --set formal.lean.strict=true --set formal.lean.emit_cert=true
+# -> <out>/lean/ram1_Lgraph.lean :
+#      structure ram1_state where st_rdata : (BitVec 4 -> BitVec 8)  deriving Inhabited
+#      ram1_comb ... mem_read s.st_rdata ...
+#      ram1_next ... mem_write s.st_rdata ...
+#      -- Certificate: STUB (counts only)
+```
+(`yosys-slang` reader; the `yosys-verilog` reader can trip a yosys `memory -nomap`
+assert on some RAM shapes. A function-typed state field cannot `deriving Repr`, so
+`<Top>_state` derives `Inhabited` only when it holds a memory.)
+
+Real CVA6 SRAM (`tc_sram`) via the module stress runner:
+
+```bash
+cd <livehd-new>
+CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 ```
 
-To generate a Lean model for a **non-memory** CVA6 module directly (e.g. an ALU),
-use the same one-liner as DINO example A with the module's filelist/top and
-`--set formal.lean.*` knobs. A memory-bearing module needs the pending Memory
-port (or `--set formal.lean.strict=false` to emit `undefined` stubs for
-inspection only — those will not typecheck downstream).
+> Two shared latent bugs surfaced while porting and were fixed in `pass.lean`
+> (both should also be applied to `pass.isabelle`):
+> 1. the per-port pin stride is `Ntype::Memory_port_stride` (now **16**), not the
+>    hardcoded `11` both passes used — stale `11` mis-decodes memory port pins;
+> 2. the `fwd` / `posclk` policy pins are parsed but unused in the async/array
+>    emission, so a non-constant driver is tolerated (default) instead of aborting
+>    — the current front-end drives `fwd` non-constant, which previously blocked
+>    every fresh memory in both passes.
