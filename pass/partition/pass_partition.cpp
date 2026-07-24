@@ -147,6 +147,81 @@ uint64_t cone_sig(const hhds::Pin_class& pin, absl::flat_hash_map<hhds::Pin_clas
   return node;
 }
 
+// Forward (CONSUMER-side) analogue of cone_sig (Proposal 2, bidirectional
+// canonical labeling): hashes how a driver's signal is USED downstream, so two
+// boundary inputs with identical PRODUCER cones but different consumer roles --
+// e.g. two replay-queue lanes that write DIFFERENT bit ranges of one packed
+// conflict-matrix flop -- get distinct signatures. cone_sig alone (producer only)
+// ties them, which is a FALSE tie: they are distinct external nets, so a by-name
+// reuse that swaps them transposes the state (LEC-refuted on
+// minion_dcache_replay_queue). Anchors on graph outputs (by name), named
+// nodes/state (by name), and folds each consumer's op + CONSTANT operands (the
+// Get_mask/Set_mask bit ranges that pick the lane) + sink port. Reproducible
+// (nid-free) and symmetric to cone_sig, so old/new recompiles agree.
+uint64_t fwd_cone_sig(const hhds::Pin_class& driver, absl::flat_hash_map<hhds::Pin_class, uint64_t>& memo,
+                      absl::flat_hash_set<hhds::Node_class>& on_path, int depth) {
+  if (auto it = memo.find(driver); it != memo.end()) {
+    return it->second;
+  }
+  constexpr uint64_t kSeed = 0x84222325cbf29ce4ULL;
+  if (depth <= 0) {
+    return sig_mix(kSeed, 0x5a17U);  // depth cap: coarse, path-dependent, not memoized
+  }
+  std::vector<uint64_t> uses;
+  for (const auto& e : driver.out_edges()) {
+    const auto& snk = e.sink;
+    uint64_t    u;
+    if (gu::is_graph_output_pin(snk)) {  // declared IO consumer: name is its identity
+      u = sig_str(sig_mix(kSeed, 1), gu::pin_name_of(snk));
+    } else {
+      auto cm = snk.get_master_node();
+      if (gu::has_name(cm)) {  // named consumer (register/wire/state): a stable anchor
+        u = sig_mix(sig_str(sig_mix(kSeed, 2), gu::node_name_of(cm)), static_cast<uint64_t>(snk.get_port_id()));
+      } else if (on_path.contains(cm)) {  // cycle: coarse op anchor
+        u = sig_mix(sig_mix(kSeed, 3), static_cast<uint64_t>(type_op_of(cm)));
+      } else {
+        on_path.insert(cm);
+        // consumer op + which sink port we feed + its CONSTANT operands (the
+        // masks that select the lane) + a fold of where its outputs go.
+        uint64_t cnode = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
+        cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
+        std::vector<uint64_t> cin;
+        for (const auto& ie : cm.inp_edges()) {
+          if (gu::is_const_pin(ie.driver)) {
+            cin.push_back(sig_mix(sig_str(sig_mix(kSeed, 5), gu::hydrate_const(ie.driver).serialize()),
+                                  static_cast<uint64_t>(ie.sink.get_port_id())));
+          }
+        }
+        std::sort(cin.begin(), cin.end());
+        for (uint64_t c : cin) {
+          cnode = sig_mix(cnode, c);
+        }
+        std::vector<uint64_t>    outs;
+        absl::flat_hash_set<int> seen;
+        for (const auto& oe : cm.out_edges()) {
+          if (seen.insert(static_cast<int>(oe.driver.get_port_id())).second) {
+            outs.push_back(fwd_cone_sig(oe.driver, memo, on_path, depth - 1));
+          }
+        }
+        std::sort(outs.begin(), outs.end());
+        for (uint64_t o : outs) {
+          cnode = sig_mix(cnode, o);
+        }
+        on_path.erase(cm);
+        u = cnode;
+      }
+    }
+    uses.push_back(u);
+  }
+  std::sort(uses.begin(), uses.end());  // commutative over the fanout set
+  uint64_t h = sig_mix(kSeed, uses.size());
+  for (uint64_t u : uses) {
+    h = sig_mix(h, u);
+  }
+  memo[driver] = h;
+  return h;
+}
+
 struct SinkRef {
   hhds::Node_class node;
   hhds::Port_id    pid = 0;
@@ -535,13 +610,24 @@ void Partitioner::name_ports() {
       absl::flat_hash_set<hhds::Node_class> on_path;
       return cone_sig(drv, sig_memo, on_path, 512);
     };
+    // Proposal 2: a boundary INPUT is identified by BOTH its producer cone
+    // (sig_of, backward) AND its consumer cone (fwd_sig_of, forward). Producer
+    // alone is a coarse tie -- two lanes fed by identical logic but used
+    // differently downstream (different packed-state bit ranges) collide; adding
+    // the consumer side separates them, so a distinguishable lane gets a distinct,
+    // reproducible name instead of an arbitrary-tiebreak _k suffix.
+    absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_memo;
+    auto fwd_sig_of = [&](const hhds::Pin_class& drv) {
+      absl::flat_hash_set<hhds::Node_class> on_path;
+      return fwd_cone_sig(drv, fwd_memo, on_path, 256);
+    };
 
     {
       auto&                                          ports = module_inputs_[r];
       absl::flat_hash_map<hhds::Pin_class, uint64_t> psig;
       psig.reserve(ports.size());
       for (auto& p : ports) {
-        psig[p.driver] = sig_of(p.driver);
+        psig[p.driver] = sig_mix(sig_of(p.driver), fwd_sig_of(p.driver));
       }
       // Sort by the content signature (nid-free, reproducible) so the port_id
       // numbering and the `_k` dedup are stable across recompiles; the port_id
@@ -554,12 +640,19 @@ void Partitioner::name_ports() {
         }
         return a.driver.get_port_id() < b.driver.get_port_id();
       });
-      // Two crossing inputs with an identical producer-cone signature are a
-      // genuine joint automorphism (replicated lanes): only an arbitrary
-      // this-run tiebreak tells their names apart, which is NOT reproducible, so
-      // the region cannot be soundly reused by name -- flag it reuse-ineligible
-      // (mirrors abc_incr's tied-input refusal). Tied OUTPUTS are interchangeable
-      // and stay eligible.
+      // After the bidirectional signature (producer AND consumer cone), two
+      // crossing inputs that STILL share a signature are a genuine automorphism:
+      // structurally indistinguishable in BOTH directions, so only an arbitrary
+      // this-run tiebreak tells their names apart -- not reproducible, so the
+      // region cannot be soundly reused by name. Flag it reuse-ineligible (the
+      // load-bearing refusal: for a true automorphism the inputs and outputs swap
+      // together, so the name-anchored compare/traversal PASS on a swapped binding
+      // and the reuse would wire the wrong ports -- proven by an LEC refutation).
+      // The consumer cone above dissolves the FALSE ties (lanes distinguishable
+      // downstream, e.g. minion_dcache_replay_queue) so they become eligible and
+      // soundly reusable; only the genuinely-symmetric residue is refused. Tied
+      // OUTPUTS stay eligible (interchangeable: whichever net reads them gets the
+      // same value).
       for (size_t i = 1; i < ports.size(); ++i) {
         if (psig[ports[i].driver] == psig[ports[i - 1].driver]) {
           region_reuse_ok_[r] = 0;

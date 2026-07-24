@@ -218,6 +218,80 @@ emitted netlist therefore points back to the pre-ABC RTL (verify with `cgen --se
 cgen.srcmap=1`). Attribution is per-cone, not per-gate — ABC's optimization is
 lossy, so exact gate lineage is unrecoverable.
 
+## Incremental reuse (2opt-incr, `abc_incr.cpp`)
+
+The oracle loop — edit a little RTL, resynthesize, compare QoR — changes a handful
+of regions per iteration; the rest map to the *same* netlist. `--workdir W` turns
+on a persistent per-region cache (under `W/abc_cache`) that skips ABC for any
+region whose pre-ABC logic is unchanged. The cache is a **speedup, never an oracle
+of record**: a miss only costs an ABC run, and every reuse is gated by an *exact*
+structural compare (not a digest whose collision would miscompile). Regions
+correspond by **module name**, and are stitched into the fresh wrapper by
+**declared port name** (the partitioner emits content-stable, nid-free names), so a
+hit needs no port matching.
+
+```
+Algorithm INCREMENTAL-ABC(design D, cell library L, persistent cache C)
+  salt ← hash(L, seq/mem mode, recipe schema)      # global inputs the per-region compare can't see
+  if C.salt ≠ salt: C ← ∅                           # a library/mode change invalidates the whole cache
+
+  R ← PARTITION(D)                                  # one module per color region, children before parents
+  for each region r ∈ R:                            # children-first, so a parent's child defs already exist
+      r.pre  ← BUILD-PRE-BODY(r)                     # r's pre-ABC logic (same construction as the cold path)
+      recipe ← RESOLVE-RECIPE(r, L)                  # the exact ABC script this region would run
+      if r.name ∈ C  and  C[r.name].recipe = recipe  and  EQUIVALENT(C[r.name].pre, r.pre):
+          netlist[r] ← C[r.name].mapped             # HIT — reuse the cached netlist in place; ABC never runs
+      else:
+          netlist[r] ← ABC-MAP(r, L, recipe)        # MISS — translate lgraph→ABC, optimize+map, read back
+          C[r.name] ← ⟨recipe, r.pre, netlist[r], ports⟩     # store for the next run
+  SAVE(C)
+  return netlist
+
+# "Is the fresh region logic identical to the cached one?"  Name-anchored and EXACT.
+function EQUIVALENT(a, b)
+  if STRUCT-IDENTICAL(a, b):   return true          # fast: one joint forward-signing pass
+  if TRAVERSE-BIJECTION(a, b): return true          # exact fallback for genuine combinational loops
+  return false
+
+# Fast path. State cells and submodules are CUT POINTS, seeded across sides by hierarchical
+# name; sign every node forward from its inputs to a fixpoint. Identical iff the node sets are
+# in bijection AND every compare point (graph output, cut input) folds equal on both sides.
+# Inconclusive when a real combinational loop stalls the signing.
+function STRUCT-IDENTICAL(a, b) → {yes | no | inconclusive-cycle}
+
+# Exact path. Build a real node bijection: pair the named sources (graph inputs, cut outputs,
+# constants), walk both graphs in lockstep pairing each matched signal's consumers, then VERIFY
+# every node is paired 1:1 and every edge maps consistently under the pairing. A traversal
+# bijection cannot false-positive like a hash, so it decides the cyclic regions signing can't.
+function TRAVERSE-BIJECTION(a, b) → {yes | no}
+```
+
+Boundary-change propagation is automatic and needs no invalidation logic: edit a
+region and its `r.pre` differs → it misses and re-maps; a neighbor sharing the
+changed boundary net also sees a different `r.pre` → it misses too; an
+internals-only edit leaves every neighbor's boundary (hence `r.pre`) unchanged, so
+only the edited region re-maps.
+
+**Boundary naming (Proposal 2, canonical + reproducible).** Reuse stitches by port
+name, so the names must be reproducible across recompiles. A boundary INPUT is
+named by a **bidirectional** content signature — its *producer* cone (backward,
+`cone_sig`) combined with its *consumer* cone (forward, `fwd_cone_sig`: how the
+signal is used downstream, incl. the packed-state bit masks that pick a lane). Two
+inputs collide only when they are structurally indistinguishable in BOTH
+directions — a genuine boundary **automorphism** (truly replicated lanes). Such a
+region is marked **reuse-ineligible** and always re-maps: `EQUIVALENT` cannot guard
+it, because a true automorphism swaps inputs *and* outputs together, so the
+name-anchored compare passes even when an arbitrary per-run tiebreak bound the
+lanes' ports the opposite way, and the by-name stitch would wire the wrong nets
+(observed as an LEC refutation before the input signature was made bidirectional).
+The consumer cone dissolves the *false* ties — two lanes fed by identical logic but
+used differently (e.g. writing different bits of one conflict-matrix flop) now get
+distinct, reproducible names, so they become eligible and reuse soundly. Only the
+genuinely-symmetric residue stays refused (a swap there is a real equivalence, so
+refusing is merely conservative). Every eligible region goes through `EQUIVALENT`,
+which reuses it when the reproducible naming matches and misses otherwise — never a
+false reuse.
+
 ## Status
 
 Combinational mapping (`seq=false`) is complete and LEC-verified

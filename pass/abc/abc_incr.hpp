@@ -135,6 +135,13 @@ private:
   // asymmetric cached-vs-fresh -> spurious cut_violated. `src_pre_lib` is the
   // partitioner's throwaway lib holding the fresh pre-body. No-op if rb.pre_body null.
   void copy_pre_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& src_pre_lib);
+
+  // Copy the MAPPED body's leaf-cell Sub child decls (liberty/DFF cells, declared
+  // into `outlib` only lazily on a MISS by abc_map's blackbox_io) into lib() next
+  // to the mapped body, so the cached body is self-contained. Then reuse_hit can
+  // re-declare them into the fresh `outlib` on an all-HIT recompile that maps
+  // nothing -- without it the reused netlist drops the cells at emission / LEC.
+  void copy_mapped_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& outlib);
 };
 
 }  // namespace livehd::abc

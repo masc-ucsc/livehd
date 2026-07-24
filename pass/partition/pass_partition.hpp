@@ -25,6 +25,18 @@ struct Region_body {
   // reproducible-across-recompiles port names (a crossing-input automorphism),
   // so it must not be reused-by-name from an earlier run's cache. Defaults true;
   // set by the partitioner from its per-region signature check.
+  //
+  // This gate is LOAD-BEARING, not conservative fluff: for a genuine automorphism
+  // (replicated lanes) BOTH the inputs and the outputs swap together, so the
+  // name-anchored compare (structural_identical AND the exact traversal bijection)
+  // sees identical structure and PASSES even when an arbitrary per-run tiebreak
+  // bound the two lanes' ports the opposite way -- the reuse then wires external
+  // signals to the wrong ports and the netlist is WRONG. Proven: dropping this
+  // gate made `minion_dcache_replay_queue` LEC-REFUTE (its conflict matrix came
+  // back permuted). The traversal cannot distinguish symmetric lanes (that is what
+  // "automorphism" means), so it is not a substitute for this refusal; a sound
+  // reuse of these regions needs canonical (reproducible) boundary naming
+  // (fixme_incremental Proposal 2), not a looser gate.
   bool reuse_eligible = true;
 
   struct Port {

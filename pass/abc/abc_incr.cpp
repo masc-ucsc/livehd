@@ -60,6 +60,37 @@ uint64_t           hstr(std::string_view s) {
   return h;
 }
 
+// Re-declare a Sub's child def (`cio`) into `dst` if absent, cloning its IO
+// (names/widths/signs/port-ids/loop_break) -- never a copy_from (which asserts on
+// a body-less decl). `with_body` mints an empty body: REQUIRED in a cache library
+// so the decl survives the save/load round-trip, but OMITTED for an output netlist
+// library where a body-less blackbox is what the fresh mapping (blackbox_io)
+// produces -- so a reused cell decl is byte-for-byte what a cold map would emit.
+void recreate_child_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& cio, bool with_body) {
+  std::string cname{cio.get_name()};
+  if (dst.find_io(cname) != nullptr) {
+    return;  // already present (shared across parents, or a real bodied def) -- never clobber
+  }
+  auto io = dst.create_io(cname);
+  for (const auto& p : cio.get_input_pin_decls()) {
+    io->add_input(p.name, p.port_id, p.loop_break);
+    if (p.bits != 0) {
+      io->set_bits(p.name, p.bits);
+    }
+    io->set_unsign(p.name, p.unsign);
+  }
+  for (const auto& p : cio.get_output_pin_decls()) {
+    io->add_output(p.name, p.port_id, p.loop_break);
+    if (p.bits != 0) {
+      io->set_bits(p.name, p.bits);
+    }
+    io->set_unsign(p.name, p.unsign);
+  }
+  if (with_body) {
+    io->create_graph()->commit();  // empty body: persists across the cache save/load
+  }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -191,14 +222,30 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
   // body-less decls. ON by default; opt-out via ABC_INCR_NO_BLACKBOX.
   so.blackbox_subs = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
   if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
-    if (incr_debug()) {
-      auto m = livehd::semdiff::structural_match(cached_pre.get(), pre_body, so);
-      std::print(
-          "[abc-incr] MISS {} -- structural NOT equal (a_unmatched={} b_unmatched={} cut_violated={} cut_unknown={} "
-          "seed_pairs={} full_pairs={})\n",
-          rb.module_name, m.a_unmatched, m.b_unmatched, m.cut_violated, m.cut_unknown, m.state.seed_pairs, m.state.full_pairs);
+    // The signature stalls on a genuine combinational loop (mux feedback): the
+    // loop cone gets no forward signature, so its obligations stay `cut_unknown`
+    // and structural_identical refuses even when the two regions are identical.
+    // Rescue with an EXACT parallel-traversal bijection -- it decides cyclic
+    // regions a signature cannot and cannot false-positive, so it only ever turns
+    // a false miss into a hit, never admits a region that differs. Opt out via
+    // ABC_INCR_NO_TRAVERSAL. Only reached on a signature miss, so its cost is
+    // bounded to the few refused regions.
+    bool rescued = std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr
+                   && livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
+    if (!rescued) {
+      if (incr_debug()) {
+        auto m = livehd::semdiff::structural_match(cached_pre.get(), pre_body, so);
+        std::print(
+            "[abc-incr] MISS {} -- structural NOT equal (a_unmatched={} b_unmatched={} cut_violated={} cut_unknown={} "
+            "seed_pairs={} full_pairs={})\n",
+            rb.module_name, m.a_unmatched, m.b_unmatched, m.cut_violated, m.cut_unknown, m.state.seed_pairs,
+            m.state.full_pairs);
+      }
+      return res;
     }
-    return res;
+    if (incr_debug()) {
+      std::print("[abc-incr] RESCUE {} -- exact traversal proved equivalent past a stalled signature\n", rb.module_name);
+    }
   }
   // Every cached port name must still exist on the fresh region (a stable-name
   // stitch: a missing name is a miss, never a guess).
@@ -254,30 +301,38 @@ void Incr_cache::copy_pre_children(const livehd::partition::Region_body& rb, hhd
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
-    auto cio = n.get_subnode_io();
-    if (!cio) {
+    if (auto cio = n.get_subnode_io()) {
+      recreate_child_decl(l, *cio, /*with_body=*/true);  // empty body: survives cache save/load
+    }
+  }
+}
+
+// Copy the MAPPED body's leaf-cell Sub child decls (liberty cells, DFF cells --
+// declared into `outlib` only lazily when a region MAPS, via abc_map's
+// blackbox_io) into lib() next to the mapped body, so the cached body is
+// self-contained. Without this, an all-HIT recompile never maps any region, so
+// the cells are never declared and the reused netlist drops them at emission /
+// cannot be encoded for LEC (they resolve get_subnode_io to nothing). A bodied
+// child region already sits in lib() under its own name (stored children-first),
+// so `recreate_child_decl`'s find-or-skip leaves it untouched -- only the leaf
+// blackbox cells are added.
+void Incr_cache::copy_mapped_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& outlib) {
+  auto mio = outlib.find_io(rb.module_name);
+  if (!mio) {
+    return;
+  }
+  auto mapped = mio->get_graph();
+  if (!mapped) {
+    return;
+  }
+  auto& l = lib();
+  for (auto n : mapped->fast_class()) {
+    if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
-    std::string cname{cio->get_name()};
-    if (l.find_io(cname) != nullptr) {  // shared across parents; recreate once
-      continue;
+    if (auto cio = n.get_subnode_io()) {  // resolves in outlib (cells declared during this map)
+      recreate_child_decl(l, *cio, /*with_body=*/true);
     }
-    auto io = l.create_io(cname);
-    for (const auto& p : cio->get_input_pin_decls()) {
-      io->add_input(p.name, p.port_id, p.loop_break);
-      if (p.bits != 0) {
-        io->set_bits(p.name, p.bits);
-      }
-      io->set_unsign(p.name, p.unsign);
-    }
-    for (const auto& p : cio->get_output_pin_decls()) {
-      io->add_output(p.name, p.port_id, p.loop_break);
-      if (p.bits != 0) {
-        io->set_bits(p.name, p.bits);
-      }
-      io->set_unsign(p.name, p.unsign);
-    }
-    io->create_graph()->commit();  // empty body: persists + no copy_from get_graph assert
   }
 }
 
@@ -290,6 +345,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   if (!lib().copy_from(*outlib, rb.module_name)) {
     return false;
   }
+  copy_mapped_children(rb, *outlib);  // self-contain the mapped body's leaf-cell decls
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -353,6 +409,22 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
   auto mapped = mio->get_graph();
   if (!mapped) {
     return false;
+  }
+  // Re-declare the reused body's leaf-cell Sub defs (liberty cells, DFF cells)
+  // into `outlib` FIRST. On an all-HIT recompile no region maps, so abc_map's
+  // blackbox_io never runs and these decls would be absent -- the reused netlist
+  // would then drop the cells at Verilog emission and be un-encodable for LEC
+  // (issue: dino_synth_lec_synth / lhd_abc_incr_test). Body-less, exactly as a
+  // cold map's blackbox_io produces (their behavior comes from the Liberty
+  // models at LEC / the library at synthesis). A bodied child region already sits
+  // in `outlib` (stored children-first), so find-or-skip leaves it untouched.
+  for (auto n : mapped->fast_class()) {
+    if (gu::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    if (auto cio = n.get_subnode_io()) {  // resolves in lib() (copy_mapped_children stored it)
+      recreate_child_decl(*outlib, *cio, /*with_body=*/false);
+    }
   }
   // Fill the freshly-partitioned region shell IN PLACE from the cached mapped
   // body (no clone, no port stitch; the name-hash gid and the writer handle stay
@@ -443,7 +515,11 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // stale bodies must never survive a semantic change.
   // v3: lgraph-compare cache -- keyed by module name, stores pre+mapped bodies,
   // structural_identical + verbatim recipe instead of a 128-bit digest.
-  uint64_t      h = hstr("abc-incr-v3");
+  // v4: mapped body now self-contains its leaf-cell Sub decls (copy_mapped_children)
+  // so an all-HIT reuse can re-declare them into outlib -- a v3 cache lacks them.
+  // v5: partition boundary INPUT naming is now bidirectional (producer + consumer
+  // cone, Proposal 2), so a v4 cache's port names no longer match.
+  uint64_t      h = hstr("abc-incr-v5");
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

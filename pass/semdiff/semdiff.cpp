@@ -132,6 +132,35 @@ int32_t node_out_bits(const hhds::Node_class& node) {
   return 0;
 }
 
+// A Sub's INTERFACE identity: def name + every port's name/width/sign, folded
+// order-independently (XOR over the decls). Round-trip stable -- keyed on names,
+// never on port_id/get_subnode_gid (both are node-id-like handles the abc cache
+// round-trip reassigns; see seed_cut_subs). 0 for a non-Sub or a Sub with no
+// resolvable IO. Used by the traversal verify to enforce the blackbox contract:
+// a child-body edit leaves this unchanged, a child-interface change breaks it.
+uint64_t sub_iface_key(const hhds::Node_class& node) {
+  if (gu::type_op_of(node) != Ntype_op::Sub) {
+    return 0;
+  }
+  auto io = node.get_subnode_io();
+  if (!io) {
+    return 0;
+  }
+  uint64_t h   = hcombine(hstr("\x01subif"), hstr(io->get_name()));
+  uint64_t acc = 0;
+  auto     fold = [&](const auto& decls, uint64_t tag) {
+    for (const auto& p : decls) {
+      uint64_t ph = hcombine(tag, hstr(p.name));
+      ph          = hcombine(ph, static_cast<uint64_t>(p.bits));
+      ph          = hcombine(ph, p.unsign ? 1ULL : 2ULL);
+      acc ^= ph;
+    }
+  };
+  fold(io->get_input_pin_decls(), hstr("\x01i"));
+  fold(io->get_output_pin_decls(), hstr("\x01o"));
+  return hcombine(h, acc);
+}
+
 // op + width + subnode identity: the local "kind" part of a node's key, shared
 // by the forward and backward signatures (a Sub also folds in its def gid so two
 // instances of different modules never match).
@@ -1355,6 +1384,366 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
     }
   }
   return is_structural_identity(res);
+}
+
+// ===========================================================================
+// Exact parallel-traversal equivalence -- the verify-on-inconclusive fallback.
+// ---------------------------------------------------------------------------
+// structural_identical()'s forward signing STALLS on a genuine combinational
+// loop (mux feedback): the loop cone never gets a forward signature, so its
+// compare-point obligations stay `cut_unknown` and the region is conservatively
+// refused. When the two pre-bodies are in fact identical (a comment-only edit)
+// that refusal is a FALSE MISS. This proves equivalence without a signature: it
+// builds a real node BIJECTION by walking a and b in lockstep from their named
+// sources (graph inputs, cut-point outputs, constants), then VERIFIES that every
+// edge maps consistently under it. A traversal bijection is exact -- unlike a
+// hash it cannot false-positive -- and a visited set makes the cycle a non-issue.
+//
+// Cut model matches structural_identical: state cells are always cut points, and
+// (blackbox_subs) every Sub is one too -- its outputs are seeded sources, its
+// inputs are compare-point obligations, keyed on the Sub's IO wiring (name/width/
+// sign, never node ids). So a child-body edit does not break the parent while a
+// child-interface change does, exactly as the signature path.
+//
+// DISCOVERY (may pick a wrong pairing under symmetry -- that only costs a false
+// MISS) then VERIFY (the sole soundness guarantee -- an exact edge check that
+// admits a reuse only for a genuine isomorphism).
+namespace {
+
+// The a<->b node bijection carried through the traversal.
+using Bimap = absl::flat_hash_map<hhds::Class_index, hhds::Class_index>;
+
+// The a-space canonical id of a PAIRED driver's master node: on the a side the
+// node's own class index, on the b side the a-node it pairs with (via ba). So a
+// descriptor built from either side references the SAME id space and the two are
+// directly comparable. Returns false when the driver's node is not (yet) paired
+// -- checked SYMMETRICALLY (ab for a, ba for b), so an unpaired fanin folds a
+// frontier on both sides rather than resolving on one and stranding the other.
+bool traversal_pairid(const hhds::Node_class& dm, bool a_side, const Bimap& ab, const Bimap& ba, uint64_t& out) {
+  if (a_side) {
+    if (!ab.contains(dm.get_class_index())) {
+      return false;
+    }
+    out = static_cast<uint64_t>(dm.get_class_index().value);
+    return true;
+  }
+  auto it = ba.find(dm.get_class_index());
+  if (it == ba.end()) {
+    return false;
+  }
+  out = static_cast<uint64_t>(it->second.value);
+  return true;
+}
+
+// A driver's cross-side descriptor, canonicalized to a-space: a graph input by
+// NAME, a constant by VALUE, any other node output by (a-space pair id, driver
+// port) -- port by NAME for a Sub (round-trip-stable), by port_id otherwise
+// (Ntype-fixed). `resolved` is false when the driver's node has no pairing yet
+// (a discovery frontier); verify treats that as a mismatch, discovery as "?".
+uint64_t driver_desc(const hhds::Pin_class& drv, bool a_side, const Bimap& ab, const Bimap& ba, bool& resolved) {
+  resolved = true;
+  if (gu::is_graph_input_pin(drv)) {
+    return hcombine(hstr("\x01I"), hstr(drv.get_pin_name()));
+  }
+  if (gu::is_const_pin(drv)) {
+    return hcombine(hstr("\x01C"), hstr(gu::hydrate_const(drv).serialize()));
+  }
+  auto     dm = drv.get_master_node();
+  uint64_t pid;
+  if (!traversal_pairid(dm, a_side, ab, ba, pid)) {
+    resolved = false;
+    return 0;
+  }
+  uint64_t h = hcombine(hstr("\x01N"), pid);
+  if (gu::type_op_of(dm) == Ntype_op::Sub) {
+    h = hcombine(h, hstr(drv.get_pin_name()));  // named output port
+  } else {
+    h = hcombine(h, static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id())));
+  }
+  return h;
+}
+
+// One input edge's descriptor: the sink port (by NAME on a Sub, else port_id)
+// combined with the driver descriptor. `ok` is cleared when the driver is
+// unresolved (verify: mismatch).
+uint64_t edge_desc(const hhds::Edge_class& e, bool sink_is_sub, bool a_side, const Bimap& ab, const Bimap& ba, bool& ok) {
+  uint64_t sink_port = sink_is_sub ? hstr(e.sink.get_pin_name())
+                                   : static_cast<uint64_t>(static_cast<uint32_t>(e.sink.get_port_id()));
+  bool     resolved;
+  uint64_t d = driver_desc(e.driver, a_side, ab, ba, resolved);
+  ok         = resolved;
+  return hcombine(sink_port, d);
+}
+
+// The multiset of a node's input-edge descriptors (sorted), a-space canonical.
+// `ok` is cleared if any driver is unresolved.
+std::vector<uint64_t> input_descs(const hhds::Node_class& node, bool a_side, const Bimap& ab, const Bimap& ba, bool& ok) {
+  ok            = true;
+  bool sink_sub = gu::type_op_of(node) == Ntype_op::Sub;
+  std::vector<uint64_t> v;
+  for (const auto& e : node.inp_edges()) {
+    bool eok;
+    v.push_back(edge_desc(e, sink_sub, a_side, ab, ba, eok));
+    ok = ok && eok;
+  }
+  std::sort(v.begin(), v.end());
+  return v;
+}
+
+}  // namespace
+
+bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
+  if (a == nullptr || b == nullptr) {
+    return false;
+  }
+
+  // ---- Analyze both sides once: fsig pairs the acyclic majority robustly, so
+  // the traversal only has to resolve the cycle cores. build_sides seeds cut
+  // points (state + blackbox Subs) exactly as the signature path, so the two
+  // agree on what a source is.
+  Side         sa, sb;
+  Match_result scratch;
+  build_sides(a, b, opts, sa, sb, scratch);
+  // A proven rewiring between compare points is a real difference -- never a
+  // stalled-signature false miss -- so do not try to rescue it.
+  if (scratch.cut_violated != 0) {
+    return false;
+  }
+
+  Bimap ab, ba;  // a<->b node bijection
+  auto  try_pair = [&](const hhds::Node_class& na, const hhds::Node_class& nb) -> bool {
+    auto ci_a = na.get_class_index();
+    auto ci_b = nb.get_class_index();
+    auto ia   = ab.find(ci_a);
+    auto ib   = ba.find(ci_b);
+    if (ia != ab.end() || ib != ba.end()) {
+      return ia != ab.end() && ia->second == ci_b && ib != ba.end() && ib->second == ci_a;  // consistent?
+    }
+    ab.emplace(ci_a, ci_b);
+    ba.emplace(ci_b, ci_a);
+    return true;
+  };
+
+  // ---- Pair the acyclic majority by forward signature (1:1 in fcommon). This
+  // is only DISCOVERY -- a signature collision would mispair, but verify rejects
+  // any inconsistent edge, so it can only cost a false miss, never a false hit.
+  {
+    absl::flat_hash_map<uint64_t, hhds::Node_class> fa, fb;
+    absl::flat_hash_set<uint64_t>                   fa_dup, fb_dup;
+    auto bucket = [](Side& s, absl::flat_hash_map<uint64_t, hhds::Node_class>& m, absl::flat_hash_set<uint64_t>& dup) {
+      for (const auto& node : s.order) {
+        auto it = s.fsig.find(node.get_class_index());
+        if (it == s.fsig.end()) {
+          continue;
+        }
+        if (!m.try_emplace(it->second, node).second) {
+          dup.insert(it->second);
+        }
+      }
+    };
+    bucket(sa, fa, fa_dup);
+    bucket(sb, fb, fb_dup);
+    for (const auto& [v, na] : fa) {
+      if (fa_dup.contains(v)) {
+        continue;
+      }
+      auto it = fb.find(v);
+      if (it == fb.end() || fb_dup.contains(v)) {
+        continue;
+      }
+      try_pair(na, it->second);
+    }
+  }
+
+  // ---- Forward traversal to reach the cycle cores the signature stranded.
+  // Worklist of matched driver pins (a signal correspondence); a visited set on
+  // the a-side pin keeps each processed once. mismatch=true aborts the rescue.
+  std::vector<std::pair<hhds::Pin_class, hhds::Pin_class>> work;
+  absl::flat_hash_set<std::pair<uint64_t, uint32_t>>       seen_pin;
+  bool                                                     mismatch = false;
+
+  auto enqueue = [&](const hhds::Pin_class& pa, const hhds::Pin_class& pb) {
+    auto key = std::make_pair(static_cast<uint64_t>(pa.get_master_node().get_class_index().value),
+                              static_cast<uint32_t>(pa.get_port_id()));
+    if (seen_pin.insert(key).second) {
+      work.emplace_back(pa, pb);
+    }
+  };
+
+  // The distinct output driver pins of a node, keyed for cross-side matching
+  // (Sub: by name; else by port_id).
+  auto enqueue_node_outputs = [&](const hhds::Node_class& na, const hhds::Node_class& nb) {
+    bool                                          sub = gu::type_op_of(na) == Ntype_op::Sub;
+    absl::flat_hash_map<uint64_t, hhds::Pin_class> bmap;
+    absl::flat_hash_set<uint64_t>                  bseen;
+    for (const auto& e : nb.out_edges()) {
+      uint64_t k = sub ? hstr(e.driver.get_pin_name())
+                       : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+      if (bseen.insert(k).second) {
+        bmap.emplace(k, e.driver);
+      }
+    }
+    absl::flat_hash_set<uint64_t> aseen;
+    for (const auto& e : na.out_edges()) {
+      uint64_t k = sub ? hstr(e.driver.get_pin_name())
+                       : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+      if (!aseen.insert(k).second) {
+        continue;
+      }
+      auto it = bmap.find(k);
+      if (it != bmap.end()) {
+        enqueue(e.driver, it->second);
+      }
+    }
+  };
+
+  // Seed 1: graph inputs by name.
+  {
+    absl::flat_hash_map<std::string_view, hhds::Pin_class> bin;
+    for (const auto& e : b->get_input_node().out_edges()) {
+      bin.try_emplace(e.driver.get_pin_name(), e.driver);
+    }
+    absl::flat_hash_set<std::string_view> adone;
+    for (const auto& e : a->get_input_node().out_edges()) {
+      if (!adone.insert(e.driver.get_pin_name()).second) {
+        continue;
+      }
+      auto it = bin.find(e.driver.get_pin_name());
+      if (it != bin.end()) {
+        enqueue(e.driver, it->second);
+      }
+    }
+  }
+  // Seed 2: outputs of every already-paired node (fsig pairs + cut points).
+  for (const auto& [ci_a, ci_b] : ab) {
+    enqueue_node_outputs(a->get_node(ci_a), b->get_node(ci_b));
+  }
+
+  // A cycle node's canonical bucket key: op + width + its resolved inputs (an
+  // unresolved fanin folds a "?" placeholder), which tells mux(sel,a,self) from
+  // mux(sel,b,self) even before the self edge is closed.
+  auto canon = [&](const hhds::Node_class& node, bool a_side) -> uint64_t {
+    uint64_t                                        h = node_kind_key(node);
+    absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
+    for (const auto& e : node.inp_edges()) {
+      bool     resolved;
+      uint64_t d = driver_desc(e.driver, a_side, ab, ba, resolved);
+      by_port[e.sink.get_port_id()].push_back(resolved ? d : hstr("\x01?"));
+    }
+    return fold_operands(h, by_port);
+  };
+
+  while (!work.empty() && !mismatch) {
+    auto [da, db] = work.back();
+    work.pop_back();
+    // Unpaired, non-cut, non-output consumers on each side.
+    auto gather = [&](const hhds::Pin_class& d, bool a_side, std::vector<hhds::Node_class>& out) {
+      absl::flat_hash_set<hhds::Class_index> dedup;
+      for (const auto& e : d.out_edges()) {
+        if (gu::is_graph_output_pin(e.sink)) {
+          continue;
+        }
+        auto sn = e.sink.get_master_node();
+        if (is_cut(sn, opts.blackbox_subs)) {
+          continue;  // an anchor: paired by fsig-seed, its inputs are obligations
+        }
+        auto ci = sn.get_class_index();
+        if ((a_side ? ab.contains(ci) : ba.contains(ci))) {
+          continue;  // already paired
+        }
+        if (dedup.insert(ci).second) {
+          out.push_back(sn);
+        }
+      }
+    };
+    std::vector<hhds::Node_class> alist, blist;
+    gather(da, true, alist);
+    gather(db, false, blist);
+    if (alist.empty() && blist.empty()) {
+      continue;
+    }
+    auto by_canon = [&](std::vector<hhds::Node_class>& v, bool a_side) {
+      std::sort(v.begin(), v.end(),
+                [&](const hhds::Node_class& x, const hhds::Node_class& y) { return canon(x, a_side) < canon(y, a_side); });
+    };
+    by_canon(alist, true);
+    by_canon(blist, false);
+    // Zip same-canon consumers; a canon present on only one side is left for
+    // another driver / caught by verify -- discovery must not abort here.
+    size_t i = 0, j = 0;
+    while (i < alist.size() && j < blist.size()) {
+      uint64_t ka = canon(alist[i], true);
+      uint64_t kb = canon(blist[j], false);
+      if (ka < kb) {
+        ++i;
+      } else if (ka > kb) {
+        ++j;
+      } else {
+        if (!try_pair(alist[i], blist[j])) {
+          mismatch = true;
+          break;
+        }
+        enqueue_node_outputs(alist[i], blist[j]);
+        ++i;
+        ++j;
+      }
+    }
+  }
+  if (mismatch) {
+    return false;
+  }
+
+  // ---- VERIFY: the exact, sole soundness gate. Every user node on both sides
+  // must be paired (a total bijection), and every paired node must agree on op,
+  // width, Sub interface, and -- the crux -- its full input-edge multiset under
+  // the bijection. A wrong discovery pairing, a rewiring, or an unreached node
+  // all surface here as an inequality, so a `true` is a genuine isomorphism.
+  for (auto node : a->forward_class()) {
+    if (!ab.contains(node.get_class_index())) {
+      return false;  // an a node the traversal never paired
+    }
+  }
+  size_t b_nodes = 0;
+  for (auto node : b->forward_class()) {
+    if (!ba.contains(node.get_class_index())) {
+      return false;
+    }
+    ++b_nodes;
+  }
+  if (ab.size() != b_nodes) {
+    return false;  // not a bijection (size mismatch)
+  }
+  for (auto na : a->forward_class()) {
+    auto nb = b->get_node(ab.at(na.get_class_index()));
+    if (gu::type_op_of(na) != gu::type_op_of(nb)) {
+      return false;
+    }
+    if (gu::type_op_of(na) == Ntype_op::Sub) {
+      if (sub_iface_key(na) != sub_iface_key(nb)) {
+        return false;  // blackbox interface changed
+      }
+    } else if (node_out_bits(na) != node_out_bits(nb)) {
+      return false;
+    }
+    bool oka, okb;
+    auto da = input_descs(na, true, ab, ba, oka);
+    auto db = input_descs(nb, false, ab, ba, okb);
+    if (!oka || !okb || da != db) {
+      return false;  // an input edge does not map under the bijection
+    }
+  }
+  // Graph outputs are compare points too (not forward_class nodes): the output
+  // node's input-edge multiset must correspond, or a swapped/rewired output slips
+  // through the node bijection.
+  {
+    bool oka, okb;
+    auto da = input_descs(a->get_output_node(), true, ab, ba, oka);
+    auto db = input_descs(b->get_output_node(), false, ab, ba, okb);
+    if (!oka || !okb || da != db) {
+      return false;
+    }
+  }
+  return true;
 }
 
 namespace {

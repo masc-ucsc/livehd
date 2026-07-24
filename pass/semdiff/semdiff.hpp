@@ -197,6 +197,21 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // without the stamping/region/similarity work.
 [[nodiscard]] bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
 
+// EXACT structural-equivalence proof by anchored parallel traversal -- the
+// verify-on-inconclusive fallback for abc incremental region reuse. Where
+// structural_identical()'s forward signing STALLS on a genuine combinational
+// loop (mux feedback) and reports `cut_unknown`, forcing a conservative miss on
+// two regions that are in fact identical, this decides them: it builds a real
+// node bijection by walking a and b in lockstep from their named sources (graph
+// inputs, cut-point outputs, constants), then verifies every edge maps
+// consistently under it. A traversal bijection is exact -- unlike a hash it
+// cannot false-positive, and a visited set makes the cycle a non-issue -- so a
+// `true` is a genuine isomorphism, sound to reuse. Same cut model and name/
+// width/value anchors as structural_identical (opts.blackbox_subs applies), so
+// call it only when structural_identical() returns false: it rescues cyclic
+// regions without ever admitting one that differs.
+[[nodiscard]] bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
+
 // A process-independent 128-bit structural digest of a module def: op kinds,
 // pin widths, connectivity (commutative-normalized within each sink port,
 // operand hashes sorted — the pass/submatch canonical form), constant values,
