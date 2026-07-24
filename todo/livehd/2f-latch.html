@@ -1036,8 +1036,9 @@
   exist to prevent — legitimately model-dependent, so not observed).</li>
 <li><code>inou/prp/tests/fixme/latch_verify_hold.prp</code>,
   <code>latch_verify_low.prp</code> &rarr; <strong>M4</strong>. BMC twins of the
-  sim fixtures (encoder refusal today = UNKNOWN/exit 0; the harness fails on
-  the missing verdicts). The low twin refutes if the polarity fold is wrong
+  sim fixtures (encoder refusal today = UNKNOWN verdict with lhd fail-closed at
+  exit 7 'unsupported'; the harness fails on the zero proven count). The low
+  twin refutes if the polarity fold is wrong
   while the high twin still proves — the anti-double-negation tripwire.</li>
 <li><code>inou/prp/tests/fixme/flop_verify_posneg.prp</code> &rarr;
   <strong>M4</strong>. The stimulus assert PROVES (inductively) even today; the

@@ -223,8 +223,10 @@ cc_test(
         # invisible to verify and body asserts are not executed by sim; see
         # each header for the dual-fixture conventions). Promote at M4:
         #   latch_verify_hold / latch_verify_low -> today the shared encoder
-        #     refuses the Latch cell (UNKNOWN/exit 0 vacuous pass; the harness
-        #     fails on the missing verdicts)
+        #     refuses the Latch cell -> verdict UNKNOWN and lhd fails closed
+        #     (exit 7, class 'unsupported'; a REFUSAL, no obligation checked --
+        #     M0 replaced the old exit-0 vacuous pass); the harness fails on the
+        #     zero proven count
         #   flop_verify_posneg -> today posclk is abstracted out of the
         #     encoding, so the half-cycle-transfer assert REFUTES at cycle 3
         "latch_verify_hold",

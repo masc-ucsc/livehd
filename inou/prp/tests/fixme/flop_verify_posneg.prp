@@ -12,10 +12,12 @@
 // the same (implicit) clock. Observed at cycle boundaries (all edges settled),
 // the negedge stage holds the SAME period's posedge value: b == a every
 // cycle — the half-cycle transfer (validated against iverilog in the sim
-// twin). TODAY pass/lec/encode.cpp ABSTRACTS posclk out of the encoding
-// (encode.cpp:679), so `b` encodes as a second posedge stage, b lags a by a
-// full cycle, and the relational assert REFUTES -> the harness fails on the
-// verdict counts. Flips green at 2f-latch M4 (commit-class-aware encoder).
+// twin). TODAY pass/lec/encode.cpp drops posclk on a single shared clock: the
+// M4 edge-gating (encode.cpp ~2245, the `posclk` read at :2262) fires only for
+// >=2 clock nets or ICG cones, so `b` encodes as an ordinary posedge stage, b
+// lags a by a full cycle, and the relational assert REFUTES at cycle 3 -> the
+// harness fails on the verdict counts. Flips green at 2f-latch M4
+// (commit-class-aware encoder).
 //
 // OBSERVATION MODEL this fixture pins for M4: an in-design assert samples the
 // END-OF-CYCLE state (all edges of the period settled — the negedge commit

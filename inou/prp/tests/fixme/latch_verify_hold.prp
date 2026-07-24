@@ -12,8 +12,10 @@
 // self-checking (a cycle counter drives the stimulus, so there are no free
 // data inputs for the solver to abuse), stated as design-body asserts for
 // `lhd formal verify`. TODAY the shared encoder refuses the Latch cell
-// (pass/lec/encode.cpp:830-833 "sequential op 'latch' not supported yet") and
-// the run is UNKNOWN/exit 0 — the harness fails on the missing verdicts.
+// (pass/lec/encode.cpp:874-875 "sequential op 'latch' not supported yet") so
+// the verdict is UNKNOWN and lhd fails closed (exit 7, class 'unsupported' — a
+// REFUSAL: no obligation is checked; M0 replaced the old exit-0 vacuous pass).
+// The harness fails on the zero proven count.
 // Flips green when the native encoder learns the commit-class latch encoding
 // (2f-latch M4).
 //

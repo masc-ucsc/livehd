@@ -13,8 +13,9 @@
 // window-capture-and-hold property as latch_verify_hold. See that file's
 // header for the dual-fixture conventions (property stated twice, `implies`
 // form, snapshot-before-write, closed-cycle observation, cyclic schedule).
-// TODAY: encoder refusal -> UNKNOWN/exit 0 -> harness fails on missing
-// verdicts. Flips green at 2f-latch M4. The polarity must NOT be lost by the
+// TODAY: encoder refusal -> UNKNOWN verdict, lhd fails closed (exit 7,
+// 'unsupported') -> harness fails on the zero proven count. Flips green at
+// 2f-latch M4. The polarity must NOT be lost by the
 // encoding: if M4 folds the enable cone wrong (the posclk double-negation
 // hazard), this refutes while latch_verify_hold still proves.
 pub mod llow_tb() -> (ok:bool@[0]) {
