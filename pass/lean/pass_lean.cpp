@@ -403,8 +403,12 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
     auto& p   = mi.ports[idx];
     p.port_id = idx;
+    // A resize gap (a port_id that never appeared on any sink) is not a real
+    // port; skip it so a sparse port map is not mistaken for a malformed write.
+    if (p.addr.is_invalid() && p.din.is_invalid() && p.enable.is_invalid() && p.clock.is_invalid()) {
+      continue;
+    }
     if (p.rdport) {
-      p.driver_pid = static_cast<uint32_t>(mi.write_ports.size() + mi.read_ports.size());
       mi.read_ports.push_back(idx);
       if (p.addr.is_invalid()) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing addr.");
@@ -426,9 +430,14 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     }
   }
 
-  if (mi.read_ports.size() > 1 || mi.write_ports.size() > 1) {
-    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory v1 supports at most one read and one write port.");
+  // Read-data output pin id follows the cgen convention (see cgen_verilog.cpp:
+  // create_driver_pin(n_wr_ports + n_rd_pos)): dout pid = (total write ports) +
+  // (read-port index in port order).  Consumers of a multi-read memory connect
+  // to these per-port driver pins; the emitter binds n_<mem>_p<pid> to match.
+  for (size_t k = 0; k < mi.read_ports.size(); ++k) {
+    mi.ports[mi.read_ports[k]].driver_pid = static_cast<uint32_t>(mi.write_ports.size() + k);
   }
+
   // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
   // read data, modeled with a read-data register field + sram_sync_read_reg_next).
   if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
@@ -529,95 +538,73 @@ std::string ucast_pin_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t w) {
   return ucast_expr(driver_expr_at(ctx, dpin, w), w);
 }
 
-// Read-during-write policy tuple for a memory that has BOTH a read and a write
-// port.  Emits a single `sram_1r1w_{read,write}_first` (or `_be_` byte-enable)
-// call that returns `(m', rdata)`; the caller takes `.1` for next-state and
-// `.2` for the read output, so read and next-state come from ONE policy
-// decision (correct on a same-cycle same-address collision).  Policy comes
-// from the `fwd` per-(read,write) matrix (graph/cell.cpp): bit r*n_wr+w.  This
-// emitter is 1R1W-only (see the fatal above), so the whole matrix is bit 0 —
-// set -> write_first (forward the new data), clear -> read_first.
-std::string memory_policy_tuple(const LeanCtx& ctx, const Memory_info& mi) {
-  const auto& wp    = mi.ports.at(mi.write_ports.front());
-  const auto& rp    = mi.ports.at(mi.read_ports.front());
-  const auto  we    = "(bitvec_nonzero " + ucast_pin_at(ctx, wp.enable, std::max<uint32_t>(1, mi.wensize)) + ")";
-  const auto  waddr = ucast_pin_at(ctx, wp.addr, mi.addr_width);
-  const auto  wdata = ucast_pin_at(ctx, wp.din, mi.bits);
-  const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
-  const auto  cur   = "s." + mi.field;
-  const bool  wfirst = ((mi.fwd >> 0) & 1) != 0;  // 1R1W: bit (0*n_wr + 0)
-  if (mi.wensize <= 1) {
-    const std::string fn = wfirst ? "sram_1r1w_write_first" : "sram_1r1w_read_first";
-    return "(" + fn + " " + we + " " + waddr + " " + wdata + " " + raddr + " " + cur + ")";
+// Folded write image: apply every write port to the current memory (s.field) in
+// port order, so a later (higher port_id) write WINS on a same-cycle same-address
+// collision.  Each write is enable-gated; a byte-enable memory (wensize>1) uses
+// mem_write_be.  This is the memory next-state and, for a write-first (fwd=1)
+// read, the transparent image the read observes.  For the 1-write case it is
+// behaviorally identical to sram_1r1w_{read,write}_first.
+std::string memory_write_fold(const LeanCtx& ctx, const Memory_info& mi) {
+  std::string acc = "s." + mi.field;
+  for (auto widx : mi.write_ports) {
+    const auto& p        = mi.ports.at(widx);
+    const auto  addr     = ucast_pin_at(ctx, p.addr, mi.addr_width);
+    const auto  data     = ucast_pin_at(ctx, p.din, mi.bits);
+    const auto  enable_w = std::max<uint32_t>(1, mi.wensize);
+    const auto  enable   = ucast_pin_at(ctx, p.enable, enable_w);
+    const auto  we       = "(bitvec_nonzero " + enable + ")";
+    if (mi.wensize <= 1) {
+      acc = "(if " + we + " then mem_write " + acc + " " + addr + " " + data + " else " + acc + ")";
+    } else {
+      const auto byte_w = mi.bits / mi.wensize;
+      acc = "(if " + we + " then mem_write_be " + acc + " " + addr + " " + data + " " + enable + " " + std::to_string(byte_w)
+            + " else " + acc + ")";
+    }
   }
-  const auto        be     = ucast_pin_at(ctx, wp.enable, mi.wensize);
-  const auto        byte_w = mi.bits / mi.wensize;
-  const std::string fn     = wfirst ? "sram_1r1w_be_write_first" : "sram_1r1w_be_read_first";
-  return "(" + fn + " " + we + " " + waddr + " " + wdata + " " + be + " " + std::to_string(byte_w) + " " + raddr + " " + cur
-         + ")";
+  return acc;
 }
 
-// Read-enable bool of the (single) read port.
-std::string memory_read_enable(const LeanCtx& ctx, const Memory_info& mi) {
-  const auto& rp = mi.ports.at(mi.read_ports.front());
+// Read-enable bool of a specific read port.
+std::string memory_read_enable_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
+  const auto& rp = mi.ports.at(port_idx);
   return "(bitvec_nonzero " + ucast_pin_at(ctx, rp.enable, pin_width(ctx, rp.enable, mi.node)) + ")";
 }
 
-// Raw (ungated) read value of the single read port: `.2` of the RDW policy tuple
-// for a 1R1W, else `mem_read s.field addr` for read-only.  Shared by the async
-// combinational read output and the sync read-register capture.
-std::string memory_raw_read_value(const LeanCtx& ctx, const Memory_info& mi) {
-  const auto& rp = mi.ports.at(mi.read_ports.front());
-  if (!mi.write_ports.empty()) {
-    return "(" + memory_policy_tuple(ctx, mi) + ").2";
-  }
-  const auto addr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
-  return "mem_read s." + mi.field + " " + addr;
+// Raw (ungated) read value of a specific read port.  Read-during-write policy is
+// memory-wide (mi.fwd): fwd=1 (write-first / transparent) reads the post-write
+// folded image so a same-cycle write forwards; else (read-first) reads the old
+// memory s.field.  Matches sram_1r1w_{write,read}_first for the 1R1W case and
+// extends it to multiple write ports (last writer wins via the fold).
+std::string memory_raw_read_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
+  const auto& rp    = mi.ports.at(port_idx);
+  const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
+  const auto  base  = (mi.fwd == 1 && !mi.write_ports.empty()) ? memory_write_fold(ctx, mi) : ("s." + mi.field);
+  return "mem_read " + base + " " + raddr;
 }
 
-// Memory read output.  Sync (type 1): the registered read-data field (value
-// captured last edge).  Async (type 0/2): enable-gated raw read value.
-std::string memory_read_expr(const LeanCtx& ctx, const Memory_info& mi) {
-  if (mi.read_ports.empty()) {
-    fatal(ctx, memory_policy_summary(mi) + ". memory read expression requested for write-only memory.");
-  }
+// Read output of a specific read port.  Sync (type 1): the registered read-data
+// field (value captured last edge).  Async (type 0/2): enable-gated raw value.
+std::string memory_read_port_expr(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
   if (mi.sync) {
-    return "s." + mi.read_reg_field.at(mi.read_ports.front());
+    return "s." + mi.read_reg_field.at(port_idx);
   }
-  return "(if " + memory_read_enable(ctx, mi) + " then " + memory_raw_read_value(ctx, mi) + " else " + lit_zero(mi.bits)
-         + ")";
+  return "(if " + memory_read_enable_port(ctx, mi, port_idx) + " then " + memory_raw_read_port(ctx, mi, port_idx) + " else "
+         + lit_zero(mi.bits) + ")";
 }
 
-// Next value of a sync memory's read-data register: capture the raw read value
-// when read-enabled, else hold.
-std::string memory_sync_reg_next_expr(const LeanCtx& ctx, const Memory_info& mi) {
-  return "sram_sync_read_reg_next " + memory_read_enable(ctx, mi) + " (" + memory_raw_read_value(ctx, mi) + ") s."
-         + mi.read_reg_field.at(mi.read_ports.front());
+// Next value of a sync read-data register: capture the raw read value when
+// read-enabled, else hold.
+std::string memory_sync_reg_next_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
+  return "sram_sync_read_reg_next " + memory_read_enable_port(ctx, mi, port_idx) + " (" + memory_raw_read_port(ctx, mi, port_idx)
+         + ") s." + mi.read_reg_field.at(port_idx);
 }
 
-// Memory next-state.  1R1W: `.1` of the RDW policy tuple.  Write-only:
-// mem_write / mem_write_be.  Read-only: unchanged.
+// Memory next-state: the folded write image (unchanged if write-less).
 std::string memory_next_expr(const LeanCtx& ctx, const Memory_info& mi) {
   if (mi.write_ports.empty()) {
     return "s." + mi.field;
   }
-  if (!mi.read_ports.empty()) {
-    return "(" + memory_policy_tuple(ctx, mi) + ").1";
-  }
-  const auto& p           = mi.ports.at(mi.write_ports.front());
-  const auto  current     = "s." + mi.field;
-  const auto  addr        = ucast_pin_at(ctx, p.addr, mi.addr_width);
-  const auto  data        = ucast_pin_at(ctx, p.din, mi.bits);
-  const auto  enable_w    = std::max<uint32_t>(1, mi.wensize);
-  const auto  enable      = ucast_pin_at(ctx, p.enable, enable_w);
-  const auto  enable_bool = "(bitvec_nonzero " + enable + ")";
-
-  if (mi.wensize <= 1) {
-    return "(if " + enable_bool + " then mem_write " + current + " " + addr + " " + data + " else " + current + ")";
-  }
-  const auto byte_w = mi.bits / mi.wensize;
-  return "(if " + enable_bool + " then mem_write_be " + current + " " + addr + " " + data + " " + enable + " "
-         + std::to_string(byte_w) + " else " + current + ")";
+  return memory_write_fold(ctx, mi);
 }
 
 std::string driver_expr(const LeanCtx& ctx, const Node_pin& dpin) {
@@ -644,6 +631,12 @@ std::string driver_expr(const LeanCtx& ctx, const Node_pin& dpin) {
       w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
     }
     return lit_const_at(ctx, driver_node, v, w);
+  }
+  if (node_is_memory(driver_node)) {
+    // A Memory node has one read-data output pin per read port; the driver pin
+    // id selects which one (cgen dout-pid convention).  The comb/next let-chain
+    // binds n_<mem>_p<pid> for each read port (see emit_node_lets).
+    return "n_" + std::to_string(node_id(driver_node)) + "_p" + std::to_string(dpin.get_port_id());
   }
   return "n_" + std::to_string(node_id(driver_node));
 }
@@ -941,7 +934,10 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
     }
 
     case Ntype_op::Memory:
-      return memory_read_expr(ctx, memory_info_for(ctx, node));
+      // A Memory node's read outputs are multi-valued (one per read port) and are
+      // emitted as per-port lets by emit_node_lets; it is never a scalar expr.
+      throw Emit_error("internal: Memory node n_" + std::to_string(node_id(node))
+                       + " must be emitted via per-port read lets");
 
     case Ntype_op::Latch:
     case Ntype_op::Fflop:
@@ -1348,9 +1344,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
   }
 
-  // Parse each Memory node's port policy (enforces <=1 read + <=1 write port,
-  // async/array-only, bits % wensize == 0) and assign a function-valued state
-  // field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
+  // Parse each Memory node's port policy (any number of read/write ports,
+  // async/array or sync-read, bits % wensize == 0) and assign a function-valued
+  // state field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
   for (auto& mn : memory_nodes) {
     auto mi = parse_memory_info(ctx, mn);
     std::string mem_raw;
@@ -1493,11 +1489,23 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
     }
 
+    // Emit the `let n_<id> := …` binding(s) for one node.  A Memory node binds
+    // one value per read port (n_<id>_p<dout_pid>); every other node binds one.
+    auto emit_node_lets = [&](std::ostream& os, const Node& n) {
+      if (node_is_memory(n)) {
+        const auto& mi = memory_info_for(ctx, n);
+        for (auto pidx : mi.read_ports) {
+          os << "  let n_" << node_id(n) << "_p" << mi.ports.at(pidx).driver_pid << " : BitVec " << mi.bits
+             << " := " << memory_read_port_expr(ctx, mi, pidx) << "\n";
+        }
+        return;
+      }
+      os << "  let n_" << node_id(n) << " : BitVec " << node_width(ctx, n) << " := " << emit_node_expr(ctx, n) << "\n";
+    };
+
     auto emit_let_chain = [&](std::ostream& os, const std::string& result_expr) {
       for (const auto& n : topo) {
-        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
-        auto rhs = emit_node_expr(ctx, n);
-        os << "  let n_" << node_id(n) << " : BitVec " << w << " := " << rhs << "\n";
+        emit_node_lets(os, n);
       }
       os << result_expr;
     };
@@ -1536,9 +1544,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       ofs << "def " << base_name << "_next (i : " << base_name << "_in) (s : " << base_name << "_state) : "
           << base_name << "_state :=\n";
       for (const auto& n : topo) {
-        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
-        auto rhs = emit_node_expr(ctx, n);
-        ofs << "  let n_" << node_id(n) << " : BitVec " << w << " := " << rhs << "\n";
+        emit_node_lets(ofs, n);
       }
       for (auto& fn : flop_nodes) {
         const auto fid = node_id(fn);
@@ -1566,7 +1572,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         ofs << "  let new_" << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits
             << ") := " << memory_next_expr(ctx, mi) << "\n";
         for (const auto& kv : mi.read_reg_field) {
-          ofs << "  let new_" << kv.second << " : BitVec " << mi.bits << " := " << memory_sync_reg_next_expr(ctx, mi) << "\n";
+          ofs << "  let new_" << kv.second << " : BitVec " << mi.bits
+              << " := " << memory_sync_reg_next_port(ctx, mi, kv.first) << "\n";
         }
       }
       ofs << "  { ";

@@ -309,16 +309,26 @@ lake env lean <livehd-new>/generated/dino_lgraph_lean_dev/lean/SingleCycleCPU_Lg
 
 ## CVA6 Lean Gate
 
-**Status — memory modeling at parity with `pass.isabelle`.** `Ntype_op::Memory`
-nodes now emit a fast model: a function-valued state field
-`(BitVec addr -> BitVec data)`, a `mem_read` in `<Top>_comb`, and a
-`mem_write` / `mem_write_be` in `<Top>_next`. As in `pass.isabelle`, the
-certificate for a memory-bearing design is a **stub** (node/flop/memory counts +
-a `_certificate_counts` theorem) because the `BV` bignum certificate evaluator is
-bit-vector-only; a memory-aware evaluator + cert proofs are still future work.
+**Status — memory modeling ahead of `pass.isabelle`.** `Ntype_op::Memory`
+nodes emit a fast model: a function-valued state field
+`(BitVec addr -> BitVec data)`, one `mem_read` per read port in `<Top>_comb`, and
+the write ports folded (`mem_write` / `mem_write_be`) in `<Top>_next`.
+Supported (each beyond the shared `pass.isabelle` v1 restrictions, and pending
+back-port there):
 
-Restrictions match `pass.isabelle`: ≤1 read + ≤1 write port, async/array memories
-(`type ∈ {0,2}`), `bits % wensize == 0`.
+- **Any number of read/write ports** — each read port binds a distinct
+  `n_<mem>_p<pid>` output; write ports are folded in port order (highest
+  `port_id` wins on a same-cycle same-address collision).
+- **Read-during-write policy** (`fwd`): `fwd=1` (write-first / transparent) reads
+  the post-write image; `fwd=0` (read-first) reads the old array.
+- **Sync-read** (`type == 1`): a registered read-data field per read port,
+  updated via `sram_sync_read_reg_next`.
+- `bits % wensize == 0` (byte/bit write-enable) still required.
+
+The certificate for a memory-bearing design is still a **stub** (node/flop/memory
+counts + a `_certificate_counts` theorem) because the `BV` bignum certificate
+evaluator is bit-vector-only; the memory-aware evaluator + cert bridge is the
+next step.
 
 Minimal memory example (async-read / sync-write SRAM), verified to typecheck:
 
