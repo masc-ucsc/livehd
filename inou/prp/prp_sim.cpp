@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <fstream>
@@ -36,13 +37,21 @@ std::string slurp(const std::string& path) {
 }
 
 // ---- DUT interface (read from the cgen_sim <unit>.hpp files in simdir) -------
+// Every member is carried with its DECLARED WIDTH: the generated header spells
+// each one `Slop<N> field{};`, and the testbench plane is Slop too (see the
+// Value model in Driver_gen), so a read is exact at the port's own width
+// instead of being narrowed to a C++ scalar.
 struct Dut {
   std::string              hpp;      // header filename, e.g. "counter.counter.hpp"
   std::string              cls;      // struct name, e.g. "counter_counter"
   std::vector<std::string> inputs;   // In field names
+  std::vector<int>         inputs_w;   // ...and their Slop<N> widths (parallel)
   std::vector<std::string> outputs;  // Out field names
+  std::vector<int>         outputs_w;  // ...and their Slop<N> widths (parallel)
   std::vector<std::string> regs;     // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
+  std::vector<int>         regs_w;     // ...and their Slop<N> widths (parallel)
   std::vector<std::string> arrays;   // `std::array<Slop<N>, S> name{}` members (memories)
+  std::vector<int>         arrays_w;   // ...and their ELEMENT Slop<N> widths (parallel)
   std::vector<std::pair<std::string, std::string>> subs;  // sub-instance member -> struct class
   bool                     is_child = false;  // this unit's hpp is #included by another unit (a sub-instance)
 
@@ -53,7 +62,33 @@ struct Dut {
     return std::find(outputs.begin(), outputs.end(), f) != outputs.end();
   }
   bool has_reg(const std::string& f) const { return std::find(regs.begin(), regs.end(), f) != regs.end(); }
+
+  // Declared width of a member, by name. 0 = not found (the caller then knows
+  // the field is not on that list). Parallel-vector lookup keeps the field
+  // ORDER (which is packed order for a tuple port's leaves) authoritative.
+  static int width_in(const std::vector<std::string>& names, const std::vector<int>& widths, const std::string& f) {
+    auto it = std::find(names.begin(), names.end(), f);
+    if (it == names.end()) {
+      return 0;
+    }
+    const size_t i = static_cast<size_t>(it - names.begin());
+    return i < widths.size() ? widths[i] : 0;
+  }
+  int input_width(const std::string& f) const { return width_in(inputs, inputs_w, f); }
+  int output_width(const std::string& f) const { return width_in(outputs, outputs_w, f); }
+  int reg_width(const std::string& f) const { return width_in(regs, regs_w, f); }
+  int array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
 };
+
+// `Slop<N>` / `std::array<Slop<N>, S>` -> N, read from the `<` after the LAST
+// `Slop` on the line (the array form nests one). 0 when the line has no width.
+int slop_width_of(const std::string& line) {
+  auto p = line.rfind("Slop<");
+  if (p == std::string::npos) {
+    return 0;
+  }
+  return std::atoi(line.c_str() + p + 5);
+}
 
 // Parse a generated <unit>.hpp: the top struct name, its In{}/Out{} fields, and
 // the struct-scope `Slop<N> name{}` members (flops/pipe stages/regs) so the
@@ -110,7 +145,7 @@ bool parse_hpp(const std::string& path, Dut& d) {
           const std::string tname = line.substr(b2, e2 - b2);
           auto&             dst   = (in_block == 1 ? d.inputs : d.outputs);
           for (size_t k = group_start; k < dst.size(); ++k) {
-            dst[k] = tname + "." + dst[k];
+            dst[k] = tname + "." + dst[k];  // widths ride the parallel vector, so only the name is stamped
           }
           continue;
         }
@@ -130,6 +165,7 @@ bool parse_hpp(const std::string& path, Dut& d) {
         auto   f = after.substr(b, e - b);
         if (!f.empty()) {
           (in_block == 1 ? d.inputs : d.outputs).push_back(f);
+          (in_block == 1 ? d.inputs_w : d.outputs_w).push_back(slop_width_of(line));
         }
       }
     } else if (got_cls) {
@@ -142,6 +178,7 @@ bool parse_hpp(const std::string& path, Dut& d) {
         auto e  = line.find_first_of("{ \t;", b);
         if (b != std::string::npos && e != std::string::npos && e > b) {
           d.arrays.push_back(line.substr(b, e - b));
+          d.arrays_w.push_back(slop_width_of(line));  // ELEMENT width (the inner Slop<N>)
         }
         continue;
       }
@@ -170,6 +207,7 @@ bool parse_hpp(const std::string& path, Dut& d) {
             auto   f = after.substr(b, e - b);
             if (!f.empty()) {
               d.regs.push_back(f);
+              d.regs_w.push_back(slop_width_of(line));
             }
           }
         }
@@ -249,6 +287,124 @@ std::string sanitize(std::string_view s) {
     o += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
   }
   return o;
+}
+
+// ---- integer-literal measurement (arbitrary precision) ----------------------
+// Pyrope integers have no width limit and the testbench plane is Slop<N>, so a
+// literal is MEASURED rather than parsed into a C++ scalar — strtoull overflows
+// exactly where this matters (a 97-bit stimulus constant). Counts VALUE bits;
+// the caller adds the sign bit. Returns 0 for a zero literal and -1 for a
+// spelling this cannot measure (the caller then leaves it alone).
+//   0x…    4 bits per hex digit, minus the leading zeros of the top digit
+//   0ub…   one bit per binary digit (`?` unknown bits included — from_pyrope
+//          carries them, so they must not change the width)
+//   digits repeated halving of the decimal string
+int int_literal_bits(const std::string& lit) {
+  if (lit.empty()) {
+    return -1;
+  }
+  auto is_bin_prefix = [&](size_t i) {
+    return lit.size() > i + 2 && lit[i] == '0' && (lit[i + 1] == 'u' || lit[i + 1] == 's') && lit[i + 2] == 'b';
+  };
+  if (is_bin_prefix(0)) {
+    int bits = 0;
+    for (size_t k = 3; k < lit.size(); ++k) {
+      if (lit[k] == '0' || lit[k] == '1' || lit[k] == '?') {
+        ++bits;
+      } else {
+        return -1;
+      }
+    }
+    return bits;
+  }
+  if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
+    size_t i = 2;
+    while (i < lit.size() && lit[i] == '0') {
+      ++i;
+    }
+    if (i >= lit.size()) {
+      return 0;  // 0x000…
+    }
+    const char* dig = std::strchr("0123456789abcdef", std::tolower(static_cast<unsigned char>(lit[i])));
+    if (dig == nullptr) {
+      return -1;
+    }
+    int top = 0;
+    for (int v = static_cast<int>(dig - "0123456789abcdef"); v != 0; v >>= 1) {
+      ++top;
+    }
+    int bits = top;
+    for (size_t k = i + 1; k < lit.size(); ++k) {
+      if (std::isxdigit(static_cast<unsigned char>(lit[k])) == 0) {
+        return -1;
+      }
+      bits += 4;
+    }
+    return bits;
+  }
+  for (char c : lit) {
+    if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
+      return -1;
+    }
+  }
+  std::string s   = lit;
+  size_t      nz0 = s.find_first_not_of('0');
+  s               = (nz0 == std::string::npos) ? "0" : s.substr(nz0);
+  int bits        = 0;
+  while (s != "0") {
+    std::string q;
+    int         rem = 0;
+    for (char c : s) {
+      const int cur = rem * 10 + (c - '0');
+      q.push_back(static_cast<char>('0' + cur / 2));
+      rem = cur % 2;
+    }
+    size_t nz = q.find_first_not_of('0');
+    s         = (nz == std::string::npos) ? "0" : q.substr(nz);
+    ++bits;
+  }
+  return bits;
+}
+
+// Signed Slop width for an integer literal: its value bits plus a sign bit, so
+// a positive constant stays positive in the signed testbench plane. 0 when the
+// literal cannot be measured (caller falls back).
+int literal_slop_width(const std::string& lit) {
+  const int b = int_literal_bits(lit);
+  return b < 0 ? 0 : (b + 1);
+}
+
+// Declared width of a `mut x:u97 = …` local: the `type_cast` child of a
+// `typed_identifier`. Unsigned `uN` gets a sign bit (so its whole range stays
+// non-negative in the signed plane); signed `iN`/`sN` is used as declared.
+// 0 when the lvalue carries no integer type annotation.
+int declared_slop_width(const std::string& src, TSNode lv) {
+  if (ts_node_is_null(lv) || ntype(lv) != "typed_identifier") {
+    return 0;
+  }
+  for (TSNode c : ts_node_named_children(lv)) {
+    if (ntype(c) != "type_cast") {
+      continue;
+    }
+    for (TSNode tc : ts_node_named_children(c)) {
+      const auto        tt = ntype(tc);
+      const std::string tx = text_of(src, tc);
+      if (tx.size() < 2) {
+        continue;
+      }
+      const int n = std::atoi(tx.c_str() + 1);
+      if (n <= 0) {
+        continue;
+      }
+      if (tt == "uint_type") {
+        return n + 1;
+      }
+      if (tt == "int_type" || tt == "sint_type") {
+        return n;
+      }
+    }
+  }
+  return 0;
 }
 
 // Translation error (carried up via a thrown string).
@@ -509,6 +665,9 @@ public:
     // pass 1: discover scalar locals (every assigned lvalue identifier) and the
     // DUT instances used (a `mut acc = Module` declaration).
     discover(stmts);
+    // pass 2: pick the Slop width every local/array is stored at, before any
+    // expression is emitted (an expression's shape depends on those widths).
+    infer_local_widths();
 
     // Parameters: name + default. A name is emitted verbatim as a driver C++
     // identifier (see is_valid_param_name); reject anything unsafe — a
@@ -529,7 +688,10 @@ public:
       p.name        = r.name;
       p.has_default = !r.required;
       if (p.has_default) {
-        p.default_expr = expr(r.default_node);  // the parameter's default expression (C++)
+        // A test parameter is CLI-bound control (a cycle count / iteration
+        // bound), so it stays on the C++ long plane and lifts into a Slop
+        // wherever the body uses it as data.
+        p.default_expr = as_long(r.default_node);
       }
       params.push_back(p);
       Param_info pi;
@@ -586,46 +748,18 @@ public:
         o << "  if (_ckpt.vcd_from < 0 && !_ckpt.vcd_on_fail) " << var << ".__vcd_path = _vcdp_" << var << ";\n";
       }
     }
+    // Every testbench value is a Slop of a fixed, generation-time width (see the
+    // value plane below): zero-initialized, and wide enough for the widest thing
+    // ever assigned to it. There is no separate "wide constant" plane any more —
+    // a 97-bit element is just a Slop<98> like every other element.
     for (const auto& v : locals_) {
-      o << "  long " << v << " = 0;\n";
+      o << "  Slop<" << local_w_.at(v) << "> " << v << "{};\n";
     }
     for (const auto& [aname, elems] : arrays_) {
-      // Classify: any element wider than 64 bits flips the WHOLE array onto the
-      // string plane (`const char*[]`), consumed exactly by the wide
-      // __prp_poke overload; otherwise stay on the long plane, with
-      // above-int64 elements rendered bit-preserving ((long)0x…ULL — the poke
-      // zero-extends raw low bits, so any width <= 64 drives exact).
-      bool wide = false;
-      for (const auto& e : elems) {
-        unsigned long long v = 0;
-        if (int_literal_class(e, v) == 2) {
-          wide = true;
-          break;
-        }
-      }
-      if (wide) {
-        o << "  static const char* " << aname << "[] = {";
-        for (size_t i = 0; i < elems.size(); ++i) {
-          unsigned long long v = 0;
-          if (int_literal_class(elems[i], v) < 0) {
-            fail("array '" + aname + "' mixes a >64-bit constant with a non-literal element: " + elems[i]);
-          }
-          o << (i != 0 ? ", " : "") << '"' << elems[i] << '"';
-        }
-        o << "};\n";
-        continue;
-      }
-      o << "  long " << aname << "[] = {";
+      const int aw = array_w_.at(aname);
+      o << "  const Slop<" << aw << "> " << aname << "[] = {";
       for (size_t i = 0; i < elems.size(); ++i) {
-        unsigned long long v  = 0;
-        const int          cl = int_literal_class(elems[i], v);
-        std::string        e  = elems[i];
-        if (cl == 1) {
-          char buf[32];
-          std::snprintf(buf, sizeof buf, "(long)0x%llxULL", v);
-          e = buf;
-        }
-        o << (i != 0 ? ", " : "") << e;
+        o << (i != 0 ? ", " : "") << at_width(eval(elems[i]), aw);
       }
       o << "};\n";
     }
@@ -673,6 +807,20 @@ public:
   }
 
 private:
+  // One testbench value. See "the testbench value plane" below for what each
+  // kind means and why the data plane is Slop rather than a C++ scalar.
+  struct Val {
+    enum class Kind { Slop, Long, Bool };
+    Kind        kind = Kind::Slop;
+    std::string cpp;
+    int         w       = 0;      // Slop width (Kind::Slop only)
+    bool        has_lit = false;  // a plain non-negative literal, value below
+    long long   lit     = 0;      // ...used for a compile-time shift amount
+  };
+  static Val slop_val(std::string c, int w) { return Val{Val::Kind::Slop, std::move(c), w, false, 0}; }
+  static Val long_val(std::string c) { return Val{Val::Kind::Long, std::move(c), 0, false, 0}; }
+  static Val bool_val(std::string c) { return Val{Val::Kind::Bool, std::move(c), 0, false, 0}; }
+
   // Escape a string for embedding inside a generated C `"..."` printf format
   // literal: backslash/quote/newline/tab plus `%` (doubled, since these strings
   // are printf format arguments).
@@ -699,9 +847,13 @@ private:
   bool                              in_tick_ = false;  // inside a tick body (reject nested ticks)
   bool                              restart_block_emitted_ = false;  // --restart-at handled by the first tick
   std::set<std::string>                           locals_;      // scalar driver vars
+  std::map<std::string, int>                      local_w_;     // ...and the Slop width each is declared at
+  std::map<std::string, int>                      local_decl_w_;  // `mut x:u97 = …` annotation (0 = infer)
   std::set<std::string>                           param_names_; // test parameter names
   std::map<std::string, std::string>              inst_of_var;  // instance var -> module name (`mut acc = M`)
-  std::map<std::string, std::vector<std::string>> arrays_;      // array name -> element exprs
+  std::map<std::string, std::vector<TSNode>>      arrays_;      // array name -> element nodes
+  std::map<std::string, int>                      array_w_;     // array name -> element Slop width
+  std::vector<std::pair<std::string, TSNode>>     assigns_;     // (local, rhs) pairs, for width inference
   std::set<std::string>                           import_bound_;  // names bound by `= import(...)` (module refs)
   std::map<std::string, std::pair<std::string, std::string>> import_path_;  // bound name -> {unit, entry}
 
@@ -787,8 +939,15 @@ private:
   }
 
   // C++ accessor for `acc.fld`: __in.fld (input), __out.fld (output), or fld
-  // (struct-scope reg). `write` rejects read-only targets.
-  std::string field_access(const std::string& var, const std::string& fld, bool write) {
+  // (struct-scope reg). `write` rejects read-only targets. `w_out` (when given)
+  // receives the member's DECLARED Slop width, so a read can be re-expressed at
+  // the port's own width instead of through a scalar.
+  std::string field_access(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr) {
+    auto width = [&](int w) {
+      if (w_out != nullptr) {
+        *w_out = w;
+      }
+    };
     // A tuple/struct-packed port is a nested struct in the generated header, so
     // its leaf path IS the C++ path (`acc.io_in.pc` -> `__in.io_in.pc`). Check
     // the port lists before the hierarchical-state walk below, which would
@@ -796,12 +955,14 @@ private:
     {
       const Dut& td = duts_.at(inst_of_var.at(var));
       if (td.has_input(fld)) {
+        width(td.input_width(fld));
         return var + ".__in." + fld;
       }
       if (td.has_output(fld)) {
         if (write) {
           fail("cannot poke output '" + var + "." + fld + "' (outputs are read-only)");
         }
+        width(td.output_width(fld));
         return var + ".peek(" + var + ".__in)." + fld;
       }
     }
@@ -830,12 +991,15 @@ private:
             idx  = seg.substr(lb + 1, seg.size() - lb - 2);
           }
           if (idx.empty() && hd->has_reg(name)) {
+            width(hd->reg_width(name));
             return cxx + "." + name;
           }
           if (std::find(hd->arrays.begin(), hd->arrays.end(), name) != hd->arrays.end()) {
+            width(hd->array_width(name));
             return cxx + "." + name + "[" + idx + "]";
           }
           if (!idx.empty() && hd->arrays.size() == 1) {
+            width(hd->array_width(hd->arrays.front()));
             return cxx + "." + hd->arrays.front() + "[" + idx + "]";  // RTL-name alias
           }
           fail("unknown state '" + name + "' in hierarchical path '" + var + "." + fld + "'");
@@ -867,6 +1031,7 @@ private:
     }
     const Dut& d = duts_.at(inst_of_var.at(var));
     if (d.has_input(fld)) {
+      width(d.input_width(fld));
       return var + ".__in." + fld;
     }
     if (d.has_output(fld)) {
@@ -875,9 +1040,11 @@ private:
       }
       // recompute the output from the current committed state (correct before the
       // first step, and after a poke without a step, too -- peek has no net effect)
+      width(d.output_width(fld));
       return var + ".peek(" + var + ".__in)." + fld;
     }
     if (d.has_reg(fld)) {
+      width(d.reg_width(fld));
       return var + "." + fld;
     }
     fail("unknown field '" + fld + "' on instance '" + var + "' of module '" + inst_of_var.at(var) + "'");
@@ -888,7 +1055,7 @@ private:
   // field_access on the matching DUT instance (09-verification.md). `<unit>`
   // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
   // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
-  std::string path_target(TSNode call, bool write) {
+  std::string path_target(TSNode call, bool write, int* w_out = nullptr) {
     TSNode args = field(call, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
       fail("peek/poke needs a \"unit/field\" path");
@@ -917,34 +1084,87 @@ private:
     if (var.empty()) {
       fail("peek/poke: no DUT instance for path '" + path + "'");
     }
-    return field_access(var, fld, write);
+    return field_access(var, fld, write, w_out);
   }
 
-  // C++ (long) expression for a `{name}` puts/print interpolation: a dotted
-  // `acc.field` resolves to the instance-field peek; anything else is a plain
-  // in-scope value (a local or the `clock` loop var).
-  std::string interp_value(const std::string& name) {
-    bool is_slop = false;
-    auto e       = interp_expr(name, is_slop);
-    return is_slop ? e + ".to_just_i64()" : "(long)" + e;
-  }
-
-  // C++ expression for a `{name}` interpolation. A dotted `acc.field` (or a
-  // hierarchical `acc.sub.state[i]`) resolves to the instance-field peek — a
-  // Slop of the field's OWN width (is_slop=true; render it with
-  // Slop::to_decimal/to_hex/to_binary, exact at ANY width — never through a
-  // 64-bit truncation). Anything else is a plain in-scope long.
-  std::string interp_expr(const std::string& name, bool& is_slop) {
-    is_slop  = false;
+  // Value for a `{name}` puts/print interpolation. A dotted `acc.field` (or a
+  // hierarchical `acc.sub.state[i]`) resolves to the instance-field peek at the
+  // field's OWN width; anything else is a plain in-scope value (a local, a test
+  // parameter, or the `clock` loop var). Every kind renders exactly — the Slop
+  // formatters are width-agnostic, so nothing goes through a 64-bit narrowing.
+  Val interp_expr(const std::string& name) {
     auto dot = name.find('.');
     if (dot != std::string::npos) {
       std::string base = name.substr(0, dot), fld = name.substr(dot + 1);
       if (inst_of_var.count(base) != 0) {
-        is_slop = true;
-        return field_access(base, fld, /*write=*/false);
+        return port_read(base, fld);
       }
     }
-    return "(" + name + ")";
+    if (auto it = local_w_.find(name); it != local_w_.end()) {
+      return slop_val(name, it->second);
+    }
+    return long_val("(" + name + ")");
+  }
+
+  // Floor for an un-annotated testbench local. Everything that fitted the old
+  // C++ `long` plane still fits, so no testbench narrows relative to it.
+  static constexpr int kDefaultTbWidth = 64;
+
+  // Does the subtree read `name`? (An assignment whose rhs reads its own lvalue
+  // is self-referential — see infer_local_widths.)
+  bool subtree_reads(TSNode n, const std::string& name) const {
+    if (ts_node_is_null(n)) {
+      return false;
+    }
+    if (ntype(n) == "identifier" && text_of(src_, n) == name) {
+      return true;
+    }
+    for (TSNode c : ts_node_named_children(n)) {
+      if (subtree_reads(c, name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Choose the Slop width each local and array is stored at. Sources, in order:
+  //   - an explicit annotation (`mut got:u97 = 0`) always wins;
+  //   - otherwise the widest value ever assigned to it — a port read carries the
+  //     port's own width, a literal its measured width, an operator its result
+  //     width;
+  //   - floored at kDefaultTbWidth.
+  // A SELF-REFERENTIAL assignment (`total = total + 1`) is skipped: its width
+  // would grow by one on every pass and never settle, and an accumulator that
+  // genuinely needs more than the floor is exactly what the annotation is for.
+  void infer_local_widths() {
+    for (const auto& v : locals_) {
+      auto it     = local_decl_w_.find(v);
+      local_w_[v] = it != local_decl_w_.end() ? it->second : kDefaultTbWidth;
+    }
+    for (const auto& [name, elems] : arrays_) {
+      int w = kDefaultTbWidth;
+      for (TSNode e : elems) {
+        w = std::max(w, to_slop(eval(e)).w);
+      }
+      array_w_[name] = w;
+    }
+    // widths only grow and every chain here is short, so this settles fast
+    for (int pass = 0; pass < 4; ++pass) {
+      bool changed = false;
+      for (const auto& [name, rhs] : assigns_) {
+        if (local_decl_w_.count(name) != 0 || subtree_reads(rhs, name)) {
+          continue;
+        }
+        const int w = to_slop(eval(rhs)).w;
+        if (w > local_w_[name]) {
+          local_w_[name] = w;
+          changed        = true;
+        }
+      }
+      if (!changed) {
+        break;
+      }
+    }
   }
 
   void discover(const std::vector<TSNode>& stmts) {
@@ -968,20 +1188,27 @@ private:
     if (t == "assignment") {
       // A dotted lvalue (`acc.field = v`) is a poke, not a new local; lvalue_name
       // returns {} for it, so it is naturally ignored below.
-      std::string ln = lvalue_name(src_, field(n, "lvalue"));
+      TSNode      lv = field(n, "lvalue");
+      std::string ln = lvalue_name(src_, lv);
       TSNode      rv = field(n, "rvalue");
       if (!ln.empty()) {
         std::string m = ts_node_is_null(rv) ? std::string{} : rvalue_module(rv);
         if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
-          std::vector<std::string> elems;
+          std::vector<TSNode> elems;
           for (TSNode c : ts_node_named_children(rv)) {
-            elems.push_back(array_elem(c));
+            elems.push_back(c);
           }
           arrays_[ln] = elems;
         } else if (!m.empty()) {
           inst_of_var[ln] = m;  // `mut acc = Module` -> a persistent instance
         } else {
           locals_.insert(ln);
+          if (const int dw = declared_slop_width(src_, lv); dw > 0) {
+            local_decl_w_[ln] = std::max(local_decl_w_[ln], dw);
+          }
+          if (!ts_node_is_null(rv)) {
+            assigns_.emplace_back(ln, rv);
+          }
         }
       }
     }
@@ -990,225 +1217,486 @@ private:
     }
   }
 
-  // ---- expression -> C++ (int64-valued) -------------------------------------
-  // Lower a Pyrope integer literal onto the driver's `long` value plane.
-  // Pyrope integers are arbitrary precision, C++ `long` is not: a decimal/hex
-  // constant above LLONG_MAX (e.g. an auto-generated formalfail testbench
-  // driving a witness value like 18446744073709551712 on a u64 bus) is not a
-  // valid C++ `long` literal and used to break the driver COMPILE. Values that
-  // fit in uint64 are emitted as a bit-preserving `(long)0x…ULL` — exact for
-  // any poke target of width <= 64 (Slop masks to the port width). Anything
-  // wider than 64 bits cannot ride the long plane at all: fail LOUDLY at
-  // generation instead of emitting uncompilable or silently-wrong C++.
-  std::string cpp_int_literal(std::string lit) {
-    unsigned long long v  = 0;
-    const int          cl = int_literal_class(lit, v);
-    if (cl <= 0) {
-      return lit;  // fits int64 verbatim, or a spelling we leave untouched
+  // ---- the testbench value plane (Slop<N>, not a C++ scalar) -----------------
+  // Pyrope integers are arbitrary precision and so is the simulation runtime
+  // (hlop `Slop<N>`), so the testbench plane is Slop as well: a `test` block
+  // that reads a 97-bit port gets all 97 bits. (It used to be C++ `long`, which
+  // silently kept the low 64 — and handed wide CONSTANT expressions straight to
+  // the host compiler, where `1 << 96` is UB.) A driver value is one of three
+  // kinds:
+  //
+  //   Slop  every Pyrope DATA value — locals, port/reg/memory reads, literals,
+  //         arithmetic. SIGNED two's complement, always sized with a spare sign
+  //         bit, so `Slop<W>(x)` (the converting constructor) widens by
+  //         sign-extension and preserves the value at any width.
+  //   Long  a C++ `long`, the CONTROL plane only: the tick loop counter and
+  //         CLI-bound `test` parameters (cycle counts and iteration bounds,
+  //         which a 64-bit CLI integer already bounds). Lifted into a Slop the
+  //         moment it is used as data.
+  //   Bool  a C++ `bool`: comparison / logical results, consumed by `if` and
+  //         `assert` guards.
+  //
+  // Slop deliberately exposes NO C++ operators — it has to keep unknown-bit
+  // propagation explicit — so an operator lowers to the matching `*_op` call
+  // with both operands first converted to the RESULT width. That is the same
+  // shape cgen_sim emits for the design side, which is the point: one value
+  // model on both sides of the testbench boundary.
+  // `v` on the Slop plane, at its natural width.
+  static Val to_slop(const Val& v) {
+    if (v.kind == Val::Kind::Slop) {
+      return v;
     }
-    if (cl == 2) {
-      fail("testbench integer constant does not fit 64 bits in an expression (drive it via a poke, whose string "
-           "plane is exact at any width): "
-           + lit);
+    if (v.kind == Val::Kind::Long) {
+      return slop_val("Slop<64>::create_integer(" + v.cpp + ")", 64);
     }
-    char buf[32];
-    std::snprintf(buf, sizeof buf, "(long)0x%llxULL", v);
-    return buf;
+    // A bool enters the data plane as the INTEGER 0/1 — never Slop::create_bool,
+    // whose `true` is all-ones: poking that into a wide port would drive ~0
+    // instead of 1.
+    return slop_val("Slop<2>::create_integer((" + v.cpp + ") ? 1 : 0)", 2);
   }
 
-  // An ARRAY element keeps a plain integer literal VERBATIM (no long-plane
-  // rendering): the array emitter classifies the whole array afterwards — a
-  // 64-bit-representable array stays `long[]`, one with any wider element is
-  // emitted as decimal strings and consumed by the wide __prp_poke overload.
-  std::string array_elem(TSNode n) {
-    TSNode lit = n;
-    if (ntype(lit) == "constant") {
-      for (TSNode c : ts_node_named_children(lit)) {
-        if (ntype(c) == "integer_literal") {
-          lit = c;
-          break;
-        }
-      }
+  // Slop text for `v` re-expressed at width `w`: sign-extends on widen, wraps on
+  // narrow (the Slop<W>(Slop<M>) converting constructor). Values are built with
+  // a spare sign bit, so widening never changes what a value means.
+  static std::string at_width(const Val& v, int w) {
+    const Val s = to_slop(v);
+    if (s.w == w) {
+      return s.cpp;
     }
-    if (ntype(lit) == "integer_literal") {
-      return strip_sep(text_of(src_, lit));
-    }
-    return expr(n);
+    return "Slop<" + std::to_string(w) + ">(" + s.cpp + ")";
   }
 
-  // Raw decimal/hex literal -> value class: 0 = fits int64 (verbatim is valid
-  // C++), 1 = fits uint64 (needs the bit-preserving ULL rendering), 2 = wider
-  // than 64 bits (only the string/from_pyrope plane can carry it), -1 = not a
-  // plain parseable literal.
-  static int int_literal_class(const std::string& lit, unsigned long long& v) {
-    if (lit.empty()) {
-      return -1;
+  // A C++ `bool` for a guard position (`if`, `assert`, `&&`/`||` operand).
+  static std::string as_bool_of(const Val& v) {
+    if (v.kind == Val::Kind::Bool) {
+      return v.cpp;
     }
-    errno     = 0;
-    char* end = nullptr;
-    if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
-      v = std::strtoull(lit.c_str() + 2, &end, 16);
-    } else if (std::isdigit(static_cast<unsigned char>(lit[0])) != 0) {
-      v = std::strtoull(lit.c_str(), &end, 10);
-    } else {
-      return -1;
+    if (v.kind == Val::Kind::Long) {
+      return "((" + v.cpp + ") != 0)";
     }
-    if (end == nullptr || *end != '\0') {
-      return -1;
+    return "(" + v.cpp + ").is_known_true()";
+  }
+  // A C++ `long` for the CONTROL positions that need one: tick/step counts,
+  // array indices, VCD clock ratios. Every one of those is a loop bound, so 64
+  // bits is the natural type rather than a narrowing.
+  static std::string as_long_of(const Val& v) {
+    if (v.kind == Val::Kind::Long) {
+      return v.cpp;
     }
-    if (errno == ERANGE) {
-      return 2;
+    if (v.kind == Val::Kind::Bool) {
+      return "(long)(" + v.cpp + ")";
     }
-    return v <= static_cast<unsigned long long>(std::numeric_limits<long long>::max()) ? 0 : 1;
+    return "(" + v.cpp + ").to_just_i64()";
+  }
+  std::string as_bool(TSNode n) { return as_bool_of(eval(n)); }
+  std::string as_long(TSNode n) { return as_long_of(eval(n)); }
+
+  // A std::string decimal rendering of any value — exact at any width (a bool
+  // prints as 0/1, matching how it reads in the source).
+  static std::string decimal_of(const Val& v) {
+    if (v.kind == Val::Kind::Bool) {
+      return "std::string((" + v.cpp + ") ? \"1\" : \"0\")";
+    }
+    return "(" + to_slop(v).cpp + ").to_decimal()";
   }
 
-  std::string expr(TSNode n) {
+  // Read a DUT port / reg / memory element as a testbench value. An RTL member
+  // is a bit vector, so it is read UNSIGNED (zero-extended into one spare sign
+  // bit): the value stays non-negative in the signed plane and every later
+  // widening preserves it. This is also what the old `to_just_i64()` read did
+  // for anything under 64 bits — now it holds at every width.
+  Val port_read(const std::string& base, const std::string& fld) {
+    int         w = 0;
+    std::string a = field_access(base, fld, /*write=*/false, &w);
+    if (w <= 0) {
+      w = 64;  // a member the header parse could not size: keep the old plane
+    }
+    return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+  }
+
+  static bool is_unary_op(std::string_view t) {
+    return t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus";
+  }
+  static bool is_binary_op(std::string_view t) {
+    return t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
+           || t == "binary_step_op";
+  }
+
+  // A Pyrope integer literal -> a Slop of its measured width (+ a sign bit), via
+  // the constexpr pyrope codec, so it folds at compile time and is exact at any
+  // width. An unmeasurable spelling falls back to the raw text on the long plane.
+  Val literal_val(const std::string& raw) {
+    const std::string lit = strip_sep(raw);
+    const int         w   = literal_slop_width(lit);
+    if (w == 0) {
+      return long_val(lit);
+    }
+    Val v = slop_val("Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\")", w);
+    if (const int b = int_literal_bits(lit); b >= 0 && b < 63) {
+      v.has_lit = true;
+      v.lit     = std::strtoll(lit.c_str(), nullptr, 0);  // measured to fit: a shift amount
+    }
+    return v;
+  }
+
+  Val eval(TSNode n) {
     auto t = ntype(n);
     if (t == "identifier") {
       std::string nm = text_of(src_, n);
       if (nm == "nil") {
-        return "0";
+        return long_val("0");
       }
-      return nm;
+      if (auto it = local_w_.find(nm); it != local_w_.end()) {
+        return slop_val(nm, it->second);
+      }
+      return long_val(nm);  // a test parameter or the tick loop counter
     }
     if (t == "constant") {
       // wraps integer_literal / bool_literal / string
       for (TSNode c : ts_node_named_children(n)) {
         auto ct = ntype(c);
         if (ct == "integer_literal") {
-          return cpp_int_literal(strip_sep(text_of(src_, c)));
+          return literal_val(text_of(src_, c));
         }
         if (ct == "bool_literal") {
-          return text_of(src_, c) == "true" ? "1" : "0";
+          return bool_val(text_of(src_, c) == "true" ? "true" : "false");
         }
       }
-      return text_of(src_, n);
+      return long_val(text_of(src_, n));
     }
     if (t == "integer_literal") {
-      return cpp_int_literal(strip_sep(text_of(src_, n)));
+      return literal_val(text_of(src_, n));
     }
     if (t == "bool_literal") {
-      return text_of(src_, n) == "true" ? "1" : "0";
-    }
-    if (t == "expression_item" || t == "paren_group") {
-      return expr_seq(n);
+      return bool_val(text_of(src_, n) == "true" ? "true" : "false");
     }
     if (t == "unary_expression") {
       std::string op;
-      std::string opnd;
+      TSNode      opnd{};
       for (TSNode c : ts_node_named_children(n)) {
-        auto ct = ntype(c);
         // prpparse unary operator node kinds (see prp2lnast.cpp): `!`/`not` ->
         // op_log_not, `~` -> op_bit_not, unary `-` -> op_unary_minus. Matching the
         // wrong names silently DROPS the operator -> a corrupted guard (e.g.
         // `assert(-x == 6)` would test `x == 6`), so this must track prpparse.
-        if (ct == "op_log_not" || ct == "op_bit_not" || ct == "op_unary_minus") {
-          op = map_op(text_of(src_, c));
+        if (is_unary_op(ntype(c))) {
+          op = text_of(src_, c);
         } else {
-          opnd = expr(c);
+          opnd = c;
         }
       }
-      return "(" + op + opnd + ")";
+      if (ts_node_is_null(opnd)) {
+        fail("unary operator with no operand: " + text_of(src_, n).substr(0, 40));
+      }
+      return apply_unary(op, eval(opnd));
     }
     if (t == "function_call_expression") {
       TSNode fn = field(n, "function");
       if (!ts_node_is_null(fn) && text_of(src_, fn) == "peek") {  // peek("unit/field")
-        return "(" + path_target(n, /*write=*/false) + ".to_just_i64())";
+        int         w = 0;
+        std::string a = path_target(n, /*write=*/false, &w);
+        if (w <= 0) {
+          w = 64;
+        }
+        return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
       }
     }
     if (t == "dot_expression") {
       std::string base, fld;
       if (inst_dot(n, base, fld)) {  // peek `acc.field` (output / reg / input)
-        return "(" + field_access(base, fld, /*write=*/false) + ".to_just_i64())";
+        return port_read(base, fld);
       }
       fail("unsupported dot expression: " + text_of(src_, n).substr(0, 40));
     }
+    if (t == "bit_selection") {
+      return eval_bit_select(n);
+    }
     if (t == "member_selection") {
       // base[index]: base identifier + `select` ([idx])
-      TSNode base = ts_node_named_child(n, 0);
+      TSNode      base = ts_node_named_child(n, 0);
       std::string idx;
       uint32_t    nc = ts_node_named_child_count(n);
       for (uint32_t i = 1; i < nc; ++i) {
         TSNode c = ts_node_named_child(n, i);
         if (ntype(c) == "select") {
           for (TSNode sc : ts_node_named_children(c)) {
-            idx = expr(sc);
+            idx = as_long(sc);
           }
         }
       }
-      return expr(base) + "[" + idx + "]";
+      const std::string bname = ntype(base) == "identifier" ? text_of(src_, base) : std::string{};
+      if (auto it = array_w_.find(bname); it != array_w_.end()) {
+        return slop_val(bname + "[" + idx + "]", it->second);
+      }
+      return long_val(as_long_of(eval(base)) + "[" + idx + "]");
     }
-    // a binary chain rendered as a flat sequence of operands/operators
-    return expr_seq(n);
+    // a binary chain (or a wrapper node) rendered from a flat operand/operator
+    // sequence: expression_item / paren_group / tuple all arrive this way
+    return eval_seq(n);
+  }
+
+  // `value#[hi]` / `value#[lo..=hi]` — a bit select on a testbench value. The
+  // bounds must be compile-time constants (they set the result's width, and the
+  // driver's values are statically sized); a runtime index is rejected with a
+  // clear message rather than an invalid-C++ driver. Lowered as shift + mask,
+  // ZERO-extended, so a slice is a plain non-negative value of its own width.
+  Val eval_bit_select(TSNode n) {
+    TSNode base = ts_node_named_child(n, 0);
+    TSNode sel{};
+    for (TSNode c : ts_node_named_children(n)) {
+      if (ntype(c) == "select") {
+        sel = c;
+      }
+    }
+    if (ts_node_is_null(sel)) {
+      fail("bit select with no range: " + text_of(src_, n).substr(0, 40));
+    }
+    // the range: either one constant (a single bit) or `lo ..= hi` / `lo ..< hi`
+    std::vector<TSNode> parts;
+    std::string         range_op;
+    for (TSNode c : ts_node_named_children(sel)) {
+      for (TSNode k : ts_node_named_children(c)) {
+        if (is_binary_op(ntype(k))) {
+          range_op = text_of(src_, k);
+        } else {
+          parts.push_back(k);
+        }
+      }
+      if (parts.empty()) {
+        parts.push_back(c);  // a bare `#[3]`: the select wraps the constant directly
+      }
+    }
+    auto const_of = [&](TSNode k) {
+      const Val v = eval(k);
+      if (!v.has_lit) {
+        fail("bit select bounds must be compile-time constants in a test: "
+             + text_of(src_, n).substr(0, 40));
+      }
+      return static_cast<int>(v.lit);
+    };
+    int lo = 0, hi = 0;
+    if (parts.size() == 1) {
+      lo = hi = const_of(parts[0]);
+    } else if (parts.size() == 2) {
+      lo = const_of(parts[0]);
+      hi = const_of(parts[1]);
+      if (range_op == "..<") {
+        --hi;
+      }
+    } else {
+      fail("unsupported bit select in test: " + text_of(src_, n).substr(0, 40));
+    }
+    if (hi < lo || lo < 0) {
+      fail("bit select range must be ascending and non-negative: " + text_of(src_, n).substr(0, 40));
+    }
+    const Val   s = to_slop(eval(base));
+    const int   w = hi - lo + 1;
+    std::string shifted = lo == 0 ? s.cpp : ("(" + s.cpp + ").sra_op(" + std::to_string(lo) + ")");
+    // Mask to exactly the selected bits, then widen into one spare sign bit, so
+    // the field reads as the non-negative number the source means. Both steps
+    // are zext (the signed conversion would take a bit ABOVE the field as the
+    // sign, and the second would sign-extend the field's own top bit).
+    return slop_val("(" + shifted + ").zext_to<" + std::to_string(w) + ">().zext_to<" + std::to_string(w + 1) + ">()",
+                    w + 1);
+  }
+
+  Val apply_unary(const std::string& op, const Val& v) {
+    if (op == "!" || op == "not") {
+      return bool_val("!(" + as_bool_of(v) + ")");
+    }
+    const Val s = to_slop(v);
+    if (op == "~") {
+      return slop_val("(" + s.cpp + ").not_op()", s.w);
+    }
+    if (op == "-") {
+      // one more bit: negating the most-negative value of a width needs it
+      return slop_val("(" + at_width(s, s.w + 1) + ").neg_op()", s.w + 1);
+    }
+    fail("unsupported unary operator '" + op + "' in test");
+    return v;
   }
 
   // Render a node whose named children are [operand, op, operand, ...] or a
   // single wrapped expression.
-  std::string expr_seq(TSNode n) {
-    uint32_t nc = ts_node_named_child_count(n);
-    if (nc == 1) {
-      return expr(ts_node_named_child(n, 0));
-    }
-    // `a implies b` has no infix C++ spelling, so it cannot ride the
-    // operand/operator loop below — it needs the LHS negated, which means
-    // knowing the operator BEFORE emitting the operands. Rewrite the whole
-    // sequence as `(!(a) || (b))`.
-    //
-    // It used to fall through map_op() unchanged and be emitted VERBATIM into
-    // the driver, so a test block using the implies form (the spelling the
-    // dual sim+BMC fixture convention uses on the formal side) produced
-    // uncompilable C++ and a bare "expected ')'" from the host compiler
-    // (2f-latch M6). The two planes should not need different spellings of the
-    // same property.
-    {
-      std::vector<TSNode> parts;
-      int                 implies_at = -1;
-      for (TSNode c : ts_node_named_children(n)) {
-        auto t = ntype(c);
-        const bool is_op = t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op"
-                           || t == "binary_logical_op" || t == "binary_step_op";
-        if (is_op && text_of(src_, c) == "implies") {
-          implies_at = static_cast<int>(parts.size());
-          continue;
-        }
-        if (is_op) {
-          parts.clear();       // a mixed chain: not a simple `a implies b`
-          implies_at = -1;
-          break;
-        }
-        parts.push_back(c);
-      }
-      if (implies_at == 1 && parts.size() == 2) {
-        return "(!(" + expr(parts[0]) + ") || (" + expr(parts[1]) + "))";
-      }
-    }
-    std::string out = "(";
+  Val eval_seq(TSNode n) {
+    std::vector<TSNode> kids;
     for (TSNode c : ts_node_named_children(n)) {
-      auto t = ntype(c);
-      if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
-          || t == "binary_step_op") {
-        out += " " + map_op(text_of(src_, c)) + " ";
-      } else if (t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus") {
-        out += map_op(text_of(src_, c));
-      } else {
-        out += expr(c);
-      }
+      kids.push_back(c);
     }
-    out += ")";
-    return out;
+    if (kids.empty()) {
+      return long_val(text_of(src_, n));
+    }
+    if (kids.size() == 1) {
+      return eval(kids[0]);
+    }
+    return eval_kids(kids, 0, kids.size());
   }
 
-  static std::string map_op(std::string_view s) {
-    if (s == "and") {
-      return "&&";
+  // Precedence class of a binary operator node, loosest first. A flat
+  // operand/operator run can MIX classes (`s * K + C` arrives as one sequence),
+  // so the fold cannot just go left to right — it splits at the loosest
+  // operator present. This is also where the driver stops inheriting C++'s
+  // grouping, which differs from Pyrope's for `& ^ |` (C++ ranks them; Pyrope
+  // treats them as one class).
+  static int prec_class(std::string_view t) {
+    if (t == "binary_logical_op") {
+      return 0;
     }
-    if (s == "or") {
-      return "||";
+    if (t == "binary_compare_op") {
+      return 1;
     }
-    if (s == "not") {
-      return "!";
+    if (t == "binary_other_op" || t == "binary_step_op") {
+      return 2;
     }
-    return std::string{s};  // == != < > <= >= + - * & | ^
+    if (t == "binary_times_op") {
+      return 3;
+    }
+    return -1;
+  }
+
+  // Evaluate the operand/operator run kids[b,e): split at the RIGHTMOST operator
+  // of the LOOSEST class present, which yields left-associative folding
+  // (`a - b - c` == `(a - b) - c`) with correct precedence.
+  Val eval_kids(const std::vector<TSNode>& kids, size_t b, size_t e) {
+    if (e - b == 1) {
+      return eval(kids[b]);
+    }
+    // `a implies b` has no infix spelling: it needs the LHS negated, so the
+    // operator has to be known BEFORE the operands are emitted. (It used to be
+    // passed through verbatim, producing uncompilable C++ from the very
+    // spelling the dual sim+BMC fixtures use on the formal side.) It binds
+    // loosest of all, so it is matched before the class scan.
+    for (size_t i = b; i < e; ++i) {
+      if (is_binary_op(ntype(kids[i])) && text_of(src_, kids[i]) == "implies") {
+        return bool_val("(!(" + as_bool_of(eval_kids(kids, b, i)) + ") || ("
+                        + as_bool_of(eval_kids(kids, i + 1, e)) + "))");
+      }
+    }
+    int    loosest = 99;
+    size_t at      = e;
+    for (size_t i = b; i < e; ++i) {
+      const int c = prec_class(ntype(kids[i]));
+      if (c < 0) {
+        continue;
+      }
+      if (c <= loosest) {
+        loosest = c;
+        at      = i;  // keep scanning: the RIGHTMOST operator of this class wins
+      }
+    }
+    if (at == e) {
+      // no binary operator in this run: one operand, possibly unary-prefixed
+      size_t i = b;
+      Val    v = eval_operand(kids, i, e);
+      if (i != e) {
+        fail("unsupported expression form in test: " + text_of(src_, kids[i]).substr(0, 40));
+      }
+      return v;
+    }
+    const std::string op = text_of(src_, kids[at]);
+    if (loosest == 0) {
+      return bool_val("(" + as_bool_of(eval_kids(kids, b, at)) + (op == "and" ? " && " : " || ")
+                      + as_bool_of(eval_kids(kids, at + 1, e)) + ")");
+    }
+    if (loosest == 1) {
+      return compare(op, eval_kids(kids, b, at), eval_kids(kids, at + 1, e));
+    }
+    return fold_binary(op, eval_kids(kids, b, at), eval_kids(kids, at + 1, e));
+  }
+
+  // One operand slot: any prefix unary operators, then the operand itself.
+  Val eval_operand(const std::vector<TSNode>& kids, size_t& i, size_t e) {
+    std::vector<std::string> pre;
+    while (i < e && is_unary_op(ntype(kids[i]))) {
+      pre.push_back(text_of(src_, kids[i]));
+      ++i;
+    }
+    if (i >= e) {
+      fail("dangling unary operator in test expression");
+    }
+    Val v = eval(kids[i]);
+    ++i;
+    for (auto it = pre.rbegin(); it != pre.rend(); ++it) {
+      v = apply_unary(*it, v);
+    }
+    return v;
+  }
+
+  Val compare(const std::string& op, const Val& a, const Val& b) {
+    // Both sides are built non-negative (or explicitly signed), so one common
+    // width is enough and the signed compare agrees with the unsigned reading.
+    const Val as = to_slop(a), bs = to_slop(b);
+    const int w    = std::max(as.w, bs.w);
+    const std::string l = at_width(as, w), r = at_width(bs, w);
+    if (op == "==") {
+      return bool_val("(" + l + ").eq_op(" + r + ").is_known_true()");
+    }
+    if (op == "!=") {
+      return bool_val("!(" + l + ").eq_op(" + r + ").is_known_true()");  // Slop has no ne_op
+    }
+    if (op == "<") {
+      return bool_val("(" + l + ").lt_op(" + r + ").is_known_true()");
+    }
+    if (op == "<=") {
+      return bool_val("(" + l + ").le_op(" + r + ").is_known_true()");
+    }
+    if (op == ">") {
+      return bool_val("(" + l + ").gt_op(" + r + ").is_known_true()");
+    }
+    if (op == ">=") {
+      return bool_val("(" + l + ").ge_op(" + r + ").is_known_true()");
+    }
+    fail("unsupported comparison operator '" + op + "' in test");
+    return bool_val("false");
+  }
+
+  // Width rules follow the operator's real value growth, so nothing overflows
+  // silently: an add needs one more bit than its widest operand, a multiply the
+  // sum, a shift the shifted-in bits.
+  Val fold_binary(const std::string& op, const Val& a, const Val& b) {
+    const Val as = to_slop(a), bs = to_slop(b);
+    const int mx = std::max(as.w, bs.w);
+    auto      bin = [&](const char* method, int w) {
+      return slop_val("(" + at_width(as, w) + ")." + method + "(" + at_width(bs, w) + ")", w);
+    };
+    if (op == "+") {
+      return bin("add_op", mx + 1);
+    }
+    if (op == "-") {
+      return bin("sub_op", mx + 1);
+    }
+    if (op == "*") {
+      return bin("mult_op", as.w + bs.w);
+    }
+    if (op == "/") {
+      return bin("div_op", mx);
+    }
+    if (op == "%") {
+      return bin("mod_op", mx);
+    }
+    if (op == "&") {
+      return bin("and_op", mx);
+    }
+    if (op == "|") {
+      return bin("or_op", mx);
+    }
+    if (op == "^") {
+      return bin("xor_op", mx);
+    }
+    if (op == "<<") {
+      // A literal shift grows the result exactly; a runtime amount cannot be
+      // sized at generation, so it gets 64 bits of headroom (a testbench that
+      // shifts by more than that is shifting by a runaway value anyway).
+      const int  grow = bs.has_lit ? static_cast<int>(bs.lit) : 64;
+      const int  w    = as.w + grow;
+      const std::string amt = bs.has_lit ? std::to_string(bs.lit) : ("(" + bs.cpp + ").to_just_i64()");
+      return slop_val("(" + at_width(as, w) + ").shl_op(" + amt + ")", w);
+    }
+    if (op == ">>") {
+      const std::string amt = bs.has_lit ? std::to_string(bs.lit) : ("(" + bs.cpp + ").to_just_i64()");
+      return slop_val("(" + as.cpp + ").sra_op(" + amt + ")", as.w);
+    }
+    fail("unsupported binary operator '" + op + "' in test");
+    return as;
   }
 
   // ---- located-assert helpers -----------------------------------------------
@@ -1281,32 +1769,15 @@ private:
     }
     return n;
   }
-  // Render named children [b,e) of `parent` as a C++ (long) sub-expression — the
-  // operand-range half of expr_seq, so `acc.total` / `cycles - 2` each render on
-  // their own side of a top-level comparison.
-  std::string expr_range(TSNode parent, uint32_t b, uint32_t e) {
+  // Evaluate named children [b,e) of `parent` — the operand-range half of
+  // eval_seq, so `acc.total` / `cycles - 2` each evaluate on their own side of a
+  // top-level comparison (the located assert prints both).
+  Val expr_range(TSNode parent, uint32_t b, uint32_t e) {
     std::vector<TSNode> kids;  // collected once: per-index ts_node_named_child rescans would be O(kids^2)
     for (TSNode k : ts_node_named_children(parent)) {
       kids.push_back(k);
     }
-    if (e - b == 1) {
-      return expr(kids[b]);
-    }
-    std::string out = "(";
-    for (uint32_t i = b; i < e; ++i) {
-      TSNode c = kids[i];
-      auto   t = ntype(c);
-      if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
-          || t == "binary_step_op") {
-        out += " " + map_op(text_of(src_, c)) + " ";
-      } else if (t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus") {
-        out += map_op(text_of(src_, c));
-      } else {
-        out += expr(c);
-      }
-    }
-    out += ")";
-    return out;
+    return eval_kids(kids, b, e);
   }
   // Source text spanning named children [b,e).
   std::string src_range(TSNode parent, uint32_t b, uint32_t e) const {
@@ -1323,8 +1794,8 @@ private:
   // assert can print both operand values. Returns false for a bare boolean, a
   // logical-combined condition (`a and b`), or a chained compare — those fall
   // back to printing the whole condition source.
-  bool decompose_compare(TSNode cond, std::string& lhs_cpp, std::string& lhs_src, std::string& op,
-                         std::string& rhs_cpp, std::string& rhs_src) {
+  bool decompose_compare(TSNode cond, Val& lhs_cpp, std::string& lhs_src, std::string& op, Val& rhs_cpp,
+                         std::string& rhs_src) {
     TSNode   u  = unwrap(cond);
     uint32_t nc = ts_node_named_child_count(u);
     if (nc < 3) {
@@ -1376,7 +1847,7 @@ private:
           o << ind << var << ".step();\n";
         }
       } else {
-        o << ind << "for (long _s = 0; _s < (long)(" << expr(cnt) << "); ++_s) {\n";
+        o << ind << "for (long _s = 0; _s < (long)(" << as_long(cnt) << "); ++_s) {\n";
         for (const auto& [var, m] : inst_of_var) {
           o << ind << "  " << var << ".step();\n";
         }
@@ -1418,8 +1889,8 @@ private:
         if (ts_node_is_null(args) || ts_node_named_child_count(args) < 2) {
           fail("poke needs a \"unit/field\" path and a value");
         }
-        o << ind << "__prp_poke(" << path_target(n, /*write=*/true) << ", " << expr(ts_node_named_child(args, 1))
-          << ");\n";
+        o << ind << "__prp_poke(" << path_target(n, /*write=*/true) << ", "
+          << to_slop(eval(ts_node_named_child(args, 1))).cpp << ");\n";
         return;
       }
     }
@@ -1433,17 +1904,12 @@ private:
     TSNode      rv = field(n, "rvalue");
 
     // poke `acc.field = v` -> set an input latch (or force an internal reg).
+    // The value is a Slop of its own width and __prp_poke re-expresses it at the
+    // port's, so a constant of ANY width drives exactly (no string plane, no
+    // 64-bit staging).
     std::string base, fld;
     if (inst_dot(lv, base, fld)) {
-      std::string tgt = field_access(base, fld, /*write=*/true);
-      // A >64-bit constant poke rides the string plane (exact at any width).
-      std::string        raw = array_elem(rv);
-      unsigned long long v   = 0;
-      if (int_literal_class(raw, v) == 2) {
-        o << ind << "__prp_poke(" << tgt << ", \"" << raw << "\");\n";
-      } else {
-        o << ind << "__prp_poke(" << tgt << ", " << expr(rv) << ");\n";
-      }
+      o << ind << "__prp_poke(" << field_access(base, fld, /*write=*/true) << ", " << to_slop(eval(rv)).cpp << ");\n";
       return;
     }
 
@@ -1460,7 +1926,9 @@ private:
     if (ts_node_is_null(rv)) {
       return;  // e.g. `mut v = nil` (declared as 0 already)
     }
-    o << ind << lname << " = " << expr(rv) << ";\n";
+    // The local's declared width is >= every value assigned to it (see
+    // infer_local_widths), so this conversion never loses anything.
+    o << ind << lname << " = " << at_width(eval(rv), local_w_.at(lname)) << ";\n";
   }
 
   void gen_if(std::ostringstream& o, TSNode n, int depth) {
@@ -1493,9 +1961,9 @@ private:
     }
     for (size_t i = 0; i < arms.size(); ++i) {
       if (i == 0) {
-        o << ind << "if (" << expr(arms[i].cond) << ") {\n";
+        o << ind << "if (" << as_bool(arms[i].cond) << ") {\n";
       } else if (arms[i].has_cond) {
-        o << " else if (" << expr(arms[i].cond) << ") {\n";
+        o << " else if (" << as_bool(arms[i].cond) << ") {\n";
       } else {
         o << " else {\n";
       }
@@ -1567,7 +2035,7 @@ private:
       fail(std::string("tick ") + what + " entry must be `name=value`");
     }
     name = lvalue_name(src_, an);  // strip any type annotation: `clock:u4` -> `clock`
-    val  = expr(av);
+    val  = as_long(av);            // a VCD time ratio / clock divider: a plain count
     return true;
   }
 
@@ -1591,8 +2059,10 @@ private:
     }
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/regs.json\", _regs);\n";
     o << ind << "    std::map<std::string, std::string> _tb;\n";
+    // Testbench frame: the same to_pyrope/from_pyrope round-trip the DUT regs
+    // use (exact at any width, unlike the old to_string/strtol pair).
     for (const auto& v : locals_) {
-      o << ind << "    _tb[\"" << v << "\"] = std::to_string(" << v << ");\n";
+      o << ind << "    _tb[\"" << v << "\"] = " << v << ".to_pyrope();\n";
     }
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/tb.json\", _tb);\n";
     o << ind << "    std::map<std::string, std::string> _meta;\n";
@@ -1635,8 +2105,8 @@ private:
     }
     o << ind << "    auto _rtb = hlop::ckpt::read_str_map(_cdir + \"/tb.json\");\n";
     for (const auto& v : locals_) {
-      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v
-        << " = std::strtol(_it->second.c_str(), nullptr, 0);\n";
+      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v << " = Slop<"
+        << local_w_.at(v) << ">::from_pyrope(_it->second);\n";
     }
     o << ind << "    { unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
     for (const auto& [var, m] : inst_of_var) {
@@ -1761,8 +2231,9 @@ private:
       fail("a `tick` body must advance the clock with `step` (none found)");
     }
     // `clock` (the clock's name) is the 0-based cycle index, stable across the
-    // whole iteration (see newtick.md).
-    std::string count = expr(cnt);
+    // whole iteration (see newtick.md). It is a C++ loop counter — the control
+    // plane — and lifts into a Slop wherever the body uses it as data.
+    std::string count = as_long(cnt);
     // Block-scope the clock loop variable so SEQUENTIAL ticks in one test each get
     // their own `clock` (it is declared outside the for now, for the restart jump).
     o << ind << "{\n";
@@ -1813,24 +2284,27 @@ private:
     // The guard always uses the full condition (correctness); the message
     // decomposes a top-level comparison into both operand values so a failure is
     // self-explanatory: `acc.total=27 != 30` instead of just the message.
-    std::string lhs_cpp, lhs_src, op, rhs_cpp, rhs_src;
+    Val         lhs_cpp, rhs_cpp;
+    std::string lhs_src, op, rhs_src;
     bool        cmp = decompose_compare(cond, lhs_cpp, lhs_src, op, rhs_cpp, rhs_src);
-    o << ind << "if (!(" << expr(cond) << ")) {\n";
+    o << ind << "if (!(" << as_bool(cond) << ")) {\n";
     if (cmp) {
+      // Operand values print through the Slop formatter (`%s`), so a failing
+      // compare on a wide value shows the whole value, not its low 64 bits.
       bool        lhs_lit = is_literal_operand(lhs_src);
       bool        rhs_lit = is_literal_operand(rhs_src);
       std::string fmt     = c_str_lit(loc) + ":assert fail: clock=%ld: " + c_str_lit(lhs_src)
-                        + (lhs_lit ? "" : "=%ld") + " " + c_str_lit(op) + " " + c_str_lit(rhs_src)
-                        + (rhs_lit ? "" : "=%ld");
+                        + (lhs_lit ? "" : "=%s") + " " + c_str_lit(op) + " " + c_str_lit(rhs_src)
+                        + (rhs_lit ? "" : "=%s");
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
       }
       o << ind << "  std::printf(\"" << fmt << "\\n\", _clk";
       if (!lhs_lit) {
-        o << ", (long)(" << lhs_cpp << ")";
+        o << ", " << decimal_of(lhs_cpp) << ".c_str()";
       }
       if (!rhs_lit) {
-        o << ", (long)(" << rhs_cpp << ")";
+        o << ", " << decimal_of(rhs_cpp) << ".c_str()";
       }
       o << ");\n";
     } else {
@@ -1868,11 +2342,11 @@ private:
       lit = lit.substr(1, lit.size() - 2);
     }
     // positional args after the format string
-    std::vector<std::string> pos;
-    uint32_t                 ai = 0;  // skips the format string (the first named child)
+    std::vector<Val> pos;
+    uint32_t         ai = 0;  // skips the format string (the first named child)
     for (TSNode a : ts_node_named_children(args)) {
       if (ai++ != 0) {
-        pos.push_back(expr(a));
+        pos.push_back(eval(a));
       }
     }
     std::string              fmt;
@@ -1895,38 +2369,35 @@ private:
           spec = name.substr(c2 + 1);
           name = name.substr(0, c2);
         }
-        bool        is_slop = false;
-        std::string ve =
-            name.empty() ? (pi < pos.size() ? pos[pi++] : std::string("0")) : interp_expr(name, is_slop);
-        if (is_slop) {
-          // Render through the Slop formatting entry points — exact at any
-          // width, no 64-bit truncation. Spec `[width][b|x|X|d][s]`: base
-          // picks the Slop method; digits/sep ride as its arguments.
+        const Val vv = name.empty() ? (pi < pos.size() ? pos[pi++] : long_val("0")) : interp_expr(name);
+        if (vv.kind == Val::Kind::Bool && spec.empty()) {
+          fmt += "%ld";
+          argv.push_back("(long)(" + vv.cpp + ")");
+        } else {
+          // Everything else renders through the Slop formatting entry points —
+          // exact at any width, no 64-bit truncation, whether the value came
+          // from a port, a local, or the loop counter. Spec `[width][b|x|X|d][s]`:
+          // base picks the Slop method; digits/sep ride as its arguments.
           // (`:o` has no Slop renderer — 64-bit fallback.)
-          size_t w = 0, si = 0;
+          const std::string ve = to_slop(vv).cpp;
+          size_t            w = 0, si = 0;
           while (si < spec.size() && spec[si] >= '0' && spec[si] <= '9') {
             w = w * 10 + static_cast<size_t>(spec[si++] - '0');
           }
-          char base = (si < spec.size() && spec[si] != 's') ? spec[si++] : 'd';
-          bool sepf = si < spec.size() && spec[si] == 's';
-          const std::string dg = std::to_string(w);
-          const std::string sp = sepf ? "true" : "false";
-          std::string call;
+          char              base = (si < spec.size() && spec[si] != 's') ? spec[si++] : 'd';
+          bool              sepf = si < spec.size() && spec[si] == 's';
+          const std::string dg   = std::to_string(w);
+          const std::string sp   = sepf ? "true" : "false";
+          std::string       call;
           switch (base) {
-            case 'd': call = ve + ".to_decimal(" + dg + ", " + sp + ")"; break;
-            case 'b': call = ve + ".to_binary(" + dg + ", " + sp + ")"; break;
-            case 'x': call = ve + ".to_hex(" + dg + ", " + sp + ", false)"; break;
-            case 'X': call = ve + ".to_hex(" + dg + ", " + sp + ", true)"; break;
-            default : call = "__fmt_i64(" + ve + ".to_just_i64(), \"" + spec + "\")"; break;
+            case 'd': call = "(" + ve + ").to_decimal(" + dg + ", " + sp + ")"; break;
+            case 'b': call = "(" + ve + ").to_binary(" + dg + ", " + sp + ")"; break;
+            case 'x': call = "(" + ve + ").to_hex(" + dg + ", " + sp + ", false)"; break;
+            case 'X': call = "(" + ve + ").to_hex(" + dg + ", " + sp + ", true)"; break;
+            default: call = "__fmt_i64((" + ve + ").to_just_i64(), \"" + spec + "\")"; break;
           }
           fmt += "%s";
           argv.push_back(call + ".c_str()");
-        } else if (spec.empty()) {
-          fmt += "%ld";
-          argv.push_back("(long)" + ve);
-        } else {
-          fmt += "%s";
-          argv.push_back("__fmt_i64((long long)" + ve + ", \"" + spec + "\").c_str()");
         }
         i = (j == std::string::npos) ? lit.size() : j;
       } else if (c == '}') {
@@ -2112,18 +2583,17 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // (it is transitively included by every DUT header otherwise).
   o << "#include \"slop.hpp\"\n";
   o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
-  // Width-deducing input poke: a testbench value is a 64-bit two's-complement
-  // long; drive it into a Slop<N> port as the RAW low bits, ZERO-extended above
-  // bit 63 (matching Verilog `port = val & mask`). create_integer() alone would
-  // SIGN-fill a wide (N>64) port from a negative value; zext_to<N> keeps the low
-  // min(64,N) bits and zeroes the rest (identical to create_integer for N<=64).
-  o << "template<int N> static inline void __prp_poke(Slop<N>& d, long long v){ "
-       "d = Slop<64>::create_integer(v).template zext_to<N>(); }\n";
-  // Wide poke: a testbench constant that does not fit 64 bits (e.g. a formalfail
-  // witness driving a u65 CSR bus) rides as a decimal STRING and converts at the
-  // port's own width via the constexpr pyrope codec — exact at any width.
-  o << "template<int N> static inline void __prp_poke(Slop<N>& d, std::string_view v){ "
-       "d = Slop<N>::from_pyrope(v); }\n";  // string_view: a literal 0 must not be ambiguous with a null pointer
+  // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
+  // driving it into a Slop<N> port is a width change with Verilog `port = val`
+  // semantics — the RAW low bits, ZERO-filled above. Staging through
+  // max(M,64) is what keeps both readings right: a NEGATIVE value fills the
+  // port (`poke(p, -1)` drives all ones, not the 0b11 of a 2-bit -1), while a
+  // value whose top bit is DATA rather than sign (a 64-bit LCG word into an
+  // 80-bit port) still zero-fills. Past 64 bits the value's own width governs,
+  // so a constant of ANY width drives exactly — the 64-bit staging that used to
+  // clip a wide poke is gone.
+  o << "template<int N, int M> static inline void __prp_poke(Slop<N>& d, const Slop<M>& v){ "
+       "constexpr int S = (M > 64 ? M : 64); d = Slop<S>(v).template zext_to<N>(); }\n";
   // `{val:spec}` puts interpolation for PLAIN locals: grammar
   // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated
   // every 4 (mirrors the comptime __fmt fold in upass/constprop).
