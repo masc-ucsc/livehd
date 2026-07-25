@@ -1,0 +1,6 @@
+# Lake build output and fetched dependencies (Mathlib etc. — large, reproducible
+# from lake-manifest.json via `lake exe cache get`).
+/.lake/
+
+# Stray Lean compiler artifact from a bare `lean <file>` invocation.
+/*.c
