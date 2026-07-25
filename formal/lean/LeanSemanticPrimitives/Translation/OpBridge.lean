@@ -104,4 +104,81 @@ theorem pack_low_toNat_lt {a b : Nat} (X : BitVec a) :
     · simp only [hb]
       exact Nat.lt_trans hih (Nat.pow_lt_pow_right (by norm_num) (by simp))
 
+/-- `Nat.testBit` as a div/mod predicate. -/
+theorem testBit_div_mod (n j : Nat) : n.testBit j = decide (n / 2 ^ j % 2 = 1) := by
+  rw [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.and_comm, Nat.and_one_is_mod]
+  rcases Nat.mod_two_eq_zero_or_one (n / 2 ^ j) with h | h <;> simp [h]
+
+/-- Disjoint OR is addition: `2^k` and `p < 2^k` share no bits. -/
+theorem two_pow_or_add {k p : Nat} (hp : p < 2 ^ k) : 2 ^ k ||| p = 2 ^ k + p := by
+  apply Nat.eq_of_testBit_eq
+  intro j
+  rw [Nat.testBit_lor, testBit_div_mod (2 ^ k) j, testBit_div_mod p j, testBit_div_mod (2 ^ k + p) j]
+  have h2j : 0 < (2 : Nat) ^ j := pow_pos (by norm_num) j
+  rcases lt_trichotomy j k with hjk | hjk | hjk
+  · have hkj : 2 ^ k = 2 ^ j * 2 ^ (k - j) := by rw [← pow_add]; congr 1; omega
+    have hdiv : (2 ^ k + p) / 2 ^ j = 2 ^ (k - j) + p / 2 ^ j := by rw [hkj, Nat.mul_add_div h2j]
+    have hdiv2 : 2 ^ k / 2 ^ j = 2 ^ (k - j) := by rw [hkj, Nat.mul_div_cancel_left _ h2j]
+    have heven : 2 ^ (k - j) % 2 = 0 := by
+      rw [← Nat.dvd_iff_mod_eq_zero]; exact dvd_pow_self 2 (by omega)
+    rw [hdiv, hdiv2]
+    rcases Nat.mod_two_eq_zero_or_one (p / 2 ^ j) with h | h <;> simp [Nat.add_mod, heven, h]
+  · subst hjk
+    have hpd : p / 2 ^ j = 0 := Nat.div_eq_of_lt hp
+    have he : (2 ^ j + p) / 2 ^ j = 1 := by rw [Nat.add_comm, Nat.add_div_right _ h2j, hpd]
+    rw [he, Nat.div_self h2j, hpd]; simp
+  · have h1 : 2 ^ k / 2 ^ j = 0 := Nat.div_eq_of_lt (Nat.pow_lt_pow_right (by norm_num) hjk)
+    have h2 : p / 2 ^ j = 0 := Nat.div_eq_of_lt (Nat.lt_trans hp (Nat.pow_lt_pow_right (by norm_num) hjk))
+    have h3 : (2 ^ k + p) / 2 ^ j = 0 := by
+      apply Nat.div_eq_of_lt
+      have hlt : 2 ^ k + p < 2 ^ (k + 1) := by rw [pow_succ]; omega
+      exact Nat.lt_of_lt_of_le hlt (Nat.pow_le_pow_right (by norm_num) (by omega))
+    rw [h1, h2, h3]; simp
+
+/-- `mk_bv` depends only on the value modulo `2^b`. -/
+theorem mk_bv_eq_of_emod {b : Nat} {x y : Int} (h : x % (2 : Int) ^ b = y % 2 ^ b) :
+    mk_bv b x = mk_bv b y := by unfold mk_bv; rw [h]
+
+theorem mk_bv_emod_eq {b : Nat} {x y : Int} (h : mk_bv b x = mk_bv b y) :
+    x % (2 : Int) ^ b = y % 2 ^ b := by
+  have := congrArg BV.value h; simpa [mk_bv] using this
+
+/-- `pack_low` correspondence: the certificate `pack_low_bv` over an encoded
+`BitVec` matches the fast `pack_low` (when the packed bits fit in `b`). -/
+theorem pack_low_bvenc {a b : Nat} (X : BitVec a) :
+    ∀ (is : List Nat), is.length ≤ b →
+      mk_bv b (pack_low_bv (bvenc X) is) = bvenc (pack_low X is : BitVec b) := by
+  intro is
+  induction is with
+  | nil => intro _; simp [pack_low_bv, pack_low, bvenc]
+  | cons i is' ih =>
+    intro hlen
+    have hlt' : is'.length < b := Nat.lt_of_lt_of_le (Nat.lt_succ_self _) hlen
+    have hih := ih (Nat.le_of_lt hlt')
+    have hP : (pack_low X is' : BitVec b).toNat < 2 ^ is'.length :=
+      pack_low_toNat_lt X is' (Nat.le_of_lt hlt')
+    simp only [pack_low_bv, pack_low, bv_bit_bvenc]
+    by_cases hb : X.getLsbD i
+    · simp only [hb, if_true]
+      unfold bvenc
+      apply mk_bv_eq_of_emod
+      have hor : ((1#b <<< is'.length) ||| (pack_low X is')).toNat
+               = 2 ^ is'.length + (pack_low X is' : BitVec b).toNat := by
+        rw [BitVec.toNat_or, toNat_one_shiftLeft hlt', two_pow_or_add hP]
+      rw [hor]
+      have hQ : (pack_low_bv (bvenc X) is') % (2 : Int) ^ b
+              = (Int.ofNat (pack_low X is' : BitVec b).toNat) % 2 ^ b := by
+        have := mk_bv_emod_eq hih; unfold bvenc at this; exact this
+      exact Int.ModEq.add_left _ hQ
+    · simp only [hb]; exact hih
+
+/-- **GetMask bridge**: the certificate bit-select equals the fast `sem_get_mask`
+under the encoding (requires the selected-bit count to fit in the output width). -/
+theorem getmask_bridge {aw mw b : Nat} (X : BitVec aw) (M : BitVec mw)
+    (hb : (mask_indices M).length ≤ b) :
+    bv_get_mask b (bvenc X) (bvenc M) = bvenc (sem_get_mask X M : BitVec b) := by
+  unfold bv_get_mask sem_get_mask
+  rw [mask_indices_bvenc]
+  exact pack_low_bvenc X (mask_indices M).reverse (by rw [List.length_reverse]; exact hb)
+
 end OpBridge
