@@ -24,6 +24,32 @@ using cvc5::Sort;
 using cvc5::Term;
 namespace gu = livehd::graph_util;
 
+// Walk a clock_pin driver back to the graph INPUT it comes from, hopping only
+// the width-mask Get_mask a typed port read picks up. Returns invalid for a
+// DERIVED clock (a divider Q, an inverter, a mux, an ICG cone) -- which is the
+// signal that this encoder cannot model the element's commit condition, since
+// its only gating branches are the ICG fold and the multi-clock detected edge.
+// File scope so the flop loop and the memory cut share ONE definition.
+static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
+  for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+    if (gu::is_graph_input_pin(p)) {
+      return p;
+    }
+    auto n = p.get_master_node();
+    if (gu::type_op_of(n) != Ntype_op::Get_mask) {
+      return {};
+    }
+    hhds::Pin_class a;
+    for (const auto& e : n.inp_edges()) {
+      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
+        a = e.driver;
+      }
+    }
+    p = a;
+  }
+  return {};
+}
+
 // Stable 1:1 cut-point key for a state cell (Flop), used to put corresponding
 // registers of the two designs in correspondence. The REGISTER NAME is the
 // primary key: both front-ends preserve the RTL name (yosys-slang on the pin,
@@ -697,6 +723,40 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
+    // ---- FAIL CLOSED on a memory clocked by anything but the reference clock.
+    // This encoder DISCARDS a Memory's clock_pin and posclk entirely: every
+    // write is modelled as landing once per step. That is right for a memory on
+    // the single reference clock and silently WRONG otherwise -- measured, a
+    // memory written on `negedge clk` came back PROVEN equal to the same memory
+    // written on `posedge clk`, and a gated-clock write PROVEN equal to an
+    // ungated one. (pass.single_edge does not cover this either: its trigger
+    // scans Flop/Fflop/Latch, so a negedge MEMORY does not even fire it.)
+    for (auto e : node.inp_edges()) {
+      const auto  raw = static_cast<int>(e.sink.get_port_id());
+      std::string pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
+      if (pn == "posclk") {
+        if (gu::is_const_pin(e.driver) && gu::hydrate_const(e.driver).is_known_false()) {
+          return fail_unsupported("memory '" + gu::debug_name(node)
+                                  + "' is written on the FALLING clock edge, which this encoder does not model "
+                                    "(it treats every memory write as landing once per step)");
+        }
+      } else if (pn == "clock_pin") {
+        // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
+        // a BUFFER CELL (`.clk(g118_BUFx1_2)`), which is a `Sub` and resolves to
+        // no input either -- but it is the same clock, and refusing it would
+        // reject every mapped design. So: refuse when the driver is ordinary
+        // combinational LOGIC in this graph (an And gate, an inverter, a mux, a
+        // divider's Q), and allow an opaque instance. A tech-mapped ICG cell is
+        // therefore still not caught here; that needs cell-model awareness and
+        // is the pre-existing behaviour for mapped netlists.
+        if (!e.driver.is_invalid() && !gu::is_const_pin(e.driver) && resolve_clk_input(e.driver).is_invalid()
+            && gu::type_op_of(e.driver.get_master_node()) != Ntype_op::Sub) {
+          return fail_unsupported("memory '" + gu::debug_name(node)
+                                  + "' has a derived clock the encoder cannot model (it treats every memory write as "
+                                    "landing once per step, with the clock derivation as dead code)");
+        }
+      }
+    }
     int mtype = -1;
     for (auto e : node.inp_edges()) {
       auto        raw_pid = static_cast<int>(e.sink.get_port_id());
@@ -2070,25 +2130,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // M5. In a relational encoding that means encoding each step TWICE with the
   // posedge Qs re-seeded to their next-state — real work, and deliberately not
   // attempted here.
-  auto resolve_clk_input = [](hhds::Pin_class p) -> hhds::Pin_class {
-    for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
-      if (gu::is_graph_input_pin(p)) {
-        return p;
-      }
-      auto n = p.get_master_node();
-      if (gu::type_op_of(n) != Ntype_op::Get_mask) {
-        return {};
-      }
-      hhds::Pin_class a;
-      for (const auto& e : n.inp_edges()) {
-        if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-          a = e.driver;
-        }
-      }
-      p = a;
-    }
-    return {};
-  };
   // Distinct clock INPUT nets across this design's flops.
   absl::flat_hash_set<std::string> clk_inputs;
   for (const auto& fn : flops) {
@@ -2267,6 +2308,28 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           out.outputs[std::string("\x01nxt:") + pkey]
               = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
         }
+      }
+      // ---- FAIL CLOSED on a clock this encoder does not model ---------------
+      // Reaching here with `commits` still null and no resolvable clock INPUT
+      // means the clock_pin is a DERIVED net that neither branch above could
+      // handle: a divider (`div <= ~div`), a mux-selected clock, an inverted
+      // clock, or an ICG cone whose clock operand could not be identified. The
+      // old behaviour was to leave the flop UNGATED and encode it as committing
+      // every step, with the derivation as dead code -- and the comment above
+      // called that "never a wrong verdict". It is exactly a wrong verdict:
+      // measured, `always @(posedge (clk ^ sel))` came back PROVEN equal to
+      // `always @(posedge clk)`, a clock-divided flop PROVEN equal to an
+      // undivided one, and `lhd formal verify` PROVED a property that is FALSE
+      // in hardware. `lhd sim` has always refused this class outright
+      // (`gated-clock-unsupported`); this is the same guard on the formal side.
+      //
+      // Latches and negedge flops do not reach this: pass.single_edge lowers
+      // them away first, and it declines (loudly) what it cannot lower.
+      if (commits.isNull() && resolve_clk_input(clk_d).is_invalid()) {
+        return fail_unsupported("flop '" + gu::debug_name(node)
+                                + "' has a derived clock the encoder cannot model (not a clock input, and not a "
+                                  "foldable `<clock> & <enables>` gate); refusing rather than encode it as "
+                                  "committing every step");
       }
     }
 

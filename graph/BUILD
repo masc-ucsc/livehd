@@ -56,4 +56,5 @@ cc_library(
 ) for test_name in [
     "node_count_test",
     "ge_weight_smoke",
+    "latch_contract_test",
 ]]

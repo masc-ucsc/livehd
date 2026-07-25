@@ -922,8 +922,8 @@ struct Ln_tree_row {
 
 bool tool_tree_ln_skeleton(Lnast_ntype::Lnast_ntype_int t) {
   using L = Lnast_ntype;
-  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t) || L::is_func_def(t)
-         || L::is_func_call(t) || L::is_io(t);
+  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t)
+         || L::is_tick(t) || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
 }
 
 // `--target kind:<X>` for the ln tree: X names an Lnast verbal (store, declare,

@@ -478,6 +478,68 @@ sh_test(
     data = ["//lhd"],
 )
 
+# LIVE blast-radius test for todo/livehd/2f-latch M8 (steps 1h + 3a): edge
+# normalization must stay OFF the synthesis path (lhd compile still emits a real
+# always_latch / negedge -- the netlist handed to ABC has to contain the actual
+# hardware), and must be SKIPPED rather than run-as-a-no-op on a design with no
+# latch, no negedge state and one clock net. Both directions are asserted, so a
+# trigger that under-fires OR over-fires fails here.
+sh_test(
+    name = "single_edge_scope_test",
+    size = "large",
+    srcs = ["single_edge_scope_test.sh"],
+    data = ["//lhd"],
+)
+
+# LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
+# (posedge, negedge, transparent-high, transparent-low) in ONE module. Discrimination
+# is checked through `lhd lec` (collapsing any two classes must REFUTE, and a
+# semantically-identical rewrite must still PROVE), and the transformation ITSELF is
+# validated trace-level against Icarus Verilog -- the source netlist (real always_latch
+# + negedge) vs the normalized one (posedge flops + phase divider), the normalized side
+# clocked P times per source period and sampled under the observation-visibility rule.
+# That iverilog leg is what the binding cross-model gating rule requires: our own
+# encoder on both sides of a miter cannot see a transformation that is wrong but applied
+# identically to both. It SKIPS with a note when iverilog is absent (it is a host tool,
+# not a bazel dep -- same status as inou/cgen/tests/sim/diff_test.py).
+# LIVE test for CLOCK GATING (todo/livehd/2f-latch): an ICG is recognized and
+# rewritten into a FLOP ENABLE rather than modelled as a gated clock -- sound
+# (the encoder has no clock-identity model, so gated and ungated otherwise look
+# identical) and cheaper (no per-step commit term). Checks the rewrite through
+# `lhd lec` in both directions AND against Icarus, with the L1 negative control
+# that pins the enable-latch bypass: reading the latch's HELD Q instead of the
+# value it passes through is a full cycle late and must fail.
+# LIVE TRACKER for todo/livehd/2f-latch: a latch or negedge flop inside a DEF is
+# refused (not lowered), which is exactly why lhdsuite's minion still needs its
+# `lec_trust` list -- running minion_lec with an EMPTY list refuses naming
+# `prim_rf_1r1w_preview_p2` and friends. This pins that the refusal is HONEST and
+# NAMES the def (it used to come back falsely PROVEN), that `formal.lec.trust`
+# still works as the escape hatch, and -- the part that keeps it a real test --
+# that the refusal stays NARROW: a def with only posedge state, and an
+# instantiated clock-gate cell, must both still pass.
+sh_test(
+    name = "single_edge_hier_latch_test",
+    size = "large",
+    srcs = ["single_edge_hier_latch_test.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "single_edge_icg_test",
+    size = "large",
+    srcs = ["single_edge_icg_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
+sh_test(
+    name = "single_edge_four_classes_test",
+    size = "large",
+    srcs = ["single_edge_four_classes_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
 # latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
 # DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and

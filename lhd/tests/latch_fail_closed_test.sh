@@ -10,14 +10,15 @@
 # the nonzero exit AND the specific diagnostic code, because "exits nonzero" is
 # also what a crash does.
 #
-#   1. `lhd formal verify` on a latch design — the shared encoder REFUSES the
+#   1. `lhd formal verify` on a latch design — the shared encoder REFUSED the
 #      Latch cell, which used to surface as status:pass / exit 0 under a
-#      warning. An encoder refusal is NOT a solver timeout: nothing was
-#      encoded, so no budget can help and `formal.strict` must not be needed to
-#      see it. Also asserts the report artifact still exists on the fail path
-#      (the agent loop requires it on EVERY run).
-#   2. the same design at the DEFAULT settings must not become clean merely
-#      because `formal.strict` is off (the regression this guards).
+#      warning. LIFTED BY M8 (edge normalization rewrites the latch into a
+#      flop-with-enable before the encoder sees it), so asserting the refusal
+#      here would now be asserting a BUG. What remains is the property that
+#      survives every milestone: the design gets a REAL, NON-VACUOUS verdict,
+#      identical across every invocation shape, and a MUTATED design refutes.
+#   2. the verdict must not depend on the invocation shape (the fork-race wire
+#      codec dropping a Verify_result field — M8 step 0a).
 #   3. `lhd sim` on a latch — used to die with a misleading `combinational-loop`
 #      error naming an internal node. LIFTED BY M5 (latches now simulate); what
 #      remains here is that the misleading diagnostic never returns.
@@ -98,32 +99,75 @@ pub mod lhold_tb() -> (ok:bool@[0]) {
 }
 EOF
 
-expect_fail_with "formal verify on a latch (default settings)" "unsupported" \
-  "$LHD" formal verify "$W/lverify.prp" --top lhold_tb --workdir "$W/vwd" \
-  --set formal.bound=8 --set formal.prpfail_run=false
+# INVERTED AT M8 (was: expect_fail_with "unsupported"). Edge normalization
+# retypes the Latch into a flop-with-enable — tolg already baked `din = en ? d
+# : q`, so the update `q_next = en ? din : q` IS transparency observed at the
+# end of the cycle — and the ordinary Flop encoding proves the obligation.
+out="$("$LHD" formal verify "$W/lverify.prp" --top lhold_tb --workdir "$W/vwd" \
+  --set formal.bound=8 --set formal.prpfail_run=false 2>&1)"
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "$out" | tail -5
+  fail "formal verify on a latch exited $rc — M8 edge normalization regressed (the encoder is refusing the cell again)"
+fi
+grep -q "pass.single_edge" <<<"$out" \
+  || fail "the latch was proven WITHOUT edge normalization in the recipe — the verdict is not coming from where we think"
+echo "ok: formal verify PROVES a latch design (M8 lifted the encoder refusal)"
 
-# The refusal must NOT depend on formal.strict — that flag exists to escalate a
-# solver GIVE-UP, and conflating the two is exactly what made this exit 0.
-out="$("$LHD" formal verify "$W/lverify.prp" --top lhold_tb --workdir "$W/vwd2" \
-  --set formal.bound=8 --set formal.strict=false --set formal.prpfail_run=false 2>&1)"
-[ $? -ne 0 ] || fail "formal verify with formal.strict=false went back to exit 0 (a REFUSAL is not a strictness setting)"
-grep -q "REFUSAL, not a timeout" <<<"$out" \
-  || fail "the refusal diagnostic must say it is not a timeout (so nobody 'fixes' it by raising formal.timeout)"
-echo "ok: refusal is independent of formal.strict"
+# NON-VACUITY. "PROVEN" means nothing unless the same machinery REFUTES a wrong
+# claim: an encoder that quietly checks nothing also reports success. The mutant
+# asserts the latch captured 6 where it captures 5, and must come back REFUTED
+# verbatim (a degradation to UNKNOWN is NOT a fix -- verdict discipline).
+sed 's/(lq == 5)/(lq == 6)/' "$W/lverify.prp" > "$W/lverify_mutant.prp"
+out="$("$LHD" formal verify "$W/lverify_mutant.prp" --top lhold_tb --workdir "$W/vwdm" \
+  --set formal.bound=8 --set formal.prpfail_run=false 2>&1)"
+[ $? -ne 0 ] || fail "the MUTATED latch property still passed: the obligation is not actually being checked (vacuous)"
+grep -q "REFUTED" <<<"$out" \
+  || { echo "$out" | tail -5; fail "the mutated latch property must be REFUTED verbatim, not merely inconclusive"; }
+echo "ok: a wrong latch claim is REFUTED (the proof above is not vacuous)"
 
-# The agent-loop report must exist even on the refusal path.
+# The agent-loop report must exist on EVERY run.
 [ -s "$W/vwd/formal_report.json" ] \
-  || fail "formal_report.json missing on the refusal path (the report must exist on EVERY run)"
-echo "ok: formal_report.json still written on the refusal path"
+  || fail "formal_report.json missing (the report must exist on EVERY run)"
+echo "ok: formal_report.json written"
 
-# ---- 2b: the SAME refusal through `lhd lec` ---------------------------------
-# Regression for a hole found while landing M2: `lhd lec` runs its ind|bmc
-# portfolio in a FORKED race and ships each engine's result back through a
-# hand-rolled wire codec. The refusal flag was not in that codec, so it was
-# silently dropped crossing the process boundary and the parent saw
-# unsupported=false — `lhd lec` on a latch design kept exiting 0 with
-# status:pass long after `lhd formal verify` had been fixed. Any future field on
-# Query_result has the same trap.
+# ---- 2a: the VERDICT MUST NOT DEPEND ON THE INVOCATION SHAPE ----------------
+# 2f-latch M8 step 0a. `lhd formal verify` runs its bmc-first|ind-first
+# portfolio either FORKED (results shipped back through serialize_verify) or
+# SEQUENTIALLY IN-PROCESS (when a verdict cache is active, i.e. --workdir and
+# formal.cache on). Verify_result::unsupported was missing from that wire codec,
+# so the FORKED shapes silently dropped it and the parent reported a clean
+# exit-0 for a design the encoder never encoded. Measured before the fix:
+#   no --workdir                       -> rc 0   (forked, flag lost)
+#   --workdir                          -> rc 7   (in-process, flag kept)
+#   no --workdir + formal.cache=false  -> rc 0   (forked, flag lost)
+# The invariant pinned here is the one that survives every later milestone: all
+# three shapes AGREE. (When M8 teaches the encoder this design, all three flip
+# to 0 together; a divergence is always the codec bug coming back.)
+verdict_rc() { # <extra args...>  -> prints the exit code
+  local wd
+  wd="$(mktemp -d "$W/shape.XXXXXX")"
+  "$LHD" formal verify "$W/lverify.prp" --top lhold_tb --set formal.bound=8 \
+    --set formal.prpfail_run=false "$@" >"$wd/log" 2>&1
+  echo $?
+}
+rc_nowd=$(verdict_rc)
+rc_wd=$(verdict_rc --workdir "$W/vwd3")
+rc_nocache=$(verdict_rc --set formal.cache=false)
+if [ "$rc_nowd" != "$rc_wd" ] || [ "$rc_nowd" != "$rc_nocache" ]; then
+  fail "the verify verdict depends on the INVOCATION SHAPE: no-workdir=$rc_nowd workdir=$rc_wd cache=false=$rc_nocache (a Verify_result field is being dropped by the fork-race wire codec — see serialize_verify)"
+fi
+echo "ok: all three verify invocation shapes agree (rc=$rc_nowd) — no field lost in the fork race"
+
+# ---- 2b: `lhd lec` on a latch pair -----------------------------------------
+# ALSO INVERTED AT M8. This case was born as a regression guard for a hole found
+# while landing M2: `lhd lec` runs its ind|bmc portfolio in a FORKED race and
+# ships each engine's result through a hand-rolled wire codec, and the refusal
+# flag was missing from it, so `lhd lec` on a latch design kept exiting 0 with
+# status:pass long after `lhd formal verify` had been fixed. The refusal itself
+# is gone (edge normalization runs MITER-WIDE, so both sides land in one time
+# base); what this now pins is the pair of verdicts that proves the oracle is
+# real — an equivalent latch pair PROVES, a polarity-flipped one REFUTES.
 cat > "$W/lecref.v" <<'EOF'
 module dut(input g, input [7:0] d, output reg [7:0] q);
   always_latch begin
@@ -140,9 +184,24 @@ module dut(input g, input [7:0] d, output reg [7:0] q);
   end
 endmodule
 EOF
+cat > "$W/lecflip.v" <<'EOF'
+module dut(input g, input [7:0] d, output reg [7:0] q);
+  always_latch begin
+    if (!g)
+      q <= d;
+  end
+endmodule
+EOF
 
-expect_fail_with "lec on a latch design (native encoder)" "unsupported" \
-  "$LHD" lec --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd"
+out="$("$LHD" lec --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd" 2>&1)"
+[ $? -eq 0 ] || { echo "$out" | tail -5; fail "lec on an EQUIVALENT latch pair no longer passes (M8 normalization regressed)"; }
+echo "ok: lec PROVES an equivalent latch pair"
+
+out="$("$LHD" lec --impl verilog:"$W/lecflip.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwdf" 2>&1)"
+[ $? -eq 0 ] && { echo "$out" | tail -5; fail "lec did NOT see a transparent-high vs transparent-low latch difference (the polarity fold is blind — the double-negation hazard)"; }
+grep -q "REFUTED" <<<"$out" \
+  || { echo "$out" | tail -5; fail "the polarity flip must be REFUTED verbatim, not merely inconclusive"; }
+echo "ok: lec REFUTES an enable-polarity flip (the proof above is not vacuous)"
 
 # ---- 3 + 4: LIFTED BY M5 — these two refusals are now real support ----------
 # M0 made `lhd sim` REFUSE a latch (it used to die with a misleading

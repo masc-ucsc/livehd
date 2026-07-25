@@ -1,0 +1,59 @@
+/*
+:name: flop_sim_secondary_negedge
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// A NEGEDGE flop in a SECOND clock domain never commits. This is M6's
+// detected-edge model crossed with M5's two-phase tick, and the crossing is
+// where it breaks.
+//
+// WHAT IS WRONG. cgen_sim updates the per-net previous-level bit
+// (`__clkprev_clkb = <current level>`) AFTER the phase-1 commits but BEFORE the
+// phase-2 block. Phase 2 then builds the negedge guard as `(!cur && prev)` —
+// but `prev` has already been assigned `cur`, so the guard is a tautological
+// false and the flop holds its power-on value forever. Emitted C++, verbatim:
+//
+//     __clkprev_clkb = (in.clkb...).is_known_true();
+//     if ((!(in.clkb...).is_known_true() && __clkprev_clkb)) { bn = bn_next; }
+//
+// `lhd sim` reports 0 errors and the VCD shows the net simply never changing.
+//
+// The POSEDGE sibling on the SAME net is the NON-VACUITY CONTROL: its guard is
+// `cur && !prev` and it still fires at the rises, so a failure below is
+// specifically the NEGEDGE guard -- not a testbench that never toggles clkb.
+//
+// clkb is a DATA input the testbench drives (M6: a second clock is a signal,
+// not the tick loop variable): rise at ticks 1 and 3, fall at tick 2.
+// `a` on the REFERENCE clock is what makes clkb a genuine SECOND domain: with
+// clkb as the only clock_pin net, cgen_sim would pick it as the reference clock
+// waveform instead and no edge detection would be generated at all.
+pub mod secneg(clkb:bool, d:u8) -> (qa:u8@[1], qp:u8@[2], qn:u8@[2]) {
+  reg a:u8 = 0
+  reg bp:u8:[clock_pin=ref clkb] = 0
+  reg bn:u8:[clock_pin=ref clkb, posclk=false] = 0
+  qa = a
+  qp = bp
+  qn = bn
+  a  = d
+  bp = a
+  bn = a
+}
+
+test secneg.second_domain_negedge_commits {
+  mut acc = secneg
+  tick 4 {
+    acc.clkb = (clock == 1) or (clock == 3)   // 0,1,0,1 -> rise@1, fall@2, rise@3
+    acc.d    = 11 + (17 * clock)
+    step
+    // CONTROL 1: the reference-clock stage commits every tick.
+    assert(acc.qa == 11 + (17 * clock), "the reference-clock stage commits every tick (control)")
+    // CONTROL 2: the POSEDGE sibling on the SAME second-domain net commits at
+    // the rises, so clkb really is toggling and really is edge-detected.
+    assert((clock >= 2) implies (acc.qp != 0), "the posedge flop in the second domain commits at a rise (control)")
+    // THE BUG: a FALL happened at tick 2, so by tick 3 the negedge flop must
+    // have left its power-on value. Today its commit guard is a dead `false`.
+    assert((clock >= 3) implies (acc.qn != 0), "the negedge flop in the second domain commits at the fall")
+  }
+}

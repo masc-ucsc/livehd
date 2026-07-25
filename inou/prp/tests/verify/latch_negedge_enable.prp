@@ -1,0 +1,84 @@
+/*
+:name: latch_negedge_enable
+:type: verify
+:top_module: negen_tb
+:verify_bound: 12
+:verify_proven: 4
+:verify_refuted: 0
+*/
+
+// todo/livehd/2f-latch — the formal twin of tests/sim/latch_sim_negedge_enable
+// .prp, and THE ONE DESIGN WHERE BOTH M8 HOLES INTERACT: a transparent latch
+// QUALIFYING A NEGEDGE FLOP'S ENABLE (the register-file write-strobe shape).
+// Everything else in the corpus exercises the latch hole or the edge hole; this
+// exercises the seam between them, and it is the fixture the task page carried
+// as "still to write" from M5 until edge normalization landed.
+//
+// After edge normalization the two elements sit in DIFFERENT SLOTS of one
+// period — the latch commits at the clock's RISE (slot 0, with the posedge
+// flops), the negedge flop at the FALL (slot 1) — so slot 1's `din` reads a
+// latch Q that already committed in slot 0. That is precisely the intra-step
+// ordering that a step-granular relational encoding cannot express and that
+// slotting converts into an ordinary cross-step read.
+//
+// WHY THE LATCH IS GATED BY THE CLOCK AND NOT BY DATA. A negedge flop samples
+// its enable AT THE FALL. A DATA-gated latch is generally still OPEN then (its
+// window closes on a clock edge, not on the fall), so the flop would sample the
+// latch READING THROUGH — an observation the visibility rule forbids, and a
+// point where the commit-at-closing-edge model and real hardware genuinely
+// disagree. A transparent-LOW latch is CLOSED for the whole high half, so the
+// fall is inside its opaque window and the observation is valid. The sim twin
+// gets away with a data gate because it samples `q` at end-of-tick, never
+// through the enable.
+//
+// The two elements do NOT trip rule 4 (coincident commit edges): the latch and
+// the posedge flops share a commit class, but no posedge flop's `din` reads the
+// latch — only the NEGEDGE flop does, and it is in the other slot.
+//
+// SCHEDULE VALIDATED AGAINST ICARUS on the hand-written golden before being
+// baked in here (the dual-fixture convention), sampled in the LOW half of each
+// period so the negedge commit for that period is visible:
+//
+//   cyc  lat=wen(c-1)  armed=arm(c-1)  en   nf
+//    1        1              1          1   11
+//    2        1              1          1   12
+//    3        0              1          0   12   <- enable dropped via the LATCH
+//    4        1              1          1   14
+//    5        1              0          0   14   <- enable dropped via the FLOP
+//    6        1              1          1   16
+//    7        1              1          1   17
+//    0        1              1          1   10   (u3 wraps: the schedule is cyclic)
+//
+// Conventions (see tests/fixme/latch_verify_hold.prp): the property is stated
+// twice across the twins, `implies` form (a formal obligation DROPS an `if`
+// guard and refutes at cycle 0), snapshot-before-write, and a CLOSED testbench —
+// `clk` is the flops' clock, not a data input, so every stimulus value is a pure
+// function of an explicitly-initialized counter. The u3 wrap makes the schedule
+// cyclic, which is what lets these obligations prove without a deep unroll.
+pub mod negen_tb(clk:bool) -> (ok:bool@[0]) {
+  reg cyc:u3:[clock_pin=ref clk] = 0
+  reg lat:bool:[latch=true]                        // transparent while clk==0 -> CLOSED while clk==1
+  reg armed:bool:[clock_pin=ref clk] = false
+  reg nf:u8:[clock_pin=ref clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified enable
+  const c   = cyc
+  const lq  = lat
+  const aq  = armed
+  const nq  = nf
+  const wen = c != 2                               // the write strobe drops for one period
+  const arm = c != 4                               // ...and so does the posedge qualifier
+  const dv  = 10 + c
+  if !clk {
+    lat = wen
+  }
+  armed = arm
+  const en = lq and aq
+  if en {
+    nf = dv
+  }
+  wrap cyc += 1
+  ok = nq#[0] == 0
+  assert((c == 2) implies (nq == 12), "latch-qualified enable loaded the negedge flop")
+  assert((c == 3) implies (nq == 12), "enable dropped via the LATCH: the negedge flop HOLDS")
+  assert((c == 5) implies (nq == 14), "enable dropped via the posedge FLOP: it HOLDS")
+  assert((c == 6) implies (nq == 16), "enable re-asserted: the negedge flop loads again")
+}

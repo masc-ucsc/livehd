@@ -1,0 +1,190 @@
+/*
+:name: tick_comptime_opaque
+:type: simulation
+*/
+// tick + constprop, HALF 2 of 2: the cases that MUST GO OPAQUE. The companion
+// half (what stays comptime) is tick_comptime_survives.prp; the rules R0/R1/R2
+// are stated in full there. In short:
+//
+//   R0  The iteration count of a tick is assumed UNKNOWN — always, including
+//       when written as a literal (a tick count is routinely overridden by a
+//       runtime argument, so never optimize on it).
+//   R1  A variable updated with anything other than a constant literal is an
+//       induction variable: assume not-constant even when it is constant.
+//   R2  R0 collapses the rest: the body may run zero times, so ANY variable
+//       written inside a tick is opaque after the loop.
+//
+// HOW A FAILURE SHOWS UP. Every assert below is TRUE at runtime. If constprop
+// folds one of these variables anyway, it will almost always fold it to the
+// declared INITIALIZER (the loop that would overwrite it is the very thing the
+// fold failed to model), the condition becomes a known-false constant, and the
+// verifier turns a passing test into a COMPILE error:
+//
+//     error[cassert-false]: comptime cassert is false (`false` evaluated to false)
+//
+// So these fixtures fail loudly on a wrong fold and pass on a correct decline.
+// They deliberately carry NO `cassert`: asserting non-provability is not
+// expressible, and a `cassert` here would only weaken the signal.
+//
+// B3 additionally carries an explicit `got != 0` canary. That is the exact
+// shape behind lhdsuite fixme issue 2 — lhdsuite/minion/sim/tensora_rf_tb.prp
+// captures a DUT output into `mut got = 0` inside a tick, and the compiler
+// reports comptime `got = 0` while the simulator computes the correct value.
+// The canary makes a fold-to-initializer fail on its own, without depending on
+// the specific correct value.
+//
+// STATUS 2026-07-25: LIVE. `tick`/`step` lower into LNAST and the runner
+// registers every write in a tick body as an uncertain modification, so each
+// variable below is invalidated on loop exit and these are real gates.
+// Verified discriminating: flipping B3's assert to `got == 0` (the initializer)
+// fails at RUNTIME reporting the true `got=4`, rather than folding to 0 and
+// silently passing — which is what happened before the fix.
+
+mod counter8(en:bool) -> (v:u8@[0]) {
+  reg c:u8 = 0
+  v = c
+  if en { wrap c += 1 }
+}
+
+// B1 + B2 — textbook induction variables (R1).
+//
+// `sum` reads itself; `seen` accumulates the cycle index. Neither is knowable
+// without unrolling, which `tick` forbids. Correct values after 4 iterations:
+// sum = 4*2 = 8, seen = 0+1+2+3 = 6.
+test counter8.induction_vars {
+  mut acc  = counter8
+  mut sum  = 0
+  mut seen = 0
+
+  tick 4 {
+    acc.en = true
+    sum    = sum + 2          // self-referencing -> R1
+    seen   = seen + clock     // depends on the cycle index -> R1
+    step
+  }
+
+  assert(sum == 8, "self-referencing induction variable")
+  assert(seen == 6, "induction over the cycle index (0+1+2+3)")
+}
+
+// B3 — DUT-OUTPUT CAPTURE. This is the fixme-issue-2 shape.
+//
+// `got` is seeded with a comptime 0 and then overwritten each iteration from a
+// runtime DUT output. The counter is enabled every cycle, so after 4 ticks the
+// captured value is 4.
+test counter8.dut_output_capture {
+  mut acc = counter8
+  mut got = 0
+
+  tick 4 {
+    acc.en = true
+    step
+    got = acc.v               // runtime DUT output -> R1
+  }
+
+  assert(got != 0, "captured DUT output must not fold back to its initializer")
+  assert(got == 4, "captured DUT output value after 4 enabled cycles")
+}
+
+// B4 + B5 — a literal write is still not enough, for two further reasons.
+//
+// `cond_lit` gets a literal, but CONDITIONALLY, so even ignoring R0 the value
+// depends on which iterations ran the guard. It settles at 9 because clock==2
+// occurs and nothing writes it afterwards.
+//
+// `lit_plus` gets a literal AND a second write in the same body, so the write
+// is not a lone literal at all. Each iteration computes 3 then 3+1, leaving 4.
+test counter8.literal_write_not_alone {
+  mut acc      = counter8
+  mut cond_lit = 5
+  mut lit_plus = 0
+
+  tick 4 {
+    acc.en = false
+    if clock == 2 { cond_lit = 9 }   // conditional
+    lit_plus = 3
+    lit_plus = lit_plus + 1          // a second write in the same body
+    step
+  }
+
+  assert(cond_lit == 9, "conditionally written literal")
+  assert(lit_plus == 4, "literal write followed by a second write")
+}
+
+// B6 — THE R0 CASE: a LONE, UNCONDITIONAL LITERAL WRITE is still opaque.
+//
+// This is the shape that looks most foldable and is the whole point of R0.
+// `lone_lit` is a trivial constant receiving exactly one literal write, nothing
+// else in the body touches it, and the trip count is even written as a LITERAL
+// 4. It is still opaque: the count is assumed unknown, so the body may run zero
+// times and the value is `5`-or-`7`. Do not reintroduce a "literal count >= 1"
+// special case here — B7 and B8 are the two ends of why.
+test counter8.lone_literal_write_still_opaque {
+  mut acc      = counter8
+  mut lone_lit = 5
+
+  tick 4 {
+    acc.en   = false
+    lone_lit = 7              // lone, unconditional literal -> STILL opaque (R0)
+    step
+  }
+
+  assert(lone_lit == 7, "lone literal write under an assumed-unknown trip count")
+}
+
+// B7 — the zero-trip end of R0: the body never runs, so the outer value stands.
+//
+// Structurally identical to B6 apart from the count. If an implementation ever
+// folds B6 to 7 on the strength of its literal count, this fixture is the proof
+// that the same reasoning gives the WRONG answer here — the correct value is 5.
+test counter8.zero_trip_keeps_outer_value {
+  mut acc = counter8
+  mut z   = 5
+
+  tick 0 {
+    acc.en = false
+    z      = 7                // never executes
+    step
+  }
+
+  assert(z == 5, "a zero-trip tick must not apply its body")
+}
+
+// B8 — the runtime-count end of R0: the count is not even a literal.
+//
+// Same lone literal write as B6, but the trip count is a test parameter. With
+// the default cycles=4 the runtime value is 7; run with `--arg cycles=0` and it
+// is 5. That the SAME source text yields either value depending on a runtime
+// argument is precisely why R0 refuses to reason about the count at all.
+test counter8.runtime_trip_count(cycles:u20 = 4) {
+  mut acc     = counter8
+  mut rt_trip = 5
+
+  tick cycles {
+    acc.en  = false
+    rt_trip = 7
+    step
+  }
+
+  assert(rt_trip == 7, "lone literal write under a runtime trip count")
+}
+
+// B9 — THE BOUNDARY OF R1: knowable, but not a literal.
+//
+// `expr` is written from `2 * 3`. Both operands are literals and the result is
+// obviously 6, but the written expression is not itself a constant literal, so
+// R1 as stated says do not touch it. (R2 would make it opaque regardless; this
+// fixture exists to document the R1 boundary independently, and is the one to
+// revisit if R1 is ever relaxed to "any expression that constant-folds".)
+test counter8.non_literal_but_knowable {
+  mut acc  = counter8
+  mut expr = 0
+
+  tick 4 {
+    acc.en = false
+    expr   = 2 * 3            // folds to 6, but is not a LITERAL -> R1
+    step
+  }
+
+  assert(expr == 6, "written from a non-literal expression that folds to 6")
+}

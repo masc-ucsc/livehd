@@ -1,0 +1,82 @@
+/*
+:name: tick_comptime_survives
+:type: simulation
+*/
+// tick + constprop, HALF 1 of 2: the cases that MUST STAY comptime-knowable.
+// The opposite half (what must go OPAQUE) is tick_comptime_opaque.prp; read
+// them together, they are one specification split by expected verdict.
+//
+// THE RULES (user ruling 2026-07-25):
+//
+//   R0  The ITERATION COUNT of a tick is assumed UNKNOWN — always, including
+//       when it is written as a literal. A tick count is routinely overridden
+//       by a runtime argument, so never optimize on it.
+//   R1  A variable updated inside a tick body with anything other than a
+//       constant literal is an INDUCTION VARIABLE: assume not-constant, even
+//       when it happens to be constant.
+//   R2  R0 collapses the rest: since the body may run zero times, a variable
+//       written anywhere inside a tick is `prior-value`-or-`written-value`
+//       after the loop, which is not knowable. So ANY write inside a tick makes
+//       that variable opaque.
+//
+// What survives is therefore exactly one thing: a variable the tick NEVER
+// WRITES. That is what this file pins. It is a short list on purpose — the
+// interesting content is the other half.
+//
+// Failing to fold these is merely conservative rather than wrong, so each is a
+// `cassert`: it hard-errors if the value is folded to something WRONG, and
+// degrades to a runtime check if it simply could not be proven. The `assert`s
+// alongside pin the runtime value independently, so no fixture passes vacuously.
+//
+// STATUS 2026-07-25: LIVE. `tick`/`step` now lower into LNAST (prp2lnast's
+// stmt_dispatch + the `tick` node), and the runner walks a tick body inside an
+// uncertain scope, so these fixtures exercise the real barrier. Before that,
+// `tick_statement` had no dispatch entry and the whole body was silently dropped
+// on the way to LNAST while `prp_sim.cpp`'s CST walk still executed it — which
+// is what made a testbench `assert` fold against a stale initializer (lhdsuite
+// fixme issue 2).
+
+mod passthru(d:u8) -> (q:u8@[0]) { q = d }
+
+// A1 — a variable the tick never writes is not poisoned by the tick existing.
+//
+// `untouched` is declared outside and read after the loop; the body never
+// assigns it. A tick must not demote it just by being in scope. Without this
+// case a "when in doubt, poison everything in scope" implementation would look
+// correct.
+test passthru.untouched_var_survives {
+  mut acc       = passthru
+  mut untouched = 5
+  mut sink      = 0
+
+  tick 4 {
+    acc.d = 3
+    sink  = acc.q             // the loop DOES write something, just not `untouched`
+    step
+  }
+
+  cassert(untouched == 5, "a tick must not poison a variable it never writes")
+  assert(untouched == 5, "runtime: untouched")
+}
+
+// A3 — a comptime const READ (never written) inside the loop stays comptime.
+//
+// Reading a comptime value from inside a tick body is not an update, so nothing
+// about the loop may demote it — not even the fact that the read happens under
+// an unknown iteration count. `from_k` is a separate variable that RECEIVES that
+// const inside the loop, so by R2 it is opaque; that half is asserted, not
+// casserted, and lives as a contrast here rather than being split across files.
+test passthru.comptime_const_read {
+  mut acc          = passthru
+  comptime const K = 5
+  mut from_k       = 0
+
+  tick 4 {
+    acc.d  = K                // reading K is not an update -> K stays comptime
+    from_k = K                // but writing from_k inside the tick -> R2: opaque
+    step
+  }
+
+  cassert(K == 5, "a comptime const read inside a tick stays comptime")
+  assert(from_k == 5, "runtime: written from a comptime const")
+}

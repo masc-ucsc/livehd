@@ -1,0 +1,60 @@
+/*
+:name: flop_sim_peek_secondary
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// READING A DUT OUTPUT BEFORE `step` EATS A SECOND-DOMAIN CLOCK EDGE.
+//
+// WHAT IS WRONG. Every output read in a test block becomes its own `peek()`
+// call, and `peek()` runs a full `cycle()` and then rolls the state back. It
+// snapshots flops, pipeline stages, memories and the VCD tick — but NOT the
+// per-net previous-clock-level bit (`__clkprev_<net>`) that M6's second-domain
+// edge detection depends on. So the peek's `cycle()` advances that bit, the
+// rollback leaves it advanced, and the real `step()` that follows sees no edge.
+//
+// The second-domain flop then never commits, silently. The same gap hits
+// checkpointing: the bit is in neither `dump_state` nor `load_state`, so a
+// `--restart-at` / `--vcd-from` restore gains or loses commits.
+//
+// This is nastier than the other trackers because the DESIGN is fine — the bug
+// is triggered purely by an innocuous testbench habit (looking at an output
+// before stepping), which is exactly what a human debugging a waveform does.
+//
+// CONTROL: `qa` is on the reference clock and is unaffected, so a failure below
+// is specifically the second-domain previous-level bit.
+//
+// The companion fixture inou/prp/tests/sim/multiclock_two_domain.prp is the
+// SAME design shape WITHOUT a pre-step read, and it passes — that pair is the
+// proof that the read is what breaks it.
+pub mod pksec(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
+  reg a:u8 = 0
+  reg b:u8:[clock_pin=ref clkb] = 0
+  qa = a
+  qb = b
+  a  = d
+  b  = a
+}
+
+test pksec.pre_step_read_must_not_consume_a_clock_edge {
+  mut acc = pksec
+  mut pre = 0
+  tick 4 {
+    acc.d    = 11 + (17 * clock)
+    acc.clkb = (clock == 2)          // one rise, at tick 2
+    // THE TRIGGER: an output read BEFORE `step`. Each such read is a peek(),
+    // and peek() advances the second domain's previous-level bit without
+    // restoring it. The read must be UNCONDITIONAL -- an `implies` guard
+    // lowers to `||`, which short-circuits, so a guarded read only peeks on the
+    // ticks where the guard is true and the bug hides.
+    pre = acc.qb
+    step
+    // CONTROL: the reference-clock stage is unaffected by the peek.
+    assert(acc.qa == 11 + (17 * clock), "the reference-clock stage still commits every tick (control)")
+    // THE BUG: clkb rose at tick 2, so the second-domain flop must have
+    // committed by tick 3. Today the pre-step peek consumed that edge.
+    assert((clock >= 3) implies (acc.qb != 0), "a pre-step read must not consume the second domain's clock edge")
+  }
+  assert(pre == 0, "the pre-step value is observed, so the read is not optimized away")
+}

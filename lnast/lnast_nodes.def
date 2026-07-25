@@ -26,6 +26,22 @@ LNAST_NODE( if, if )
 LNAST_NODE( unique_if, uif )
 LNAST_NODE( for, for )
 LNAST_NODE( while, while )
+// `tick [N] { … }` — the simulation cycle loop inside a `test` block. Unlike
+// `for`/`while` (comptime-only, always fully unrolled) a tick is a RUNTIME loop
+// whose ITERATION COUNT IS ASSUMED UNKNOWN, always — even when written as a
+// literal, because a tick count is routinely overridden by a runtime `--arg`.
+// Children: (count-expr | const "" when absent), stmts-body.
+//
+// The runner therefore walks the body in an UNCERTAIN scope, so every variable
+// written inside is invalidated on scope exit: the body may run zero times, so
+// such a variable is `prior-value`-or-`written-value` afterwards, which is not
+// knowable. Only a variable the tick never writes keeps its comptime value.
+// Spec + regression gates: inou/prp/tests/sim/tick_comptime_{survives,opaque}.prp
+LNAST_NODE( tick, tick )
+// `step [N]` — advance N simulation cycles (default 1). A leaf; the optional
+// count is its only child. Nothing folds through it: it is the point at which
+// DUT state advances, so it is emitted verbatim.
+LNAST_NODE( step, step )
 LNAST_NODE( func_call, fcall )
 LNAST_NODE( func_def, fdef )
 LNAST_NODE( io, io )

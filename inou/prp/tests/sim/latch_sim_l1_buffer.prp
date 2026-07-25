@@ -1,0 +1,55 @@
+/*
+:name: latch_sim_l1_buffer
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// THE L1 / COINCIDENT-COMMIT-EDGE CASE (US7624363), in simulation.
+//
+// A transparent-LOW latch on `clk` is open while clk == 0, so it CLOSES at the
+// RISE. A posedge flop on the same `clk` SAMPLES at that same rise. Real
+// hardware therefore hands the flop the value read THROUGH the still-open
+// latch — the latch acts as a BUFFER with respect to a reader that commits on
+// its own closing edge.
+//
+// WHAT IS WRONG. cgen_sim models a Latch as a plain flop-with-enable committed
+// at end-of-tick, so the consumer flop reads the latch's PREVIOUS commit and
+// lands a full period late. No diagnostic; `lhd sim` reports 0 errors.
+//
+// This is the same rule `pass.single_edge` enforces for LEC/formal (2f-latch
+// condition 5, step 1b), where a coincident-edge latch/flop pair is REFUSED by
+// name. Sim has no equivalent: the rule lives only in the pass, and the plan
+// deliberately does not apply the pass to sim — so the two halves of the tool
+// disagree, and sim is the silent one.
+//
+// EXPECTED VALUES from Icarus on LiveHD's own emitted netlist:
+//   ql = 11, 28, 45, 62   (the latch itself is right today)
+//   qf = 11, 28, 45, 62   (today sim gives 0, 11, 28, 45 — one period late)
+//
+// The `ql` assert is the NON-VACUITY CONTROL: the latch half is already
+// correct, so a failure is specifically the coincident-edge reader.
+pub mod l1buf(clk:bool, d:u8) -> (ql:u8@[0], qf:u8@[1]) {
+  reg l:u8:[latch=true]
+  reg f:u8:[clock_pin=ref clk] = 0
+  ql = l
+  qf = f
+  if !clk {
+    l = d
+  }
+  f = l
+}
+
+test l1buf.coincident_edge_reader_sees_through_the_latch {
+  mut acc = l1buf
+  tick 4 {
+    acc.d = 11 + (17 * clock)
+    step
+    // CONTROL: the latch half already tracks d correctly.
+    assert(acc.ql == 11 + (17 * clock), "the transparent-low latch captured this tick's d (control)")
+    // THE BUG: the flop samples at the SAME rise the latch closes on, so it
+    // reads THROUGH the open latch and lands on the same value in the same
+    // period -- not a period later.
+    assert(acc.qf == acc.ql, "a flop committing on the latch's own closing edge reads through it")
+  }
+}

@@ -66,6 +66,18 @@ public:
   // declaring scope.
   void mark_current_uncertain();
 
+  // Register `name` as written under the current uncertain scope WITHOUT the
+  // write actually being walked. Same effect as an ordinary store inside an
+  // uncertain if-arm: leave_scope invalidates it in its declaring scope.
+  //
+  // Exists for `tick`, whose body is emitted VERBATIM rather than folded (see
+  // uPass_runner::tick_uncertain_body). A tick body may poke and peek DUT
+  // instance ports, which upass has no model for, so walking it would raise
+  // spurious errors — but its writes still have to invalidate, or a variable
+  // captured in the loop keeps its stale pre-loop value. No-op when no active
+  // scope is uncertain.
+  void note_uncertain_write(std::string_view name) { record_uncertain_modification(name); }
+
   // True when any active scope is an uncertain if-arm — i.e. the statement
   // being processed is not guaranteed to execute. A RUNTIME-rhs
   // write under uncertainty must invalidate the lhs's stale comptime value

@@ -742,10 +742,39 @@ void pass_command(Options& opts, Result& res) {
     set_top_label(opts, var, labels, "pass.formal");
     merge_sets(opts, "pass.formal", labels);
     run_step("pass.formal", var, labels, opts, res);  // marks proven/runtime_check in place; errors on a real violation
+  } else if (sub == "single_edge") {
+    // 2f-latch M8 step 1f. Deliberately NOT part of any recipe and NOT reachable
+    // from `lhd compile`: edge normalization is for verification and simulation
+    // only (slot enables and a phase divider cost QoR, and the netlist handed to
+    // ABC must still hold a real always_latch). This subcommand exists so the
+    // source-vs-normalized differential harness has an artifact to consume.
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    Eprp_var::Eprp_dict labels;
+    set_top_label(opts, var, labels, "pass.single_edge");
+    if (lg_out != nullptr) {
+      if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
+        throw Lhd_error{"usage", "single_edge --emit-dir lg: must differ from the input lg:", ""};
+      }
+      std::error_code ec;
+      fs::remove_all(lg_out->path, ec);
+      ensure_dir(lg_out->path);
+      labels["out"] = lg_out->path;
+    }
+    merge_sets(opts, "pass.single_edge", labels);
+    run_step("pass.single_edge", var, labels, opts, res);
+    if (lg_out != nullptr) {
+      livehd::Hhds_graph_library::save(lg_out->path);
+      res.outputs.push_back(lg_out->path);
+    }
   } else {
     throw Lhd_error{"usage",
                     std::format("unknown pass subcommand '{}'", sub),
-                    "use: color <alg> | partition | abc | opentimer | formal | liberty gensim | semdiff"};
+                    "use: color <alg> | partition | single_edge | abc | opentimer | formal | liberty gensim | semdiff"};
   }
 }
 

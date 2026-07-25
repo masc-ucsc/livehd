@@ -52,6 +52,24 @@ inline constexpr std::string_view lgassert_module_name = "lgassert";
 // compares data outputs) is unaffected.
 inline constexpr std::string_view fproperty_module_name = "fproperty";
 
+// Name of the phase register pass.single_edge synthesizes when it slots a design
+// into P > 1 sub-steps (2f-latch M8). Chosen to survive canon_flop_name (no '$'
+// decoration, no "___ssa_", no '.'), and NEVER derived from a nid, so both sides
+// of a miter spell it identically and it lands in shared_inputs instead of the
+// per-side fallback.
+inline constexpr std::string_view single_edge_phase_name = "single_edge_phase";
+
+// True for a flop STATE KEY that names the M8 phase register. The BMC engine
+// deliberately discards flop `initial` values under phase=after_reset (a free
+// initial state is the sound over-approximation), but a FREE phase would let the
+// solver choose the wrong sub-step parity, so the period-boundary guard would
+// check mid-period and refute an equivalent design. The phase divider is
+// TOOL-SYNTHESIZED with a known concrete start, so it keeps its init — which is
+// also what makes every slot predicate const-fold at unroll step j.
+[[nodiscard]] inline bool is_single_edge_phase_key(std::string_view key) {
+  return key.find(single_edge_phase_name) != std::string_view::npos;
+}
+
 // pass/formal obligation-kind codes stored in the proven / runtime_check attrs.
 inline constexpr uint32_t kFormalOnehot       = 1;
 inline constexpr uint32_t kFormalAssert       = 2;

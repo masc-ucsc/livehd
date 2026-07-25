@@ -1,0 +1,102 @@
+/*
+:name: wide_values
+:type: simulation
+*/
+// WIDE testbench values — a `test` block driving and reading past 64 bits.
+//
+// The driver's value plane is `Slop<N>`, the same arbitrary-precision type the
+// generated design uses, so a testbench value is exact at whatever width it
+// needs. It used to be a C++ `long`, and everything here was silently wrong:
+// a 97-bit port read kept its low 64 bits, a wide constant expression was
+// handed to the host compiler where `1 << 96` is undefined (folding to 0), and
+// a compare against either one then passed or failed on the truncated value
+// with no diagnostic at all.
+//
+// Every check below is a value that does NOT fit 64 bits, so each one fails on
+// the old plane and passes on this one.
+
+pub mod wide_reg(clk:bool, din:u97, we:bool) -> (dout:u97@[0], low:u32@[0]) {
+  reg r:u97 = 0
+  dout = r
+  low  = r@[0]#[0..=31]
+  if we { r = din }
+}
+
+// A 97-bit value driven in, read back whole, and compared whole. The stimulus
+// has bits set both above and below bit 63, so a 64-bit plane cannot carry it
+// (it would read back only the low half) and cannot compare it either.
+test wide_reg.roundtrip {
+  mut acc = wide_reg
+  mut got:u97 = 0
+  tick 4 {
+    acc.we  = true
+    acc.din = 0x1_0000_0000_0000_0000_0000_1234
+    step
+    got = acc.dout
+  }
+  assert(got == 0x1_0000_0000_0000_0000_0000_1234, "97-bit value survives the round trip")
+  // the same value, reached by ARITHMETIC rather than as one literal: the
+  // shifted term alone overflows a 64-bit expression
+  assert(got == (1 << 96) | 0x1234, "wide constant expression is exact")
+  puts("wide: dout={acc.dout} hex={acc.dout:x} low={acc.low}")
+}
+
+// Widths come from the values, so an expression grows as its operators say:
+// a shift moves bits ABOVE 64 and they are still there afterwards.
+test wide_reg.arithmetic {
+  mut acc = wide_reg
+  mut shifted:u97 = 0
+  mut summed:u97  = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 1
+    step
+    shifted = acc.dout << 80          // bit 80 of a value read back as 1
+    summed  = shifted + 0xFFFF
+  }
+  assert(shifted == (1 << 80), "a shift past 64 keeps its bits")
+  assert(summed == (1 << 80) + 0xFFFF, "arithmetic on a wide value is exact")
+  assert(shifted > 0xFFFF_FFFF_FFFF_FFFF, "the wide value compares above the 64-bit range")
+}
+
+// A narrow port next to a wide one: the low 32 bits of the same register read
+// through their own port must agree with the wide read's low bits, i.e. the
+// plane is not quietly widening or narrowing either one.
+test wide_reg.mixed_widths {
+  mut acc = wide_reg
+  mut lo = 0
+  mut hi:u97 = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 0x1_0000_0000_0000_0000_ABCD_0001  // bit 96 is the top bit of u97
+    step
+    lo = acc.low
+    hi = acc.dout
+  }
+  assert(lo == 0xABCD0001, "the narrow port reads the low word")
+  assert((hi & 0xFFFF_FFFF) == lo, "wide and narrow reads agree on the low bits")
+  assert((hi >> 96) == 1, "the bits above 64 are the ones that were driven")
+}
+
+// Bit selects on a wide value. Between them, the two halves of this used to be
+// unreachable: a testbench could not read a >64-bit port whole (it truncated)
+// and could not slice one either (`#[]` emitted literal Pyrope range syntax
+// into the C++ driver, which then failed to compile). Both work on the Slop
+// plane, including a field that straddles bit 64.
+test wide_reg.bit_select {
+  mut acc = wide_reg
+  mut top = 0
+  mut mid = 0
+  mut bit = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 0x1_DEAD_BEEF_0000_0000_0000_0007
+    step
+    top = acc.dout#[96..=96]     // the top bit of u97
+    mid = acc.dout#[64..=79]     // a field straddling the old 64-bit boundary
+    bit = acc.dout#[2]           // a single bit, no range
+  }
+  assert(top == 1, "the top bit of a 97-bit port is reachable")
+  assert(mid == 0xBEEF, "a slice above bit 64 reads the right field")
+  assert(bit == 1, "a single-bit select works")
+}

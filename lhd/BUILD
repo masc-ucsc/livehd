@@ -72,6 +72,7 @@ cc_library(
         "//pass/lec:pass_lec",
         "//pass/formal:pass_formal",
         "//pass/partition:pass_partition",
+        "//pass/single_edge:pass_single_edge",
         "//pass/semdiff:pass_semdiff",
         "//pass/semdiff:semdiff",
         "//pass/lnastfmt:pass_lnastfmt",

@@ -7263,7 +7263,8 @@ void uPass_runner::dead_code_eliminate_staging() {
           }
         }
         const bool child_structural = ct == N::Lnast_ntype_top || ct == N::Lnast_ntype_stmts || ct == N::Lnast_ntype_if
-                                      || ct == N::Lnast_ntype_while || ct == N::Lnast_ntype_for;
+                                      || ct == N::Lnast_ntype_while || ct == N::Lnast_ntype_for
+                                      || ct == N::Lnast_ntype_tick;
         scan(c, next_active, on_spine && child_structural);
       }
     };
@@ -7324,7 +7325,7 @@ void uPass_runner::dead_code_eliminate_staging() {
     // under it is a kill candidate anyway).
     const auto structural = [](Lnast_ntype::Lnast_ntype_int t) {
       return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if || t == N::Lnast_ntype_while
-             || t == N::Lnast_ntype_for;
+             || t == N::Lnast_ntype_for || t == N::Lnast_ntype_tick;
     };
     std::function<void(const Lnast_nid&)> sweep_wrappers = [&](const Lnast_nid& n) {
       const bool n_is_stmts = staging->get_type(n) == N::Lnast_ntype_stmts;
@@ -7388,7 +7389,7 @@ void uPass_runner::dead_code_eliminate_staging() {
 
   auto is_structural = [](Lnast_ntype::Lnast_ntype_int t) {
     return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if || t == N::Lnast_ntype_while
-           || t == N::Lnast_ntype_for;
+           || t == N::Lnast_ntype_for || t == N::Lnast_ntype_tick;
   };
 
   std::function<void(const Lnast_nid&, const Lnast_nid&, bool)> copy_subtree;
@@ -7829,6 +7830,24 @@ void uPass_runner::process_lnast() {
       unroll_while();
       break;
 
+    // Tick — the simulation cycle loop of a `test` block. Deliberately NOT
+    // unrolled, unlike `for`/`while`: its iteration count is assumed UNKNOWN
+    // even when written as a literal, because a tick count is routinely
+    // overridden by a runtime `--arg` (`tick cycles` with `cycles:u20=4` is the
+    // common shape, and `--arg cycles=0` must not be a miscompile).
+    //
+    // Consequence, and the whole reason this case exists: the body may run zero
+    // times, so a variable written inside is `prior-value`-or-`written-value`
+    // afterwards — not knowable. Walking the body as an UNCERTAIN scope makes
+    // Symbol_table::leave_scope invalidate every such variable on exit, which is
+    // exactly the required rule and needs no tick-specific logic in constprop.
+    // A variable the tick never writes is untouched and keeps its comptime value.
+    //
+    // Spec + regression gates: inou/prp/tests/sim/tick_comptime_{survives,opaque}.prp
+    case Ntype::Lnast_ntype_tick:
+      tick_uncertain_body();
+      break;
+
     default:
       // Unknown / not-yet-handled node type: copy its subtree verbatim so
       // nothing silently disappears from the output tree. Add an explicit
@@ -8247,6 +8266,101 @@ void uPass_runner::process_stmts() {
   // Pop AFTER stmts_post so passes' tear-down hooks (e.g. constprop's pub
   // harvest, which reads the scope depth) still see the block scope active.
   symbol_table_.leave_scope();
+}
+
+// Walk a `tick` node: (count, stmts-body). The count is evaluated ONCE, before
+// the loop, so it is walked in the enclosing (certain) scope; the BODY is walked
+// as an uncertain scope.
+//
+// The tick node itself is always emitted — a tick is never unrolled and never
+// dropped, however its count folds. Folding on the count is precisely what must
+// not happen: it is routinely overridden by a runtime `--arg`, so even a literal
+// count carries no guarantee the body runs at all. Marking the body uncertain
+// makes Symbol_table::leave_scope invalidate every variable written inside, so a
+// value that would only be correct after >= 1 iteration can never escape.
+//
+// `notify_uncertain_arm_begin/end` are dispatched around the body for the same
+// reason the if-arm walk does it: the coalescer must flush deferred writes at
+// the boundary, and bitwidth must stop treating in-body stores as the only range.
+void uPass_runner::tick_uncertain_body() {
+  if (!lm->has_child()) {
+    emit_subtree_verbatim();  // malformed tick (no count, no body) — never drop it silently
+    return;
+  }
+
+  emit_push(lm->current_type());
+  lm->move_to_child();
+
+  // child0 — the iteration count, in the ENCLOSING scope.
+  process_lnast();
+
+  // child1 (and any future trailing children) — the body.
+  //
+  // The body is EMITTED VERBATIM, not folded. Two independent reasons:
+  //
+  //   1. Nothing inside a tick may be folded anyway (R0/R1/R2), so folding the
+  //      body could only produce values that must then be thrown away.
+  //   2. A tick body pokes and peeks DUT INSTANCE PORTS (`acc.en = true`,
+  //      `got = acc.v`). upass has no model of an instance — `mut acc = counter`
+  //      binds no io — so walking those reads raises a spurious
+  //      "unknown field `v` on tuple `acc`". Modelling instances properly is a
+  //      separate piece of work; until then, not folding is both sufficient and
+  //      honest.
+  //
+  // What we DO need is the body's WRITES, so a variable captured in the loop
+  // (`got = acc.v`) loses its stale pre-loop binding instead of keeping the
+  // initializer — that stale binding is exactly what made a testbench `assert`
+  // fold to false (lhdsuite fixme issue 2). So: open an uncertain scope,
+  // register every name the body stores to, emit, and close — leave_scope then
+  // invalidates each one in its declaring scope.
+  while (lm->move_to_sibling()) {
+    symbol_table_.block_scope(lm->current_scope_uid());
+    symbol_table_.mark_current_uncertain();
+    dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
+    register_tick_body_writes();
+    emit_subtree_verbatim();
+    dispatch_to_passes(&upass::uPass::notify_uncertain_arm_end);
+    symbol_table_.leave_scope();
+  }
+
+  lm->move_to_parent();
+  emit_pop();
+}
+
+// Walk the subtree under the cursor and register every stored-to NAME as an
+// uncertain write. Cursor-neutral (saved/restored), and it folds nothing — it
+// only reads node types and the first child of each store.
+void uPass_runner::register_tick_body_writes() {
+  const auto saved = lm->save_cursor();
+
+  std::function<void()> walk = [&]() {
+    const auto t = lm->current_type();
+    if (Lnast_ntype::is_store(t) && lm->has_child()) {
+      lm->move_to_child();
+      if (Lnast_ntype::is_ref(lm->current_type())) {
+        // A field write (`acc.en = …`) stores to the dotted path; the ROOT name
+        // is what has to be invalidated, so cut at the first dot.
+        std::string_view nm = lm->current_text();
+        if (const auto dot = nm.find('.'); dot != std::string_view::npos) {
+          nm = nm.substr(0, dot);
+        }
+        if (!nm.empty()) {
+          symbol_table_.note_uncertain_write(nm);
+        }
+      }
+      lm->move_to_parent();
+    }
+    if (lm->has_child()) {
+      lm->move_to_child();
+      do {
+        walk();
+      } while (lm->move_to_sibling());
+      lm->move_to_parent();
+    }
+  };
+  walk();
+
+  lm->restore_cursor(saved);
 }
 
 void uPass_runner::report_cond_nil(std::string_view which) {

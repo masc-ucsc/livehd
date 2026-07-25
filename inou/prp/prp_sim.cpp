@@ -1407,6 +1407,9 @@ private:
       }
       fail("unsupported dot expression: " + text_of(src_, n).substr(0, 40));
     }
+    if (t == "if_expression") {
+      return eval_if_expression(n);
+    }
     if (t == "bit_selection") {
       return eval_bit_select(n);
     }
@@ -1432,6 +1435,91 @@ private:
     // a binary chain (or a wrapper node) rendered from a flat operand/operator
     // sequence: expression_item / paren_group / tuple all arrive this way
     return eval_seq(n);
+  }
+
+  // `if c { a } elif d { b } else { z }` used as a VALUE, the spelling Pyrope
+  // uses instead of a ternary. Test blocks reach it constantly for cycle-varying
+  // stimulus (`acc.d = if clock == 0 { 5 } else { 99 }`), and without it the
+  // whole if_expression fell through to the generic binary-chain walker, which
+  // saw a `scope_statement` where it wanted an operand and reported the useless
+  // "unsupported expression form in test: { 5 }".
+  //
+  // Every arm must be a single expression (a scope_statement holding one
+  // statement); a multi-statement block has no value and is rejected by name.
+  // An absent `else` is also rejected: in a test the missing arm would silently
+  // become 0 (or, worse, hold), which is exactly the kind of quietly-wrong
+  // stimulus that makes an assert schedule lie.
+  Val eval_if_expression(TSNode n) {
+    // Fields arrive flat because `_if_branch` is inlined: condition/code repeat
+    // once per arm, and tree-sitter tags BOTH the `else` keyword and the else
+    // body with field "else" (see prp2lnast's identical walk).
+    std::vector<std::pair<TSNode, TSNode>> arms;  // (condition, value-block)
+    TSNode                                 else_body{};
+    TSNode                                 pending_cond{};
+    bool                                   have_cond = false;
+    bool                                   in_else   = false;
+    const uint32_t                         nc        = ts_node_child_count(n);
+    for (uint32_t i = 0; i < nc; ++i) {
+      const char* fname = ts_node_field_name_for_child(n, i);
+      TSNode      c     = ts_node_child(n, i);
+      if (fname == nullptr) {
+        continue;
+      }
+      const std::string_view f(fname);
+      if (f == "condition") {
+        pending_cond = c;
+        have_cond    = true;
+      } else if (f == "code") {
+        if (in_else) {
+          else_body = c;
+          in_else   = false;
+        } else if (have_cond) {
+          arms.emplace_back(pending_cond, c);
+          have_cond = false;
+        }
+      } else if (f == "else") {
+        if (ntype(c) == "scope_statement") {
+          else_body = c;
+          in_else   = false;
+        } else if (text_of(src_, c) == "else") {
+          in_else = true;
+        }
+      } else if (f == "init") {
+        fail("an `if` used as a value in a test may not declare variables in its header: "
+             + text_of(src_, n).substr(0, 40));
+      }
+    }
+    if (arms.empty()) {
+      fail("if-expression with no arm in test: " + text_of(src_, n).substr(0, 40));
+    }
+    if (ts_node_is_null(else_body)) {
+      fail("an `if` used as a value in a test needs an `else` arm (otherwise the unmatched case has no value): "
+           + text_of(src_, n).substr(0, 40));
+    }
+    // The single expression inside `{ ... }`.
+    auto arm_value = [&](TSNode block) {
+      std::vector<TSNode> stmts;
+      for (TSNode c : ts_node_named_children(block)) {
+        stmts.push_back(c);
+      }
+      if (stmts.size() != 1) {
+        fail("an `if` arm used as a value in a test must hold exactly one expression: "
+             + text_of(src_, block).substr(0, 40));
+      }
+      return eval(stmts[0]);
+    };
+    Val out = arm_value(else_body);
+    for (auto it = arms.rbegin(); it != arms.rend(); ++it) {
+      const Val cond = eval(it->first);
+      const Val arm  = arm_value(it->second);
+      // Widen both sides to one common Slop width so the ternary has a single
+      // type; `at_width` is the same widening every binary operator uses, so an
+      // arm never silently truncates against its sibling.
+      const Val a = to_slop(arm), b = to_slop(out);
+      const int w = std::max(a.w, b.w);
+      out = slop_val("(" + as_bool_of(cond) + " ? " + at_width(a, w) + " : " + at_width(b, w) + ")", w);
+    }
+    return out;
   }
 
   // `value#[hi]` / `value#[lo..=hi]` — a bit select on a testbench value. The

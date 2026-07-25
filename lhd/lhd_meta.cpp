@@ -343,7 +343,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","opentimer","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","abc","opentimer","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -639,6 +639,32 @@ int help_pass(const std::string& sub) {
         "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n");
     return print_options_section({"pass.partition."});
   }
+  if (sub == "single_edge") {
+    std::print(
+        "lhd pass single_edge — edge normalization: latches + negedge state -> posedge flops\n"
+        "\n"
+        "usage: lhd pass single_edge --top M lg:DIR --emit-dir lg:OUT/\n"
+        "  --emit-dir lg: (must differ from the input) receives the normalized library.\n"
+        "\n"
+        "CONDITIONAL. The pass is SKIPPED ENTIRELY (not run as a no-op) unless the design\n"
+        "  holds a Latch, a negedge flop, or more than one clock net. A plain posedge\n"
+        "  single-clock design is never re-emitted and cannot change a verdict.\n"
+        "\n"
+        "SCOPE. Verification and simulation only — never on the synthesis path: slot\n"
+        "  enables and a phase divider cost QoR, and the netlist handed to ABC has to\n"
+        "  contain a real always_latch. `lhd formal verify` and `lhd lec` run it\n"
+        "  automatically, MITER-WIDE (if either side needs it, both sides get it —\n"
+        "  otherwise the two are compared in different time bases).\n"
+        "\n"
+        "FAIL CLOSED. A stateful instance, a second clock domain with no known ratio, a\n"
+        "  yosys raw-D/EN latch or a coincident-edge latch/flop pair DECLINES the whole\n"
+        "  design with a named diagnostic. A partial lowering is a silent full-cycle\n"
+        "  error, so half-transforming is never an option.\n"
+        "\n"
+        "example:\n"
+        "  lhd pass single_edge --top m lg:dir --emit-dir lg:norm\n");
+    return print_options_section({"pass.single_edge."});
+  }
   if (sub == "abc") {
     std::print(
         "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> sky130 blackboxes)\n"
@@ -740,7 +766,7 @@ int help_pass(const std::string& sub) {
     return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | opentimer | liberty | semdiff)\n", sub);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n", sub);
     return 1;
   }
   std::print(
@@ -800,6 +826,9 @@ constexpr std::string_view kJsonPassColor =
 
 constexpr std::string_view kJsonPassPartition =
     R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
+
+constexpr std::string_view kJsonPassSingleEdge =
+    R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
 constexpr std::string_view kJsonPassAbc =
     R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net"]})json";
@@ -882,6 +911,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassPartition);
       return 0;
     }
+    if (sub == "single_edge") {
+      print_json_line(kJsonPassSingleEdge);
+      return 0;
+    }
     if (sub == "abc") {
       print_json_line(kJsonPassAbc);
       return 0;
@@ -894,7 +927,7 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassLiberty);
       return 0;
     }
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | opentimer | liberty | semdiff)\n", sub);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n", sub);
     return 1;
   }
   // compile / lec / formal / scan / tool, plus every non-command describe topic

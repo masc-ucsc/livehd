@@ -1,0 +1,55 @@
+/*
+:name: hier_sim_negedge_sub
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// NEGEDGE STATE INSIDE A SUBMODULE lands a full period late.
+//
+// WHAT IS WRONG. M5's two-phase tick builds its "stale" set from the `flops`
+// vector of the CURRENT graph only, and raises the `negedge-through-instance`
+// refusal only when THIS module has a negedge flop. A child module's negedge
+// state is invisible to both. Meanwhile the child's `cycle()` is invoked during
+// the parent's combinational walk — i.e. BEFORE the parent's phase-1 commits —
+// so the child samples the parent's PRE-rise data.
+//
+// Result: the half-cycle transfer becomes a full-cycle lag, with no diagnostic.
+// The parent here has no non-posedge state of its own, so its two-phase
+// machinery never engages at all.
+//
+// EXPECTED (Icarus on the emitted hierarchy): the child's negedge flop samples
+// the parent's posedge Q from the SAME period, so `qn == qa` every tick. Today
+// `lhd sim` gives qn = 0, 11, 28, 45 against qa = 11, 28, 45, 62.
+//
+// The same shape with a LATCH in the child is wrong in both value and the cycle
+// the hold lands on; the negedge form is the smaller reproducer.
+//
+// CONTROL: `qa` is the parent's own posedge stage and is correct today, so a
+// failure below is specifically the child's timing.
+mod negchild(din:u8) -> (o:u8@[1]) {
+  reg n:u8:[posclk=false] = 0
+  o = n
+  n = din
+}
+
+pub mod souter(d:u8) -> (qa:u8@[1], qn:u8@[2]) {
+  reg a:u8 = 0
+  a  = d
+  qa = a
+  stage[1] i = negchild(din=a)
+  qn = i
+}
+
+test souter.child_negedge_sees_the_same_period {
+  mut acc = souter
+  tick 4 {
+    acc.d = 11 + (17 * clock)
+    step
+    // CONTROL: the parent's own posedge stage loads every tick.
+    assert(acc.qa == 11 + (17 * clock), "the parent posedge stage commits every tick (control)")
+    // THE BUG: the child's negedge flop commits at the FALL of the same period,
+    // after the parent's rise -- so it carries the SAME period's value.
+    assert(acc.qn == acc.qa, "a negedge flop in a child samples the parent's post-rise value")
+  }
+}

@@ -1065,14 +1065,15 @@ void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loo
         }
       }
       const auto ct = ln.get_type(c);
-      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct)) {
+      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)
+          || Lnast_ntype::is_stmts(ct)) {
         gather_loop_driven_wires(ln, c, in_loop, out);
       }
     }
     return;
   }
-  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
-    const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t);
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t)) {
+    const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t);
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(ln.get_type(c))) {
         gather_loop_driven_wires(ln, c, nl, out);
@@ -1092,13 +1093,14 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
         out.insert(std::string(w));
       }
       const auto ct = ln.get_type(c);
-      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct)) {
+      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)
+          || Lnast_ntype::is_stmts(ct)) {
         gather_subtree_write_wires(ln, c, out);
       }
     }
     return;
   }
-  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t)) {
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(ln.get_type(c))) {
         gather_subtree_write_wires(ln, c, out);
@@ -1836,6 +1838,8 @@ void Prp2lnast::process_statement(TSNode n) {
       {        "while_statement",         &Prp2lnast::process_while_statement},
       {          "for_statement",           &Prp2lnast::process_for_statement},
       {         "loop_statement",          &Prp2lnast::process_loop_statement},
+      {         "tick_statement",          &Prp2lnast::process_tick_statement},
+      {         "step_statement",          &Prp2lnast::process_step_statement},
       {      "control_statement",       &Prp2lnast::process_control_statement},
       {                 "lambda",        &Prp2lnast::process_lambda_statement},
       {        "enum_assignment",         &Prp2lnast::process_enum_assignment},
@@ -1985,7 +1989,23 @@ void Prp2lnast::process_statement(TSNode n) {
     (void)expr_to_node(n);
     return;
   }
-  std::print("prp2lnast: unhandled statement type `{}`\n", t);
+  // A statement kind with no dispatch entry is SILENTLY DROPPED from the LNAST —
+  // the rest of the pipeline then reasons about a program that is missing code.
+  // This used to be a bare `std::print`, so a dropped statement did not count as
+  // an error OR a warning: `tick_statement` and `step_statement` fell through
+  // here, the whole body of every `test` block's cycle loop vanished, and a
+  // testbench `assert` was folded against a variable's stale initializer while
+  // the run still reported "0 errors, 0 warnings" (lhdsuite fixme issue 2).
+  //
+  // It is a WARNING rather than an error because it reports a front-end gap, not
+  // a user mistake, and the partial tree is often still usable. But it must be
+  // visible: any future statement kind added to the grammar without a handler
+  // here now announces itself instead of quietly deleting code.
+  report_warning(n,
+                 "unhandled-statement",
+                 "internal",
+                 std::format("statement kind `{}` has no LNAST lowering and was dropped", t),
+                 "add a handler to Prp2lnast::stmt_dispatch — the statement is missing from the compiled program");
 }
 
 void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
@@ -3580,6 +3600,113 @@ void Prp2lnast::process_loop_statement(TSNode n) {
   // `loop { body }` ≡ `while (1==1) { if (1==1) {body} else {break} }` — the
   // recomputed-ref infinite form (the body must `break` to terminate).
   lower_infinite_loop(child_by_field(n, "code"), n);
+}
+
+// `tick [N] [clocks=(…)] [resets=(…)] { body }` — the simulation cycle loop of a
+// `test` block. Emits (count, stmts-body) under a `tick` node.
+//
+// WHY IT IS ITS OWN NODE rather than a `while`/`for`. Those are comptime-only:
+// the upass runner FULLY UNROLLS them (unroll_for / unroll_while), which is
+// exactly wrong here. A tick's iteration count is assumed UNKNOWN — always,
+// including when written as a literal — because it is routinely overridden by a
+// runtime `--arg`. The runner walks a tick body in an uncertain scope so every
+// variable written inside is invalidated on exit (see lnast_nodes.def).
+//
+// Until this existed, `tick_statement` had no dispatch entry and fell through to
+// the unhandled-statement fallback, so the ENTIRE body was dropped on the way to
+// LNAST while `prp_sim.cpp`'s independent CST walk still executed it. That split
+// is what made a testbench `assert` fold against a variable's stale initializer
+// (lhdsuite fixme issue 2).
+//
+// `clocks=` / `resets=` are deliberately NOT lowered: they configure the VCD
+// waveform and are consumed only by prp_sim's CST walk, so putting them in LNAST
+// would add names no upass consumer reads.
+void Prp2lnast::process_tick_statement(TSNode n) {
+  TSNode count = child_by_field(n, "value");
+  TSNode code  = child_by_field(n, "code");
+
+  // Lower the count OUTSIDE the body: it is evaluated once, before the loop, so
+  // it must not land in the uncertain scope the body gets.
+  Lnast_node count_ref = ts_node_is_null(count) ? Lnast_node::create_const("") : expr_to_node(count);
+
+  auto tick_idx = builder.add_child(Lnast_ntype::create_tick());
+  attach_loc(tick_idx, n);
+  lnast->add_child(tick_idx, count_ref);
+
+  auto body_idx = lnast->add_child(tick_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(body_idx);
+
+  // THE LOOP VARIABLE. A tick body implicitly binds the 0-based cycle index —
+  // `clock` by default, renamable through the `clocks=(name=ratio)` clause — and
+  // fixtures read it freely (`acc.reset = clock < 2`). Nothing in the source
+  // declares it, so it must be introduced here.
+  //
+  // It is needed even though the RUNNER emits a tick body verbatim without
+  // folding: semacheck's scope-aware undefined-read check walks the whole tree
+  // independently, so an undeclared `clock` is a hard error regardless (removing
+  // this declaration fails ~75 tests with "read of undefined variable 'clock'").
+  //
+  // Seeded with the TYPELESS UNKNOWN literal `0sb?` (Kind::unknown, the wildcard
+  // that skips checks and never errors) rather than a sized value. That is both
+  // honest and convenient: the index genuinely is not comptime (it differs every
+  // iteration, and R0 says the count is unknown anyway), and a typeless unknown
+  // will not fight the surrounding widths — `acc.din = clock` into a u8 port and
+  // `11 + 17*clock` must both stay legal.
+  //
+  // CAVEAT: this puts a binding in the tree that no source line wrote, so a
+  // Pyrope round-trip of a `test` block would emit it as real code. No writer
+  // walks test bodies today; revisit if one starts to.
+  const std::string loop_var = tick_loop_var_name(n);
+  auto              decl_idx = builder.add_child(Lnast_ntype::create_declare());
+  attach_loc(decl_idx, n);
+  lnast->add_child(decl_idx, Lnast_node::create_ref(loop_var));
+  auto seed_idx = builder.add_child(Lnast_ntype::create_store());
+  attach_loc(seed_idx, n);
+  lnast->add_child(seed_idx, Lnast_node::create_ref(loop_var));
+  lnast->add_child(seed_idx, Lnast_node::create_const("0sb?"));
+
+  if (!ts_node_is_null(code)) {
+    process_scope_statement(code, body_idx);
+  }
+  builder.pop_stmts();
+}
+
+// The tick loop-variable name: the lvalue of the single `clocks=(name=ratio)`
+// entry, else `clock`. Mirrors prp_sim.cpp's tick_one_entry, which is the
+// authority at simulation time — the two must agree on the name or a fixture
+// that renames its counter would read an undeclared variable here while
+// simulating fine.
+std::string Prp2lnast::tick_loop_var_name(TSNode tick) {
+  TSNode clocks = child_by_field(tick, "clocks");
+  if (!ts_node_is_null(clocks)) {
+    for (TSNode a : ts_node_named_children(clocks)) {
+      if (std::string_view(ts_node_type(a)) != "assignment") {
+        continue;  // skip the operator wrapper / stray nodes
+      }
+      TSNode lv = child_by_field(a, "lvalue");
+      if (!ts_node_is_null(lv)) {
+        // Strip any type annotation: `clock:u4` -> `clock`, same as prp_sim.
+        std::string nm{trim(get_text(lv))};
+        if (const auto colon = nm.find(':'); colon != std::string::npos) {
+          nm = std::string{trim(std::string_view(nm).substr(0, colon))};
+        }
+        if (!nm.empty()) {
+          return nm;
+        }
+      }
+    }
+  }
+  return "clock";
+}
+
+// `step [N]` — advance N simulation cycles (default 1). A leaf whose only child
+// is the count, so `step`, `step 5` and `step(1000)` all lower alike.
+void Prp2lnast::process_step_statement(TSNode n) {
+  TSNode count = child_by_field(n, "value");
+
+  auto step_idx = builder.add_child(Lnast_ntype::create_step());
+  attach_loc(step_idx, n);
+  lnast->add_child(step_idx, ts_node_is_null(count) ? Lnast_node::create_const("1") : expr_to_node(count));
 }
 
 void Prp2lnast::process_control_statement(TSNode n) {

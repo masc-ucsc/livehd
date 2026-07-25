@@ -141,6 +141,109 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
   }
 };
 
+// Symbols DEFINITELY assigned (blocking) on EVERY path through `stmt`.
+//
+// This is what decides an INFERRED LATCH: in a level-sensitive process, a
+// variable that some path leaves unwritten RETAINS ITS VALUE, which is a latch —
+// `always @(*) if (en) q = d;` is the canonical form, and every synthesis tool
+// infers a `$dlatch` from it. Without this analysis the reader classified such a
+// block as pure combinational logic and emitted `q = en ? d : X`, dropping the
+// hold path entirely: measured on inou/prp/tests/equiv/latch_enable_hold.v,
+// whose round-trip came back as a stateless `comb`.
+//
+// BIASED TOWARD COMBINATIONAL on anything not precisely modelled. The two errors
+// are not symmetric: calling comb logic a latch INSERTS state that the source
+// never had (a new, silent miscompile), while missing a latch reproduces today's
+// behaviour. So an unhandled statement kind reports every write beneath it as
+// definite, and only the shapes below — an `if` with no `else`, a `case` with no
+// `default` — actually produce a latch.
+void definite_blocking_writes(const slang::ast::Statement& stmt,
+                              absl::flat_hash_set<const slang::ast::ValueSymbol*>& out) {
+  using slang::ast::StatementKind;
+  auto all_writes_below = [&](const slang::ast::Statement& s) {
+    Write_collector wc;
+    s.visit(wc);
+    out.insert(wc.blocking.begin(), wc.blocking.end());
+  };
+  auto intersect_into = [&](const std::vector<const slang::ast::Statement*>& arms) {
+    if (arms.empty()) {
+      return;
+    }
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
+    definite_blocking_writes(*arms.front(), acc);
+    for (size_t i = 1; i < arms.size(); ++i) {
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
+      definite_blocking_writes(*arms[i], other);
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
+      for (const auto* sym : acc) {
+        if (other.contains(sym)) {
+          keep.insert(sym);
+        }
+      }
+      acc = std::move(keep);
+    }
+    out.insert(acc.begin(), acc.end());
+  };
+
+  switch (stmt.kind) {
+    case StatementKind::Empty: return;
+    case StatementKind::List:
+      for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
+        definite_blocking_writes(*s, out);  // sequential: a later write still counts
+      }
+      return;
+    case StatementKind::Block: definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out); return;
+    case StatementKind::Timed: definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out); return;
+    case StatementKind::ExpressionStatement: {
+      const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
+      if (e.kind != ExpressionKind::Assignment) {
+        return;
+      }
+      const auto& a = e.as<slang::ast::AssignmentExpression>();
+      if (a.isNonBlocking()) {
+        return;  // a nonblocking write in a level-sensitive block is the M1 latch idiom
+      }
+      std::function<void(const slang::ast::Expression&)> note = [&](const slang::ast::Expression& lhs) {
+        if (lhs.kind == ExpressionKind::Concatenation) {
+          for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
+            note(*op);
+          }
+          return;
+        }
+        if (const auto* sym = lhs_base_symbol(lhs)) {
+          out.insert(sym);
+        }
+      };
+      note(a.left());
+      return;
+    }
+    case StatementKind::Conditional: {
+      const auto& c = stmt.as<slang::ast::ConditionalStatement>();
+      if (c.ifFalse == nullptr) {
+        return;  // THE latch shape: the un-taken path holds the previous value
+      }
+      intersect_into({&c.ifTrue, c.ifFalse});
+      return;
+    }
+    case StatementKind::Case: {
+      const auto& c = stmt.as<slang::ast::CaseStatement>();
+      if (c.defaultCase == nullptr) {
+        // No default => an unmatched selector holds. A `unique`/`priority`
+        // qualifier is a CLAIM about the selector, not a proof of coverage, so it
+        // is deliberately not treated as one here.
+        return;
+      }
+      std::vector<const slang::ast::Statement*> arms{c.defaultCase};
+      for (const auto& item : c.items) {
+        arms.push_back(item.stmt);
+      }
+      intersect_into(arms);
+      return;
+    }
+    default: all_writes_below(stmt); return;  // bias to combinational (see above)
+  }
+}
+
 // Collects every unpacked-array element-select in the module along with its
 // selector, plus the set of for-loop INDUCTION variables, so the caller can
 // classify each array as constant- or runtime-indexed (a selector that folds,
@@ -969,6 +1072,29 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     for (const auto* sym : wc.nonblocking) {
       reg_syms_.insert(sym);
       if (is_latch_block) {
+        latch_syms_.insert(sym);
+      }
+    }
+    // INFERRED LATCH from a BLOCKING write (2f-latch). A level-sensitive process
+    // that leaves a variable unwritten on some path is a latch, not comb — the
+    // textbook `always @(*) if (en) q = d;`. Before this, such a block was
+    // classified as pure combinational logic and emitted `q = en ? d : X`, so the
+    // hold path vanished: inou/prp/tests/equiv/latch_enable_hold.v round-tripped
+    // into a stateless `comb`, and the reverse LEC only passed because the shared
+    // encoder happened to refuse the reference side's Latch cell.
+    //
+    // Restricted to a level-sensitive `always` / `always_latch`. `always_comb` is
+    // deliberately excluded: an incomplete assignment there is a LANGUAGE error
+    // (IEEE 1800 requires it to be combinational), so quietly inserting state
+    // would hide a source bug rather than model hardware.
+    if (is_latch_block && !wc.blocking.empty()) {
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
+      definite_blocking_writes(pbs.getBody(), definite);
+      for (const auto* sym : wc.blocking) {
+        if (definite.contains(sym)) {
+          continue;  // assigned on every path: ordinary combinational logic
+        }
+        reg_syms_.insert(sym);
         latch_syms_.insert(sym);
       }
     }

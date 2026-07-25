@@ -345,6 +345,16 @@ protected:
   void process_while_statement(TSNode n);
   void process_for_statement(TSNode n);
   void process_loop_statement(TSNode n);
+  // `tick`/`step` — the simulation cycle loop of a `test` block and its cycle
+  // advance. A tick is NOT a comptime loop: its iteration count is assumed
+  // unknown (see lnast_nodes.def), so it gets its own node rather than reusing
+  // the always-unrolled `while`/`for` lowering.
+  void process_tick_statement(TSNode n);
+  void process_step_statement(TSNode n);
+  // Name of the implicit tick loop variable (the 0-based cycle index): the
+  // `clocks=(name=ratio)` lvalue if present, else `clock`. Must agree with
+  // prp_sim.cpp's tick_one_entry.
+  std::string tick_loop_var_name(TSNode tick);
   // An always-true RECOMPUTED ref (`1 == 1`) for `loop`/`while true` conditions
   // (a literal `const 'true'` cond makes the runner skip the in-loop body fold,
   // so the break-guard never resolves). `lower_infinite_loop` builds the shared

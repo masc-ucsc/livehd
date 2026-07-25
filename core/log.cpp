@@ -36,6 +36,7 @@ constexpr std::string_view kChannels[] = {
     "pass.abc",
     "pass.color",
     "pass.partition",
+    "pass.single_edge",
     "pass.liberty",
     // the pass/upass runner and its phases
     "upass",

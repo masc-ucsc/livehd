@@ -1,0 +1,56 @@
+/*
+:name: latch_sim_clockgate_high
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// A transparent-HIGH latch GATED BY THE DESIGN'S CLOCK NET. This is the ICG
+// enable latch, the slave half of a master/slave pair, and the exact shape of
+// the formal fixture inou/prp/tests/verify/latch_negedge_enable.prp — so today
+// `lhd sim` and `lhd formal verify` DISAGREE about it.
+//
+// WHAT IS WRONG. `clk` here is the REFERENCE CLOCK (the flop below is clocked
+// by it), so cgen_sim marks it the clock waveform and the testbench never pokes
+// it. But the latch's gate cone READS that same net as ordinary DATA, and the
+// generated `struct In` field for it is left at its zero default — so the gate
+// is a constant 0 and the latch NEVER COMMITS. q stays at its power-on value
+// forever, `lhd sim` reports 0 errors, and there is no diagnostic: the only
+// clock guard (cgen_sim.cpp `gated-clock-unsupported`) iterates `is_type_flop`
+// over `clock_pin`, and node_util.hpp's `is_type_flop` excludes Latch.
+//
+// WHY NO EXISTING FIXTURE CATCHES IT. Every latch sim fixture avoids this
+// shape: latch_sim_master_slave.prp makes `clk` a DATA input the testbench
+// toggles by hand, and latch_sim_{hold,low,reset,negedge_enable}.prp all use
+// data gates. Nothing in the corpus lets the gate be the real clock net.
+//
+// EXPECTED VALUES are from Icarus on the always_latch netlist LiveHD itself
+// emits for this module, sampled in the OPAQUE (low) half per the
+// observation-visibility rule: q = 11, 28, 45, 62 at ticks 0..3.
+//
+// The `qf` assert is the NON-VACUITY CONTROL: the posedge flop on the same
+// clock does commit, so a failure here is specifically the latch's gate, not a
+// dead testbench.
+pub mod lclkhi(clk:bool, d:u8) -> (q:u8@[0], qf:u8@[1]) {
+  reg l:u8:[latch=true]
+  reg f:u8:[clock_pin=ref clk] = 0
+  q  = l
+  qf = f
+  if clk {
+    l = d
+  }
+  f = d
+}
+
+test lclkhi.clock_gated_latch_commits_at_the_fall {
+  mut acc = lclkhi
+  tick 4 {
+    acc.d = 11 + (17 * clock)
+    step
+    // CONTROL: the flop on the same clock net loads every tick.
+    assert(acc.qf == 11 + (17 * clock), "the posedge flop on this clock net loads (control)")
+    // THE BUG: a transparent-HIGH latch closes at the FALL of its gate, so at
+    // end-of-tick it holds the value presented during that tick.
+    assert(acc.q == 11 + (17 * clock), "clock-gated latch captured this tick's d at the closing edge")
+  }
+}

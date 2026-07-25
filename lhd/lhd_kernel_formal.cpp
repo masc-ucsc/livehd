@@ -29,6 +29,8 @@
 #include "lnast.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "latch_contract.hpp"
+#include "pass_single_edge.hpp"
 #include "query.hpp"
 #include "semdiff.hpp"
 #include "taskflow/taskflow.hpp"
@@ -2250,6 +2252,145 @@ void lec_command(Options& opts, Result& res) {
   }
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
+  // ── 2f-latch M8: EDGE NORMALIZATION, MITER-WIDE ───────────────────────────
+  // The trigger is evaluated over the MITER, not per side. This is the single
+  // most dangerous failure mode of a conditional pass: if one side holds a
+  // latch and the other is its already-lowered round-trip, a per-side trigger
+  // fires on ONE side and the two are compared in different time bases — a
+  // guaranteed false REFUTED, and exactly the shape of the prp-v2prp-latch_*
+  // corpus. So: if EITHER side needs it, BOTH are normalized (a side with
+  // nothing to lower still runs the pass; at P=1 that is a no-op for it).
+  //
+  // Runs after the --lib cell models load and BEFORE canonical_digest, since a
+  // //graph-resident pass is outside //lhd:formal_salt and would otherwise let
+  // a stale cached verdict answer for a differently-timed design.
+  int lec_single_edge_slots = 1;
+  {
+    // The design's OWN defs, not just the --lib cell models. Scanning only
+    // sub_lib meant the trigger saw the TOP BODY alone: a negedge flop inside a
+    // submodule was invisible, the pass never ran, and lec[hier] proved the
+    // child bottom-up with the edge-blind encoder -- a FALSE PROVEN against the
+    // same design with a posedge flop there. (verify_command already included
+    // its var.graphs, so only lec had the hole.) The pass fails closed on a
+    // stateful Sub, so including them turns that wrong answer into a refusal.
+    // A def the user COLLAPSED or TRUSTED is a blackbox: its internals are
+    // assumed equal and never encoded, so a latch or a negedge flop inside it
+    // is irrelevant here. `formal.lec.trust` exists precisely as the escape
+    // hatch for "the encoder cannot model this leaf", and refusing on its
+    // contents would pre-empt the mechanism that makes such a design provable.
+    auto is_boxed = [&](const hhds::Graph* d) {
+      const std::string full{d->get_name()};
+      const std::string ent = lec_entity_of(full);
+      return std::find(o.collapse.begin(), o.collapse.end(), full) != o.collapse.end()
+             || std::find(o.collapse.begin(), o.collapse.end(), ent) != o.collapse.end();
+    };
+    std::vector<hhds::Graph*> ref_defs, impl_defs;
+    for (const auto& sp : ref_var.graphs) {
+      if (sp && sp.get() != ref_g.get() && !is_boxed(sp.get())) {
+        ref_defs.push_back(sp.get());
+      }
+    }
+    for (const auto& sp : impl_var.graphs) {
+      if (sp && sp.get() != impl_g.get() && !is_boxed(sp.get())) {
+        impl_defs.push_back(sp.get());
+      }
+    }
+    for (const auto& [gid, gp] : sub_lib) {
+      if (gp != nullptr && gp != ref_g.get() && gp != impl_g.get()) {
+        ref_defs.push_back(gp);
+        impl_defs.push_back(gp);
+      }
+    }
+    // CLOCK-GATE CELLS first. A real design instantiates its ICG
+    // (`prim_clk_gate u_cg(.clk_i(clk), .en_i(en), .clk_o(gclk));`), so the
+    // gate sits one module level away and the flop's clock_pin is an opaque Sub
+    // output that nothing can recognize. Inlining just those cells brings the
+    // gate into the body, where the M8 fold turns it into a flop enable.
+    // Semantics-preserving on its own and idempotent, so it runs on BOTH sides
+    // before either is probed -- symmetry matters here as much as anywhere.
+    if (const int nr = livehd::latch_contract::inline_clock_gate_cells(ref_g.get(), "pass.single_edge"); nr > 0) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} ref clock-gate cell(s)", nr));
+    }
+    if (const int ni = livehd::latch_contract::inline_clock_gate_cells(impl_g.get(), "pass.single_edge"); ni > 0) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} impl clock-gate cell(s)", ni));
+    }
+    auto probe = [&](hhds::Graph* side, const std::vector<hhds::Graph*>& defs, const char* which) {
+      livehd::single_edge::Options po;
+      po.dry_run = true;
+      auto sn    = livehd::single_edge::normalize(side, defs, po);
+      if (sn.error) {
+        // Re-run loudly so the user gets the specific diagnostic, then fail.
+        livehd::single_edge::normalize(side, defs, {});
+        throw Lhd_error{"unsupported",
+                        std::format("lec refused the {} side '{}': edge normalization declined ({})", which,
+                                    side->get_name(), sn.reason),
+                        "a partial or one-sided lowering compares the two designs in different time bases"};
+      }
+      return sn;
+    };
+    const auto pr = probe(ref_g.get(), ref_defs, "ref");
+    const auto pi = probe(impl_g.get(), impl_defs, "impl");
+    if (pr.applied || pi.applied) {
+      // ONE time base for both sides: the max P either side needs. A side with
+      // nothing of its own to lower still gets the divider and slot 0 — that is
+      // its P=1 behaviour embedded in the P-slot time base, and it is what keeps
+      // an all-posedge ref comparable against a negedge impl instead of the two
+      // counting time differently.
+      livehd::single_edge::Options ao;
+      ao.force_slots = std::max(pr.slots, pi.slots);
+      const auto rn  = livehd::single_edge::normalize(ref_g.get(), ref_defs, ao);
+      // SAME GRAPH OBJECT on both sides (`--impl X --ref X`, the vacuity-guard
+      // idiom, and any two --impl/--ref paths that resolve to one library):
+      // normalizing again would run over the ALREADY-normalized graph, find
+      // nothing left to lower, and report "skipped" with no slot count and no
+      // reference clock -- which the cross-side agreement checks below would
+      // then read as a disagreement and refuse a design that is trivially equal
+      // to itself.
+      const bool same_graph = ref_g.get() == impl_g.get();
+      const auto in         = same_graph ? rn : livehd::single_edge::normalize(impl_g.get(), impl_defs, ao);
+      if (rn.error || in.error) {
+        throw Lhd_error{"unsupported",
+                        std::format("lec: edge normalization failed after planning ({})",
+                                    rn.error ? rn.reason : in.reason),
+                        ""};
+      }
+      // Both agreement checks apply only when BOTH sides actually normalized. A
+      // side that legitimately had nothing to lower reports slots=1 and no
+      // reference clock, and comparing that against a normalized sibling is not
+      // a disagreement -- the force_slots above already put them in one time
+      // base.
+      if (rn.applied && in.applied && rn.slots != in.slots) {
+        throw Lhd_error{"unsupported",
+                        std::format("lec: edge normalization produced P={} on the ref side and P={} on the impl side",
+                                    rn.slots, in.slots),
+                        "the two designs mix clock edges differently; compare like against like"};
+      }
+      if (rn.applied && in.applied && rn.ref_clock != in.ref_clock) {
+        // Slots are expressed RELATIVE to a reference clock, so two sides
+        // normalized against different clocks are in different time bases. The
+        // encoder cannot catch this itself: it models a single clock as
+        // "commits every step" and has no notion of clock IDENTITY, so a latch
+        // gated by `clk` and one gated by `clk2` encode identically and come
+        // back falsely PROVEN (lgyosys refutes the same pair).
+        throw Lhd_error{"unsupported",
+                        std::format("lec: the ref side normalizes against clock '{}' but the impl side against '{}'",
+                                    rn.ref_clock.empty() ? "<none>" : rn.ref_clock,
+                                    in.ref_clock.empty() ? "<none>" : in.ref_clock),
+                        "the two designs are clocked by different nets, so their slots do not denote the same instants"};
+      }
+      // BMC `bound` counts STEPS, and a step is now a sub-step: at P=2 the same
+      // bound buys half the design cycles. Scale it so a design keeps the depth
+      // coverage its options asked for.
+      if (rn.slots > 1) {
+        o.bound *= rn.slots;
+      }
+      lec_single_edge_slots = rn.slots;
+      res.recipe_steps.emplace_back(
+          std::format("pass.single_edge slots:{} ref_latches:{} impl_latches:{} bound:{}", rn.slots, rn.latches_retyped,
+                      in.latches_retyped, o.bound));
+    }
+  }
+
   // Formal blocks are impl-side helpers. Compile every selected statement via
   // the normal Pyrope monitor pipeline, prove internal facts independently,
   // and only then expose the normalized assumptions to the relational miter.
@@ -2629,7 +2770,17 @@ void lec_command(Options& opts, Result& res) {
     if (std::string rv; get_set("prpfail_run", rv)) {
       prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
     }
-    if (!prpfail.empty()) {
+    if (!prpfail.empty() && lec_single_edge_slots > 1) {
+      // 2f-latch M8 step 2d, same reason as the verify half: the generator
+      // re-emits the un-normalized sides and drives the trace at the reported
+      // index, which after normalization counts SUB-steps. A replay that runs
+      // clean would read as "the counterexample was spurious", so skip honestly.
+      livehd::diag::info("pass.lec", "lecfail-skip", "io")
+          .msg("formal.lec.prpfail witness testbench not generated: the designs were edge-normalized into {} sub-steps "
+               "per clock period, so the witness cycle indices do not line up with the un-normalized sources",
+               lec_single_edge_slots)
+          .emit();
+    } else if (!prpfail.empty()) {
       emit_lecfail_witness(opts, res, r, std::string(impl_g->get_name()), std::string(ref_g->get_name()), prpfail, prpfailrun);
     }
   }
@@ -3318,6 +3469,51 @@ void formal_verify_command(Options& opts, Result& res) {
   }
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
+  // ── 2f-latch M8: EDGE NORMALIZATION ───────────────────────────────────────
+  // Rewrite latches and negedge state into posedge flops before the encoder
+  // ever sees them. Placed HERE — after the --lib cell-model graphs load, so a
+  // latch inside a cell model is not left as an opaque blackbox, and before the
+  // monitors compile and the verdict cache keys anything.
+  //
+  // Deliberately NOT in graph_pipeline_and_emits: that is the shared graph half
+  // of `lhd compile` and `lhd sim`, and this must never touch the synthesis
+  // path (the netlist handed to ABC has to keep its real always_latch, and
+  // keeping `lhd sim` on the SOURCE graph is what makes it an INDEPENDENT
+  // oracle for this very transformation).
+  if (const int n = livehd::latch_contract::inline_clock_gate_cells(g.get(), "pass.single_edge"); n > 0) {
+    res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} clock-gate cell(s)", n));
+  }
+  const int single_edge_slots = [&] {
+    std::vector<hhds::Graph*> defs;
+    for (const auto& sp : var.graphs) {
+      if (sp && sp.get() != g.get()) {
+        defs.push_back(sp.get());
+      }
+    }
+    for (const auto& [gid, gp] : sub_lib) {
+      if (gp != nullptr && gp != g.get()) {
+        defs.push_back(gp);
+      }
+    }
+    auto sn = livehd::single_edge::normalize(g.get(), defs);
+    if (sn.error) {
+      throw Lhd_error{"unsupported",
+                      std::format("formal verify refused '{}': edge normalization declined ({})", g->get_name(), sn.reason),
+                      "the design mixes clock edges or holds latches in a shape the normalizer does not model; a "
+                      "partial lowering would be a silent full-cycle error, so it declines instead"};
+    }
+    if (sn.applied) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge slots:{} latches:{}", sn.slots, sn.latches_retyped));
+    }
+    return sn.applied ? sn.slots : 1;
+  }();
+  if (single_edge_slots > 1) {
+    // `formal.bound` counts STEPS and a step is now a SUB-step, so the same
+    // bound buys 1/P of the design cycles it used to. Scale it (and the report's
+    // own view of it) so a fixture's `:verify_bound:` still means design cycles.
+    o.bound *= single_edge_slots;
+  }
+
   // ── Formal-block monitors (2f-verify V2) ──────────────────────────────────
   // Extract every `formal name.dotted { ... }` block from the block sources,
   // filter by --formal <glob>, resolve each referenced dotted path against the
@@ -3604,6 +3800,19 @@ void formal_verify_command(Options& opts, Result& res) {
       .emit();
   res.recipe_steps.emplace_back(std::format("pass.lec prove_properties bound:{} phase:{}", o.bound, o.phase));
 
+  if (single_edge_slots > 1 && !mons.empty()) {
+    // A formal-block monitor is a separate comb module bound to the design's
+    // ports, so its obligation has no access to the phase register and cannot
+    // be gated to the period boundary — it would be checked mid-period, where
+    // half the design has committed and half has not. Fail closed rather than
+    // report a mid-period refutation as a design bug.
+    throw Lhd_error{"unsupported",
+                    std::format("formal verify: '{}' needed edge normalization (P={}) and also has {} formal block "
+                                "monitor(s), which cannot be gated to the period boundary",
+                                g->get_name(), single_edge_slots, mons.size()),
+                    "state the property as a design-body assert (it is gated automatically), or drop the formal block"};
+  }
+
   auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
   if (r.oversize_refused) {
     throw Lhd_error{"unsupported", std::format("formal verify refused '{}': {}", g->get_name(), r.detail),
@@ -3707,7 +3916,20 @@ void formal_verify_command(Options& opts, Result& res) {
     if (pfr != labels.end() && !pfr->second.empty()) {
       prpfailrun = !(pfr->second == "false" || pfr->second == "0");
     }
-    if (fp != nullptr && !prpfail.empty()) {
+    if (fp != nullptr && !prpfail.empty() && single_edge_slots > 1) {
+      // 2f-latch M8 step 2d. The replay generator re-emits the UN-NORMALIZED
+      // source and embeds the assert at the raw cycle index the engine reported
+      // — but after edge normalization that index counts SUB-STEPS, so the
+      // testbench would drive the wrong cycle and simply not reproduce. Emitting
+      // it anyway is worse than emitting nothing: a replay that runs clean reads
+      // as "the counterexample was spurious". Honest skip until the trace is
+      // decimated back into periods.
+      livehd::diag::info("pass.formal", "formalfail-skip", "io")
+          .msg("formal.prpfail witness testbench not generated: the design was edge-normalized into {} sub-steps per "
+               "clock period, so the witness cycle indices do not line up with the un-normalized source",
+               single_edge_slots)
+          .emit();
+    } else if (fp != nullptr && !prpfail.empty()) {
       std::string embed;
       if (auto it = fb_embed.find(fp->block + "\x1f" + fp->loc); it != fb_embed.end()) {
         embed = it->second;

@@ -365,6 +365,13 @@ protected:
   // collide. Cursor is left on the loop node on every path.
   void unroll_for();
   void unroll_while();
+  // `tick` — emitted, never unrolled. Its body is walked as an UNCERTAIN scope
+  // because the iteration count is assumed unknown (a runtime `--arg` can set it
+  // to 0), so every variable written inside is invalidated on scope exit.
+  void tick_uncertain_body();
+  // Register every name a tick body stores to as an uncertain write, without
+  // folding the body. Cursor-neutral.
+  void register_tick_body_writes();
   // Re-walk ONE loop iteration. Precondition: the read cursor is on the loop's
   // body `stmts` node. Opens a fresh iteration scope (fresh salt + staging/pass
   // block scope), invokes `emit_binds` to bind the iteration variable(s) into

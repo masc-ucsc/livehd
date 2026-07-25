@@ -2274,7 +2274,16 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     {
       auto enable_dpin = get_driver(find_sink_pin(node, "enable"));
       if (!enable_dpin.is_invalid() && !is_const_pin(enable_dpin)) {
-        enable = get_wire_or_const(enable_dpin);
+        // VALUE context: get_expression, not get_wire_or_const — the same fix
+        // M1 had to make for the latch's din/enable and this block's clock_pin.
+        // A COMPUTED, single-fanout enable driver is inlined into pin2expr and
+        // never declared as a wire, so get_wire_or_const returns a bare
+        // undeclared name and the emitted `if (and_80)` does not elaborate
+        // (iverilog: "Unable to bind wire/reg/memory"; yosys silently invents an
+        // implicit wire reading X, which is worse). Previously unreachable
+        // because every emitter gave a flop enable fanout >= 2; pass.single_edge
+        // synthesizes `enable & (phase == slot)` with exactly one consumer.
+        enable = get_expression(enable_dpin);
       }
     }
 

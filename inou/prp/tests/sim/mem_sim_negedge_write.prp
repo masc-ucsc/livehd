@@ -1,0 +1,76 @@
+/*
+:name: mem_sim_negedge_write
+:type: simulation
+*/
+
+// todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+//
+// A MEMORY WRITE IS SILENTLY DROPPED when the design also holds a negedge flop.
+//
+// WHAT IS WRONG. M5's two-phase tick drops the pin2var binding of every cone
+// reachable from a posedge Q, then re-readies ONLY the negedge flops' operand
+// ports (din/enable/reset_pin/initial), the ICG guards and any secondary clock.
+// The MEMORY next-state section is emitted AFTER that, and after the
+// `negedge-operand-unresolved` fail-closed check has already passed — so the
+// memory's own operand() calls re-raise `cycle_unresolved_` with nobody left to
+// notice. The emitted C++ contains, verbatim:
+//
+//     if ((Slop<1>::create_integer(0) /*UNRESOLVED-CYCLE*/).is_known_true() && ...)
+//         mem[__a] = ...;
+//
+// i.e. the write guard is a hard-coded 0 and the array is never written.
+// `lhd sim` reports 0 errors. (A corroborating tell: gen_digests.json is not
+// emitted for such a run — the digest gate knew the emission was unresolved —
+// yet the sim is still built and run.)
+//
+// The trigger is the write cone reading a POSEDGE flop's Q, which is the
+// ordinary register-file write-strobe shape: `if we { m[a] = st }` where `we`
+// or `st` is flopped state.
+//
+// CONTROL: the identical design with the negedge flop made posedge simulates
+// correctly (rd stays 28) — so the failure is the phase-2 interaction, not the
+// memory model. That control is `nf` below being asserted independently.
+//
+// EXPECTED: after tick 1 the memory holds 28 (the value `st` carried when the
+// write strobe first went true), and every later read returns 28.
+// The write happens ONLY while `st == 1`, and the assert reads the array back
+// LATER, when the strobe is false. That ordering matters: the emitted memory
+// READ carries same-address write-forwarding, so a test that reads on a writing
+// tick sees the forwarded value and passes even though the array was never
+// written. The forwarding is what hid this bug from every existing fixture.
+pub mod mwe(d:u8) -> (rd:u10@[0], qn:u8@[1], we:bool@[0]) {
+  reg st:u8 = 0                       // POSEDGE flop feeding the write cone
+  reg nf:u8:[posclk=false] = 0        // the NEGEDGE flop that engages phase 2
+  reg m:[4]u10 = nil
+  st = d
+  nf = d
+  rd = m[0]
+  qn = nf
+  we = st == 1
+  if st == 1 {
+    m[0] = 99                         // write guard reads a posedge flop's Q
+  }
+}
+
+test mwe.memory_write_survives_a_negedge_flop {
+  mut acc = mwe
+  tick 4 {
+    acc.d = 1                         // st becomes 1 at tick 1; the strobe is
+    if clock >= 1 {                   // true ONLY at tick 1
+      acc.d = 7
+    }
+    step
+    // CONTROL 1: the negedge flop commits, so phase 2 really did run.
+    assert((clock >= 1) implies (acc.qn != 0), "the negedge flop commits (control)")
+    // CONTROL 2: the write strobe really did assert, exactly once. (These are
+    // POST-step reads, which recompute with st already updated: st == d(tick),
+    // so the strobe reads true at tick 0 and false afterwards, while the WRITE
+    // itself fires during tick 1, when st still holds d(0) == 1.)
+    assert((clock == 0) implies acc.we, "the write strobe asserts (control)")
+    assert((clock >= 2) implies (not acc.we), "the strobe is DEasserted by the read ticks, so no write-forwarding")
+    // THE BUG: the array was written at tick 1, and from tick 2 on the strobe
+    // is false -- so write-forwarding cannot mask a dropped write. Today the
+    // write guard is emitted as a hard-coded 0 and the array stays empty.
+    assert((clock >= 2) implies (acc.rd == 99), "the memory write is not dropped by the two-phase tick")
+  }
+}

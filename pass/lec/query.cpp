@@ -560,6 +560,15 @@ std::string serialize_verify(const Verify_result& v) {
     }
     b.push_back(static_cast<char>(m.inductive ? 1 : 0));
   }
+  // Refusal flags (2f-latch M8 step 0a) — the SAME trap serialize_result's tail
+  // documents, and it was still live here: the F3 verify strategy race forks,
+  // so a field missing from this codec is SILENTLY LOST and the parent sees
+  // unsupported=false. Reproduced: `lhd formal verify latch_verify_hold.prp`
+  // exited 0 "pass" on a design whose encoder REFUSED the Latch cell, and only
+  // the non-forking paths (--workdir, formal.cache=false) told the truth.
+  // Best-effort TAIL: an older/truncated blob leaves both false (prior behavior).
+  b.push_back(static_cast<char>(v.unsupported ? 1 : 0));
+  b.push_back(static_cast<char>(v.oversize_refused ? 1 : 0));
   return b;
 }
 
@@ -694,6 +703,17 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     b.remove_prefix(1);
     v.mined.push_back(std::move(m));
   }
+  // Refusal-flag tail (mirror serialize_verify). Best-effort: absent => false.
+  if (b.empty()) {
+    return true;
+  }
+  v.unsupported = b.front() != 0;
+  b.remove_prefix(1);
+  if (b.empty()) {
+    return true;
+  }
+  v.oversize_refused = b.front() != 0;
+  b.remove_prefix(1);
   return true;
 }
 
@@ -2941,7 +2961,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
       for (const auto& [key, w] : fw) {
         Val v;
-        if (!phase_run && init.count(key)) {
+        if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
           v = init.at(key);
         } else {
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
@@ -5662,7 +5682,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       }
     }
     for (const auto& [key, w] : fw) {
-      if (!phase_run && init.count(key)) {
+      if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
         state[key] = init.at(key);
       } else {
         state[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};

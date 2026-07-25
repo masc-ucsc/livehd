@@ -85,6 +85,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},
     {        "pass.color",        "pass.color",     Set_pass::List::all},
     {    "pass.partition",    "pass.partition",     Set_pass::List::all},
+    {  "pass.single_edge",  "pass.single_edge",     Set_pass::List::all},
     {          "pass.abc",          "pass.abc",     Set_pass::List::all},
     {      "pass.liberty",      "pass.liberty",     Set_pass::List::all},
     {    "pass.opentimer",    "pass.opentimer",     Set_pass::List::all},

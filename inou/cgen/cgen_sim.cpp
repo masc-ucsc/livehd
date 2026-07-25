@@ -1396,6 +1396,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     int                      depth;          // pipe_min shift-register depth (>=1)
     std::vector<std::string> stages;         // depth-1 intermediate stage members (q is the last)
     bool                     posedge = true; // false = negedge flop (posclk known-false)
+    // 2f-latch M8 step 0d. On a LATCH, `posclk` is the ENABLE POLARITY, not an
+    // edge (graph/cell.cpp): known-false means transparent while enable == 0,
+    // so the write test is INVERTED. Reading the pin with the Flop meaning did
+    // two wrong things at once — it put the latch in the negedge sub-tick and
+    // left the enable un-inverted — for the one shape that produces it, a
+    // yosys-imported active-low $dlatch. cgen_verilog gets this right
+    // (`neg_en` -> `if (!en)`), so sim silently disagreed with its own Verilog.
+    bool                     neg_enable = false;
     // ICG fold (2f-latch M5): non-clock operands of a `<clock> & <enable>` clock
     // cone. Non-empty => this flop commits only in ticks where every guard is
     // true. Empty => an ungated clock, i.e. commit every tick.
@@ -1434,7 +1442,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); !pm.is_invalid() && is_const_pin(pm)) {
       depth = std::max<int>(1, static_cast<int>(hydrate_const(pm).to_just_i64()));
     }
-    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, {}, {}, {}};
+    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, false, {}, {}, {}};
     const std::string ref_clock = clock_input_of(g);
     f.clock_guards              = icg_guards(node, ref_clock);
     // SECONDARY CLOCK (2f-latch M6): a clock_pin wired to a graph input that is
@@ -1463,9 +1471,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     // posedge (default) vs negedge clock: the comptime `posclk` pin, known-false
-    // means negedge -- only matters for which sub-tick slot dumps its VCD data.
+    // means negedge -- and, since M5, it also picks the sub-tick the element
+    // commits in. On a LATCH the SAME pin means enable polarity instead, so it
+    // must never reach f.posedge: a latch always commits in the primary
+    // sub-tick and carries its polarity in `neg_enable` (M8 step 0d).
     if (auto pc = get_driver(find_sink_pin(node, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
-      f.posedge = !hydrate_const(pc).is_known_false();
+      const bool pos = !hydrate_const(pc).is_known_false();
+      if (type_op_of(node) == Ntype_op::Latch) {
+        f.neg_enable = !pos;
+      } else {
+        f.posedge = pos;
+      }
     }
     for (int i = 0; i < depth - 1; ++i) {
       f.stages.push_back(absl::StrCat(f.member, "_p", i));
@@ -2502,7 +2518,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     std::string etest;                // C++ bool: write enabled (empty = always)
     if (!enp.is_invalid() && !is_const_pin(enp)) {
-      etest = absl::StrCat(operand(enp, 1), ".is_known_true()");
+      // `neg_enable` = an active-LOW latch gate: transparent while enable == 0.
+      // is_known_false() rather than !is_known_true(), so an UNKNOWN enable
+      // fails closed (holds) on both polarities instead of writing on X.
+      etest = absl::StrCat(operand(enp, 1), f.neg_enable ? ".is_known_false()" : ".is_known_true()");
+    } else if (!enp.is_invalid() && f.neg_enable && is_const_pin(enp)) {
+      // A CONSTANT active-low gate folds here: const 0 => permanently
+      // transparent (write every tick), anything else => never writes.
+      if (!hydrate_const(enp).is_known_false()) {
+        etest = "false";
+      }
     }
     auto next_of = [&](const std::string& value_in, const std::string& hold) -> std::string {
       if (reset_always) {

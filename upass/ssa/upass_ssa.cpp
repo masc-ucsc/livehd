@@ -789,7 +789,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
                   }
                 } else if (Lnast_ntype::is_if_like(ct) ||
                            Lnast_ntype::is_for(ct) ||
-                           Lnast_ntype::is_while(ct)) {
+                           Lnast_ntype::is_while(ct) ||
+                           Lnast_ntype::is_tick(ct)) {
                   absl::flat_hash_set<std::string> rw;
                   collect_reg_writes(c, rw);
                   for (auto sub : lnast->children(c)) {
