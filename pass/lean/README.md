@@ -113,10 +113,52 @@ evaluated certificate.  The remaining hard bridge is the fast-view theorem:
 <Top>_next i s = <Top>_next_cert i s
 ```
 
-That fast-view proof is intentionally not emitted yet, because the fast model is
-a fixed-width `BitVec` let-chain while the certificate evaluator uses the
-dynamic `BV` representation.  It should be generated after the certificate
-checker is scalable.
+### Step 5 — fast-view bridge (in progress)
+
+This is the "first link" above (generated fast model = evaluated certificate),
+the keystone that ties the executable model to the graph semantics (and, via the
+LEC gate, to the RTL).  It is *not fully emitted yet*, but the reusable core is
+proven.  Architecture (design- and operator-independent library + a small
+per-design instantiation the emitter generates):
+
+- **General theorem (proven)** — `GraphRefine.evalGraph_of_localAgree`
+  (`formal/lean/LeanSemanticPrimitives/Translation/GraphRefine.lean`): `evalGraph`
+  computes the unique topological fixpoint of a dependency-ordered graph, so any
+  environment `φ` that agrees with the source env on off-topo deps and satisfies
+  the per-node recurrence `φ n = evalNode G φ n` equals `evalGraph` on every topo
+  node.  Every design's step 5 reduces to this by instantiating `φ` with its
+  encoded fast-model node values.  Mathlib-free; includes a decidable
+  `DepOrderedB` so a concrete graph discharges dependency ordering by
+  `native_decide`.
+
+- **Per-operator bridge lemmas (in progress)** —
+  `formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean`: relate the
+  certificate evaluator `eval_op` (width-erased `BV`) to the native `BitVec`
+  fast-model op, under the encoding `bvenc x = mk_bv w (Int.ofNat x.toNat)`.
+  Proven so far: `bv_to_bitvec_bvenc` (round trip), `bv_zext_id`,
+  `bv_uint_bvenc`, `bv_bit_bvenc` (`bv_bit (bvenc x) i = x.getLsbD i`, the crux
+  for all bit ops), plus the `GetMask` building blocks (`mask_indices_bvenc`,
+  `toNat_one_shiftLeft`, `pack_low_toNat_lt`).  These discharge the per-node
+  recurrence; the general theorem then closes `<Top>_comb = <Top>_comb_cert`, and
+  `FastModelBridge.generated_step_equals_lgraph_step` lifts `_comb`/`_next` to
+  `_step`.
+
+- **Mathlib dependency** — the op-bridge proofs need Mathlib's `BitVec`/`Nat`/`Int`
+  lemma library, so `formal/lean` now requires `mathlib @ v4.31.0` (matching the
+  pinned toolchain).  Fetch the prebuilt oleans once with:
+  ```bash
+  cd <livehd-new>/formal/lean && lake exe cache get
+  ```
+  `OpBridge` is intentionally NOT imported by the package root, so non-bridge
+  generated files stay Mathlib-free; the emitter adds
+  `import LeanSemanticPrimitives.Translation.OpBridge` only to bridge-enabled
+  output.
+
+Remaining: finish the operator bridge library (assemble `GetMask`; add
+`Sum`/`And`/`Or`/`Xor`/`Not`/`EQ`/compares, then `SRA`/`SHL`), the
+source-agreement lemma, then the emitter (per-node have-chain + `native_decide`
+well-formedness facts behind an `emit_fast_bridge` knob), and validate the
+add2 → small-sequential → DINO `SingleCycleCPU` ladder.
 
 ## Remaining Implementation Work
 
@@ -127,16 +169,18 @@ checker is scalable.
    - chunked uniqueness
    - eventually dense topological certificates
 
-2. Emit per-design fast-view bridge theorems.
+2. Emit per-design fast-view bridge theorems — **in progress** (see "Step 5 —
+   fast-view bridge" above; general theorem + bridge foundations proven).
    - `<Top>_comb = <Top>_comb_cert`
    - `<Top>_next = <Top>_next_cert`
    - `<Top>_step = <Top>_step_cert`
 
-3. Port memory-node emission and certificates from `pass.isabelle`.
-   - function-valued memory state fields;
-   - read/write/byte-enable policy extraction;
-   - memory `NodeCert` operator extension;
-   - collision/read-first/write-first policy proofs.
+3. Memory-node emission — **done** (fast model): function-valued memory state
+   fields, read/write/byte-enable policy extraction, any number of read/write
+   ports, read-during-write (`fwd`) policy, sync-read.  **Remaining**: the memory
+   *certificate* is still a stub (counts only); a memory-aware certificate
+   evaluator (`Val = bv | mem`, `Op_MemRead`/`Op_MemWrite[BE]`) + collision /
+   read-first / write-first policy proofs are future work.
 
 4. Harden operator semantics and tests.
    - `Get_mask` mask width and packing corner cases;
