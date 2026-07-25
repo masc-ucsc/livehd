@@ -2,3 +2,4 @@ import LeanSemanticPrimitives.SemanticPrimitives
 import LeanSemanticPrimitives.Translation.LGraphModel
 import LeanSemanticPrimitives.Translation.FastModelBridge
 import LeanSemanticPrimitives.Translation.GraphRefine
+import LeanSemanticPrimitives.Translation.OpBridge
