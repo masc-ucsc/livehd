@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="todo.css">
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a href="#pre-todo">Pre TODO</a><a href="#pyrope">Pyrope</a><a href="#livehd">LiveHD</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a href="#recommended">Recommended</a><a href="#pre-todo">Pre TODO</a><a href="#pyrope">Pyrope</a><a href="#livehd">LiveHD</a></nav>
 <main>
 <h1 id="todo">LiveHD TODO</h1>
 <p>Single hub for all pending work. One bullet per open task below, grouped by
@@ -22,6 +22,357 @@ stay visible.</p>
 this hub is strictly current work. Conceptual "why/what" lives in the
 <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD &amp; Pyrope docs</a>;
 agent build/process rules live in <code>AGENTS.md</code>.</p>
+
+<h2 id="recommended">Recommended next — 19 subtasks</h2>
+<p><strong>Goals (set 2026-07-26).</strong>
+<strong>G1</strong> — fast synthesis iteration: ABC attribute annotations leveraging
+incremental synthesis + LEC, where LEC is always <em>Verilog-vs-Verilog</em> or
+<em>Pyrope-vs-Pyrope</em>, never source-vs-netlist.
+<strong>G2</strong> — bring Pyrope up clean: translate large Verilog designs to Pyrope,
+then iterate module-by-module with LEC and cleanup.
+<strong>G3</strong> — incremental <code>assert</code>/<code>assume</code> moving toward
+SVA (temporal) semantics, where the novelty is <em>very fast</em> assert/assume via
+incremental reuse and cvc5 feedback.
+<strong>G2 and G3 outrank G1.</strong></p>
+<p><strong>What this list is.</strong> Every item below is an already-diagnosed gap —
+it lives on a task page, in a <code>fixme</code>-tagged target, or in a landed-work
+record. Nothing here is new design; each item names the page that owns it so the work
+lands there and this list stays a pointer. Ordering is dependency-first inside each
+tier.</p>
+
+<h3 id="rec-a">Tier A — blockers shared by G2 and G3 (do these first)</h3>
+<ul class="subtasks">
+<li><strong>R1 — <code>assert</code>/<code>assume</code> under an <code>if</code> silently
+  dropped the guard.</strong> <span class="status landed">LANDED 2026-07-26</span>
+  <code>lower_cassert</code> connected only the <code>cond</code> pin to the
+  <code>__fproperty</code> <code>Sub</code>, so a property inside an <code>if</code>
+  became <em>unconditional</em> — strictly stronger than what the user wrote, and wrong
+  in both directions: <code>if a&lt;4 { assert(a&lt;10) }</code> refuted with
+  <code>a=10</code> (a value the guard excludes), and a guarded <code>assume</code>
+  over-constrained the environment into a <strong>false PROVEN</strong>. Both measured
+  against the pre-fix binary. <code>implies</code> was the only correct spelling, which is
+  why no checked-in fixture (and nothing in <code>../lhdsuite</code>) carried a guarded
+  design-body property — the bug had no corpus.
+  <br><br>
+  <strong>Shipped:</strong> the obligation is now <code>guard implies cond</code>
+  (SystemVerilog's procedural-assertion semantics). <code>lower_if</code>'s existing
+  <code>path_cond_</code> stack — built for 1a-mem write enables — is armed whenever the
+  body holds a property (a one-time pre-scan, <em>not</em> the dynamic
+  <code>mem_map_</code> test, so a guard cannot depend on statement order), and
+  <code>lower_cassert</code> folds <code>or2(not1(guard), cond)</code> into the single
+  <code>cond</code> pin. <strong>Folded, not carried as a second port:</strong> every
+  consumer (<code>pass.formal</code>, the verify monitor encode,
+  <code>cgen_verilog</code>, <code>cgen_sim</code>) then honors it by construction, where
+  a separate <code>guard</code> port would reproduce this bug once per consumer that
+  forgot to read it. <code>match</code> rides the same stack (it lowers to a
+  <code>unique_if</code> whose arms are branch-lowered before the Hotmux merge).
+  <code>cassert</code> is deliberately excluded — it is an elaboration check that must
+  fold to a comptime constant, and <code>!guard || cond</code> under a runtime guard never
+  folds. Test-block asserts are untouched: <code>prp_sim</code> emits them as real C++
+  control flow.
+  <br><br>
+  Regression: case 9 of <code>lhd/tests/lhd_formal_verify_test.sh</code> —
+  <code>if</code>/nested/<code>elif</code>/<code>else</code> and three <code>match</code>
+  arms all prove (each named, so a regression says which gate was dropped); a property
+  false under its own guard still refutes; and the over-constrained-assume case must NOT
+  prove. 9a and 9c flip verdict if the fold is removed; 9b is the
+  no-over-correction check and does not discriminate on its own.
+  <br><br>
+  <strong>Phase 2 — antecedent vacuity — ALSO LANDED 2026-07-26.</strong> R1 traded a
+  wrong-property bug for a possible vacuous-pass bug: a guard that can never hold makes
+  <code>guard implies cond</code> trivially PROVEN while checking nothing. tolg now also
+  leaves the RAW guard on a second <code>guard</code> sink that is
+  <strong>diagnostic-only</strong> — a consumer that ignores it loses a warning, never
+  correctness, which is the whole reason the obligation itself stayed folded into one pin.
+  Each obligation carries <code>guarded</code> + <code>vacuous_guard</code> in
+  <code>formal_report.json</code>, prints a VACUOUS continuation row under its verdict,
+  warns (<code>formal-vacuous-guard</code>) at BOTH tiers —
+  <code>lhd formal verify</code> and plain <code>lhd compile</code> via
+  <code>pass.formal</code>, which is the flow a user actually runs — and fails under
+  <code>formal.strict</code>. Severity ruling: warning by default, not the hard error a
+  contradictory assume set gets, because a dead antecedent leaves the obligation genuinely
+  TRUE (only an unsatisfiable assume set makes a proof unsound to rely on) and a guard
+  unreachable at <em>this</em> top can be reachable under another parent.
+  <br><br>
+  <strong>The measure is a FREE FRAME, not the unrolled window</strong> — the one design
+  decision worth remembering. "Was the guard ever true in the cycles we checked?" is the
+  intuitive question and it is wrong: an inductive proof settles at <em>one</em> checked
+  step, so a live <code>count == 5</code> guard reads as dead, and the same design flips
+  answer depending on which strategy wins the ind/bmc race. Measured — bound=10 on a
+  counter reported the same 1 checked step as bound=3. So the question asked is "is this
+  guard satisfiable at all, over free inputs and free state?" (<code>prover.is_false</code>
+  at the compile tier; one extra fresh-symbol encode at the verify tier), which
+  over-approximates reachability and therefore has no false positives, no bound
+  dependence, and no engine dependence. Deliberate non-goal: a guard satisfiable in the
+  abstract but unreachable from reset is also vacuous and is <em>not</em> reported —
+  detecting that is a reachability problem whose only cheap proxy is the unstable window.
+  <br><br>
+  Phase 2 traps paid for: the free frame is wrapped in <code>push</code>/<code>pop</code>
+  because it is the only place that ADDS assertions after verdicts settle, and
+  <code>getTimeoutCoreAssuming</code> below it returns a subset of the solver's
+  assertions — an unpopped frame would put <code>vg_</code> equalities in a core meant to
+  name toxic obligations. And the guard driver must be resolved by walking
+  <code>inp_edges</code>: an unguarded fproperty has no <code>guard</code> sink pin at all,
+  and <code>get_driver_of_sink_name</code> aborts in a dbg build on a pin that was never
+  created — which is the COMMON path, so it took down every existing test until fixed.
+  Regressions: case 10 of <code>lhd_formal_verify_test.sh</code> (10d pins the
+  bound-independence — a window-based implementation fails it) and case 10 of
+  <code>lhd_formal_fail_test.sh</code> (compile tier, with a live-guard control).
+  Suite 1444/0.
+  Home: <a class="xref" href="livehd/2f-verify.html">2f-verify</a>.</li>
+<li><strong>R1b — <code>upass_dependency_test.sh</code> was already red.</strong>
+  <span class="status landed">LANDED 2026-07-26</span> Found while validating R1, unrelated
+  to it (the pre-fix binary fails identically): <code>--set upass.order=assert</code>
+  truncates the pass list, so <code>simple.prp</code>'s <code>cassert(c == 10)</code>
+  reaches the tolg seam undischarged and hard-errors <code>cassert-not-comptime</code>
+  under the 2026-07-25 cassert ruling. Fixed by adding
+  <code>--set upass.tolg=false</code> — the test is about uPass <em>order resolution</em>,
+  and the seam explicitly exempts the LNAST-only tiers.</li>
+<li><strong>R2 — make "<code>assume</code> anywhere in the code" mean something (root /
+  child policy).</strong> <span class="status">G3 · medium</span>
+  Today a <em>root</em>-module input assume is a hard compile error
+  (<code>assume-refuted</code>), while a <em>child</em>-module assume defers to a runtime
+  check and is never re-proven at the parent that binds it — and
+  <code>pass/formal/pass_formal.cpp:351-367</code> promotes only <em>PROVEN</em> assumes to
+  hypotheses, so an undischarged assume constrains nothing. Net: an assume either fails
+  the build or is a no-op. Needs a <strong>ruling first</strong> (is a root input assume
+  an environment constraint or an obligation? who discharges a child's — the parent
+  binding, per the fcore contract?), then the wiring.
+  <em>Done when:</em> <code>lhd/tests:hier_property_test</code> sheds its
+  <code>fixme</code> tag — its case 3 (a parent that <em>violates</em> a submodule's
+  assume must FAIL) is what keeps the fix honest.
+  Home: <a class="xref" href="livehd/2f-verify.html">2f-verify</a> (hierarchy half).</li>
+<li><strong>R3 — multi-module Pyrope recompile: resolve sibling-file callees.</strong>
+  <span class="status">G2 · medium</span>
+  <code>pass.prp_writer</code> emits <strong>one <code>.prp</code> per module</strong>, so
+  recompiling the top of a freshly translated design dies with
+  <code>upass.tolg: call to 'mul' has no hardware lowering</code>, and a monomorphized
+  varargs callee is emitted as a qualified <code>file.name(...)</code> call that re-parses
+  as an undefined read. This blocks the entire G2 loop — you cannot recompile what the
+  translator just produced — and it is simultaneously
+  <a class="xref" href="livehd/2w-prp_writer.html">2w-prp_writer</a>'s A-LEC blocker and
+  <a class="xref" href="livehd/2i-import.html">2i-import</a>'s importer-dir-relative
+  resolution slice.
+  <em>Done when:</em> <code>mod_mul_add</code>, <code>mod_twopaths</code> and the three
+  <code>*_varargs_*</code> cases join the <code>prp-p2p-*</code> allow-list, and the writer
+  emits the bare callee name.</li>
+</ul>
+
+<h3 id="rec-b">Tier B — G2: Verilog → Pyrope at scale</h3>
+<ul class="subtasks">
+<li><strong>R4 — re-baseline the 250-module XiangShan sweep.</strong>
+  <span class="status">G2 · small (machine time)</span>
+  <code>verification.html</code> is a 2026-07-04 snapshot: LEC(lhd) pass 142 /
+  inconclusive 64 / timeout 43 / fail 1; LEC(lgyosys) pass 160 / timeout 85; SIM pass 160
+  / error 45 / timeout 19 / skipped 20. It predates <code>split_selfref</code> at cprop,
+  <code>pass.single_edge</code>, struct-typed ports, param provenance, the slang
+  wire-classification split, and the clock-blindness encoder guards — some of which move
+  those columns forward and some (the guards) deliberately backward. Re-run
+  <code>gen_verification.py</code> and triage the residue <strong>by failure class, not by
+  module</strong>. <em>Done when:</em> the regenerated table ships with a per-class residual
+  count, each class pointing at the page that owns it. Everything else in this tier should
+  be re-ordered by what it says.</li>
+<li><strong>R5 — per-port memory clock binding.</strong> <span class="status">G2 · medium</span>
+  <a class="xref" href="livehd/2m-multiport_mem.html">2m-multiport_mem</a> A:
+  <code>upass/tolg/upass_tolg.cpp:1273-1274</code> wires the Memory cell's
+  <code>clock_pin</code> from one module-wide clock, so XiangShan's
+  <code>data_mem_8x4</code> (three distinct port clocks) silently collapses both read ports
+  onto <code>W0_clk</code> — wrong Verilog, no diagnostic. The cell already models a
+  per-port clock (<code>clock_pin</code> is pid 2, "×1 <em>or</em> n_ports") and
+  <code>cgen</code> already derives single- vs multi-clock from the per-port drivers, so
+  this is reader + tolg wiring. Memories are also where the R4 inconclusive/timeout
+  residue concentrates.</li>
+<li><strong>R6 — <code>lhd compile</code> links several <code>lg:</code> inputs; retire
+  <code>--lib</code>.</strong> <span class="status">G2+G1 · medium</span>
+  <a class="xref" href="livehd/2i-import.html">2i-import</a> S3+S4: export a
+  process-independent <code>semdiff::canonical_hash</code> plus the bottom-up Merkle driver,
+  lift the pure-<code>lg:</code>-only cap (<code>lhd/lhd_kernel.cpp:2632</code>, <em>"multiple
+  lg: inputs are not supported yet"</em>), and replace today's hhds name-hash dedup with
+  digest → bucket → <code>structural_match</code> confirm → dedup + a report. This is also
+  the user-requested replacement for <code>--lib lg:sky130_vendor_flat_lg</code> on the
+  post-ABC LEC command, which is why it carries a G1 tag.
+  <em>Trap (non-negotiable):</em> never dedup on the digest alone — a hash collision must
+  be confirmed by <code>structural_match</code> or it becomes wrong hardware.</li>
+<li><strong>R7 — prp→prp logical-fidelity bucket, memories first.</strong>
+  <span class="status">G2 · medium</span>
+  <a class="xref" href="livehd/2w-prp_writer.html">2w-prp_writer</a> B: ~34 equiv pairs
+  re-emit <em>clean</em> Pyrope that recompiles but is <strong>not equivalent</strong> to
+  the golden <code>.v</code> — the safety net cannot see it, only <code>lhd lec</code> can.
+  Work the buckets in this order: every <code>mem_*</code> (shares root causes with R5),
+  then <code>condout_*</code>/<code>cond_modified_read</code>, then
+  <code>reg_async_flag</code>/<code>reg_attr_override</code>/<code>reg_delay_init</code>,
+  and finally the surprising small ones (<code>trivial_if</code>). The per-case triage
+  recipe is already written on the page; promote each into <code>prp-p2p-*</code> as it is
+  fixed.</li>
+<li><strong>R8 — the two remaining <a class="xref" href="2i-issues.html">2i-issues</a>
+  lowering defects.</strong> <span class="status">G2 · small each</span>
+  <strong>A</strong> registered-output interface <code>-&gt; (reg count:u8@[0])</code> — the
+  canonical counter straight out of <code>docs/pyrope/04-variables.md</code>, hard-erroring
+  with <code>homes at stage 0 … requires home -1</code> because the state-reg branch applies
+  the feedforward <code>home.min + 1 == rec.min</code> invariant to a register that pins
+  σ(q)=σ(din) with no flop crossing. <strong>B</strong> hierarchical (nested-tuple) enums —
+  <code>read of undefined variable 'eagle'</code>, because nested-enum detection accepts only
+  an explicit <code>enum(...)</code> value, not the bare tuple the spec prescribes. Both are
+  root-caused to a line with a proposed fix on the page. This is the "translated design still
+  needs hand edits" class.</li>
+<li><strong>R9 — the six silent simulation bugs (latch / negedge / memory).</strong>
+  <span class="status">G2 · medium</span>
+  <code>prp-sim-{latch_sim_clockgate_high, latch_sim_l1_buffer, flop_sim_secondary_negedge,
+  mem_sim_negedge_write, hier_sim_negedge_sub, flop_sim_peek_secondary}</code> — 4-tick
+  trackers whose expected values come from Icarus on the netlist LiveHD itself emits. Each
+  fails today with <strong>no diagnostic</strong> (<code>lhd sim</code> reports 0 errors and
+  hands back wrong numbers) and each carries control asserts that pass, so a failure is
+  attributable. Sim is the cheap oracle in the G2 iterate loop, so a silently-wrong sim
+  poisons every iteration that trusts it.
+  Home: <a class="xref" href="livehd/2f-latch.html">2f-latch</a> (M6 residue).
+  <em>Fixture traps recorded there:</em> <code>implies</code> lowers to <code>||</code> and
+  short-circuits (hiding peek bugs), and a memory read carries same-address write
+  forwarding (masking dropped writes).</li>
+<li><strong>R10 — the translated-code cleanup batch.</strong>
+  <span class="status">G2 · small each, independent</span>
+  (a) emitted Verilog ports are all <code>signed</code> even when the GraphIO says unsigned
+  (<a class="xref" href="livehd/2i-import.html">2i-import</a> item 6d,
+  <code>cgen_verilog.cpp</code>);
+  (b) <code>prp-tbd-vector_io_ports</code> — a positional/array port has no lowering in
+  either direction (the named-tuple twin passes);
+  (c) <code>prp-tbd-wire_field_const_store</code> — a const store to a wire-<em>bundle</em>
+  field is folded and dropped, then tolg errors <code>wire 'io.a' is never driven</code> on
+  valid code;
+  (d) LSP hover on a translated module reports <code>src: int</code> where it should read
+  <code>src: u128</code> / <code>pc: u64</code> (AluDataModule.prp:508) — readability is the
+  ergonomics of the whole iterate loop
+  (<a class="xref" href="livehd/2n.html">2n</a>).</li>
+</ul>
+
+<h3 id="rec-c">Tier C — G3: fast incremental assert/assume</h3>
+<ul class="subtasks">
+<li><strong>R11 — cone-scoped obligation cache keys (this <em>is</em> the "incremental" in
+  incremental assert/assume).</strong> <span class="status">G3 · medium-large · highest leverage</span>
+  <code>verify_obligation_key</code> (<code>pass/lec/query.cpp:5056</code>) mixes
+  <strong>every assertion of the whole encoding</strong> plus the scope, so <em>any</em> edit
+  anywhere in the design invalidates <em>every</em> obligation's cached verdict — today's
+  cache is a re-run cache, not an incremental one. Re-key each obligation on the digest of
+  its <strong>own fan-in cone</strong> (<code>semdiff::canonical_digest</code> — already the
+  formal verdict cache's identity primitive and the same digest
+  <a class="xref" href="livehd/2opt-incr.html">2opt-incr</a> uses per ABC region) plus the
+  in-force assume set and scope, so an edit re-proves only the obligations whose cone
+  actually moved.
+  <em>Traps:</em> the cone must cover state reachable within the checked bound (a bounded
+  verdict is only valid at its bound — rule B); the assume set and scope must stay in the key
+  or a constrained proof aliases an unconditional one (the P1 rule); a rename must be a
+  <em>miss</em>, never a wrong bind.
+  <em>Done when:</em> editing one module of a multi-property design re-proves only that
+  module's obligations — pinned by a test that counts obligations with
+  <code>solve_ms &gt; 0</code> in <code>formal_report.json</code>.
+  Home: <a class="xref" href="livehd/2f-verify.html">2f-verify</a>.</li>
+<li><strong>R12 — cvc5 feedback: <code>getDifficulty</code>, <code>getUnsatCore</code>, and
+  stop mining redundant bounds.</strong> <span class="status">G3 · medium</span>
+  Three named remainders on <a class="xref" href="livehd/2f-verify.html">2f-verify</a>:
+  <code>produce-difficulty</code> is still unused repo-wide (it is the hardness-mass ranking
+  signal, and it is callable right after <em>any</em> checkSat including a timeout);
+  <code>getUnsatCore</code> earns-its-keep pruning is unimplemented, so <em>every</em>
+  inductive survivor is emitted rather than only those that demonstrably help a stuck
+  obligation; and the range templates emit tight <em>plus</em> next-pow2 with no subsumption
+  filter (<code>count &le; 5</code> AND <code>count &le; 7</code>) — the one accidental
+  overlapping-assume site in the repo. All three make the mined
+  <code>formal_mined.prp</code> something an agent can paste without curating.</li>
+<li><strong>R13 — temporal minimal core: <code>rose</code> / <code>fell</code> /
+  <code>stable</code>.</strong> <span class="status">G3 · small-medium</span>
+  <code>past[n]</code> now lowers (a depth-<em>n</em> <code>stage</code> shift register;
+  <code>prp-tbd-temporal_past</code> is already untagged), so what remains of the
+  ruled-minimal core is the three pure functions of <code>x</code> and
+  <code>past(x)</code>, restricted to verification contexts. This is the SVA on-ramp: it is
+  the smallest step that lets a property talk about <em>time</em> without any engine work
+  (they produce ordinary flop cones the landed BMC/induction ladder already handles).
+  <em>Done when:</em> <code>delay2</code> LECs against its golden Verilog, a two-cycle
+  property built from <code>rose</code> proves through <code>lhd formal verify</code>, and the
+  docs drop the TBD marks for the core while deleting the out-of-scope operators.
+  Home: <a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a>.</li>
+<li><strong>R14 — re-admit design assumes into <code>lhd lec</code>.</strong>
+  <span class="status">G3+G1 · small</span>
+  After the per-block assume-scoping change, <code>lhd lec</code> honors <strong>no user
+  assume of any kind</strong>: <code>graph_has_assume</code> lives in
+  <code>prove_properties</code> (verify) only, and <code>compile_lec_formal_helpers</code> was
+  deleted. The engine hook (<code>Lec_options::assumptions</code> + the monitor encode in
+  <code>query.cpp</code>) was deliberately retained and left unused, so re-admitting is flag
+  wiring plus the P1 input-vs-internal classification and the "PROVEN under N input
+  assume(s)" disclosure. Wanted by G1 too — the RTL-vs-RTL iteration gate should be allowed
+  to run under the design's own environment constraints rather than over all inputs.
+  Home: <a class="xref" href="livehd/2f-lec.html">2f-lec</a>.</li>
+<li><strong>R15 — emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into
+  slop.</strong> <span class="status">G3 · medium</span>
+  Properties exist for the formal tier only. Emitting them into the simulator gives the agent
+  loop a <em>cheap</em> tier that runs before cvc5 (a failing sim assert is a refutation
+  found in milliseconds) and makes <code>coverpoint</code> report something.
+  Home: <a class="xref" href="pyrope/4b.html">4b</a>.</li>
+</ul>
+
+<h3 id="rec-d">Tier D — G1: fast synthesis iteration</h3>
+<ul class="subtasks">
+<li><strong>R16 — ABC memory admission.</strong> <span class="status">G1 · medium</span>
+  <a class="xref" href="livehd/2opt-incr.html">2opt-incr</a> subtask 0, still the stated
+  prerequisite. The shipped 30M-GE coloring cap bounds the region's <em>size estimate</em>,
+  not what ABC actually allocates — the measured mapping peak factor is
+  <strong>2.5–29.6×</strong>. Sample RSS growth after ~5% of <em>estimated work</em> (not 5%
+  of nodes), project both completed-translation and mapping peak, and refuse cleanly —
+  delete the partial network, emit no partial result, exit nonzero with a
+  smaller-coloring recommendation — with <code>pass.abc.allow_oversize=true</code> as the
+  acknowledged bypass and <code>pass.abc.memory_budget_mb=N</code> for CI determinism. This
+  is what makes an unattended iteration loop safe to leave running on a notebook.</li>
+<li><strong>R17 — post-ABC netlist fidelity, so the loop's LEC and STA actually run.</strong>
+  <span class="status">G1 · medium</span>
+  Measured on dino today: memories expand to sky130 flops instead of staying an lgraph
+  Memory / <code>ware/rtl/cgen_memory_*</code> instance (ABC has no memory support enabled by
+  default, so they should never have been handed to it); the emitted Verilog carries
+  <code>always @(posedge 'hx /*cgen-miss*/)</code> blocks; <code>pass opentimer</code>
+  reports zero timing through the black-boxed memories; and <code>lhd pass --help</code> /
+  <code>lhd pass opentimer --help</code> do not work the way <code>pass abc --help</code>
+  does. Pair this with <a class="xref" href="livehd/3a-synth.html">3a-synth</a> A — flops
+  must keep instance-prefixed hierarchical names across the flatten, or post-synthesis LEC
+  loses tier-1 correspondence for no reason.
+  <em>Done when:</em> <code>lg:dino_lg_abc</code> LECs against
+  <code>dino_prp/PipelinedDualIssueCPU.prp</code> and <code>pass opentimer</code> returns a
+  real critical path on it.</li>
+<li><strong>R18 — FIB timing probe + partition refinement policy.</strong>
+  <span class="status">G1 · large</span>
+  <a class="xref" href="livehd/2opt-incr.html">2opt-incr</a> D+E. The probe answers "is X
+  faster?" in seconds by resynthesizing only the touched cone with boundary delays pinned
+  from the original run — ephemeral, never stitched, so its area redundancy structurally
+  cannot reach P&amp;R. <em>Settle the page's open question first:</em> does the probe need a
+  one-sided guarantee (never claims faster when it is not) or only a good estimate? The
+  pruning role argues for one-sided. E then grows a partition when its critical path spans
+  input→output and splits above the band — which needs the GE→gate calibration
+  <a class="xref" href="livehd/2c-color-size.html">2c-color-size</a> left open (421 GE/node
+  measured on XSCore, so <code>pass.color</code>'s 1k–5k GE bucket is <em>not</em> LiveSynth's
+  1k–5k <em>gate</em> band).</li>
+<li><strong>R19 — parallel per-partition mapping + the area / no-op validation.</strong>
+  <span class="status">G1 · large</span>
+  <a class="xref" href="livehd/2opt-incr.html">2opt-incr</a> B's parallel half is the lec
+  fork pattern with a <em>graph</em> result rather than a verdict blob: per-child
+  <code>GraphLibrary</code> saves, <code>load_merge</code> in the parent, srcid/QoR/refusal
+  merging — and it interacts directly with R16, since splitting the memory budget N ways can
+  refuse regions that map fine sequentially. F is the headline claim worth publishing: 24 of
+  Anubis' 144 changes are <em>NoChange</em> by construction and both commercial flows burn
+  ~106s re-synthesizing them, while a digest-keyed cache answers in
+  <code>O(#regions)</code> lookups against a published baseline — <strong>and area, the one
+  metric this flow is known to bleed, was never measured by the lineage</strong>.</li>
+</ul>
+
+<p><strong>Deliberately not on this list</strong> (nothing here moves G1–G3 in the near
+term): <a class="xref" href="livehd/2n.html">2n</a> LSP phases D–E (only the hover-width bug
+made it, as R10d), <a class="xref" href="livehd/2p-piper.html">2p-piper</a>,
+<a class="xref" href="livehd/3l.html">3l</a>, <a class="xref" href="livehd/3c.html">3c</a>,
+<a class="xref" href="livehd/4c.html">4c</a>/<a class="xref" href="livehd/4e.html">4e</a>,
+the Group-5 test/bench reorgs, <a class="xref" href="livehd/cleanup.html">cleanup</a>, and
+the research tracks <a class="xref" href="livehd/4f-fluid-lec.html">4f-fluid-lec</a> /
+<a class="xref" href="livehd/4f-bitwuzla.html">4f-bitwuzla</a> /
+<a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a>.
+<a class="xref" href="pyrope/3p.html">3p</a> and its
+<code>prp-tbd-stdlib_import</code> tracker are held back too: a standard library is worth
+building <em>after</em> R3–R8 settle what translated Pyrope actually looks like.
+<a class="xref" href="livehd/3f-semdiff.html">3f-semdiff</a>'s <code>alg=functional</code>
+n:m matcher is the one judgement call — it would shrink every miter, but R11's cone-scoped
+cache buys more per unit of work on the same designs, so it waits.</p>
 
 <h3 id="pre-todo">Pre TODO</h3>
 <p>Ideas to either turn into full todo pages or drop, ordered by date added

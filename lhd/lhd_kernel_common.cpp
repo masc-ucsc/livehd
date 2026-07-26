@@ -1381,18 +1381,20 @@ std::string find_header_in_runfiles(std::string_view header) {
 }
 
 // hlop checkout for the generated MODULE.bazel:
-// `--set compile.cgen.sim_hlop_dir=DIR` wins (point the sim build at a WORKING
-// hlop checkout — the reason to keep this knob is testing new slop/vcd_writer
+// `--set sim.hlop_dir=DIR` wins (point the sim build at a WORKING hlop
+// checkout — the reason to keep this knob is testing new slop/vcd_writer
 // code without reinstalling), else the sibling ../hlop of the CWD (the dev
 // layout), else the bazel runfiles in sim_hlop_include_dir().
 //
-// Historical note: this was `sim_hlop` and was never registered in the options
-// registry, so passing the flag lhd's own hint printed was rejected as an
-// unknown flag. Renamed to `_dir` (it is a directory) and registered — see
-// `lhd list options compile.cgen`.
+// Historical note: this began as `compile.cgen.sim_hlop`, which was never
+// registered in the options registry, so passing the flag lhd's own hint
+// printed was rejected as unknown. It is now `sim.hlop_dir` in kSimSetOptions
+// (validated, listed, and in the hint) — this reader and the lec/verify
+// forwarders must match THAT spelling, or the knob validates and then
+// silently does nothing.
 std::string sim_hlop_path(const Options& opts) {
   for (const auto& [k, v] : opts.sets) {
-    if (k == "compile.cgen.sim_hlop_dir" && !v.empty()) {
+    if (k == "sim.hlop_dir" && !v.empty()) {
       return v;
     }
   }
@@ -1403,7 +1405,7 @@ std::string sim_hlop_path(const Options& opts) {
 
 // The `-I` directory that resolves `#include "slop.hpp"` (and blop.hpp /
 // vcd_writer.hpp): the `hlop/` subdir of the hlop module root. Falls back to the
-// module root itself in case `--set compile.cgen.sim_hlop=` already points at the
+// module root itself in case `--set sim.hlop_dir=` already points at the
 // header dir. Empty result -> slop.hpp not located (the caller reports it).
 std::string sim_hlop_include_dir(const Options& opts) {
   const auto root = sim_hlop_path(opts);
@@ -1416,13 +1418,13 @@ std::string sim_hlop_include_dir(const Options& opts) {
 }
 
 // The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
-// in): `--set compile.cgen.sim_iassert_dir=DIR` wins, else the sibling
+// in): `--set sim.iassert_dir=DIR` wins, else the sibling
 // `../iassert` of the hlop root / CWD, where the header lives under `src/`,
 // else the bazel runfiles. Empty -> not found.
 std::string sim_iassert_include_dir(const Options& opts) {
   std::vector<std::string> cands;
   for (const auto& [k, v] : opts.sets) {
-    if (k == "compile.cgen.sim_iassert_dir" && !v.empty()) {
+    if (k == "sim.iassert_dir" && !v.empty()) {
       cands.push_back(v);
     }
   }

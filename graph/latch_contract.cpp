@@ -397,7 +397,8 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   return {};
 }
 
-int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass) {
+int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
+                            const std::function<bool(const hhds::Graph*)>& is_boxed) {
   if (g == nullptr) {
     return 0;
   }
@@ -449,6 +450,13 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass) {
       continue;  // body-less blackbox: nothing to inline
     }
     if (!clock_drivers.contains(n.get_class_index())) {
+      continue;
+    }
+    // A def the caller BLACKBOXED stays a blackbox. Inlining it would compare
+    // internals the caller declared out of scope -- see the header: minion's
+    // trusted `prim_clk_gate` holds an unreset enable latch the two front-ends
+    // default differently, so comparing it manufactures a refutation.
+    if (is_boxed && is_boxed(def.get())) {
       continue;
     }
     bool has_latch = false;

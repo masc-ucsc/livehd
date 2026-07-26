@@ -586,4 +586,188 @@ verify ladder ladder --top cnt2 --set formal.bound=6
 grep -q "'parity'\": PROVEN (inductive" "$OUT" || fail "the inductive invariant must upgrade to unbounded: $(cat "$OUT")"
 grep -q "'bounded only'\": PROVEN to cycle 7 (bounded)" "$OUT" || fail "a non-inductive fact must STAY bounded: $(cat "$OUT")"
 
-echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass)"
+# ---------------------------------------------------------------------------
+# 9. R1 — a property inside an `if`/`elif`/`else`/`match` arm is GUARDED by
+#    that arm's path condition, i.e. the obligation is `guard implies cond`,
+#    never the bare `cond`. This is SystemVerilog's procedural-assertion
+#    semantics: the statement is only evaluated when control flow reaches it.
+#
+#    Before this, upass.tolg's lower_cassert connected the bare condition pin,
+#    so the obligation was STRICTLY STRONGER than what the user wrote — wrong
+#    in both directions, and silently:
+#      * 9a: an assert fired on paths the guard excludes (`assert(a < 10)`
+#        under `if a < 4` refuted with a=10, a value the guard rules out);
+#      * 9c: an assume over-constrained the environment and manufactured a
+#        FALSE PROVEN — the dangerous direction, since it hides real bugs.
+#    9a and 9c are the guard-drop detectors: both flip verdict if the fold in
+#    lower_cassert is removed. 9b is the OVER-correction check and does NOT
+#    discriminate on its own (measured: its counterexample is a=0 either way,
+#    which satisfies the guard) — it exists so that honoring the guard cannot
+#    be "fixed" by making guarded properties vacuous, and it pins that the
+#    witness stays consistent with the guard the obligation now carries.
+# ---------------------------------------------------------------------------
+cat >"$W/guarded.prp" <<'EOF'
+mod guarded(a:u8, b:u8) -> (o:u8@[0]) {
+  o = a
+  if a < 4 {
+    if b < 4 {
+      assert(a + b < 10, "nested")
+    }
+    assert(a < 4, "then")
+  } elif a < 8 {
+    assert(a >= 4, "elif")
+  } else {
+    assert(a >= 8, "else")
+  }
+  match a {
+    == 1 { assert(a == 1, "match-eq") }
+    < 5  { assert(a != 1, "match-lt") }
+    else { assert(a >= 5, "match-else") }
+  }
+}
+EOF
+verify guarded guarded --top guarded --set formal.bound=4
+[ "$RC" -eq 0 ] || fail "every guarded property is true UNDER ITS GUARD and must prove (rc=$RC): $(cat "$OUT")"
+# Each arm kind is named so a regression says WHICH gate was dropped. `match`
+# rides the same path stack (it lowers to a unique_if whose arms are
+# branch-lowered before the Hotmux merge), and `nested` needs BOTH guards.
+for m in nested then elif else match-eq match-lt match-else; do
+  grep -q "'$m'\": PROVEN" "$OUT" || fail "guarded property '$m' must prove (its arm's path condition was dropped): $(cat "$OUT")"
+done
+
+# 9b. The guard must not swallow a real violation, and the counterexample must
+#     satisfy the guard (a < 4). A counterexample with a >= 4 means the guard
+#     was dropped and the run refuted for the wrong reason.
+cat >"$W/guarded_bad.prp" <<'EOF'
+mod guarded_bad(a:u8) -> (o:u8@[0]) {
+  o = a
+  if a < 4 {
+    assert(a > 2, "false under its own guard")
+  }
+}
+EOF
+verify guarded_bad guarded_bad --top guarded_bad --set formal.bound=4
+[ "$RC" -ne 0 ] || fail "a property FALSE under its own guard must still refute: $(cat "$OUT")"
+grep -q "false under its own guard" "$OUT" || fail "the refutation must name the failing assertion: $(cat "$OUT")"
+CEX=$(grep -oE 'counterexample: a=[0-9]+' "$OUT" | head -1 | grep -oE '[0-9]+$')
+[ -n "$CEX" ] || fail "the refutation must carry a counterexample: $(cat "$OUT")"
+[ "$CEX" -lt 4 ] || fail "the counterexample (a=$CEX) must SATISFY the guard a<4 — a>=4 means the guard was dropped: $(cat "$OUT")"
+
+# 9c. The over-constraint direction: a guarded `assume` constrains only where
+#     its guard holds. Dropping the guard here makes `a < 3` an unconditional
+#     environment constraint, which PROVES the assert below — a false PROVEN.
+cat >"$W/guarded_assume.prp" <<'EOF'
+mod guarded_assume(a:u8) -> (o:u8@[0]) {
+  if a >= 100 {
+    assume(a < 3)
+  }
+  o = a
+  assert(a < 3, "must NOT be provable")
+}
+EOF
+verify guarded_assume guarded_assume --top guarded_assume --set formal.bound=4
+[ "$RC" -ne 0 ] || fail "a guarded assume must not over-constrain into a FALSE PROVEN: $(cat "$OUT")"
+grep -q "must NOT be provable" "$OUT" || fail "the refutation must name the assert the over-constrained assume was faking: $(cat "$OUT")"
+
+# ---------------------------------------------------------------------------
+# 10. R1 Phase 2 — ANTECEDENT vacuity. R1 (case 9) made a guarded property mean
+#     `guard implies cond`, which is right but introduced a new silent failure:
+#     a guard that can NEVER hold proves trivially while checking nothing. Each
+#     obligation now carries `guarded` + `vacuous_guard` in formal_report.json,
+#     prints a VACUOUS continuation row, warns by default, and FAILS under
+#     formal.strict.
+#
+#     10d is the load-bearing case: the measure must be a FREE frame, not the
+#     unrolled window. "Was the guard ever true in the cycles we checked?" is
+#     the intuitive question and it is wrong — an inductive proof settles at ONE
+#     checked step, so a live `count == 5` guard would be reported dead, and the
+#     answer would flip with whichever strategy wins the ind/bmc race.
+# ---------------------------------------------------------------------------
+cat >"$W/vacuity.prp" <<'EOF'
+mod vacuity(a:u8) -> (o:u8@[0]) {
+  o = a
+  if a > 200 and a < 100 {
+    assert(a == 7, "dead guard")
+  }
+  if a < 4 {
+    assert(a < 10, "live guard")
+  }
+}
+EOF
+WDV="$W/wd_vacuity"
+mkdir -p "$WDV"
+verify vacuity vacuity --top vacuity --set formal.bound=4 --workdir "$WDV"
+[ "$RC" -eq 0 ] || fail "a vacuous obligation is a WARNING, not a failure, by default (rc=$RC): $(cat "$OUT")"
+grep -q "obligation(s) VACUOUS (guard can never be true)" "$OUT" || fail "the run detail must count vacuous obligations: $(cat "$OUT")"
+grep -q "formal-vacuous-guard" "$OUT" || fail "a vacuous obligation must emit the formal-vacuous-guard warning: $(cat "$OUT")"
+grep -q "VACUOUS: its \`if\`/\`match\` guard can never be true" "$OUT" || fail "the obligation's own row must carry the vacuity note: $(cat "$OUT")"
+# The note is a CONTINUATION of the verdict row, never a replacement: the
+# obligation is honestly PROVEN (a dead antecedent leaves it true), so vacuity
+# must not be implemented by downgrading the verdict.
+grep -q "'dead guard'\": PROVEN" "$OUT" || fail "vacuity is a diagnostic, not a verdict downgrade: $(cat "$OUT")"
+python3 - "$WDV" <<'PYEOF' || fail "vacuity formal_report.json contract check failed"
+import json, sys
+d = json.load(open(sys.argv[1] + "/formal_report.json"))
+by = {o["msg"].strip("'"): o for o in d["obligations"]}
+assert set(by) == {"dead guard", "live guard"}, list(by)
+dead, live = by["dead guard"], by["live guard"]
+# Both are guarded; only the dead one is vacuous. A check that flagged BOTH
+# would "pass" a sloppier assertion, so pin the live one explicitly.
+assert dead["guarded"] and dead["vacuous_guard"], dead
+assert live["guarded"] and not live["vacuous_guard"], live
+assert dead["verdict"] == "proven" and live["verdict"] == "proven", (dead, live)
+PYEOF
+
+# 10c. formal.strict promotes it to a failure (the existing "this outcome proves
+#      nothing" lever). It is deliberately NOT a hard error by default: a guard
+#      unreachable at THIS top can be reachable under another parent, and unlike
+#      a contradictory assume set the obligation is still genuinely true.
+verify vacuity vacuity_strict --top vacuity --set formal.bound=4 --set formal.strict=true
+[ "$RC" -ne 0 ] || fail "formal.strict must turn a vacuous obligation into a failure: $(cat "$OUT")"
+grep -q "VACUOUS obligation" "$OUT" || fail "the strict failure must name the vacuous obligations: $(cat "$OUT")"
+
+# 10d. BOUND- AND ENGINE-INDEPENDENCE (the reason the measure is a free frame).
+#      `count == 5` is a LIVE guard that a shallow bound cannot reach, and the
+#      ind engine settles this design in ONE checked step at any bound. A
+#      window-based check reports it dead at every bound; the free-frame check
+#      must report it at none. Run with AND without --workdir: those take
+#      different engine paths (the F3 strategy race forks), which also pins that
+#      `vacuous_guard` survives the serialize_verify/deserialize_verify codec —
+#      an unserialized field is silently lost and the parent sees false.
+cat >"$W/vacuity_deep.prp" <<'EOF'
+mod vacuity_deep(enable:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+  value = count
+  if count == 5 {
+    assert(count != 6, "live but deep")
+  }
+  if enable {
+    wrap count += 1
+  }
+}
+EOF
+for b in 3 10; do
+  verify vacuity_deep "vacuity_deep_$b" --top vacuity_deep --set formal.bound=$b
+  [ "$RC" -eq 0 ] || fail "vacuity_deep must pass at bound=$b (rc=$RC): $(cat "$OUT")"
+  grep -q "VACUOUS" "$OUT" && fail "a LIVE guard the bound cannot reach must NOT be called vacuous (bound=$b) — the measure regressed to the unrolled window: $(cat "$OUT")"
+done
+# Same design, --workdir path (the non-forking / cached path): still not vacuous.
+WDD="$W/wd_vac_deep"
+mkdir -p "$WDD"
+verify vacuity_deep vacuity_deep_wd --top vacuity_deep --set formal.bound=6 --workdir "$WDD"
+[ "$RC" -eq 0 ] || fail "vacuity_deep must pass on the --workdir path: $(cat "$OUT")"
+grep -q "VACUOUS" "$OUT" && fail "a LIVE guard must not be vacuous on the --workdir path either: $(cat "$OUT")"
+python3 - "$WDD" <<'PYEOF' || fail "vacuity_deep report must record guarded-but-not-vacuous"
+import json, sys
+o = [p for p in json.load(open(sys.argv[1] + "/formal_report.json"))["obligations"] if p["kind"] == "assert"]
+assert len(o) == 1 and o[0]["guarded"] and not o[0]["vacuous_guard"], o
+PYEOF
+
+# 10e. The vacuity flag must cross the fork codec. The default (no --workdir) run
+#      above races strategies through serialize_verify; assert the dead-guard
+#      design still reports it there, not only on the --workdir path used in 10a.
+verify vacuity vacuity_fork --top vacuity --set formal.bound=4
+[ "$RC" -eq 0 ] || fail "the fork-path vacuity run must still pass: $(cat "$OUT")"
+grep -q "VACUOUS: its" "$OUT" || fail "vacuous_guard was LOST across the verify fork codec (serialize_verify/deserialize_verify): $(cat "$OUT")"
+
+echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity)"

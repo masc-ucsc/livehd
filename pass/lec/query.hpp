@@ -564,6 +564,19 @@ struct Prop_result {
   // + its induction-rung candidate checks; cache hits cost ~0). P2 agent-report
   // signal — the report ranks stragglers by it. Serialized by the wire codec.
   long long solve_ms = 0;
+  // R1 Phase 2 — antecedent (guard) diagnostics. `guarded` = the property was
+  // written inside an `if`/`match` arm, so the obligation is `guard implies
+  // cond`, not `cond`. `vacuous_guard` = that antecedent is UNSAT over every
+  // checked cycle, i.e. the property held only because it was never exercised.
+  //
+  // This is STRICTLY DIAGNOSTIC and never moves a verdict: unlike a
+  // contradictory assume set (which makes the proof unsound to rely on), a
+  // vacuous antecedent leaves the obligation genuinely true — it just checked
+  // nothing. So an inconclusive vacuity query leaves `vacuous_guard` false
+  // rather than accusing (the opposite of the conservative direction the
+  // per-scope check takes, and deliberately so).
+  bool guarded       = false;
+  bool vacuous_guard = false;
   std::string witness;  // per-cycle input assignment reaching the violation (Refuted)
   // Structured, uncapped input trace for witness reproduction (Refuted only):
   // the same shape the lec engine fills, so `lhd formal verify --workdir` can

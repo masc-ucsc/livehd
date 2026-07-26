@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -141,7 +142,19 @@ struct Icg_cone {
 // the flop's ENABLE. Inlining is unconditionally semantics-preserving, so this
 // is safe to run before any analysis, and it is idempotent (an inlined cell is
 // no longer a Sub). Returns the number of cells inlined.
-[[nodiscard]] int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass);
+//
+// `is_boxed` (optional) names the defs the caller has BLACKBOXED — `lhd lec`
+// passes its `formal.lec.trust` / collapse predicate. Such a cell is left
+// alone, and that is a soundness requirement, not a nicety: trust means "assume
+// these two implementations equal, do not compare them", so inlining one pulls
+// its internals into the compared cone and a difference trust was covering
+// becomes a REFUTATION. Measured on minion, whose `prim_clk_gate` is trusted:
+// its enable latch carries no reset, the two front-ends default it 0 vs 1, and
+// comparing it turns an honest UNKNOWN into `not equivalent` on a design whose
+// two clock gates are line-for-line the same logic. A don't-care is not a
+// disproof.
+[[nodiscard]] int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
+                                          const std::function<bool(const hhds::Graph*)>& is_boxed = {});
 
 // Commit class of `n`, or nullopt when `n` is not a state element (or its
 // controlling cone could not be resolved to a root). `clocks` supplies the

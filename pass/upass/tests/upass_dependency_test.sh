@@ -10,8 +10,15 @@ PRP_FILE="${TEST_SRCDIR}/${TEST_WORKSPACE}/inou/prp/tests/pyrope/simple.prp"
 W="${TEST_TMPDIR}/w"
 OUT_FILE="${TEST_TMPDIR}/upass_dependency.out"
 
-"${LHD}" compile "${PRP_FILE}" --set upass.order=assert --workdir "${W}" -q \
-  --result-json "${TEST_TMPDIR}/result.json" >/dev/null 2>&1
+# upass.tolg=false: this test is about uPass ORDER RESOLUTION, not about
+# producing hardware. `upass.order=assert` deliberately truncates the pass list
+# (no verifier), so simple.prp's `cassert(c == 10)` — whose operand comes from a
+# comb call the reduced order never folds — reaches the tolg seam undischarged
+# and hard-errors `cassert-not-comptime` (the 2026-07-25 cassert ruling: an
+# elaboration check must fold to true or it is an error). That seam explicitly
+# exempts the LNAST-only tiers, which is exactly this one.
+"${LHD}" compile "${PRP_FILE}" --set upass.order=assert --set upass.tolg=false \
+  --workdir "${W}" -q --result-json "${TEST_TMPDIR}/result.json" >/dev/null 2>&1
 
 cat "${W}"/logs/*pass_upass*.log >"${OUT_FILE}"
 

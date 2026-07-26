@@ -1819,13 +1819,13 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
     cmd += shell_quote(opts.impl_path) + " " + shell_quote(opts.ref_path) + " ";
   }
   cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
-  // Forward any explicit sim-runtime header locations (compile.cgen.sim_hlop /
-  // sim_iassert) to the child sim host-compile — needed when `../hlop` isn't
-  // beside the cwd (e.g. under `bazel test`, where the caller passes them) —
-  // and the VCD style knob, so `lhd lec --set sim.vcdfakedelay=false` shapes
-  // the counterexample waveform too.
+  // Forward any explicit sim-runtime header locations (sim.hlop_dir /
+  // sim.iassert_dir) to the child sim host-compile — needed when `../hlop`
+  // isn't beside the cwd (e.g. under `bazel test`, where the caller passes
+  // them) — and the VCD style knob, so `lhd lec --set sim.vcd_fake_delay=false`
+  // shapes the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -1841,6 +1841,82 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
         .msg("formal.lec.prpfail_run: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
         .emit();
   }
+}
+
+// Bring every INTEGRATED CLOCK GATE into a body the analyses can see, across
+// the top AND each def the encoder will meet, and fold the defs that gained one.
+// Returns {cells inlined, defs folded}.
+//
+// Inlining the top alone holds only for a design that instantiates its gate AT
+// the top. A real one puts it further down (minion instantiates `prim_clk_gate`
+// inside `minion_dcache_reduce`, `txfma_top`, `vpu_trans` and 8 more), and there
+// the top body holds no cell at all -- so nothing was inlined, every gated flop
+// kept an opaque `Sub` for a clock, and the encoder refused each of those defs.
+//
+// Folding is not optional once a def is inlined: the cell's enable latch lands
+// in the def's body, and the def scan refuses ANY def holding a latch, so
+// inlining alone would trade an encode refusal for a normalization refusal.
+//
+// P=1 IS THE WHOLE SAFETY ARGUMENT. A gate has ONE commit edge, so folding it
+// into an enable is a pure retype -- no phase divider, no re-timing, hence none
+// of the cross-module timing question that keeps the GENERAL per-def case (a
+// genuine latch or a negedge flop, P>1) refusing. The dry run enforces exactly
+// that: a def whose plan wants a divider is left untouched for the refusal to
+// find, and a def with no gate at all is not touched in any way.
+static std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vector<hhds::Graph*>& defs,
+                                                      absl::flat_hash_set<hhds::Graph*>*             unfolded,
+                                                      const std::function<bool(const hhds::Graph*)>& is_boxed = {}) {
+  int cells  = livehd::latch_contract::inline_clock_gate_cells(top, "pass.single_edge", is_boxed);
+  int folded = 0;
+  // Dedupe: the ref and impl def lists share every `--lib` cell model, and a def
+  // reached twice is the same Graph*. Inlining is idempotent, but the COUNT
+  // would double and read as twice the work.
+  absl::flat_hash_set<hhds::Graph*> seen{top};
+  for (auto* d : defs) {
+    if (d == nullptr || !seen.insert(d).second) {
+      continue;
+    }
+    // STRICTLY ADDITIVE: a def that already holds a latch or a negedge flop is
+    // one the def scan refuses TODAY, and that refusal is load-bearing (it is
+    // what keeps a latch def from being silently blackboxed). Leave it exactly
+    // as it was and let the scan speak. We only ever touch defs that pass the
+    // scan today, so nothing that passes now can start failing.
+    if (const auto pre = livehd::latch_contract::needs_single_edge(d); pre.n_latches > 0 || pre.n_negedge_flops > 0) {
+      continue;
+    }
+    const int nd = livehd::latch_contract::inline_clock_gate_cells(d, "pass.single_edge", is_boxed);
+    if (nd <= 0) {
+      continue;  // no gate here: leave the def byte-for-byte as it was
+    }
+    cells += nd;
+    // An EMPTY allow-list: this call normalizes the def's OWN body only. A
+    // latch deeper still is not this call's business -- the caller's top-level
+    // scan walks the whole instance tree and refuses there, as before.
+    livehd::single_edge::Options dp;
+    dp.dry_run = true;
+    dp.quiet   = true;  // a def we then decline to fold must not print a refusal
+    const auto plan = livehd::single_edge::normalize(d, {}, dp);
+    livehd::single_edge::Options ao;
+    ao.quiet = true;
+    if (!plan.error && plan.applied && plan.slots == 1) {
+      if (const auto done = livehd::single_edge::normalize(d, {}, ao); done.applied && !done.error) {
+        ++folded;
+        continue;
+      }
+    }
+    // Could not fold (a second clock net, or a plan wanting a divider). The
+    // gate's enable latch is now in this def's body, which the def scan would
+    // refuse -- turning what is today a single UNKNOWN def into a refusal of
+    // the WHOLE run. So hand the def back to the caller to keep OUT of that
+    // scan: the encoder then meets it exactly as it does today and returns the
+    // same honest per-def UNKNOWN (`sequential op 'latch' not supported yet`
+    // rather than `derived clock` -- same verdict, different sentence), while
+    // every def that did fold is a def that now proves.
+    if (unfolded != nullptr) {
+      unfolded->insert(d);
+    }
+  }
+  return {cells, folded};
 }
 
 void lec_command(Options& opts, Result& res) {
@@ -2101,11 +2177,25 @@ void lec_command(Options& opts, Result& res) {
     // gate into the body, where the M8 fold turns it into a flop enable.
     // Semantics-preserving on its own and idempotent, so it runs on BOTH sides
     // before either is probed -- symmetry matters here as much as anywhere.
-    if (const int nr = livehd::latch_contract::inline_clock_gate_cells(ref_g.get(), "pass.single_edge"); nr > 0) {
-      res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} ref clock-gate cell(s)", nr));
-    }
-    if (const int ni = livehd::latch_contract::inline_clock_gate_cells(impl_g.get(), "pass.single_edge"); ni > 0) {
-      res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} impl clock-gate cell(s)", ni));
+    //
+    // Across the top AND every def the hierarchical driver will encode; see
+    // inline_clock_gates_and_fold for why the per-def half is load-bearing and
+    // why folding it at P=1 is sound.
+    absl::flat_hash_set<hhds::Graph*> unfolded;
+    auto note_gates = [&res](std::string_view which, std::pair<int, int> r) {
+      if (r.first > 0) {
+        res.recipe_steps.emplace_back(
+            std::format("pass.single_edge inlined {} {} clock-gate cell(s), folded {} def(s)", r.first, which, r.second));
+      }
+    };
+    note_gates("ref", inline_clock_gates_and_fold(ref_g.get(), ref_defs, &unfolded, is_boxed));
+    note_gates("impl", inline_clock_gates_and_fold(impl_g.get(), impl_defs, &unfolded, is_boxed));
+    if (!unfolded.empty()) {
+      auto drop = [&unfolded](std::vector<hhds::Graph*>& v) {
+        std::erase_if(v, [&unfolded](hhds::Graph* d) { return unfolded.contains(d); });
+      };
+      drop(ref_defs);
+      drop(impl_defs);
     }
     auto probe = [&](hhds::Graph* side, const std::vector<hhds::Graph*>& defs, const char* which) {
       livehd::single_edge::Options po;
@@ -2817,7 +2907,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -2968,14 +3058,20 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         why += "; unproven internal assume — NOT used";
       }
     }
+    // R1 Phase 2: `guarded` says the obligation is `guard implies cond` (written
+    // inside an `if`/`match` arm), `vacuous_guard` says that antecedent is
+    // unsatisfiable over the checked window — a PROVEN that checked nothing. An
+    // agent should treat vacuous_guard like an unproven obligation even though
+    // the verdict is honestly "proven".
     j += std::format("    {{\"id\": \"{}\", \"kind\": \"{}\", \"file\": \"{}\", \"line\": {}, \"msg\": \"{}\", "
                      "\"block\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", \"unbounded\": {}, \"proven_to\": {}, "
                      "\"refuted_at\": {}, \"unknown_at\": {}, \"unknown_why\": {}, \"solve_ms\": {}, "
-                     "\"in_timeout_core\": {}, \"witness\": {}}}{}\n",
+                     "\"in_timeout_core\": {}, \"guarded\": {}, \"vacuous_guard\": {}, \"witness\": {}}}{}\n",
                      json_esc(prop_id(p)), json_esc(p.kind), json_esc(file), line.empty() ? "0" : line, json_esc(p.msg),
                      json_esc(p.block), json_esc(p.aclass), verdict, p.unbounded ? "true" : "false", p.proven_to,
                      p.refuted_at, p.unknown_at, why.empty() ? std::string{"null"} : "\"" + json_esc(why) + "\"",
-                     p.solve_ms, in_core.contains(i) ? "true" : "false",
+                     p.solve_ms, in_core.contains(i) ? "true" : "false", p.guarded ? "true" : "false",
+                     p.vacuous_guard ? "true" : "false",
                      p.witness.empty() ? std::string{"null"} : "\"" + json_esc(p.witness) + "\"",
                      i + 1 < r.props.size() ? "," : "");
   }
@@ -3233,9 +3329,6 @@ void formal_verify_command(Options& opts, Result& res) {
   // path (the netlist handed to ABC has to keep its real always_latch, and
   // keeping `lhd sim` on the SOURCE graph is what makes it an INDEPENDENT
   // oracle for this very transformation).
-  if (const int n = livehd::latch_contract::inline_clock_gate_cells(g.get(), "pass.single_edge"); n > 0) {
-    res.recipe_steps.emplace_back(std::format("pass.single_edge inlined {} clock-gate cell(s)", n));
-  }
   const int single_edge_slots = [&] {
     std::vector<hhds::Graph*> defs;
     for (const auto& sp : var.graphs) {
@@ -3248,6 +3341,15 @@ void formal_verify_command(Options& opts, Result& res) {
         defs.push_back(gp);
       }
     }
+    // Same treatment `lhd lec` gets: the top AND every def, since a design that
+    // instantiates its clock gate below the top is the normal case, not the
+    // exception. Needs `defs` in hand, so it happens here rather than above.
+    absl::flat_hash_set<hhds::Graph*> unfolded;
+    if (const auto [cells, folded] = inline_clock_gates_and_fold(g.get(), defs, &unfolded); cells > 0) {
+      res.recipe_steps.emplace_back(
+          std::format("pass.single_edge inlined {} clock-gate cell(s), folded {} def(s)", cells, folded));
+    }
+    std::erase_if(defs, [&unfolded](hhds::Graph* d) { return unfolded.contains(d); });
     auto sn = livehd::single_edge::normalize(g.get(), defs);
     if (sn.error) {
       throw Lhd_error{"unsupported",
@@ -3615,6 +3717,18 @@ void formal_verify_command(Options& opts, Result& res) {
     if (!p.block.empty()) {
       msg += " [" + p.block + "]";  // block (+@instance) attribution
     }
+    // R1 Phase 2 — an obligation whose GUARD can never hold proved trivially: it
+    // is honestly true and honestly useless. Printed as a CONTINUATION of the
+    // verdict row it qualifies (same shape as the witness lines below), never
+    // as a replacement — vacuity is a diagnostic, not a downgrade. A vacuous
+    // antecedent leaves the obligation genuinely TRUE; only a contradictory
+    // assume set makes a proof unsound to rely on.
+    auto vacuity_note = [&p]() {
+      if (p.vacuous_guard) {
+        std::print("    VACUOUS: its `if`/`match` guard can never be true, so the property is never exercised — the "
+                   "branch is dead (fix the guard condition, or drop the branch)\n");
+      }
+    };
     if (p.kind == "assume" && p.aclass != "internal") {
       if (p.aclass == "unchecked") {
         std::print("  assume{}{}: in force (UNCHECKED assume_nocheck_formal; verdicts are conditional and unchecked)\n",
@@ -3623,6 +3737,7 @@ void formal_verify_command(Options& opts, Result& res) {
       } else {
         std::print("  assume{}{}: in force (input environment constraint; verdicts are conditional on it)\n", where, msg);
       }
+      vacuity_note();  // an env assume whose guard never holds constrains nothing
       continue;
     }
     // Asserts AND internal assumes (P1 prove-then-use): the same verdict rows.
@@ -3664,6 +3779,7 @@ void formal_verify_command(Options& opts, Result& res) {
         break;
       }
     }
+    vacuity_note();
   }
 
   // formalfail witness testbench + VCD (`--workdir`, mirroring lec's lecfail):
@@ -3776,6 +3892,46 @@ void formal_verify_command(Options& opts, Result& res) {
         res.outputs.push_back(rpath);
         std::print("formal verify: wrote report {}\n", rpath);
       }
+    }
+  }
+
+  // R1 Phase 2 — ANTECEDENT vacuity. Independent of the run verdict (the usual
+  // case is a PROVEN run), so this sits ahead of the verdict ladder below.
+  //
+  // Severity ruling: WARNING by default, failure under `formal.strict`. It is
+  // deliberately NOT the hard error a contradictory assume set gets: that one
+  // makes every proof it governed unsound to rely on, whereas a vacuous
+  // antecedent leaves the obligation genuinely true — it just proved nothing.
+  // And a guard unreachable at THIS top can be perfectly reachable under a
+  // different parent instantiation, which is a legitimate design pattern; a
+  // hard error would punish it. `formal.strict` is the existing "treat a
+  // proves-nothing outcome as a failure" knob, so it is the right lever.
+  {
+    std::string vac_list;
+    int         n_vac = 0;
+    for (const auto& p : r.props) {
+      if (!p.vacuous_guard) {
+        continue;
+      }
+      ++n_vac;
+      vac_list += (vac_list.empty() ? "" : ", ") + p.kind + (p.loc.empty() ? std::string{} : " at " + p.loc)
+                  + (p.msg.empty() ? std::string{} : " \"" + p.msg + "\"");
+    }
+    if (n_vac > 0) {
+      if (o.strict) {
+        throw Lhd_error{"unsupported",
+                        std::format("formal verify: {} VACUOUS obligation(s) in '{}' — {}", n_vac, g->get_name(), vac_list),
+                        "each proved only because its `if`/`match` guard can never be true, so it checked nothing: the "
+                        "branch is dead. Fix the guard condition, or drop the branch"};
+      }
+      livehd::diag::warn("pass.formal", "formal-vacuous-guard", "io")
+          .msg("formal verify: {} obligation(s) proved VACUOUSLY in '{}' ({}) — the `if`/`match` guard can never be "
+               "true, so the property is never exercised and its PROVEN means nothing. Fix the guard condition or drop "
+               "the dead branch; --set formal.strict=true makes this a failure.",
+               n_vac,
+               g->get_name(),
+               vac_list)
+          .emit();
     }
   }
 

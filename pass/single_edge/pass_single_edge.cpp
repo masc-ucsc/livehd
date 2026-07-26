@@ -548,13 +548,28 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (!sub) {
       continue;  // blackbox / property cell: no state of ours to re-time
     }
-    for (auto sn : sub->fast_class()) {
-      if (gu::is_type_register(sn)) {
-        r.error  = true;
-        r.reason = "instance `" + label_of(n) + "` holds state; the phase divider is not port-threaded";
-        refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-               "flatten the design before normalizing (all three M8 gate fixtures are flat)");
-        return r;
+    // ...and only under a DIVIDER, exactly like the Memory case above. What
+    // this refuses is re-timing a child we cannot reach: at P>1 the parent's
+    // state moves onto slots driven by a phase counter that is not threaded
+    // through the child's ports, so the child would keep counting in the old
+    // time base. At P=1 there IS no phase counter and no slot -- a latch
+    // retype and an ICG folded into a flop enable both leave every clock and
+    // every instance boundary exactly where they were -- so a stateful child
+    // is simply not this pass's business.
+    //
+    // Scoping this is what lets a def with an inlined clock gate fold at all:
+    // a real one instantiates FIFOs and register files (minion's
+    // `minion_dcache_reduce` holds `u_ba_alloc_fifo`), so the unscoped guard
+    // refused every def that mattered and the gated flops stayed unencodable.
+    if (plan.slots > 1) {
+      for (auto sn : sub->fast_class()) {
+        if (gu::is_type_register(sn)) {
+          r.error  = true;
+          r.reason = "instance `" + label_of(n) + "` holds state; the phase divider is not port-threaded";
+          refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "flatten the design before normalizing (all three M8 gate fixtures are flat)");
+          return r;
+        }
       }
     }
   }

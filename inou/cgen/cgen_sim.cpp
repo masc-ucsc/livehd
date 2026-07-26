@@ -2183,7 +2183,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       auto it = pid2name.find(pid);
       if (it != pid2name.end()) {
-        pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__pre.", cpp_id(it->second));
+        // cpp_port_path, never cpp_id: a tuple leaf is `io_data.instruction` in
+        // the callee's Out struct (a NESTED struct, see emit_io_block), so
+        // mangling the dot to `_` here named a member that does not exist —
+        // `no member named 'io_data_instruction' in 'StageReg_StageReg::Out'`.
+        pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__pre.", cpp_port_path(it->second));
       }
     }
   }
@@ -2461,7 +2465,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (it == pid2in.end() || !bound_pids.emplace(pid, nullptr).second) {
         continue;
       }
-      fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(it->second.first), " = ",
+      // cpp_port_path for the same reason as the __pre read above: In mirrors a
+      // tuple port as a nested struct, so the leaf is `io_data.instruction`.
+      fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_port_path(it->second.first), " = ",
                                 operand(e.driver, it->second.second), ";\n"));
     }
     fout->append(absl::StrCat("    ", s.inst, ".cycle(", s.inst, "__i);  // deferred Moore-sub state advance\n"));

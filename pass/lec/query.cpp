@@ -538,6 +538,15 @@ std::string serialize_verify(const Verify_result& v) {
     put_u32(b, static_cast<uint32_t>(p.unknown_at));
     int64_t sms = p.solve_ms;
     b.append(reinterpret_cast<const char*>(&sms), sizeof sms);
+    // R1 Phase 2 guard diagnostics. Inside the per-prop record (not a tail
+    // flag): the records are length-prefixed as a group and followed by more
+    // fields, so a per-record addition has to live here. Safe because this
+    // codec is only ever a fork parent/child pair of ONE binary — but it is
+    // exactly the trap the file's tail comments describe, so: a new
+    // Prop_result field that is not added HERE is silently lost on the F3
+    // strategy-race path and the parent sees the default.
+    b.push_back(static_cast<char>(p.guarded ? 1 : 0));
+    b.push_back(static_cast<char>(p.vacuous_guard ? 1 : 0));
     put_str(b, p.witness);
     put_trace(b, p.trace);
   }
@@ -647,6 +656,13 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     std::memcpy(&sms, b.data(), sizeof sms);
     b.remove_prefix(sizeof sms);
     p.solve_ms = sms;
+    if (b.size() < 2) {
+      return false;
+    }
+    p.guarded = b.front() != 0;
+    b.remove_prefix(1);
+    p.vacuous_guard = b.front() != 0;
+    b.remove_prefix(1);
     if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
       return false;
     }
@@ -5049,6 +5065,29 @@ std::optional<Prop_key> parse_prop_key(std::string_view name) {
   return k;
 }
 
+// "\x04guard:<occ>" — R1 Phase 2. The RAW antecedent of a property written
+// inside an `if`/`match` arm, emitted alongside its "\x04prop:<occ>" so the
+// obligation's guard can be tested for satisfiability. Diagnostic only; the
+// obligation itself already carries the folded `guard implies cond`.
+std::optional<int> parse_guard_key(std::string_view name) {
+  constexpr std::string_view pfx{"\x04guard:", 7};
+  if (name.substr(0, pfx.size()) != pfx) {
+    return std::nullopt;
+  }
+  std::string_view occ_s = name.substr(pfx.size());
+  if (occ_s.empty()) {
+    return std::nullopt;
+  }
+  int occ = 0;
+  for (char c : occ_s) {
+    if (c < '0' || c > '9') {
+      return std::nullopt;
+    }
+    occ = occ * 10 + (c - '0');
+  }
+  return occ;
+}
+
 // Rule-F verify cache key: hash the exact asserted SMT encoding accumulated for
 // this cycle plus the obligation term. This is deliberately downstream of the
 // encoder; any semantic encoding change changes the serialized terms, while the
@@ -5992,6 +6031,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   };
 
   absl::flat_hash_map<int, size_t> prop_ix;  // encoder occ -> res.props index
+  bool                             any_guarded = false;  // R1 Phase 2: some property sits in an if/match arm
   int  uid         = 0;
   bool any_refuted = false, any_unknown = false;
   int                              split_checks = 0;
@@ -6069,9 +6109,12 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         Val      cond;
       };
       std::vector<Ob> obs;
+      absl::flat_hash_map<int, Val> guards;  // encoder occ -> raw antecedent (R1 Phase 2)
       for (const auto& [name, v] : eo.outputs) {
         if (auto k = parse_prop_key(name)) {
           obs.push_back({std::move(*k), v});
+        } else if (auto g = parse_guard_key(name)) {
+          guards.emplace(*g, v);
         }
       }
       std::sort(obs.begin(), obs.end(), [](const Ob& a, const Ob& b) { return a.k.occ < b.k.occ; });
@@ -6113,6 +6156,16 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         const int  w     = ob.cond.width > 0 ? ob.cond.width : 1;
         cvc5::Term zero  = tm.mkBitVector(static_cast<uint32_t>(w), 0);
         cvc5::Term holds = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, ob.cond, w), zero});
+
+        // R1 Phase 2 — note that this obligation is `guard implies cond` (written
+        // inside an `if`/`match` arm). Only the FLAG is taken from the per-cycle
+        // frames; the vacuity question itself is asked once at the end over a
+        // FREE frame, never over these cycles — see the check after the loop for
+        // why the unrolled window is the wrong measure.
+        if (guards.contains(ob.k.occ)) {
+          pr.guarded  = true;
+          any_guarded = true;
+        }
 
         if (pr.kind == "assume") {
           // Compile tier (ignore_assumes): a design assume is a no-op here — the
@@ -6961,6 +7014,110 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           pr.verdict  = Verdict::Unknown;
           pr.unbounded = false;
         }
+      }
+    }
+  }
+
+  // R1 Phase 2 — ANTECEDENT vacuity, per obligation. R1 made a property written
+  // inside an `if`/`match` arm mean `guard implies cond`; that is the right
+  // semantics, but it introduced a new silent failure mode: a guard that can
+  // never hold makes the obligation trivially Proven while checking NOTHING.
+  // This is the per-obligation counterpart of the per-scope
+  // contradictory-assume check above, and it is what SVA tooling reports (the
+  // hand-written convention is a companion `cover property (guard)`).
+  //
+  // THE MEASURE IS A FREE FRAME, NOT THE UNROLLED WINDOW. Asking "was the guard
+  // ever true in the cycles we checked?" is the intuitive question and it is
+  // WRONG here, because the number of cycles actually run is an artifact of the
+  // engine: an inductive proof settles at ONE checked step, so a perfectly live
+  // guard like `count == 5` comes out "never true" — and the same design flips
+  // answer depending on which strategy wins the ind/bmc race. Measured: bound=10
+  // on a counter reported the same 1 checked step as bound=3. So instead we ask
+  // the bound-independent, engine-independent question: is this guard
+  // satisfiable AT ALL, over free inputs and free state? UNSAT there means the
+  // branch is structurally DEAD (`if a > 200 and a < 100`), which is a precise
+  // claim with no false positives.
+  //   Deliberate non-goal: a guard that is satisfiable in the abstract but
+  // UNREACHABLE from reset is also vacuous, and is not reported. Detecting that
+  // is a reachability problem, and the only cheap proxy for it is exactly the
+  // bounded window this comment rejects.
+  //
+  // DELIBERATELY NOT the conservative direction the scope check takes: a
+  // contradictory assume set makes a proof unsound to RELY on, so an
+  // inconclusive answer there must void the verdict. A vacuous antecedent leaves
+  // the obligation genuinely TRUE — it just proved nothing interesting — so this
+  // never touches `verdict`, and an inconclusive query stays silent rather than
+  // accusing. The CLI decides warning vs failure (formal.strict).
+  //
+  // The free frame is also why no env assume applies: the guard is judged on its
+  // own logic, so an assume can never make this fire. Conservative direction.
+  if (any_guarded) {
+    if (solve_budget_on) {
+      solver.setOption("tlimit-per", std::to_string(solve_budget_ms));
+    }
+    // One extra frame with FRESH symbols everywhere — the same shape as the P1
+    // classification probe, and appended after every verdict is settled, so it
+    // cannot perturb anything already decided.
+    Io_name_map<Val> vsh;
+    for (const auto& [name, info] : ins) {
+      vsh[name] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "vgi_" + name), info.w, info.sgn};
+    }
+    for (const auto& [key, v] : state) {
+      vsh[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "vgs_" + key), v.width, v.is_signed};
+    }
+    Io_name_map<cvc5::Term> vmem;
+    for (const auto& [key, a] : mem) {
+      vmem[key] = tm.mkConst(a.getSort(), "vgm_" + key);
+    }
+    Io_name_map<cvc5::Term> vreads;
+    Encoded                 ve = enc.encode(design, &vsh, "vg_", &vmem, &vreads);
+    if (ve.ok) {
+      // PUSH/POP around the frame. This is the only place in prove_properties
+      // that ADDS assertions after the verdicts are settled, and the
+      // formal.minetimeout diagnosis below calls getTimeoutCoreAssuming — which
+      // returns a subset of THE SOLVER'S ASSERTIONS. Leaving a whole extra design
+      // frame in the assertion set would let `vg_` equalities show up in a core
+      // that is supposed to name the toxic obligations. Popping restores the
+      // solver exactly, so the diagnosis is unperturbed no matter where this
+      // block sits.
+      solver.push();
+      for (const auto& [l, r] : ve.equalities) {
+        solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+      }
+      // Deterministic order: sort by occ, since `outputs` is a hash map and the
+      // detail string below must be stable across runs.
+      std::vector<std::pair<int, Val>> vg;
+      for (const auto& [name, v] : ve.outputs) {
+        if (auto occ = parse_guard_key(name)) {
+          vg.emplace_back(*occ, v);
+        }
+      }
+      std::sort(vg.begin(), vg.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+      for (const auto& [occ, gv] : vg) {
+        auto pit = prop_ix.find(occ);  // design-tier occ_base is 0
+        if (pit == prop_ix.end()) {
+          continue;
+        }
+        auto& pr = res.props[pit->second];
+        // A REFUTED obligation demonstrably fired, so its guard is satisfiable by
+        // construction — do not pay for a known answer.
+        if (pr.verdict == Verdict::Refuted) {
+          continue;
+        }
+        const int        gw = gv.width > 0 ? gv.width : 1;
+        const cvc5::Term holds
+            = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, gv, gw), tm.mkBitVector(static_cast<uint32_t>(gw), 0)});
+        if (solver.checkSatAssuming(holds).isUnsat()) {
+          pr.vacuous_guard = true;
+        }
+      }
+      solver.pop();
+      int n_vac = 0;
+      for (const auto& pr : res.props) {
+        n_vac += pr.vacuous_guard ? 1 : 0;
+      }
+      if (n_vac > 0) {
+        res.detail += std::format("; {} obligation(s) VACUOUS (guard can never be true)", n_vac);
       }
     }
   }

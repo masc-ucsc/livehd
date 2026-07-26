@@ -210,4 +210,45 @@ grep -q '"code":"assert-deferred"' "$DIAG" || fail "on_refute=warn must emit a d
 grep -q 'on_refute=warn' "$DIAG" || fail "the downgrade warning must name the on_refute=warn knob: $(cat "$DIAG")"
 grep -q '"severity":"error"' "$DIAG" && fail "on_refute=warn must NOT emit any error: $(cat "$DIAG")"
 
-echo "PASS: 2f-formal FAIL policy (record+continue+emit; proven clean; modes; not-enough-top defers; on_refute downgrade)"
+# ---------------------------------------------------------------------------
+# 10. R1 Phase 2 — ANTECEDENT vacuity at the COMPILE tier. R1 made a property
+#     inside an `if`/`match` arm lower as `guard implies cond`; a guard that can
+#     never be true then proves trivially and its runtime check is elided. That
+#     elision is CORRECT (the check could never fire), so this is not a build
+#     failure — but the user wrote a check that can never run, and `lhd compile`
+#     is the flow they actually run, so it must warn here and not only under
+#     `lhd formal verify`.
+#
+#     The question is asked with `prover.is_false(guard)`, which quantifies over
+#     FREE state and inputs. That over-approximates the reachable states, so a
+#     Proven answer means the guard is dead in every reachable state too — no
+#     false positives, and no dependence on a bound. `live_guard` below is the
+#     control: a satisfiable guard must stay silent, or the check is useless.
+# ---------------------------------------------------------------------------
+cat >"$W/dead_guard.prp" <<'EOF'
+comb chk(a:u8) -> (x:u8) {
+  x = a
+  if a > 200 and a < 100 {
+    assert(a == 7, "dead branch")
+  }
+}
+EOF
+compile_case dead_guard dead_guard
+[ "$RC" -eq 0 ] || fail "a dead guard is a WARNING, not a build failure (got rc=$RC): $(cat "$DIAG")"
+grep -q '"code":"formal-vacuous-guard"' "$DIAG" || fail "a dead `if` guard must warn at compile time: $(cat "$DIAG")"
+grep -q 'dead branch' "$DIAG" || fail "the vacuity warning must name the assertion: $(cat "$DIAG")"
+grep -q '"severity":"error"' "$DIAG" && fail "a dead guard must not error: $(cat "$DIAG")"
+
+cat >"$W/live_guard.prp" <<'EOF'
+comb chk2(a:u8) -> (x:u8) {
+  x = a
+  if a < 4 {
+    assert(a < 10, "live branch")
+  }
+}
+EOF
+compile_case live_guard live_guard
+[ "$RC" -eq 0 ] || fail "a live guarded assert must compile clean (got rc=$RC): $(cat "$DIAG")"
+grep -q 'formal-vacuous-guard' "$DIAG" && fail "a SATISFIABLE guard must never be reported vacuous: $(cat "$DIAG")"
+
+echo "PASS: 2f-formal FAIL policy (record+continue+emit; proven clean; modes; not-enough-top defers; on_refute downgrade; R1 dead-guard vacuity warning)"

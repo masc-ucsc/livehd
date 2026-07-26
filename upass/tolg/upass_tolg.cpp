@@ -248,6 +248,7 @@ public:
 
     // Body: lower the `stmts` child of `top`.
     auto top = lnast_->get_root();
+    has_property_ = subtree_has_cassert(top);
     for (auto c = lnast_->get_first_child(top); !c.is_invalid();
          c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(lnast_->get_type(c))) {
@@ -1878,12 +1879,30 @@ private:
     return d;
   } // Memory per-port sink stride, graph/cell.hpp
 
-  // Branch path conditions for memory write enables. Maintained by lower_if
-  // only while a memory exists (mem_map_ non-empty); each entry is the full
-  // path condition (already ANDed with the enclosing one). Empty stack =
+  // Branch path conditions for memory write enables AND for property guards.
+  // Maintained by lower_if while a memory exists (mem_map_ non-empty) or the
+  // body holds a property (has_property_); each entry is the full path
+  // condition (already ANDed with the enclosing one). Empty stack =
   // unconditional.
   [[nodiscard]] Pin current_path_cond() const {
     return path_cond_.empty() ? Pin{} : path_cond_.back();
+  }
+
+  // Whole-subtree scan for an assert/assume/assert_always/cassert node. All
+  // four share the `cassert` LNAST type (lower_cassert splits them on the
+  // `__fkind__*` sentinel), so this over-approximates: a body whose only
+  // property is a comptime-discharged `cassert` still arms path tracking. That
+  // costs a couple of And/Not cells per if-branch and never changes a result,
+  // which is the right side to err on.
+  [[nodiscard]] bool subtree_has_cassert(const Lnast_nid &root) const {
+    for (auto c = lnast_->get_first_child(root); !c.is_invalid();
+         c = lnast_->get_sibling_next(c)) {
+      if (Lnast_ntype::is_cassert(lnast_->get_type(c)) ||
+          subtree_has_cassert(c)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // a AND b as a 1-bit unsigned pin; an invalid operand means "true".
@@ -4460,9 +4479,53 @@ private:
       gio->set_bits("cond", 1);
       gio->set_unsign("cond", true);
     }
+    // R1 Phase 2 — the RAW guard, as a second port that is DIAGNOSTIC ONLY.
+    // `cond` above already carries the full obligation (`!guard || cond`), so a
+    // consumer that never reads this port is still CORRECT — it merely loses the
+    // antecedent-vacuity diagnostic. That asymmetry is the whole reason the
+    // implication is folded into one pin instead of being carried here: a
+    // correctness-bearing second port reproduces the R1 bug once per consumer
+    // that forgets it, while a diagnostic one can only cost a warning.
+    // Guarded by has_input so an fproperty GraphIO loaded from an older `lg:`
+    // artifact (cond only) degrades to "no vacuity check" rather than asserting.
+    if (!gio->has_input("guard")) {
+      gio->add_input("guard", 2);
+      gio->set_bits("guard", 1);
+      gio->set_unsign("guard", true);
+    }
+    // R1 — an `assert`/`assume` inside an `if`/`match` arm is guarded by that
+    // arm's path condition, exactly as SystemVerilog does it: a procedural
+    // assertion is only evaluated when control flow reaches it, which the LRM
+    // models as an implication (`guard |-> cond`). Dropping the guard makes the
+    // obligation STRICTLY STRONGER, which is silently wrong in both directions
+    // — an assert fires on paths the user never claimed anything about, and an
+    // over-constrained assume prunes traces (a false PROVEN). So fold the guard
+    // into `cond` rather than carrying it as a second port: every consumer of
+    // this Sub (pass.formal, the verify monitor encode, cgen_verilog,
+    // cgen_sim) then honors it by construction, where a separate port would
+    // reproduce this bug once per consumer that forgot to read it.
+    //
+    // IMPLICATION, not conjunction — `!guard || cond`. The other consumer of
+    // current_path_cond() (memory write enables) wants `and2(guard, ...)`; the
+    // same pin with the wrong combinator here yields an assert that fires
+    // precisely when the guard is FALSE.
+    //
+    // `cassert` never reaches this point (it returned above): it is an
+    // elaboration check that must fold to a comptime constant, and `!guard ||
+    // cond` under a runtime guard never folds, so guarding it would turn
+    // working code into `cassert-not-comptime`.
+    //
+    // or2 treats an invalid operand as the identity, so an unguarded property
+    // (empty path stack) mints no cells at all.
+    const auto guard = current_path_cond();
+    const auto eff_cond =
+        guard.is_invalid() ? cond.pin : or2(not1(guard), cond.pin);
     auto sub = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
-    sub.create_sink_pin("cond").connect_driver(cond.pin);
+    sub.create_sink_pin("cond").connect_driver(eff_cond);
+    if (!guard.is_invalid() && gio->has_input("guard")) {
+      sub.create_sink_pin("guard").connect_driver(guard);
+    }
     const auto sp = lnast_->span_of(nid);
     std::string loc = sp.file.empty() ? std::string{} : sp.file;
     if (sp.start_line) {
@@ -5353,9 +5416,13 @@ private:
       return;
     }
     // 1a-mem — memory write enables need each branch's full path condition;
-    // only built while a memory exists (zero overhead otherwise). `guard`
-    // accumulates enclosing ∧ ¬(prior conds); a branch's path is guard ∧ cond.
-    const bool track_path = !mem_map_.empty();
+    // R1 — so do assert/assume guards (lower_cassert turns the path condition
+    // into an IMPLICATION, where a memory enable uses it as a CONJUNCTION).
+    // Only built when one of the two consumers exists (zero overhead
+    // otherwise). `guard` accumulates enclosing ∧ ¬(prior conds); a branch's
+    // path is guard ∧ cond. `match` rides this too: it lowers to a unique_if
+    // whose arms are branch-lowered here before lower_unique_merge runs.
+    const bool track_path = !mem_map_.empty() || has_property_;
     Pin guard = track_path ? current_path_cond() : Pin{};
     auto lower_branch_with_path = [&](const Lnast_nid &stmts, const Pin &path) {
       if (!track_path) {
@@ -5679,6 +5746,15 @@ private:
   absl::flat_hash_map<std::string, Mem_info> mem_map_;
   std::vector<std::string> mem_order_;
   std::vector<Pin> path_cond_;
+  // Does this body hold an assert/assume/assert_always? Decided ONCE by a
+  // pre-scan in build(), before any statement lowers, because lower_if's
+  // path-condition tracking must be armed for the WHOLE body: the other
+  // consumer (memory write enables) keys on mem_map_, which fills as memories
+  // are DECLARED, so an `if` lexically ahead of the declaration gets no path
+  // condition. That is tolerable for a memory (its writes are inside/after the
+  // declaration) but not for a property, whose guard would then depend on
+  // statement order. See lower_cassert.
+  bool has_property_ = false;
   absl::flat_hash_map<std::string, Tuple_rec> tuple_recs_;
   absl::flat_hash_map<std::string, Mem_result> mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).

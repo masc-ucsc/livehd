@@ -50,6 +50,46 @@ static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
   return {};
 }
 
+// Guard-side classifier for a Memory's clock_pin driver: TRUE iff nothing in
+// the clock's shape contradicts the "every write lands once per step" model.
+// Acceptable lanes: unconnected, a constant (a tied-off port), a graph clock
+// input (via resolve_clk_input), or an opaque instance (a mapped clock-buffer
+// cell -- hhds resolves a Sub body only through the graph's OWN library and a
+// netlist holds IO-only cell decls, so a cell Sub never flattens here). The
+// Set_mask recursion is the load-bearing part: the abc read-back rebuilds a
+// signed 1-bit clock_pin as `set_mask(const, mapped-driver)` and chains one
+// per port (abc_map.cpp pass 3b), so the buffer Sub the exemption above was
+// written for sits BEHIND a Set_mask and the bare master-node test never sees
+// it -- that regression refused every ABC-mapped memory under `lhd lec`.
+// Ordinary combinational logic in ANY lane (an And, a mux, a divider's Q)
+// still returns false, which is the guard's whole point. Depth-capped
+// fail-closed: a pathological chain refuses rather than recursing away.
+static bool memory_clock_shape_ok(hhds::Pin_class p, int depth = 0) {
+  if (depth > 64) {
+    return false;
+  }
+  if (p.is_invalid() || gu::is_const_pin(p)) {
+    return true;
+  }
+  if (!resolve_clk_input(p).is_invalid()) {
+    return true;
+  }
+  auto n = p.get_master_node();
+  const auto op = gu::type_op_of(n);
+  if (op == Ntype_op::Sub) {
+    return true;
+  }
+  if (op != Ntype_op::Set_mask) {
+    return false;
+  }
+  for (const auto& e : n.inp_edges()) {
+    if (!memory_clock_shape_ok(e.driver, depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Stable 1:1 cut-point key for a state cell (Flop), used to put corresponding
 // registers of the two designs in correspondence. The REGISTER NAME is the
 // primary key: both front-ends preserve the RTL name (yosys-slang on the pin,
@@ -744,13 +784,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
         // a BUFFER CELL (`.clk(g118_BUFx1_2)`), which is a `Sub` and resolves to
         // no input either -- but it is the same clock, and refusing it would
-        // reject every mapped design. So: refuse when the driver is ordinary
-        // combinational LOGIC in this graph (an And gate, an inverter, a mux, a
-        // divider's Q), and allow an opaque instance. A tech-mapped ICG cell is
-        // therefore still not caught here; that needs cell-model awareness and
-        // is the pre-existing behaviour for mapped netlists.
-        if (!e.driver.is_invalid() && !gu::is_const_pin(e.driver) && resolve_clk_input(e.driver).is_invalid()
-            && gu::type_op_of(e.driver.get_master_node()) != Ntype_op::Sub) {
+        // reject every mapped design. So: refuse when any lane of the clock is
+        // ordinary combinational LOGIC in this graph (an And gate, an inverter,
+        // a mux, a divider's Q), and allow an opaque instance. A tech-mapped
+        // ICG cell is therefore still not caught here; that needs cell-model
+        // awareness and is the pre-existing behaviour for mapped netlists.
+        // memory_clock_shape_ok, not the bare Sub test: the abc read-back does
+        // not wire the buffer cell to clock_pin directly -- it wraps it in a
+        // Set_mask concat -- so the immediate driver is a Set_mask and the Sub
+        // exemption alone refuses every mapped memory.
+        if (!memory_clock_shape_ok(e.driver)) {
           return fail_unsupported("memory '" + gu::debug_name(node)
                                   + "' has a derived clock the encoder cannot model (it treats every memory write as "
                                     "landing once per step, with the clock derivation as dead code)");
@@ -1983,6 +2026,34 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto        nm  = gu::node_name_of(node);
       std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
       out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
+
+      // R1 Phase 2 — the optional raw GUARD of a property written inside an
+      // `if`/`match` arm, emitted as "\x04guard:<occ>" so prove_properties can
+      // ask whether the antecedent is ever satisfiable (a guard that can never
+      // hold makes `guard implies cond` trivially Proven — true, but it checked
+      // nothing). DIAGNOSTIC ONLY: `cond` above already carries the folded
+      // implication, so dropping this emission can never change a verdict, and
+      // every failure path below simply omits it. The distinct `guard:` prefix
+      // is invisible to both `\x04prop:` parsers.
+      if (!sio->has_input("guard")) {
+        continue;
+      }
+      const auto      guard_pid = sio->get_input_port_id("guard");
+      hhds::Pin_class guard_drv;
+      for (const auto& e : node.inp_edges()) {
+        if (e.sink.get_port_id() == guard_pid) {
+          guard_drv = e.driver;
+          break;
+        }
+      }
+      if (guard_drv.is_invalid()) {
+        continue;  // unguarded property: nothing to report
+      }
+      bool gok = true;
+      Val  gv  = driver_val(guard_drv, gok);
+      if (gok) {
+        out.outputs[std::string("\x04") + "guard:" + std::to_string(occ)] = gv;
+      }
     }
   }
 

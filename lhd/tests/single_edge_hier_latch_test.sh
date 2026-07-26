@@ -28,6 +28,12 @@
 # and RF-preview families). P>1 inside a def needs the phase counter port-threaded
 # first (todo open question 6).
 #
+# The ICG SLICE of that is DONE (case 5): clock-gate cells are inlined into every
+# def the hierarchical driver will encode, not just into the top body, and each
+# def that gained one is then folded IN PLACE at P=1. A gate has one commit edge,
+# so the fold never introduces a divider — which is exactly why this slice needs
+# none of the port-threaded phase counter the general P>1 case waits on.
+#
 # The CONTRAST cases below are what make this a real test rather than a note:
 # an instantiated CLOCK-GATE cell with a latch inside is NOT refused (it is
 # inlined and folded — see single_edge_icg_test.sh), and a def with only ordinary
@@ -148,5 +154,67 @@ build hicg "$W/hicg.v" dut
 [ $? -eq 0 ] \
   || { tail -6 "$W/l4.log"; fail "an INSTANTIATED clock-gate cell was refused -- it holds a latch in a def too, but it is meant to be inlined and folded into the flop enable"; }
 echo "ok: an instantiated clock-gate cell is still inlined and proven, not refused"
+
+# ---- 5. the ICG one level DEEPER: in a DEF, not in the top body -------------
+# lhdsuite fixme issue 1a, reduced to 20 lines. Case 4 works because the gate
+# sits in the TOP body, which is the only graph clock-gate inlining used to run
+# on. Real designs put it one level down — minion instantiates `prim_clk_gate`
+# inside `minion_dcache_reduce`, `txfma_top`, `vpu_trans` and 8 more — and there
+# the top's body holds no cell at all, so nothing was inlined and every one of
+# those defs came back UNKNOWN. Two distinct failures rode on it, both here:
+#   5a. untrusted: the ICG def is reachable and holds a latch, so the def scan
+#       refuses the whole run before anything is encoded.
+#   5b. TRUSTED (what minion actually does): the def scan skips the boxed cell,
+#       the run reaches the encoder, and the encoder refuses each gated flop
+#       ("has a derived clock ... not a foldable `<clock> & <enables>` gate").
+cat > "$W/hicgdeep.v" <<'EOF'
+module prim_clk_gate(input clk_i, input en_i, output clk_o);
+  logic en_latch;
+  always_latch if (!clk_i) en_latch <= en_i;
+  assign clk_o = clk_i & en_latch;
+endmodule
+
+module leaf(input clk, input en, input [7:0] d, input [7:0] m, output [7:0] o);
+  logic gclk;
+  prim_clk_gate u_cg(.clk_i(clk), .en_i(en), .clk_o(gclk));
+  reg [7:0] f;
+  always @(posedge gclk) f <= d;
+  assign o = f & m;
+endmodule
+
+module dut(input clk, input en, input [7:0] d, input [7:0] m, output [7:0] q);
+  wire [7:0] t;
+  leaf u(.clk(clk), .en(en), .d(d), .m(m), .o(t));
+  reg [7:0] g;
+  always @(posedge clk) g <= t;
+  assign q = g;
+endmodule
+EOF
+build hicgdeep "$W/hicgdeep.v" dut
+"$LHD" lec --impl "lg:$W/lg_hicgdeep" --ref "lg:$W/lg_hicgdeep" --top dut --workdir "$W/l5a" >"$W/l5a.log" 2>&1
+[ $? -eq 0 ] \
+  || { tail -6 "$W/l5a.log"; fail "a clock-gate cell one level DOWN (inside a def) was refused -- inlining must reach every def the hierarchical driver encodes, not just the top body"; }
+echo "ok: a clock-gate cell inside a def is inlined and proven"
+
+# 5b. TRUST WINS, AND MUST NOT MANUFACTURE A REFUTATION. A trusted def is one
+# the user declared out of scope: "assume these two equal, do not compare them".
+# So a trusted clock-gate cell is NOT inlined, even though inlining is what
+# makes its gated flops encodable — and the run is allowed to come back
+# UNKNOWN. What it may never do is come back REFUTED.
+#
+# That is not hypothetical. minion trusts `prim_clk_gate`, whose enable latch
+# carries no reset; the Verilog and Pyrope front-ends default it to 0 and 1.
+# Inlining it pulls that don't-care into the compared cone and the whole design
+# reports `not equivalent` — a false disproof of two clock gates that are
+# line-for-line the same logic. An honest UNKNOWN is strictly better than a
+# confident wrong answer, so the two sides here differ (De Morgan) to force a
+# real encode, and the gate is trusted: the only forbidden outcome is a refutation.
+sed 's/assign o = f & m;/assign o = ~(~f | ~m);/' "$W/hicgdeep.v" > "$W/hicgdeep_dm.v"
+build hicgdeep_dm "$W/hicgdeep_dm.v" dut
+out="$("$LHD" lec --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top dut \
+        --workdir "$W/l5b" --set formal.lec.trust=prim_clk_gate 2>&1)"
+grep -qaiE "refut|not equivalent|equiv_fail" <<<"$out" \
+  && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }
+echo "ok: a trusted clock-gate cell stays boxed and yields no false refutation"
 
 echo "PASS: single_edge_hier_latch_test"

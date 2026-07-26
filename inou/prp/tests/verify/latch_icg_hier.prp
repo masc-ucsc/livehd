@@ -1,0 +1,88 @@
+/*
+:name: latch_icg_hier
+:type: verify
+:top_module: icghier_tb
+:verify_bound: 16
+:verify_proven: 3
+:verify_refuted: 0
+*/
+
+// todo/livehd/2f-latch — AN INTEGRATED CLOCK GATE ONE LEVEL DOWN.
+//
+// The hierarchical companion to tests/equiv/latch_icg.prp, and the small fast
+// reproduction of lhdsuite fixme issue 1a. Everything here exists to put the
+// clock gate BELOW the top: `icghier_tb` instantiates `icg_leaf`, and it is
+// `icg_leaf` — not the top — that instantiates the gate cell and clocks a flop
+// from its output.
+//
+// WHY THE LEVEL MATTERS. Clock-gate inlining is what lets anything downstream
+// see that `gclk` is a GATE rather than an opaque instance output; the M8 fold
+// then rewrites it into the flop's ENABLE, which the encoder models natively.
+// That inlining used to run on the TOP GRAPH ONLY. With the cell at the top it
+// fired (tests/equiv/latch_icg.prp, lhd/tests/single_edge_hier_latch_test.sh
+// case 4); one level down NOTHING was inlined, the gated flop kept a `Sub`
+// output for a clock, and the run refused with
+//
+//   flop 'f' has a derived clock the encoder cannot model
+//   (not a clock input, and not a foldable `<clock> & <enables>` gate)
+//
+// which is exactly how minion loses 11 defs at once — it instantiates
+// `prim_clk_gate` inside `minion_dcache_reduce`, `txfma_top`, `vpu_trans` and 8
+// more, never in the top body. Inlining now reaches every def the driver will
+// encode, and each def that gains a cell is folded IN PLACE at P=1 (a gate has
+// ONE commit edge, so the fold is a pure retype with no phase divider).
+//
+// WHAT THE OBLIGATIONS PIN. Not merely that the design encodes — that the GATE
+// STILL GATES after being folded into an enable. A fold that dropped the gate
+// would leave a flop that loads every cycle, and the HOLD obligation at c==3 is
+// what catches it. Conventions follow latch_negedge_enable.prp: `implies` form
+// (a formal obligation drops an `if` guard and would refute at cycle 0),
+// snapshot-before-write, and a CLOSED testbench — every stimulus is a pure
+// function of an explicitly-initialized counter, and the u3 wrap makes the
+// schedule cyclic so these prove without a deep unroll.
+//
+// Schedule (`en` low for exactly one period, `d` always changing, so a dropped
+// gate is observable as a value that moved when it should have held):
+//
+//   c   en  d    f after the rise   snapshot q at c
+//   0   1   10   10                 (reset)
+//   1   1   11   11                 10
+//   2   1   12   12                 11
+//   3   0   13   12  <- HELD        12   <- the gate closed
+//   4   1   14   14                 12   <- still the held value
+//   5   1   15   15                 14
+//
+// The gate cell itself: a transparent-low enable latch ANDed with the clock,
+// structurally identical to core-et's `prim_clk_gate`.
+mod icg_cell(clk_i:bool, en_i:bool) -> (clk_o:bool@[]) {
+  reg enl:bool:[latch=true]  // transparent while clk_i==0, CLOSED while clk_i==1
+  if !clk_i {
+    enl = en_i
+  }
+  clk_o = clk_i and enl
+}
+
+// The def that holds both the gate cell and the flop it gates. This is the
+// graph that used to be unencodable: from the top, `gclk` is invisible.
+mod icg_leaf(clk:bool, en:bool, d:u8) -> (o:u8@[]) {
+  wire gclk:bool = nil
+  mut u_cg = icg_cell(clk_i = clk, en_i = en)
+  gclk = u_cg
+  reg f:u8:[clock_pin=ref gclk] = 0
+  o = f
+  f = d
+}
+
+pub mod icghier_tb(clk:bool) -> (ok:bool@[0]) {
+  reg cyc:u3:[clock_pin=ref clk] = 0
+  const c  = cyc
+  const en = c != 3   // the gate closes for exactly one period
+  const dv = 10 + c   // ...while the data keeps moving, so a hold is visible
+  mut u    = icg_leaf(clk = clk, en = en, d = dv)
+  const q  = u
+  wrap cyc += 1
+  ok = q#[0] == 0
+  assert((c == 3) implies (q == 12), "the gated flop loaded while the gate was open")
+  assert((c == 4) implies (q == 12), "the gate closed for one period: the flop HELD its value")
+  assert((c == 5) implies (q == 14), "the gate reopened: the flop loads again")
+}

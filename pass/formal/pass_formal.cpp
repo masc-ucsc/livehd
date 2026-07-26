@@ -386,6 +386,57 @@ void Pass_formal::work(Eprp_var& var) {
       prover.assume(c);  // sound hypotheses for the assert queries
     }
 
+    // R1 Phase 2 — ANTECEDENT vacuity at the COMPILE tier. A property written
+    // inside an `if`/`match` arm lowers to `guard implies cond` (upass.tolg
+    // lower_cassert), and tolg also leaves the RAW guard on the fproperty's
+    // diagnostic-only `guard` sink. If that guard can never be true the
+    // obligation proves trivially and its runtime check is elided — correct, but
+    // the user wrote a check that can never run, so say so on the flow they
+    // actually run (`lhd compile`), not only under `lhd formal verify`.
+    //
+    // `prover.is_false` is exactly the right question and exactly the right
+    // frame: it quantifies over FREE state and inputs, which OVER-approximates
+    // the reachable states, so Proven ⇒ the guard is never true in any reachable
+    // state either. No false positives, and no dependence on a bound — the same
+    // reason `prove_properties` asks this over a free frame instead of over its
+    // unrolled window.
+    auto warn_vacuous_guard = [&](const hhds::Node_class& node, const Fprop& parts) {
+      if (!warn_assert) {
+        return;
+      }
+      // Resolve the guard driver by WALKING the in-edges, never via
+      // get_driver_of_sink_name: an UNGUARDED fproperty has no `guard` sink pin
+      // at all, and asking for a pin that was never created aborts in a dbg
+      // build ("get_pin: requested pin was not created"). Since most properties
+      // are unguarded, that is the common path, not the corner case.
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr || !sio->has_input("guard")) {
+        return;
+      }
+      const auto      guard_pid = sio->get_input_port_id("guard");
+      hhds::Pin_class guard;
+      for (const auto& e : node.inp_edges()) {
+        if (e.sink.get_port_id() == guard_pid) {
+          guard = e.driver;
+          break;
+        }
+      }
+      if (guard.is_invalid()) {
+        return;  // unguarded property: nothing to ask, nothing to pay
+      }
+      if (prover.is_false(guard).verdict != formal::Verdict::Proven) {
+        return;
+      }
+      livehd::diag::warn("pass.formal", "formal-vacuous-guard", "comptime")
+          .msg("VACUOUS: {} in '{}'{}{} sits in an `if`/`match` arm whose guard can NEVER be true, so it is never "
+               "exercised — the branch is dead. Fix the guard condition or drop the branch.",
+               parts.kind,
+               g->get_name(),
+               parts.loc.empty() ? std::string{} : " at " + parts.loc,
+               parts.msg.empty() ? std::string{} : " \"" + parts.msg + "\"")
+          .emit();
+    };
+
     // Pass 2: prove asserts / assert_always.
     //
     // The pre-rebase single-frame Prover engine, as a per-obligation proof:
@@ -522,6 +573,19 @@ void Pass_formal::work(Eprp_var& var) {
             prove_assert_prover(node, parts, /*allow_refute_error=*/false);
           }
         }
+      }
+    }
+
+    // R1 Phase 2 — one antecedent-vacuity sweep, AFTER whichever engine above
+    // decided the verdicts, so it runs exactly once per node in every mode
+    // (fast, normal, and normal's correlation-failure fallback) instead of being
+    // threaded through all three call sites. It never touches a verdict or an
+    // elision: a dead guard leaves the obligation genuinely true, it just means
+    // the user wrote a check that can never run.
+    for (auto& node : props) {
+      auto parts = fprop_parts(node);
+      if (parts.kind != "assume") {
+        warn_vacuous_guard(node, parts);
       }
     }
   }
