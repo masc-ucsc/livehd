@@ -138,24 +138,40 @@ struct Lec_options {
                                  // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
   int         bound   = 6;       // BMC / induction depth
-  int         timeout = 0;       // per-query seconds (0 = none). NOTE: for the hierarchical
-                                 // driver this is the TOTAL wall-clock budget for the whole
-                                 // command (2f-fcore §6 scheduler), sliced across escalating
-                                 // rounds; for a single def / the flat path it is the per-query cap.
-  // Budget scheduler (2f-fcore §6): how the hier driver spends `timeout`.
-  //   "wall"   — `timeout` is a TOTAL wall-clock budget; the driver runs escalating
-  //              rounds (small slices first, survivors re-tried with bigger slices)
-  //              until every def settles or the deadline passes. This makes one
-  //              `formal.timeout=T` an actual total, not `T` per def (the D×T hazard).
-  //   "rlimit" — no wall-clock rounds; each query is bounded by the deterministic
-  //              `rlimit` counter instead (the compile tier / CI-repro path). A no-op
-  //              scheduler, so builds stay reproducible across machines/build modes.
-  std::string budget_mode = "wall";
-  // Independent budget (seconds, 0 = off) for a diagnosis/straggler phase after the
-  // final round: name the still-unproven defs so a timed-out run's OUTPUT is
-  // actionable. Reserved for the mining/timeout-core work; currently emits the
-  // straggler list. (2f-fcore §6 `formal.minetimeout`.)
-  int         minetimeout = 0;
+  // `timeout` is a SOFT TOTAL budget, not a per-query cap: overshooting it is
+  // fine, silently checking nothing is not. The hier driver spends it as total
+  // WALL clock over the proof DAG (defs run concurrently under `jobs`, so a
+  // summed budget would drain jobs-times faster than real time); the verify
+  // engine spends it as total SOLVER time across the run. Either way one
+  // `formal.timeout=T` is an actual total, not T per def / per obligation (the
+  // D×T hazard). 0 = unbounded. Accounting is ON iff `timeout > 0 && rlimit == 0`
+  // — `rlimit` is the deterministic CI path and owns the bound by itself, which
+  // is why there is no separate mode knob.
+  int         timeout = 0;
+  // FLOOR, in seconds, under the soft total: once `timeout` is spent, a unit
+  // that has NO verdict yet still gets at least this much solver time so it
+  // earns a real Unknown/CEX instead of a silent "not checked". A "unit" is one
+  // obligation (verify) or one def (hier lec).
+  //
+  // This is deliberately allowed to overshoot `timeout` — that is the point.
+  // The bound is `timeout + (unsettled units x min_timeout)`, and what keeps
+  // the second term at ONE floor per unit (not one per BMC cycle) is the FREEZE
+  // in prove_properties: once the budget is spent, a unit that already has a
+  // bounded proof stops deepening, and a unit with none takes its single floored
+  // attempt and then latches `unknown_at`, which the cycle loop skips. Removing
+  // that freeze turns this into units x cycles x floor.
+  //
+  // Default 1s = the value both floors were hardcoded to before it became a
+  // knob. Raise it to trade overrun for fewer Unknowns on a wide design.
+  int         min_timeout = 1;
+  // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
+  // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
+  // still-Unknown obligations is jointly toxic), and P3 invariant MINING. All
+  // three are diagnosis — they cost solver time and can never change a verdict —
+  // which is why they share one budget that is never drawn from `timeout`
+  // (mining's induction rung must be able to open even when the main run is
+  // exhausted, which is the normal mining scenario).
+  int         spec_mining_timeout = 0;
   // Deterministic per-query budget (cvc5 `rlimit-per`): a machine-/wall-clock-
   // independent internal resource counter, so the SAME config yields the SAME
   // verdict on every machine and build mode. The compile tier (2f-formal) sets
@@ -397,7 +413,7 @@ struct Lec_options {
   std::function<bool(std::string_view)> verify_cache_lookup;
   std::function<void(std::string)>      verify_cache_store;
 
-  // P3 mining tier. Mining itself is gated by minetimeout>0 (it spends that
+  // P3 mining tier. Mining itself is gated by spec_mining_timeout>0 (it spends that
   // budget, never `timeout`). "" = report only the inductive survivors;
   // "speculative" = also report base-proven candidates the induction step
   // dropped (bounded facts an agent may still find suggestive).
@@ -608,8 +624,18 @@ struct Verify_result {
   // DESIGN tier voids everything (every scope sits on the design frame).
   bool                     vacuous = false;
   std::vector<std::string> vacuous_scopes;
+  // Soft-budget accounting (formal.timeout is a TARGET, not a cap). What was
+  // actually spent against it, over how many units, and how many of those ran on
+  // the formal.min_timeout floor — the floored ones ARE the overrun, so the two
+  // numbers together say whether to raise the target or lower the floor.
+  // budget_target_s == 0 means no budget was in force (unbounded / rlimit tier).
+  int       budget_target_s = 0;
+  long long budget_spent_ms = 0;
+  int       budget_units    = 0;  // obligations (verify) actually put to the solver
+  int       budget_floored  = 0;  // of those, how many ran on the floor
+  int       budget_floor_s  = 0;
   std::vector<Prop_result> props;  // one entry per fproperty, walk order
-  // STRUCTURED timeout core (formal.minetimeout): indices into `props` of the
+  // STRUCTURED timeout core (formal.spec_mining_timeout): indices into `props` of the
   // obligations cvc5 named as the toxic subset (the same set res.detail spells
   // in prose). Empty when the diagnosis is off / unavailable / found nothing.
   std::vector<int> timeout_core;

@@ -54,11 +54,16 @@ void Pass_lec::setup() {
                        "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout",
-                       "per-query wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to "
-                       "UNKNOWN instead of freezing). ONE allowance covering the whole query — ENCODE plus every checkSat — "
-                       "not one per phase: the encoders take what is left and each checkSat is re-armed to what remains "
-                       "(before, encode and solve each got the full value, so a `120` cap really cost ~2x that in wall "
-                       "clock). NB engine=auto races ind+bmc as two processes, so a run is bounded by ~timeout, not 2x",
+                       "SOFT TOTAL budget in seconds for the run (0 = unbounded; the default bounds the CLI so a hard "
+                       "miter degrades to UNKNOWN instead of freezing). A target, not a cap: overshooting is fine, "
+                       "silently checking nothing is not — see formal.min_timeout for the floor that causes the "
+                       "overrun, and the 'budget Ns target / Ms actual' line that reports it. It is ONE allowance for "
+                       "the whole query (ENCODE plus every checkSat, each re-armed to what remains), and one TOTAL "
+                       "across units, not one per def / per obligation (the D x T hazard). The hierarchical driver "
+                       "spends it as wall clock (defs run concurrently under formal.jobs, so a summed budget would "
+                       "drain jobs-times faster than real time); the verify engine spends it as total solver time. "
+                       "Accounting is on iff timeout>0 and formal.rlimit==0. NB engine=auto races ind+bmc as two "
+                       "processes, each self-bounded to timeout",
                        "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate prpfail/prpfail_run)", "true");
   m.add_label_optional("prpfail",
@@ -138,14 +143,19 @@ void Pass_lec::setup() {
                        "counter (0 = off). The compile tier sets it (with timeout=0) so a verdict that elides a "
                        "runtime check is reproducible across binaries; verify/lec default to wall-clock timeout",
                        "0");
-  m.add_label_optional("budget_mode",
-                       "how the hierarchical driver spends `timeout`: wall (timeout is a TOTAL wall-clock budget spent "
-                       "over escalating rounds, so one formal.timeout=T is an actual total, not T per def) | rlimit "
-                       "(no wall-clock rounds; deterministic rlimit-per bounds each query — the compile/CI-repro path)",
-                       "wall");
-  m.add_label_optional("mine_timeout",
-                       "extra budget (seconds, 0 = off) for a diagnosis phase after the final round: names the "
-                       "still-unproven defs so a timed-out run's output is actionable",
+  m.add_label_optional("min_timeout",
+                       "FLOOR in seconds under the soft `timeout` total: once the total is spent, a unit with no "
+                       "verdict yet still gets at least this much solver time, so it earns a real UNKNOWN/CEX instead "
+                       "of a silent 'not checked'. A unit is one obligation (formal verify) or one def (hierarchical "
+                       "lec). Overshooting `timeout` is intended — the bound is timeout + unsettled_units*min_timeout "
+                       "— and the run reports target/actual/units/floored so the overrun is never silent",
+                       "1");
+  m.add_label_optional("spec_mining_timeout",
+                       "independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase, never drawn from "
+                       "`timeout`: the unproven-def straggler list, the cvc5 timeout-CORE diagnosis (which subset of "
+                       "still-unknown obligations is jointly toxic), and P3 invariant mining (see formal.mine, which "
+                       "is inert unless this is set). All three are diagnosis: they cost solver time and can never "
+                       "change a verdict",
                        "0");
   m.add_label_optional("report",
                        "`lhd formal verify` machine-readable run report: a JSON file written into the workdir on "
@@ -154,8 +164,8 @@ void Pass_lec::setup() {
                        "feedback channel. Value: a filename (default formal_report.json); ''/'false'=off",
                        "formal_report.json");
   m.add_label_optional("mine",
-                       "`lhd formal verify` invariant-mining tier (runs under the mine_timeout budget; mine_timeout=0 "
-                       "disables mining entirely): '' (default) reports only INDUCTIVE survivors — genuine "
+                       "`lhd formal verify` invariant-mining tier (runs under the formal.spec_mining_timeout budget; "
+                       "spec_mining_timeout=0 disables mining entirely): '' (default) reports only INDUCTIVE survivors — genuine "
                        "invariants, also emitted as a paste-ready formal block (formal_mined.prp) | speculative "
                        "(additionally report base-proven candidates the induction step dropped)",
                        "");

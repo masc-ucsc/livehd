@@ -662,6 +662,14 @@ void check_known_set_passes(const Options& opts) {
                         std::format("--set/--config '{}.{}' was renamed", pass, flag),
                         std::format("use --set {}.{}={} instead", pass, f2, value)};
       }
+      // A flag DELETED outright (not renamed) gets its own reason: the generic
+      // "unknown flag" below would send the user hunting for a near-miss spelling
+      // that does not exist.
+      for (const auto& [oldf, why] : kRemovedFlags) {
+        if (oldf == flag) {
+          throw Lhd_error{"usage", std::format("--set/--config '{}.{}' was removed", pass, flag), std::string{why}};
+        }
+      }
       auto near = leaf_match_hint(flag);
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),

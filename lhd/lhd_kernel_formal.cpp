@@ -542,7 +542,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   }
   std::vector<uint8_t>      proven(order.size(), 0);  // each slot written by its owning task
   // Budget scheduler: `settled` marks a def whose verdict is DEFINITIVE (Proven or
-  // Refuted), for the straggler diagnosis. When `budget_on` (budget_mode=wall,
+  // Refuted), for the straggler diagnosis. When `budget_on` (timeout>0, rlimit==0,
   // timeout>0, >1 def), `base.timeout` is a soft TOTAL WALL budget for the DAG's
   // solving: each def's per-query cap is the wall time remaining since dispatch
   // (see run_def — wall, not a sum of per-def times, so concurrent defs don't
@@ -554,6 +554,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<uint8_t>      settled(order.size(), 0);
   bool                      budget_on = false;
   std::atomic<long long>    solve_spent_ms{0};
+  std::atomic<int>          defs_floored{0};  // defs dispatched past the soft total, on the min_timeout floor
+  std::atomic<int>          defs_solved{0};   // defs actually handed to the solver (the "units" of the report)
   std::chrono::steady_clock::time_point budget_t0{};  // DAG dispatch start; the wall clock the budget draws from
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
@@ -647,7 +649,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // pre-scheduler behavior a standalone --top run gives it.
       const long long spent_s
           = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - budget_t0).count();
-      o.timeout = static_cast<int>(std::max<long long>(1, static_cast<long long>(base.timeout) - spent_s));
+      const long long remaining_s = static_cast<long long>(base.timeout) - spent_s;
+      const long long floor_s     = std::max<long long>(1, base.min_timeout);
+      if (remaining_s < floor_s) {
+        defs_floored.fetch_add(1);  // this def is running on the floor, past the soft total
+      }
+      o.timeout = static_cast<int>(std::max<long long>(floor_s, remaining_s));
     }
     if (name != top_key) {
       // Sidecar paths are resolved against the selected impl top. Descendant
@@ -983,6 +990,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     if (budget_on) {
       solve_spent_ms += ms;  // only solver (prove_equal) time draws down the budget
+      defs_solved.fetch_add(1);
     }
     lec_store_cones(vcache, r);
     if (r.verdict == Verdict::Proven) {
@@ -1083,7 +1091,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   };
 
   // ── Budget scheduler ──────────────────────────────────────────────────────
-  // Under budget_mode "wall" with a finite timeout on a multi-def hierarchy,
+  // With a finite timeout and no rlimit, on a multi-def hierarchy,
   // `base.timeout` is a soft TOTAL WALL budget for the DAG's solving: each
   // def's per-query cap becomes the wall time remaining since dispatch
   // (run_def, above) — so N hard defs share ~one budget of solver effort
@@ -1095,18 +1103,39 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // case) finish well under budget and still see the full cap, so a design
   // that fits is never regressed; only a run that would out-solve `timeout`
   // is reined in. Off — the full per-query cap, byte-identical to before —
-  // for the compile/rlimit tier (budget_mode!=wall), an unbounded budget
-  // (timeout==0), or a lone def. A single DAG pass: the verdict cache /
-  // Unknown-ledger and per-def progress stay exactly as before.
-  budget_on = base.budget_mode == "wall" && base.timeout > 0 && order.size() > 1;
+  // for the deterministic rlimit tier, an unbounded budget (timeout==0), or a
+  // lone def. A single DAG pass: the verdict cache / Unknown-ledger and per-def
+  // progress stay exactly as before.
+  budget_on = base.timeout > 0 && base.rlimit == 0 && order.size() > 1;
   budget_t0 = std::chrono::steady_clock::now();
   dispatch_dag();
 
-  // Diagnosis phase (formal.minetimeout): name the still-unproven defs so a
+  // Soft-budget accounting: `timeout` is a TARGET, so report what it actually
+  // cost. `defs_floored` is the overrun's cause — those defs were dispatched
+  // after the total was already spent and each drew a full min_timeout floor —
+  // so target/actual/units/floored together say whether to raise the target or
+  // lower the floor. Printed whenever the target was missed, not only on a
+  // failure, because a run that quietly took 3x its budget is the thing an agent
+  // loop needs to see.
+  if (budget_on) {
+    const long long spent_s
+        = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - budget_t0).count();
+    const int floored = defs_floored.load();
+    if (spent_s > base.timeout || floored > 0) {
+      std::print("lec[hier]: budget {}s target / {}s actual over {} def(s) solved, {} on the {}s floor\n",
+                 base.timeout,
+                 spent_s,
+                 defs_solved.load(),
+                 floored,
+                 std::max(1, base.min_timeout));
+    }
+  }
+
+  // Diagnosis phase (formal.spec_mining_timeout): name the still-unproven defs so a
   // budget-limited run's OUTPUT is actionable. The toxic-core / mining iteration —
-  // itself potentially many cvc5 rounds — gets its OWN budget (formal.minetimeout),
+  // itself potentially many cvc5 rounds — gets its OWN budget (formal.spec_mining_timeout),
   // never drawing from formal.timeout; the straggler list is today's signal.
-  if (base.minetimeout > 0) {
+  if (base.spec_mining_timeout > 0) {
     std::string stragglers;
     int         n = 0;
     for (size_t i = 0; i < order.size(); ++i) {
@@ -2019,8 +2048,13 @@ void lec_command(Options& opts, Result& res) {
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
-  o.budget_mode  = label("budget_mode", "wall");             // wall = total-budget escalating rounds; rlimit = no-op
-  o.minetimeout  = std::atoi(label("mine_timeout", "0").c_str());
+  // `timeout` is a SOFT TOTAL; `min_timeout` is the per-def floor beneath it, so
+  // a def dispatched after the total is spent still earns a real verdict instead
+  // of a silent skip. Budget accounting is on iff timeout>0 && rlimit==0 — the
+  // deterministic rlimit tier owns the bound by itself, which is why the old
+  // budget_mode knob is gone.
+  o.min_timeout          = std::atoi(label("min_timeout", "1").c_str());
+  o.spec_mining_timeout  = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -3025,8 +3059,14 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     j += std::format("    \"vacuous_scopes\": [{}],\n", vs);
   }
   j += std::format("    \"engine\": \"{}\",\n    \"bound\": {},\n", json_esc(o.engine), o.bound);
-  j += std::format("    \"budget\": {{\"timeout_s\": {}, \"budget_mode\": \"{}\", \"rlimit\": {}, \"mine_timeout_s\": {}}},\n",
-                   o.timeout, json_esc(o.budget_mode), o.rlimit, o.minetimeout);
+  // Soft-budget block: the target, the floor beneath it, and what the run
+  // actually cost against them (spent/units/floored are 0 when no budget was in
+  // force). `floored` is the overrun's cause, so an agent can tell "raise the
+  // target" from "lower the floor" without re-running.
+  j += std::format("    \"budget\": {{\"timeout_s\": {}, \"min_timeout_s\": {}, \"rlimit\": {}, "
+                   "\"spec_mining_timeout_s\": {}, \"spent_ms\": {}, \"units\": {}, \"floored\": {}}},\n",
+                   o.timeout, o.min_timeout, o.rlimit, o.spec_mining_timeout, r.budget_spent_ms, r.budget_units,
+                   r.budget_floored);
   j += std::format(
       "    \"assume_counts\": {{\"input\": {}, \"unchecked\": {}, \"internal_proven\": {}, \"internal_unproven\": {}, "
       "\"internal_refuted\": {}}}\n",
@@ -3277,13 +3317,13 @@ void formal_verify_command(Options& opts, Result& res) {
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
-  // budget_mode=wall (default): `timeout` is a TOTAL cvc5-time budget spent
+  // Soft total (on iff timeout>0 && rlimit==0): `timeout` is a TOTAL cvc5-time budget spent
   // across every obligation-check, not `timeout` per check (the O×C hazard) —
   // the verify analogue of the hier-lec scheduler. rlimit>0 (deterministic tier)
-  // disables it inside prove_properties. minetimeout (0=off): an INDEPENDENT
+  // disables it inside prove_properties. spec_mining_timeout (0=off): an INDEPENDENT
   // diagnosis budget that names the toxic obligation core of a timed-out run.
-  o.budget_mode  = label("budget_mode", "wall");
-  o.minetimeout  = std::atoi(label("mine_timeout", "0").c_str());
+  o.min_timeout          = std::atoi(label("min_timeout", "1").c_str());
+  o.spec_mining_timeout  = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.mine         = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;

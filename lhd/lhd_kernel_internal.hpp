@@ -44,8 +44,8 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "bound", "budget_mode", "cache", "engine", "jobs", "mine", "mine_timeout", "minetimeout",
-    "partitions", "phase", "report", "reset", "reset_cycles", "retry", "rlimit", "solver", "split", "strict", "timeout", "witness",
+    "allow_oversize", "bound", "cache", "engine", "jobs", "mine", "min_timeout", "partitions", "phase", "report",
+    "reset", "reset_cycles", "retry", "rlimit", "solver", "spec_mining_timeout", "split", "strict", "timeout", "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
@@ -63,12 +63,28 @@ inline constexpr Renamed_ns kRenamedSetPasses[] = {
     {    "compile.lean",     "formal.lean", false},
 };
 inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] = {
-    { "minetimeout",    "mine_timeout"},
-    {  "prpfailrun",     "prpfail_run"},
-    {"vcdfakedelay",  "vcd_fake_delay"},
-    {         "min",          "min_ge"},
-    {         "max",          "max_ge"},
-    {         "seq",        "register"},
+    // `mine` read as "my own", and the one budget funds three SPECULATIVE
+    // post-run phases (straggler list, timeout-core diagnosis, invariant
+    // mining), so the spelling now says which. Renaming it also frees the
+    // `min_*` space: `min_timeout` (the per-unit floor under the soft total) and
+    // `mine_timeout` differed by one letter and meant unrelated things.
+    { "minetimeout", "spec_mining_timeout"},
+    {"mine_timeout", "spec_mining_timeout"},
+    {  "prpfailrun",         "prpfail_run"},
+    {"vcdfakedelay",      "vcd_fake_delay"},
+    {         "min",              "min_ge"},
+    {         "max",              "max_ge"},
+    {         "seq",            "register"},
+};
+
+// REMOVED flags with no replacement: a directed "was removed, here is why"
+// instead of the generic unknown-flag guess. Keyed on the flag leaf, so it
+// applies whatever namespace it was spelled under.
+inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] = {
+    {"budget_mode",
+     "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
+     "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "
+     "--set formal.rlimit=N for the old budget_mode=rlimit behavior"},
 };
 
 inline constexpr Set_pass kSetPasses[] = {

@@ -172,13 +172,13 @@ echo "$simlist" | grep -q '^sim\.checkpoint_min_secs=10' || fail "list options s
 "$LHD" compile "$PRP" --set compile.sim.vcd=1 --workdir "$W/w11b" -q >"$W/r11b.json" 2>/dev/null && fail "--set compile.sim.vcd must fail"
 grep -q "use --set sim.vcd=1 instead" "$W/r11b.json" || fail "dead compile.sim.vcd must name the replacement: $(cat "$W/r11b.json")"
 # same for the removed lec.* namespace: common flags point at formal.*, pairing
-# flags at formal.lec.*, and renamed flags compose (lec.minetimeout -> formal.mine_timeout)
+# flags at formal.lec.*, and renamed flags compose (lec.minetimeout -> formal.spec_mining_timeout)
 "$LHD" compile "$PRP" --set lec.solver=lgyosys --workdir "$W/w11d" -q >"$W/r11d.json" 2>/dev/null && fail "--set lec.solver must fail (namespace removed)"
 grep -q "use --set formal.solver=lgyosys instead" "$W/r11d.json" || fail "lec.solver must point at formal.solver: $(cat "$W/r11d.json")"
 "$LHD" compile "$PRP" --set lec.hier=false --workdir "$W/w11e" -q >"$W/r11e.json" 2>/dev/null && fail "--set lec.hier must fail (namespace removed)"
 grep -q "use --set formal.lec.hier=false instead" "$W/r11e.json" || fail "lec.hier must point at formal.lec.hier: $(cat "$W/r11e.json")"
 "$LHD" compile "$PRP" --set lec.minetimeout=9 --workdir "$W/w11f" -q >"$W/r11f.json" 2>/dev/null && fail "--set lec.minetimeout must fail"
-grep -q "use --set formal.mine_timeout=9 instead" "$W/r11f.json" || fail "lec.minetimeout must compose both renames: $(cat "$W/r11f.json")"
+grep -q "use --set formal.spec_mining_timeout=9 instead" "$W/r11f.json" || fail "lec.minetimeout must compose both renames: $(cat "$W/r11f.json")"
 # `lhd sim --help` ends with the standardized options block (like lec/compile),
 # enumerating the sim.* flags instead of a hand-maintained list (pretty page;
 # jsonl help would emit the machine record instead — forced here since piped).

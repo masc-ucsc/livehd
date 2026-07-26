@@ -578,6 +578,18 @@ std::string serialize_verify(const Verify_result& v) {
   // Best-effort TAIL: an older/truncated blob leaves both false (prior behavior).
   b.push_back(static_cast<char>(v.unsupported ? 1 : 0));
   b.push_back(static_cast<char>(v.oversize_refused ? 1 : 0));
+  // Soft-budget accounting tail. Same trap as every field above: the F3 verify
+  // strategy race forks, so a counter missing here comes back ZERO in the parent
+  // and the overrun report silently reads "0 units, 0 floored" on the default
+  // (forking) path while being correct under --workdir.
+  put_u32(b, static_cast<uint32_t>(v.budget_target_s));
+  put_u32(b, static_cast<uint32_t>(v.budget_units));
+  put_u32(b, static_cast<uint32_t>(v.budget_floored));
+  put_u32(b, static_cast<uint32_t>(v.budget_floor_s));
+  {
+    int64_t bs = v.budget_spent_ms;
+    b.append(reinterpret_cast<const char*>(&bs), sizeof bs);
+  }
   return b;
 }
 
@@ -730,6 +742,24 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   }
   v.oversize_refused = b.front() != 0;
   b.remove_prefix(1);
+  // Soft-budget accounting tail (mirror serialize_verify). All-or-nothing: a
+  // partial tail leaves the counters at 0, which reads as "no budget in force"
+  // rather than as a bogus half-report.
+  uint32_t bt = 0, bu = 0, bf = 0, bfs = 0;
+  if (!get_u32(b, bt) || !get_u32(b, bu) || !get_u32(b, bf) || !get_u32(b, bfs)) {
+    return true;
+  }
+  int64_t bs = 0;
+  if (b.size() < sizeof bs) {
+    return true;
+  }
+  std::memcpy(&bs, b.data(), sizeof bs);
+  b.remove_prefix(sizeof bs);
+  v.budget_target_s = static_cast<int>(bt);
+  v.budget_units    = static_cast<int>(bu);
+  v.budget_floored  = static_cast<int>(bf);
+  v.budget_floor_s  = static_cast<int>(bfs);
+  v.budget_spent_ms = bs;
   return true;
 }
 
@@ -2421,12 +2451,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // OFF (byte-identical to the old per-phase behavior) for the deterministic
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
   const auto      budget_t0 = std::chrono::steady_clock::now();
-  const bool      budget_on = opts.budget_mode == "wall" && opts.timeout > 0 && opts.rlimit == 0;
+  const bool      budget_on = opts.timeout > 0 && opts.rlimit == 0;
   const long long budget_ms = static_cast<long long>(opts.timeout) * 1000;
-  auto            budget_left_ms = [&]() -> long long {
+  // formal.min_timeout: the floor this query never drops below once the shared
+  // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
+  const long long budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
+  auto            budget_left_ms  = [&]() -> long long {
     const auto spent
         = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - budget_t0).count();
-    return std::max<long long>(1000, budget_ms - spent);
+    return std::max<long long>(budget_floor_ms, budget_ms - spent);
   };
   // Encoder budget in SECONDS (its unit), rounded up so a sub-second remainder is
   // still a positive bound rather than 0 == unbounded.
@@ -5408,22 +5441,22 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   if (opts.witness) {
     solver.setOption("produce-models", "true");
   }
-  // 2f-verify timeout-core diagnosis (formal.minetimeout): unsat-core production
+  // 2f-verify timeout-core diagnosis (formal.spec_mining_timeout): unsat-core production
   // AND the timeout-core budget must be armed at setup — both are rejected once
   // the solver is "fully initialized" (after the first checkSat). Opt-in only
   // (default 0), so a normal run pays nothing. The same gate arms the P3 mining
   // inputs: learned-literal production (candidate source 1) and models (the
   // template seed sample) — all experimental cvc5 surface, guarded at use.
-  if (opts.minetimeout > 0) {
+  if (opts.spec_mining_timeout > 0) {
     solver.setOption("produce-unsat-cores", "true");
-    solver.setOption("timeout-core-timeout", std::to_string(static_cast<long long>(opts.minetimeout) * 1000));
+    solver.setOption("timeout-core-timeout", std::to_string(static_cast<long long>(opts.spec_mining_timeout) * 1000));
     if (!opts.ignore_assumes) {
       solver.setOption("produce-learned-literals", "true");
       solver.setOption("produce-models", "true");
     }
   }
 
-  // ── Total solver-time budget (2f-verify, budget_mode=wall) ────────────────
+  // ── Total solver-time budget (2f-verify; on iff timeout>0 && rlimit==0) ───
   // Mirror the hierarchical lec scheduler at OBLIGATION granularity: bound the
   // whole prove_properties run to ~opts.timeout of cvc5 time across every
   // obligation-check and cycle, instead of opts.timeout PER checkSatAssuming (the
@@ -5434,11 +5467,20 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // run strategies, each its own prove_properties call, so each self-bounds to
   // `timeout` (fork children can't share this in-process accumulator — that is
   // fine: two strategies budgeted to T apiece is the intended parallelism).
-  const bool      solve_budget_on = opts.budget_mode == "wall" && opts.timeout > 0 && opts.rlimit == 0;
+  const bool      solve_budget_on = opts.timeout > 0 && opts.rlimit == 0;
   const long long solve_budget_ms = static_cast<long long>(opts.timeout) * 1000;
-  long long       solve_spent_ms  = 0;
-  bool            budget_capped   = false;  // an obligation was frozen for lack of budget
-  auto            budget_spent    = [&]() { return solve_budget_on && solve_spent_ms >= solve_budget_ms; };
+  // The floor every unsettled obligation is guaranteed once the total is spent
+  // (formal.min_timeout). Clamped to >=1ms because 0 reads as UNBOUNDED to cvc5,
+  // which would turn the floor into "no limit at all" — the exact opposite.
+  const long long min_ms         = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
+  long long       solve_spent_ms = 0;
+  bool            budget_capped  = false;  // an obligation was frozen for lack of budget
+  // Obligations that ran on the floor. A SET of prop indices, not a counter of
+  // checks: one obligation is checked once per BMC cycle, so counting checks
+  // reported "5 floored" on a 4-obligation design — the report promises UNITS.
+  absl::flat_hash_set<size_t> floored_units;
+  bool                        last_check_floored = false;  // set by budget_check, read at the obligation site
+  auto budget_spent = [&]() { return solve_budget_on && solve_spent_ms >= solve_budget_ms; };
   // Budget-aware checkSatAssuming: while budget remains it shrinks tlimit-per to
   // the remaining budget; once spent it FLOORS each attempt at 1s so a straggler
   // still earns a real verdict (matching the hier-lec scheduler) instead of a
@@ -5475,7 +5517,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   auto budget_check = [&](const cvc5::Term& bad, const cvc5::Term& act = cvc5::Term()) -> cvc5::Result {
     if (solve_budget_on) {
       const long long remaining = solve_budget_ms - solve_spent_ms;
-      solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, remaining)));
+      last_check_floored        = remaining < min_ms;  // this check runs past the soft total, on the floor
+      solver.setOption("tlimit-per", std::to_string(std::max<long long>(min_ms, remaining)));
     }
     const auto   tq = std::chrono::steady_clock::now();
     cvc5::Result r  = act.isNull() ? solver.checkSatAssuming(bad) : solver.checkSatAssuming({bad, act});
@@ -5484,7 +5527,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     }
     return r;
   };
-  // Timeout-core diagnosis (formal.minetimeout): each obligation left Unknown
+  // Timeout-core diagnosis (formal.spec_mining_timeout): each obligation left Unknown
   // remembers the `bad` term of its stuck cycle, so a post-run getTimeoutCore
   // can name the toxic subset. prop index -> its last violated-condition term.
   absl::flat_hash_map<size_t, cvc5::Term> unknown_bad;
@@ -5720,11 +5763,11 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // unreachable initial state — the compile tier gates its hard error on this.
   res.reset_detected = !reset_negset.empty();
 
-  // P3 mining bookkeeping (minetimeout>0 only): every per-cycle STATE symbol is
+  // P3 mining bookkeeping (spec_mining_timeout>0 only): every per-cycle STATE symbol is
   // remembered with its flop key + cycle so learned literals map back to named
   // signals, and the state map of every cycle is retained so a candidate can be
   // base-proven at each checked cycle by substitution. Zero cost when off.
-  const bool                                 mining_on = opts.minetimeout > 0 && !opts.ignore_assumes;
+  const bool                                 mining_on = opts.spec_mining_timeout > 0 && !opts.ignore_assumes;
   absl::flat_hash_map<uint64_t, std::string> sym2key;
   absl::flat_hash_map<uint64_t, int>         sym2cyc;
   std::vector<Io_name_map<Val>>              cyc_state;
@@ -6216,6 +6259,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         bool        unsat  = cached;
         bool        sat    = false;
         const auto  tob    = std::chrono::steady_clock::now();  // per-obligation solve_ms (P2)
+        last_check_floored = false;  // budget_check re-arms this per check; a cached hit never solves
         if (!cached && !verify_split.name.empty()) {
           auto sit = sh.find(verify_split.name);
           if (sit != sh.end()) {
@@ -6249,6 +6293,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         }
         if (!cached) {
           pr.solve_ms += now_ms(tob);
+          if (last_check_floored) {
+            floored_units.insert(ix);  // this OBLIGATION ran past the soft total (counted once, not per cycle)
+          }
         }
         if (unsat) {
           pr.proven_to = cyc;
@@ -6270,7 +6317,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           if (pr.kind != "assume") {
             any_unknown = true;  // an unproven internal assume is unused, not a run-degrader
           }
-          if (opts.minetimeout > 0) {
+          if (opts.spec_mining_timeout > 0) {
             unknown_bad[ix] = bad;  // remember the toxic term for the post-run timeout-core
           }
         }
@@ -6362,14 +6409,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // Every candidate must FIRST pass the base proof — UNSAT of "violated at any
   // checked cycle" inside the live BMC frame (env assumes in force) — before it
   // may even be a step candidate, so a sampled-wrong or garbage candidate can
-  // never survive. Mining bills its OWN budget (opts.minetimeout), never the
+  // never survive. Mining bills its OWN budget (opts.spec_mining_timeout), never the
   // run's `timeout`. Term shapes that render to Pyrope become paste-ready; the
   // rest are reported as SMT text only.
   std::vector<cvc5::Term>                      mined_rep;   // candidate over rep syms
   std::vector<Verify_result::Mined_invariant>  mined_meta;  // parallel metadata
   Io_name_map<Val>                             rep;         // representative frame
   long long                                    mine_spent_ms = 0;
-  const long long                              mine_budget_ms = static_cast<long long>(opts.minetimeout) * 1000;
+  const long long                              mine_budget_ms = static_cast<long long>(opts.spec_mining_timeout) * 1000;
   auto mine_check = [&](const cvc5::Term& t) -> cvc5::Result {
     solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, mine_budget_ms - mine_spent_ms)));
     const auto   tq = std::chrono::steady_clock::now();
@@ -7074,7 +7121,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     if (ve.ok) {
       // PUSH/POP around the frame. This is the only place in prove_properties
       // that ADDS assertions after the verdicts are settled, and the
-      // formal.minetimeout diagnosis below calls getTimeoutCoreAssuming — which
+      // formal.spec_mining_timeout diagnosis below calls getTimeoutCoreAssuming — which
       // returns a subset of THE SOLVER'S ASSERTIONS. Leaving a whole extra design
       // frame in the assertion set would let `vg_` equalities show up in a core
       // that is supposed to name the toxic obligations. Popping restores the
@@ -7272,19 +7319,44 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     res.detail += "; mined " + std::to_string(n_inductive) + " inductive invariant(s) of " + std::to_string(mined_tried)
                 + " base candidate(s)";
   }
+  // Soft-budget accounting. `timeout` is a TARGET, so the honest report is what
+  // was actually spent against it, over how many units, and how many of those
+  // ran on the min_timeout floor (i.e. are the reason for any overrun). Without
+  // the actual figure an agent tuning formal.timeout / formal.min_timeout is
+  // guessing: "budget reached" alone never said whether the run then spent 2s or
+  // 300s more.
+  if (solve_budget_on) {
+    int n_units = 0;
+    for (const auto& pr : res.props) {
+      n_units += (pr.kind == "assume" && pr.aclass != "internal") ? 0 : 1;
+    }
+    res.budget_target_s = opts.timeout;
+    res.budget_spent_ms = solve_spent_ms;
+    res.budget_units    = n_units;
+    res.budget_floored  = static_cast<int>(floored_units.size());
+    res.budget_floor_s  = opts.min_timeout;
+    if (solve_spent_ms > solve_budget_ms || !floored_units.empty()) {
+      res.detail += std::format("; budget {}s target / {}.{:01}s actual over {} unit(s), {} on the {}s floor",
+                                opts.timeout,
+                                solve_spent_ms / 1000,
+                                (solve_spent_ms % 1000) / 100,
+                                n_units,
+                                floored_units.size(),
+                                opts.min_timeout);
+    }
+  }
   if (budget_capped) {
-    res.detail += "; total solver budget (" + std::to_string(opts.timeout)
-                + "s) reached: unproven obligation(s) left at their budget-limited depth";
+    res.detail += "; unproven obligation(s) left at their budget-limited depth";
   }
 
-  // ── Timeout-core diagnosis (formal.minetimeout) ───────────────────────────
+  // ── Timeout-core diagnosis (formal.spec_mining_timeout) ───────────────────────────
   // A time-limited run leaves obligations Unknown. Under an INDEPENDENT
-  // minetimeout budget (never drawn from formal.timeout), ask cvc5 which SUBSET
+  // spec_mining_timeout budget (never drawn from formal.timeout), ask cvc5 which SUBSET
   // of the still-open obligations is the toxic core — the ones whose combined
   // constraints actually make the solver time out — so the OUTPUT names the real
   // culprit instead of a flat "N unknown". Diagnostic ONLY: it never changes a
   // verdict. The cvc5 timeout-core API is experimental, so it is best-effort.
-  if (opts.minetimeout > 0 && !unknown_bad.empty()) {
+  if (opts.spec_mining_timeout > 0 && !unknown_bad.empty()) {
     std::vector<cvc5::Term> bads;
     std::vector<size_t>     bad_ix;
     for (const auto& [ix, t] : unknown_bad) {
@@ -7316,11 +7388,11 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         // empty core (names stays empty and is skipped).
         if (!names.empty()) {
           const char* why = tc.first.isUnsat() ? "jointly UNSATISFIABLE (cannot all be violated)" : "jointly exhaust the solver";
-          res.detail += "; mine_timeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
+          res.detail += "; spec_mining_timeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
                       + " obligation(s) " + why + "): " + names;
         }
       } catch (const std::exception& e) {
-        res.detail += "; minetimeout diagnosis unavailable (" + std::string(e.what()) + ")";
+        res.detail += "; spec_mining_timeout diagnosis unavailable (" + std::string(e.what()) + ")";
       }
     }
   }

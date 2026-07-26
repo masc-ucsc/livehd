@@ -523,7 +523,7 @@ PYEOF
 WDU="$W/wd_report_unknown"
 mkdir -p "$WDU"
 "$LHD" formal verify "$W/hard.prp" --top hard --set formal.bound=2 --set formal.timeout=2 \
-  --set formal.mine_timeout=3 --workdir "$WDU" >"$W/report_unknown.out" 2>&1
+  --set formal.spec_mining_timeout=3 --workdir "$WDU" >"$W/report_unknown.out" 2>&1
 python3 - "$WDU" <<'PYEOF' || fail "UNKNOWN formal_report.json contract check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))
