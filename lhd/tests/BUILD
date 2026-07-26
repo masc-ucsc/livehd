@@ -1053,3 +1053,25 @@ sh_test(
     srcs = ["lhd_unused_inputs_test.sh"],
     data = ["//lhd"],
 )
+
+# An --emit-dir may not name one of the run's own IR inputs. An emission
+# replaces the directory (declaration file rewritten in full, stale bodies
+# pruned), so aliasing an input destroyed it in place while still exiting 0.
+sh_test(
+    name = "emit_dir_alias_test",
+    srcs = ["emit_dir_alias_test.sh"],
+    data = ["//lhd"],
+)
+
+# Formal obligations across a module boundary: a submodule's `assume(a==3)` on an
+# input is discharged (or refuted) by what the PARENT binds, not by the submodule
+# in isolation. Case 3 (a parent that violates the assume must FAIL) is what
+# keeps the test honest — without it, never checking anything would look correct.
+# Tagged fixme: today the assume is only evaluated in module isolation, so the
+# submodule cannot be compiled on its own and a violating parent still passes.
+sh_test(
+    name = "hier_property_test",
+    srcs = ["hier_property_test.sh"],
+    data = ["//lhd"],
+    tags = ["fixme"],
+)

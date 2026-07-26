@@ -672,6 +672,9 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
     // it is a `store`, not a declaration. `type`/enum/func declarations are not
     // shadow-checked here.) Located via the span attached to the declaring node.
     auto check_shadowing = [&](const Lnast_nid& node, const std::string& name) {
+      if (tick_loop_var_decls_.contains(node)) {
+        return;  // synthesized tick loop var — `lhd sim` owns its collision errors
+      }
       if (!name.empty() && is_var_mode(third_child_name(node)) && in_enclosing(name)) {
         report_error(node,
                      "variable-shadowing",
@@ -1911,21 +1914,11 @@ void Prp2lnast::process_statement(TSNode n) {
     TSNode func = child_by_field(n, "function");
     if (!ts_node_is_null(func)) {
       auto fname = trim(get_text(func));
-      // Lambda pre/postconditions (05-assert.md): `requires`/`ensures` are
-      // accepted and lowered as a no-op today. A `requires` precondition is an
-      // input constraint that a free top would refute in isolation, so it is not
-      // yet lowered to a checked assert/assume; full pre/post verification is
-      // 3f-verify. LOUD no-op (P1): an agent writing contracts must learn from
-      // the run that they generate ZERO obligations, not find out from silence.
-      if (fname == "requires" || fname == "ensures") {
-        report_warning(n,
-                       "contract-not-lowered",
-                       "comptime",
-                       std::format("'{}' is accepted but generates NO obligation yet (silent no-op)", fname),
-                       "lambda pre/postconditions are not lowered; use assert/assume (or a formal block) for checked "
-                       "properties");
-        return;
-      }
+      // `requires`/`ensures` were REMOVED from the language (user ruling,
+      // 2026-07-25): they never generated an obligation, and a silent-no-op
+      // contract is worse than no contract. They are now ordinary undefined
+      // calls — write `assume` for a precondition, `assert` for a
+      // postcondition.
       if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assert_always") {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
@@ -1956,11 +1949,21 @@ void Prp2lnast::process_statement(TSNode n) {
           attach_loc(idx, n);  // source span → verifier can point at this assertion
           lnast->add_child(idx, cond_ref);
           // The cassert NODE name does not survive upass re-emission, but its
-          // CHILDREN do — so carry the obligation kind (assume / assert_always)
-          // as a sentinel const child ahead of the optional user message. A plain
-          // assert/cassert adds no sentinel (tolg then defaults the kind to assert).
-          if (fname == "assume" || fname == "assert_always") {
-            lnast->add_child(idx, Lnast_node::create_const(std::string("'__fkind__") + std::string{fname} + "'"));
+          // CHILDREN do — so carry the obligation kind (assume / assert_always /
+          // cassert) as a sentinel const child ahead of the optional user
+          // message. A plain `assert` adds no sentinel (tolg then defaults the
+          // kind to assert). `cassert` MUST carry one: it is an ELABORATION
+          // check, not a design obligation — it never reaches pass.formal and
+          // never becomes a runtime check, so tolg has to tell it from `assert`.
+          if (fname == "assume" || fname == "assert_always" || fname == "cassert") {
+            // UNQUOTED on purpose. A user message is always a STRING const
+            // (`'…'`), so an unquoted spelling can never collide with one. The
+            // old quoted form was matched downstream with an unanchored
+            // substring search, which let a message merely CONTAINING
+            // "__fkind__assume" retype an `assert` into an `assume` — the
+            // solver then used it as a hypothesis and reported a genuinely
+            // false property as PROVEN, at exit 0.
+            lnast->add_child(idx, Lnast_node::create_const(std::string("__fkind__") + std::string{fname}));
           }
           if (have_msg) {
             lnast->add_child(idx, msg_ref);
@@ -3625,6 +3628,25 @@ void Prp2lnast::process_tick_statement(TSNode n) {
   TSNode count = child_by_field(n, "value");
   TSNode code  = child_by_field(n, "code");
 
+  // A nested `tick` is rejected HERE, not left to `lhd sim`. Both ticks
+  // synthesize the same implicit loop variable (`clock` by default), so the
+  // inner declaration trips upass.semacheck's no-shadowing rule FIRST and the
+  // user sees "declaration of 'clock' shadows an outer-scope variable" — a name
+  // that appears nowhere in their source. prp2lnast exempts the synthesized
+  // decl from its own shadow check (tick_loop_var_decls_), but semacheck runs
+  // later with its own check and cannot see that set, so the exemption alone is
+  // not enough. Reporting at parse time keeps the honest message and the right
+  // source span.
+  if (in_tick_statement_) {
+    report_error(n,
+                 "tick-nested",
+                 "unsupported",
+                 "a `tick` cannot be nested inside another `tick` (single-clock model)",
+                 "flatten into one tick loop: a single `tick` body advances the shared clock with `step`");
+    return;
+  }
+  in_tick_statement_ = true;
+
   // Lower the count OUTSIDE the body: it is evaluated once, before the loop, so
   // it must not land in the uncertain scope the body gets.
   Lnast_node count_ref = ts_node_is_null(count) ? Lnast_node::create_const("") : expr_to_node(count);
@@ -3660,6 +3682,17 @@ void Prp2lnast::process_tick_statement(TSNode n) {
   auto              decl_idx = builder.add_child(Lnast_ntype::create_declare());
   attach_loc(decl_idx, n);
   lnast->add_child(decl_idx, Lnast_node::create_ref(loop_var));
+  // declare is (var, type, mode) — the type/mode children are NOT optional.
+  // Untyped (`prim_type_none`, so the `0sb?` seed below stays typeless) and
+  // `mut` (the index takes a new value every iteration).
+  lnast->add_child(decl_idx, Lnast_ntype::create_prim_type_none());
+  lnast->add_child(decl_idx, Lnast_node::create_const("mut"));
+  // …but EXEMPT from the no-shadowing rule: `mut` makes it shadow-checkable, and
+  // a test parameter named like the loop var (`test t(clock:u8=3)`) would then
+  // report generic shadowing instead of the named "collides with a test
+  // parameter". Nothing in the source declares this name, so the generic
+  // "rename the inner/loop variable" hint points at a line that is not there.
+  tick_loop_var_decls_.insert(decl_idx);
   auto seed_idx = builder.add_child(Lnast_ntype::create_store());
   attach_loc(seed_idx, n);
   lnast->add_child(seed_idx, Lnast_node::create_ref(loop_var));
@@ -3668,6 +3701,7 @@ void Prp2lnast::process_tick_statement(TSNode n) {
   if (!ts_node_is_null(code)) {
     process_scope_statement(code, body_idx);
   }
+  in_tick_statement_ = false;  // ticks never nest (guarded above), so a plain reset is exact
   builder.pop_stmts();
 }
 

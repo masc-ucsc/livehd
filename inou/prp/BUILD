@@ -173,11 +173,13 @@ cc_test(
             "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # verif_requires + testbench_step + temporal_past now lower/run, as do the
+        # testbench_step + temporal_past now lower/run, as do the
         # 3g subtask-A body-binding trackers (generic_{body_type,const_value,
         # lambda_param} — a generic name is now visible+substituted in the body);
         # the rest are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N
         # `stage` shift register — see prp2lnast function_call_expr_to_node.)
+        # verif_requires is GONE: requires/ensures were removed from the language
+        # (user ruling, 2026-07-25) — write assume for a pre, assert for a post.
         tags = [] if base in (
             # 2f-latch M8 (edge normalization): the two latch twins and the
             # posedge/negedge twin all carry REAL verdicts now — the encoder no
@@ -187,7 +189,6 @@ cc_test(
             "latch_verify_hold",
             "latch_verify_low",
             "flop_verify_posneg",
-            "verif_requires",
             "testbench_step",
             "temporal_past",
             "generic_body_type",
@@ -204,7 +205,6 @@ cc_test(
     for base in [
         "temporal_past",
         "stdlib_import",
-        "verif_requires",
         "testbench_step",
         "generic_body_type",
         "generic_const_value",
@@ -273,6 +273,40 @@ sh_test(
     srcs = ["tests/imports/lg_import_test.sh"],
     data = ["//lhd"],
     deps = ["//inou/yosys:scripts"],
+)
+
+# What a PLAIN `import("unit")` binds to when that same unit is ALSO supplied as
+# a pre-built IR input — distinct from prp-import-lg above, which covers the
+# EXPLICIT `import("lg:name")` form. The contract:
+#   no ln:/lg: input -> re-parse the sibling .prp into a fresh LNAST
+#   ln: input        -> reuse that LNAST, do NOT re-parse the sibling
+#   lg: input        -> call the compiled LGraph directly (nothing to parse)
+# The ln:/lg: artifacts are built from a DIFFERENT definition of the same unit,
+# each with a distinct output width, so the width the importer instantiates says
+# which definition actually won; `--result-json` inputs says whether the sibling
+# was re-parsed. Split into two targets so the half lhd already honours is
+# enforced on every run, while the lg: half stays visible and runnable on demand
+# without breaking the build: today a lg: input does not resolve a plain import
+# at all, and the compile silently falls back to re-parsing the sibling source.
+sh_test(
+    name = "prp-import-ir-precedence",
+    srcs = ["tests/imports/ir_import_precedence_test.sh"],
+    args = [
+        "no_ir",
+        "ln_only",
+    ],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "prp-import-ir-precedence-lg",
+    srcs = ["tests/imports/ir_import_precedence_test.sh"],
+    args = [
+        "lg_only",
+        "ln_and_lg",
+    ],
+    data = ["//lhd"],
+    tags = ["fixme"],
 )
 
 # Simulation tests (tests/sim/*.prp, `:type: simulation`): a synthesizable DUT

@@ -271,6 +271,12 @@ protected:
   // Child position of each direct child of a stmts scope (the boundary nodes
   // read_is_visible compares against). Built in the same walk.
   mutable absl::flat_hash_map<Lnast_nid, int>                                   read_child_index_;
+  // The `declare` nodes process_tick_statement synthesizes for a tick's implicit
+  // loop variable (`clock`). They are exempt from the no-shadowing rule: no
+  // source line wrote them, so "rename the inner/loop variable" is unactionable
+  // advice for the one shape that trips it — a test parameter named like the
+  // loop var, which `lhd sim` reports as "collides with a test parameter".
+  absl::flat_hash_set<Lnast_nid>                                               tick_loop_var_decls_;
   // True iff `rs.name` is visible at the recorded site (see Read_site).
   bool                   read_is_visible(const Read_site& rs) const;
 
@@ -564,6 +570,11 @@ protected:
   // anywhere else (each elaboration may compute a different legal range, so
   // branching on one would not converge).
   bool in_assert_lowering_ = false;
+
+  // Inside a `tick` body: a nested `tick` is rejected at parse time so the user
+  // sees "cannot be nested" instead of upass.semacheck's shadowing error on the
+  // implicit `clock` loop variable, a name their source never declares.
+  bool in_tick_statement_ = false;
 
   struct Conditional_scope {
     uint32_t* d;

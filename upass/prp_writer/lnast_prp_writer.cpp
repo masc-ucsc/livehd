@@ -2914,15 +2914,35 @@ void Lnast_prp_writer::write_cassert() {
   if (!move_to_child()) {
     return;
   }
-  // The new Pyrope grammar requires parens on every call, including
-  // `cassert`. Emit `cassert(<cond>)` so the round-trip output reparses
-  // under the current grammar.
-  print("cassert(");
-  print(render_value(cur, /*operand_ctx=*/false));
-  // Optional 2nd child: a comptime message string (cassert(cond, "msg")).
+  // One LNAST node carries all four verification statements; the obligation
+  // KIND rides in a sentinel const child ahead of the optional message (see
+  // prp2lnast). Recover it and re-emit the ORIGINAL keyword — writing every
+  // kind as `cassert` silently retyped an `assert` into an elaboration check
+  // on round-trip, and leaked the raw sentinel into the message slot.
+  const std::string cond = render_value(cur, /*operand_ctx=*/false);
+  std::string       kw   = "assert";
+  std::string       msg;
   if (move_to_sibling()) {
+    const std::string_view t = current_text();
+    if (t == "__fkind__assert_always") {
+      kw = "assert_always";
+    } else if (t == "__fkind__assume") {
+      kw = "assume";
+    } else if (t == "__fkind__cassert") {
+      kw = "cassert";
+    } else {
+      msg = render_value(cur, /*operand_ctx=*/false);  // no sentinel: this IS the message
+    }
+    if (msg.empty() && kw != "assert" && move_to_sibling()) {
+      msg = render_value(cur, /*operand_ctx=*/false);
+    }
+  }
+  print(kw);
+  print("(");
+  print(cond);
+  if (!msg.empty()) {
     print(", ");
-    print(render_value(cur, /*operand_ctx=*/false));
+    print(msg);
   }
   print(")");
   move_to_parent();

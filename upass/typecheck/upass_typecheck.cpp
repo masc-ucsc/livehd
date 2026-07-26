@@ -393,7 +393,15 @@ void uPass_typecheck::process_cassert() {
   if (!move_to_child()) {
     return;  // malformed cassert (no operands) — nothing to check
   }
-  if (move_to_sibling()) {  // child1 = optional message
+  // child1 may be the obligation-KIND sentinel (`__fkind__assume` /
+  // `__fkind__assert_always` / `__fkind__cassert`) that prp2lnast inserts ahead
+  // of the message; skip it, or the message never gets type-checked. Guarded:
+  // the sentinel is the last child when there is no message.
+  bool at_msg = move_to_sibling();
+  if (at_msg && current_text().rfind("__fkind__", 0) == 0) {
+    at_msg = move_to_sibling();
+  }
+  if (at_msg) {
     Kind mk = kind_of_operand_at_cursor();
     if (mk != Kind::unknown && mk != Kind::string) {
       emit_type_error("cassert-msg-not-string",

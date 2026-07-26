@@ -270,6 +270,36 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
       throw Lhd_error{"usage", std::format("{} does not accept {}: inputs", cmd, in.kind), "IR inputs are ln:DIR or lg:DIR"};
     }
   }
+
+  // An --emit-dir naming one of the IR inputs would overwrite the library it is
+  // reading. An emission REPLACES the directory (the declaration file is
+  // rewritten in full, and bodies no longer in the artifact are pruned), so the
+  // input is destroyed in place while the run still exits 0 — silent data loss.
+  // Compare canonically, so `d`, `./d` and `a/../d` are all caught.
+  {
+    namespace fs   = std::filesystem;
+    auto canonical = [](const std::string& p) {
+      std::error_code ec;
+      const auto      c = fs::weakly_canonical(p, ec);
+      return ec ? p : c.lexically_normal().string();
+    };
+    auto reject_clash = [&](const Typed_path& out, const std::vector<std::string>& ins, std::string_view in_kind) {
+      const auto out_c = canonical(out.path);
+      for (const auto& in : ins) {
+        if (canonical(in) == out_c) {
+          throw Lhd_error{"usage",
+                          std::format("--emit-dir {}:{} is also a {}: input", out.kind, out.path, in_kind),
+                          "an emission replaces the directory, which would destroy the input; emit somewhere else"};
+        }
+      }
+    };
+    for (const auto& out : opts.emit_dirs) {
+      if (out.kind == "ln" || out.kind == "lg") {
+        reject_clash(out, ir.ln_dirs, "ln");
+        reject_clash(out, ir.lg_dirs, "lg");
+      }
+    }
+  }
   return ir;
 }
 

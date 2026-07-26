@@ -27,7 +27,17 @@ run_lec() {
   RC=$?
 }
 
-# The designs differ without a helper.
+# The designs differ. lec has ONE obligation (impl == ref), so a formal block —
+# an independent test with its own assume set — has nothing to be scoped to;
+# blocks belong to `lhd formal verify` (user ruling, 2026-07-25). lec must
+# REFUSE a sidecar loudly rather than silently ignore it.
+#
+# NOTE lec now honors NO user assume of any kind: prove_equal never read the
+# design's own fproperty assumes (only prove_properties does — graph_has_assume
+# lives there), and the block path is gone. Conditioning a lec run on a design
+# assume is a FUTURE capability; the engine hook it would use (Lec_options::
+# assumptions) is retained and unused. Until then a design assume is inert here,
+# which is the SOUND direction: lec proves equivalence over all inputs.
 run_lec
 [ "$RC" -ne 0 ] || fail "baseline mismatch was not refuted: $OUT"
 
@@ -38,72 +48,14 @@ formal dut.env {
 }
 EOF
 run_lec "$W/input.prp"
-[ "$RC" -eq 0 ] || fail "input-conditioned equivalence did not prove: $OUT"
-echo "$OUT" | grep -q 'PROVEN under 1 input assume' || fail "input-assume disclosure missing: $OUT"
+[ "$RC" -ne 0 ] || fail "lec must not silently accept a formal-block sidecar: $OUT"
+echo "$OUT" | grep -q 'unexpected positional input' || fail "sidecar refusal must be a directed usage error: $OUT"
+echo "$OUT" | grep -q 'lhd formal verify' || fail "the refusal must point at the command that DOES consume blocks: $OUT"
 
-# A changed helper must not reuse the previous constrained result.
-cat >"$W/input_bad.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.env_bad {
-  assume(acc.en == 0)
-}
-EOF
-run_lec "$W/input_bad.prp"
-[ "$RC" -ne 0 ] || fail "different helper set reused a stale PROVEN result: $OUT"
-
-cat >"$W/contradictory.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.impossible_env {
-  assume((acc.en == 0) and (acc.en == 1))
-}
-EOF
-run_lec "$W/contradictory.prp" --set formal.engine=bmc
-echo "$OUT" | grep -q 'CONTRADICTORY' || fail "contradictory helper set was not diagnosed: $OUT"
-echo "$OUT" | grep -q 'PROVEN equivalent' && fail "contradictory helper produced a vacuous proof: $OUT"
-
-# An internal/output fact is independently proven unbounded before it is used.
-cat >"$W/proven.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.impl_fact {
-  assert_always(acc.y == (acc.a & acc.en))
-}
-EOF
-run_lec "$W/proven.prp"
-[ "$RC" -ne 0 ] || fail "a proven invariant must not hide the real mismatch"
-echo "$OUT" | grep -q 'using 1 proven impl invariant' || fail "proven-helper disclosure missing: $OUT"
-
-# A false internal assume is a proof obligation and is rejected before LEC.
-cat >"$W/false_internal.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.false_internal {
-  assume(acc.y == 1)
-}
-EOF
-run_lec "$W/false_internal.prp"
-[ "$RC" -ne 0 ] || fail "false internal helper was accepted"
-echo "$OUT" | grep -q 'cannot constrain the miter' || fail "false-helper rejection missing: $OUT"
-
-# The explicit unchecked form is accepted, warned, and distinctly disclosed.
-cat >"$W/unchecked.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.debug_only {
-  assume_nocheck_formal(acc.en == 1)
-}
-EOF
-run_lec "$W/unchecked.prp"
-[ "$RC" -eq 0 ] || fail "unchecked formal helper did not condition the proof: $OUT"
-echo "$OUT" | grep -q 'lec-unchecked-assume' || fail "unchecked helper warning missing: $OUT"
-echo "$OUT" | grep -q 'PROVEN under 1 unchecked assume' || fail "unchecked disclosure missing: $OUT"
-
-# Synthesis-only assumptions are invisible to LEC.
-cat >"$W/synth_only.prp" <<'EOF'
-const acc = import("impl.dut")
-formal dut.synth_only {
-  assume_nocheck_synth(acc.en == 1)
-}
-EOF
-run_lec "$W/synth_only.prp"
-[ "$RC" -ne 0 ] || fail "synthesis-only assumption changed the LEC verdict"
+# --formal selects blocks, so it is refused for the same reason.
+run_lec --formal 'dut.env'
+[ "$RC" -ne 0 ] || fail "--formal must be refused by lec: $OUT"
+echo "$OUT" | grep -q 'which lec does not consume' || fail "--formal refusal must explain itself: $OUT"
 
 # The engine recorded in a strategy hint is tried first on the next cache miss.
 cat >"$W/eq1.v" <<'EOF'

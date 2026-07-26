@@ -138,6 +138,11 @@ TEST(LnastPrpWriter, EqEmittedAsDoubleEquals) {
 }
 
 // ── Test 5: cassert emits with parentheses (new grammar) ─────────────────────
+// All four verification statements share ONE LNAST node; the obligation kind
+// rides in a sentinel const child ahead of the optional message, and NO
+// sentinel means a plain `assert` (that is what prp2lnast emits). The writer
+// must round-trip the ORIGINAL keyword: emitting everything as `cassert`
+// silently retyped an `assert` into an elaboration check.
 TEST(LnastPrpWriter, CassertHasParens) {
   auto ln = std::make_shared<Lnast>("cassert_test");
   ln->set_root(Lnast_ntype::create_top());
@@ -145,9 +150,54 @@ TEST(LnastPrpWriter, CassertHasParens) {
 
   auto ca = ln->add_child(stmts, Lnast_ntype::create_cassert());
   ln->add_child(ca, Lnast_node::create_ref("cond"));
+  ln->add_child(ca, Lnast_node::create_const("__fkind__cassert"));
 
   auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("cassert(cond)"), std::string::npos) << output;
+  EXPECT_EQ(output.find("__fkind__"), std::string::npos) << "sentinel leaked into the emitted Pyrope: " << output;
+}
+
+TEST(LnastPrpWriter, VerificationKindRoundTrips) {
+  struct Case {
+    const char* sentinel;  // nullptr = no sentinel (a plain assert)
+    const char* expect;
+  };
+  const Case cases[] = {
+      {nullptr, "assert(cond)"},
+      {"__fkind__assume", "assume(cond)"},
+      {"__fkind__assert_always", "assert_always(cond)"},
+      {"__fkind__cassert", "cassert(cond)"},
+  };
+  for (const auto& c : cases) {
+    auto ln = std::make_shared<Lnast>("kind_test");
+    ln->set_root(Lnast_ntype::create_top());
+    auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+    auto ca    = ln->add_child(stmts, Lnast_ntype::create_cassert());
+    ln->add_child(ca, Lnast_node::create_ref("cond"));
+    if (c.sentinel != nullptr) {
+      ln->add_child(ca, Lnast_node::create_const(c.sentinel));
+    }
+    auto output = run_and_emit(ln, {"noop"});
+    EXPECT_NE(output.find(c.expect), std::string::npos) << "wanted " << c.expect << " in: " << output;
+    EXPECT_EQ(output.find("__fkind__"), std::string::npos) << "sentinel leaked: " << output;
+  }
+}
+
+// A user MESSAGE is never a kind sentinel, even when it contains (or equals)
+// the sentinel text: an unanchored match here let `assert(x, "…__fkind__assume…")`
+// retype itself into an assume the solver then USED as a hypothesis, reporting
+// a false property as PROVEN at exit 0.
+TEST(LnastPrpWriter, MessageCannotSpoofKind) {
+  auto ln = std::make_shared<Lnast>("spoof_test");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+  auto ca    = ln->add_child(stmts, Lnast_ntype::create_cassert());
+  ln->add_child(ca, Lnast_node::create_ref("cond"));
+  ln->add_child(ca, Lnast_node::create_const("'see __fkind__assume in the manual'"));
+
+  auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("assert(cond"), std::string::npos) << output;
+  EXPECT_EQ(output.find("assume(cond"), std::string::npos) << "message spoofed the kind: " << output;
 }
 
 // ── Test 6: if with const-true condition is pruned ───────────────────────────

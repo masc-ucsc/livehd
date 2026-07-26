@@ -75,10 +75,13 @@ grep -q '_ff.line ='                    "$DRV" || fail "assert line is not captu
 grep -q 'std::string _rj = "\[";'       "$DRV" || fail "result array is not a bare JSON array"
 grep -q '"--result-json"'               "$DRV" || fail "driver does not accept --result-json"
 grep -q 'failing_assert'                "$DRV" || fail "driver does not emit failing_assert"
-# a literal RHS prints only its source (one %ld for the LHS): `v=%ld == 30`
-grep -q 'v=%ld == 30'                   "$DRV" || fail "literal operand should not print '=value' ($(grep 'la.prp:.*:assert fail:.*== 30' "$DRV"))"
-# two named operands each print their value: `v=%ld == expect=%ld`
-grep -q 'v=%ld == expect=%ld'           "$DRV" || fail "both named operands should print their value"
+# Operand VALUES go through the Slop decimal formatter (`%s` + to_decimal()), not
+# `%ld` — a wide value must print in full rather than as its low 64 bits.
+# A literal RHS prints only its source (one %s, for the LHS): `v=%s == 30`
+grep -q 'v=%s == 30'                    "$DRV" || fail "literal operand should not print '=value' ($(grep 'la.prp:.*:assert fail:.*== 30' "$DRV"))"
+grep -q '(v).to_decimal().c_str()'      "$DRV" || fail "operand value is not formatted through Slop to_decimal()"
+# two named operands each print their value: `v=%s == expect=%s`
+grep -q 'v=%s == expect=%s'             "$DRV" || fail "both named operands should print their value"
 
 # ---- a `tick` nested in another `tick` is rejected at setup (no shared _clk) ---
 cat > "$W/nest.prp" <<'EOF'

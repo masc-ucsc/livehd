@@ -1964,7 +1964,20 @@ private:
     if (t == "function_call_expression") {
       TSNode      fn   = field(n, "function");
       std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
-      if (fnnm == "assert" || fnnm == "cassert" || fnnm == "assume") {
+      if (fnnm == "cassert") {
+        // `cassert` is an ELABORATION check (user ruling, 2026-07-25), not a
+        // simulation one: it must fold to true at build time or it is a diag
+        // error. upass.tolg (check_unlowered_casserts) already decided every
+        // cassert of this `test` block's `%`-named unit — so by the time this
+        // generator runs, the only ones left are DISCHARGED. Emitting a runtime
+        // check for one would re-express an elaboration obligation as a
+        // simulation obligation, which is exactly what the ruling forbids (and
+        // is how a comptime-FALSE cassert used to fail at `lhd sim` time
+        // instead of at build time). Skip it; pair it with `assert` when the
+        // value must also be checked at runtime.
+        return;
+      }
+      if (fnnm == "assert" || fnnm == "assume") {
         gen_assert(o, n, depth);
         return;
       }

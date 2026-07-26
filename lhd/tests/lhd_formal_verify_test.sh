@@ -252,8 +252,11 @@ grep -q "'frozen counter'.*PROVEN" "$OUT" || fail "block input assume must prune
 # 6c. P1 assume forms in blocks. A plain block assume over STATE is a proof
 #     obligation: a false one REFUTES the run. assume_nocheck_formal is the
 #     explicit escape: accepted as a free constraint, warned per encounter,
-#     disclosed as UNCHECKED (and it masks the violation — the user owns the
-#     risk). assume_nocheck_synth is invisible to verify.
+#     disclosed as UNCHECKED, and it prunes the block's OWN obligations (the
+#     user owns that risk). assume_nocheck_synth is invisible to verify.
+#     SCOPE: it prunes only inside its block. The design's own `counter hit 5`
+#     assert is a DESIGN-tier obligation and still refutes — a sidecar may not
+#     weaken the design's own claims (user ruling, 2026-07-25).
 cat >"$W/stateassume.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
 formal cnt.stateassume {
@@ -278,12 +281,101 @@ formal cnt.nocheck {
 EOF
 OUT="$W/blocks_nocheck.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/nocheck.verify.prp" --formal 'cnt.nocheck' --top cnt --set formal.bound=10 >"$OUT" 2>&1
-[ $? -eq 0 ] || fail "assume_nocheck_formal must be accepted on the verify path (got rc!=0): $(cat "$OUT")"
 grep -q 'formal-unchecked-assume' "$OUT" || fail "assume_nocheck_formal must warn per encounter: $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck_formal' "$OUT" || fail "the unchecked assume row must be distinct: $(cat "$OUT")"
 grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose the unchecked count: $(cat "$OUT")"
-grep -q "'shadow'.*PROVEN" "$OUT" || fail "the unchecked constraint must prune (user owns the risk): $(cat "$OUT")"
+grep -q "'shadow'.*PROVEN" "$OUT" || fail "the unchecked constraint must prune its OWN block: $(cat "$OUT")"
 grep -q 'count < 3' "$OUT" && fail "assume_nocheck_synth must be INVISIBLE to verify: $(cat "$OUT")"
+# Scope isolation, the point of the ruling: the SAME run's design-tier assert is
+# NOT pruned by the block's unchecked assume — it refutes at its real cycle.
+grep -q "'counter hit 5'.*REFUTED at cycle" "$OUT" \
+  || fail "a block assume must NOT weaken the design's own assert: $(cat "$OUT")"
+
+# ---------------------------------------------------------------------------
+# 6d. SCOPING (fixme issue 3, user ruling 2026-07-25): formal blocks are
+#     INDEPENDENT tests, exactly like `test` blocks. Each block's assumes are in
+#     force ONLY for that block's own obligations, so two blocks may carry
+#     MUTUALLY EXCLUSIVE assumes and both still prove. Before the fix this run
+#     reported "assume set contradictory" and every obligation went UNKNOWN,
+#     which forced sidecar authors to collapse to one block + implication-style
+#     asserts.
+# ---------------------------------------------------------------------------
+cat >"$W/alu.prp" <<'AEOF'
+pub comb aluop(op:u8, x:u8, y:u8) -> (r:u8) {
+  r = if op == 0x17 { (x + y) & 0xff } elif op == 0x07 { (x - y) & 0xff } else { 0 }
+}
+AEOF
+cat >"$W/two.verify.prp" <<'AEOF'
+const a = import("alu.aluop")
+
+formal alu.addw {
+  mut acc = a
+  assume(acc.op == 0x17)
+  assert(acc.r == ((acc.x + acc.y) & 0xff), "ADDW is the sum")
+}
+
+formal alu.subw {
+  mut acc = a
+  assume(acc.op == 0x07)
+  assert(acc.r == ((acc.x - acc.y) & 0xff), "SUBW is the difference")
+}
+AEOF
+OUT="$W/blocks_two.out"
+"$LHD" formal verify "$W/alu.prp" "$W/two.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
+[ $? -eq 0 ] || fail "two blocks with exclusive assumes must both prove (got rc!=0): $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "block 1 must prove under its own assume: $(cat "$OUT")"
+grep -q "'SUBW is the difference'.*PROVEN" "$OUT" || fail "block 2 must prove under its own assume: $(cat "$OUT")"
+grep -q 'CONTRADICTORY' "$OUT" && fail "independent blocks must not form one contradictory assume set: $(cat "$OUT")"
+
+# The dual: a block must NOT borrow a SIBLING's assume. `leak` asserts the ADDW
+# property under the SUBW assume, so it can only pass if op==0x17 leaked in.
+cat >"$W/leak.verify.prp" <<'AEOF'
+const a = import("alu.aluop")
+
+formal alu.addw {
+  mut acc = a
+  assume(acc.op == 0x17)
+  assert(acc.r == ((acc.x + acc.y) & 0xff), "ADDW is the sum")
+}
+
+formal alu.leak {
+  mut acc = a
+  assume(acc.op == 0x07)
+  assert(acc.r == ((acc.x + acc.y) & 0xff), "LEAK only holds under addw's assume")
+}
+AEOF
+OUT="$W/blocks_leak.out"
+"$LHD" formal verify "$W/alu.prp" "$W/leak.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
+[ $? -ne 0 ] || fail "a sibling block's assume must not prove a false property (got rc=0): $(cat "$OUT")"
+grep -q "'LEAK only holds under addw's assume'.*REFUTED" "$OUT" \
+  || fail "the borrowing block must REFUTE: $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "the honest block must still prove alongside it: $(cat "$OUT")"
+
+# A block whose OWN assume set is contradictory is named, is NOT allowed to
+# vacuously prove, and fails the run (exit != 0) even without formal.strict —
+# while a healthy sibling in the same run still proves.
+cat >"$W/contra.verify.prp" <<'AEOF'
+const a = import("alu.aluop")
+
+formal alu.good {
+  mut acc = a
+  assume(acc.op == 0x17)
+  assert(acc.r == ((acc.x + acc.y) & 0xff), "ADDW is the sum")
+}
+
+formal alu.contra {
+  mut acc = a
+  assume(acc.op == 0x17)
+  assume(acc.op == 0x07)
+  assert(acc.r == 0xde, "anything at all")
+}
+AEOF
+OUT="$W/blocks_contra.out"
+"$LHD" formal verify "$W/alu.prp" "$W/contra.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
+[ $? -ne 0 ] || fail "a contradictory assume set must fail the run without formal.strict (got rc=0): $(cat "$OUT")"
+grep -q "CONTRADICTORY in block 'alu.contra'" "$OUT" || fail "the contradiction must NAME its block: $(cat "$OUT")"
+grep -q "'anything at all'.*PROVEN" "$OUT" && fail "a contradictory block must not prove anything vacuously: $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "a healthy sibling block must survive: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 6b. A block may target a SUBMODULE (user ruling): it binds to EVERY instance

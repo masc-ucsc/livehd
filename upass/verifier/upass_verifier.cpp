@@ -143,7 +143,16 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     // operand: a folded string literal becomes a const, an interpolated
     // string a ref the runner can fold. Only a comptime-known string is
     // surfaced; anything else is dropped (the diag still reports without it).
-    if (move_to_sibling()) {
+    // An obligation-KIND sentinel (`__fkind__assume` / `__fkind__assert_always`
+    // / `__fkind__cassert`) sits ahead of the message and is not one — skip it,
+    // or it is reported as the user's message.
+    // The sentinel is the LAST child when there is no user message, so the
+    // skip must be guarded — walking off the end leaves the cursor invalid.
+    bool have_msg_child = move_to_sibling();
+    if (have_msg_child && current_text().rfind("__fkind__", 0) == 0) {
+      have_msg_child = move_to_sibling();
+    }
+    if (have_msg_child) {
       std::optional<Dlop> mval;
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
         mval = *Dlop::from_pyrope(current_text());

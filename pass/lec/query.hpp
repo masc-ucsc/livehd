@@ -526,7 +526,14 @@ struct Prop_result {
   std::string kind;   // assert | assert_always | assume
   std::string loc;    // source location ("" when tolg carried none)
   std::string msg;    // user message ("")
-  std::string block;  // formal-block dotted name ("" = an fproperty in the design itself)
+  std::string block;  // formal-block dotted name + "@instance" ("" = an fproperty in the design itself)
+  // The obligation's ASSUME SCOPE: the formal block's dotted name WITHOUT the
+  // "@instance" suffix, so every instance context of one authored block shares
+  // it ("" = the design tier). Blocks are independent tests (user ruling,
+  // 2026-07-25): an obligation is discharged under exactly its own scope's
+  // assumes plus the always-in-force design-tier ones, never under a sibling
+  // block's. See prove_properties' per-scope activation literals.
+  std::string scope;
   // kind==assume classification (P1 assume discipline; "" for asserts and under
   // ignore_assumes):
   //   "input"     — the cond's cone reaches primary inputs (or free blackbox
@@ -580,7 +587,14 @@ struct Verify_result {
                                        // state, so a refute may rest on an unreachable initial state — the
                                        // compile tier must NOT treat it as reachable-from-reset (no hard error).
   int         n_assumes     = 0;   // user assumes in force (verdicts are conditional on them)
-  bool        vacuous       = false;  // assume set contradictory: every "proof" was vacuous
+  // An assume set was contradictory, so the proofs it governed were vacuous.
+  // With per-scope assume scoping this is now a PER-SCOPE property: `vacuous`
+  // is the roll-up (true if ANY scope was contradictory) and `vacuous_scopes`
+  // names them — "" for the design tier, else the formal block's dotted name.
+  // A contradictory BLOCK voids only that block's obligations; a contradictory
+  // DESIGN tier voids everything (every scope sits on the design frame).
+  bool                     vacuous = false;
+  std::vector<std::string> vacuous_scopes;
   std::vector<Prop_result> props;  // one entry per fproperty, walk order
   // STRUCTURED timeout core (formal.minetimeout): indices into `props` of the
   // obligations cvc5 named as the toxic subset (the same set res.detail spells
@@ -614,7 +628,13 @@ struct Verify_result {
 // join the verdict table under the block's dotted name.
 struct Monitor {
   hhds::Graph* graph = nullptr;  // the compiled monitor comb (caller owns lifetime)
-  std::string  block;            // dotted block name (filter/report handle)
+  std::string  block;            // dotted block name + "@instance" (filter/report handle)
+  // Assume SCOPE: the block's dotted name with no "@instance" suffix. Every
+  // instance context of one authored block shares a scope, so a block that
+  // binds to N instances still has ONE assume set (all N in force together —
+  // that is one test), while a DIFFERENT block never sees it. Leave empty only
+  // for a monitor that should share the design tier's always-in-force assumes.
+  std::string scope;
   // One input binding: the monitor's input port name <- a design signal.
   struct Bind {
     enum class Src { input, output, state };

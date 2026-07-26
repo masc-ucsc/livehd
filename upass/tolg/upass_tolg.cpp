@@ -4411,13 +4411,44 @@ private:
     auto nxt = lnast_->get_sibling_next(cond_nid);
     if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
       std::string s{lnast_->get_name(nxt)};
-      if (s.find("__fkind__assert_always") != std::string::npos) {
+      // EXACT match, never a substring search: when the user wrote a plain
+      // `assert` there is no sentinel and this child is the user's MESSAGE.
+      // An unanchored find() there let `assert(x, "… __fkind__assume …")`
+      // retype itself into an assume that the solver then USED as a
+      // hypothesis — a silent false-PROVEN. The sentinel is emitted unquoted
+      // so it cannot collide with any string message.
+      if (s == "__fkind__assert_always") {
         kind = "assert_always";
         nxt = lnast_->get_sibling_next(nxt);
-      } else if (s.find("__fkind__assume") != std::string::npos) {
+      } else if (s == "__fkind__assume") {
         kind = "assume";
         nxt = lnast_->get_sibling_next(nxt);
+      } else if (s == "__fkind__cassert") {
+        kind = "cassert";
+        nxt = lnast_->get_sibling_next(nxt);
       }
+    }
+    // `cassert` is an ELABORATION check (user ruling, 2026-07-25): the upass
+    // must fold it here, or it fails. It never becomes an fproperty, so it
+    // never reaches pass.formal and never survives into the netlist as a
+    // runtime check — that is exactly what distinguishes it from `assert`.
+    if (kind == "cassert") {
+      if (!livehd::graph_util::is_const_pin(cond.pin)) {
+        error_at(nid, {"cassert-not-comptime", "unsupported"},
+                 "upass.tolg: cassert condition did not fold to a compile-time "
+                 "value — cassert is an elaboration check; use `assert` for a "
+                 "condition that must hold of the hardware");
+        return;
+      }
+      // Discharge only on a known-TRUE fold. `!is_known_false()` is not the
+      // same predicate: an X/unknown constant pin is const and not known-false,
+      // so it would slip through as "proven" and emit a full netlist. A cassert
+      // the compiler cannot decide is exactly the case that must fail.
+      if (!livehd::graph_util::hydrate_const(cond.pin).is_known_true()) {
+        error_at(nid, {"cassert-false", "unsupported"},
+                 "upass.tolg: cassert condition is not true at compile time");
+      }
+      return;  // folded true: discharged here, nothing to materialize
     }
     if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
       msg = std::string{lnast_->get_name(nxt)};
@@ -7134,6 +7165,113 @@ static bool is_sim_only_unit(const std::shared_ptr<Lnast> &lnast) {
   return !entity.empty() && entity.front() == '%';
 }
 
+// Decide ONE surviving `cassert` node on the post-upass tree, with exactly the
+// predicate lower_cassert applies to the folded driver pin.
+static void decide_unlowered_cassert(const std::shared_ptr<Lnast> &lnast,
+                                     const Lnast_nid &nid) {
+  auto cond = lnast->get_first_child(nid);
+  if (cond.is_invalid()) {
+    return;
+  }
+  // `assert` / `assert_always` / `assume` share this node type and are DESIGN
+  // obligations: they may legally stay unresolved (a testbench `assert` is the
+  // runtime check prp_sim emits, an `assert` in a body becomes an fproperty).
+  // Only `cassert` is an elaboration check. The kind rides an EXACT-match
+  // sentinel const child ahead of the optional user message — never a substring
+  // search, or a message merely CONTAINING the text would retype the
+  // obligation (the false-PROVEN bug lower_cassert documents).
+  auto kind_nid = lnast->get_sibling_next(cond);
+  if (kind_nid.is_invalid()
+      || !Lnast_ntype::is_const(lnast->get_type(kind_nid))
+      || lnast->get_name(kind_nid) != "__fkind__cassert") {
+    return;
+  }
+  std::string msg;
+  if (auto m = lnast->get_sibling_next(kind_nid);
+      !m.is_invalid() && Lnast_ntype::is_const(lnast->get_type(m))) {
+    msg = std::string{lnast->get_name(m)};
+    if (msg.size() >= 2 && msg.front() == '\'' && msg.back() == '\'') {
+      msg = msg.substr(1, msg.size() - 2); // strip Lconst::to_pyrope quoting
+    }
+  }
+  const bool const_cond = Lnast_ntype::is_const(lnast->get_type(cond));
+  if (const_cond) {
+    auto v = Dlop::from_pyrope(lnast->get_name(cond));
+    // Discharge ONLY on a known-TRUE fold, or on a comptime nil (an unset
+    // attribute reads as nil; upass.verifier discharges that same way per
+    // attributes_spec §Phase 2). `!is_known_false()` is NOT this predicate: an
+    // X/unknown constant is const and not known-false, so it would slip through
+    // as "proven" — and a cassert the compiler cannot decide is exactly the
+    // case that must fail.
+    if (v && !v->is_invalid() && (v->is_nil() || v->is_known_true())) {
+      return;
+    }
+  }
+  std::string text
+      = const_cond ? "upass.tolg: cassert condition is not true at compile time"
+                   : "upass.tolg: cassert condition did not fold to a "
+                     "compile-time value";
+  if (!msg.empty()) {
+    text += ": " + msg;
+  }
+  livehd::diag::err("upass.tolg",
+                    const_cond ? "cassert-false" : "cassert-not-comptime",
+                    "unsupported")
+      .at(lnast->span_of(nid))
+      .msg("{}", text)
+      .hint("cassert is an elaboration check: it must fold to true at compile "
+            "time; use `assert` for a condition that must hold of the hardware")
+      .fatal();
+}
+
+// `cassert` is an ELABORATION check (user ruling, 2026-07-25): the compiler
+// folds it to true, or it is a diagnostic error. It never becomes an LGraph
+// node, a netlist check, a simulation check or a formal obligation — that is
+// exactly what separates it from `assert`. `lower_cassert` enforces that for
+// every lambda BODY the builder walks, but two trees are handed to tolg and
+// returned UNLOWERED, so no lower_cassert ever runs on them:
+//
+//   * the FILE-SCOPE statement tree (empty io_meta — the top-level
+//     `mut`/`const`/`cassert` statements of the source file), and
+//   * a `%`-named SIM-ONLY unit (the comb a `test` / `spawn` block lowers to),
+//     whose casserts inou.prp (prp_sim) would otherwise code-generate as
+//     RUNTIME checks that fail during `lhd sim` instead of at build time. The
+//     verifier is stripped for those spawned units, so even a comptime-FALSE
+//     one survives here undiagnosed.
+//
+// Both are CLOSED scopes: no call site is left that could bind a value and fold
+// the condition later, so an undischarged cassert there is final. A TEMPLATE
+// body is the opposite case — it is realized (and folded) per call site — and a
+// pre-elaborated import / `.__pub` index is not re-walked this run; all three
+// are skipped.
+//
+// This runs at the tolg seam on purpose: reaching tolg is what says "this
+// compilation is producing hardware". An LNAST-only flow (lnast-dump, the LSP,
+// the `comptime`/`upass` test tiers, which all pass upass.tolg=false) may still
+// carry an unresolved cassert, exactly as the ruling allows.
+static void check_unlowered_casserts(const std::shared_ptr<Lnast> &lnast) {
+  if (!lnast || lnast->is_template() || lnast->is_pre_elaborated()
+      || lnast->get_top_module_name().ends_with(".__pub")) {
+    return;
+  }
+  // Whole-subtree walk: a cassert can sit inside a `tick` body, an `if`/`uif`
+  // arm or a nested `stmts`. (A DEAD `comptime if` / const-`if` arm is already
+  // gone — the runner prunes the untaken arm and its casserts with it — so this
+  // never sees one. A `match` lowers to a `uif` that KEEPS its untaken arms;
+  // deciding the casserts in them is the same behavior lower_cassert already
+  // has for lambda bodies.)
+  std::function<void(const Lnast_nid &)> walk = [&](const Lnast_nid &nid) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
+         c = lnast->get_sibling_next(c)) {
+      if (Lnast_ntype::is_cassert(lnast->get_type(c))) {
+        decide_unlowered_cassert(lnast, c);
+      }
+      walk(c);
+    }
+  };
+  walk(lnast->get_root());
+}
+
 void uPass_tolg::register_io(const std::shared_ptr<Lnast> &lnast,
                              std::string_view lib_path,
                              const Registry &registry) {
@@ -7157,7 +7295,11 @@ std::shared_ptr<hhds::Graph>
 uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
                 const Registry &registry, std::string_view reset_style) {
   if (!lnast || lnast->io_meta().empty()) {
-    return nullptr; // not a lowerable module (e.g. the empty file-root tree)
+    // Not a lowerable module (the file-root tree, or a parameterless `test`
+    // block). No lower_cassert will run on it, so discharge-or-fail its
+    // casserts here before dropping it.
+    check_unlowered_casserts(lnast);
+    return nullptr;
   }
   // One perfetto slice per lowered unit (profiling builds only) — tolg is
   // invoked directly by the kernel (not via run_step), so without this the
@@ -7165,8 +7307,11 @@ uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
   TRACE_EVENT("pass", "lnast.tolg", "unit",
               std::string(lnast->get_top_module_name()));
   if (is_sim_only_unit(lnast)) {
-    return nullptr; // testbench / spawn comb — checked by `lhd sim`, not
-                    // lowered to hardware
+    // Testbench / spawn comb — checked by `lhd sim`, not lowered to hardware.
+    // Its `assert`s stay for prp_sim; its `cassert`s are elaboration checks
+    // that must be discharged here (nothing downstream can).
+    check_unlowered_casserts(lnast);
+    return nullptr;
   }
   // A deferred template produces no LGraph (see register_io). A
   // template selected as a synthesis top simply yields no module; it is never

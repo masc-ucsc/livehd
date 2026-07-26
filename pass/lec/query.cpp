@@ -5053,7 +5053,8 @@ std::optional<Prop_key> parse_prop_key(std::string_view name) {
 // this cycle plus the obligation term. This is deliberately downstream of the
 // encoder; any semantic encoding change changes the serialized terms, while the
 // cache-wide formal source salt handles changes that preserve their spelling.
-std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, const cvc5::Term& bad, const Lec_options& opts) {
+std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, const cvc5::Term& bad, const Lec_options& opts,
+                                  const std::string& scope) {
   uint64_t h0  = 1469598103934665603ULL;
   uint64_t h1  = 1099511628211ULL ^ 0x9e3779b97f4a7c15ULL;
   auto     mix = [&](std::string_view s) {
@@ -5063,9 +5064,13 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
     }
     h0 = (h0 ^ 0xffU) * 1099511628211ULL;  // term boundary
   };
-  // v2: P1 assume discipline — internal assumes became obligations (the
-  // asserted-set changes anyway, but the explicit bump keeps old stores inert).
-  mix("verify-obligation-v2");
+  // v3: per-scope assume scoping — a block's assumes are now asserted as
+  // `act => holds`, so the serialized assertion set changed shape AND the same
+  // assertion set can now mean different things depending on which scope's act
+  // is forced. The scope therefore joins the key, and the bump keeps v2 stores
+  // (recorded when every block's assumes bound globally) inert.
+  mix("verify-obligation-v3");
+  mix(scope);
   mix(opts.solver);
   mix(opts.phase);
   mix(opts.reset);
@@ -5401,13 +5406,40 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // silent skip. The FREEZE of already-bounded obligations (below) is what bounds
   // the total — this only ensures no single obligation-check runs unbounded.
   // No-op accounting when the budget is off.
-  auto budget_check = [&](const cvc5::Term& bad) -> cvc5::Result {
+  // Per-scope assume ACTIVATION literals (formal blocks are independent tests —
+  // user ruling, 2026-07-25). Each formal block gets one fresh Boolean constant;
+  // the block's free assumes are asserted as `act => holds` instead of `holds`,
+  // and an obligation belonging to that block is checked with its own `act`
+  // added to the checkSatAssuming set. A sibling block's `act` stays FREE, so
+  // the solver satisfies its implications by picking act=false and the sibling's
+  // assumes constrain nothing. Design-tier assumes carry no literal and so are
+  // in force everywhere, which is exactly the two-tier intent already recorded
+  // for the compile gate. One encode, no push/pop, no re-solve per block.
+  absl::flat_hash_map<std::string, cvc5::Term> scope_act;
+  if (monitors != nullptr) {
+    for (const auto& m : *monitors) {
+      if (m.scope.empty() || scope_act.count(m.scope) != 0) {
+        continue;
+      }
+      scope_act.emplace(m.scope, tm.mkConst(tm.getBooleanSort(), "act_scope:" + m.scope));
+    }
+  }
+  // The activation literal governing `scope`, or a null Term for the design tier
+  // (and for any scope with no literal — an unscoped monitor stays design-tier).
+  auto act_of = [&](const std::string& scope) -> cvc5::Term {
+    if (scope.empty()) {
+      return cvc5::Term();
+    }
+    auto it = scope_act.find(scope);
+    return it == scope_act.end() ? cvc5::Term() : it->second;
+  };
+  auto budget_check = [&](const cvc5::Term& bad, const cvc5::Term& act = cvc5::Term()) -> cvc5::Result {
     if (solve_budget_on) {
       const long long remaining = solve_budget_ms - solve_spent_ms;
       solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, remaining)));
     }
     const auto   tq = std::chrono::steady_clock::now();
-    cvc5::Result r  = solver.checkSatAssuming(bad);
+    cvc5::Result r  = act.isNull() ? solver.checkSatAssuming(bad) : solver.checkSatAssuming({bad, act});
     if (solve_budget_on) {
       solve_spent_ms += now_ms(tq);
     }
@@ -5422,6 +5454,15 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   auto                    assert_formula = [&](const cvc5::Term& t) {
     solver.assertFormula(t);
     asserted.push_back(t);
+  };
+  // Assert a fact that is only valid inside `scope`: design tier -> plain, a
+  // formal block -> `act => t`, so it is inert while any other block's
+  // obligations are being discharged. Used for BOTH a block's free (env)
+  // assumes and the frontier facts its proven obligations contribute — a fact
+  // entailed under block B's assumes is only sound under block B.
+  auto assert_scoped = [&](const std::string& scope, const cvc5::Term& t) {
+    cvc5::Term act = act_of(scope);
+    assert_formula(act.isNull() ? t : tm.mkTerm(cvc5::Kind::IMPLIES, {act, t}));
   };
 
   // Blackbox presence: a Sub with no body that sub_lib cannot flatten becomes
@@ -6056,6 +6097,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           }
           if (mon != nullptr) {
             pr.block = mon->block;
+            pr.scope = mon->scope;
             // The fproperty loc points into the GENERATED monitor source; map
             // its line back to the user's formal-block statement.
             if (auto colon = pr.loc.rfind(':'); colon != std::string::npos) {
@@ -6087,7 +6129,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
             // checked during the prologue would run unconstrained and
             // false-refute). A contradiction with the driven reset behavior is
             // caught by the vacuity check below. Disclosed by class.
-            assert_formula(holds);
+            // SCOPED: a formal block's env assume constrains only that block's
+            // own obligations, so two blocks with mutually-exclusive assumes no
+            // longer poison each other into a global "assume set contradictory".
+            assert_scoped(pr.scope, holds);
             continue;
           }
           // internal (P1 prove-then-use): fall through to the obligation path —
@@ -6110,7 +6155,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           continue;
         }
         cvc5::Term   bad = tm.mkTerm(cvc5::Kind::EQUAL, {fit_to(tm, ob.cond, w), zero});
-        std::string ckey   = verify_obligation_key(asserted, bad, opts);
+        // This obligation's scope literal: forced TRUE for the check, so its own
+        // block's assumes bind while every sibling block's stay free (inert).
+        const cvc5::Term pact = act_of(pr.scope);
+        std::string ckey   = verify_obligation_key(asserted, bad, opts, pr.scope);
         bool        cached = opts.verify_cache_lookup && opts.verify_cache_lookup(ckey);
         bool        unsat  = cached;
         bool        sat    = false;
@@ -6126,7 +6174,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               cvc5::Term cube_bad
                   = tm.mkTerm(cvc5::Kind::AND,
                               {bad.substitute(sit->second.term, vc), tm.mkTerm(cvc5::Kind::EQUAL, {sit->second.term, vc})});
-              cvc5::Result cr = budget_check(cube_bad);
+              cvc5::Result cr = budget_check(cube_bad, pact);
               if (cr.isSat()) {
                 sat   = true;
                 unsat = false;
@@ -6142,7 +6190,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         if (!cached && !unsat && !sat) {
           // A poor selector is only an accelerator miss: fall back to the
           // monolithic obligation so splitting can never weaken the verdict.
-          cvc5::Result r = budget_check(bad);
+          cvc5::Result r = budget_check(bad, pact);
           unsat          = r.isUnsat();
           sat            = r.isSat();
         }
@@ -6155,8 +6203,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
             opts.verify_cache_store(std::move(ckey));
           }
           // Frontier assume: an entailed fact — later obligations (same cycle
-          // included) and deeper cycles solve in the pruned space.
-          assert_formula(holds);
+          // included) and deeper cycles solve in the pruned space. Scoped: the
+          // fact was proven UNDER this obligation's scope, so it may only be
+          // reused there (a design-tier fact stays unconditional and global).
+          assert_scoped(pr.scope, holds);
         } else if (sat) {
           pr.refuted_at = cyc;
           pr.trace      = build_input_trace(cyc);  // model valid only until the next assert
@@ -6714,9 +6764,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass == "internal") {
             continue;
           }
+          // Scoped exactly as in the BMC frame: a block's env assume constrains
+          // both step frames only while that block's own candidate is on the
+          // rung, never a sibling block's.
+          const cvc5::Term act = act_of(res.props[ix].scope);
           for (int f = 0; f < 2; ++f) {
             if (auto it = cond_f[f].find(occ_key); it != cond_f[f].end()) {
-              solver.assertFormula(truth(it->second));
+              cvc5::Term t = truth(it->second);
+              solver.assertFormula(act.isNull() ? t : tm.mkTerm(cvc5::Kind::IMPLIES, {act, t}));
             }
           }
         }
@@ -6764,7 +6819,12 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
             changed = false;
             solver.push();
             for (size_t ix : alive) {
-              solver.assertFormula(truth(cond_f[0].at(occ_of(ix))));  // hypothesis at frame 0
+              // Hypothesis at frame 0, scoped: block B's candidate may not prop
+              // up block C's induction (nor vice versa); design-tier candidates
+              // stay unconditional hypotheses for everyone.
+              const cvc5::Term hact = act_of(res.props[ix].scope);
+              cvc5::Term       h    = truth(cond_f[0].at(occ_of(ix)));
+              solver.assertFormula(hact.isNull() ? h : tm.mkTerm(cvc5::Kind::IMPLIES, {hact, h}));
             }
             for (size_t i : malive) {
               solver.assertFormula(mc_f0[i]);  // mined hypothesis at frame 0
@@ -6779,7 +6839,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               // dropped (kept only on a definitive UNSAT) — a budget-out only ever
               // loses an unbounded upgrade, never manufactures one.
               const auto trk = std::chrono::steady_clock::now();
-              const bool ok  = budget_check(bad).isUnsat();
+              const bool ok  = budget_check(bad, act_of(res.props[ix].scope)).isUnsat();
               res.props[ix].solve_ms += now_ms(trk);
               if (ok) {
                 keep.push_back(ix);
@@ -6839,13 +6899,19 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // each proven UNSAT-of-negation under the assertions in force). Skipped under
   // ignore_assumes — no design assume was asserted, so there is no assume set
   // to be contradictory (the compile tier owns assume consistency).
-  int n_env_assumes = 0;
-  for (const auto& pr : res.props) {
-    if (pr.kind == "assume" && pr.aclass != "internal" && !opts.ignore_assumes) {
-      ++n_env_assumes;
+  // PER SCOPE, because assumes are now per scope: a contradictory formal block
+  // voids only its OWN obligations. The design tier is checked with every act
+  // free (so no block's assumes bind); if IT is contradictory everything is
+  // vacuous, since every scope sits on the design frame.
+  absl::flat_hash_map<std::string, int> env_assumes_by_scope;
+  if (!opts.ignore_assumes) {
+    for (const auto& pr : res.props) {
+      if (pr.kind == "assume" && pr.aclass != "internal") {
+        ++env_assumes_by_scope[pr.scope];
+      }
     }
   }
-  if (n_env_assumes > 0 && !opts.ignore_assumes) {
+  if (!env_assumes_by_scope.empty()) {
     // Restore the full per-query limit first: a budget-exhausted run left
     // tlimit-per floored at the 1s straggler value, and an inconclusive vacuity
     // check would spuriously VOID genuine bounded-Proven obligations. This check
@@ -6853,18 +6919,47 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     if (solve_budget_on) {
       solver.setOption("tlimit-per", std::to_string(solve_budget_ms));
     }
-    cvc5::Result r = solver.checkSat();
-    if (r.isUnsat()) {
-      res.vacuous = true;
-      res.detail += "; assume set CONTRADICTORY (all proofs vacuous)";
-    } else if (!r.isSat()) {
-      res.detail += "; vacuity check inconclusive (assume consistency unconfirmed)";
-      res.vacuous = true;  // conservative: do not report vacuum-tainted Proven
+    // Deterministic order: the design tier first (it can void everything), then
+    // the blocks by name, so the detail string is stable across runs.
+    std::vector<std::string> scopes;
+    scopes.reserve(env_assumes_by_scope.size());
+    for (const auto& [s, n] : env_assumes_by_scope) {
+      scopes.push_back(s);
     }
-    if (res.vacuous) {
+    std::sort(scopes.begin(), scopes.end());
+    bool design_tier_vacuous = false;
+    for (const auto& scope : scopes) {
+      if (design_tier_vacuous) {
+        break;  // already voided everything; the per-block answers are moot
+      }
+      cvc5::Term   act = act_of(scope);
+      cvc5::Result r   = act.isNull() ? solver.checkSat() : solver.checkSatAssuming(act);
+      bool         bad_scope = false;
+      if (r.isUnsat()) {
+        bad_scope   = true;
+        res.detail += scope.empty() ? std::string{"; assume set CONTRADICTORY (all proofs vacuous)"}
+                                    : std::format("; assume set CONTRADICTORY in block '{}' (its proofs vacuous)", scope);
+      } else if (!r.isSat()) {
+        bad_scope   = true;  // conservative: do not report vacuum-tainted Proven
+        res.detail += scope.empty()
+                          ? std::string{"; vacuity check inconclusive (assume consistency unconfirmed)"}
+                          : std::format("; vacuity check inconclusive for block '{}' (assume consistency unconfirmed)", scope);
+      }
+      if (!bad_scope) {
+        continue;
+      }
+      res.vacuous = true;
+      res.vacuous_scopes.push_back(scope);
+      design_tier_vacuous = scope.empty();
       for (auto& pr : res.props) {
+        // A contradictory DESIGN tier voids every obligation; a contradictory
+        // BLOCK voids only the obligations discharged under it.
+        if (!design_tier_vacuous && pr.scope != scope) {
+          continue;
+        }
         if ((pr.kind != "assume" || pr.aclass == "internal") && pr.verdict == Verdict::Proven) {
-          pr.verdict = Verdict::Unknown;
+          pr.verdict  = Verdict::Unknown;
+          pr.unbounded = false;
         }
       }
     }

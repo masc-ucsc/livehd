@@ -63,11 +63,19 @@ reject_param() {
 :type: simulation
 */
 mod nn(a:u8) -> (s:u8@[0]) { s = a }
-test nn.t($decl) { const v = nn(a=1); assert(v == 1, "x") }
+test nn.t($decl) {
+  mut acc = nn
+  mut v = 0
+  tick 2 { acc.a = 1; step; v = acc.s }
+  assert(v == 1, "x")
+}
 EOF
   local out
   out="$("$LHD" sim "$W/bad.prp" --setup-only --workdir "$W/bad" -q 2>&1)" \
     && fail "reserved parameter name ($label) was NOT rejected"
+  # The body is the ordinary instance/`step` form on purpose: it must set up
+  # cleanly so the ONLY thing that can fail is the parameter name. A body that
+  # errors on its own would make every case below pass vacuously.
   echo "$out" | grep -q 'not a usable simulation parameter name' \
     || fail "rejection of $label lacked the explanatory message: $out"
 }

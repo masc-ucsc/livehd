@@ -339,6 +339,14 @@ static void lec_store_pair_hint(livehd::formal::Verdict_cache* vcache, const std
   vcache->set_pair_hint(entity, std::move(ph));
 }
 
+// Disclose helper-conditioned lec verdicts. NOTHING in the driver sets these
+// counters today: lec no longer consumes formal-block sidecars (user ruling,
+// 2026-07-25 — blocks are independent `lhd formal verify` tests, and lec's
+// single impl==ref obligation could only take their assumes globally). The
+// ENGINE-side capability in query.cpp (Lec_options::assumptions + the monitor
+// encode) is deliberately retained so re-admitting blocks later is an explicit
+// opt-in flag wiring them back up here, not a re-implementation. Every branch
+// below is guarded on > 0, so it is inert until then.
 static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec::Lec_options& o) {
   if (o.proven_helpers > 0) {
     r.detail += std::format("; using {} proven impl invariant(s)", o.proven_helpers);
@@ -1835,228 +1843,6 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
 }
 
-struct Lec_formal_helpers {
-  std::vector<livehd::lec::Monitor> constraints;
-  std::vector<livehd::lec::Monitor> checks;
-  std::vector<Eprp_var>             keep;
-  std::string                       key;
-  int                               proven    = 0;
-  int                               inputs    = 0;
-  int                               unchecked = 0;
-};
-
-static Lec_formal_helpers compile_lec_formal_helpers(Options& opts, Result& res, hhds::Graph* impl,
-                                                     const std::vector<std::string>& block_files) {
-  Lec_formal_helpers out;
-  if (block_files.empty()) {
-    return out;
-  }
-
-  struct Sig {
-    int  w;
-    bool sgn;
-  };
-  absl::flat_hash_map<std::string, Sig> in_tbl, out_tbl, flop_tbl;
-  auto                                  gio = impl->get_io();
-  for (const auto& d : gio->get_input_pin_decls()) {
-    auto pin       = impl->get_input_pin(d.name);
-    int  w         = livehd::lec::real_width_io(pin, *gio, d.name);
-    // Sign from the IO DECLARATION, never the pin: LiveHD represents uN as a
-        // signed N+1 internally, so the pin reads "signed" for an unsigned port —
-        // typing the monitor input sN would flip ordered compares in user
-        // properties (assume(x <= 15) held vacuously for large x). The decl is
-        // what the user wrote; the engine truncates/extends the bound value to
-        // the monitor's declared type.
-        in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
-  }
-  for (const auto& d : gio->get_output_pin_decls()) {
-    auto pin        = impl->get_output_pin(d.name);
-    int  w          = livehd::lec::real_width_io(pin, *gio, d.name);
-    out_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
-  }
-  for (auto node : impl->forward_hier()) {
-    if (livehd::graph_util::type_op_of(node) != Ntype_op::Flop) {
-      continue;
-    }
-    auto q = node.get_driver_pin(0);
-    if (!q.is_invalid()) {
-      int w                                                        = livehd::lec::real_width(q);
-      flop_tbl[livehd::lec::canon_flop_name(node.get_hier_name())] = Sig{w == 0 ? 1 : w, !livehd::graph_util::is_unsign(q)};
-    }
-  }
-
-  auto entity = [](std::string_view n) {
-    auto d = n.rfind('.');
-    return d == std::string_view::npos ? n : n.substr(d + 1);
-  };
-  auto callee = [](std::string_view text) {
-    size_t n = 0;
-    while (n < text.size() && (std::isalnum(static_cast<unsigned char>(text[n])) != 0 || text[n] == '_')) {
-      ++n;
-    }
-    return std::string{text.substr(0, n)};
-  };
-  auto rewrite_callee = [](std::string text, std::string_view replacement) {
-    size_t n = 0;
-    while (n < text.size() && (std::isalnum(static_cast<unsigned char>(text[n])) != 0 || text[n] == '_')) {
-      ++n;
-    }
-    text.replace(0, n, replacement);
-    return text;
-  };
-  uint64_t h        = 1469598103934665603ULL;
-  auto     hash_add = [&](std::string_view s) {
-    for (unsigned char c : s) {
-      h ^= c;
-      h *= 1099511628211ULL;
-    }
-    h ^= 0xff;
-    h *= 1099511628211ULL;
-  };
-  int gen_ix = 0;
-  for (const auto& bf : block_files) {
-    for (auto& blk : livehd::formal_blocks::extract(bf, /*allow_nocheck=*/true)) {
-      if (!blk.error.empty()) {
-        throw Lhd_error{"usage", std::format("formal block error: {}", blk.error), "LEC helpers use the formal-block syntax"};
-      }
-      if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
-        continue;
-      }
-      std::vector<std::string> prefixes;
-      if (blk.target.empty() || entity(blk.target) == entity(impl->get_name())) {
-        prefixes.emplace_back("");
-      } else {
-        for (auto node : impl->forward_hier()) {
-          if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
-            auto sio = node.get_subnode_io();
-            if (sio != nullptr && entity(sio->get_name()) == entity(blk.target)) {
-              prefixes.emplace_back(node.get_hier_name());
-            }
-          }
-        }
-        if (prefixes.empty()) {
-          throw Lhd_error{"usage",
-                          std::format("formal block '{}' targets module '{}', which impl '{}' does not instantiate",
-                                      blk.name,
-                                      blk.target,
-                                      impl->get_name()),
-                          "bind the block to the selected impl top or one of its instantiated modules"};
-        }
-      }
-
-      auto resolve
-          = [&](const livehd::formal_blocks::Input& in, const std::string& prefix, livehd::lec::Monitor::Bind& b) -> const Sig* {
-        b.ident = in.ident;
-        if (prefix.empty()) {
-          if (auto it = in_tbl.find(in.path); it != in_tbl.end()) {
-            b.src = livehd::lec::Monitor::Bind::Src::input;
-            b.key = in.path;
-            return &it->second;
-          }
-          if (auto it = out_tbl.find(in.path); it != out_tbl.end()) {
-            b.src = livehd::lec::Monitor::Bind::Src::output;
-            b.key = in.path;
-            return &it->second;
-          }
-        }
-        std::string full = prefix.empty() ? in.path : prefix + "." + in.path;
-        if (auto it = flop_tbl.find(livehd::lec::canon_flop_name(full)); it != flop_tbl.end()) {
-          b.src = livehd::lec::Monitor::Bind::Src::state;
-          b.key = livehd::lec::canon_flop_name(full);
-          return &it->second;
-        }
-        return nullptr;
-      };
-
-      for (const auto& st : blk.stmts) {
-        const std::string kind = callee(st.text);
-        if (kind == "assume_nocheck_synth") {
-          continue;  // formal engines never consume synthesis-only assumptions
-        }
-        absl::flat_hash_set<std::string>                 used(st.idents.begin(), st.idents.end());
-        std::vector<const livehd::formal_blocks::Input*> stmt_inputs;
-        for (const auto& in : blk.inputs) {
-          if (used.contains(in.ident)) {
-            stmt_inputs.push_back(&in);
-          }
-        }
-        for (const auto& prefix : prefixes) {
-          livehd::lec::Monitor base;
-          base.block  = prefix.empty() ? blk.name : blk.name + "@" + prefix;
-          base.block += std::format(":{}", st.line);
-          std::string ports;
-          bool        input_only = !stmt_inputs.empty();
-          for (const auto* in : stmt_inputs) {
-            livehd::lec::Monitor::Bind b;
-            const Sig*                 sig = resolve(*in, prefix, b);
-            if (sig == nullptr) {
-              throw Lhd_error{"usage",
-                              std::format("formal block '{}': signal path '{}' does not resolve in impl '{}'",
-                                          blk.name,
-                                          in->path,
-                                          impl->get_name()),
-                              "LEC helpers reach top ports and registers (including dotted instance registers)"};
-            }
-            input_only  = input_only && b.src == livehd::lec::Monitor::Bind::Src::input;
-            ports      += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", b.ident, sig->sgn ? "s" : "u", sig->w);
-            base.binds.push_back(std::move(b));
-          }
-
-          auto compile_one = [&](std::string statement, std::string_view tag) {
-            const auto genp = fs::path(workdir(opts)) / std::format("__lec_fbmon_{}_{}.prp", gen_ix++, tag);
-            {
-              std::ofstream gf(genp);
-              gf << std::format("comb __lec_fbmon({}) -> (__fb_ok:bool) {{\n{}\n__fb_ok = true\n}}\n", ports, statement);
-            }
-            const size_t saved_sets = opts.sets.size();
-            opts.sets.emplace_back("compile.formal.mode", "none");
-            Eprp_var mvar;
-            load_side_graphs(opts, res, "pyrope", genp.string(), "impl", mvar);
-            opts.sets.resize(saved_sets);
-            if (mvar.graphs.size() != 1) {
-              throw Lhd_error{"internal",
-                              std::format("formal helper '{}' monitor compile yielded {} modules", base.block, mvar.graphs.size()),
-                              genp.string()};
-            }
-            livehd::lec::Monitor mon = base;
-            mon.graph                = mvar.graphs.front().get();
-            mon.line2loc[2]          = std::format("{}:{}", bf, st.line);
-            out.keep.push_back(std::move(mvar));
-            return mon;
-          };
-
-          const bool unchecked = kind == "assume_nocheck_formal";
-          const bool env_input = kind == "assume" && input_only;
-          if (!unchecked && !env_input) {
-            out.checks.push_back(compile_one(rewrite_callee(st.text, "assert_always"), "check"));
-            ++out.proven;
-          } else if (unchecked) {
-            ++out.unchecked;
-            livehd::diag::warn("pass.lec", "lec-unchecked-assume", "comptime")
-                .msg("formal helper '{}' uses assume_nocheck_formal; the LEC verdict is conditional and unchecked", base.block)
-                .emit();
-          } else {
-            ++out.inputs;
-          }
-          out.constraints.push_back(compile_one(rewrite_callee(st.text, "assume"), "use"));
-          hash_add(bf);
-          hash_add(base.block);
-          hash_add(st.text);
-          hash_add(unchecked ? "unchecked" : (env_input ? "input" : "proven"));
-          for (const auto& b : base.binds) {
-            hash_add(b.ident);
-            hash_add(b.key);
-          }
-        }
-      }
-    }
-  }
-  if (!out.constraints.empty()) {
-    out.key = std::format("{:016x}", h);
-  }
-  return out;
-}
-
 void lec_command(Options& opts, Result& res) {
   // Whether the USER passed --workdir (captured before load_side_graphs' first
   // workdir() call fabricates a scratch temp dir): the lecfail witness testbench
@@ -2101,19 +1887,26 @@ void lec_command(Options& opts, Result& res) {
     return;
   }
 
-  std::vector<std::string> block_files;
-  if (opts.impl_kind == "pyrope" && opts.impl_path.ends_with(".prp")) {
-    block_files.push_back(opts.impl_path);
+  // Formal BLOCKS are a `lhd formal verify` construct, not a lec one (user
+  // ruling, 2026-07-25): a block is an independent test, while lec has a single
+  // obligation (impl == ref) that a block's assumes could only condition
+  // globally — which is precisely the cross-block poisoning that ruling removes.
+  // lec still honors the design's OWN assumes (fproperty Subs in the graph, see
+  // query.cpp's graph_has_assume), so an environment constraint written in the
+  // design tier reaches lec exactly as before. A sidecar is refused loudly
+  // rather than silently ignored; re-admitting it later would be an explicit
+  // opt-in flag, never a bare positional.
+  if (!opts.files.empty()) {
+    throw Lhd_error{"usage",
+                    std::format("lec: unexpected positional input '{}'", opts.files.front()),
+                    "lec takes no formal-block sidecar: blocks are independent tests, proved by `lhd formal verify "
+                    "<design> <sidecar>`. An environment constraint for lec belongs in the design itself, where it is "
+                    "in force for every check"};
   }
-  for (const auto& f : opts.files) {
-    if (!f.ends_with(".prp")) {
-      throw Lhd_error{"usage",
-                      std::format("lec: unexpected positional input '{}'", f),
-                      "extra inputs must be .prp formal-block sidecars"};
-    }
-    block_files.push_back(f);
+  if (!opts.formal_filter.empty()) {
+    throw Lhd_error{"usage", "lec: --formal selects formal blocks, which lec does not consume",
+                    "use `lhd formal verify <design> <sidecar> --formal <glob>`"};
   }
-  check_inputs_exist(block_files);
 
   Eprp_var ref_var;
   Eprp_var impl_var;
@@ -2389,56 +2182,6 @@ void lec_command(Options& opts, Result& res) {
           std::format("pass.single_edge slots:{} ref_latches:{} impl_latches:{} bound:{}", rn.slots, rn.latches_retyped,
                       in.latches_retyped, o.bound));
     }
-  }
-
-  // Formal blocks are impl-side helpers. Compile every selected statement via
-  // the normal Pyrope monitor pipeline, prove internal facts independently,
-  // and only then expose the normalized assumptions to the relational miter.
-  Lec_formal_helpers formal_helpers = compile_lec_formal_helpers(opts, res, impl_g.get(), block_files);
-  if (!formal_helpers.checks.empty()) {
-    livehd::lec::Lec_options check_opts = o;
-    check_opts.engine                   = "bmc";
-    // Helper facts feed the relational miter, so their proof must be
-    // REPRODUCIBLE (build success depends on an unbounded helper verdict). Never
-    // run this under the wall-clock total budget — a budget-out could skip the
-    // induction rung and lose a genuinely-inductive helper on a slow machine.
-    check_opts.budget_mode = "rlimit";
-    check_opts.minetimeout = 0;
-    check_opts.assumptions              = nullptr;
-    check_opts.assumption_key.clear();
-    check_opts.proven_helpers = check_opts.input_assumes = check_opts.unchecked_assumes = 0;
-    auto checked = livehd::lec::prove_properties(impl_g.get(), check_opts, sub_lib_ptr, &formal_helpers.checks);
-    if (checked.oversize_refused) {
-      throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), checked.detail),
-                      "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
-    }
-    int  seen    = 0;
-    for (const auto& p : checked.props) {
-      if (p.block.empty()) {
-        continue;
-      }
-      ++seen;
-      if (p.verdict != livehd::lec::Verdict::Proven || !p.unbounded) {
-        const std::string why = p.verdict == livehd::lec::Verdict::Refuted ? std::format("refuted at cycle {}", p.refuted_at)
-                                                                           : "not proven unbounded";
-        throw Lhd_error{"equiv_fail",
-                        std::format("LEC formal helper '{}' was {} and cannot constrain the miter", p.block, why),
-                        "prove the impl invariant first, use an input-only assume for an environment constraint, or spell "
-                        "assume_nocheck_formal explicitly"};
-      }
-    }
-    if (seen != static_cast<int>(formal_helpers.checks.size())) {
-      throw Lhd_error{"internal", "not every LEC formal helper produced a proof obligation", checked.detail};
-    }
-  }
-  if (!formal_helpers.constraints.empty()) {
-    o.assumptions       = &formal_helpers.constraints;
-    o.assumption_key    = formal_helpers.key;
-    o.proven_helpers    = formal_helpers.proven;
-    o.input_assumes     = formal_helpers.inputs;
-    o.unchecked_assumes = formal_helpers.unchecked;
-    res.recipe_steps.emplace_back(
-        std::format("pass.lec helpers proven:{} input:{} unchecked:{}", o.proven_helpers, o.input_assumes, o.unchecked_assumes));
   }
 
   // Phase 1/3 of the lec-on-failure flow (detect -> testbench -> waveform):
@@ -3184,6 +2927,13 @@ static void emit_formal_report(const std::string& path, const std::string& desig
                    r.checked_steps, r.reset_hold);
   j += std::format("    \"reset_detected\": {},\n    \"vacuous\": {},\n", r.reset_detected ? "true" : "false",
                    r.vacuous ? "true" : "false");
+  {  // which assume scopes were contradictory ("" = the design tier)
+    std::string vs;
+    for (const auto& s : r.vacuous_scopes) {
+      vs += std::format("{}\"{}\"", vs.empty() ? "" : ", ", json_esc(s));
+    }
+    j += std::format("    \"vacuous_scopes\": [{}],\n", vs);
+  }
   j += std::format("    \"engine\": \"{}\",\n    \"bound\": {},\n", json_esc(o.engine), o.bound);
   j += std::format("    \"budget\": {{\"timeout_s\": {}, \"budget_mode\": \"{}\", \"rlimit\": {}, \"mine_timeout_s\": {}}},\n",
                    o.timeout, json_esc(o.budget_mode), o.rlimit, o.minetimeout);
@@ -3207,9 +2957,12 @@ static void emit_formal_report(const std::string& path, const std::string& desig
                                                                               : "unknown";
     std::string why;
     if (!env_assume && p.verdict != livehd::lec::Verdict::Proven && p.verdict != livehd::lec::Verdict::Refuted) {
+      const bool scope_vacuous
+          = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
       why = p.refuted_at >= 0    ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
             : p.unknown_at >= 0  ? std::format("solver gave up at cycle {}", p.unknown_at)
-            : r.vacuous          ? std::string{"assume set contradictory"}
+            : scope_vacuous      ? (p.scope.empty() ? std::string{"design assume set contradictory"}
+                                                    : std::format("assume set of block '{}' contradictory", p.scope))
                                  : std::string{"not checked"};
       if (p.kind == "assume") {
         why += "; unproven internal assume — NOT used";
@@ -3666,6 +3419,10 @@ void formal_verify_command(Options& opts, Result& res) {
         // widths in every instance); binds built per instance below.
         livehd::lec::Monitor mon;
         mon.block = blk.name;
+        // Assume scope = the authored block. Every instance context below copies
+        // it unchanged (only `block` gains the @instance label), so one block's
+        // N instances share one assume set while a sibling block never sees it.
+        mon.scope = blk.name;
         std::string ports;
         for (const auto& in : blk.inputs) {
           livehd::lec::Monitor::Bind b;
@@ -3745,6 +3502,25 @@ void formal_verify_command(Options& opts, Result& res) {
                           genp.string()};
         }
         mon.graph = mvar.graphs.front().get();
+        // A formal-block monitor must be STATELESS. The engine re-encodes it
+        // fresh at every cycle and does not thread its outputs into the next
+        // state, so any flop inside it is a NEW free symbol each step — which
+        // silently refutes tautologies. `past[N](x)` is the way that happens
+        // in practice (it lowers to a pipeline stage), so REFUSE rather than
+        // emit an unsound verdict. Temporal properties need engine-resolved
+        // history (index the unroll), which is not implemented yet.
+        for (auto mn : mon.graph->fast_hier()) {
+          const auto mop = livehd::graph_util::type_op_of(mn);
+          if (mop != Ntype_op::Flop && mop != Ntype_op::Fflop && mop != Ntype_op::Latch && mop != Ntype_op::Memory) {
+            continue;
+          }
+          throw Lhd_error{"unsupported",
+                          std::format("formal block '{}': the property holds STATE, which is not implemented", blk.name),
+                          "a formal-block property must be a combinational function of the signals it names. Temporal "
+                          "operators (`past`, `rose`, `fell`, `stable`, `changed`, `eventually`, `always`) are not "
+                          "implemented for formal verification yet; note the pipelining `past[N](x)` is a delay stage, "
+                          "not a history sample, and cannot be used here"};
+        }
         mon_keep.push_back(std::move(mvar));
         // One Monitor per instance context: the compiled graph is shared, the
         // binds differ, and non-top contexts carry the @instance label.
@@ -3868,10 +3644,16 @@ void formal_verify_command(Options& opts, Result& res) {
         }
         break;
       default: {
+        // A contradictory assume set is now attributed to the SCOPE that owns
+        // it, so the message names the block to fix instead of blaming the run.
+        const bool scope_vacuous
+            = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
         std::string why = p.refuted_at >= 0 ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
                           : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
-                          : r.vacuous ? std::string{"assume set contradictory"}
-                                      : std::string{"not checked"};
+                          : scope_vacuous
+                              ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
+                                                 : std::format("assume set of block '{}' is contradictory", p.scope))
+                          : std::string{"not checked"};
         if (p.kind == "assume") {
           why += "; unproven internal assume — NOT used (prove it, restrict it to inputs, or spell assume_nocheck_formal)";
         }
@@ -4016,6 +3798,23 @@ void formal_verify_command(Options& opts, Result& res) {
                       std::format("{}. This is a REFUSAL, not a timeout: no obligation was checked, so the run proves "
                                   "nothing. Raising formal.timeout cannot help.",
                                   r.detail)};
+    }
+    // A CONTRADICTORY assume set is not a solver give-up either: every proof it
+    // governed was vacuous, so the run proved nothing, and it is the USER's
+    // input that is wrong — a bigger budget cannot help. Hard error regardless
+    // of `formal.strict`, for the same reason an encoder refusal is: an exit-0
+    // warning here reads downstream as "verified", and it silently turns a
+    // genuinely REFUTED design green (the assumes prune the counterexample away).
+    if (r.vacuous) {
+      std::string which;
+      for (const auto& s : r.vacuous_scopes) {
+        which += (which.empty() ? "" : ", ") + (s.empty() ? std::string{"the design itself"} : "block '" + s + "'");
+      }
+      throw Lhd_error{"usage",
+                      std::format("formal verify: contradictory assume set in {} — every proof under it is VACUOUS",
+                                  which.empty() ? std::string{"the design"} : which),
+                      "no obligation was really discharged: an unsatisfiable assume set proves anything. Fix the "
+                      "conflicting assumes (each block is scoped independently, so only the named one needs it)"};
     }
     if (o.strict) {
       throw Lhd_error{"unsupported", std::format("formal verify could not decide '{}'", g->get_name()), r.detail};
