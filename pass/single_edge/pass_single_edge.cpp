@@ -525,6 +525,17 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
 
+  // Does this def REWRITE a clock? A latch retype moves when its enable
+  // commits, and an ICG fold moves the gate into a flop enable; a def with only
+  // plain posedge flops rewrites nothing and cannot mis-time a child.
+  bool rewrites_a_clock = false;
+  for (const auto& e : plan.elems) {
+    if (e.is_latch || e.icg) {
+      rewrites_a_clock = true;
+      break;
+    }
+  }
+
   // Fail closed on shapes a partial lowering would silently mis-time.
   for (auto n : g->fast_class()) {
     const auto op = gu::type_op_of(n);
@@ -561,13 +572,72 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // a real one instantiates FIFOs and register files (minion's
     // `minion_dcache_reduce` holds `u_ba_alloc_fifo`), so the unscoped guard
     // refused every def that mattered and the gated flops stayed unencodable.
-    if (plan.slots > 1) {
-      for (auto sn : sub->fast_class()) {
-        if (gu::is_type_register(sn)) {
+    bool child_has_state = false;
+    for (auto sn : sub->fast_class()) {
+      if (gu::is_type_register(sn)) {
+        child_has_state = true;
+        break;
+      }
+    }
+    if (child_has_state && plan.slots > 1) {
+      r.error  = true;
+      r.reason = "instance `" + label_of(n) + "` holds state; the phase divider is not port-threaded";
+      refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+             "flatten the design before normalizing (all three M8 gate fixtures are flat)");
+      return r;
+    }
+    // P=1 is NOT automatically safe for a stateful child. The claim above --
+    // "a latch retype and an ICG folded into a flop enable leave every clock and
+    // every instance boundary exactly where they were" -- holds only while the
+    // rewritten clock stays INSIDE this def. When an ICG's gated clock also
+    // crosses into a stateful child's clock port, the fold retypes the enable
+    // latch to a flop for the LOCAL flops while the child keeps consuming the
+    // gate, so the two halves of one clock gate disagree by a full cycle and the
+    // pass silently ships a design whose submodule gating is off by one -- where
+    // it used to refuse honestly.
+    //
+    // The discriminator is cheap and exact: a child clocked by a PLAIN clock
+    // input is untouched by anything this pass does (that is the minion shape
+    // the narrowing exists for), while a child clocked by IN-GRAPH LOGIC is
+    // clocked by something we may be about to rewrite. Refuse only the latter,
+    // and only when this def actually rewrites a clock (a latch or a folded
+    // ICG); a def with plain posedge state normalizes nothing and stays allowed.
+    if (child_has_state && rewrites_a_clock) {
+      auto csio = n.get_subnode_io();
+      for (const auto& e : n.inp_edges()) {
+        // Clock ports only, by the SHARED spelling notion (Design_clocks::
+        // name_looks_like_clock) rather than a private list, so this and the
+        // rest of M8 agree on what a clock port is.
+        std::string_view pname;
+        for (const auto& d : csio->get_input_pin_decls()) {
+          if (csio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+            pname = d.name;
+            break;
+          }
+        }
+        if (pname.empty() || !lc::Design_clocks::name_looks_like_clock(pname)) {
+          continue;
+        }
+        // A PLAIN clock input (possibly through the width mask the readers add)
+        // is untouched by this pass; anything else is in-graph logic.
+        if (gu::is_graph_input_pin(e.driver)
+            || (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask
+                && [&] {
+                     for (const auto& ge : e.driver.get_master_node().inp_edges()) {
+                       if (gu::is_graph_input_pin(ge.driver)) {
+                         return true;
+                       }
+                     }
+                     return false;
+                   }())) {
+          continue;
+        }
+        {
           r.error  = true;
-          r.reason = "instance `" + label_of(n) + "` holds state; the phase divider is not port-threaded";
+          r.reason = "instance `" + label_of(n) + "` holds state and is clocked by in-graph logic this pass rewrites";
           refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                 "flatten the design before normalizing (all three M8 gate fixtures are flat)");
+                 "the gate would be re-timed for this def's own flops but not for the child's; flatten the design, or "
+                 "trust the child def, before normalizing");
           return r;
         }
       }

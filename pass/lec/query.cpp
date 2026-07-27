@@ -531,6 +531,10 @@ std::string serialize_verify(const Verify_result& v) {
     put_str(b, p.msg);
     put_str(b, p.block);
     put_str(b, p.aclass);
+    // `scope` was missing since per-block assume scoping landed: without it the
+    // parent of a forked run saw scope=="" for every obligation, so a block's
+    // contradictory-assume attribution was reported as the DESIGN's.
+    put_str(b, p.scope);
     b.push_back(static_cast<char>(static_cast<uint8_t>(p.verdict)));
     b.push_back(static_cast<char>(p.unbounded ? 1 : 0));
     put_u32(b, static_cast<uint32_t>(p.proven_to));
@@ -590,6 +594,15 @@ std::string serialize_verify(const Verify_result& v) {
     int64_t bs = v.budget_spent_ms;
     b.append(reinterpret_cast<const char*>(&bs), sizeof bs);
   }
+  // `vacuous_scopes` names WHICH scope was contradictory. `vacuous` (the
+  // roll-up) was already serialized, so without this the parent knew a scope was
+  // contradictory but not which one, and both the per-obligation "assume set of
+  // block 'B' is contradictory" reason and the hard error's block name fell back
+  // to blaming the design as a whole.
+  put_u32(b, static_cast<uint32_t>(v.vacuous_scopes.size()));
+  for (const auto& sc : v.vacuous_scopes) {
+    put_str(b, sc);
+  }
   return b;
 }
 
@@ -637,7 +650,8 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   v.props.clear();
   for (uint32_t i = 0; i < np; ++i) {
     Prop_result p;
-    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.aclass)) {
+    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.aclass)
+        || !get_str(b, p.scope)) {
       return false;
     }
     if (b.empty()) {
@@ -760,6 +774,18 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   v.budget_floored  = static_cast<int>(bf);
   v.budget_floor_s  = static_cast<int>(bfs);
   v.budget_spent_ms = bs;
+  uint32_t nvs = 0;
+  if (!get_u32(b, nvs)) {
+    return true;
+  }
+  v.vacuous_scopes.clear();
+  for (uint32_t i = 0; i < nvs; ++i) {
+    std::string sc;
+    if (!get_str(b, sc)) {
+      return true;
+    }
+    v.vacuous_scopes.push_back(std::move(sc));
+  }
   return true;
 }
 
@@ -7098,7 +7124,13 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   //
   // The free frame is also why no env assume applies: the guard is judged on its
   // own logic, so an assume can never make this fire. Conservative direction.
-  if (any_guarded) {
+  // A contradictory assume set makes EVERY checkSatAssuming UNSAT, which would
+  // stamp `vacuous_guard` on every guarded obligation and blame the user's `if`
+  // for what is actually a broken assume set. `res.vacuous` is exactly that
+  // condition and the scope check above has just computed it, so skip; and
+  // because an UNSAT frame can also arise for reasons that check does not cover,
+  // confirm the pushed frame is SAT before believing any UNSAT answer from it.
+  if (any_guarded && !res.vacuous) {
     if (solve_budget_on) {
       solver.setOption("tlimit-per", std::to_string(solve_budget_ms));
     }
@@ -7127,13 +7159,19 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       // that is supposed to name the toxic obligations. Popping restores the
       // solver exactly, so the diagnosis is unperturbed no matter where this
       // block sits.
+      std::vector<std::pair<int, Val>> vg;
       solver.push();
       for (const auto& [l, r] : ve.equalities) {
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
       }
+      // Baseline: if the frame itself cannot be satisfied, "guard is UNSAT here"
+      // says nothing about the guard. Report nothing rather than accuse.
+      if (!solver.checkSat().isSat()) {
+        solver.pop();
+        vg.clear();
+      }
       // Deterministic order: sort by occ, since `outputs` is a hash map and the
       // detail string below must be stable across runs.
-      std::vector<std::pair<int, Val>> vg;
       for (const auto& [name, v] : ve.outputs) {
         if (auto occ = parse_guard_key(name)) {
           vg.emplace_back(*occ, v);
@@ -7154,7 +7192,12 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         const int        gw = gv.width > 0 ? gv.width : 1;
         const cvc5::Term holds
             = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, gv, gw), tm.mkBitVector(static_cast<uint32_t>(gw), 0)});
-        if (solver.checkSatAssuming(holds).isUnsat()) {
+        // Through budget_check, NOT a raw checkSatAssuming: this is one query
+        // per guarded obligation and a hard guard can eat a full timeout each,
+        // so bypassing the accounting let a diagnostic sweep silently multiply
+        // the run's wall clock and leave the target/actual report understating
+        // what was spent. budget_check also applies the min_timeout floor here.
+        if (budget_check(holds).isUnsat()) {
           pr.vacuous_guard = true;
         }
       }

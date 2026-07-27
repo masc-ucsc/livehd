@@ -85,6 +85,18 @@ struct Val {
   return 0;
 }
 
+// Does this LNAST subtree hold an assert/assume/assert_always/cassert? (All four
+// share the `cassert` node type.) Used to warn when a callee carrying properties
+// is INSTANTIATED under a guard those properties will never see.
+[[nodiscard]] bool lnast_subtree_has_cassert(const Lnast &ln, const Lnast_nid &root) {
+  for (auto c = ln.get_first_child(root); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    if (Lnast_ntype::is_cassert(ln.get_type(c)) || lnast_subtree_has_cassert(ln, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
@@ -248,7 +260,6 @@ public:
 
     // Body: lower the `stmts` child of `top`.
     auto top = lnast_->get_root();
-    has_property_ = subtree_has_cassert(top);
     for (auto c = lnast_->get_first_child(top); !c.is_invalid();
          c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(lnast_->get_type(c))) {
@@ -1879,30 +1890,56 @@ private:
     return d;
   } // Memory per-port sink stride, graph/cell.hpp
 
-  // Branch path conditions for memory write enables AND for property guards.
-  // Maintained by lower_if while a memory exists (mem_map_ non-empty) or the
-  // body holds a property (has_property_); each entry is the full path
-  // condition (already ANDed with the enclosing one). Empty stack =
-  // unconditional.
-  [[nodiscard]] Pin current_path_cond() const {
-    return path_cond_.empty() ? Pin{} : path_cond_.back();
+  // Branch path condition for memory write enables AND for property guards.
+  //
+  // The stack holds UNMATERIALIZED terms — the branch condition pins, which
+  // exist anyway as mux selectors — and the and2/not1/nonzero1 chain is built
+  // only when a consumer actually asks. That is why tracking can now be
+  // UNCONDITIONAL: an `if` in a body with no memory and no property mints no
+  // cells at all, so there is nothing to dead-strip and no node-id churn (the
+  // measured symptom of always materializing was every emitted signal in every
+  // design with an `if` getting renumbered).
+  //
+  // Unconditional tracking is what makes the path condition correct rather than
+  // discovery-ordered. The old gate was `!mem_map_.empty()`, evaluated once when
+  // lower_if was ENTERED, so a memory DECLARED INSIDE a branch was invisible:
+  // `if c1 { reg m:[4]u8 = …; if c2 { m[a] = d } }` emitted `wr_enable = c2`,
+  // dropping c1 entirely and writing the memory on a cycle the source does not.
+  // Arming it from a property pre-scan instead only moved the seam — the same
+  // body then lowered differently depending on whether an unrelated assert
+  // existed elsewhere in it.
+  //
+  // Folds are memoized per prefix, so N consumers under one branch share cells.
+  [[nodiscard]] Pin current_path_cond() {
+    if (path_terms_.empty()) {
+      return Pin{};
+    }
+    size_t i = 0;
+    while (i < path_folded_.size() && !path_folded_[i].is_invalid()) {
+      ++i;
+    }
+    Pin acc = i == 0 ? Pin{} : path_folded_[i - 1];
+    for (; i < path_terms_.size(); ++i) {
+      // nonzero1 FIRST: and2/not1 stamp bits=1, so a multi-bit branch condition
+      // fed in raw would contribute only its LSB and silently narrow the path.
+      Pin one = nonzero1(path_terms_[i].cond);
+      if (path_terms_[i].negated) {
+        one = not1(one);
+      }
+      acc             = and2(acc, one);
+      path_folded_[i] = acc;
+    }
+    return acc;
   }
 
-  // Whole-subtree scan for an assert/assume/assert_always/cassert node. All
-  // four share the `cassert` LNAST type (lower_cassert splits them on the
-  // `__fkind__*` sentinel), so this over-approximates: a body whose only
-  // property is a comptime-discharged `cassert` still arms path tracking. That
-  // costs a couple of And/Not cells per if-branch and never changes a result,
-  // which is the right side to err on.
-  [[nodiscard]] bool subtree_has_cassert(const Lnast_nid &root) const {
-    for (auto c = lnast_->get_first_child(root); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
-      if (Lnast_ntype::is_cassert(lnast_->get_type(c)) ||
-          subtree_has_cassert(c)) {
-        return true;
-      }
-    }
-    return false;
+  // Push one term (a branch condition, or its negation for a later arm/else).
+  void push_path_term(const Pin &cond, bool negated) {
+    path_terms_.push_back({cond, negated});
+    path_folded_.emplace_back();  // lazily materialized by current_path_cond()
+  }
+  void truncate_path_terms(size_t depth) {
+    path_terms_.resize(depth);
+    path_folded_.resize(depth);
   }
 
   // a AND b as a 1-bit unsigned pin; an invalid operand means "true".
@@ -1922,6 +1959,8 @@ private:
     return d;
   }
 
+  // a OR b as a 1-bit unsigned pin; an invalid operand is the identity (returns
+  // the other), so an unguarded caller mints no cell at all.
   [[nodiscard]] Pin or2(const Pin &a, const Pin &b) {
     if (a.is_invalid()) {
       return b;
@@ -1936,6 +1975,42 @@ private:
     set_bits(d, 1);
     set_unsign(d);
     return d;
+  }
+
+  // "a != 0" as a 1-bit unsigned pin: an OR-reduction over every bit, which is
+  // exactly the nonzero test regardless of width or signedness (a two's
+  // complement value is nonzero iff some bit is set).
+  //
+  // Needed because and2/or2/not1 all stamp their driver `bits=1, unsigned`, and
+  // the encoder reads that as real_width 0 -> W=1 -> it FITS each operand to
+  // [0:0]. Feeding a multi-bit value straight into one of them therefore keeps
+  // only its LSB. That is harmless for a comparison result (already 1 bit) and a
+  // silent miscompile for anything wider, so a wide operand must be reduced
+  // BEFORE it reaches them. A 1-bit input makes this a no-op the folder removes.
+  [[nodiscard]] Pin nonzero1(const Pin &a) {
+    if (a.is_invalid()) {
+      return a;
+    }
+    // A 1-bit operand already IS its own nonzero test, so return it untouched.
+    // This is not just an optimization: the path condition feeds SYNTHESIZABLE
+    // logic (a memory write enable), and every cell minted here has to survive
+    // pass.abc. Practically every branch condition is a comparison or a bool, so
+    // the common path must add nothing at all — and does not.
+    if (pin_mw_of(a) <= 1) {
+      return a;
+    }
+    // Wider: `a != 0` as EQ-to-zero plus a NOT. Deliberately NOT Ntype_op::Ror,
+    // which is the obvious spelling and has no combinational bit-blast in
+    // pass.abc — a Ror on a memory write-enable cone made `lhd pass abc` fail
+    // with "cell 'ror' ... has no combinational bit-blast yet". eq and not are
+    // both in abc's supported set.
+    auto eq = make_node(Ntype_op::EQ);
+    eq.create_sink_pin(0).connect_driver(a);
+    eq.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto z = eq.create_driver_pin(0);
+    set_bits(z, 1);
+    set_unsign(z);
+    return not1(z);
   }
 
   // Bitwise NOT of a 1-bit condition (LSB carries the logical value).
@@ -3805,6 +3880,22 @@ private:
     // NOTE: set_subnode RE-STAMPS the raw hhds type to its own 2/3 loop-hint
     // encoding — type_op_of() recognizes Subs by the subnode LINK, never by
     // the stored type (see node_util.hpp).
+    // R1 limit, made LOUD instead of silent: the path condition is BODY-LOCAL.
+    // A property inside an INSTANTIATED callee lives in the callee's graph, so
+    // the caller's guard never reaches it and the obligation stays the bare
+    // condition — strictly stronger than what the source says. The same `comb`
+    // INLINED (the default) does get the guard, so without this warning the
+    // identical source proves or refutes depending on compile.upass.inline.
+    // Propagating a guard across the boundary is the caller-context discharge
+    // R2 owns; until then, say so at the call site.
+    if (callee != nullptr && !current_path_cond().is_invalid() && lnast_subtree_has_cassert(*callee, callee->get_root())) {
+      warn_at(nid,
+              {"guarded-instance-property", "unsupported"},
+              "upass.tolg: '{}' is instantiated inside an `if`/`match` arm and its body holds an assert/assume — the "
+              "guard does NOT cross the instance boundary, so those properties are checked UNCONDITIONALLY (a stricter "
+              "obligation than the source states)",
+              callee_name);
+    }
     auto sub = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
     {
@@ -4516,10 +4607,20 @@ private:
     // working code into `cassert-not-comptime`.
     //
     // or2 treats an invalid operand as the identity, so an unguarded property
-    // (empty path stack) mints no cells at all.
+    // (empty path stack) mints no cells at all — and, crucially, keeps its cond
+    // pin EXACTLY as before, at full width, so the encoder's own nonzero test
+    // still spans every bit.
+    //
+    // A guarded one must reduce first: or2/not1 stamp `bits=1`, which the
+    // encoder fits to [0:0], so handing them a multi-bit condition would keep
+    // only its LSB. `if c { assert(flags | 0x2) }` is always true (bit 1 is
+    // always set) yet refuted on flags[0]==0 before nonzero1 was applied. Both
+    // operands go through it: `cond` because the user may assert any integer,
+    // and `guard` because it is only 1-bit by convention (prp2lnast gives an
+    // if-condition a synthetic `:bool`), not by construction.
     const auto guard = current_path_cond();
     const auto eff_cond =
-        guard.is_invalid() ? cond.pin : or2(not1(guard), cond.pin);
+        guard.is_invalid() ? cond.pin : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
     auto sub = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
     sub.create_sink_pin("cond").connect_driver(eff_cond);
@@ -5418,19 +5519,28 @@ private:
     // 1a-mem — memory write enables need each branch's full path condition;
     // R1 — so do assert/assume guards (lower_cassert turns the path condition
     // into an IMPLICATION, where a memory enable uses it as a CONJUNCTION).
-    // Only built when one of the two consumers exists (zero overhead
-    // otherwise). `guard` accumulates enclosing ∧ ¬(prior conds); a branch's
-    // path is guard ∧ cond. `match` rides this too: it lowers to a unique_if
-    // whose arms are branch-lowered here before lower_unique_merge runs.
-    const bool track_path = !mem_map_.empty() || has_property_;
-    Pin guard = track_path ? current_path_cond() : Pin{};
-    auto lower_branch_with_path = [&](const Lnast_nid &stmts, const Pin &path) {
-      if (!track_path) {
-        return lower_branch(stmts);
+    // Tracking is UNCONDITIONAL: the stack holds the raw condition pins (which
+    // exist anyway as mux selectors) and current_path_cond() materializes the
+    // and2/not1/nonzero1 chain only when a consumer asks, so a body with neither
+    // consumer mints nothing. The old `!mem_map_.empty()` gate was evaluated on
+    // ENTRY, which lost the guard of any `if` enclosing a memory's declaration.
+    // The MUX selector (`branches[].cond`) keeps the RAW pin — that is datapath,
+    // with its own established semantics; only the path copy is reduced.
+    // `match` rides this too: it lowers to a unique_if whose arms are
+    // branch-lowered here before lower_unique_merge runs.
+    const size_t path_base = path_terms_.size();
+    // Arm k is taken when every earlier condition is false and c_k is true, so
+    // its terms are ¬c_0 … ¬c_{k-1}, c_k; the bare else drops the final c_k.
+    std::vector<Pin> prior_conds;
+    auto lower_arm = [&](const Lnast_nid &stmts, const Pin &cond, bool is_else) {
+      for (const auto &pc : prior_conds) {
+        push_path_term(pc, /*negated=*/true);
       }
-      path_cond_.push_back(path);
+      if (!is_else) {
+        push_path_term(cond, /*negated=*/false);
+      }
       auto w = lower_branch(stmts);
-      path_cond_.pop_back();
+      truncate_path_terms(path_base);
       return w;
     };
 
@@ -5439,20 +5549,14 @@ private:
     if (child.is_invalid()) {
       return;
     }
-    branches.push_back(
-        {false, first_cond,
-         lower_branch_with_path(child,
-                                track_path ? and2(guard, first_cond) : Pin{})});
-    if (track_path) {
-      guard = and2(guard, not1(first_cond));
-    }
+    branches.push_back({false, first_cond, lower_arm(child, first_cond, /*is_else=*/false)});
+    prior_conds.push_back(first_cond);
 
     child = lnast_->get_sibling_next(child);
     while (!child.is_invalid()) {
       bool last = lnast_->is_last_child(child);
       if (last && Lnast_ntype::is_stmts(lnast_->get_type(child))) {
-        branches.push_back(
-            {true, Pin{}, lower_branch_with_path(child, guard)}); // bare else
+        branches.push_back({true, Pin{}, lower_arm(child, Pin{}, /*is_else=*/true)});
         break;
       }
       Pin elif_cond = leaf(child).pin;
@@ -5460,13 +5564,8 @@ private:
       if (child.is_invalid()) {
         break;
       }
-      branches.push_back(
-          {false, elif_cond,
-           lower_branch_with_path(child, track_path ? and2(guard, elif_cond)
-                                                    : Pin{})});
-      if (track_path) {
-        guard = and2(guard, not1(elif_cond));
-      }
+      branches.push_back({false, elif_cond, lower_arm(child, elif_cond, /*is_else=*/false)});
+      prior_conds.push_back(elif_cond);
       child = lnast_->get_sibling_next(child);
     }
 
@@ -5745,16 +5844,15 @@ private:
   // bound __memory results.
   absl::flat_hash_map<std::string, Mem_info> mem_map_;
   std::vector<std::string> mem_order_;
-  std::vector<Pin> path_cond_;
-  // Does this body hold an assert/assume/assert_always? Decided ONCE by a
-  // pre-scan in build(), before any statement lowers, because lower_if's
-  // path-condition tracking must be armed for the WHOLE body: the other
-  // consumer (memory write enables) keys on mem_map_, which fills as memories
-  // are DECLARED, so an `if` lexically ahead of the declaration gets no path
-  // condition. That is tolerable for a memory (its writes are inside/after the
-  // declaration) but not for a property, whose guard would then depend on
-  // statement order. See lower_cassert.
-  bool has_property_ = false;
+  // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED
+  // (see current_path_cond). `path_folded_[i]` caches the fold of terms[0..i]
+  // once some consumer asks for it; an invalid entry is "not built yet".
+  struct Path_term {
+    Pin  cond;
+    bool negated = false;
+  };
+  std::vector<Path_term> path_terms_;
+  std::vector<Pin>       path_folded_;
   absl::flat_hash_map<std::string, Tuple_rec> tuple_recs_;
   absl::flat_hash_map<std::string, Mem_result> mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).

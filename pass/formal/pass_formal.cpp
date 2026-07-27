@@ -194,6 +194,14 @@ void Pass_formal::setup() {
   m.add_label_optional("warn_deferred", "true|false warn whenever any obligation is deferred to runtime", "true");
   m.add_label_optional("warn_onehot", "true|false warn on a deferred Hotmux one-hot check", "true");
   m.add_label_optional("warn_assert", "true|false warn on a deferred assert", "true");
+  m.add_label_optional("warn_vacuous",
+                       "true|false warn when a property's `if`/`match` guard can NEVER be true, so the property is "
+                       "never exercised (formal-vacuous-guard). Its own knob on purpose: warn_deferred/warn_assert "
+                       "silence 'could not prove' NOISE, while this reports DEAD CODE — a project that quiets the "
+                       "former still wants the latter. `lhd formal verify` sets it false for its own design load, "
+                       "because the verify tier re-derives the same fact per obligation with a richer report and "
+                       "under formal.strict; without that both tiers would emit the same diagnostic code twice",
+                       "true");
   m.add_label_optional("warn_assume", "true|false warn on a deferred assume", "true");
   register_pass(m);
 }
@@ -346,6 +354,7 @@ void Pass_formal::work(Eprp_var& var) {
       }
     }
     const bool warn_assume = warn_def && truthy(var.get("warn_assume", "true"));
+    const bool warn_vacuous = truthy(var.get("warn_vacuous", "true"));
     const bool warn_assert = warn_def && truthy(var.get("warn_assert", "true"));
 
     // Pass 1: prove each assume INDEPENDENTLY (no hypotheses, so no circular
@@ -401,7 +410,12 @@ void Pass_formal::work(Eprp_var& var) {
     // reason `prove_properties` asks this over a free frame instead of over its
     // unrolled window.
     auto warn_vacuous_guard = [&](const hhds::Node_class& node, const Fprop& parts) {
-      if (!warn_assert) {
+      // Own knob, NOT warn_assert: warn_deferred/warn_assert exist to silence
+      // "could not prove" NOISE, while this reports DEAD CODE. A project that
+      // quiets the former still wants the latter, and gating them together made
+      // `lhd compile` and `lhd formal verify` disagree about whether the same
+      // source is clean.
+      if (!warn_vacuous) {
         return;
       }
       // Resolve the guard driver by WALKING the in-edges, never via

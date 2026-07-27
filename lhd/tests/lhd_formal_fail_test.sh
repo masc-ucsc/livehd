@@ -251,4 +251,85 @@ compile_case live_guard live_guard
 [ "$RC" -eq 0 ] || fail "a live guarded assert must compile clean (got rc=$RC): $(cat "$DIAG")"
 grep -q 'formal-vacuous-guard' "$DIAG" && fail "a SATISFIABLE guard must never be reported vacuous: $(cat "$DIAG")"
 
-echo "PASS: 2f-formal FAIL policy (record+continue+emit; proven clean; modes; not-enough-top defers; on_refute downgrade; R1 dead-guard vacuity warning)"
+# ---------------------------------------------------------------------------
+# 11. Review fixes on the compile-tier vacuity diagnostic (2026-07-26).
+# ---------------------------------------------------------------------------
+# 11a. The dead-code finding has its OWN knob. warn_deferred/warn_assert exist to
+#      silence "could not prove" noise; gating vacuity on them made `lhd compile`
+#      and `lhd formal verify` disagree about whether the same source is clean.
+compile_case dead_guard dead_guard_quiet --set compile.formal.warn_assert=false
+grep -q '"code":"formal-vacuous-guard"' "$DIAG" \
+  || fail "a dead branch must still be reported when warn_assert silences deferred-assert noise: $(cat "$DIAG")"
+compile_case dead_guard dead_guard_off --set compile.formal.warn_vacuous=false
+grep -q 'formal-vacuous-guard' "$DIAG" \
+  && fail "compile.formal.warn_vacuous=false must silence it: $(cat "$DIAG")"
+
+# 11b. A property inside an INSTANTIATED callee never sees the caller's guard
+#      (the path condition is body-local), so the obligation is checked
+#      unconditionally — a stricter claim than the source makes, and one that
+#      flips with compile.upass.inline. That must be LOUD, not silent.
+cat >"$W/gunit.prp" <<'EOF'
+pub mod gunit(a:u8) -> (o:u8@[0]) {
+  o = a
+  assert(a != 0, "callee property")
+}
+EOF
+cat >"$W/gcaller.prp" <<'EOF'
+const gunit = import("gunit.gunit")
+pub mod gcaller(valid:bool, a:u8) -> (r:u8@[0]) {
+  r = 0
+  if valid {
+    const u = gunit(a=a)
+    r = u.o
+  }
+}
+EOF
+compile_case gcaller gcaller
+grep -q '"code":"guarded-instance-property"' "$DIAG" \
+  || fail "instantiating a property-carrying callee under a guard must warn that the guard does not cross: $(cat "$DIAG")"
+# Control: no guard, no warning — otherwise the check is just noise on every
+# instance of every module that happens to contain an assert.
+cat >"$W/gplain.prp" <<'EOF'
+const gunit = import("gunit.gunit")
+pub mod gplain(a:u8) -> (r:u8@[0]) {
+  const u = gunit(a=a)
+  r = u.o
+}
+EOF
+compile_case gplain gplain
+grep -q 'guarded-instance-property' "$DIAG" \
+  && fail "an UNGUARDED instantiation must not warn: $(cat "$DIAG")"
+
+# 11c. A memory declared INSIDE a guarded branch must still get that guard on its
+#      write enable. The path condition used to be armed on ENTRY to lower_if
+#      from `!mem_map_.empty()`, so a memory declared inside the branch was
+#      invisible and `wr_enable` came out as the inner condition alone — the
+#      memory was written on cycles the source does not.
+cat >"$W/memguard.prp" <<'EOF'
+pub mod memguard(c1:bool, c2:bool, a:u2, d:u8) -> (o:u8@[0]) {
+  o = 0
+  if c1 {
+    reg m:[4]u8 = (0,0,0,0)
+    o = m[a]
+    if c2 {
+      m[a] = d
+    }
+  }
+}
+EOF
+compile_case memguard memguard
+[ "$RC" -eq 0 ] || fail "memguard must compile: $(cat "$DIAG")"
+grep -qE "wr_enable_0\((and_[0-9]+|[a-z_0-9]+)\)" "$VOUT" || fail "no memory write enable emitted: $(cat "$VOUT")"
+python3 - "$VOUT" <<'PYEOF' || fail "the OUTER guard c1 was dropped from the memory write enable"
+import re, sys
+v = open(sys.argv[1]).read()
+m = re.search(r"wr_enable_0\((\w+)\)", v)
+assert m, "no wr_enable_0"
+sig = m.group(1)
+d = re.search(rf"{sig}\s*=\s*([^;]+);", v)
+assert d, f"no driver for {sig}: {v}"
+expr = d.group(1)
+assert "c1" in expr and "c2" in expr, f"write enable {sig} = {expr} must depend on BOTH guards"
+PYEOF
+
+echo "PASS: 2f-formal FAIL policy (record+continue+emit; proven clean; modes; not-enough-top defers; on_refute downgrade; R1 dead-guard vacuity warning; 2026-07-26 review fixes)"

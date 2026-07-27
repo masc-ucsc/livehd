@@ -226,6 +226,319 @@
   unmodelled derived clock, that is an honest refusal rather than a wrong
   answer.</p>
 
+<h2 id="clock-cell">M9 — <code>Clock_cell</code>: ONE recognized clock operator <span class="status">PLAN OF RECORD</span></h2>
+
+<p>User direction, 2026-07-26. M8 folds a clock gate into a flop enable when the
+  gate is <em>visible in the body</em>. That is not how real designs are written:
+  they <strong>instantiate</strong> the gate, and a <code>Sub</code> output is an
+  opaque symbol. Measured on <code>//bench:minion_lec</code> (2026-07-26):
+  <strong>30 defs refuse to encode</strong> — 22 <code>flop &hellip; has a derived
+  clock</code> + 8 <code>memory &hellip; has a derived clock</code> — while 110/140
+  prove and 32 more are trusted. Nothing times out; they never reach the solver.</p>
+
+<p><strong>The intuition this inverts:</strong> for a clock gate, blackboxing the
+  proven leaf is precisely what breaks the parent. Every other leaf is fine
+  opaque — its outputs become free symbols the parent compares. But an ICG&rsquo;s
+  output <em>is a clock</em>, and the encoder has no clock-identity model, so a
+  flop whose <code>clock_pin</code> is an opaque <code>Sub</code> output cannot be
+  given a commit condition. &ldquo;Prove it, then box it&rdquo; does not compose
+  for an ICG — which is why <code>prim_clk_gate</code> sitting on minion&rsquo;s
+  <code>formal.lec.trust</code> list is self-defeating.</p>
+
+<p><strong>What the cell buys, beyond this bug.</strong> One recognized operator
+  is the enforcement point for &ldquo;nothing may be done to a clock&rdquo; — the
+  clock network becomes auditable structure instead of arbitrary logic. Formal is
+  the first consumer, and that means BOTH drivers: <code>lhd lec</code> and
+  <code>lhd formal verify</code> funnel into the single <code>Encoder</code> in
+  <code>pass/lec/encode.cpp</code> (instantiated from <code>query.cpp</code>&rsquo;s
+  <code>prove_equal</code> AND <code>prove_properties</code>), so one lowering
+  helper serves both. And it is deliberately the anchor for FUTURE POWER WORK:
+  the shared ICG surviving to mapping is a power feature, not just area —
+  gating-coverage metrics, automatic clock-gate insertion (the REVERSE of the LEC
+  lowering: turn a flop-enable cone into a <code>Clock_cell</code>), and
+  eventually power-gating domains all hang off the same operator. That is why the
+  cell is a representation to KEEP, not a normalization to fold away.</p>
+
+<h3>The cell</h3>
+
+<pre>  out_clk = Clock_cell(clk_ref, en, div=1, invert=false)</pre>
+
+<ul class="subtasks">
+<li><code>clk_ref</code>, <code>en</code> are <strong>runtime inputs</strong>;
+  <code>div</code>, <code>invert</code> are <strong>comptime attributes</strong>.
+  Keep the split explicit — the attributes are structural facts decided at
+  compile time, <code>en</code> becomes data feeding the downstream enable cone.</li>
+<li><strong><code>en</code> is sampled at the ACTIVE EDGE of <code>clk_ref</code></strong>
+  — the glitch-free ICG contract. Encoding the CONTRACT, not the latch, is what
+  keeps the physical enable latch out of the graph: the cell is combinational, so
+  every latch-counting consumer (<code>needs_single_edge</code>, the
+  <code>pass.single_edge</code> def scan) stops seeing ICG latches entirely.</li>
+<li>Everything reduces to a commit condition on the reference clock, and all three
+  mechanisms already exist: gate &rarr; enable (M8 fold, P=1); invert &rarr; the
+  opposite edge (slot assignment, P=2); divide &rarr; every 2^N-th edge (the
+  <code>single_edge_phase</code> counter, P=2^N).</li>
+</ul>
+
+<h3>v1 is <code>div=1</code> ONLY — <code>div&gt;1</code> is an honest error</h3>
+
+<p>User ruling 2026-07-26: <em>&ldquo;ship div=1 first as we do not have test cases
+  for div=2 or div=4 (just flag error as not implemented)&rdquo;</em>. The syntax
+  admits <code>div</code>; the lowering refuses anything but 1. Three independent
+  reasons, all measured or cited:</p>
+
+<ul class="subtasks">
+<li><code>pass/single_edge/pass_single_edge.cpp:521</code> already refuses
+  <code>slots &gt; 2</code> (&ldquo;only P&lt;=2 is implemented&rdquo;), and the
+  phase counter is not port-threaded across a module boundary (open question 6).</li>
+<li><strong>SOUNDNESS — a divider&rsquo;s INITIAL PHASE must be part of its
+  identity.</strong> Two div-by-2 cells off one reference can run 180&deg; apart
+  depending on reset state; recording only <code>div=2</code> makes them compare
+  equal. That is exactly the clock-blindness false-PROVEN class the guards exist
+  to stop. Gate and invert have no such state, which is why they are safe first.</li>
+<li>2^N only: a power-of-two maps onto a phase counter with a clean duty cycle;
+  divide-by-3/5 does not &rArr; blackbox with an honest error.</li>
+</ul>
+
+<h3>Recognition — ONE shared recognizer, THREE entry points</h3>
+
+<p>All three must call the same function and each must be pinned by a test. If any
+  one is missed, that design silently falls back to the refusal path and looks
+  like a tool bug.</p>
+
+<ul class="subtasks">
+<li>inline RTL: <code>clk &amp; en</code> / <code>clk &amp; latch(en)</code>;</li>
+<li>an <strong>instantiated cell</strong> whose body matches the pattern (minion&rsquo;s
+  <code>prim_clk_gate</code>) — recognized at the <code>Sub</code> boundary, with
+  NO inlining, so <code>formal.lec.trust</code> is respected rather than fought;</li>
+<li>a <strong>DECLARED blackbox</strong> — an attribute naming the clk/en/out pins
+  of a bodyless foundry ICG. Not optional: <code>minion/verilog/prim_clk_gate.sv</code>
+  says &ldquo;ASIC: swap this for the foundry ICG cell&rdquo;, and without a
+  declaration every ASIC configuration silently loses formal on every gated flop —
+  the same 30-refusal hole in a different costume. The declaration must admit
+  <strong>more than one enable pin, OR-combined</strong>: every real foundry ICG
+  carries a test-enable (TE/SCE) beside the functional enable, and minion&rsquo;s
+  own behavioral gate has one (below).</li>
+</ul>
+
+<p><strong>The enable is a CONE, not a wire — measured on the real gate.</strong>
+  <code>prim_clk_gate.sv</code> latches <code>en_i | dft_i.scanmode</code> (scan
+  forces the clock ON), and <code>dft_i</code> is a packed struct that graph
+  flows keep as one FLAT 5-bit bus (<code>struct_port_bundles=false</code>), so
+  the compiled def&rsquo;s latch din is
+  <code>or(en_i, and(sra(dft_i,&nbsp;k),&nbsp;1))</code> behind tolg&rsquo;s hold
+  mux. The body match must accept ANY combinational cone of the non-clock input
+  ports as the latched value, and bind the cell&rsquo;s <code>en</code> to that
+  cone re-rooted on the instance&rsquo;s actual nets. Dropping the
+  <code>scanmode</code> term is UNSOUND, not conservative — gate sites wire a
+  live <code>dft</code> (<code>minion_frontend_thread_buffer.sv:327</code>,
+  <code>txfmafrac_top.sv:354</code>) and <code>minion_top</code> exposes it as a
+  primary input.</p>
+
+<p><strong>Clock identity inside the matched def is STRUCTURAL, never the port
+  name.</strong> <code>prim_clk_gate</code>&rsquo;s own graph holds no flop, so
+  <code>Design_clocks</code>&rsquo; roots are empty there and only the name
+  heuristic could identify <code>clk_i</code> — and the heuristic is being
+  retired (Rules below). The anchor that replaces it: the port that is BOTH
+  AND-ed into the output AND gates the latch&rsquo;s transparency window is the
+  clock; equivalently, at the <code>Sub</code> boundary, clockness flows TOP-DOWN
+  from the instantiation (the net wired to the port is a clock in the parent).
+  Both resolutions agree on every real ICG and neither reads a name.</p>
+
+<h3>Lowering — the cell is the REPRESENTATION; each consumer lowers its own view</h3>
+
+<ul class="subtasks">
+<li><strong>LEC + verify encode</strong>: resolve the clock through the cell to
+  <code>{clk, commits}</code>. ONE helper serving BOTH the memory cut
+  (<code>pass/lec/encode.cpp</code> ~:754) and the flop clock path (~:2400) — the
+  memory half is unreachable any other way, because the M8 fold rewrites flop
+  clocks into enables and never touches a <code>Memory</code>&rsquo;s <code>clock_pin</code>.
+  <code>lhd formal verify</code> gets the helper for free: both drivers
+  instantiate the same <code>Encoder</code>.</li>
+<li><strong>sim cgen</strong>: same recognizer &rarr; commit guard. This is
+  lhdsuite fixme issue 12 — and the gap is NARROWER than that issue first
+  recorded: <code>cgen_sim.cpp</code> already folds the inline
+  <code>&lt;clock&gt; &amp; &lt;enables&gt;</code> shape (M5,
+  <code>Cgen_sim::icg_guards</code> ~:1075, with a fail-closed
+  <code>gated-clock-unsupported</code> diagnostic for what the fold cannot see);
+  only <code>lhd_kernel_sim.cpp</code> is truly clock-free. What
+  <code>icg_guards</code> cannot see is a <code>Sub</code>-driven
+  <code>clock_pin</code> — exactly what the recognizer resolves. The sim
+  lowering&rsquo;s HARD CASE is <code>prim_rf_single_1r1w_par_preview</code>: ONE
+  gated clock consumed by a posedge flop, a NEGEDGE flop, and a transparent-low
+  latch at once (instantiated with <code>rf_clk_i = preview_clk_i = clkgt</code>
+  in <code>minion_dcache_tensor_load</code>; LEC dodges the def via
+  <code>lec_trust</code>, sim compiles everything). A negedge consumer composes
+  as invert-at-the-consumer: it commits at the reference FALL iff <code>en</code>
+  as sampled at the rise that OPENED the pulse was high — the same
+  <code>{clk_ref, en}</code> condition, opposite edge.</li>
+<li><strong>synthesis</strong>: the cell SURVIVES to mapping as a real ICG cell,
+  so the shared gate is preserved — the power half of the motivation, not just
+  area, and the reason not to eager-fold. Until that lowering ships,
+  <code>pass/abc</code> already fails closed BY NAME on an unknown comb op
+  (<code>unsupported-cell</code>, <code>abc_map.cpp</code> ~:1537), so a
+  <code>Clock_cell</code> reaching mapping early refuses rather than mismaps.
+  <code>semdiff</code> digests a new op distinguishably with no work, and the
+  Pyrope writer is unreachable from a graph op (no LGraph&rarr;LNAST decompiler) —
+  which is also why GRAPH-level recognition cannot churn lhdsuite&rsquo;s
+  checked-in <code>pyrope/</code> trees, where an LNAST-level recognizer
+  would.</li>
+</ul>
+
+<h3>Canonicalization — required, or structural matching degrades</h3>
+
+<ul class="subtasks">
+<li>double <code>invert</code> &rarr; the reference;</li>
+<li>gate of gate &rarr; AND the enables;</li>
+<li><code>div=1, invert=false</code> with no <code>en</code> &rarr; identity, remove.</li>
+<li><em>Corpus note (measured):</em> gate-of-gate occurs ONLY across
+  <code>Sub</code> boundaries in minion (<code>clock&rarr;cgate</code> in
+  <code>vpu_lane</code>, re-gated in <code>txfmafrac_top</code>) — never inside
+  one def — so per-def recognition sees at most one gate level, and this
+  canonicalization is pinned by a SYNTHETIC test, off minion&rsquo;s acceptance
+  path.</li>
+</ul>
+
+<h3>Rules — BINDING</h3>
+
+<ul class="subtasks">
+<li><strong>A <code>Clock_cell</code> output is legal ONLY on a clock sink:</strong>
+  a state element&rsquo;s <code>clock_pin</code>, a <code>Latch</code>&rsquo;s gate
+  (the RF-preview shape — a transparent-low latch gated by the gated clock),
+  another cell&rsquo;s <code>clk_ref</code>, or a <code>Sub</code> instance INPUT
+  port (the gated clock crossing hierarchy; minion exercises all four).
+  Reading it as DATA is an error (or forces the blackbox path). People do sample
+  gated clocks in DFT and clock-monitor logic; without this rule the
+  &ldquo;it is an enable&rdquo; model and the &ldquo;it is a bit value&rdquo;
+  reading diverge silently. This is the dual of &ldquo;nothing may be done with a
+  clock&rdquo;.</li>
+<li>Anything else on a clock (<code>clock+1</code>, an odd divider, arbitrary
+  logic) &rArr; compile error naming the blackbox escape hatch.</li>
+<li><strong>Stage that error: WARN first, measure with R4, then promote to an
+  error.</strong> It is a breaking change and the allowed set is wider than
+  &ldquo;gating&rdquo; — <code>posedge ~clk</code> is legitimate and
+  <code>lhd/tests/lec_clock_blindness_test.sh</code> already pins it PROVEN equal
+  to <code>negedge clk</code>.</li>
+<li><code>is_clock</code> becomes STRUCTURAL: a net is a clock iff it is a declared
+  clock input, a <code>Clock_cell</code> output, or a <code>Sub</code> input port
+  fed by a clock in the parent — clockness propagates TOP-DOWN through the
+  instance tree. This retires the name heuristic
+  in <code>Design_clocks::is_clock</code> (&ldquo;else a conventional spelling&rdquo;,
+  pinned by <code>ClockNameHeuristicBoundaries</code>). Caveat that gates the
+  retirement: NO &ldquo;declared clock input&rdquo; mechanism exists yet — the
+  slang reader&rsquo;s only clock ID is itself a name match — so defining the
+  declaration is part of the staged rollout, and until it lands the heuristic
+  stays as the top-level seed only.</li>
+<li><strong>WHERE recognition runs is part of the contract: inside the formal
+  (<code>lhd lec</code> / <code>formal verify</code>) and sim pipelines ONLY,
+  never on the compile/emission path</strong> — mirroring
+  <code>pass.single_edge</code>&rsquo;s placement and for the same reasons:
+  <code>single_edge_scope_test</code>&rsquo;s byte-identical-emission rule, the
+  ABC incremental cache&rsquo;s digest-keyed regions, and lhdsuite&rsquo;s
+  checked-in trees. Pin it 1h-style: compile emission byte-identical on an ICG
+  design, recipe log never names the recognizer. Revisit only when the synthesis
+  ICG lowering ships.</li>
+<li><strong>The escape-hatch inventory is already known — name it, so the first
+  refusal is a diagnosis, not a surprise.</strong> Two clock primitives sit in
+  minion&rsquo;s tree UNINSTANTIATED (absent from <code>filelist.f</code>, no
+  sites): <code>prim_clk_mux.sv</code>, a 2:1 clock mux that
+  <code>dft_pkg.sv:16</code> names as the mechanism for the
+  <code>sram_clk_override</code> DFT field every <code>dft_t</code> port already
+  carries — blackbox path for now, a comptime-<code>sel</code> candidate later;
+  and <code>prim_clk_gate_n.sv</code>, the active-low OR-form dual
+  (<code>clk_no = clk_i | ~en_latch</code>, latch transparent while the clock is
+  HIGH) — representable as invert&#8728;gate&#8728;invert once <code>invert</code>
+  lands. The day either is wired, the failure must be a named &ldquo;not
+  implemented&rdquo;, not a recognizer surprise.
+  (<code>prim_phase_pair_*</code> was checked and stays OUT of scope: its latches
+  are clock-AND-data gated and its outputs are consumed strictly as data —
+  M8/latch_contract business.)</li>
+</ul>
+
+<h3>Implementation order — do NOT skip step 0</h3>
+
+<ul class="subtasks">
+<li><strong>(0) Close the silently-accepted gated-memory hole FIRST.</strong>
+  <code>memory_clock_shape_ok</code> (<code>pass/lec/encode.cpp</code>) accepts
+  <em>any</em> <code>Sub</code> on a memory <code>clock_pin</code> — the exemption
+  was written for the ABC-mapped clock BUFFER cell, and an ICG <code>Sub</code>
+  satisfies it by accident, so a gated memory encodes as
+  &ldquo;commits every step&rdquo;, which the guard&rsquo;s own comment calls
+  &ldquo;silently WRONG&rdquo;. MEASURED on the compiled minion library:
+  <strong>21 memory <code>clock_pin</code> edges, all 21 driven by a
+  <code>Sub</code></strong> — <code>intpipe_csr_file</code> 7,
+  <code>vpu_trans</code> 6, <code>minion_dcache_tensor_load</code> 3,
+  <code>_p1</code> 3, <code>minion_frontend_thread_buffer</code> 1,
+  <code>_p1</code> 1. Masked today only because those defs are UNKNOWN for other
+  reasons — <strong>fix the flop side first and several become false PROVENs.</strong>
+  Narrow the exemption to a buffer-shaped def, fail closed otherwise.
+  <em>Acceptance:</em> <code>minion_lec</code>&rsquo;s table stays byte-identical
+  (110 proven / 32 trusted / 30 refusals), only the NAMED element changing in some
+  defs — that identity is the receipt the hole was fully masked.</li>
+<li>(1) <strong>Guardrails first, then the cell, then the recognizer.</strong>
+  (1a) <code>Ntype_op</code> slot — a combinational cell takes an EVEN slot per
+  <code>graph/cell.hpp</code>&rsquo;s bit-0 <code>loop_last</code> invariant, and
+  <strong>52 is free</strong> (between <code>Nconst</code>=50 and
+  <code>AttrSet</code>=56, outside the pipelined block) — with the matching
+  <code>static_assert</code> and the name-table entry in the SAME commit, so
+  every diagnostic prints a real name. In that same commit, add <strong>named
+  fail-closed default arms to <code>cgen_verilog</code> and
+  <code>cgen_sim</code></strong>: today <code>cgen_verilog</code>&rsquo;s only
+  unknown-op guard is <code>I(!txt_op.empty())</code>, which compiles out under
+  NDEBUG (the <code>-c opt</code> default) and then emits a silent first-operand
+  pass-through — for a <code>Clock_cell</code> that is <code>clk_ref</code> wired
+  straight through, i.e. the gate silently DROPPED — and <code>cgen_sim</code>&rsquo;s
+  expression default does the same. Pin with a test that a hand-built
+  <code>Clock_cell</code> graph is REFUSED BY NAME in both emitters.
+  (1b) the shared recognizer (3 entry points) + canonicalization.</li>
+<li>(2) LEC + verify lowering — memory cut and flop path through one helper (the
+  shared <code>Encoder</code> serves both drivers). After step 0&rsquo;s
+  narrowing, a <code>Clock_cell</code> on a memory <code>clock_pin</code> gets
+  its own NAMED accept arm in <code>memory_clock_shape_ok</code>, not a ride
+  through the generic comb refusal.</li>
+<li>(3) sim cgen lowering (closes fixme issue 12; the hard case is
+  <code>prim_rf_single_1r1w_par_preview</code> — see Lowering).</li>
+<li>(4) Only then shrink <code>CORES.lec_trust</code> in
+  <code>../lhdsuite/bench/defs.bzl</code>.</li>
+</ul>
+
+<h3>Acceptance — what must move</h3>
+
+<ul class="subtasks">
+<li><code>//bench:minion_lec</code>: 30 encode refusals &rarr; 0; proven 110/140
+  &rarr; higher; <code>prim_clk_gate</code> leaves <code>lec_trust</code> (32 &rarr; 31).</li>
+<li>minion <code>METRIC sim_cpu_top_ok</code>: 0 &rarr; 1, then flip
+  <code>CORES.sim_top_assert</code> for minion.</li>
+<li><code>lhd formal verify</code> moves with it for free (shared encoder):
+  <code>prp-verify-latch_icg_hier</code> (3 obligations) stays green through the
+  switch from inline+fold to recognition, and gains a <code>Sub</code>-boundary /
+  declared-blackbox twin.</li>
+<li>Unchanged: dino 14/14; livehd <code>//...</code> green;
+  <code>lec_clock_blindness_test</code> must STILL refute gated-vs-ungated,
+  two-clock-vs-one, and negedge-vs-posedge.</li>
+</ul>
+
+<h3>Traps — measured, do not re-derive</h3>
+
+<ul class="subtasks">
+<li><strong>Enable-latch bypass</strong>: use the value the latch is passing
+  THROUGH at the sampling edge, never its held Q. The L1 error, invisible to a
+  symmetric before/after comparison — which is why the ICG fixture validates
+  against Icarus.</li>
+<li><strong>Polarity</strong>: for <code>gclk = clk &amp; g</code> the commit
+  condition is <code>enable &amp; g</code> — NOT <code>&amp; !g</code>. Also
+  invisible to a symmetric check.</li>
+<li><strong>Do NOT eager-fold into enables as the representation.</strong> It
+  destroys the shared ICG (power/area at synthesis), changes the netlist ABC
+  sees, invalidates incremental-synth cache regions, and collides with
+  <code>single_edge_scope_test</code>&rsquo;s byte-identical-emission requirement.
+  Represent as a node; lower per consumer.</li>
+<li>Inlining a TRUSTED def to expose its gate is <strong>not</strong> the answer:
+  it pulls internals the user declared out of scope into the compared cone.
+  Pinned by <code>single_edge_hier_latch_test.sh</code> case 5b — trusting a clock
+  gate may return UNKNOWN, never a REFUTATION. Recognition at the
+  <code>Sub</code> boundary avoids this entirely.</li>
+</ul>
+
 <h2 id="lhdsuite">Measured on real designs — lhdsuite dino + minion (2026-07-25)</h2>
 
 <p>Run with
@@ -759,7 +1072,7 @@
 </table>
 
 <p><strong>Explicitly NOT subtasks — keep these as invariants.</strong> The ICG
-  fold <code>encode.cpp:2206-2243</code> stays: an ICG design has one clock input,
+  fold <code>encode.cpp:2318-2356</code> stays: an ICG design has one clock input,
   all-posedge flops and no latch, so it <em>never fires the trigger</em> and is
   never normalized — delete the fold and gated-vs-ungated goes back to falsely
   PROVEN. The multi-clock edge branch <code>:2245-2269</code> stays for the

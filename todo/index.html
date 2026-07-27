@@ -242,6 +242,39 @@ tier.</p>
   <code>src: u128</code> / <code>pc: u64</code> (AluDataModule.prp:508) — readability is the
   ergonomics of the whole iterate loop
   (<a class="xref" href="livehd/2n.html">2n</a>).</li>
+<li><strong>R20 — <code>Clock_cell</code>: one recognized clock operator (gate / invert / divide).</strong>
+  <span class="status">G2+G3 · medium</span>
+  A clock gate is INSTANTIATED in real RTL, so its output is an opaque <code>Sub</code>
+  and every flop or memory it clocks refuses to encode. Measured on
+  <code>//bench:minion_lec</code> 2026-07-26: <strong>30 defs refuse — 22 flop + 8
+  memory</strong>, while 110/140 prove and nothing times out. Blackboxing the gate is
+  what breaks the parent — an ICG&rsquo;s output is a CLOCK and the encoder has no
+  clock-identity model, so &ldquo;prove the leaf, then box it&rdquo; does not compose,
+  and trusting <code>prim_clk_gate</code> is self-defeating. Replace the pattern with a
+  first-class <code>Clock_cell(clk_ref, en, div=1, invert=false)</code> recognized at
+  three entry points (inline RTL, an instantiated cell at the <code>Sub</code> boundary
+  with NO inlining so <code>lec_trust</code> is respected, and a DECLARED foundry
+  blackbox), then let each consumer lower its own view: LEC <em>and</em>
+  <code>formal verify</code> (one shared encoder) and sim to a commit
+  condition, synthesis to a real ICG cell so the shared gate survives — which also
+  makes the cell the anchor for future POWER work (gating-coverage metrics,
+  automatic clock-gate insertion, power-gating domains): a representation to
+  keep, not a normalization to fold away.
+  <strong>v1 is <code>div=1</code> only</strong> — <code>div&gt;1</code> is an honest
+  &ldquo;not implemented&rdquo; error (no test cases, <code>pass_single_edge.cpp:521</code>
+  refuses <code>slots&gt;2</code>, and a divider&rsquo;s initial phase would have to
+  become part of its identity or two out-of-phase dividers compare equal; 2^N only
+  even then — an odd divider takes the blackbox path).
+  <strong>Step 0 is a soundness fix and lands first:</strong>
+  <code>memory_clock_shape_ok</code> accepts ANY <code>Sub</code> on a memory clock pin —
+  measured 21 of 21 minion memory clock edges are Sub-driven and encode as
+  &ldquo;commits every step&rdquo;, so fixing the flop side first would mint false
+  PROVENs. <em>Done when:</em> minion_lec&rsquo;s 30 refusals go to 0,
+  <code>prim_clk_gate</code> leaves <code>lec_trust</code>, and minion&rsquo;s
+  <code>sim_cpu_top_ok</code> flips to 1 (lhdsuite fixme issue 12), with
+  <code>lec_clock_blindness_test</code> still refuting gated-vs-ungated. Home:
+  <a href="livehd/2f-latch.html#clock-cell">2f-latch M9</a>; cross-ref R5
+  (<code>2m-multiport_mem</code> A) for the memory clock pin.</li>
 </ul>
 
 <h3 id="rec-c">Tier C — G3: fast incremental assert/assume</h3>

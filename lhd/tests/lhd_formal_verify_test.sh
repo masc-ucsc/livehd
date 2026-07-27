@@ -770,4 +770,121 @@ verify vacuity vacuity_fork --top vacuity --set formal.bound=4
 [ "$RC" -eq 0 ] || fail "the fork-path vacuity run must still pass: $(cat "$OUT")"
 grep -q "VACUOUS: its" "$OUT" || fail "vacuous_guard was LOST across the verify fork codec (serialize_verify/deserialize_verify): $(cat "$OUT")"
 
-echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity)"
+# ---------------------------------------------------------------------------
+# 11. Code-review fixes on the R1 / Phase-2 work (2026-07-26). Each case below
+#     FLIPPED verdict or attribution before its fix.
+# ---------------------------------------------------------------------------
+# 11a. and2/or2/not1 stamp `bits=1`, which the encoder fits to [0:0]. A guarded
+#      property therefore kept only the LSB of a multi-bit condition, and a
+#      NESTED guard kept only the LSB of the outer one. `flags | 0x2` is always
+#      nonzero, so the first must PROVE; the second is a false PROVEN detector —
+#      the clamped guard `(flags|2)[0] & d` never checks flags==0, where the
+#      property is false, so it must REFUTE.
+cat >"$W/widecond.prp" <<'EOF'
+mod widecond(flags:u8, d:bool) -> (o:u8@[0]) {
+  o = flags
+  if flags | 0x2 {
+    assert(flags | 0x4, "multi-bit cond under a multi-bit guard")
+  }
+}
+EOF
+verify widecond widecond --top widecond --set formal.bound=2
+[ "$RC" -eq 0 ] || fail "a multi-bit assert condition must not be truncated to its LSB: $(cat "$OUT")"
+
+cat >"$W/widecond_bad.prp" <<'EOF'
+mod widecond_bad(flags:u8, d:bool) -> (o:u8@[0]) {
+  o = flags
+  if flags | 0x2 {
+    if d {
+      assert(flags#[0] == 1, "false on even flags")
+    }
+  }
+}
+EOF
+verify widecond_bad widecond_bad --top widecond_bad --set formal.bound=2
+[ "$RC" -ne 0 ] || fail "a NESTED multi-bit guard clamped to its LSB hides the flags==0 violation (false PROVEN): $(cat "$OUT")"
+
+# 11b. A contradictory assume set makes every checkSatAssuming UNSAT, which used
+#      to stamp `vacuous_guard` on a perfectly live guard and — under strict —
+#      throw about the user's `if` instead of the conflicting assumes.
+cat >"$W/contra_guard.prp" <<'EOF'
+mod contra_guard(a:u8) -> (o:u8@[0]) {
+  o = a
+  assume(a < 10)
+  assume(a > 20)
+  if a < 4 {
+    assert(a < 10, "live guard")
+  }
+}
+EOF
+verify contra_guard contra_guard --top contra_guard --set formal.bound=2 --set compile.formal.on_refute=warn
+grep -q "contradictory assume set" "$OUT" || fail "the contradictory assume set must be the reported problem: $(cat "$OUT")"
+grep -q "VACUOUS: its" "$OUT" && fail "a LIVE guard must not be called dead just because the assume set is contradictory: $(cat "$OUT")"
+
+# 11c. The strict vacuity throw must not pre-empt a more severe exit: a design
+#      with BOTH a dead branch and a reachable violation must report the
+#      violation (equiv_fail), not an `unsupported` dead-branch complaint.
+cat >"$W/vac_and_refute.prp" <<'EOF'
+mod vac_and_refute(a:u8) -> (o:u8@[0]) {
+  o = a
+  if a > 200 and a < 100 {
+    assert(a == 7, "dead")
+  }
+  assert(a != 3, "genuinely reachable")
+}
+EOF
+verify vac_and_refute vac_and_refute --top vac_and_refute --set formal.bound=2 --set formal.strict=true
+[ "$RC" -ne 0 ] || fail "a reachable violation must fail the run"
+grep -q "reachable property violation" "$OUT" \
+  || fail "the REFUTATION must be the reported failure, not the vacuous dead branch: $(cat "$OUT")"
+
+# 11d. A dead-guard ASSUME is reported but must NOT gate `formal.strict` — the
+#      compile tier skips assumes, and the two tiers must agree on whether the
+#      same source is clean. The assert alongside it keeps the run decidable.
+cat >"$W/vac_assume.prp" <<'EOF'
+mod vac_assume(a:u8) -> (o:u8@[0]) {
+  o = a
+  if a > 200 and a < 100 {
+    assume(a < 3)
+  }
+  assert(a < 256, "trivially true")
+}
+EOF
+WDVA="$W/wd_vac_assume"
+mkdir -p "$WDVA"
+verify vac_assume vac_assume --top vac_assume --set formal.bound=2 --set formal.strict=true --workdir "$WDVA"
+[ "$RC" -eq 0 ] || fail "a dead-guard ASSUME must not fail the run under strict: $(cat "$OUT")"
+python3 - "$WDVA" <<'PYEOF' || fail "the dead-guard assume must still be REPORTED (flagged but not gating)"
+import json, sys
+obs = json.load(open(sys.argv[1] + "/formal_report.json"))["obligations"]
+a = [o for o in obs if o["kind"] == "assume"]
+assert len(a) == 1 and a[0]["vacuous_guard"], a
+PYEOF
+
+# 11e. Per-block assume attribution must survive the FORK codec. Run WITHOUT
+#      --workdir (the forking strategy race) on a block whose INPUT-only assumes
+#      are contradictory: the parent must name the block, not blame the design.
+cat >"$W/blk.prp" <<'EOF'
+mod blk(enable:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+EOF
+cat >"$W/blk.verify.prp" <<'EOF'
+const top = import("blk.blk")
+formal blk.bad {
+  mut acc = top
+  assume(acc.enable)
+  assume(not acc.enable)
+  assert(acc.value != 9, "under a contradictory block")
+}
+EOF
+OUT="$W/blkfork.out"
+"$LHD" formal verify "$W/blk.prp" "$W/blk.verify.prp" --top blk --set formal.bound=4 >"$OUT" 2>&1
+grep -q "block 'blk.bad'" "$OUT" \
+  || fail "the fork path must attribute the contradictory assumes to block 'blk.bad' (Prop_result::scope lost in the codec): $(cat "$OUT")"
+grep -q "contradictory assume set in the design" "$OUT" \
+  && fail "the fork path blamed the DESIGN for a BLOCK's contradictory assumes: $(cat "$OUT")"
+
+echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"

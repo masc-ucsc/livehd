@@ -1913,6 +1913,22 @@ static std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const s
     if (const auto pre = livehd::latch_contract::needs_single_edge(d); pre.n_latches > 0 || pre.n_negedge_flops > 0) {
       continue;
     }
+    // PREDICT the fold failure instead of discovering it after mutating. The
+    // inline is DESTRUCTIVE and has no undo, so a def whose fold then fails is
+    // handed back holding an enable Latch it did NOT have when we found it —
+    // and while `unfolded` keeps it out of the def SCAN, the ENCODER still
+    // refuses a Latch, so a def that used to encode cleanly (an opaque gate
+    // cell whose gated clock only crosses into a child) regresses from PROVEN
+    // to UNKNOWN purely because this ran. "Nothing that passes now can start
+    // failing" only holds for defs whose fold succeeds.
+    //
+    // The dominant failure is the documented one: resolve_icg folds only in a
+    // SINGLE-clock design (a gate on a second domain has no reference clock to
+    // be relative to), after which the orphaned latch wants a divider. That is
+    // decidable BEFORE touching anything.
+    if (livehd::latch_contract::Design_clocks(d).n_clock_inputs() > 1) {
+      continue;
+    }
     const int nd = livehd::latch_contract::inline_clock_gate_cells(d, "pass.single_edge", is_boxed);
     if (nd <= 0) {
       continue;  // no gate here: leave the def byte-for-byte as it was
@@ -1941,6 +1957,16 @@ static std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const s
     // same honest per-def UNKNOWN (`sequential op 'latch' not supported yet`
     // rather than `derived clock` -- same verdict, different sentence), while
     // every def that did fold is a def that now proves.
+    // Residual (not predicted above): the def is now mutated and there is no
+    // rollback, so at minimum say so instead of leaving a silent regression.
+    if (const auto post = livehd::latch_contract::needs_single_edge(d); post.n_latches > 0) {
+      livehd::diag::warn("pass.single_edge", "icg-inline-not-folded", "unsupported")
+          .msg("def '{}' had its clock-gate cell inlined but the fold did not apply, so it now holds an enable latch it "
+               "did not have before; it will encode as UNKNOWN rather than refuse",
+               d->get_name())
+          .hint("flatten the design, or trust this def, to get a verdict for it")
+          .emit();
+    }
     if (unfolded != nullptr) {
       unfolded->insert(d);
     }
@@ -3283,7 +3309,18 @@ void formal_verify_command(Options& opts, Result& res) {
   // --set compile.formal.on_refute=warn deliberately.
 
   Eprp_var var;
-  load_side_graphs(opts, res, kind, path, "impl", var);
+  {
+    // R1 Phase 2 — the verify tier RE-DERIVES antecedent vacuity per obligation
+    // (free frame, richer report, governed by formal.strict), so letting the
+    // in-compile gate also report it emitted `formal-vacuous-guard` TWICE per
+    // run with different wording. Silence the gate for this load only; the
+    // plain `lhd compile` flow keeps it. Same save/restore idiom the monitor
+    // compile below uses for compile.formal.mode.
+    const size_t saved_sets = opts.sets.size();
+    opts.sets.emplace_back("compile.formal.warn_vacuous", "false");
+    load_side_graphs(opts, res, kind, path, "impl", var);
+    opts.sets.resize(saved_sets);
+  }
 
   // Top pick: --impl-top / --top, else the sole module; entity fallback like
   // lec (pick_top_graph warns when the fallback substitutes the full name).
@@ -3946,6 +3983,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // different parent instantiation, which is a legitimate design pattern; a
   // hard error would punish it. `formal.strict` is the existing "treat a
   // proves-nothing outcome as a failure" knob, so it is the right lever.
+  std::string strict_vacuous;  // set below; thrown only after the verdict ladder
   {
     std::string vac_list;
     int         n_vac = 0;
@@ -3953,17 +3991,27 @@ void formal_verify_command(Options& opts, Result& res) {
       if (!p.vacuous_guard) {
         continue;
       }
+      // An env-class assume whose guard is dead constrains nothing — worth the
+      // row and the warning, but it is not a broken PROOF, and the compile tier
+      // skips assumes outright. Counting it here made the same source pass
+      // `lhd compile` and hard-fail `lhd formal verify --set formal.strict=true`
+      // on the identical diagnostic. Align: only obligations gate the exit.
+      if (p.kind == "assume" && p.aclass != "internal") {
+        continue;
+      }
       ++n_vac;
       vac_list += (vac_list.empty() ? "" : ", ") + p.kind + (p.loc.empty() ? std::string{} : " at " + p.loc)
                   + (p.msg.empty() ? std::string{} : " \"" + p.msg + "\"");
     }
     if (n_vac > 0) {
-      if (o.strict) {
-        throw Lhd_error{"unsupported",
-                        std::format("formal verify: {} VACUOUS obligation(s) in '{}' — {}", n_vac, g->get_name(), vac_list),
-                        "each proved only because its `if`/`match` guard can never be true, so it checked nothing: the "
-                        "branch is dead. Fix the guard condition, or drop the branch"};
-      }
+      // The WARNING is emitted here so it is visible even on a run that goes on
+      // to fail for a worse reason. The strict FAILURE is deferred to after the
+      // verdict ladder below: throwing here pre-empted every more severe exit
+      // class, so a design with BOTH a reachable violation and a dead branch
+      // exited "unsupported: 1 VACUOUS obligation(s)" and the equiv_fail plus
+      // its counterexample trace were never printed. Same masking applied to an
+      // encoder refusal and to a contradictory assume set.
+      strict_vacuous = std::format("formal verify: {} VACUOUS obligation(s) in '{}' — {}", n_vac, g->get_name(), vac_list);
       livehd::diag::warn("pass.formal", "formal-vacuous-guard", "io")
           .msg("formal verify: {} obligation(s) proved VACUOUSLY in '{}' ({}) — the `if`/`match` guard can never be "
                "true, so the property is never exercised and its PROVEN means nothing. Fix the guard condition or drop "
@@ -4022,6 +4070,14 @@ void formal_verify_command(Options& opts, Result& res) {
              g->get_name(),
              r.detail)
         .emit();
+  }
+  // LAST: a vacuous obligation under formal.strict fails the run, but only once
+  // nothing more severe has claimed the exit (see where strict_vacuous is set).
+  if (!strict_vacuous.empty() && o.strict) {
+    throw Lhd_error{"unsupported",
+                    strict_vacuous,
+                    "each proved only because its `if`/`match` guard can never be true, so it checked nothing: the "
+                    "branch is dead. Fix the guard condition, or drop the branch"};
   }
 }
 

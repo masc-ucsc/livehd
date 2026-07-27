@@ -213,8 +213,15 @@ sed 's/assign o = f & m;/assign o = ~(~f | ~m);/' "$W/hicgdeep.v" > "$W/hicgdeep
 build hicgdeep_dm "$W/hicgdeep_dm.v" dut
 out="$("$LHD" lec --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top dut \
         --workdir "$W/l5b" --set formal.lec.trust=prim_clk_gate 2>&1)"
+# A bare negative grep is not an assertion: a build failure, an `unsupported`
+# refusal before any encoding, or a crash all produce output matching NEITHER
+# pattern, so the case would print "ok" without lec ever having run. Pin that it
+# REACHED a verdict first (the sibling cases 4/5a check $? for the same reason),
+# then that the verdict is not a refutation.
+grep -qaiE "PROVEN|UNKNOWN|INCONCLUSIVE" <<<"$out" \
+  || { echo "$out" | tail -8; fail "case 5b never reached a lec verdict (build failure / refusal / crash) -- it cannot distinguish 'boxed and inconclusive' from 'never ran'"; }
 grep -qaiE "refut|not equivalent|equiv_fail" <<<"$out" \
   && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }
-echo "ok: a trusted clock-gate cell stays boxed and yields no false refutation"
+echo "ok: a trusted clock-gate cell stays boxed, reached a verdict, and did not refute"
 
 echo "PASS: single_edge_hier_latch_test"

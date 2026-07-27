@@ -77,7 +77,22 @@ static bool memory_clock_shape_ok(hhds::Pin_class p, int depth = 0) {
   auto n = p.get_master_node();
   const auto op = gu::type_op_of(n);
   if (op == Ntype_op::Sub) {
-    return true;
+    // A clock BUFFER/inverter is one cell input (the clock) and is transparent
+    // to "every write lands once per step". A clock GATE is not: it is the same
+    // opaque Sub with an EXTRA enable input, and accepting it models a gated
+    // memory as if it were written unconditionally -- a false PROVEN against a
+    // reference that writes every cycle. That distinction is the only thing
+    // separating them here (the cell body never flattens: hhds resolves a Sub
+    // only through the graph's OWN library and a netlist holds IO-only cell
+    // decls), so count the non-constant inputs and refuse anything with a
+    // second one. Constants are tie-offs, not enables.
+    int data_ins = 0;
+    for (const auto& e : n.inp_edges()) {
+      if (!gu::is_const_pin(e.driver)) {
+        ++data_ins;
+      }
+    }
+    return data_ins <= 1;
   }
   if (op != Ntype_op::Set_mask) {
     return false;

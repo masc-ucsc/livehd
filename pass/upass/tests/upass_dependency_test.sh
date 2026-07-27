@@ -40,4 +40,27 @@ if ! grep -q "uPass - add assert" "${OUT_FILE}"; then
   exit 3
 fi
 
+# The reduced order WITH tolg enabled is still a user-reachable configuration, so
+# pin that it fails HONESTLY rather than crashing or silently emitting hardware.
+# (Adding upass.tolg=false above fixed the test but would otherwise have deleted
+# the only coverage of this path.) `cassert` is an elaboration check under the
+# 2026-07-25 ruling: with the folding passes omitted from the order it cannot be
+# discharged, and the contract is a DIRECTED diagnostic naming that, not silence.
+# NB a HARDWARE emit is required: the cassert seam fires at tolg, and "reaching
+# tolg is what says this compilation is producing hardware". Asking only for
+# diagnostics is an LNAST-only flow, which the ruling explicitly exempts — so
+# that spelling exits 0 and would make this case vacuous.
+ERR_OUT="${TEST_TMPDIR}/upass_dependency_tolg.out"
+if "${LHD}" compile "${PRP_FILE}" --set upass.order=assert --workdir "${TEST_TMPDIR}/w2" \
+     --emit "verilog:${TEST_TMPDIR}/w2.v" >"${ERR_OUT}" 2>&1; then
+  echo "FAIL: a reduced upass.order that cannot fold a cassert must not exit 0"
+  cat "${ERR_OUT}"
+  exit 4
+fi
+if ! grep -q 'cassert-not-comptime' "${ERR_OUT}"; then
+  echo "FAIL: the reduced-order failure must be the directed cassert-not-comptime diagnostic"
+  cat "${ERR_OUT}"
+  exit 5
+fi
+
 echo "PASS: dependency ordering works"
