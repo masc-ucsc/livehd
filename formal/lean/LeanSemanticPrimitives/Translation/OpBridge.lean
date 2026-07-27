@@ -342,4 +342,68 @@ theorem not_bridge {wa w : Nat} (a : BitVec wa) :
   intro i hi
   rw [bv_bit_bvenc, BitVec.getLsbD_not, getLsbD_zext_lt a hi]; simp [hi]
 
+--------------------------------------------------------------------------------
+-- Arithmetic / comparison family (Sum, EQ, ULT, UGT).
+--------------------------------------------------------------------------------
+
+theorem toNat_bv_zext_le {wa cw : Nat} (a : BitVec wa) (h : wa ≤ cw) :
+    (bv_zext a : BitVec cw).toNat = a.toNat := by
+  unfold bv_zext; rw [BitVec.toNat_ofNat]
+  exact Nat.mod_eq_of_lt (lt_of_lt_of_le a.isLt (Nat.pow_le_pow_right (by norm_num) h))
+
+theorem bvenc_bool (P : Bool) : bvenc (bool_to_bv1 P) = mk_bv 1 (if P then 1 else 0) := by
+  cases P <;> simp [bvenc, bool_to_bv1, mk_bv]
+
+theorem sum2_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op (LGraphOp.Op_Sum 2) w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) + (bv_zext b : BitVec w)) := by
+  rw [show eval_op (LGraphOp.Op_Sum 2) w [bvenc a, bvenc b]
+        = mk_bv w (Int.ofNat a.toNat + Int.ofNat b.toNat) from by simp [eval_op, bv_uint_bvenc]]
+  unfold bvenc
+  apply mk_bv_eq_of_emod
+  rw [BitVec.toNat_add]
+  simp only [bv_zext, BitVec.toNat_ofNat, Int.ofNat_eq_natCast]
+  push_cast
+  rw [Int.emod_emod_of_dvd _ (dvd_refl _), ← Int.add_emod]
+
+theorem eq_bridge {wa wb ew : Nat} (a : BitVec wa) (b : BitVec wb) (ha : wa ≤ ew) (hb : wb ≤ ew) :
+    eval_op LGraphOp.Op_EQ 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext b : BitVec ew) = (bv_zext a : BitVec ew))) := by
+  rw [show eval_op LGraphOp.Op_EQ 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if b.toNat = a.toNat then (1:Int) else 0) from by simp [eval_op, bv_uint_bvenc]]
+  rw [bvenc_bool]
+  congr 1
+  have hiff : ((bv_zext b : BitVec ew) = (bv_zext a : BitVec ew)) ↔ (b.toNat = a.toNat) := by
+    rw [BitVec.toNat_eq, toNat_bv_zext_le b hb, toNat_bv_zext_le a ha]
+  simp only [decide_eq_true_eq]
+  by_cases h : b.toNat = a.toNat
+  · rw [if_pos h, if_pos (hiff.mpr h)]
+  · rw [if_neg h, if_neg (fun hc => h (hiff.mp hc))]
+
+theorem ult_bridge {wa wb cw : Nat} (a : BitVec wa) (b : BitVec wb) (ha : wa ≤ cw) (hb : wb ≤ cw) :
+    eval_op LGraphOp.Op_ULT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec cw) < (bv_zext b : BitVec cw))) := by
+  rw [show eval_op LGraphOp.Op_ULT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if a.toNat < b.toNat then (1:Int) else 0) from by simp [eval_op, bv_uint_bvenc]]
+  rw [bvenc_bool]; congr 1
+  have hiff : ((bv_zext a : BitVec cw) < (bv_zext b : BitVec cw)) ↔ (a.toNat < b.toNat) := by
+    rw [BitVec.lt_def, toNat_bv_zext_le a ha, toNat_bv_zext_le b hb]
+  simp only [decide_eq_true_eq]
+  by_cases h : a.toNat < b.toNat
+  · rw [if_pos h, if_pos (hiff.mpr h)]
+  · rw [if_neg h, if_neg (fun hc => h (hiff.mp hc))]
+
+theorem ugt_bridge {wa wb cw : Nat} (a : BitVec wa) (b : BitVec wb) (ha : wa ≤ cw) (hb : wb ≤ cw) :
+    eval_op LGraphOp.Op_UGT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec cw) > (bv_zext b : BitVec cw))) := by
+  rw [show eval_op LGraphOp.Op_UGT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if b.toNat < a.toNat then (1:Int) else 0) from by simp [eval_op, bv_uint_bvenc]]
+  rw [bvenc_bool]; congr 1
+  have hiff : ((bv_zext a : BitVec cw) > (bv_zext b : BitVec cw)) ↔ (b.toNat < a.toNat) := by
+    rw [gt_iff_lt, BitVec.lt_def, toNat_bv_zext_le a ha, toNat_bv_zext_le b hb]
+  simp only [decide_eq_true_eq]
+  by_cases h : b.toNat < a.toNat
+  · rw [if_pos h, if_pos (hiff.mpr h)]
+  · rw [if_neg h, if_neg (fun hc => h (hiff.mp hc))]
+
 end OpBridge
