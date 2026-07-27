@@ -1,0 +1,41 @@
+/*
+:name: array_store_stale_rhs
+:type: equiv
+:verilog_top: array_store_stale_rhs
+:pyrope_top: array_store_stale_rhs
+*/
+// TRACKER — SILENT MISCOMPILE in tolg's array-element store (lhdsuite
+// array_problem.md). Known-failing: the prp-equiv-array_store_stale_rhs target
+// is tagged `fixme` (and the pair sits in _V2PRP_FIXME); it moved here from
+// tests/fixme/ (compile-only, which could never observe a clean-compile
+// miscompile) so the failure is LEC-gated against the golden .v.
+//
+// `arr[0] = m` stores m's DECLARATION value (0) instead of its live value (d).
+// Emitted netlist: `arr_data['sb0] = 'sb0;` — a constant zero, where it must be
+// `d`. So `o` reads 0 for sel==0 regardless of `d`. The golden .v beside this
+// file is the SEMANTIC mux (o = sel ? 0 : d), deliberately array-free so yosys
+// reads it exactly and the v2v round trip of the golden stays green.
+//
+// BOTH ingredients are required (each verified by a passing counter-variant):
+//   * the READ index must be non-constant (`arr[sel]`). With `arr[0]` the front
+//     end degenerates the array to a scalar bit-select and the bug is bypassed.
+//   * the store RHS must be a `mut` DECLARED in one statement and ASSIGNED in
+//     another. `mut m:u1 = d` (decl+init together) is lowered CORRECTLY, as is
+//     a literal RHS (`arr[1] = 17`) and a direct port RHS (`arr[0] = d`).
+// Reading the same `m` into a SCALAR output in the same def is also correct —
+// so the defect is specific to the array-store `din`, not to `m`'s binding.
+// The CLOCKED twin (a `reg` array fed through an intermediate) lowers
+// CORRECTLY — this is a comb-array (`mut`) defect only; see the
+// arr_comb_mux_const / arr_comb_tmp pairs and lhdsuite array_problem.md.
+//
+// WHY IT MATTERS: this is the root cause of `minion_dcache_tensor_load`
+// refuting in //bench:minion_lec. There `mut _mux_33:u5 = 0` is hoisted, then
+// assigned from an enum, then stored into `my_miss_id[0]` — so all four array
+// entries hold 0 and `l2_req_o.id` reads 0 for any index.
+pub comb array_store_stale_rhs(sel:u1, d:u1) -> (o:u1) {
+  mut m:u1 = 0
+  mut arr:[2]u1 = 0
+  m = d
+  arr[0] = m
+  o = arr[sel]
+}

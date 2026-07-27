@@ -1,0 +1,21 @@
+/*
+:name: mem_wr_seq_same
+:type: equiv
+:verilog_top: mem_wr_seq_same
+:pyrope_top: mem_wr_seq_same
+*/
+// Clocked-array semantics anchor (lhdsuite array_problem.md): two
+// unconditional non-blocking writes to the SAME address in one always_ff —
+// Verilog says the LAST one (wd2) commits. This .prp is the VERBATIM
+// `lhd compile mem_wr_seq_same.v --emit-dir pyrope:` output (headers added):
+// both per-entry writes survive as separate write ports in program order, and
+// the Memory cell's storage priority is last-port-wins, so `wd2` commits and
+// the round trip PROVES. (`ordering="none"` governs only what a same-cycle
+// READ observes — here nothing, since the reader emits committed-state reads.)
+pub mod mem_wr_seq_same::[timecheck=false](clk:u1, waddr:u2, wd1:u2, wd2:u2, raddr:u2) -> (rdata:u2@[]) {
+  reg mem:[4]u2:[ordering="none"]
+  rdata = 0ub??
+  mem[waddr] = wd1
+  mem[waddr] = wd2
+  rdata = mem[raddr]
+}

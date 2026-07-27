@@ -1,0 +1,31 @@
+/*
+:name: mem_ordering_program
+:type: equiv
+:verilog_top: mem_ordering_program
+:pyrope_top: mem_ordering_program
+*/
+// `ordering="program"` showcase (lhdsuite array_problem.md, ruled and
+// implemented 2026-07-27). This pair PROVES; it was the fixme tracker that
+// drove the implementation and was promoted out of both fixme lists when the
+// attribute landed.
+//
+// PROGRAM (sequential) ordering — the canonical same-cycle sequence:
+//   o1 = mem[a1]      // read BEFORE the writes: the OLD stored value,
+//                     //   even when a1==a2 or a1==a3
+//   mem[a2] = d2
+//   mem[a3] = d3      // write-write: if a2==a3 the LAST write (d3) commits
+//   o4 = mem[a4]      // read AFTER the writes: sees them, later write
+//                     //   winning (a4==a3 -> d3, else a4==a2 -> d2)
+//
+// Before `ordering` existed the lowering applied ONE per-write-port fwd mask
+// to EVERY read port (position-blind), so o1 wrongly forwarded the same-cycle
+// writes and a triple collision returned d2 where d3 must win. The `fwd` pin
+// is now a per-(read,write) matrix, so o1's row is empty and o4's is full.
+// The golden .v encodes the ruled semantics with explicit bypasses on o4 only.
+pub mod mem_ordering_program(clk:u1, a1:u2, a2:u2, d2:u2, a3:u2, d3:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
+  reg mem:[4]u2:[ordering="program"] = 0
+  o1 = mem[a1]
+  mem[a2] = d2
+  mem[a3] = d3
+  o4 = mem[a4]
+}

@@ -1,0 +1,31 @@
+/*
+:name: arr_comb_mux_const
+:type: equiv
+:verilog_top: arr_comb_mux_const
+:pyrope_top: arr_comb_mux_const
+*/
+// TRACKER — comb-array per-entry store loses its RHS (lhdsuite
+// array_problem.md). Known-failing: prp-equiv-arr_comb_mux_const is tagged
+// `fixme`.
+//
+// This .prp is the VERBATIM `lhd compile arr_comb_mux_const.v --emit-dir
+// pyrope:` output (headers added): the golden's elaboration-constant ternary
+// `assign arr[0] = 1 ? d : ~d;` makes the writer emit `_mux_1` declared in one
+// statement and reassigned inside a code block, and tolg then resolves the
+// store din from a STALE version of `_mux_1` — `o` reads the wrong value for
+// sel==0. The emitted Pyrope below is CORRECT (the last `_mux_1` write is
+// `d & 1`); the defect is in lowering it (upass tolg), which is why the
+// direct .v round trip (prp-v2v-arr_comb_mux_const) PROVES while this pair
+// REFUTES. Same root cause as array_store_stale_rhs (reassigned-mut RHS);
+// the clocked twin (mem[waddr] <= 1 ? wdata : ~wdata) lowers correctly.
+pub comb arr_comb_mux_const::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
+  mut _mux_1:u1 = 0
+  mut arr:[2]u1 = 0
+  _mux_1 = (~d) & 1 & 1
+  o = 0ub?
+  {
+    _mux_1 = d & 1
+  }
+  arr[0] = _mux_1
+  o = arr[sel]
+}

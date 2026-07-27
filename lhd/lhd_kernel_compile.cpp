@@ -630,19 +630,14 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
                       "a graphs flow (lg/verilog/sim emit) folds package params; drop the flag or emit pyrope in a "
                       "separate invocation"};
     }
-    // Struct-port bundles ride the SAME default: qualifying packed-struct
-    // ports become Pyrope tuple ports only on the pyrope-emission path (the
-    // graphs flow keeps flat ports — that flat lgraph is the LEC reference).
-    auto bit = labels.find("struct_port_bundles");
-    if (bit == labels.end()) {
-      if (!needs_graphs && find_slot(opts.emit_dirs, "pyrope") != nullptr) {
-        labels["struct_port_bundles"] = "true";
-      }
-    } else if (needs_graphs && (bit->second == "1" || bit->second == "true")) {
-      throw Lhd_error{"io", "compile.slang.struct_port_bundles=true requires a pyrope-only emission",
-                      "a graphs flow (lg/verilog/sim emit) keeps flat struct ports; drop the flag or emit pyrope in a "
-                      "separate invocation"};
-    }
+    // Struct ports are BUNDLES everywhere: reading a Verilog struct yields a
+    // bundle, which is LiveHD's representation of one, and both front ends
+    // must agree or a comparison between them cannot pair the ports (a trusted
+    // sub-instance is keyed by port NAME, so `d` vs `d.f0`/`d.f1` never meet —
+    // see lhd/tests/lec_trusted_box_struct_port_test.sh). Flattening is an
+    // explicit opt-out; `flat_top_io` is the narrow form that packs ONLY the
+    // top interface, for generated-vs-original Verilog equivalence.
+    (void)needs_graphs;
   }
   run_step("inou.slang", var, labels, opts, res);
   if (lnastfmt_enabled(opts)) {

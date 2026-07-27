@@ -789,7 +789,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       }
       // M7: a qualifying packed-struct port becomes a TUPLE-typed io entry
       // (bundle) — per-field leaf ports after the SSA flatten, not a flat bus.
-      const bool is_bundle = !is_flat_array && bundle_port_qualifies(port);
+      const bool is_bundle = !is_flat_array && bundle_port_qualifies(port, symbol.getDefinition().name);
       // Provenance: a `[P-1:0]` dim naming a package param mints an imported
       // scalar alias (`pub type P_T = uN` in the package unit) the pyrope
       // re-emission prints as the port's type. A bundle port skips the alias
@@ -2193,8 +2193,15 @@ std::vector<Slang_context::Struct_info::Field> Slang_context::struct_port_fields
   return out;
 }
 
-bool Slang_context::bundle_port_qualifies(const slang::ast::PortSymbol& port) const {
+bool Slang_context::bundle_port_qualifies(const slang::ast::PortSymbol& port, std::string_view owner_def) const {
   if (!options_.struct_port_bundles) {
+    return false;
+  }
+  // flat_top_io: only the TOP module's own ports go back to a packed bus, so
+  // the emitted netlist is a drop-in replacement for the source module. A top
+  // is never instantiated, so the instance-connection call site (which passes
+  // no owner) is unaffected and def/instance stay consistent.
+  if (options_.flat_top_io && !owner_def.empty() && top_defs_.count(std::string(owner_def)) != 0) {
     return false;
   }
   if (port.direction != slang::ast::ArgumentDirection::In && port.direction != slang::ast::ArgumentDirection::Out) {

@@ -22,6 +22,12 @@
 #include "str_tools.hpp"
 
 void Slang_context::process_root(const slang::ast::RootSymbol& root) {
+  // flat_top_io keys on the ELABORATION ROOTS, not on the `top` label: the
+  // callers that need it (generated-vs-original Verilog equivalence) do not
+  // always pass one, and slang already knows which modules are tops.
+  for (auto inst : root.topInstances) {
+    top_defs_.insert(std::string(inst->getDefinition().name));
+  }
   for (auto inst : root.topInstances) {
     lower_module(*inst);
   }

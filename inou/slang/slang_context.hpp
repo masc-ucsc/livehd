@@ -67,6 +67,12 @@ public:
     // compile); a graphs flow keeps flat ports (that flat lgraph is the LEC
     // reference).
     bool struct_port_bundles = false;
+    // Pack the TOP module's IO into flat buses even while every internal
+    // module keeps bundles. Verilog-vs-Verilog equivalence (lgcheck/yosys
+    // `miter`) needs the emitted TOP interface to match the source module's
+    // port list, and only the top's: submodule interfaces are internal to each
+    // netlist. Off by default — LiveHD's own representation is the bundle.
+    bool flat_top_io = false;
   };
 
   Slang_context() = default;
@@ -386,7 +392,10 @@ private:
   static std::vector<Struct_info::Field> struct_port_fields(const slang::ast::Type& t);
   // Full qualification of a port at def AND call sites (option + plain name +
   // type rule). Deterministic: consults no body uses.
-  bool bundle_port_qualifies(const slang::ast::PortSymbol& port) const;
+  bool bundle_port_qualifies(const slang::ast::PortSymbol& port, std::string_view owner_def = {}) const;
+  // Definition names of the elaboration roots (slang's root.topInstances).
+  // `flat_top_io` packs the IO of exactly these.
+  absl::flat_hash_set<std::string> top_defs_;
   const Struct_info* bundle_port_of(const slang::ast::Symbol& sym) const;
   // COMB bundle OUTPUT ports drive a local per-field SHADOW accumulator
   // (`<port>__bpo.<field>` mut leaves, poison-initialized) and the port leaf

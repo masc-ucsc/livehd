@@ -1,0 +1,29 @@
+/*
+:name: struct_top_port
+:type: equiv
+:verilog_top: struct_top_port
+:pyrope_top: struct_top_port
+*/
+// Pyrope twin of a design whose TOP interface is a packed struct. The corpus
+// had no such golden — every other struct pair keeps its struct on an INTERNAL
+// instance — so the `flat_top_io` contract (a struct is a bundle everywhere
+// inside LiveHD; only the top interface is packed, for generated-vs-original
+// Verilog equivalence) shipped untested until this pair existed.
+// prp-v2v-struct_top_port is the direction that exercises it: it miters the
+// emitted netlist against the .v, which only matches if the top stayed packed.
+//
+// The ports are written FLAT (u7) here to mirror the golden's packed top
+// interface; the fields are `{fp, addr[4:0], thread_id}`, first-declared field
+// in the MSBs (SystemVerilog packed-struct layout).
+// `= nil` (no reset) on purpose: the golden's rst_ni is an ordinary data input
+// driving a synchronous clear, so an implicit `reset` port here would add a
+// port the golden does not have.
+pub mod struct_top_port(clk:u1, rst_ni:u1, din:u7) -> (dout:u7@[]) {
+  reg dout_q:u7 = nil
+  dout = dout_q
+  if rst_ni == 0 {
+    dout_q = 0
+  } else {
+    dout_q = din
+  }
+}

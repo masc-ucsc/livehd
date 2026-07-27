@@ -1,0 +1,30 @@
+/*
+:name: arr_comb_tmp
+:type: equiv
+:verilog_top: arr_comb_tmp
+:pyrope_top: arr_comb_tmp
+*/
+// TRACKER — a blocking temp feeding a comb-array store is DROPPED by the
+// slang front end (lhdsuite array_problem.md). Known-failing TWICE:
+// prp-equiv-arr_comb_tmp and prp-v2v-arr_comb_tmp are both tagged `fixme`.
+//
+// This .prp is the VERBATIM `lhd compile arr_comb_tmp.v --emit-dir pyrope:`
+// output (headers added). The golden has `always_comb begin t = d;
+// arr[0] = t; ... end`; the emitted Pyrope below shows the loss directly —
+// `t = 0ub?` where `t = d` should be — so the drop happens on the
+// slang->LNAST side (BEFORE tolg): the direct .v->lg->.v round trip refutes
+// too (prp-v2v-arr_comb_tmp), unlike arr_comb_mux_const whose direct path is
+// fine. SOUNDNESS TRAP: the dropped assignment leaves a don't-care, so the
+// native cvc5 `lhd lec` of the two lgraphs returns a VACUOUS PROVEN — only
+// the yosys-referenced lgcheck flows (equiv, v2v) see this bug at all.
+// The clocked twin (blocking temp inside always_ff feeding a mem store)
+// lowers correctly.
+pub comb arr_comb_tmp::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
+  mut t = 0
+  mut arr:[2]u1 = 0
+  o = 0ub?
+  t = 0ub?
+  arr[0] = t
+  arr[1] = (~d) & 1
+  o = arr[sel]
+}

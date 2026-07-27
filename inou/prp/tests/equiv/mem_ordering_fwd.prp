@@ -1,0 +1,27 @@
+/*
+:name: mem_ordering_fwd
+:type: equiv
+:verilog_top: mem_ordering_fwd
+:pyrope_top: mem_ordering_fwd
+*/
+// `ordering="fwd"` showcase (lhdsuite array_problem.md, ruled 2026-07-27):
+// pure transparency — EVERY read of an address written this cycle returns
+// the new data, regardless of the read's textual position. Both o1 (before
+// the write) and o4 (after it) forward d2 on an address match: forwarding is
+// position-blind by definition; only ordering="program" distinguishes
+// before/after. One write port on purpose — with two same-cycle writers a
+// fwd-mode collision is UNDEFINED (sim: random, formal: `?`), which an equiv
+// golden cannot pin.
+//
+// This pair pins the "fwd" mode specifically: the DEFAULT is now "program",
+// so it proves only while the attribute is actually honored. If `ordering`
+// were ever silently ignored again, o1 would stop forwarding and this pair
+// would go red — which is the alarm it exists for.
+pub mod mem_ordering_fwd(clk:u1, a1:u2, we:u1, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
+  reg mem:[4]u2:[ordering="fwd"] = 0
+  o1 = mem[a1]
+  if we != 0 {
+    mem[a2] = d2
+  }
+  o4 = mem[a4]
+}

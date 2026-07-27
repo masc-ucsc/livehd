@@ -534,6 +534,21 @@ sh_test(
     data = ["//lhd"],
 )
 
+# REGRESSION: a TRUSTED def's struct ports must pair across the two front ends.
+# Box ports are keyed by NAME, so a flat bus on one side and per-leaf ports on
+# the other never meet — the box outputs become unrelated free symbols and the
+# parent goes Unknown (a false REFUTED at scale; symmetrically it can HIDE a
+# real difference). Fixed by making a struct ALWAYS a bundle inside LiveHD
+# (both front ends agree); `flat_top_io` packs only the top interface, where
+# generated-vs-original Verilog equivalence needs it. This was the root cause
+# of lhdsuite //bench:minion_lec's prim_mul_div / tensor_load refutations.
+sh_test(
+    name = "lec_trusted_box_struct_port_test",
+    size = "medium",
+    srcs = ["lec_trusted_box_struct_port_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "mem_ordering_test",
     size = "large",
