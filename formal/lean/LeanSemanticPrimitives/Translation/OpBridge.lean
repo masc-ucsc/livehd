@@ -456,4 +456,36 @@ theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ w
   rw [← hsra]
   exact mk_bv_toInt_zext (sem_sra a b) hw
 
+--------------------------------------------------------------------------------
+-- Shift left (SHL): the cert xor-fold-from-zero collapses to a masked shift.
+--------------------------------------------------------------------------------
+
+theorem bv_bit_mk_bv_general {w i : Nat} (V : Int) (hi : i < w) :
+    bv_bit (mk_bv w V) i = (V % 2 ^ w).toNat.testBit i := by
+  unfold bv_bit bv_uint mk_bv
+  rw [Int.emod_emod_of_dvd _ (dvd_refl _), Nat.shiftRight_eq_div_pow, ← testBit_div_mod]
+
+theorem shl_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_SHL w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) <<< b.toNat) := by
+  show bv_bitwise w (fun x y => xor x y) (mk_bv w 0)
+        (mk_bv w (bv_uint (bvenc a) * 2 ^ (bv_uint (bvenc b)).toNat)) = _
+  rw [bv_uint_bvenc, bv_uint_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  rw [bv_bit_mk_bv_zero, Bool.false_xor, bv_bit_mk_bv_general _ hi]
+  have hV : ((Int.ofNat a.toNat * 2 ^ (Int.ofNat b.toNat).toNat) % (2:Int) ^ w).toNat
+          = (a.toNat * 2 ^ b.toNat) % 2 ^ w := by
+    rw [show (Int.ofNat b.toNat).toNat = b.toNat from rfl,
+        show Int.ofNat a.toNat * (2:Int) ^ b.toNat = ((a.toNat * 2 ^ b.toNat : Nat) : Int) from by simp only [Int.ofNat_eq_natCast]; push_cast; ring,
+        show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp, ← Int.natCast_emod, Int.toNat_natCast]
+  rw [hV, Nat.testBit_mod_two_pow, ← Nat.shiftLeft_eq, Nat.testBit_shiftLeft,
+      BitVec.getLsbD_shiftLeft]
+  simp only [hi, decide_true, Bool.true_and]
+  by_cases hib : i < b.toNat
+  · simp [hib, Nat.not_le.mpr hib]
+  · have hlt : i - b.toNat < w := by omega
+    rw [getLsbD_zext_lt a hlt, BitVec.getLsbD]
+    simp [hib, Nat.not_lt.mp hib]
+
 end OpBridge
