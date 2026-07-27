@@ -406,4 +406,54 @@ theorem ugt_bridge {wa wb cw : Nat} (a : BitVec wa) (b : BitVec wb) (ha : wa ≤
   · rw [if_pos h, if_pos (hiff.mpr h)]
   · rw [if_neg h, if_neg (fun hc => h (hiff.mp hc))]
 
+--------------------------------------------------------------------------------
+-- Arithmetic shift right (SRA): signed value + arithmetic shift = floor div.
+--------------------------------------------------------------------------------
+
+theorem toNat_toInt_emod {w : Nat} (x : BitVec w) : (x.toNat : Int) % 2 ^ w = x.toInt % 2 ^ w := by
+  rw [BitVec.toInt_eq_toNat_bmod, show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp, Int.bmod_emod]
+
+theorem bv_sint_bvenc {w : Nat} (a : BitVec w) : bv_sint (bvenc a) = a.toInt := by
+  unfold bv_sint
+  rw [show (bvenc a).width = w from rfl, bv_uint_bvenc, BitVec.toInt_eq_toNat_cond]
+  rcases Nat.eq_zero_or_pos w with hw | hw
+  · subst hw; simp [Nat.lt_one_iff.mp a.isLt]
+  · have hne : w ≠ 0 := by omega
+    have hpow : (2:Nat) ^ w = 2 * 2 ^ (w - 1) := by
+      conv_lhs => rw [show w = (w - 1) + 1 from by omega]
+      rw [pow_succ]; ring
+    rw [if_neg hne]
+    have hcond : (Int.ofNat a.toNat < 2 ^ (w - 1)) ↔ (2 * a.toNat < 2 ^ w) := by
+      rw [Int.ofNat_eq_natCast, show (2:Int) ^ (w - 1) = ((2 ^ (w - 1) : Nat) : Int) from by simp, Nat.cast_lt]
+      omega
+    by_cases hc : 2 * a.toNat < 2 ^ w
+    · rw [if_pos (hcond.mpr hc), if_pos hc, Int.ofNat_eq_natCast]
+    · rw [if_neg (fun h => hc (hcond.mp h)), if_neg hc, Int.ofNat_eq_natCast,
+          show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp]
+
+theorem mk_bv_toInt_zext {wy w : Nat} (y : BitVec wy) (hw : w ≤ wy) :
+    mk_bv w y.toInt = bvenc (bv_zext y : BitVec w) := by
+  unfold bvenc
+  apply mk_bv_eq_of_emod
+  have hz : (bv_zext y : BitVec w).toNat = y.toNat % 2 ^ w := by unfold bv_zext; rw [BitVec.toNat_ofNat]
+  rw [hz]
+  have key : (↑y.toNat : Int) % (2:Int) ^ w = y.toInt % (2:Int) ^ w :=
+    Int.ModEq.of_dvd (pow_dvd_pow 2 hw) (toNat_toInt_emod y)
+  rw [Int.ofNat_eq_natCast, ← key,
+      show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp,
+      ← Int.natCast_emod, ← Int.natCast_emod, Nat.mod_mod]
+
+theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ wa) :
+    eval_op LGraphOp.Op_SRA w [bvenc a, bvenc b]
+      = bvenc (bv_zext (sem_sra a b) : BitVec w) := by
+  have hsra : (sem_sra a b).toInt = a.toInt / (2:Int) ^ b.toNat := by
+    unfold sem_sra
+    rw [BitVec.toInt_sshiftRight, Int.shiftRight_eq_div_pow]; norm_num
+  show bv_sra w (bvenc a) (bvenc b) = _
+  unfold bv_sra
+  rw [bv_sint_bvenc, bv_uint_bvenc]
+  show mk_bv w (a.toInt / (2:Int) ^ b.toNat) = bvenc (bv_zext (sem_sra a b) : BitVec w)
+  rw [← hsra]
+  exact mk_bv_toInt_zext (sem_sra a b) hw
+
 end OpBridge
