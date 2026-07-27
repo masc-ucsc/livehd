@@ -58,3 +58,5 @@ dino_chisel_*
   dino_opentimer_*
   abc.history
   EOF
+*.bak
+*_lgraph/
