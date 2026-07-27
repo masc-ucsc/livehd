@@ -508,8 +508,10 @@ std::string ucast_pin_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t w) {
 // port.  Emits a single `sram_1r1w_{read,write}_first` (or `_be_` byte-enable)
 // call that returns `(m', rdata)`; the caller takes `.1` for next-state and
 // `.2` for the read output, so read and next-state come from ONE policy
-// decision (correct on a same-cycle same-address collision).  Policy is chosen
-// by mi.fwd: fwd=1 -> write_first (forward new data), else read_first.
+// decision (correct on a same-cycle same-address collision).  Policy comes
+// from the `fwd` per-(read,write) matrix (graph/cell.cpp): bit r*n_wr+w.  This
+// emitter is 1R1W-only (see the fatal above), so the whole matrix is bit 0 —
+// set -> write_first (forward the new data), clear -> read_first.
 std::string memory_policy_tuple(const LeanCtx& ctx, const Memory_info& mi) {
   const auto& wp    = mi.ports.at(mi.write_ports.front());
   const auto& rp    = mi.ports.at(mi.read_ports.front());
@@ -518,7 +520,7 @@ std::string memory_policy_tuple(const LeanCtx& ctx, const Memory_info& mi) {
   const auto  wdata = ucast_pin_at(ctx, wp.din, mi.bits);
   const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
   const auto  cur   = "s." + mi.field;
-  const bool  wfirst = (mi.fwd == 1);
+  const bool  wfirst = ((mi.fwd >> 0) & 1) != 0;  // 1R1W: bit (0*n_wr + 0)
   if (mi.wensize <= 1) {
     const std::string fn = wfirst ? "sram_1r1w_write_first" : "sram_1r1w_read_first";
     return "(" + fn + " " + we + " " + waddr + " " + wdata + " " + raddr + " " + cur + ")";

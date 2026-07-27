@@ -16,7 +16,7 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_multiclock_1rd_1wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)
+  #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1)
     (
       // RD PORT 0
       input [`log2(SIZE)-1:0]  rd_addr_0
@@ -47,8 +47,8 @@ always @(posedge wr_clock_0) begin
 end
 
 //READ PORT 0 — combinational read of the CURRENT address, then the
-//per-write-port FWD mask resolves same-cycle writes (write port j forwards
-//iff its FWD bit is set). LATENCY_0==1 flops the resolved value ONCE at the
+//per-(read,write) FWD matrix resolves same-cycle writes (write port j
+//forwards to read port k iff FWD bit (k*N_WR + j) is set). LATENCY_0==1 flops the resolved value ONCE at the
 //output (exactly one edge, same contract as the single-clock wrappers);
 //==0 is fully asynchronous.
 reg [BITS-1:0]        d0_mem;

@@ -18,7 +18,8 @@ module \mem_multidim_rw.md (
     if (we) data[waddr] <= a;
   end
 
-  // async read + same-cycle write forwarding (fwd=1 for reg memories)
+  // async read + same-cycle write forwarding (the write precedes the read in
+  // program order, so the default ordering="program" forwards it)
   assign z = (we && (waddr == raddr)) ? a : data[raddr];
 
 endmodule

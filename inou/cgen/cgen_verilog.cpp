@@ -723,13 +723,24 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 // ware/rtl wrapper templates, for (R,W,clock) shapes ware/rtl does not ship
 // (e.g. a register file that reads out all entries -> many read ports, or a
 // multi-clock RF). Semantics match the templates exactly: port-order write
-// priority, per-write-port FWD forwarding, and LATENCY_0 (==1 flops the output
+// priority (the highest enabled write port wins a same-address collision, i.e.
+// the LAST program write), a per-(READ,WRITE) FWD matrix (bit k*n_wr+j forwards
+// write port j to read port k), and LATENCY_0 (==1 flops the output
 // once, ==0 async). Uses $clog2 instead of the `log2 macro to avoid depending
 // on a macro that may not be in scope when emitted inline.
 std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock) {
   std::string s;
   s          += absl::StrCat("module ", mod_name, "\n");
-  s          += "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,\n";
+  // FWD is the per-(read,write) matrix (bit k*n_wr+j) and can exceed a plain
+  // integer parameter's 32 bits, so it is explicitly sized to THIS shape's
+  // n_rd*n_wr (floored at 256 to match the shipped ware/rtl templates). A
+  // reset-restore expansion mints one write port per entry, so the matrix
+  // easily runs past 256 bits and a fixed width would silently drop the high
+  // read-port rows.
+  const int fwd_w = std::max(256, n_rd * n_wr);
+  s          += absl::StrCat("  #(parameter BITS = 4, SIZE=128, parameter [",
+                             fwd_w - 1,
+                             ":0] FWD=1, parameter LATENCY_0=1, WENSIZE=1,\n");
   s          += "    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)\n  (\n";
   bool first  = true;
   auto port   = [&](const std::string& decl) {
@@ -803,9 +814,13 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
                       k,
                       "\n");
     s += absl::StrCat("  always_comb d", k, "_fwd[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
-    for (int j = 0; j < n_wr; ++j) {
+    // FWD is a per-(read,write) matrix: bit (k*n_wr + j) forwards write port j
+    // to read port k. Later write ports override earlier ones so a same-address
+    // multi-write forwards the LAST writer, matching the storage priority in
+    // the always block above (which is why this chain runs j high -> low).
+    for (int j = n_wr - 1; j >= 0; --j) {
       s += absl::StrCat("    (((FWD >> ",
-                        j,
+                        k * n_wr + j,
                         ") & 1) != 0 && wr_enable_",
                         j,
                         "[fwd_j",
@@ -859,7 +874,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
   int mem_size    = 0;
   int mem_bits    = 0;
-  int mem_fwd     = 0;
+  hhds::Pin_class mem_fwd_dpin;  // per-(read,write) forwarding matrix (may exceed 64 bits)
   int mem_type    = 2;  // array by default
   int mem_wensize = 0;
 
@@ -921,7 +936,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
         return;
       }
-      mem_fwd = hydrate_const(e.driver).to_just_i64();
+      mem_fwd_dpin = e.driver;
     } else if (pin_name == "init") {
       // For a plain memory `init` is the comptime power-on contents; for a
       // whole-array cell (the `update` pin is driven) it is the RUNTIME reset
@@ -1139,7 +1154,17 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".BITS(", mem_bits, ")");
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".SIZE(", mem_size, ")");
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".WENSIZE", "(", mem_wensize, ")");
-    parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".FWD", "(", mem_fwd, ")");
+    {
+      // The wrapper's FWD parameter is the per-(read,write) matrix. A matrix
+      // wider than an int64 (a whole-array expansion reaches 9rd x 8wr = 72
+      // bits) must go out as a sized literal, exactly like INIT.
+      std::string fwd_txt = "0";
+      if (!mem_fwd_dpin.is_invalid()) {
+        auto fv  = hydrate_const(mem_fwd_dpin);
+        fwd_txt  = fv.is_just_i64() ? std::to_string(fv.to_just_i64()) : const_to_verilog(fv);
+      }
+      parameters = absl::StrCat(parameters, first_entry ? "" : " ,", ".FWD", "(", fwd_txt, ")");
+    }
     if (!mem_init_dpin.is_invalid()) {
       // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
       // in the low BITS); only the single-clock wrappers carry it.

@@ -1916,6 +1916,16 @@ private:
     int n_user_wr = 0;  // pre-scanned program write sites
     int wr_next = 0;
     int rd_next = 0;
+    // Same-cycle ordering (Pyrope `ordering` attr): "program" (default) needs
+    // each read port's POSITION in program order, so record `wr_next` as each
+    // read port is minted — the number of program writes that textually
+    // precede it. finalize_mems() turns this into the per-(read,write) `fwd`
+    // matrix. "fwd" forwards every write to every read (position-blind),
+    // "none" forwards nothing.
+    enum class Mem_order { program, fwd, none };
+    int64_t legacy_fwd_mask = 0; // set when the deprecated `fwd=` attr is used
+    bool has_legacy_fwd = false;
+    std::vector<int> rd_wr_before; // per read port: writes minted before it
     // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
     // array coexists with a bound reset, finalize_mems() adds one restore
     // write port per entry (addr=k, din=init[k], enable=reset) and gates the
@@ -2428,19 +2438,35 @@ private:
 
     const int user_sites = count_mem_write_sites(name);
     const bool wants_restore = !is_array && reg_init && !reset_name_.empty();
-    // The fwd mask covers exactly the PROGRAM write ports (per-write-port
-    // forwarding in the cgen wrappers); restore ports stay un-forwarded so a
-    // read during reset returns the committed contents. A pre-declared
-    // `fwd=0` attr (verilog nonblocking memory semantics: reads see the old
-    // contents) clears the program-port forwarding.
-    int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
+    // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
+    // finalize_mems() builds once every port is minted and each read port's
+    // program position is known (`rd_wr_before`). The `ordering` attr is read
+    // there too, not here — a hand-written Pyrope declaration emits its
+    // attr_set AFTER the declare, so pending_attrs_ is not populated yet (the
+    // same reason the clock wiring is deferred). The value driven below is
+    // provisional, and is the final one only for the two cases finalize_mems
+    // leaves alone: a `mut`/`const` array and a legacy `fwd=` escape hatch.
+    int64_t legacy_fwd_mask = 0;
+    bool has_legacy_fwd = false;
     if (auto pit = pending_attrs_.find(std::string(name));
         pit != pending_attrs_.end()) {
+      // Deprecated numeric `fwd=`: an explicit matrix, taken verbatim (a
+      // per-WRITE-port mask still reads correctly on a 1-read memory, which is
+      // every historical user).
       if (auto fit = pit->second.find("fwd"); fit != pit->second.end()) {
         if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
-          fwd_mask = fv->to_just_i64();
+          legacy_fwd_mask = fv->to_just_i64();
+          has_legacy_fwd = true;
         }
       }
+    }
+    // A `mut`/`const` array (type=2) has no clock: tolg lowers it
+    // writes-before-reads (a read after a write is a hard error), so every
+    // write is visible to every read and the matrix is irrelevant — the comb
+    // encoders read the post-write array unconditionally.
+    int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
+    if (has_legacy_fwd) {
+      fwd_mask = legacy_fwd_mask;
     }
 
     auto mem = make_node(Ntype_op::Memory);
@@ -2495,6 +2521,8 @@ private:
                   std::string_view::npos;
     info.n_user_wr = user_sites;
     info.n_wr_total = user_sites + (wants_restore ? static_cast<int>(size) : 0);
+    info.legacy_fwd_mask = legacy_fwd_mask;
+    info.has_legacy_fwd = has_legacy_fwd;
     if (wants_restore) {
       info.restore_vals = std::move(init_entries);
     }
@@ -3047,10 +3075,21 @@ private:
         ++n_wr_cfg;
       }
     }
-    // `fwd=true` means every write port forwards (the cgen wrappers take a
-    // per-write-port mask); a value > 1 passes through as an explicit mask.
+    // `fwd=true` means every write port forwards to every read port: the sink
+    // is a per-(read,write) MATRIX (graph/cell.cpp), so the all-ones value
+    // spans n_rd*n_wr bits, not n_wr. A value > 1 passes through as an explicit
+    // matrix (the RTL escape hatch: __memory's vocabulary is the cell verbatim).
+    const int n_rd_cfg = n_ports - n_wr_cfg;
+    const int fwd_bits = n_rd_cfg * n_wr_cfg;
+    if (fwd == 1 && fwd_bits > 62) {
+      error_here("upass.tolg: __memory has {} read x {} write ports — fwd=true "
+                 "exceeds the 62-bit matrix this path builds; pass an explicit "
+                 "matrix instead",
+                 n_rd_cfg, n_wr_cfg);
+      return true;
+    }
     const int64_t fwd_mask =
-        fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << n_wr_cfg) - 1 : fwd);
+        fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << fwd_bits) - 1 : fwd);
 
     auto mem = make_node(Ntype_op::Memory);
     // Stamp the RESULT name on the Memory node (same rationale as the
@@ -3366,6 +3405,9 @@ private:
     }
     const int slot = mi.n_wr_total + mi.rd_next;
     const auto base = slot * kMemPortStride;
+    // Program-order position: the writes minted so far are exactly those that
+    // textually precede this read, i.e. the ones it may forward from.
+    mi.rd_wr_before.emplace_back(mi.wr_next);
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
         .connect_driver(addr); // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4))
@@ -3444,6 +3486,90 @@ private:
                   *g_, *Dlop::create_integer(0))); // rdport = 0 (write)
         }
       }
+      // Same-cycle ordering: build the per-(read,write) `fwd` matrix now that
+      // every port is minted. Bit (r*n_wr + w) => read port r forwards write
+      // port w. Only the USER write ports can forward; the restore ports
+      // (reset) never do, so a read during reset sees the committed contents.
+      //   "program" (default): row r = the writes that textually precede read r
+      //                        (a PREFIX, recorded in rd_wr_before)
+      //   "fwd":               every read forwards every user write
+      //   "none":              nothing forwards
+      // A type=2 array keeps its legacy single-bit value: it has no clock and
+      // is lowered writes-before-reads, so every encoder reads the post-write
+      // array unconditionally and the matrix is unused.
+      // (A whole-array cell has already forced fwd=0 — a bulk update is a
+      // next-state that no same-cycle read observes — so leave it alone.)
+      auto ordering = Mem_info::Mem_order::program; // Pyrope default
+      if (auto pit = pending_attrs_.find(std::string(name));
+          pit != pending_attrs_.end()) {
+        if (auto oit = pit->second.find("ordering"); oit != pit->second.end()) {
+          std::string_view ov{oit->second};
+          // Attr values arrive as Pyrope source text: a string literal keeps
+          // its quotes.
+          while (ov.size() >= 2 && (ov.front() == '"' || ov.front() == '\'') &&
+                 ov.back() == ov.front()) {
+            ov = ov.substr(1, ov.size() - 2);
+          }
+          if (ov == "program") {
+            ordering = Mem_info::Mem_order::program;
+          } else if (ov == "fwd") {
+            ordering = Mem_info::Mem_order::fwd;
+          } else if (ov == "none") {
+            ordering = Mem_info::Mem_order::none;
+          } else {
+            error_here("upass.tolg: memory '{}' has ordering=\"{}\" — the legal "
+                       "values are \"program\" (default), \"fwd\" and \"none\"",
+                       name, ov);
+          }
+        }
+      }
+      const int n_rd = static_cast<int>(mi.rd_wr_before.size());
+      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update &&
+          mi.n_wr_total > 0 && n_rd > 0) {
+        // Row-major bit string, MSB first: bit (r*n_wr + w) sits at index
+        // n_bits-1-(r*n_wr+w). Built as TEXT so a wide matrix stays exact — a
+        // whole-array expansion easily reaches 9rd x 8wr = 72 bits, and every
+        // consumer reads it with Dlop::bit_test (arbitrary precision).
+        const int n_bits = n_rd * mi.n_wr_total;
+        std::string bits(static_cast<size_t>(n_bits), '0');
+        for (int r = 0; r < n_rd; ++r) {
+          int fwd_upto = 0;
+          switch (ordering) {
+          case Mem_info::Mem_order::program:
+            fwd_upto = mi.rd_wr_before[static_cast<size_t>(r)];
+            break;
+          case Mem_info::Mem_order::fwd: fwd_upto = mi.n_user_wr; break;
+          case Mem_info::Mem_order::none: fwd_upto = 0; break;
+          }
+          for (int w = 0; w < fwd_upto; ++w) {
+            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] =
+                '1';
+          }
+        }
+        spool_ptr<Dlop> matrix;
+        if (n_bits <= 62) { // compact form: emitted Verilog stays unchanged
+          int64_t v = 0;
+          for (int b = 0; b < n_bits; ++b) {
+            if (bits[static_cast<size_t>(n_bits - 1 - b)] == '1') {
+              v |= int64_t{1} << b;
+            }
+          }
+          matrix = Dlop::create_integer(v);
+        } else {
+          matrix = Dlop::from_pyrope("0ub" + bits);
+        }
+        if (matrix) {
+          for (const auto &e : mi.node.inp_edges()) {
+            if (!e.sink.is_invalid() &&
+                static_cast<int>(e.sink.get_port_id()) == 5) { // fwd (pid 5)
+              e.del_edge();
+              break;
+            }
+          }
+          setup_sink_by_name(mi.node, "fwd")
+              .connect_driver(create_const(*g_, *matrix));
+        }
+      }
       // Chunked masked writes (mem[addr][chunk]<=data) set a wensize > 1 via a
       // pending attr from the reader; the declare provisionally drove
       // wensize=1, so re-drive it here (after every write port is in place).
@@ -3472,7 +3598,11 @@ private:
         // Pyrope source folds the attr onto the declaration (`reg
         // t:[N]T:[fwd=0]`) prp2lnast emits the attr_set AFTER the declare, so
         // it lands here.
-        if (auto fit = pit->second.find("fwd"); fit != pit->second.end()) {
+        // A whole-array cell keeps the fwd=0 that lower_mem_update_store
+        // forced: a clocked bulk update is a next-state no same-cycle read
+        // observes, and cgen emits `dout = data[addr]` for it regardless.
+        if (auto fit = pit->second.find("fwd");
+            fit != pit->second.end() && !mi.has_update) {
           if (auto fv = Dlop::from_pyrope(fit->second);
               fv && fv->is_just_i64()) {
             for (const auto &e : mi.node.inp_edges()) {

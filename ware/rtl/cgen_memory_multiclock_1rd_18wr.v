@@ -16,7 +16,7 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_multiclock_1rd_18wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)
+  #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1)
     (
       // RD PORT 0
       input [`log2(SIZE)-1:0]  rd_addr_0
@@ -217,34 +217,28 @@ endgenerate
 reg [BITS-1:0] d0_fwd;
 
 generate
-  if (FWD) begin:BLOCK_FWD_TRUE
-    genvar j;
-    for(j=0;j<WENSIZE;j=j+1) begin:FWD_BLOCK_CALC_0
-      always_comb begin
-        d0_fwd[j*MASKSIZE +: MASKSIZE] = d0_mem[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_17[j] && (wr_addr_17 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_17[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_16[j] && (wr_addr_16 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_16[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_15[j] && (wr_addr_15 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_15[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_14[j] && (wr_addr_14 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_14[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_13[j] && (wr_addr_13 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_13[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_12[j] && (wr_addr_12 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_12[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_11[j] && (wr_addr_11 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_11[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_10[j] && (wr_addr_10 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_10[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_9[j] && (wr_addr_9 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_9[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_8[j] && (wr_addr_8 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_8[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_7[j] && (wr_addr_7 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_7[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_6[j] && (wr_addr_6 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_6[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_5[j] && (wr_addr_5 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_5[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_4[j] && (wr_addr_4 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_4[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_3[j] && (wr_addr_3 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_3[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_2[j] && (wr_addr_2 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_2[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_1[j] && (wr_addr_1 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_1[j*MASKSIZE +: MASKSIZE];
-        if (wr_enable_0[j] && (wr_addr_0 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_0[j*MASKSIZE +: MASKSIZE];
-      end
-    end
-  end else begin:BLOCK_FWD_FALSE
+  genvar j;
+  for(j=0;j<WENSIZE;j=j+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
-      d0_fwd = d0_mem;
+      d0_fwd[j*MASKSIZE +: MASKSIZE] = d0_mem[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 0) & 1) != 0 && wr_enable_0[j] && (wr_addr_0 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_0[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 1) & 1) != 0 && wr_enable_1[j] && (wr_addr_1 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_1[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 2) & 1) != 0 && wr_enable_2[j] && (wr_addr_2 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_2[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 3) & 1) != 0 && wr_enable_3[j] && (wr_addr_3 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_3[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 4) & 1) != 0 && wr_enable_4[j] && (wr_addr_4 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_4[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 5) & 1) != 0 && wr_enable_5[j] && (wr_addr_5 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_5[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 6) & 1) != 0 && wr_enable_6[j] && (wr_addr_6 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_6[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 7) & 1) != 0 && wr_enable_7[j] && (wr_addr_7 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_7[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 8) & 1) != 0 && wr_enable_8[j] && (wr_addr_8 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_8[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 9) & 1) != 0 && wr_enable_9[j] && (wr_addr_9 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_9[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 10) & 1) != 0 && wr_enable_10[j] && (wr_addr_10 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_10[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 11) & 1) != 0 && wr_enable_11[j] && (wr_addr_11 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_11[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 12) & 1) != 0 && wr_enable_12[j] && (wr_addr_12 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_12[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 13) & 1) != 0 && wr_enable_13[j] && (wr_addr_13 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_13[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 14) & 1) != 0 && wr_enable_14[j] && (wr_addr_14 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_14[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 15) & 1) != 0 && wr_enable_15[j] && (wr_addr_15 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_15[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 16) & 1) != 0 && wr_enable_16[j] && (wr_addr_16 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_16[j*MASKSIZE +: MASKSIZE];
+      if (((FWD >> 17) & 1) != 0 && wr_enable_17[j] && (wr_addr_17 == rd_addr_0)) d0_fwd[j*MASKSIZE +: MASKSIZE] = wr_din_17[j*MASKSIZE +: MASKSIZE];
     end
   end
 endgenerate

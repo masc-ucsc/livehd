@@ -2537,12 +2537,28 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto     abits   = cell->getParam(ID::ABITS).as_int();
       auto     rdports = cell->getParam(ID::RD_PORTS).as_int();
       auto     wrports = cell->getParam(ID::WR_PORTS).as_int();
-      auto     transp  = cell->hasParam(ID::RD_TRANSPARENCY_MASK) ? cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int() : 0;
+      // RD_TRANSPARENCY_MASK is indexed rd*WR_PORTS + wr (yosys simlib.v), which
+      // is EXACTLY the Memory cell's per-(read,write) `fwd` matrix layout — so
+      // it transfers verbatim. Build it bit-exactly (as_int() keeps only the
+      // low 32 bits, losing the high read-port rows once RD*WR > 32) the same
+      // way the INIT param below is handled.
+      spool_ptr<Dlop> transp;
+      if (cell->hasParam(ID::RD_TRANSPARENCY_MASK)) {
+        const RTLIL::Const& tv = cell->getParam(ID::RD_TRANSPARENCY_MASK);
+        if (!tv.is_fully_zero()) {
+          std::string val = "0ub";
+          for (char c : tv.as_string()) {  // MSB first
+            val += c == '1' ? '1' : '0';
+          }
+          transp = Dlop::from_pyrope(val);
+        }
+      }
       auto     rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
       auto     wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
-      setup_sink_by_name(exit_node, "fwd").connect_driver(create_const(*g, *Dlop::create_integer(transp)));
+      setup_sink_by_name(exit_node, "fwd")
+          .connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));
       setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(wr_clkp)));
       setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(rd_clke)));
       setup_sink_by_name(exit_node, "wensize").connect_driver(create_const(*g, *Dlop::create_integer(width)));

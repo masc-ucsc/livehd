@@ -6536,6 +6536,9 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       "enable",
       "negreset",
       "posclk",
+      // Memory same-cycle read/write ordering: "none"|"fwd"|"program"
+      // (upass.tolg validates the VALUE; this list gates the NAME).
+      "ordering",
       // Latch-facing spelling of `posclk` (2f-latch M2): on a Latch that pin is
       // the ENABLE POLARITY, not a clock edge.
       "enable_high",

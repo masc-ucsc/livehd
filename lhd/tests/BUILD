@@ -535,6 +535,16 @@ sh_test(
 )
 
 sh_test(
+    name = "mem_ordering_test",
+    size = "large",
+    srcs = ["mem_ordering_test.sh"],
+    # _FLOW_DATA (lhd + the yosys lgcheck scripts) + the hermetic Liberty: the
+    # abc write-priority case tech-maps and LECs, so it needs all three or it
+    # degrades to a "skip" and stops covering anything.
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
     name = "single_edge_icg_test",
     size = "large",
     srcs = ["single_edge_icg_test.sh"],

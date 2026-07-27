@@ -1592,15 +1592,19 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     auto&       ln   = *builder_.lnast;
     set_pending_loc(sym.location);
     emit_tuple_typedef(rec);
-    // Verilog nonblocking memory reads see old contents (fwd=0). detuple does
+    // Verilog nonblocking memory reads see the committed contents, i.e. NO
+    // read forwards any write: ordering="none" (an all-zeros per-(read,write)
+    // matrix). The reader cannot use the ordering="program" default because it
+    // emits memory reads AFTER the writes in LNAST order, which program order
+    // would (correctly, for Pyrope source) forward. detuple does
     // not split attr_set, so emit the attr on each post-split `mem.field` name
     // directly (it lands before the per-field declares detuple synthesizes).
     if (is_reg) {
       for (const auto& f : rec.fields) {
         auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
         ln.add_child(aidx, Lnast_node::create_ref(absl::StrCat(name, ".", f.name)));
-        ln.add_child(aidx, Lnast_node::create_const("fwd"));
-        ln.add_child(aidx, Lnast_node::create_const("0"));
+        ln.add_child(aidx, Lnast_node::create_const("ordering"));
+        ln.add_child(aidx, Lnast_node::create_const("\"none\""));
       }
     }
     auto didx = builder_.add_child(Lnast_ntype::create_declare());
@@ -1629,8 +1633,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   if (is_reg) {
     auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
     ln.add_child(aidx, Lnast_node::create_ref(name));
-    ln.add_child(aidx, Lnast_node::create_const("fwd"));
-    ln.add_child(aidx, Lnast_node::create_const("0"));
+    ln.add_child(aidx, Lnast_node::create_const("ordering"));
+    ln.add_child(aidx, Lnast_node::create_const("\"none\""));
   }
   auto didx = builder_.add_child(Lnast_ntype::create_declare());
   ln.add_child(didx, Lnast_node::create_ref(name));
@@ -1828,8 +1832,8 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
       {
         auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
         ln.add_child(aidx, Lnast_node::create_ref(name));
-        ln.add_child(aidx, Lnast_node::create_const("fwd"));
-        ln.add_child(aidx, Lnast_node::create_const("0"));
+        ln.add_child(aidx, Lnast_node::create_const("ordering"));
+        ln.add_child(aidx, Lnast_node::create_const("\"none\""));
       }
       auto didx = builder_.add_child(Lnast_ntype::create_declare());
       ln.add_child(didx, Lnast_node::create_ref(name));
@@ -4024,6 +4028,27 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
                        std::string("output '") + std::string(sym->name)
                            + "' is blocking-assigned in an edge-sensitive process; --reader slang only supports `<=` for state",
                        "use a non-blocking assignment");
+      continue;
+    }
+    // An unpacked ARRAY blocking-written in an edge process is the same gap,
+    // but it is NOT an output so the check above never saw it — and unlike a
+    // scalar process-local temp, a module-scope array is PERSISTENT state.
+    // collect_state_vars only admits NONBLOCKING-written symbols to reg_syms_
+    // (see its header comment), so such an array is declared `mut`: a
+    // combinational, re-zeroed-every-cycle array. That silently drops the
+    // storage — measured, `always_ff begin if (we) mem[wa] = wd; q <= mem[ra];
+    // end` lowered to `q = (we && wa==ra) ? wd : 0` and lgcheck REFUTED it
+    // against the source. Refuse instead of miscompiling (the same fail-stop
+    // stance upass.tolg already takes when such an array is read before the
+    // write). yosys handles this shape by demoting the memory to per-entry
+    // registers (mem2reg); doing the same here is the real fix.
+    const auto& sct = sym->getType().getCanonicalType();
+    if (sct.isUnpackedArray()) {
+      emit_unsupported(sym->location, "blocking-ff-array",
+                       std::string("array '") + std::string(sym->name)
+                           + "' is blocking-assigned in an edge-sensitive process; --reader slang only supports `<=` for "
+                             "array state, and would otherwise lower it as a stateless combinational array",
+                       "use a non-blocking assignment (`<=`) for the array write, or read it with --reader yosys-verilog");
     }
   }
 

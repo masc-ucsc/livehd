@@ -20,7 +20,8 @@ module \mem_tuple_rw.mtr (
     end
   end
 
-  // async read + same-cycle write forwarding (fwd=1 for reg memories)
+  // async read + same-cycle write forwarding (the write precedes the read in
+  // program order, so the default ordering="program" forwards it)
   assign za = (we && (wi == ri)) ? wa : mem_a[ri];
   assign zb = (we && (wi == ri)) ? wb : mem_b[ri];
 

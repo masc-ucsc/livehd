@@ -16,7 +16,7 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_1rd_0wr
-  #(parameter BITS = 4, SIZE = 128, FWD = 1, LATENCY_0 = 1, WENSIZE = 1)
+  #(parameter BITS = 4, SIZE = 128, parameter [255:0] FWD = 1, parameter LATENCY_0 = 1, WENSIZE = 1)
     (input clk
 
       // RD PORT 0

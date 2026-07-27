@@ -1558,7 +1558,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   struct Mem {
     hhds::Node_class     node;
     std::string          member;
-    int                  bits = 1, size = 0, type = 2, fwd = 0;
+    int                  bits = 1, size = 0, type = 2;
+    // Per-(read,write) forwarding matrix (graph/cell.cpp): bit (rdidx*n_wr +
+    // wridx). Held as the const itself — Dlop::bit_test is arbitrary precision,
+    // and n_rd*n_wr overflows an int on wide shapes.
+    spool_ptr<Dlop>      fwd;
+    int                  n_wr = 0;
     std::vector<MemPort> ports;  // real ports, in port order (phantoms dropped)
     // Whole-array support (the `update` bus is driven): one update/read_all bus
     // instead of N per-entry ports. registered when a clock is present.
@@ -1586,7 +1591,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       } else if (pn == "type") {
         m.type = static_cast<int>(hydrate_const(e.driver).to_just_i64());
       } else if (pn == "fwd") {
-        m.fwd = static_cast<int>(hydrate_const(e.driver).to_just_i64());
+        m.fwd = Dlop::clone(hydrate_const(e.driver));
       } else if (pn == "update") {
         m.update = e.driver;
       } else if (pn == "update_enable") {  // MUST precede ends_with("enable") below
@@ -1642,6 +1647,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       m.ports.push_back(p);
     }
+    // Row stride of the `fwd` matrix: the write-port count `wridx` ranks over
+    // (tolg mints every write port with addr+din+enable, so this matches the
+    // n_wr the producer laid the matrix out with).
+    m.n_wr   = wr;
     m.member = cpp_id(default_instance_name(node));
     mems.push_back(std::move(m));
   }
@@ -2372,7 +2381,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // its post-write value directly (not via the peek-committed member).
             const bool forward_all = !m.registered();
             for (const auto& wp : m.ports) {
-              if (wp.rd || wp.addr.is_invalid() || (!forward_all && !((m.fwd >> wp.wridx) & 1))) {
+              if (wp.rd || wp.addr.is_invalid()
+                  || (!forward_all && !(m.fwd && m.fwd->bit_test(p.rdidx * m.n_wr + wp.wridx)))) {
                 continue;
               }
               std::string we = "true";

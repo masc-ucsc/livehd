@@ -120,7 +120,7 @@ int const_i(const hhds::Pin_class& d, int def) {
 // shapes not handled here (whole-array cells, negedge, type==2 arrays).
 bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   int             bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
-  int64_t         fwd = 0;
+  spool_ptr<Dlop> fwd;  // per-(read,write) matrix; arbitrary precision
   hhds::Pin_class init_drv;
   bool            whole_array = false;
   std::map<int, Port> ports;
@@ -136,7 +136,11 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
       case kEnable: ports[pidx].en = drv; ports[pidx].block = pidx; break;
       case kRdport: ports[pidx].role = const_i(drv, -1); ports[pidx].block = pidx; break;
       case kBits: bits = const_i(drv, bits); break;
-      case kFwd: fwd = gu::is_const_pin(drv) ? gu::hydrate_const(drv).to_just_i64() : 0; break;
+      case kFwd:
+        if (gu::is_const_pin(drv)) {
+          fwd = Dlop::clone(gu::hydrate_const(drv));
+        }
+        break;
       case kPosclk: posclk = const_i(drv, posclk); break;
       case kType: mtype = const_i(drv, mtype); break;
       case kWensize: wensize = const_i(drv, wensize); break;
@@ -180,6 +184,10 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     (role == 1 ? rd : wr).push_back(p);
   }
   int n_wr = static_cast<int>(wr.size());
+  // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + w says
+  // read port r forwards write port w. Dlop::bit_test is arbitrary precision,
+  // so wide (many-port) shapes do not truncate.
+  auto fwd_bit = [&](int r, int w) -> int { return (fwd && fwd->bit_test(r * n_wr + w)) ? 1 : 0; };
 
   int32_t color     = gu::has_color(mem) ? gu::color_of(mem) : 0;
   bool    has_color = gu::has_color(mem);
@@ -281,14 +289,18 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     if (!p.en.is_invalid() && !(gu::is_const_pin(p.en) && gu::hydrate_const(p.en).is_known_true())) {
       dmem = B.mux(B.getbit(p.en, 0), B.konst_i(0), dmem, bits);
     }
-    // forwarding: apply forwarding write ports HIGH-to-LOW index so the lowest
-    // (port 0) ends up outermost and wins (cgen forward priority).
+    // forwarding: fold the forwarding write ports in ASCENDING order so the
+    // HIGHEST-numbered enabled port ends up outermost and wins — the same
+    // priority as the write next-state fold above, as cgen/cgen_sim/lec all
+    // use. (Each B.mux wraps the previous value, so the last port folded is
+    // the outermost and therefore the winner.)
     std::vector<hhds::Pin_class> db(bits);
     for (int b = 0; b < bits; ++b) {
       db[b] = B.getbit(dmem, b);
     }
-    for (int ji = n_wr - 1; ji >= 0; --ji) {
-      if (((fwd >> ji) & 1) == 0) {
+    for (int ji = 0; ji < n_wr; ++ji) {
+      // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + ji.
+      if (fwd_bit(r, ji) == 0) {
         continue;
       }
       const auto& wp     = wr[ji];

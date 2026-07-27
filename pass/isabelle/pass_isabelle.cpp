@@ -585,7 +585,17 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
     } else if (pname == "type") {
       mi.type = const_pin_int(ctx, e.driver, node, pname);
     } else if (pname == "fwd") {
-      mi.fwd = const_pin_int(ctx, e.driver, node, pname);
+      // The per-(read,write) matrix (graph/cell.cpp) can exceed the 62-bit
+      // is_just_i64 window on a many-port memory, and const_pin_int would
+      // FATAL on it. This value is only echoed in the debug summary here, so
+      // degrade to 0 rather than aborting the pass with a misleading message.
+      mi.fwd = 0;
+      if (pin_is_const(e.driver)) {
+        auto fv = pin_const_value(e.driver);
+        if (fv.is_just_i64()) {
+          mi.fwd = fv.to_just_i64();
+        }
+      }
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int(ctx, e.driver, node, pname);
     } else if (pname == "rdport") {

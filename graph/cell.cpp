@@ -217,7 +217,14 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 2 : return "clock_pin";  // runtime  x 1 or n_ports
         case 3 : return "din";        // runtime  x n_ports
         case 4 : return "enable";     // runtime  x n_ports
-        case 5 : return "fwd";        // comptime x 1 -- per-WRITE-port forwarding mask (bit j forwards write port j)
+        case 5 : return "fwd";        // comptime x 1 -- per-(READ-port,WRITE-port) forwarding MATRIX: bit
+                                      // (r*n_wr + w) set => read port r sees write port w's new data on a
+                                      // same-cycle same-address collision (r/w = read/write ordinals, n_wr =
+                                      // the cell's TOTAL write-port count). A zero row => that read returns
+                                      // the committed contents. A 1-read-port memory encodes bit-identically
+                                      // to the old per-write-port mask. Built from the Pyrope `ordering`
+                                      // attr: "program" => row r is the PREFIX of writes preceding read r in
+                                      // program order; "fwd" => all ones; "none" => all zeros.
         case 6 : return "posclk";     // comptime x 1
         case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
         case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits

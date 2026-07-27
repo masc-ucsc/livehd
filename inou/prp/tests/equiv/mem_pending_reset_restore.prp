@@ -6,6 +6,10 @@
 */
 
 // The async memory read lands @[0]: committed state, like a scalar reg read.
+// `z = t[i]` is placed BEFORE the write, so under the default
+// ordering="program" it reads the committed contents even when `i` selects the
+// entry being written (spell `ordering="fwd"` on the reg for the old
+// position-blind forwarding). The reset-restore ports never forward either.
 pub mod restore(reset:bool, a:u4, i:u1, we:bool) -> (z:u4@[0]) {
   reg t:[2]u4 = (4, 9)
   z = t[i]

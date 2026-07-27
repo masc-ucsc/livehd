@@ -16,7 +16,7 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_4rd_2wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,
+  #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1,
     parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)
     (input clk
 
@@ -85,8 +85,9 @@ always @(posedge clk) begin
 end
 
 //READ PORT 0 — combinational read of the CURRENT address, then the
-//per-write-port FWD mask resolves same-cycle writes (write port j forwards
-//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//per-(read,write) FWD matrix resolves same-cycle writes (write port j
+//forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
+//write port wins, matching the storage priority above). LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d0_mem;
@@ -104,10 +105,10 @@ generate
   for(fwd_j0=0;fwd_j0<WENSIZE;fwd_j0=fwd_j0+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
       d0_fwd[fwd_j0*MASKSIZE +: MASKSIZE] =
-        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
-        wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
         (((FWD >> 1) & 1) != 0 && wr_enable_1[fwd_j0] && (wr_addr_1 == rd_addr_0)) ?
         wr_din_1[fwd_j0*MASKSIZE +: MASKSIZE] :
+        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
+        wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
         d0_mem[fwd_j0*MASKSIZE +: MASKSIZE];
     end
   end
@@ -124,8 +125,9 @@ generate
 endgenerate
 
 //READ PORT 1 — combinational read of the CURRENT address, then the
-//per-write-port FWD mask resolves same-cycle writes (write port j forwards
-//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//per-(read,write) FWD matrix resolves same-cycle writes (write port j
+//forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
+//write port wins, matching the storage priority above). LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d1_mem;
@@ -143,10 +145,10 @@ generate
   for(fwd_j1=0;fwd_j1<WENSIZE;fwd_j1=fwd_j1+1) begin:FWD_BLOCK_CALC_1
     always_comb begin
       d1_fwd[fwd_j1*MASKSIZE +: MASKSIZE] =
-        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j1] && (wr_addr_0 == rd_addr_1)) ?
-        wr_din_0[fwd_j1*MASKSIZE +: MASKSIZE] :
-        (((FWD >> 1) & 1) != 0 && wr_enable_1[fwd_j1] && (wr_addr_1 == rd_addr_1)) ?
+        (((FWD >> 3) & 1) != 0 && wr_enable_1[fwd_j1] && (wr_addr_1 == rd_addr_1)) ?
         wr_din_1[fwd_j1*MASKSIZE +: MASKSIZE] :
+        (((FWD >> 2) & 1) != 0 && wr_enable_0[fwd_j1] && (wr_addr_0 == rd_addr_1)) ?
+        wr_din_0[fwd_j1*MASKSIZE +: MASKSIZE] :
         d1_mem[fwd_j1*MASKSIZE +: MASKSIZE];
     end
   end
@@ -163,8 +165,9 @@ generate
 endgenerate
 
 //READ PORT 2 — combinational read of the CURRENT address, then the
-//per-write-port FWD mask resolves same-cycle writes (write port j forwards
-//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//per-(read,write) FWD matrix resolves same-cycle writes (write port j
+//forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
+//write port wins, matching the storage priority above). LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d2_mem;
@@ -182,10 +185,10 @@ generate
   for(fwd_j2=0;fwd_j2<WENSIZE;fwd_j2=fwd_j2+1) begin:FWD_BLOCK_CALC_2
     always_comb begin
       d2_fwd[fwd_j2*MASKSIZE +: MASKSIZE] =
-        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j2] && (wr_addr_0 == rd_addr_2)) ?
-        wr_din_0[fwd_j2*MASKSIZE +: MASKSIZE] :
-        (((FWD >> 1) & 1) != 0 && wr_enable_1[fwd_j2] && (wr_addr_1 == rd_addr_2)) ?
+        (((FWD >> 5) & 1) != 0 && wr_enable_1[fwd_j2] && (wr_addr_1 == rd_addr_2)) ?
         wr_din_1[fwd_j2*MASKSIZE +: MASKSIZE] :
+        (((FWD >> 4) & 1) != 0 && wr_enable_0[fwd_j2] && (wr_addr_0 == rd_addr_2)) ?
+        wr_din_0[fwd_j2*MASKSIZE +: MASKSIZE] :
         d2_mem[fwd_j2*MASKSIZE +: MASKSIZE];
     end
   end
@@ -202,8 +205,9 @@ generate
 endgenerate
 
 //READ PORT 3 — combinational read of the CURRENT address, then the
-//per-write-port FWD mask resolves same-cycle writes (write port j forwards
-//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//per-(read,write) FWD matrix resolves same-cycle writes (write port j
+//forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
+//write port wins, matching the storage priority above). LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d3_mem;
@@ -221,10 +225,10 @@ generate
   for(fwd_j3=0;fwd_j3<WENSIZE;fwd_j3=fwd_j3+1) begin:FWD_BLOCK_CALC_3
     always_comb begin
       d3_fwd[fwd_j3*MASKSIZE +: MASKSIZE] =
-        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j3] && (wr_addr_0 == rd_addr_3)) ?
-        wr_din_0[fwd_j3*MASKSIZE +: MASKSIZE] :
-        (((FWD >> 1) & 1) != 0 && wr_enable_1[fwd_j3] && (wr_addr_1 == rd_addr_3)) ?
+        (((FWD >> 7) & 1) != 0 && wr_enable_1[fwd_j3] && (wr_addr_1 == rd_addr_3)) ?
         wr_din_1[fwd_j3*MASKSIZE +: MASKSIZE] :
+        (((FWD >> 6) & 1) != 0 && wr_enable_0[fwd_j3] && (wr_addr_0 == rd_addr_3)) ?
+        wr_din_0[fwd_j3*MASKSIZE +: MASKSIZE] :
         d3_mem[fwd_j3*MASKSIZE +: MASKSIZE];
     end
   end

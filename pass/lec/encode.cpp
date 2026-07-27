@@ -803,7 +803,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     Mem_sig             sig;
     std::vector<MPort>  ports;
     int                 wensize = 0;
-    int                 fwd     = 0;
+    // Per-(read,write) forwarding matrix (graph/cell.cpp): bit r*n_wr + w.
+    // Held as the const itself — Dlop::bit_test is arbitrary precision, and
+    // n_rd*n_wr overflows an int on wide (many-port) shapes.
+    spool_ptr<Dlop>     fwd;
     int                 mtype   = -1;
     bool                is_rom  = false;
     cvc5::Term          a_cur;
@@ -911,7 +914,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (pn == "wensize") {
         mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
       } else if (pn == "fwd") {
-        mc.fwd = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+        mc.fwd = Dlop::clone(gu::hydrate_const(e.driver));
       } else if (pn == "update") {
         mc.update   = e.driver;
         mc.is_whole = true;
@@ -2751,8 +2754,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       out.equalities.emplace_back(mc.a_cur, array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits)));
     }
+    // a_after[m] = the array after the first m APPLIED write ports (a_after[0]
+    // == a_cur for a plain memory). `applied_upto[w]` maps a cell write-port
+    // ordinal to its a_after index, since a port with no din is skipped by the
+    // fold but still occupies a column of the `fwd` matrix.
+    std::vector<Term> a_after;
+    std::vector<size_t> applied_upto;
+    a_after.emplace_back(a_next);
     for (auto& p : mc.ports) {
-      if (p.rd || p.din.is_invalid()) {
+      if (p.rd) {
+        continue;
+      }
+      applied_upto.emplace_back(a_after.size() - 1);
+      if (p.din.is_invalid()) {
         continue;
       }
       Val av = driver_val(p.addr, ok);
@@ -2793,6 +2807,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
       Term new_word = tm_.mkTerm(Kind::BITVECTOR_OR, {keep, set});
       a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
+      // Snapshot after each write port so a read port can source the array as
+      // of its own program position: `fwd` row r is a PREFIX of the write ports
+      // under ordering="program" (and all/none under "fwd"/"none"), so
+      // a_after[m] is exactly what read port r with m forwarded writes sees.
+      a_after.emplace_back(a_next);
       // The bit-vector inputs this port contributes to the chain: equal inputs on
       // both sides => equal chains, provable without the array theory.
       out.mem_wr[mc.key].push_back(Encoded::Mem_wr_port{addr, wmask, din});
@@ -2821,8 +2840,42 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // whole-array reads its POST-update contents (a_next == the live array); a
     // registered whole-array and plain memory read committed state (a_cur, since
     // fwd is forced 0 for whole-arrays); fwd!=0 plain memories forward writes.
-    const Term& rd_src = mc.is_comb ? a_next : ((mc.fwd != 0) ? a_next : mc.a_cur);
+    applied_upto.emplace_back(a_after.size() - 1);  // sentinel: "all write ports"
+    const size_t n_wr = applied_upto.empty() ? 0 : applied_upto.size() - 1;
+    // `fwd` is a per-(read,write) MATRIX (graph/cell.cpp): bit (r*n_wr + w) =>
+    // read port r sees write port w's new data. ordering="program" makes each
+    // row a PREFIX of the write ports, so read r simply sources the array as of
+    // its own program position (a_after[...]); "fwd" is the full row and "none"
+    // an empty one. A legacy hand-written non-prefix mask cannot be expressed
+    // as a snapshot, so it keeps the historical coarse behavior (any bit set =>
+    // read the fully-written array).
+    auto fwd_bit   = [&](size_t r, size_t w) { return mc.fwd && mc.fwd->bit_test(static_cast<int>(r * n_wr + w)); };
+    auto rd_source = [&](size_t r) -> const Term& {
+      if (mc.is_comb || mc.is_whole || n_wr == 0) {
+        return mc.is_comb ? a_next : ((mc.fwd && !mc.fwd->is_known_false()) ? a_next : mc.a_cur);
+      }
+      size_t prefix = 0;
+      while (prefix < n_wr && fwd_bit(r, prefix)) {
+        ++prefix;
+      }
+      // Scan for a set bit BEYOND the prefix FIRST: a row with a hole (e.g.
+      // 0b10 from a legacy `fwd=2` or an explicit __memory matrix) is not
+      // expressible as a snapshot. Falling through to `a_cur` here would both
+      // UNDER-forward and — because `rd_src == a_cur` sets `shared_cur` — let
+      // the two designs' douts be assumed equal on equal addresses, which is a
+      // false PROVEN. Over-forwarding (a_next) is the safe direction.
+      for (size_t w = prefix; w < n_wr; ++w) {
+        if (fwd_bit(r, w)) {
+          return a_next;  // historical coarse behavior
+        }
+      }
+      if (prefix == 0) {
+        return mc.a_cur;
+      }
+      return a_after[applied_upto[prefix]];
+    };
     for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
+      const Term& rd_src = rd_source(k);
       Val av = driver_val(mc.rd_addr[k], ok);
       if (!ok) {
         return fail("memory '" + gu::debug_name(mc.node) + "' read addr not encodable");
@@ -2833,7 +2886,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // merging with the other design's matching port: equal address + the same
       // array term => provably equal values. A forwarding / combinational read
       // sources this design's OWN a_next, so nothing can be assumed about it.
-      const bool shared_cur = !mc.is_comb && mc.fwd == 0 && !mc.is_rom && rd_src == mc.a_cur;
+      const bool shared_cur = !mc.is_comb && !mc.is_rom && rd_src == mc.a_cur;
       out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, shared_cur});
       if (mc.mtype == 1 && shared_reads != nullptr) {
         // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
@@ -2852,11 +2905,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         out.equalities.emplace_back(mc.rd_fresh[k], real);
       }
     }
-    // Combinational read_all: tie its deferred symbol to CONCAT(SELECT(rd_src,i)).
+    // Combinational read_all: tie its deferred symbol to CONCAT(SELECT(a_next,i))
+    // — a comb array reads its POST-update contents (rd_source() returns a_next
+    // for is_comb).
     if (mc.is_comb && !mc.ra_fresh.isNull()) {
-      Term bus = tm_.mkTerm(Kind::SELECT, {rd_src, bv_const(tm_, mc.sig.addr_w, 0)});
+      Term bus = tm_.mkTerm(Kind::SELECT, {a_next, bv_const(tm_, mc.sig.addr_w, 0)});
       for (int i = 1; i < mc.sig.size; ++i) {
-        Term ei = tm_.mkTerm(Kind::SELECT, {rd_src, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
+        Term ei = tm_.mkTerm(Kind::SELECT, {a_next, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
         bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});
       }
       out.equalities.emplace_back(mc.ra_fresh, bus);

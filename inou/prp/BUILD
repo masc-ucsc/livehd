@@ -450,6 +450,12 @@ _SIM_FIXME = [
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
+            # Comb-array store-loss trackers (lhdsuite array_problem.md): the
+            # per-entry store's RHS resolves stale (reassigned-mut din) or the
+            # feeding temp is dropped outright. Run via the fixme list below.
+            "tests/equiv/array_store_stale_rhs.prp",
+            "tests/equiv/arr_comb_mux_const.prp",
+            "tests/equiv/arr_comb_tmp.prp",
             # NOTE: the six latch_* pairs (latch_enable_hold, latch_hold_basic,
             # latch_active_low, latch_master_slave, latch_icg, latch_mixed_flop)
             # used to be excluded here as todo/livehd/2f-latch trackers. They
@@ -522,6 +528,24 @@ sh_test(
         # of this list (2026-07-03): `:gold_reader: slang` reads their goldens
         # through the yosys-slang plugin (see the equiv-glob note above), so
         # the forward direction proves; they run as ordinary prp-equiv-* now.
+        #
+        # Comb-array store-loss trackers (2026-07-27, lhdsuite
+        # array_problem.md). All three compile clean and LEC wrong; the
+        # clocked (`reg` array) twins of each shape lower correctly (see the
+        # mem_two_wr_prio / mem_sw_sr_data / mem_wr_seq_same green pairs):
+        # * array_store_stale_rhs: `m = d; arr[0] = m` stores m's DECLARATION
+        #   value (0), not d (pure-Pyrope isolation; golden is the semantic mux).
+        # * arr_comb_mux_const: same defect reached from Verilog — the
+        #   elaboration-constant ternary emits a reassigned `_mux_1` whose
+        #   stale version feeds the store din (the .prp is the verbatim
+        #   emitted Pyrope; the direct .v round trip prp-v2v-* PROVES).
+        # * arr_comb_tmp: `t = d; arr[0] = t` in always_comb drops `t = d`
+        #   on the slang->LNAST side (emitted Pyrope shows `t = 0ub?`);
+        #   also in _V2V_FIXME since even the direct .v round trip refutes,
+        #   while the native cvc5 lec is VACUOUSLY blind to it (don't-care).
+        "array_store_stale_rhs",
+        "arr_comb_mux_const",
+        "arr_comb_tmp",
     ]
 ]
 
@@ -561,6 +585,21 @@ _V2PRP_FIXME = [
     # (per-def UF congruence), stateful ones pair name-first, and a collapsed-box
     # REFUTE is flat-confirmed before it can fail — see pass/lec/encode.hpp
     # (Comb_box / set_box_keys) and lec_hierarchical's flat confirmation.
+    #
+    # array_store_stale_rhs (2026-07-27): the golden here is the SEMANTIC mux
+    # (array-free), so the impl side (golden -> slang -> Pyrope, correct)
+    # refutes against the reference .prp, which recompiles through the same
+    # comb-array store-loss bug this pair tracks (lhdsuite array_problem.md).
+    # NOT a prp_writer gap — flip it green by fixing the tolg store din.
+    "array_store_stale_rhs",
+    # mem_ordering_none (2026-07-27): the golden encodes the mode's undefined
+    # read-during-write window as x, and the cvc5 BMC engine GROUNDS that x
+    # to a concrete value instead of treating it as either-way (witness:
+    # o1 ref=2 impl=0 on a we=1 collision) — so this direction refutes even
+    # though yosys lgcheck (-ignore_gold_x) proves the same pair. Flips green
+    # when the native encoder learns x-as-don't-care at outputs (the formal
+    # `?` half of the ordering ruling, lhdsuite array_problem.md).
+    "mem_ordering_none",
 ]
 
 [
@@ -590,6 +629,74 @@ _V2PRP_FIXME = [
             # (prp-simeq-*), not equiv goldens — keep them out of the v2prp glob.
             exclude = [
                 "tests/equiv/*_tb.v",
+            ],
+        )
+    ]
+]
+
+# v2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
+# is compiled by lhd (native slang reader, default O1 recipe) and re-emitted as
+# Verilog, and inou/yosys/lgcheck proves the emitted netlist equivalent to the
+# ORIGINAL .v. This is the only harness whose reference side is read
+# INDEPENDENTLY of LiveHD (yosys read_verilog, or yosys-slang via the sibling
+# .prp's `:gold_reader: slang` header): prp-v2prp-* LECs two LiveHD-read sides
+# with the in-process cvc5 engine, so a slang misread — or a dropped
+# assignment that lec sees as a vacuous don't-care (arr_comb_tmp) — is
+# invisible to it, while this family refutes. Gate semantics match
+# v2prp_test.py: lgcheck INCONCLUSIVE (exit 2) and timeouts pass with an
+# honest note; only a counterexample or a hard yosys error fails.
+#
+# Census 2026-07-27 (lhdsuite array_problem.md): 169 of 179 pairs prove, 5 are
+# honest-inconclusive (array_selfref, assign_pattern, io_bundle_nested,
+# io_bundle_selfref, packed_assign), 4 are real round-trip miscompiles tracked
+# below, 2 cannot be compared by any available reference reader (excluded).
+_V2V_FIXME = [
+    # Dynamic bit-range round trip miscompiles: z reads 0 where the golden
+    # keeps bits (witness: a=0x100 base=7 len=7 -> gold z=2, gate z=0).
+    "bitrange_dyn",
+    # Struct/tuple input-port round trips leave `res` UNDRIVEN (x) where the
+    # golden drives a value — same lost-assignment family as arr_comb_tmp.
+    "tup_in_port",
+    "tuple_in_port",
+    # Comb-array blocking-temp store: `t = d` dropped by the slang front end
+    # (see the equiv fixme list above and lhdsuite array_problem.md).
+    "arr_comb_tmp",
+]
+
+[
+    sh_test(
+        name = "prp-v2v-%s" % base,
+        srcs = ["tests/v2v_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.v)" % base,
+        ],
+        # The sibling .prp is a runfile only for its `:verilog_top:` /
+        # `:gold_reader:` headers; the round trip itself never compiles it.
+        data = [
+            "//inou/prp:tests/v2v_test.py",
+            "//inou/prp:tests/equiv/%s.v" % base,
+            "//inou/prp:tests/equiv/%s.prp" % base,
+            "//lhd",
+        ],
+        tags = ["fixme"] if base in _V2V_FIXME else [],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for base in [
+        f.split("/")[-1][:-2]
+        for f in glob(
+            ["tests/equiv/*.v"],
+            exclude = [
+                # generated differential-sim golden drivers, not equiv goldens
+                "tests/equiv/*_tb.v",
+                # No available reference reader can ingest these two goldens:
+                # yosys read_verilog hard-errors on the compound async-reset
+                # edge list ('Multiple edge sensitive events'), and yosys-slang
+                # fails compilation on them too — the round trip cannot even
+                # be compared. Their coverage stays with the equiv_slang /
+                # v2prp directions.
+                "tests/equiv/async_negreset_compound.v",
+                "tests/equiv/async_reset_enable.v",
             ],
         )
     ]

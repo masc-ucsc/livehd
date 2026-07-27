@@ -15,7 +15,7 @@ module \mem_rtl_rf.rtlmem (
     if (we0) data[wraddr] <= din0;
   end
 
-  // fwd=0: async reads of the committed state only
+  // ordering="none": async reads of the committed state only
   assign q0 = data[raddr0];
   assign q1 = data[raddr1];
 
