@@ -98,6 +98,14 @@ enum class Ntype_op : uint8_t {
   //------------------END PIPELINED (break LOOPS)
   Nconst = 50,  // Constant -- non-loop-last; paired with IO via is_loop_first.
 
+  // The ONE recognized clock operator (2f-latch M9): gate / invert / divide.
+  // COMBINATIONAL by construction, hence an EVEN slot -- the enable-sampling
+  // latch of a real ICG is NOT in the graph, because the cell encodes the
+  // glitch-free CONTRACT ("en is sampled at clk_ref's active edge") rather than
+  // the implementation. That is what keeps every latch-counting consumer from
+  // seeing ICG latches at all.
+  Clock_cell = 52,
+
   // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
   // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
   // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
@@ -113,6 +121,7 @@ static_assert((static_cast<uint8_t>(Ntype_op::Flop) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Latch) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Fflop) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Sub) & 1) == 1);
+static_assert((static_cast<uint8_t>(Ntype_op::Clock_cell) & 1) == 0);  // combinational
 static_assert((static_cast<uint8_t>(Ntype_op::Sum) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
@@ -167,6 +176,7 @@ protected:
     a[static_cast<size_t>(Ntype_op::Fflop)]    = "fflop";
     a[static_cast<size_t>(Ntype_op::Sub)]      = "sub";
     a[static_cast<size_t>(Ntype_op::Nconst)]   = "const";
+    a[static_cast<size_t>(Ntype_op::Clock_cell)] = "clock_cell";
     a[static_cast<size_t>(Ntype_op::AttrSet)]  = "attr_set";
     return a;
   }();

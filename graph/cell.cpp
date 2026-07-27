@@ -325,6 +325,26 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         default: return "invalid";
       }
       break;
+    case Ntype_op::Clock_cell:
+      // The ONE recognized clock operator (2f-latch M9). Pin ids follow the
+      // Flop/Latch/Memory convention where it exists -- `clk_ref` at 2 like
+      // `clock_pin`, `en` at 4 like `enable` -- because get_sink_pid's fast path
+      // derives the pid from the leading char for 'a'..'f' (pid == c - 'a') and
+      // resolves an unknown name to invalid SILENTLY. A pin whose name and slot
+      // disagree there is not a compile error, it is a dropped connection.
+      //
+      // `div`/`invert` are COMPTIME: like Flop's `posclk` and Memory's `bits`
+      // they are ordinary sink pins that must be driven by an Nconst. Unset
+      // means the identity default (div=1, invert=false); `en` unset means
+      // always-enabled, which canonicalization then removes outright.
+      switch (pid) {
+        case 2 : return "clk_ref";  // runtime  x 1 -- the reference clock
+        case 3 : return "div";      // comptime x 1 -- 2^N divide; v1 refuses != 1
+        case 4 : return "en";       // runtime  x 1 -- sampled AT clk_ref's active edge
+        case 6 : return "invert";   // comptime x 1 -- output is the opposite edge
+        default: return "invalid";
+      }
+      break;
     case Ntype_op::AttrSet:
       switch (pid) {
         case 0 : return "parent";

@@ -1801,7 +1801,22 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     } else if (op == Ntype_op::EQ) {
       txt_op = "==";
     }
-    I(!txt_op.empty());
+    // FAIL CLOSED on an op with no lowering here. `I()` alone is NOT enough:
+    // it compiles out under NDEBUG (the default `-c opt` build), and the loop
+    // below then joins the operands with an EMPTY operator -- a one-input cell
+    // emits its first operand VERBATIM, i.e. a Clock_cell would emit its bare
+    // `clk_ref` with the gate silently DROPPED, and a two-input one emits
+    // syntactically broken text. A dropped clock gate is exactly the silent
+    // miscompile class 2f-latch exists to remove, so name it instead.
+    if (txt_op.empty()) {
+      livehd::diag::err("inou.cgen", "unsupported-cell", "unsupported")
+          .msg("cell `{}` ({}) has no Verilog lowering", debug_name(node), Ntype::get_name(op))
+          .hint(
+              "a Clock_cell reaches here only if a recognizer ran on the compile/emission path -- recognition is "
+              "scoped to the formal and sim pipelines (2f-latch M9). Otherwise this op needs a lowering arm")
+          .fatal();
+      return {};
+    }
 
     for (auto e : node.inp_edges()) {
       final_expr = add_expression(final_expr, txt_op, e.driver);
@@ -2202,6 +2217,23 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     // both (pin2var net name, else the pin2expr inline expression), giving
     // `always @(posedge (clk_b & gate))`; a module-input clock falls through to
     // its input name as before.
+    // A Clock_cell must never reach Verilog emission (2f-latch M9: recognition
+    // is scoped to the formal and sim pipelines, never the compile/emission
+    // path). Guard it explicitly because the failure would otherwise be SILENT
+    // and of the worst kind: get_expression has no arm for the cell, falls
+    // through to `'hx`, and emits `always @(posedge 'hx)` -- a register with no
+    // clock at all. create_locals does not declare a fanout-1 cell either, so
+    // there is not even an undeclared-identifier error to catch it.
+    if (auto cdrv = get_driver(clock_sink);
+        !cdrv.is_invalid() && type_op_of(cdrv.get_master_node()) == Ntype_op::Clock_cell) {
+      livehd::diag::err("inou.cgen", "clock-cell-emission", "unsupported")
+          .msg("flop `{}` is clocked by a Clock_cell, which has no Verilog lowering yet", debug_name(node))
+          .hint(
+              "the synthesis lowering (Clock_cell -> a real ICG cell, so the SHARED gate survives mapping) is not "
+              "implemented; recognition must not run on the emission path")
+          .fatal();
+      return;
+    }
     std::string clock      = get_expression(get_driver(clock_sink));
 
     std::string reset_async;

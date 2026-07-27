@@ -1892,6 +1892,31 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
 // genuine latch or a negedge flop, P>1) refusing. The dry run enforces exactly
 // that: a def whose plan wants a divider is left untouched for the refusal to
 // find, and a def with no gate at all is not touched in any way.
+// 2f-latch M9 — RECOGNIZE instantiated clock gates as `Clock_cell`, everywhere
+// the hierarchical driver will encode. Runs BEFORE the inline+fold below, and
+// takes precedence over it: what this recognizes, the fold never sees.
+//
+// NO `is_boxed` FILTER, AND THAT IS THE POINT. Inlining a TRUSTED def is
+// unsound -- it pulls internals the user declared out of scope into the
+// compared cone, which is why `inline_clock_gate_cells` takes the predicate.
+// Recognition is different in kind: nothing of the def's STATE crosses the
+// boundary (the enable latch is replaced by the cell's sampling contract), only
+// a pure combinational function of nets the parent ALREADY drives and already
+// compares. So trust is respected rather than fought -- and since the instance
+// is then gone, the def is no longer instantiated at all and its trust entry
+// becomes a no-op, which is what lets `prim_clk_gate` leave the trust list.
+static int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
+  int                               n = livehd::latch_contract::materialize_clock_cells(top, "pass.single_edge");
+  absl::flat_hash_set<hhds::Graph*> seen{top};
+  for (auto* d : defs) {
+    if (d == nullptr || !seen.insert(d).second) {
+      continue;  // ref and impl def lists share every --lib cell model: same Graph*
+    }
+    n += livehd::latch_contract::materialize_clock_cells(d, "pass.single_edge");
+  }
+  return n;
+}
+
 static std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vector<hhds::Graph*>& defs,
                                                       absl::flat_hash_set<hhds::Graph*>*             unfolded,
                                                       const std::function<bool(const hhds::Graph*)>& is_boxed = {}) {
@@ -2248,6 +2273,15 @@ void lec_command(Options& opts, Result& res) {
             std::format("pass.single_edge inlined {} {} clock-gate cell(s), folded {} def(s)", r.first, which, r.second));
       }
     };
+    // M9 recognition runs FIRST and on BOTH sides -- symmetry matters here as
+    // much as anywhere, since a gate recognized on one side only would compare
+    // a Clock_cell against a Sub.
+    if (const int mr = materialize_clock_cells_all(ref_g.get(), ref_defs); mr > 0) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} ref clock gate(s) as Clock_cell", mr));
+    }
+    if (const int mi = materialize_clock_cells_all(impl_g.get(), impl_defs); mi > 0) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} impl clock gate(s) as Clock_cell", mi));
+    }
     note_gates("ref", inline_clock_gates_and_fold(ref_g.get(), ref_defs, &unfolded, is_boxed));
     note_gates("impl", inline_clock_gates_and_fold(impl_g.get(), impl_defs, &unfolded, is_boxed));
     if (!unfolded.empty()) {
@@ -3422,6 +3456,9 @@ void formal_verify_command(Options& opts, Result& res) {
     // instantiates its clock gate below the top is the normal case, not the
     // exception. Needs `defs` in hand, so it happens here rather than above.
     absl::flat_hash_set<hhds::Graph*> unfolded;
+    if (const int mr = materialize_clock_cells_all(g.get(), defs); mr > 0) {
+      res.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} clock gate(s) as Clock_cell", mr));
+    }
     if (const auto [cells, folded] = inline_clock_gates_and_fold(g.get(), defs, &unfolded); cells > 0) {
       res.recipe_steps.emplace_back(
           std::format("pass.single_edge inlined {} clock-gate cell(s), folded {} def(s)", cells, folded));

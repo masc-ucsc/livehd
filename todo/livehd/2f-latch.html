@@ -226,7 +226,94 @@
   unmodelled derived clock, that is an honest refusal rather than a wrong
   answer.</p>
 
-<h2 id="clock-cell">M9 — <code>Clock_cell</code>: ONE recognized clock operator <span class="status">PLAN OF RECORD</span></h2>
+<h2 id="clock-cell">M9 — <code>Clock_cell</code>: ONE recognized clock operator <span class="status">LANDED (formal half) 2026-07-26</span></h2>
+
+<p><strong>STATUS 2026-07-26 — steps 0-2 are LANDED; step 3 (sim) and step 4
+  (shrink <code>lec_trust</code>) are not.</strong> The design below is the
+  record; what follows is what it actually does now.</p>
+
+<ul class="subtasks">
+<li><code>Ntype_op::Clock_cell = 52</code> (even &rArr; combinational), pins
+  <code>clk_ref</code>=2 / <code>div</code>=3 / <code>en</code>=4 /
+  <code>invert</code>=6. The pin ids are NOT free: <code>get_sink_pid</code>'s
+  fast path derives the pid from the leading char for <code>a</code>-<code>f</code>
+  (<code>pid == c - 'a'</code>), so <code>clk_ref</code> must sit at 2 and
+  <code>en</code> at 4. Mirroring Flop's <code>clock_pin</code>/<code>enable</code>
+  is what makes that safe.</li>
+<li><strong>The guardrails were not theoretical.</strong>
+  <code>cgen_verilog</code>'s only unknown-op guard was an <code>I()</code> that
+  compiles out under <code>-c opt</code>, after which it emitted the cell's FIRST
+  OPERAND — the ungated <code>clk_ref</code>, gate silently dropped. Named
+  fail-closed arms now sit in <code>build_simple_expr</code>
+  (<code>unsupported-cell</code>), <code>create_registers</code>
+  (<code>clock-cell-emission</code>, which otherwise emitted
+  <code>always @(posedge 'hx)</code>) and <code>cgen_sim::node_expr</code>
+  (<code>clock-cell-unsupported</code>).</li>
+<li>Recognition lives in <code>graph/latch_contract.cpp</code>:
+  <code>match_icg_def</code> (structural — the port both AND-ed into the output
+  AND gating the latch's window is the clock; no name heuristic),
+  <code>Cone_cloner</code> (clones ONLY the combinational enable cone into the
+  parent, re-rooted on the instance's drivers; fails closed on any state,
+  <code>Sub</code> or <code>Memory</code> in the cone), and
+  <code>materialize_clock_cells</code>, which creates the cell, rewires the
+  gate's readers and DELETES the instance — which is what makes the ICG's latch
+  disappear from every latch-counting consumer.</li>
+<li><code>resolve_phase</code> gained a <code>Clock_cell</code> arm so a gated
+  clock's ROOT is its REFERENCE clock. Without it <code>Design_clocks</code>
+  inserts the cell's own output into <code>roots_</code>, <code>is_clock</code>
+  starts answering true for gated nets, and two flops committing on the very
+  same edge land in different slots.</li>
+<li>Wired CONSUMER-SIDE ONLY (<code>lhd_kernel_formal.cpp</code>, both
+  <code>lec_command</code> and <code>verify_command</code>), before the older
+  inline+fold. It deliberately passes NO <code>is_boxed</code>: recognition
+  respects trust rather than fighting it, and that is exactly what lets a
+  TRUSTED gate be recognized.</li>
+<li>LEC lowering in <code>pass/lec/encode.cpp</code>: the flop path
+  (<code>commits = en != 0</code>; <code>div != 1</code> and <code>invert</code>
+  refuse BY NAME) and the memory path (folded at ALL THREE commit points —
+  per-port write mask, whole-array update, and the sync-read register).
+  A <code>Clock_cell</code> is skipped in the encode fixpoint because it has NO
+  DATA VALUE — <strong>and so is a <code>Get_mask</code>/<code>Sext</code>
+  WRAPPER on a gated clock</strong>, which was a measured regression on minion
+  (a typed 1-bit port read wraps the clock, and every such wrapper became
+  &ldquo;operand has no encodable driver&rdquo;).</li>
+<li>Gate: <code>lhd/tests/clock_cell_test.sh</code>, 8 cases, every proof paired
+  with a refutation that must still fire — including the two shapes inlining
+  structurally cannot reach (a TRUSTED gate, and a gated MEMORY).</li>
+<li><strong>The binding rule is enforced for Pyrope</strong>:
+  <code>illegal_clock_op</code> (<code>upass/tolg/upass_tolg.cpp</code>) rejects
+  an arithmetic or data-merging op in a clock cone with a
+  <code>clock-op-unsupported</code> diagnostic; fixture
+  <code>inou/prp/tests/errors/clock_or_data.prp</code>. It is a DENY-list, not
+  an allow-list, and it is scoped to the Pyrope front-end: a hard error on any
+  derived clock would break <code>lec_clock_blindness_test</code>'s
+  <code>clk ^ sel</code> case, which wants an ENCODER refusal, not a compile
+  error. (Trap for that fixture: the <code>tests/errors/</code> harness runs
+  <code>tolg:false</code>, so a lowering-stage error needs <code>:tolg: 1</code>
+  in the header or it silently reports &ldquo;no error emitted&rdquo;.)</li>
+</ul>
+
+<p><strong>Measured.</strong> livehd <code>//...</code> 1446/1447 pass (baseline
+  1444/1445; the two extra are the new tests), zero failures;
+  <code>dino_lec</code>, <code>dino_lec_bug</code>,
+  <code>dino_synth_lec_flat</code> unchanged. <code>//bench:minion_lec</code>:
+  <strong>the 30 encode refusals are GONE</strong> — it reaches the solver for
+  the first time and now REFUTES (exit 7 &rarr; exit 10) at
+  <code>minion_dcache_cache_op_unit_l2</code>, with 110/140 proven, 32 trusted,
+  and 10 gates recognized symmetrically per side.</p>
+
+<p><strong>Still open, honestly.</strong> (1) That refutation: the earliest
+  diverging state cut is <code>id_running_q</code> (ref=0 impl=1 after step s3).
+  Two things are already ruled out — the checked-in Pyrope is NOT stale
+  (regeneration is byte-identical) and the gate's enable cone matches TEXTUALLY
+  on both sides (<code>dft_i</code> is tied to <code>'0</code> on both), so this
+  is a candidate REAL translation difference of exactly the class
+  <code>minion_lec</code> exists to surface. (2) A gate whose output crosses into
+  a <code>Sub</code> instance's clock PORT is not recognized —
+  <code>materialize_clock_cells</code> scans only clock_pins in the SAME graph,
+  and <code>ctrl_frf_clk</code> (gated in <code>txfmafrac_top</code>, consumed by
+  <code>txfma_f0</code>) is the residual &ldquo;derived clock&rdquo; refusal.
+  (3) Steps 3-4 (sim lowering, shrinking <code>lec_trust</code>).</p>
 
 <p>User direction, 2026-07-26. M8 folds a clock gate into a flop enable when the
   gate is <em>visible in the body</em>. That is not how real designs are written:

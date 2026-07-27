@@ -1,11 +1,11 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# 2f-fcore §6 global budget scheduler. `formal.timeout` (formal.timeout) is a TOTAL
-# wall-clock budget for the whole hierarchical `lhd lec` command, not a budget PER
-# def. With N hard sub-defs and jobs=1 the OLD behavior spent N*timeout (each def
-# got the full budget); the scheduler caps the TOTAL at ~timeout by handing each def
-# only the budget REMAINING when it runs. Accounting is on whenever timeout>0 and
+# 2f-fcore §6 global budget scheduler. `formal.timeout` is a TOTAL wall-clock budget
+# for the whole hierarchical `lhd lec` command, not a budget PER def. With N hard
+# sub-defs and jobs=1 the OLD behavior spent N*timeout (each def got the full
+# budget); the scheduler caps the TOTAL at ~timeout by handing each def only the
+# budget REMAINING when it runs. Accounting is on whenever timeout>0 and
 # formal.rlimit==0 (the old budget_mode knob is gone — rlimit selects the
 # deterministic tier by itself). A fast, genuinely-equivalent hierarchy must still
 # PROVE under the scheduler (no regression).
@@ -14,6 +14,19 @@
 # once the total is spent, so raising it BUYS verdicts by overshooting. Case 3 pins
 # that tradeoff in both directions — a bigger floor costs measurably more wall
 # clock, and the run says so instead of overrunning silently.
+#
+# COST MODEL (keep this test under ~25s; a hard def costs about
+# `granted_timeout + min_timeout` because the ind engine spends the grant on the
+# base check and the floor on the step check, and the TOP def is exempt from the
+# draw-down): every knob below is the SMALLEST value that still separates the
+# behaviors.
+#
+# Timing claims are asserted on the run's OWN accounting (the `Ns actual` in its
+# budget report = the DAG dispatch window), never on the shell's `date` delta: the
+# reported window is stable to the second because it is a sum of solver grants,
+# whereas end-to-end wall clock also carries RTL compile and varies by several
+# seconds under load — a raw-elapsed threshold tight enough to be meaningful here
+# is flaky by construction. Raw elapsed is kept only as a loose blowup guard.
 
 set -u
 
@@ -27,45 +40,28 @@ WORK="${TEST_TMPDIR:-/tmp/lecbudget}"
 mkdir -p "$WORK"
 fail=0
 
-# --- three HARD sub-defs: 16-bit mul reassoc, equivalent but cvc5 bit-blast freezes.
-mkhier() {  # $1=ref|impl  -> a hierarchy whose 3 mul3 instances each need a solver call
-  local e; if [ "$1" = ref ]; then e='(a*b)*c'; else e='a*(b*c)'; fi
-  cat > "$WORK/htop_$1.v" <<EOF
-module mul3(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = $e;
-endmodule
-module top(input [15:0] a, input [15:0] b, input [15:0] c,
-           output [15:0] z0, output [15:0] z1, output [15:0] z2);
-  mul3 u0(.a(a),         .b(b),         .c(c), .z(z0));
-  mul3 u1(.a(a ^ 16'd1), .b(b),         .c(c), .z(z1));
-  mul3 u2(.a(a),         .b(b ^ 16'd2), .c(c), .z(z2));
-endmodule
-EOF
-}
-mkhier ref
-mkhier impl
-
-# --- FIVE DISTINCT hard leaf defs (not five instances of one def: LEC works per
-# --- DEF, so instances of one def are proven once and would not exercise
-# --- starvation). Each leaf needs its own solver call, so a tiny total budget
-# --- cannot possibly cover them all -- which is the point of case 4.
-mkwide() {  # $1=ref|impl
-  local e; if [ "$1" = ref ]; then e='(a*b)*c'; else e='a*(b*c)'; fi
-  { for i in 0 1 2 3 4; do
+# --- N DISTINCT hard leaf defs (not N instances of one def: LEC works per DEF, so
+# --- instances of one def are proven once and would not exercise starvation).
+# --- Each leaf is a 16-bit mul reassoc: equivalent, but the cvc5 bit-blast freezes,
+# --- so every leaf needs a solver call that will burn its whole grant.
+mkhier() {  # $1=basename $2=nleaves $3=ref|impl
+  local e i; if [ "$3" = ref ]; then e='(a*b)*c'; else e='a*(b*c)'; fi
+  { for ((i = 0; i < $2; i++)); do
       echo "module mul3_$i(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);"
       echo "  assign z = $e ^ 16'd$i;"
       echo "endmodule"
     done
-    echo "module top(input [15:0] a, input [15:0] b, input [15:0] c,"
-    echo "           output [15:0] z0, output [15:0] z1, output [15:0] z2, output [15:0] z3, output [15:0] z4);"
-    for i in 0 1 2 3 4; do
+    echo -n "module top(input [15:0] a, input [15:0] b, input [15:0] c"
+    for ((i = 0; i < $2; i++)); do echo -n ", output [15:0] z$i"; done
+    echo ");"
+    for ((i = 0; i < $2; i++)); do
       echo "  mul3_$i u$i(.a(a ^ 16'd$i), .b(b), .c(c), .z(z$i));"
     done
     echo "endmodule"
-  } > "$WORK/wide_$1.v"
+  } > "$WORK/${1}_$3.v"
 }
-mkwide ref
-mkwide impl
+mkhier wide  3 ref; mkhier wide  3 impl   # 3 hard leaves + top: 4 defs on one budget
+mkhier hard1 1 ref; mkhier hard1 1 impl   # 1 hard leaf + top: the cheap floor A/B pair
 
 # --- an EASY, genuinely-equivalent hierarchy (De Morgan leaf) for the no-regression check.
 mkeasy() {  # $1=ref|impl
@@ -83,31 +79,67 @@ EOF
 mkeasy ref
 mkeasy impl
 
-# run TAG REF IMPL OUTER_KILL [extra --set ...] -> sets ELAPSED / VERDICT / OUTFILE
-run_lec() {  # $1=tag $2=ref $3=impl $4=outer_kill_s; $5.. = extra args
-  local mode=$1 ref=$2 impl=$3 outer=$4 start end pid wd
+# run_lec TAG BASE TIMEOUT OUTER_KILL [extra --set ...] -> sets ELAPSED / VERDICT / OUTFILE
+run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extra args
+  local mode=$1 base=$2 to=$3 outer=$4 start end pid wd
   shift 4
-  OUTFILE="$WORK/out_${mode}_${ref}.txt"
+  OUTFILE="$WORK/out_${mode}_${base}.txt"
   start=$(date +%s)
-  "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top top \
-         --set formal.engine=ind --set formal.jobs=1 --set formal.timeout=4 "$@" \
-         --workdir "$WORK/w_${mode}_${ref}" > "$OUTFILE" 2>&1 &
+  "$LHD" lec --ref "$WORK/${base}_ref.v" --impl "$WORK/${base}_impl.v" --top top \
+         --set formal.engine=ind --set formal.jobs=1 --set "formal.timeout=$to" "$@" \
+         --workdir "$WORK/w_${mode}_${base}" > "$OUTFILE" 2>&1 &
   pid=$!
-  ( sleep "$outer"; kill -9 "$pid" 2>/dev/null ) & wd=$!
+  # Hang watchdog. It POLLS in 1s steps and exits as soon as the run is reaped,
+  # instead of `sleep $outer` in one shot: killing the watchdog subshell does NOT
+  # kill a long sleep it already spawned, and that orphan INHERITS the test's
+  # stdout — so it holds the pipe open and bazel keeps billing the test for the
+  # full watchdog after the work is done (an $outer-second test that does 5s of
+  # work). Output goes to /dev/null so even the <=1s orphan holds nothing.
+  ( for ((i = 0; i < outer; i++)); do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+    done
+    kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 & wd=$!
   wait "$pid"; kill -9 "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
   end=$(date +%s); ELAPSED=$((end-start))
   VERDICT=$(grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|UNKNOWN|INCONCLUSIVE" "$OUTFILE" | head -1)
+  # The scheduler's own solving window (compile excluded) — see the header note.
+  ACTUAL=$(sed -nE 's/.*budget [0-9]+s target \/ ([0-9]+)s actual.*/\1/p' "$OUTFILE" | head -1)
 }
 
-# 1) Total-budget bound: 3 hard defs, jobs=1, budget=4s. The scheduler must finish
-#    in roughly one budget (~4-8s) — DECISIVELY under the ~3*4=12s the per-def path
-#    would take. We assert < 11s (generous margin, but well below 12s).
-run_lec wall htop_ref.v htop_impl.v 40
-ELAPSED_WALL=$ELAPSED
-if [ "$ELAPSED" -lt 11 ]; then
-  echo "ok: wall budget bounded total to ${ELAPSED}s (< 11s; per-def would be ~12s+)"
+# 1) One TOTAL budget, shared — and every def still attempted. 3 hard leaves + top
+#    on a 2s total with jobs=1: the first leaf drains the total, so the leaves
+#    dispatched after it must fall back to the min_timeout floor. That FLOORED
+#    COUNT is the deterministic proof the budget is a total and not per-def (per-def
+#    budgeting floors nobody), and the per-def verdict lines are the proof that
+#    running out of budget never SILENTLY SKIPS a def — it must still earn a real
+#    UNKNOWN/CEX on the floor (user ruling). The two legitimate skips in run_def are
+#    verdict-CACHE hits (a known Proven, or a known-Unknown at >= this budget on an
+#    unchanged digest); a fresh workdir has neither, so every line is a real attempt.
+run_lec wall wide 2 30
+DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN)" "$OUTFILE")
+if [ "$DEFS_SEEN" -ge 4 ]; then
+  echo "ok: all $DEFS_SEEN defs (3 leaves + top) got a verdict despite a 2s total"
 else
-  echo "FAIL: wall budget took ${ELAPSED}s (want < 11s; total budget not honored)"; fail=1
+  echo "FAIL: only $DEFS_SEEN def verdict line(s); a def was SKIPPED for lack of budget instead of falling back to the floor: $(cat "$OUTFILE")"; fail=1
+fi
+# The overrun must be DISCLOSED (target/actual/units/floored), and a non-zero
+# floored count is exactly "these defs ran past the spent total".
+if grep -qE "budget 2s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [1-9][0-9]* on the 1s floor" "$OUTFILE"; then
+  echo "ok: total shared + overrun disclosed ($(grep -oE 'budget 2s target[^\n]*' "$OUTFILE" | head -1))"
+else
+  echo "FAIL: a starved run must report target/actual/units and a NON-ZERO floored count (per-def budgeting floors nobody): $(cat "$OUTFILE")"; fail=1
+fi
+# Wall bound: the solving window is ~one budget plus a floor per straggler (2+1+1+2
+# = ~10s), strictly under the 4*(2+1)=12s the per-def path would spend. Plus a loose
+# end-to-end guard so a real blowup (a def ignoring its cap) still fails loudly.
+if [ "${ACTUAL:-99}" -lt 12 ]; then
+  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 12s; per-def would be 12s+)"
+else
+  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 12s; total budget not honored)"; fail=1
+fi
+if [ "$ELAPSED" -ge 25 ]; then
+  echo "FAIL: end-to-end took ${ELAPSED}s for a 2s budget (want < 25s)"; fail=1
 fi
 # The hard hierarchy must degrade soundly (never a false PROVEN).
 if [ "$VERDICT" = "PROVEN equivalent" ]; then
@@ -117,7 +149,7 @@ else
 fi
 
 # 2) No regression: an easy, genuinely-equivalent hierarchy still PROVES under wall.
-run_lec wall easy_ref.v easy_impl.v 40
+run_lec wall easy 2 30
 if [ "$VERDICT" = "PROVEN equivalent" ]; then
   echo "ok: easy hierarchy under wall budget -> PROVEN (no regression)"
 else
@@ -125,49 +157,35 @@ else
 fi
 
 # 3) formal.min_timeout is the SOFT-budget floor, and the overrun is REPORTED.
-#    Same hard hierarchy, same 4s target, but a 3s per-def floor: every def
-#    dispatched after the total is spent now draws 3s instead of 1s, so the run
-#    must take measurably longer AND say so. Without the report line a run that
-#    silently took 3x its budget is indistinguishable from one that fit.
-run_lec floor htop_ref.v htop_impl.v 60 --set formal.min_timeout=3
-FLOOR_ELAPSED=$ELAPSED
-if grep -qE "budget 4s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [0-9]+ on the 3s floor" "$OUTFILE"; then
-  echo "ok: overrun reported ($(grep -oE 'budget 4s target[^\n]*' "$OUTFILE" | head -1))"
+#    A/B on the cheap 1-leaf hierarchy at the same 1s target: the default 1s floor
+#    versus a 2s floor. Every def dispatched after the total is spent now draws 2s
+#    instead of 1s, so the run must take measurably longer AND say so. Without the
+#    report line a run that silently took several times its budget is
+#    indistinguishable from one that fit.
+run_lec base hard1 1 30
+BASE_ACTUAL=$ACTUAL
+if [ "$VERDICT" = "PROVEN equivalent" ]; then
+  echo "FAIL: hard leaf under budget -> FALSE PROVEN"; fail=1
+else
+  echo "ok: floor A/B baseline (1s floor) -> ${VERDICT:-<none>} in ${BASE_ACTUAL:-<none>}s of solving (sound)"
+fi
+run_lec floor hard1 1 30 --set formal.min_timeout=2
+FLOOR_ACTUAL=$ACTUAL
+if grep -qE "budget 1s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [0-9]+ on the 2s floor" "$OUTFILE"; then
+  echo "ok: overrun reported ($(grep -oE 'budget 1s target[^\n]*' "$OUTFILE" | head -1))"
 else
   echo "FAIL: a run that overshot its soft budget must report target/actual/units/floored: $(cat "$OUTFILE")"; fail=1
 fi
-if [ "$FLOOR_ELAPSED" -ge "$ELAPSED_WALL" ]; then
-  echo "ok: min_timeout=3 cost more wall clock than the 1s default (${FLOOR_ELAPSED}s vs ${ELAPSED_WALL}s)"
+if [ -n "${BASE_ACTUAL:-}" ] && [ "${FLOOR_ACTUAL:-0}" -gt "$BASE_ACTUAL" ]; then
+  echo "ok: min_timeout=2 cost more solver time than the 1s default (${FLOOR_ACTUAL}s vs ${BASE_ACTUAL}s)"
 else
-  echo "FAIL: min_timeout=3 (${FLOOR_ELAPSED}s) should not be FASTER than the 1s default (${ELAPSED_WALL}s)"; fail=1
+  echo "FAIL: min_timeout=2 (${FLOOR_ACTUAL:-<none>}s) must cost MORE than the 1s default (${BASE_ACTUAL:-<none>}s): raising the floor buys verdicts by overshooting"; fail=1
 fi
 # A bigger floor must still not turn an unprovable hierarchy into a false PROVEN.
 if [ "$VERDICT" = "PROVEN equivalent" ]; then
   echo "FAIL: hard hierarchy with a bigger floor -> FALSE PROVEN"; fail=1
 else
   echo "ok: bigger floor keeps the sound verdict (${VERDICT:-<none>})"
-fi
-
-# 4) EVERY def still gets attempted, even past the total. `timeout` is a soft
-#    target: running out of budget must never SILENTLY SKIP a def, it must fall
-#    back to the min_timeout floor for each remaining one (user ruling). Five
-#    distinct hard leaves + top on a 2s total cannot all fit, so if the budget
-#    could starve a def, some def would produce no verdict line at all.
-#    The two legitimate skips in run_def are verdict-CACHE hits (a known Proven,
-#    or a known-Unknown at >= this budget on an unchanged digest); a fresh
-#    workdir has neither, so every line here must come from a real attempt.
-run_lec wide wide_ref.v wide_impl.v 90 --set formal.min_timeout=1
-DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN)" "$OUTFILE")
-if [ "$DEFS_SEEN" -ge 6 ]; then
-  echo "ok: all $DEFS_SEEN defs (5 leaves + top) got a verdict despite a 2s-scale total"
-else
-  echo "FAIL: only $DEFS_SEEN def verdict line(s); a def was SKIPPED for lack of budget instead of falling back to the floor: $(cat "$OUTFILE")"; fail=1
-fi
-# And the run must admit it overran rather than pretending it fit.
-if grep -qE "budget 4s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [1-9][0-9]* on the 1s floor" "$OUTFILE"; then
-  echo "ok: overrun disclosed ($(grep -oE 'budget 4s target[^\n]*' "$OUTFILE" | head -1))"
-else
-  echo "FAIL: a starved run must report a non-zero floored count: $(cat "$OUTFILE")"; fail=1
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_budget_test: FAILED"; exit 1; fi

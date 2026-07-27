@@ -524,6 +524,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# todo/livehd/2f-latch M9 — Clock_cell recognition at the Sub boundary: the
+# cases INLINING structurally cannot cover (a TRUSTED gate, a MEMORY clock, and
+# an enable that is a CONE rather than a bare port).
+sh_test(
+    name = "clock_cell_test",
+    size = "large",
+    srcs = ["clock_cell_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "single_edge_icg_test",
     size = "large",

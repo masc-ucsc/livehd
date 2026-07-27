@@ -108,6 +108,12 @@ struct Icg_cone {
   hhds::Pin_class              clock;    // the clock operand, resolved to its root
   bool                         clock_inverted = false;  // `~clk & en` gates the FALLING edge
   std::vector<hhds::Pin_class> enables;  // the remaining operands (constants excluded)
+  // 2^N clock division. v1 only ever produces 1; a `Clock_cell` carrying any
+  // other value is refused BY NAME at every lowering rather than approximated,
+  // because a divider's INITIAL PHASE has to become part of its identity or two
+  // 180-degrees-apart div-by-2s compare equal -- the clock-blindness
+  // false-PROVEN class these guards exist to stop.
+  int div = 1;
 };
 
 // Decode `clock_pin`'s driver as an ICG cone, or nullopt when it is not one.
@@ -120,6 +126,72 @@ struct Icg_cone {
 // conventional spelling), and an AMBIGUOUS cone — no clock operand, or more
 // than one — returns nullopt so the caller fails closed rather than guessing.
 [[nodiscard]] std::optional<Icg_cone> resolve_icg(const hhds::Pin_class& clock_pin, const Design_clocks& clocks);
+
+// ---------------------------------------------------------------------------
+// 2f-latch M9 — `Clock_cell`, the ONE recognized clock operator.
+//
+// `resolve_icg` above recognizes a gate that is VISIBLE IN THE BODY. Real
+// designs INSTANTIATE the gate, so the flop's `clock_pin` is an opaque `Sub`
+// output and nothing downstream can see it is a gate at all. The functions
+// below close that: `clock_op_of` is the ONE recognizer (every consumer calls
+// it, so a shape recognized for LEC is recognized for sim by construction) and
+// `materialize_clock_cells` rewrites what it recognizes into `Clock_cell`
+// nodes, which is the representation each consumer then lowers its own way.
+
+// Read a materialized `Clock_cell` node back into a cone. `clk_ref` becomes
+// `clock` (resolved to its root, folding any inversion into `clock_inverted`),
+// `en` becomes the single enable. Returns nullopt when `n` is not a Clock_cell.
+[[nodiscard]] std::optional<Icg_cone> clock_cell_cone(const hhds::Node_class& n, const Design_clocks& clocks);
+
+// THE shared recognizer. Resolves `clock_pin`'s driver to a clock operation via
+// whichever entry point applies:
+//   1. a materialized `Clock_cell` node                (clock_cell_cone)
+//   2. an inline `<clock> & <enables>` cone in the body (resolve_icg)
+// A `Sub`-boundary instance is NOT resolved here -- it cannot be, because its
+// enable is a cone of the DEF's ports and has no meaning as a parent pin until
+// `materialize_clock_cells` re-roots it. That is the whole reason materializing
+// is a separate step rather than a pure query.
+[[nodiscard]] std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Design_clocks& clocks);
+
+// Is `def` an ICG cell -- i.e. does its body match `clk_o = clk_port & <enable
+// cone>` where the enable is held by a latch transparent on the OPPOSITE phase
+// of that same clock port? Returns the matched shape when it is.
+//
+// Clock identity here is STRUCTURAL, never the port name: the clock is the port
+// that is BOTH AND-ed into the output AND gates the latch's transparency
+// window. A gate cell's own body holds no flop, so `Design_clocks` has no root
+// to offer inside the def and a name heuristic would be the only alternative --
+// which is exactly what M9 retires.
+struct Icg_def_match {
+  hhds::Pin_class clk_in;         // the def's clock INPUT pin
+  hhds::Pin_class out;            // the def's clock OUTPUT pin
+  hhds::Pin_class enable_cone;    // root of the latched enable cone, inside the def
+  bool            invert = false; // body is `clk | ~en_latch` (active-low gate) rather than `clk & en_latch`
+};
+[[nodiscard]] std::optional<Icg_def_match> match_icg_def(hhds::Graph* def);
+
+// Rewrite every recognized clock gate in `g` into a `Clock_cell`.
+//
+// For an INSTANTIATED cell this CLONES the def's combinational enable cone into
+// `g`, re-rooted on the instance's actual drivers, and drops the instance. The
+// clone is what makes the cell usable by every consumer without inlining the
+// def: minion's `prim_clk_gate` latches `en_i | dft_i.scanmode` (scan forces
+// the clock ON, and `dft_i` is a packed struct that graph flows keep as one
+// FLAT bus), so the enable is a CONE of two ports, not a wire, and binding it
+// to a single parent pin is impossible without re-rooting it.
+//
+// WHAT IS AND IS NOT PULLED IN. Only the comb enable cone crosses the boundary;
+// the enable LATCH does not, because the cell encodes the glitch-free CONTRACT
+// ("en is sampled at clk_ref's active edge") instead of the implementation.
+// That is why this is not the inlining `inline_clock_gate_cells` does and why
+// it does not reintroduce the state comparison that made a TRUSTED gate refute:
+// no state element and no new compare point crosses -- the cone is a function
+// of nets the parent already drives.
+//
+// `is_boxed` still applies to the DEF-BODY match: a caller may declare a def
+// out of scope entirely. Returns the number of cells materialized.
+[[nodiscard]] int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
+                                          const std::function<bool(const hhds::Graph*)>& is_boxed = {});
 
 // The value a latch passes THROUGH while its window is open: the arm of tolg's
 // hold mux (`gate ? d : q`) that is not the latch's own Q. Invalid when `n` is

@@ -50,6 +50,64 @@ static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
   return {};
 }
 
+// 2f-latch M9 -- decode a clock_pin driver that is (or reaches, through the
+// width-mask wrappers a typed port read picks up) a `Clock_cell`.
+//
+// Deliberately SEPARATE from resolve_clk_input rather than a hop inside it:
+// that function's INVALID answer is the "this clock is derived, refuse" signal
+// in four places, so teaching it to see through a gate would silently turn
+// every gated element into "on the plain reference clock, ungated" -- the exact
+// false PROVEN the guards exist to stop.
+struct Clock_cell_use {
+  hhds::Pin_class cell;     // the cell's output pin; invalid when there is none
+  hhds::Pin_class clk_ref;  // reference clock driver
+  hhds::Pin_class en;       // enable driver; invalid => identity (always commits)
+  int             div    = 1;
+  bool            invert = false;
+};
+
+static Clock_cell_use clock_cell_on(hhds::Pin_class p) {
+  Clock_cell_use r;
+  for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+    if (gu::is_graph_input_pin(p) || gu::is_const_pin(p)) {
+      return r;
+    }
+    auto       n  = p.get_master_node();
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Clock_cell) {
+      r.cell = p;
+      for (const auto& e : n.inp_edges()) {
+        switch (static_cast<int>(e.sink.get_port_id())) {
+          case 2: r.clk_ref = e.driver; break;
+          case 3:
+            if (gu::is_const_pin(e.driver)) {
+              const auto dc = gu::hydrate_const(e.driver);
+              r.div         = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
+            }
+            break;
+          case 4: r.en = e.driver; break;
+          case 6:
+            r.invert = gu::is_const_pin(e.driver) && !gu::hydrate_const(e.driver).is_known_false();
+            break;
+          default: break;
+        }
+      }
+      return r;
+    }
+    if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask && op != Ntype_op::Sext) {
+      return r;
+    }
+    hhds::Pin_class a;
+    for (const auto& e : n.inp_edges()) {
+      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
+        a = e.driver;
+      }
+    }
+    p = a;
+  }
+  return r;
+}
+
 // Guard-side classifier for a Memory's clock_pin driver: TRUE iff nothing in
 // the clock's shape contradicts the "every write lands once per step" model.
 // Acceptable lanes: unconnected, a constant (a tied-off port), a graph clock
@@ -763,6 +821,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool             is_comb  = false;
     hhds::Pin_class  ra_pin;    // async read_all driver pin (size*bits)
     cvc5::Term       ra_fresh;  // deferred read_all symbol (tied in phase 2)
+    // 2f-latch M9: enable of the Clock_cell gating this memory's clock, or
+    // invalid when it is on a plain (or identity-celled) clock. Recorded as a
+    // PIN in phase 1 and resolved to a term in phase 2 -- the combinational
+    // fixpoint has not run yet when the clock scan happens.
+    hhds::Pin_class commit_en;
   };
   std::vector<MemCut>                   mem_cuts;
   Io_name_map<int> mem_occ;  // per-signature occurrence -> stable key
@@ -808,6 +871,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // not wire the buffer cell to clock_pin directly -- it wraps it in a
         // Set_mask concat -- so the immediate driver is a Set_mask and the Sub
         // exemption alone refuses every mapped memory.
+        // 2f-latch M9 -- a recognized Clock_cell IS modellable, and this is the
+        // half the M8 fold structurally cannot reach: that fold rewrites flop
+        // clocks into enables and never touches a Memory's clock_pin. Gate the
+        // writes on the cell's enable instead of refusing.
+        //
+        // The enable's VALUE cannot be built here: this scan is phase 1, before
+        // the combinational fixpoint, so no Val exists for the cone yet. Record
+        // the driver PIN and resolve it in phase 2, where every write folds.
+        if (auto cc = clock_cell_on(e.driver); !cc.cell.is_invalid()) {
+          if (cc.div != 1) {
+            return fail_unsupported("memory '" + gu::debug_name(node) + "' is clocked by a Clock_cell with div="
+                                    + std::to_string(cc.div) + ", which is not implemented (v1 is div=1 only)");
+          }
+          if (cc.invert) {
+            return fail_unsupported("memory '" + gu::debug_name(node)
+                                    + "' is clocked by an INVERTED Clock_cell; this encoder models every memory "
+                                      "write as landing once per step and cannot express the opposite edge");
+          }
+          if (resolve_clk_input(cc.clk_ref).is_invalid()) {
+            return fail_unsupported("memory '" + gu::debug_name(node)
+                                    + "' is clocked by a Clock_cell whose clk_ref is itself derived");
+          }
+          mc.commit_en = cc.en;  // invalid => an identity cell: commits every step
+          continue;
+        }
         if (!memory_clock_shape_ok(e.driver)) {
           return fail_unsupported("memory '" + gu::debug_name(node)
                                   + "' has a derived clock the encoder cannot model (it treats every memory write as "
@@ -1388,6 +1476,38 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         out.outputs[std::string("\x01") + "nxt:\x01leafstate:" + bk] = nsv;
       }
       done.insert(nk);
+      progress = true;
+      continue;
+    }
+
+    // A width-mask wrapper sitting ON a clock carries no data value either. A
+    // typed 1-bit port read picks up `Get_mask(clk, 1)`, so a gated clock
+    // usually reaches its flop THROUGH one of these rather than directly --
+    // measured on minion, where every such wrapper became "operand has no
+    // encodable driver". Clockness propagates through the identity wrappers,
+    // exactly the ones clock_cell_on already walks.
+    bool clock_wrapper = false;
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Sext) {
+      int non_const = 0;
+      for (const auto& e : node.inp_edges()) {
+        if (!gu::is_const_pin(e.driver)) {
+          ++non_const;
+        }
+      }
+      clock_wrapper = non_const == 1 && !clock_cell_on(node.get_driver_pin(0)).cell.is_invalid();
+    }
+    if (op == Ntype_op::Clock_cell || clock_wrapper) {
+      // 2f-latch M9: a Clock_cell has NO DATA VALUE. Its output is a CLOCK, and
+      // the binding rule is that it may only reach a clock sink -- the flop and
+      // memory paths below resolve THROUGH it to a commit condition rather than
+      // reading it as a bit. Encoding it as data is precisely the modelling
+      // error the cell exists to remove: a gated clock read as a value is
+      // indistinguishable from an ungated one to a step-granular encoder.
+      //
+      // Not an error, just no value: a DATA consumer then fails with "has no
+      // encodable driver", which is the honest refusal for the DFT /
+      // clock-monitor shape that samples a gated clock.
+      done.insert(nodekey(node));
       progress = true;
       continue;
     }
@@ -2326,11 +2446,79 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // already false (see the SCOPE note above). Null => commit every step, i.e.
     // exactly the previous behavior.
     Term commits;
+    // Set by a branch that fully MODELLED the clock even though it produced no
+    // commit term (a Clock_cell with no enable is an identity buffer: it commits
+    // every step, which is exactly a null `commits`). Without this the
+    // fail-closed guard below could not tell "modelled, commits always" from
+    // "could not model at all".
+    bool clock_modelled = false;
     if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
       auto        cn      = clk_d.get_master_node();
       const auto  cop     = gu::type_op_of(cn);
       const auto  clk_in  = resolve_clk_input(clk_d);
-      if (cop == Ntype_op::And && clk_in.is_invalid()) {
+      if (cop == Ntype_op::Clock_cell) {
+        // 2f-latch M9 -- the ONE recognized clock operator. The cell encodes the
+        // glitch-free ICG CONTRACT: `en` is sampled AT clk_ref's active edge.
+        // One encoder step IS that edge, so the commit condition is simply
+        // "en held at this step" -- the same term the inline M8 fold produces,
+        // now reachable when the gate was INSTANTIATED rather than spelled out.
+        hhds::Pin_class ref_d, en_d, div_d, inv_d;
+        for (const auto& e : cn.inp_edges()) {
+          switch (static_cast<int>(e.sink.get_port_id())) {
+            case 2: ref_d = e.driver; break;   // clk_ref
+            case 3: div_d = e.driver; break;   // div
+            case 4: en_d = e.driver; break;    // en
+            case 6: inv_d = e.driver; break;   // invert
+            default: break;
+          }
+        }
+        int divv = 1;
+        if (!div_d.is_invalid() && gu::is_const_pin(div_d)) {
+          const auto dc = gu::hydrate_const(div_d);
+          divv          = dc.is_just_i64() ? static_cast<int>(dc.to_just_i64()) : 0;
+        }
+        if (divv != 1) {
+          // Deliberately NOT approximated. A divider's INITIAL PHASE has to be
+          // part of its identity or two 180-degrees-apart div-by-2s compare
+          // equal -- the clock-blindness false-PROVEN class.
+          return fail_unsupported("flop '" + gu::debug_name(node) + "' is clocked by a Clock_cell with div="
+                                  + std::to_string(divv) + ", which is not implemented (v1 is div=1 only)");
+        }
+        if (!inv_d.is_invalid() && gu::is_const_pin(inv_d) && !gu::hydrate_const(inv_d).is_known_false()) {
+          // An inverted gate output commits on the OPPOSITE edge, which is a
+          // negedge flop -- pass.single_edge's job (P=2), not something a
+          // one-step-is-one-commit encoding can express.
+          return fail_unsupported("flop '" + gu::debug_name(node)
+                                  + "' is clocked by an INVERTED Clock_cell (the opposite edge); "
+                                    "pass.single_edge must normalize it first");
+        }
+        if (resolve_clk_input(ref_d).is_invalid()) {
+          return fail_unsupported("flop '" + gu::debug_name(node)
+                                  + "' is clocked by a Clock_cell whose clk_ref is itself derived "
+                                    "(gate of gate must be canonicalized to one cell first)");
+        }
+        clock_modelled = true;
+        if (!en_d.is_invalid()) {
+          bool ok2 = true;
+          Val  gv  = driver_val(en_d, ok2);
+          if (!ok2 || gv.term.isNull()) {
+            return fail_unsupported("flop '" + gu::debug_name(node)
+                                    + "' is clocked by a Clock_cell whose enable cone has no encodable driver");
+          }
+          // NOTE on X: `DISTINCT(v, 0)` reads an X plane as a concrete value,
+          // so an enable cone carrying don't-care bits is modelled as a
+          // definite commit. That is a real (pre-existing) imprecision, but it
+          // is NOT fixed here: the sibling And-ICG fold below builds its guards
+          // exactly the same way, and X policy for the whole encoder already
+          // lives in `formal.lec.gold_x`. Refusing on a non-null x_mask was
+          // MEASURED on minion: it fires on 7 defs that otherwise encode and
+          // compare, so it trades a broad loss of coverage for a narrow gain in
+          // precision, inconsistently with the path beside it. Settle it as one
+          // X-policy decision across both folds, not as a Clock_cell special
+          // case.
+          commits = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)});
+        }
+      } else if (cop == Ntype_op::And && clk_in.is_invalid()) {
         // ICG: `<clock-input> & <enables>` -> commit iff every non-clock
         // operand is true. Requires one operand to BE a clock input, or this is
         // some other derived clock and is left ungated (sound: unchanged).
@@ -2411,7 +2599,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       //
       // Latches and negedge flops do not reach this: pass.single_edge lowers
       // them away first, and it declines (loudly) what it cannot lower.
-      if (commits.isNull() && resolve_clk_input(clk_d).is_invalid()) {
+      if (commits.isNull() && !clock_modelled && resolve_clk_input(clk_d).is_invalid()) {
         return fail_unsupported("flop '" + gu::debug_name(node)
                                 + "' has a derived clock the encoder cannot model (not a clock input, and not a "
                                   "foldable `<clock> & <enables>` gate); refusing rather than encode it as "
@@ -2492,6 +2680,26 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       return arr;
     };
 
+    // 2f-latch M9 -- the memory's COMMIT condition, when a recognized
+    // Clock_cell gates its clock. Built once here (phase 2, where the
+    // combinational fixpoint has run) and folded into ALL THREE places a memory
+    // commits: the whole-array update, each per-port write mask, and the
+    // sync-read register. Missing any one of them re-registers or re-writes on
+    // a step the clock never ticked -- the "commits every step" mis-model this
+    // whole guard exists to remove, just moved somewhere less obvious.
+    Term mem_commit;
+    if (!mc.commit_en.is_invalid()) {
+      Val cv = driver_val(mc.commit_en, ok);
+      if (!ok || cv.term.isNull()) {
+        return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                                + "' is clocked by a Clock_cell whose enable cone has no encodable driver");
+      }
+      // See the flop path's note on X: the enable's don't-care plane is
+      // deliberately NOT refused here, for consistency with the And-ICG fold
+      // and with `formal.lec.gold_x`.
+      mem_commit = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
+    }
+
     // Whole-array bulk `update` is the BASE next-state (lowest priority); per-port
     // writes below STORE on top of it (per-port wins). update_enable gates the
     // whole array (hold = a_cur). A plain memory starts from a_cur unchanged.
@@ -2512,6 +2720,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
           a_upd       = tm_.mkTerm(Kind::ITE, {en_hot, a_upd, mc.a_cur});
         }
+      }
+      if (!mem_commit.isNull()) {
+        a_upd = tm_.mkTerm(Kind::ITE, {mem_commit, a_upd, mc.a_cur});  // gated clock did not tick: HOLD
       }
       a_next = a_upd;
     } else if (mc.is_comb && !mc.init.is_invalid()) {
@@ -2569,6 +2780,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                                bv_const(tm_, mc.sig.bits, 0)});
         }
       }
+      // Fold the commit into the MASK rather than into `a_next` alone: the
+      // per-port record pushed into out.mem_wr below is an ALTERNATIVE proof
+      // route (equal inputs => equal write chains, decided without the array
+      // theory). Gating only the array term would leave the two routes
+      // disagreeing about whether this step wrote at all.
+      if (!mem_commit.isNull()) {
+        wmask = tm_.mkTerm(Kind::ITE, {mem_commit, wmask, bv_const(tm_, mc.sig.bits, 0)});
+      }
       Term old      = tm_.mkTerm(Kind::SELECT, {a_next, addr});
       Term keep     = tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old});
       Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
@@ -2622,7 +2841,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // threaded forward by the caller like next_mem. The dout thus lands one
         // cycle after the address. (Gated on shared_reads so callers that do not
         // thread it keep the latency-0 tie below — a sound conservative default.)
-        out.next_read[mc.rd_key[k]] = real;
+        //
+        // The dout REGISTER is clocked by the same (possibly gated) clock, so a
+        // step the gate suppressed must HOLD it. This is the third commit point
+        // and the easiest to miss: writes look correctly gated while the read
+        // port quietly re-registers every step.
+        out.next_read[mc.rd_key[k]]
+            = mem_commit.isNull() ? real : tm_.mkTerm(Kind::ITE, {mem_commit, real, mc.rd_fresh[k]});
       } else {
         out.equalities.emplace_back(mc.rd_fresh[k], real);
       }

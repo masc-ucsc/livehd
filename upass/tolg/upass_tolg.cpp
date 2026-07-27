@@ -141,6 +141,61 @@ struct Pending_rec {
   bool is_sink = false;
 };
 
+// 2f-latch M9 — name the operation if this clock cone contains one that can
+// never be a clock operator; "" when the cone is a legal clock.
+//
+// DENY-LIST, deliberately, not an allow-list. The allowed set is wider than it
+// looks (`posedge ~clk` is legitimate and pinned PROVEN equal to `negedge clk`;
+// `clk & en` is the ICG; a `Sub` output is an opaque gate or buffer cell; a
+// flop-driven net is a DIVIDER, which the formal side refuses later with a
+// better message than a compile error could give). So flag only what is
+// UNAMBIGUOUS -- arithmetic on a clock, or a bitwise op that merges data INTO
+// it -- and let everything else through. Guessing in the other direction is how
+// a legal design gets a confident wrong rejection.
+//
+// Staging note: this is the narrow first slice of M9's "anything else on a
+// clock is a compile error". Widening it is a breaking change and wants the R4
+// corpus re-baselined first.
+std::string_view illegal_clock_op(hhds::Pin_class d) {
+  for (int hops = 0; hops < 8 && !d.is_invalid(); ++hops) {
+    if (livehd::graph_util::is_graph_input_pin(d) || livehd::graph_util::is_const_pin(d)) {
+      return {};
+    }
+    auto       n  = d.get_master_node();
+    const auto op = livehd::graph_util::type_op_of(n);
+    switch (op) {
+      // Data merged into a clock, or arithmetic on one: never a clock operator.
+      case Ntype_op::Or:
+      case Ntype_op::Xor:
+      case Ntype_op::Ror:
+      case Ntype_op::Sum:
+      case Ntype_op::Mult:
+      case Ntype_op::Div:
+      case Ntype_op::SHL:
+      case Ntype_op::SRA:
+      case Ntype_op::LT:
+      case Ntype_op::GT:
+      case Ntype_op::LUT:
+      case Ntype_op::Hotmux: return Ntype::get_name(op);
+      // Identity / shaping wrappers a typed 1-bit read picks up: keep walking.
+      case Ntype_op::Get_mask:
+      case Ntype_op::Sext:
+      case Ntype_op::Not: break;
+      // And (the gate), Clock_cell, Sub (an opaque cell), Mux/EQ (boolean
+      // shaping), a state element (a divider): all legal or handled later.
+      default: return {};
+    }
+    hhds::Pin_class a;
+    for (const auto& e : n.inp_edges()) {
+      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
+        a = e.driver;
+      }
+    }
+    d = a;
+  }
+  return {};
+}
+
 // Shared phase-1 io+clock+reset GraphIO registration result. `clock_name` /
 // `reset_name` are the graph inputs driving flop clock_pin / reset_pin (a
 // declared input bound before minting, or the implicit "clock"/"reset"
@@ -1287,6 +1342,21 @@ private:
       } else {
         warn_at(info.decl_nid, {"no-clock", "time"},
                 "reg '{}' has no clock input to bind", name);
+      }
+      // 2f-latch M9 -- NOTHING MAY BE DONE TO A CLOCK except a recognized clock
+      // operation. A clock may be GATED (`clk and en`) or INVERTED (`not clk`);
+      // both lower to a `Clock_cell` and every consumer knows what they mean.
+      // Arithmetic, or a bitwise op that MERGES data into the clock, has no
+      // such meaning -- and the failure is otherwise silent in the worst way: a
+      // step-granular encoder cannot tell `clk or sel` from plain `clk`, so it
+      // came back PROVEN equal to the ungated design (measured, and pinned by
+      // lec_clock_blindness_test). Refuse at COMPILE time, where the source span
+      // still exists to point at.
+      if (const auto bad = illegal_clock_op(livehd::graph_util::get_driver_of_sink_name(flop, "clock_pin")); !bad.empty()) {
+        error_at(info.decl_nid, {"clock-op-unsupported", "time"},
+                 "reg '{}' takes its clock from a `{}` operation, which is not a clock operation -- a clock may only "
+                 "be gated (`clk and en`) or inverted (`not clk`)",
+                 name, bad);
       }
       if (info.has_posclk && !info.posclk_val) {
         setup_sink_by_name(flop, "posclk")

@@ -730,7 +730,56 @@ void Lnast_prp_writer::write_module() {
         }
       }
     };
+    // A `wire` net is POSITION-INDEPENDENT: it is hoisted to the function top as
+    // a bare `wire X:T` DECLARATION and its store stays its sole driver, so a
+    // `clock_pin=ref X` binds correctly wherever the store lands. Any emitted
+    // ICG module shows the pattern: `wire clkgt:u1` at the top, the regs
+    // declared with `clock_pin=ref clkgt`, and `clkgt = <gate>` assigned after
+    // the body. Such a net needs NO relocation — and the cone must not walk
+    // THROUGH it either.
+    //
+    // Walking through it is what produced a silent miscompile. The closure
+    // followed `clkgt` into the gate instance and on into the gate's ENABLE,
+    // dragging `busy_o`/`th_id_complete_o` above the always_comb that computes
+    // them. Those are SPLIT WIRES (`<net> = <net>__wtmp` bridges), so hoisting
+    // a bridge above its accumulator's writes captured the poison init: the
+    // nets became constant-unknown, silently deleting two terms from the clock
+    // gate's enable and making the re-emitted Pyrope inequivalent to its own
+    // Verilog source. See lhdsuite fixme.md issue 1f.
+    //
+    // Stopping at the wire keeps the relocation OTHER users need — a `mut` SSA
+    // temp defined after its readers (`wb_wdata__w1` in intpipe_csr_file) still
+    // relocates — while dropping the part that was never necessary.
+    std::unordered_set<std::string> wire_decl;
+    {
+      auto scan_wires = [&](auto&& self, Lnast_nid n) -> void {
+        for (auto s = lnast->get_child(n); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+          const auto st = lnast->get_type(s);
+          if (Lnast_ntype::is_stmts(st) || st == Lnast_ntype::Lnast_ntype_if
+              || st == Lnast_ntype::Lnast_ntype_unique_if) {
+            self(self, s);
+            continue;
+          }
+          if (st != Lnast_ntype::Lnast_ntype_declare) {
+            continue;
+          }
+          auto d0 = lnast->get_child(s);
+          if (d0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(d0))) {
+            continue;
+          }
+          auto d1 = lnast->get_sibling_next(d0);
+          auto d2 = d1.is_invalid() ? d1 : lnast->get_sibling_next(d1);
+          if (!d2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(d2)) && lnast->get_name(d2) == "wire") {
+            wire_decl.insert(std::string(strip_prefix(lnast->get_name(d0))));
+          }
+        }
+      };
+      scan_wires(scan_wires, stmts_nid);
+    }
     pin_cone_ = pin_dep_nets_;
+    for (auto it = pin_cone_.begin(); it != pin_cone_.end();) {
+      it = (wire_decl.count(*it) != 0u) ? pin_cone_.erase(it) : std::next(it);
+    }
     if (!pin_dep_nets_.empty()) {
       std::unordered_map<std::string, std::vector<Lnast_nid>> body_writers;  // stripped lhs -> its top-level writers
       std::unordered_set<std::string>                         state_decl;    // reg/latch names — a flop-Q read is order-free
@@ -789,6 +838,11 @@ void Lnast_prp_writer::write_module() {
         for (const auto& r : reads) {
           if (state_decl.count(r)) {
             continue;  // flop Q — position-independent, the reg declare stays put
+          }
+          if (wire_decl.count(r)) {
+            continue;  // a `wire` — position-independent too (see above); its forward
+                       // declaration binds any ref, so neither it nor anything it
+                       // depends on has to move.
           }
           if (body_writers.count(r) && pin_cone_.insert(r).second) {
             work.push_back(r);

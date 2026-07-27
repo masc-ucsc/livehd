@@ -422,6 +422,22 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return absl::StrCat("Slop<", tw, ">::", m, "(", sel, ", {", vals, "})");
     }
+    case Ntype_op::Clock_cell:
+      // FAIL CLOSED, never fall into the pass-through below. A Clock_cell's
+      // first input is `clk_ref`, so the generic fallback would emit the
+      // UNGATED reference clock and silently drop the gate -- the flop would
+      // then commit every tick with the enable as dead code. That is the same
+      // silent miscompile `gated-clock-unsupported` refuses one level up, and a
+      // clock gate is precisely the shape where it is invisible to a
+      // before/after comparison. The M9 lowering resolves the cell to a commit
+      // guard instead; until it lands for this shape, refuse by name.
+      livehd::diag::err("inou.cgen.sim", "clock-cell-unsupported", "unsupported")
+          .msg("cell `{}` is a Clock_cell reaching expression emission", debug_name(node))
+          .hint(
+              "a Clock_cell must be lowered to a flop/memory COMMIT GUARD, never evaluated as a data expression -- "
+              "emitting it as a value would hand the simulator an ungated clock with the enable as dead code")
+          .fatal();
+      return absl::StrCat("Slop<", tw, ">::create_integer(0)");
     default:
       // Compiling fallback: pass the first input through at the node width (the
       // per-operand width conversion already enforces wbits). Covers width-trim

@@ -76,7 +76,16 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
          --top foo --set formal.lec.hier=false --set formal.engine=bmc --set formal.lec.decompose=false \
          --set formal.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
-  ( sleep "$outer"; kill -9 "$pid" 2>/dev/null ) &
+  # POLL in 1s steps and exit as soon as the run is reaped, rather than one
+  # `sleep $outer`: killing the watchdog subshell does NOT kill a long sleep it
+  # already spawned, and that orphan INHERITS this test's stdout — holding the
+  # pipe open so bazel bills the test for the whole watchdog after the work is
+  # done. Output to /dev/null so even the <=1s orphan holds nothing.
+  ( for ((i = 0; i < outer; i++)); do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+    done
+    kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
   wd=$!
   wait "$pid"; RC=$?
   kill -9 "$wd" 2>/dev/null; wait "$wd" 2>/dev/null

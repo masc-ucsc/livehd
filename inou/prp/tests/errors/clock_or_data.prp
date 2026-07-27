@@ -1,0 +1,25 @@
+/*
+:name: clock_or_data
+:type: error
+:tolg: 1
+:error: (not a clock operation)
+*/
+// todo/livehd/2f-latch M9 — NOTHING MAY BE DONE TO A CLOCK except a recognized
+// clock operation. A clock may be GATED (`clk and en`) or INVERTED (`not clk`);
+// both lower to a `Clock_cell` that every consumer knows how to interpret.
+//
+// `clk or sel` is neither. It has no meaning as a clock, and getting it wrong
+// is SILENT rather than loud: a step-granular formal encoder has no
+// clock-identity model, so an OR of a clock with data looks exactly like the
+// bare clock and the design came back PROVEN equal to an ungated one. Catch it
+// at compile time, where the source span still exists to point at.
+//
+// The legal forms are exercised elsewhere: `clk and en` in
+// tests/equiv/latch_icg.prp, `not clk` wherever a negedge flop appears.
+pub mod bad_clock(clk:bool, sel:bool, d:u8) -> (q:u8@[1]) {
+  wire gclk:bool = nil
+  gclk = clk or sel
+  reg f:u8:[clock_pin=ref gclk] = 0
+  q = f
+  f = d
+}
