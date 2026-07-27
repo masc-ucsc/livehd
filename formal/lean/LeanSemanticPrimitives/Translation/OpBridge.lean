@@ -181,4 +181,165 @@ theorem getmask_bridge {aw mw b : Nat} (X : BitVec aw) (M : BitVec mw)
   rw [mask_indices_bvenc]
   exact pack_low_bvenc X (mask_indices M).reverse (by rw [List.length_reverse]; exact hb)
 
+--------------------------------------------------------------------------------
+-- Bitwise family (And / Or / Xor / Not): relate the certificate bits_to_int /
+-- bv_bitwise / bv_not to the native BitVec ops under the encoding.
+--------------------------------------------------------------------------------
+
+theorem bits_to_int_succ (w : Nat) (f : Nat → Bool) :
+    bits_to_int (w + 1) f = bits_to_int w f + (if f w then (2:Int) ^ w else 0) := by
+  unfold bits_to_int
+  rw [List.range_succ, List.filterMap_append, List.sum_append]
+  by_cases hfw : f w <;> simp [hfw]
+
+theorem bits_to_int_nonneg (w : Nat) (f : Nat → Bool) : 0 ≤ bits_to_int w f := by
+  induction w with
+  | zero => simp [bits_to_int]
+  | succ w ih => rw [bits_to_int_succ]; have : (0:Int) ≤ (if f w then (2:Int)^w else 0) := by split <;> positivity
+                 omega
+
+theorem bits_to_int_lt (w : Nat) (f : Nat → Bool) : bits_to_int w f < 2 ^ w := by
+  induction w with
+  | zero => simp [bits_to_int]
+  | succ w ih =>
+    rw [bits_to_int_succ, pow_succ]
+    have : (if f w then (2:Int)^w else 0) ≤ 2 ^ w := by split <;> first | exact le_refl _ | positivity
+    omega
+
+theorem bits_to_int_testBit (w : Nat) (f : Nat → Bool) (j : Nat) :
+    (bits_to_int w f).toNat.testBit j = (decide (j < w) && f j) := by
+  induction w generalizing j with
+  | zero => simp [bits_to_int]
+  | succ w ih =>
+    have hB0 : 0 ≤ bits_to_int w f := bits_to_int_nonneg w f
+    have hBlt : (bits_to_int w f).toNat < 2 ^ w := by
+      have h := bits_to_int_lt w f
+      have hc : (2:Int) ^ w = ((2 ^ w : Nat) : Int) := by simp
+      rw [hc] at h; omega
+    rw [bits_to_int_succ]
+    by_cases hfw : f w
+    · simp only [hfw, if_true]
+      have hcast : (bits_to_int w f + (2:Int) ^ w).toNat = (bits_to_int w f).toNat + 2 ^ w := by
+        have h2 : (2:Int) ^ w = ((2 ^ w : Nat) : Int) := by simp
+        rw [h2, Int.toNat_add hB0 (by positivity), Int.toNat_natCast]
+      rw [hcast, Nat.add_comm, ← two_pow_or_add hBlt, Nat.testBit_lor, Nat.testBit_two_pow, ih]
+      rcases Nat.lt_trichotomy j w with h | h | h
+      · have e1 : ¬ (w = j) := by omega
+        simp [e1, h, Nat.lt_succ_of_lt h]
+      · subst h; simp [hfw]
+      · have e1 : ¬ (w = j) := by omega
+        have e2 : ¬ (j < w) := by omega
+        have e3 : ¬ (j < w + 1) := by omega
+        simp [e1, e2, e3]
+    · have hfw' : f w = false := by simpa using hfw
+      rw [hfw']; simp only [Bool.false_eq_true, if_false, add_zero]
+      rw [ih]
+      rcases Nat.lt_trichotomy j w with h | h | h
+      · simp [h, Nat.lt_succ_of_lt h]
+      · subst h; simp [hfw']
+      · have e2 : ¬ (j < w) := by omega
+        have e3 : ¬ (j < w + 1) := by omega
+        simp [e2, e3]
+
+-- ============ bitwise family ============
+
+
+theorem bits_to_int_toNat {w : Nat} (X : BitVec w) :
+    bits_to_int w (fun i => X.getLsbD i) = Int.ofNat X.toNat := by
+  have hnn := bits_to_int_nonneg w (fun i => X.getLsbD i)
+  have key : (bits_to_int w (fun i => X.getLsbD i)).toNat = X.toNat := by
+    apply Nat.eq_of_testBit_eq
+    intro j
+    rw [bits_to_int_testBit]
+    by_cases hj : j < w
+    · simp only [hj, decide_true, Bool.true_and, BitVec.getLsbD]
+    · have hge : X.getLsbD j = false := BitVec.getLsbD_of_ge X j (by omega)
+      have hge2 : X.toNat.testBit j = false := by rw [BitVec.getLsbD] at hge; exact hge
+      simp [hj, hge2]
+  rw [← key]; exact (Int.toNat_of_nonneg hnn).symm
+
+theorem bits_to_int_congr {w : Nat} {f g : Nat → Bool} (h : ∀ i, i < w → f i = g i) :
+    bits_to_int w f = bits_to_int w g := by
+  unfold bits_to_int; congr 1
+  apply List.filterMap_congr
+  intro i hi; rw [List.mem_range] at hi; rw [h i hi]
+
+theorem getLsbD_zext_lt {wa w : Nat} (a : BitVec wa) {i : Nat} (hi : i < w) :
+    (bv_zext a : BitVec w).getLsbD i = a.getLsbD i := by
+  unfold bv_zext; rw [BitVec.getLsbD_ofNat]; simp [hi, BitVec.getLsbD]
+
+theorem bv_resize_bvenc {wa w : Nat} (a : BitVec wa) :
+    bv_resize w (bvenc a) = bvenc (bv_zext a : BitVec w) := by
+  have hz : (bv_zext a : BitVec w).toNat = a.toNat % 2 ^ w := by unfold bv_zext; rw [BitVec.toNat_ofNat]
+  unfold bv_resize; rw [bv_uint_bvenc]; unfold bvenc
+  apply mk_bv_eq_of_emod
+  rw [hz]
+  have hc : (2:Int) ^ w = ((2 ^ w : Nat) : Int) := by simp
+  simp only [Int.ofNat_eq_natCast]
+  rw [hc, Int.natCast_emod, Int.emod_emod_of_dvd _ (dvd_refl _)]
+
+theorem bv_bit_mk_bv_zero {w i : Nat} : bv_bit (mk_bv w 0) i = false := by
+  unfold bv_bit mk_bv bv_uint; simp
+
+theorem bv_bit_bitsToInt {w : Nat} (g : Nat → Bool) {i : Nat} (hi : i < w) :
+    bv_bit (mk_bv w (bits_to_int w g)) i = g i := by
+  have hnn := bits_to_int_nonneg w g
+  have hlt := bits_to_int_lt w g
+  have hval : bv_uint (mk_bv w (bits_to_int w g)) = bits_to_int w g := by
+    unfold bv_uint mk_bv
+    rw [Int.emod_emod_of_dvd _ (dvd_refl _)]
+    exact Int.emod_eq_of_lt hnn hlt
+  unfold bv_bit; rw [hval, Nat.shiftRight_eq_div_pow, ← testBit_div_mod, bits_to_int_testBit]
+  simp [hi]
+
+theorem bv_bitwise_eq {w : Nat} (f : Bool → Bool → Bool) (A B : BV) (Z : BitVec w)
+    (h : ∀ i, i < w → f (bv_bit A i) (bv_bit B i) = Z.getLsbD i) :
+    bv_bitwise w f A B = bvenc Z := by
+  unfold bv_bitwise bvenc; congr 1
+  rw [← bits_to_int_toNat Z]; exact bits_to_int_congr h
+
+theorem bv_not_eq {w : Nat} (A : BV) (Z : BitVec w)
+    (h : ∀ i, i < w → (! bv_bit A i) = Z.getLsbD i) :
+    bv_not w A = bvenc Z := by
+  unfold bv_not bvenc; congr 1
+  rw [← bits_to_int_toNat Z]
+  apply bits_to_int_congr
+  intro i hi; rw [← h i hi]; simp
+
+theorem and_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_And w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) &&& (bv_zext b : BitVec w)) := by
+  show bv_bitwise w (fun x y => x && y) (bv_resize w (bvenc a)) (bvenc b) = _
+  rw [bv_resize_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
+
+theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_Or w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) := by
+  show bv_bitwise w (fun x y => x || y) (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) (bvenc b) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have hz : bv_bit (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  simp only [hz, bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
+
+theorem xor_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_Xor w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) ^^^ (bv_zext b : BitVec w)) := by
+  show bv_bitwise w (fun x y => xor x y) (bv_bitwise w (fun x y => xor x y) (mk_bv w 0) (bvenc a)) (bvenc b) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have hz : bv_bit (bv_bitwise w (fun x y => xor x y) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  simp only [hz, bv_bit_bvenc, BitVec.getLsbD_xor, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
+
+theorem not_bridge {wa w : Nat} (a : BitVec wa) :
+    eval_op LGraphOp.Op_Not w [bvenc a] = bvenc (~~~ (bv_zext a : BitVec w)) := by
+  show bv_not w (bvenc a) = _
+  apply bv_not_eq
+  intro i hi
+  rw [bv_bit_bvenc, BitVec.getLsbD_not, getLsbD_zext_lt a hi]; simp [hi]
+
 end OpBridge
