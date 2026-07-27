@@ -1,0 +1,52 @@
+pub comb DualIssueForwardingUnit::[lg="DualIssueForwardingUnit", hdl](io_ex_pipeA_rs1:u5, io_ex_pipeA_rs2:u5, io_ex_pipeB_rs1:u5, io_ex_pipeB_rs2:u5, io_mem_pipeA_rd:u5, io_mem_pipeA_rw:u1, io_mem_pipeB_rd:u5, io_mem_pipeB_rw:u1, io_wb_pipeA_rd:u5, io_wb_pipeA_rw:u1, io_wb_pipeB_rd:u5, io_wb_pipeB_rw:u1) -> (io_pipeA_forward1:u3, io_pipeA_forward2:u3, io_pipeB_forward1:u3, io_pipeB_forward2:u3) {
+  mut _b2i_1 = if io_mem_pipeB_rd == io_ex_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_2 = if io_ex_pipeA_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_3 = if io_mem_pipeA_rd == io_ex_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_4 = if io_ex_pipeA_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_5 = if io_wb_pipeB_rd == io_ex_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_6 = if io_ex_pipeA_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_7 = if io_wb_pipeA_rd == io_ex_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_8 = if io_ex_pipeA_rs1 != 0 { 1 } else { 0 }
+  mut _mux_9:u3 = if (io_wb_pipeA_rw & _b2i_7 & _b2i_8) != 0 { 3 } else { 0 }
+  mut _mux_10:u3 = if (io_wb_pipeB_rw & _b2i_5 & _b2i_6) != 0 { 4 } else { _mux_9#[0..=2] }
+  mut _mux_11:u3 = if (io_mem_pipeA_rw & _b2i_3 & _b2i_4) != 0 { 1 } else { _mux_10#[0..=2] }
+  mut _mux_12:u3 = if (io_mem_pipeB_rw & _b2i_1 & _b2i_2) != 0 { 2 } else { _mux_11#[0..=2] }
+  io_pipeA_forward1 = _mux_12
+  mut _b2i_13 = if io_mem_pipeB_rd == io_ex_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_14 = if io_ex_pipeA_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_15 = if io_mem_pipeA_rd == io_ex_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_16 = if io_ex_pipeA_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_17 = if io_wb_pipeB_rd == io_ex_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_18 = if io_ex_pipeA_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_19 = if io_wb_pipeA_rd == io_ex_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_20 = if io_ex_pipeA_rs2 != 0 { 1 } else { 0 }
+  mut _mux_21:u3 = if (io_wb_pipeA_rw & _b2i_19 & _b2i_20) != 0 { 3 } else { 0 }
+  mut _mux_22:u3 = if (io_wb_pipeB_rw & _b2i_17 & _b2i_18) != 0 { 4 } else { _mux_21#[0..=2] }
+  mut _mux_23:u3 = if (io_mem_pipeA_rw & _b2i_15 & _b2i_16) != 0 { 1 } else { _mux_22#[0..=2] }
+  mut _mux_24:u3 = if (io_mem_pipeB_rw & _b2i_13 & _b2i_14) != 0 { 2 } else { _mux_23#[0..=2] }
+  io_pipeA_forward2 = _mux_24
+  mut _b2i_25 = if io_mem_pipeB_rd == io_ex_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_26 = if io_ex_pipeB_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_27 = if io_mem_pipeA_rd == io_ex_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_28 = if io_ex_pipeB_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_29 = if io_wb_pipeB_rd == io_ex_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_30 = if io_ex_pipeB_rs1 != 0 { 1 } else { 0 }
+  mut _b2i_31 = if io_wb_pipeA_rd == io_ex_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_32 = if io_ex_pipeB_rs1 != 0 { 1 } else { 0 }
+  mut _mux_33:u3 = if (io_wb_pipeB_rw & _b2i_29 & _b2i_30) != 0 { 5 } else { (0 | ((io_wb_pipeA_rw & _b2i_31 & _b2i_32) << 2))#[0..=2] }
+  mut _mux_34:u3 = if (io_mem_pipeA_rw & _b2i_27 & _b2i_28) != 0 { 2 } else { _mux_33#[0..=2] }
+  mut _mux_35:u3 = if (io_mem_pipeB_rw & _b2i_25 & _b2i_26) != 0 { 3 } else { _mux_34#[0..=2] }
+  io_pipeB_forward1 = _mux_35
+  mut _b2i_36 = if io_mem_pipeB_rd == io_ex_pipeB_rs2 { 1 } else { 0 }
+  mut _b2i_37 = if io_ex_pipeB_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_38 = if io_mem_pipeA_rd == io_ex_pipeB_rs2 { 1 } else { 0 }
+  mut _b2i_39 = if io_ex_pipeB_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_40 = if io_wb_pipeB_rd == io_ex_pipeB_rs2 { 1 } else { 0 }
+  mut _b2i_41 = if io_ex_pipeB_rs2 != 0 { 1 } else { 0 }
+  mut _b2i_42 = if io_wb_pipeA_rd == io_ex_pipeB_rs2 { 1 } else { 0 }
+  mut _b2i_43 = if io_ex_pipeB_rs2 != 0 { 1 } else { 0 }
+  mut _mux_44:u3 = if (io_wb_pipeB_rw & _b2i_40 & _b2i_41) != 0 { 5 } else { (0 | ((io_wb_pipeA_rw & _b2i_42 & _b2i_43) << 2))#[0..=2] }
+  mut _mux_45:u3 = if (io_mem_pipeA_rw & _b2i_38 & _b2i_39) != 0 { 2 } else { _mux_44#[0..=2] }
+  mut _mux_46:u3 = if (io_mem_pipeB_rw & _b2i_36 & _b2i_37) != 0 { 3 } else { _mux_45#[0..=2] }
+  io_pipeB_forward2 = _mux_46
+}

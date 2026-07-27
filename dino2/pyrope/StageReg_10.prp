@@ -1,0 +1,17 @@
+pub mod StageReg_10::[lg="StageReg_10", hdl](clock:u1, reset:u1, io_in_readdata:u64, io_in_ex_result:u64, io_in_instruction:u64) -> (io_data_readdata:u64@[], io_data_ex_result:u64@[], io_data_instruction:u64@[]) {
+  reg reg_readdata:u64
+  reg reg_ex_result:u64
+  reg reg_instruction:u64
+  if reset != 0 {
+    reg_ex_result = 0
+    reg_instruction = 0
+    reg_readdata = 0
+  } else {
+    reg_ex_result = io_in_ex_result
+    reg_instruction = io_in_instruction
+    reg_readdata = io_in_readdata
+  }
+  io_data_ex_result = reg_ex_result
+  io_data_instruction = reg_instruction
+  io_data_readdata = reg_readdata
+}

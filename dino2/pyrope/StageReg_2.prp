@@ -1,0 +1,56 @@
+pub mod StageReg_2::[lg="StageReg_2", hdl](clock:u1, reset:u1, io_in_pc:u64, io_in_instruction:u64, io_in_sextImm:u64, io_in_readdata1:u64, io_in_readdata2:u64, io_in_isValid:u1, io_flush:u1) -> (io_data_pc:u64@[], io_data_instruction:u64@[], io_data_sextImm:u64@[], io_data_readdata1:u64@[], io_data_readdata2:u64@[], io_data_isValid:u1@[]) {
+  mut _mux_1 = 0
+  mut _mux_2 = 0
+  mut _mux_3 = 0
+  mut _mux_4 = 0
+  mut _mux_5 = 0
+  reg reg_pc:u64
+  reg reg_instruction:u64
+  reg reg_sextImm:u64
+  reg reg_readdata1:u64
+  reg reg_readdata2:u64
+  reg reg_isValid:u1
+  if reset != 0 {
+    reg_instruction = 0
+    reg_isValid = 0
+    reg_pc = 0
+    reg_readdata1 = 0
+    reg_readdata2 = 0
+    reg_sextImm = 0
+  } else {
+    
+    _mux_1 = if io_flush != 0 { 0 } else { io_in_pc#[0..=63] }
+    
+    _mux_2 = io_in_instruction#[0..=63]
+    reg_pc = _mux_1
+    if io_flush != 0 {
+      _mux_2 = 0
+    }
+    
+    _mux_3 = io_in_sextImm#[0..=63]
+    reg_instruction = _mux_2
+    if io_flush != 0 {
+      _mux_3 = 0
+    }
+    
+    _mux_4 = io_in_readdata1#[0..=63]
+    reg_sextImm = _mux_3
+    if io_flush != 0 {
+      _mux_4 = 0
+    }
+    
+    _mux_5 = io_in_readdata2#[0..=63]
+    reg_readdata1 = _mux_4
+    if io_flush != 0 {
+      _mux_5 = 0
+    }
+    reg_isValid = (~io_flush) & 1 & io_in_isValid
+    reg_readdata2 = _mux_5
+  }
+  io_data_instruction = reg_instruction
+  io_data_isValid = reg_isValid
+  io_data_pc = reg_pc
+  io_data_readdata1 = reg_readdata1
+  io_data_readdata2 = reg_readdata2
+  io_data_sextImm = reg_sextImm
+}

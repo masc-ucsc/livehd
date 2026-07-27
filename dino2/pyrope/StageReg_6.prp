@@ -1,0 +1,50 @@
+pub mod StageReg_6::[lg="StageReg_6", hdl](clock:u1, reset:u1, io_in_ex_result:u64, io_in_mem_writedata:u64, io_in_nextpc:u64, io_in_taken:u1, io_in_instruction:u64, io_in_isValid:u1, io_flush:u1) -> (io_data_ex_result:u64@[], io_data_mem_writedata:u64@[], io_data_nextpc:u64@[], io_data_taken:u1@[], io_data_instruction:u64@[], io_data_isValid:u1@[]) {
+  mut _mux_1 = 0
+  mut _mux_2 = 0
+  mut _mux_3 = 0
+  mut _mux_4 = 0
+  reg reg_ex_result:u64
+  reg reg_mem_writedata:u64
+  reg reg_nextpc:u64
+  reg reg_taken:u1
+  reg reg_instruction:u64
+  reg reg_isValid:u1
+  if reset != 0 {
+    reg_ex_result = 0
+    reg_instruction = 0
+    reg_isValid = 0
+    reg_mem_writedata = 0
+    reg_nextpc = 0
+    reg_taken = 0
+  } else {
+    
+    _mux_1 = if io_flush != 0 { 0 } else { io_in_ex_result#[0..=63] }
+    
+    _mux_2 = io_in_mem_writedata#[0..=63]
+    reg_ex_result = _mux_1
+    if io_flush != 0 {
+      _mux_2 = 0
+    }
+    
+    _mux_3 = io_in_nextpc#[0..=63]
+    reg_mem_writedata = _mux_2
+    if io_flush != 0 {
+      _mux_3 = 0
+    }
+    
+    _mux_4 = io_in_instruction#[0..=63]
+    reg_nextpc = _mux_3
+    reg_taken = (~io_flush) & 1 & io_in_taken
+    if io_flush != 0 {
+      _mux_4 = 0
+    }
+    reg_instruction = _mux_4
+    reg_isValid = (~io_flush) & 1 & io_in_isValid
+  }
+  io_data_ex_result = reg_ex_result
+  io_data_instruction = reg_instruction
+  io_data_isValid = reg_isValid
+  io_data_mem_writedata = reg_mem_writedata
+  io_data_nextpc = reg_nextpc
+  io_data_taken = reg_taken
+}

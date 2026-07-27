@@ -1,0 +1,17 @@
+DualIssueIssueUnit.sv
+DualIssueRegisterFile.sv
+Control.sv
+ImmediateGenerator.sv
+ALUControl.sv
+ALU.sv
+DualIssueNextPC.sv
+DualIssueForwardingUnit.sv
+DualIssueHazardUnit.sv
+StageReg.sv
+StageReg_2.sv
+StageReg_4.sv
+StageReg_6.sv
+StageReg_8.sv
+StageReg_10.sv
+StageReg_12.sv
+PipelinedDualIssueCPU.sv

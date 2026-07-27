@@ -1,0 +1,27 @@
+pub mod StageReg::[lg="StageReg", hdl](clock:u1, reset:u1, io_in_instruction:u32, io_in_pc:u64, io_in_isValid:u1, io_flush:u1, io_valid:u1) -> (io_data_instruction:u32@[], io_data_pc:u64@[], io_data_isValid:u1@[]) {
+  mut _mux_1 = 0
+  reg reg_instruction:u32
+  reg reg_pc:u64
+  reg reg_isValid:u1
+  if reset != 0 {
+    reg_instruction = 0
+    reg_isValid = 0
+    reg_pc = 0
+  } else {
+    if io_flush != 0 {
+      reg_instruction = 0
+      reg_pc = 0
+    } else {
+      if io_valid != 0 {
+        reg_instruction = io_in_instruction
+        reg_pc = io_in_pc
+      }
+    }
+    
+    _mux_1 = if io_valid != 0 { io_in_isValid & 1 } else { reg_isValid & 1 }
+    reg_isValid = (~io_flush) & 1 & _mux_1
+  }
+  io_data_instruction = reg_instruction
+  io_data_isValid = reg_isValid
+  io_data_pc = reg_pc
+}

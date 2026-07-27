@@ -1,0 +1,13 @@
+pub mod StageReg_12::[lg="StageReg_12", hdl](clock:u1, reset:u1, io_in_wb_ctrl_toreg:u1, io_in_wb_ctrl_regwrite:u1) -> (io_data_wb_ctrl_toreg:u1@[], io_data_wb_ctrl_regwrite:u1@[]) {
+  reg reg_wb_ctrl_toreg:u1
+  reg reg_wb_ctrl_regwrite:u1
+  if reset != 0 {
+    reg_wb_ctrl_regwrite = 0
+    reg_wb_ctrl_toreg = 0
+  } else {
+    reg_wb_ctrl_regwrite = io_in_wb_ctrl_regwrite
+    reg_wb_ctrl_toreg = io_in_wb_ctrl_toreg
+  }
+  io_data_wb_ctrl_regwrite = reg_wb_ctrl_regwrite
+  io_data_wb_ctrl_toreg = reg_wb_ctrl_toreg
+}

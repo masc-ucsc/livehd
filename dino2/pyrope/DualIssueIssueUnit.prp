@@ -1,0 +1,74 @@
+pub comb DualIssueIssueUnit::[lg="DualIssueIssueUnit", hdl](clock:u1, reset:u1, io_pc:u64, io_inst:u64) -> (io_nextpc:u64, io_pipeA_inst:u32, io_pipeB_inst:u32, io_pipeB_valid:u1) {
+  mut _GEN_0__w1 = 0
+  mut _GEN__w1 = 0
+  mut _inst2_regs_T_11__w1 = 0
+  mut _inst2_regs_T_13__w1 = 0
+  mut _inst2_regs_T_15__w1 = 0
+  mut _inst2_regs_T_1__w1 = 0
+  mut _inst2_regs_T_3__w1 = 0
+  mut _inst2_regs_T_42__w1 = 0
+  mut _inst2_regs_T_5__w1 = 0
+  mut _oddPC_T__w1 = 0
+  mut will_issue_inst1__w1 = 0
+  mut will_issue_inst2__w1 = 0
+  mut _mux_35:u32 = 0
+  mut _mux_36:u32 = 0
+  _oddPC_T__w1 = io_pc & 7
+  mut _b2i_1 = if io_inst#[32..=38] == 51 { 1 } else { 0 }
+  _inst2_regs_T_1__w1 = _b2i_1
+  mut _b2i_2 = if io_inst#[32..=38] == 19 { 1 } else { 0 }
+  _inst2_regs_T_3__w1 = _b2i_2
+  mut _b2i_3 = if io_inst#[32..=38] == 3 { 1 } else { 0 }
+  _inst2_regs_T_5__w1 = _b2i_3
+  mut _b2i_4 = if io_inst#[32..=38] == 55 { 1 } else { 0 }
+  _inst2_regs_T_11__w1 = _b2i_4
+  mut _b2i_5 = if io_inst#[32..=38] == 23 { 1 } else { 0 }
+  _inst2_regs_T_13__w1 = _b2i_5
+  mut _b2i_6 = if io_inst#[32..=38] == 111 { 1 } else { 0 }
+  _inst2_regs_T_15__w1 = _b2i_6
+  mut _b2i_7 = if io_inst#[32..=38] == 59 { 1 } else { 0 }
+  _inst2_regs_T_42__w1 = _b2i_7
+  mut _b2i_8 = if io_inst#[32..=38] == 103 { 1 } else { 0 }
+  mut _b2i_9 = if io_inst#[32..=38] == 27 { 1 } else { 0 }
+  _GEN__w1 = _b2i_8 | _b2i_9
+  mut _b2i_10 = if io_inst#[32..=38] == 35 { 1 } else { 0 }
+  mut _b2i_11 = if io_inst#[32..=38] == 99 { 1 } else { 0 }
+  _GEN_0__w1 = _b2i_10 | _b2i_11
+  mut _b2i_12 = if _oddPC_T__w1#[0..=3] != 4 { 1 } else { 0 }
+  will_issue_inst1__w1 = _b2i_12
+  mut _b2i_13 = if io_inst#[0..=6] == 3 { 1 } else { 0 }
+  mut _b2i_14 = if io_inst#[0..=6] == 35 { 1 } else { 0 }
+  mut _b2i_15 = if io_inst#[0..=6] == 99 { 1 } else { 0 }
+  mut _b2i_16 = if io_inst#[0..=6] == 111 { 1 } else { 0 }
+  mut _b2i_17 = if io_inst#[0..=6] == 103 { 1 } else { 0 }
+  mut _b2i_18 = if io_inst#[0..=6] == 51 { 1 } else { 0 }
+  mut _b2i_19 = if io_inst#[0..=6] == 19 { 1 } else { 0 }
+  mut _b2i_20 = if io_inst#[0..=6] == 3 { 1 } else { 0 }
+  mut _b2i_21 = if io_inst#[0..=6] == 35 { 1 } else { 0 }
+  mut _b2i_22 = if io_inst#[0..=6] == 99 { 1 } else { 0 }
+  mut _b2i_23 = if io_inst#[0..=6] == 55 { 1 } else { 0 }
+  mut _b2i_24 = if io_inst#[0..=6] == 23 { 1 } else { 0 }
+  mut _b2i_25 = if io_inst#[0..=6] == 111 { 1 } else { 0 }
+  mut _b2i_26 = if io_inst#[0..=6] == 103 { 1 } else { 0 }
+  mut _b2i_27 = if io_inst#[0..=6] == 27 { 1 } else { 0 }
+  mut _b2i_28 = if io_inst#[0..=6] == 59 { 1 } else { 0 }
+  mut _b2i_29 = if io_inst#[7..=11] != 0 { 1 } else { 0 }
+  mut _b2i_30 = if io_inst#[7..=11] == io_inst#[47..=51] { 1 } else { 0 }
+  mut _b2i_31 = if io_inst#[7..=11] == io_inst#[52..=56] { 1 } else { 0 }
+  mut _b2i_32 = if _oddPC_T__w1#[0..=3] == 4 { 1 } else { 0 }
+  will_issue_inst2__w1 = _b2i_32 | ((~(_b2i_13 | _b2i_14 | _b2i_15 | _b2i_16 | _b2i_17)) & 1 & (((~((_b2i_18 | _b2i_19 | _b2i_20 | ((~(_b2i_21 | _b2i_22)) & 1 & (_b2i_23 | _b2i_24 | _b2i_25 | _b2i_26 | _b2i_27 | _b2i_28))) & _b2i_29)) & 1) | ((~(((_inst2_regs_T_1__w1 | _inst2_regs_T_3__w1 | _inst2_regs_T_5__w1 | _GEN_0__w1 | ((~(_inst2_regs_T_11__w1 | _inst2_regs_T_13__w1 | _inst2_regs_T_15__w1)) & 1 & (_GEN__w1 | _inst2_regs_T_42__w1))) & _b2i_30) | ((_inst2_regs_T_1__w1 | ((~(_inst2_regs_T_3__w1 | _inst2_regs_T_5__w1)) & 1 & (_GEN_0__w1 | ((~(_inst2_regs_T_11__w1 | _inst2_regs_T_13__w1 | _inst2_regs_T_15__w1 | _GEN__w1)) & 1 & _inst2_regs_T_42__w1)))) & _b2i_31))) & 1)))
+  mut _mux_33:u64 = if will_issue_inst2__w1 != 0 { (io_pc + 8)#[0..=63]#[0..=63] } else { (io_pc + 4)#[0..=63]#[0..=63] }
+  mut _mux_34:u64 = if will_issue_inst1__w1 != 0 { _mux_33#[0..=63] } else { (io_pc + 4)#[0..=63]#[0..=63] }
+  _mux_35 = io_inst#[32..=63]#[0..=31]
+  io_nextpc = _mux_34
+  if will_issue_inst1__w1 != 0 {
+    _mux_35 = io_inst#[0..=31]#[0..=31]
+  }
+  _mux_36 = 19
+  io_pipeA_inst = _mux_35
+  if (will_issue_inst1__w1 & will_issue_inst2__w1) != 0 {
+    _mux_36 = io_inst#[32..=63]#[0..=31]
+  }
+  io_pipeB_inst = _mux_36
+  io_pipeB_valid = will_issue_inst1__w1 & will_issue_inst2__w1
+}

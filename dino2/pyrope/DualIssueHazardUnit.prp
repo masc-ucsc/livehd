@@ -1,0 +1,22 @@
+pub comb DualIssueHazardUnit::[lg="DualIssueHazardUnit", hdl](io_id_pipeA_rs1:u5, io_id_pipeA_rs2:u5, io_id_pipeB_rs1:u5, io_id_pipeB_rs2:u5, io_pipeA_idex_memread:u1, io_pipeA_idex_rd:u5, io_pipeA_exmem_taken:u1, io_pipeB_idex_memread:u1, io_pipeB_idex_rd:u5, io_pipeB_exmem_taken:u1) -> (io_pcfromtaken:u1, io_pcstall:u1, io_if_id_stall:u1, io_id_ex_flush:u1, io_ex_mem_flush:u1, io_if_id_flush:u1) {
+  mut _GEN__w1 = 0
+  mut io_pcfromtaken_0__w1 = 0
+  mut io_pcstall_0__w1 = 0
+  io_pcfromtaken_0__w1 = io_pipeA_exmem_taken | io_pipeB_exmem_taken
+  mut _b2i_1 = if io_pipeB_idex_rd == io_id_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_2 = if io_pipeB_idex_rd == io_id_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_3 = if io_pipeB_idex_rd == io_id_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_4 = if io_pipeB_idex_rd == io_id_pipeB_rs2 { 1 } else { 0 }
+  mut _b2i_5 = if io_pipeA_idex_rd == io_id_pipeA_rs1 { 1 } else { 0 }
+  mut _b2i_6 = if io_pipeA_idex_rd == io_id_pipeA_rs2 { 1 } else { 0 }
+  mut _b2i_7 = if io_pipeA_idex_rd == io_id_pipeB_rs1 { 1 } else { 0 }
+  mut _b2i_8 = if io_pipeA_idex_rd == io_id_pipeB_rs2 { 1 } else { 0 }
+  _GEN__w1 = (io_pipeB_idex_memread & (_b2i_1 | _b2i_2 | _b2i_3 | _b2i_4)) | (io_pipeA_idex_memread & (_b2i_5 | _b2i_6 | _b2i_7 | _b2i_8))
+  io_pcstall_0__w1 = (~io_pcfromtaken_0__w1) & 1 & _GEN__w1
+  io_ex_mem_flush = io_pcfromtaken_0__w1
+  io_id_ex_flush = io_pcfromtaken_0__w1 | _GEN__w1
+  io_if_id_flush = io_pcfromtaken_0__w1
+  io_if_id_stall = io_pcstall_0__w1
+  io_pcfromtaken = io_pcfromtaken_0__w1
+  io_pcstall = io_pcstall_0__w1
+}

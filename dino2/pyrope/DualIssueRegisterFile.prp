@@ -1,0 +1,822 @@
+pub mod DualIssueRegisterFile::[lg="DualIssueRegisterFile", hdl](clock:u1, io_pipeA_readreg1:u5, io_pipeA_readreg2:u5, io_pipeA_writereg:u5, io_pipeA_writedata:u64, io_pipeA_wen:u1, io_pipeB_readreg1:u5, io_pipeB_readreg2:u5, io_pipeB_writereg:u5, io_pipeB_writedata:u64, io_pipeB_wen:u1) -> (io_pipeA_readdata1:u64@[], io_pipeA_readdata2:u64@[], io_pipeB_readdata1:u64@[], io_pipeB_readdata2:u64@[]) {
+  mut _GEN_0__w1 = 0
+  mut _GEN_10__w1 = 0
+  mut _GEN_11__w1 = 0
+  mut _GEN_12__w1 = 0
+  mut _GEN_13__w1 = 0
+  mut _GEN_14__w1 = 0
+  mut _GEN_15__w1 = 0
+  mut _GEN_16__w1 = 0
+  mut _GEN_17__w1 = 0
+  mut _GEN_18__w1 = 0
+  mut _GEN_19__w1 = 0
+  mut _GEN_1__w1 = 0
+  mut _GEN_20__w1 = 0
+  mut _GEN_21__w1 = 0
+  mut _GEN_22__w1 = 0
+  mut _GEN_23__w1 = 0
+  mut _GEN_24__w1 = 0
+  mut _GEN_25__w1 = 0
+  mut _GEN_26__w1 = 0
+  mut _GEN_27__w1 = 0
+  mut _GEN_28__w1 = 0
+  mut _GEN_29__w1 = 0
+  mut _GEN_2__w1 = 0
+  mut _GEN_3__w1 = 0
+  mut _GEN_4__w1 = 0
+  mut _GEN_5__w1 = 0
+  mut _GEN_6__w1 = 0
+  mut _GEN_7__w1 = 0
+  mut _GEN_8__w1 = 0
+  mut _GEN_9__w1 = 0
+  mut _GEN__w1 = 0
+  mut _b2i_33 = 0
+  mut _b2i_34 = 0
+  mut _b2i_35 = 0
+  mut _b2i_36 = 0
+  mut _b2i_37 = 0
+  mut _b2i_38 = 0
+  mut _b2i_39 = 0
+  mut _b2i_40 = 0
+  mut _b2i_41 = 0
+  mut _b2i_42 = 0
+  mut _b2i_43 = 0
+  mut _b2i_44 = 0
+  mut _b2i_45 = 0
+  mut _b2i_46 = 0
+  mut _b2i_47 = 0
+  mut _b2i_48 = 0
+  mut _b2i_49 = 0
+  mut _b2i_50 = 0
+  mut _b2i_51 = 0
+  mut _b2i_52 = 0
+  mut _b2i_53 = 0
+  mut _b2i_54 = 0
+  mut _b2i_55 = 0
+  mut _b2i_56 = 0
+  mut _b2i_57 = 0
+  mut _b2i_58 = 0
+  mut _b2i_59 = 0
+  mut _b2i_60 = 0
+  mut _b2i_61 = 0
+  mut _b2i_62 = 0
+  mut _b2i_63 = 0
+  mut _b2i_64 = 0
+  mut _b2i_65 = 0
+  mut casez_tmp = 0
+  mut casez_tmp_0 = 0
+  mut casez_tmp_1 = 0
+  mut casez_tmp_2 = 0
+  reg regs_0:u64
+  reg regs_1:u64
+  reg regs_2:u64
+  reg regs_3:u64
+  reg regs_4:u64
+  reg regs_5:u64
+  reg regs_6:u64
+  reg regs_7:u64
+  reg regs_8:u64
+  reg regs_9:u64
+  reg regs_10:u64
+  reg regs_11:u64
+  reg regs_12:u64
+  reg regs_13:u64
+  reg regs_14:u64
+  reg regs_15:u64
+  reg regs_16:u64
+  reg regs_17:u64
+  reg regs_18:u64
+  reg regs_19:u64
+  reg regs_20:u64
+  reg regs_21:u64
+  reg regs_22:u64
+  reg regs_23:u64
+  reg regs_24:u64
+  reg regs_25:u64
+  reg regs_26:u64
+  reg regs_27:u64
+  reg regs_28:u64
+  reg regs_29:u64
+  reg regs_30:u64
+  reg regs_31:u64
+  unique if io_pipeA_readreg1 == 0 {
+    
+    casez_tmp = regs_0
+  } elif io_pipeA_readreg1 == 1 {
+    casez_tmp = regs_1
+  } elif io_pipeA_readreg1 == 2 {
+    casez_tmp = regs_2
+  } elif io_pipeA_readreg1 == 3 {
+    casez_tmp = regs_3
+  } elif io_pipeA_readreg1 == 4 {
+    casez_tmp = regs_4
+  } elif io_pipeA_readreg1 == 5 {
+    casez_tmp = regs_5
+  } elif io_pipeA_readreg1 == 6 {
+    casez_tmp = regs_6
+  } elif io_pipeA_readreg1 == 7 {
+    casez_tmp = regs_7
+  } elif io_pipeA_readreg1 == 8 {
+    casez_tmp = regs_8
+  } elif io_pipeA_readreg1 == 9 {
+    casez_tmp = regs_9
+  } elif io_pipeA_readreg1 == 10 {
+    casez_tmp = regs_10
+  } elif io_pipeA_readreg1 == 11 {
+    casez_tmp = regs_11
+  } elif io_pipeA_readreg1 == 12 {
+    casez_tmp = regs_12
+  } elif io_pipeA_readreg1 == 13 {
+    casez_tmp = regs_13
+  } elif io_pipeA_readreg1 == 14 {
+    casez_tmp = regs_14
+  } elif io_pipeA_readreg1 == 15 {
+    casez_tmp = regs_15
+  } elif io_pipeA_readreg1 == 16 {
+    casez_tmp = regs_16
+  } elif io_pipeA_readreg1 == 17 {
+    casez_tmp = regs_17
+  } elif io_pipeA_readreg1 == 18 {
+    casez_tmp = regs_18
+  } elif io_pipeA_readreg1 == 19 {
+    casez_tmp = regs_19
+  } elif io_pipeA_readreg1 == 20 {
+    casez_tmp = regs_20
+  } elif io_pipeA_readreg1 == 21 {
+    casez_tmp = regs_21
+  } elif io_pipeA_readreg1 == 22 {
+    casez_tmp = regs_22
+  } elif io_pipeA_readreg1 == 23 {
+    casez_tmp = regs_23
+  } elif io_pipeA_readreg1 == 24 {
+    casez_tmp = regs_24
+  } elif io_pipeA_readreg1 == 25 {
+    casez_tmp = regs_25
+  } elif io_pipeA_readreg1 == 26 {
+    casez_tmp = regs_26
+  } elif io_pipeA_readreg1 == 27 {
+    casez_tmp = regs_27
+  } elif io_pipeA_readreg1 == 28 {
+    casez_tmp = regs_28
+  } elif io_pipeA_readreg1 == 29 {
+    casez_tmp = regs_29
+  } elif io_pipeA_readreg1 == 30 {
+    casez_tmp = regs_30
+  } else {
+    casez_tmp = regs_31
+  }
+  unique if io_pipeA_readreg2 == 0 {
+    
+    casez_tmp_0 = regs_0
+  } elif io_pipeA_readreg2 == 1 {
+    casez_tmp_0 = regs_1
+  } elif io_pipeA_readreg2 == 2 {
+    casez_tmp_0 = regs_2
+  } elif io_pipeA_readreg2 == 3 {
+    casez_tmp_0 = regs_3
+  } elif io_pipeA_readreg2 == 4 {
+    casez_tmp_0 = regs_4
+  } elif io_pipeA_readreg2 == 5 {
+    casez_tmp_0 = regs_5
+  } elif io_pipeA_readreg2 == 6 {
+    casez_tmp_0 = regs_6
+  } elif io_pipeA_readreg2 == 7 {
+    casez_tmp_0 = regs_7
+  } elif io_pipeA_readreg2 == 8 {
+    casez_tmp_0 = regs_8
+  } elif io_pipeA_readreg2 == 9 {
+    casez_tmp_0 = regs_9
+  } elif io_pipeA_readreg2 == 10 {
+    casez_tmp_0 = regs_10
+  } elif io_pipeA_readreg2 == 11 {
+    casez_tmp_0 = regs_11
+  } elif io_pipeA_readreg2 == 12 {
+    casez_tmp_0 = regs_12
+  } elif io_pipeA_readreg2 == 13 {
+    casez_tmp_0 = regs_13
+  } elif io_pipeA_readreg2 == 14 {
+    casez_tmp_0 = regs_14
+  } elif io_pipeA_readreg2 == 15 {
+    casez_tmp_0 = regs_15
+  } elif io_pipeA_readreg2 == 16 {
+    casez_tmp_0 = regs_16
+  } elif io_pipeA_readreg2 == 17 {
+    casez_tmp_0 = regs_17
+  } elif io_pipeA_readreg2 == 18 {
+    casez_tmp_0 = regs_18
+  } elif io_pipeA_readreg2 == 19 {
+    casez_tmp_0 = regs_19
+  } elif io_pipeA_readreg2 == 20 {
+    casez_tmp_0 = regs_20
+  } elif io_pipeA_readreg2 == 21 {
+    casez_tmp_0 = regs_21
+  } elif io_pipeA_readreg2 == 22 {
+    casez_tmp_0 = regs_22
+  } elif io_pipeA_readreg2 == 23 {
+    casez_tmp_0 = regs_23
+  } elif io_pipeA_readreg2 == 24 {
+    casez_tmp_0 = regs_24
+  } elif io_pipeA_readreg2 == 25 {
+    casez_tmp_0 = regs_25
+  } elif io_pipeA_readreg2 == 26 {
+    casez_tmp_0 = regs_26
+  } elif io_pipeA_readreg2 == 27 {
+    casez_tmp_0 = regs_27
+  } elif io_pipeA_readreg2 == 28 {
+    casez_tmp_0 = regs_28
+  } elif io_pipeA_readreg2 == 29 {
+    casez_tmp_0 = regs_29
+  } elif io_pipeA_readreg2 == 30 {
+    casez_tmp_0 = regs_30
+  } else {
+    casez_tmp_0 = regs_31
+  }
+  unique if io_pipeB_readreg1 == 0 {
+    
+    casez_tmp_1 = regs_0
+  } elif io_pipeB_readreg1 == 1 {
+    casez_tmp_1 = regs_1
+  } elif io_pipeB_readreg1 == 2 {
+    casez_tmp_1 = regs_2
+  } elif io_pipeB_readreg1 == 3 {
+    casez_tmp_1 = regs_3
+  } elif io_pipeB_readreg1 == 4 {
+    casez_tmp_1 = regs_4
+  } elif io_pipeB_readreg1 == 5 {
+    casez_tmp_1 = regs_5
+  } elif io_pipeB_readreg1 == 6 {
+    casez_tmp_1 = regs_6
+  } elif io_pipeB_readreg1 == 7 {
+    casez_tmp_1 = regs_7
+  } elif io_pipeB_readreg1 == 8 {
+    casez_tmp_1 = regs_8
+  } elif io_pipeB_readreg1 == 9 {
+    casez_tmp_1 = regs_9
+  } elif io_pipeB_readreg1 == 10 {
+    casez_tmp_1 = regs_10
+  } elif io_pipeB_readreg1 == 11 {
+    casez_tmp_1 = regs_11
+  } elif io_pipeB_readreg1 == 12 {
+    casez_tmp_1 = regs_12
+  } elif io_pipeB_readreg1 == 13 {
+    casez_tmp_1 = regs_13
+  } elif io_pipeB_readreg1 == 14 {
+    casez_tmp_1 = regs_14
+  } elif io_pipeB_readreg1 == 15 {
+    casez_tmp_1 = regs_15
+  } elif io_pipeB_readreg1 == 16 {
+    casez_tmp_1 = regs_16
+  } elif io_pipeB_readreg1 == 17 {
+    casez_tmp_1 = regs_17
+  } elif io_pipeB_readreg1 == 18 {
+    casez_tmp_1 = regs_18
+  } elif io_pipeB_readreg1 == 19 {
+    casez_tmp_1 = regs_19
+  } elif io_pipeB_readreg1 == 20 {
+    casez_tmp_1 = regs_20
+  } elif io_pipeB_readreg1 == 21 {
+    casez_tmp_1 = regs_21
+  } elif io_pipeB_readreg1 == 22 {
+    casez_tmp_1 = regs_22
+  } elif io_pipeB_readreg1 == 23 {
+    casez_tmp_1 = regs_23
+  } elif io_pipeB_readreg1 == 24 {
+    casez_tmp_1 = regs_24
+  } elif io_pipeB_readreg1 == 25 {
+    casez_tmp_1 = regs_25
+  } elif io_pipeB_readreg1 == 26 {
+    casez_tmp_1 = regs_26
+  } elif io_pipeB_readreg1 == 27 {
+    casez_tmp_1 = regs_27
+  } elif io_pipeB_readreg1 == 28 {
+    casez_tmp_1 = regs_28
+  } elif io_pipeB_readreg1 == 29 {
+    casez_tmp_1 = regs_29
+  } elif io_pipeB_readreg1 == 30 {
+    casez_tmp_1 = regs_30
+  } else {
+    casez_tmp_1 = regs_31
+  }
+  unique if io_pipeB_readreg2 == 0 {
+    
+    casez_tmp_2 = regs_0
+  } elif io_pipeB_readreg2 == 1 {
+    casez_tmp_2 = regs_1
+  } elif io_pipeB_readreg2 == 2 {
+    casez_tmp_2 = regs_2
+  } elif io_pipeB_readreg2 == 3 {
+    casez_tmp_2 = regs_3
+  } elif io_pipeB_readreg2 == 4 {
+    casez_tmp_2 = regs_4
+  } elif io_pipeB_readreg2 == 5 {
+    casez_tmp_2 = regs_5
+  } elif io_pipeB_readreg2 == 6 {
+    casez_tmp_2 = regs_6
+  } elif io_pipeB_readreg2 == 7 {
+    casez_tmp_2 = regs_7
+  } elif io_pipeB_readreg2 == 8 {
+    casez_tmp_2 = regs_8
+  } elif io_pipeB_readreg2 == 9 {
+    casez_tmp_2 = regs_9
+  } elif io_pipeB_readreg2 == 10 {
+    casez_tmp_2 = regs_10
+  } elif io_pipeB_readreg2 == 11 {
+    casez_tmp_2 = regs_11
+  } elif io_pipeB_readreg2 == 12 {
+    casez_tmp_2 = regs_12
+  } elif io_pipeB_readreg2 == 13 {
+    casez_tmp_2 = regs_13
+  } elif io_pipeB_readreg2 == 14 {
+    casez_tmp_2 = regs_14
+  } elif io_pipeB_readreg2 == 15 {
+    casez_tmp_2 = regs_15
+  } elif io_pipeB_readreg2 == 16 {
+    casez_tmp_2 = regs_16
+  } elif io_pipeB_readreg2 == 17 {
+    casez_tmp_2 = regs_17
+  } elif io_pipeB_readreg2 == 18 {
+    casez_tmp_2 = regs_18
+  } elif io_pipeB_readreg2 == 19 {
+    casez_tmp_2 = regs_19
+  } elif io_pipeB_readreg2 == 20 {
+    casez_tmp_2 = regs_20
+  } elif io_pipeB_readreg2 == 21 {
+    casez_tmp_2 = regs_21
+  } elif io_pipeB_readreg2 == 22 {
+    casez_tmp_2 = regs_22
+  } elif io_pipeB_readreg2 == 23 {
+    casez_tmp_2 = regs_23
+  } elif io_pipeB_readreg2 == 24 {
+    casez_tmp_2 = regs_24
+  } elif io_pipeB_readreg2 == 25 {
+    casez_tmp_2 = regs_25
+  } elif io_pipeB_readreg2 == 26 {
+    casez_tmp_2 = regs_26
+  } elif io_pipeB_readreg2 == 27 {
+    casez_tmp_2 = regs_27
+  } elif io_pipeB_readreg2 == 28 {
+    casez_tmp_2 = regs_28
+  } elif io_pipeB_readreg2 == 29 {
+    casez_tmp_2 = regs_29
+  } elif io_pipeB_readreg2 == 30 {
+    casez_tmp_2 = regs_30
+  } else {
+    casez_tmp_2 = regs_31
+  }
+  mut _b2i_1 = if io_pipeB_writereg == 0 { 1 } else { 0 }
+  _GEN__w1 = _b2i_1
+  mut _b2i_2 = if io_pipeB_writereg == 1 { 1 } else { 0 }
+  _GEN_0__w1 = _b2i_2
+  mut _b2i_3 = if io_pipeB_writereg == 2 { 1 } else { 0 }
+  _GEN_1__w1 = _b2i_3
+  mut _b2i_4 = if io_pipeB_writereg == 3 { 1 } else { 0 }
+  _GEN_2__w1 = _b2i_4
+  mut _b2i_5 = if io_pipeB_writereg == 4 { 1 } else { 0 }
+  _GEN_3__w1 = _b2i_5
+  mut _b2i_6 = if io_pipeB_writereg == 5 { 1 } else { 0 }
+  _GEN_4__w1 = _b2i_6
+  mut _b2i_7 = if io_pipeB_writereg == 6 { 1 } else { 0 }
+  _GEN_5__w1 = _b2i_7
+  mut _b2i_8 = if io_pipeB_writereg == 7 { 1 } else { 0 }
+  _GEN_6__w1 = _b2i_8
+  mut _b2i_9 = if io_pipeB_writereg == 8 { 1 } else { 0 }
+  _GEN_7__w1 = _b2i_9
+  mut _b2i_10 = if io_pipeB_writereg == 9 { 1 } else { 0 }
+  _GEN_8__w1 = _b2i_10
+  mut _b2i_11 = if io_pipeB_writereg == 10 { 1 } else { 0 }
+  _GEN_9__w1 = _b2i_11
+  mut _b2i_12 = if io_pipeB_writereg == 11 { 1 } else { 0 }
+  _GEN_10__w1 = _b2i_12
+  mut _b2i_13 = if io_pipeB_writereg == 12 { 1 } else { 0 }
+  _GEN_11__w1 = _b2i_13
+  mut _b2i_14 = if io_pipeB_writereg == 13 { 1 } else { 0 }
+  _GEN_12__w1 = _b2i_14
+  mut _b2i_15 = if io_pipeB_writereg == 14 { 1 } else { 0 }
+  _GEN_13__w1 = _b2i_15
+  mut _b2i_16 = if io_pipeB_writereg == 15 { 1 } else { 0 }
+  _GEN_14__w1 = _b2i_16
+  mut _b2i_17 = if io_pipeB_writereg == 16 { 1 } else { 0 }
+  _GEN_15__w1 = _b2i_17
+  mut _b2i_18 = if io_pipeB_writereg == 17 { 1 } else { 0 }
+  _GEN_16__w1 = _b2i_18
+  mut _b2i_19 = if io_pipeB_writereg == 18 { 1 } else { 0 }
+  _GEN_17__w1 = _b2i_19
+  mut _b2i_20 = if io_pipeB_writereg == 19 { 1 } else { 0 }
+  _GEN_18__w1 = _b2i_20
+  mut _b2i_21 = if io_pipeB_writereg == 20 { 1 } else { 0 }
+  _GEN_19__w1 = _b2i_21
+  mut _b2i_22 = if io_pipeB_writereg == 21 { 1 } else { 0 }
+  _GEN_20__w1 = _b2i_22
+  mut _b2i_23 = if io_pipeB_writereg == 22 { 1 } else { 0 }
+  _GEN_21__w1 = _b2i_23
+  mut _b2i_24 = if io_pipeB_writereg == 23 { 1 } else { 0 }
+  _GEN_22__w1 = _b2i_24
+  mut _b2i_25 = if io_pipeB_writereg == 24 { 1 } else { 0 }
+  _GEN_23__w1 = _b2i_25
+  mut _b2i_26 = if io_pipeB_writereg == 25 { 1 } else { 0 }
+  _GEN_24__w1 = _b2i_26
+  mut _b2i_27 = if io_pipeB_writereg == 26 { 1 } else { 0 }
+  _GEN_25__w1 = _b2i_27
+  mut _b2i_28 = if io_pipeB_writereg == 27 { 1 } else { 0 }
+  _GEN_26__w1 = _b2i_28
+  mut _b2i_29 = if io_pipeB_writereg == 28 { 1 } else { 0 }
+  _GEN_27__w1 = _b2i_29
+  mut _b2i_30 = if io_pipeB_writereg == 29 { 1 } else { 0 }
+  _GEN_28__w1 = _b2i_30
+  mut _b2i_31 = if io_pipeB_writereg == 30 { 1 } else { 0 }
+  _GEN_29__w1 = _b2i_31
+  mut _b2i_32 = if io_pipeA_writereg == io_pipeB_writereg { 1 } else { 0 }
+  if (io_pipeA_wen & io_pipeB_wen & _b2i_32) != 0 {
+    if _GEN__w1 != 0 {
+      regs_0 = io_pipeB_writedata
+    }
+    if _GEN_0__w1 != 0 {
+      regs_1 = io_pipeB_writedata
+    }
+    if _GEN_1__w1 != 0 {
+      regs_2 = io_pipeB_writedata
+    }
+    if _GEN_2__w1 != 0 {
+      regs_3 = io_pipeB_writedata
+    }
+    if _GEN_3__w1 != 0 {
+      regs_4 = io_pipeB_writedata
+    }
+    if _GEN_4__w1 != 0 {
+      regs_5 = io_pipeB_writedata
+    }
+    if _GEN_5__w1 != 0 {
+      regs_6 = io_pipeB_writedata
+    }
+    if _GEN_6__w1 != 0 {
+      regs_7 = io_pipeB_writedata
+    }
+    if _GEN_7__w1 != 0 {
+      regs_8 = io_pipeB_writedata
+    }
+    if _GEN_8__w1 != 0 {
+      regs_9 = io_pipeB_writedata
+    }
+    if _GEN_9__w1 != 0 {
+      regs_10 = io_pipeB_writedata
+    }
+    if _GEN_10__w1 != 0 {
+      regs_11 = io_pipeB_writedata
+    }
+    if _GEN_11__w1 != 0 {
+      regs_12 = io_pipeB_writedata
+    }
+    if _GEN_12__w1 != 0 {
+      regs_13 = io_pipeB_writedata
+    }
+    if _GEN_13__w1 != 0 {
+      regs_14 = io_pipeB_writedata
+    }
+    if _GEN_14__w1 != 0 {
+      regs_15 = io_pipeB_writedata
+    }
+    if _GEN_15__w1 != 0 {
+      regs_16 = io_pipeB_writedata
+    }
+    if _GEN_16__w1 != 0 {
+      regs_17 = io_pipeB_writedata
+    }
+    if _GEN_17__w1 != 0 {
+      regs_18 = io_pipeB_writedata
+    }
+    if _GEN_18__w1 != 0 {
+      regs_19 = io_pipeB_writedata
+    }
+    if _GEN_19__w1 != 0 {
+      regs_20 = io_pipeB_writedata
+    }
+    if _GEN_20__w1 != 0 {
+      regs_21 = io_pipeB_writedata
+    }
+    if _GEN_21__w1 != 0 {
+      regs_22 = io_pipeB_writedata
+    }
+    if _GEN_22__w1 != 0 {
+      regs_23 = io_pipeB_writedata
+    }
+    if _GEN_23__w1 != 0 {
+      regs_24 = io_pipeB_writedata
+    }
+    if _GEN_24__w1 != 0 {
+      regs_25 = io_pipeB_writedata
+    }
+    if _GEN_25__w1 != 0 {
+      regs_26 = io_pipeB_writedata
+    }
+    if _GEN_26__w1 != 0 {
+      regs_27 = io_pipeB_writedata
+    }
+    if _GEN_27__w1 != 0 {
+      regs_28 = io_pipeB_writedata
+    }
+    if _GEN_28__w1 != 0 {
+      regs_29 = io_pipeB_writedata
+    }
+    if _GEN_29__w1 != 0 {
+      regs_30 = io_pipeB_writedata
+    }
+    if io_pipeB_writereg == 31 {
+      regs_31 = io_pipeB_writedata
+    }
+  } else {
+    if (io_pipeB_wen & _GEN__w1) != 0 {
+      regs_0 = io_pipeB_writedata
+    } else {
+      
+      _b2i_33 = if io_pipeA_writereg == 0 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_33) != 0 {
+        regs_0 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_0__w1) != 0 {
+      regs_1 = io_pipeB_writedata
+    } else {
+      
+      _b2i_34 = if io_pipeA_writereg == 1 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_34) != 0 {
+        regs_1 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_1__w1) != 0 {
+      regs_2 = io_pipeB_writedata
+    } else {
+      
+      _b2i_35 = if io_pipeA_writereg == 2 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_35) != 0 {
+        regs_2 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_2__w1) != 0 {
+      regs_3 = io_pipeB_writedata
+    } else {
+      
+      _b2i_36 = if io_pipeA_writereg == 3 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_36) != 0 {
+        regs_3 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_3__w1) != 0 {
+      regs_4 = io_pipeB_writedata
+    } else {
+      
+      _b2i_37 = if io_pipeA_writereg == 4 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_37) != 0 {
+        regs_4 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_4__w1) != 0 {
+      regs_5 = io_pipeB_writedata
+    } else {
+      
+      _b2i_38 = if io_pipeA_writereg == 5 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_38) != 0 {
+        regs_5 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_5__w1) != 0 {
+      regs_6 = io_pipeB_writedata
+    } else {
+      
+      _b2i_39 = if io_pipeA_writereg == 6 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_39) != 0 {
+        regs_6 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_6__w1) != 0 {
+      regs_7 = io_pipeB_writedata
+    } else {
+      
+      _b2i_40 = if io_pipeA_writereg == 7 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_40) != 0 {
+        regs_7 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_7__w1) != 0 {
+      regs_8 = io_pipeB_writedata
+    } else {
+      
+      _b2i_41 = if io_pipeA_writereg == 8 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_41) != 0 {
+        regs_8 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_8__w1) != 0 {
+      regs_9 = io_pipeB_writedata
+    } else {
+      
+      _b2i_42 = if io_pipeA_writereg == 9 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_42) != 0 {
+        regs_9 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_9__w1) != 0 {
+      regs_10 = io_pipeB_writedata
+    } else {
+      
+      _b2i_43 = if io_pipeA_writereg == 10 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_43) != 0 {
+        regs_10 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_10__w1) != 0 {
+      regs_11 = io_pipeB_writedata
+    } else {
+      
+      _b2i_44 = if io_pipeA_writereg == 11 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_44) != 0 {
+        regs_11 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_11__w1) != 0 {
+      regs_12 = io_pipeB_writedata
+    } else {
+      
+      _b2i_45 = if io_pipeA_writereg == 12 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_45) != 0 {
+        regs_12 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_12__w1) != 0 {
+      regs_13 = io_pipeB_writedata
+    } else {
+      
+      _b2i_46 = if io_pipeA_writereg == 13 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_46) != 0 {
+        regs_13 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_13__w1) != 0 {
+      regs_14 = io_pipeB_writedata
+    } else {
+      
+      _b2i_47 = if io_pipeA_writereg == 14 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_47) != 0 {
+        regs_14 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_14__w1) != 0 {
+      regs_15 = io_pipeB_writedata
+    } else {
+      
+      _b2i_48 = if io_pipeA_writereg == 15 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_48) != 0 {
+        regs_15 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_15__w1) != 0 {
+      regs_16 = io_pipeB_writedata
+    } else {
+      
+      _b2i_49 = if io_pipeA_writereg == 16 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_49) != 0 {
+        regs_16 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_16__w1) != 0 {
+      regs_17 = io_pipeB_writedata
+    } else {
+      
+      _b2i_50 = if io_pipeA_writereg == 17 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_50) != 0 {
+        regs_17 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_17__w1) != 0 {
+      regs_18 = io_pipeB_writedata
+    } else {
+      
+      _b2i_51 = if io_pipeA_writereg == 18 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_51) != 0 {
+        regs_18 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_18__w1) != 0 {
+      regs_19 = io_pipeB_writedata
+    } else {
+      
+      _b2i_52 = if io_pipeA_writereg == 19 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_52) != 0 {
+        regs_19 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_19__w1) != 0 {
+      regs_20 = io_pipeB_writedata
+    } else {
+      
+      _b2i_53 = if io_pipeA_writereg == 20 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_53) != 0 {
+        regs_20 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_20__w1) != 0 {
+      regs_21 = io_pipeB_writedata
+    } else {
+      
+      _b2i_54 = if io_pipeA_writereg == 21 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_54) != 0 {
+        regs_21 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_21__w1) != 0 {
+      regs_22 = io_pipeB_writedata
+    } else {
+      
+      _b2i_55 = if io_pipeA_writereg == 22 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_55) != 0 {
+        regs_22 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_22__w1) != 0 {
+      regs_23 = io_pipeB_writedata
+    } else {
+      
+      _b2i_56 = if io_pipeA_writereg == 23 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_56) != 0 {
+        regs_23 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_23__w1) != 0 {
+      regs_24 = io_pipeB_writedata
+    } else {
+      
+      _b2i_57 = if io_pipeA_writereg == 24 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_57) != 0 {
+        regs_24 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_24__w1) != 0 {
+      regs_25 = io_pipeB_writedata
+    } else {
+      
+      _b2i_58 = if io_pipeA_writereg == 25 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_58) != 0 {
+        regs_25 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_25__w1) != 0 {
+      regs_26 = io_pipeB_writedata
+    } else {
+      
+      _b2i_59 = if io_pipeA_writereg == 26 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_59) != 0 {
+        regs_26 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_26__w1) != 0 {
+      regs_27 = io_pipeB_writedata
+    } else {
+      
+      _b2i_60 = if io_pipeA_writereg == 27 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_60) != 0 {
+        regs_27 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_27__w1) != 0 {
+      regs_28 = io_pipeB_writedata
+    } else {
+      
+      _b2i_61 = if io_pipeA_writereg == 28 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_61) != 0 {
+        regs_28 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_28__w1) != 0 {
+      regs_29 = io_pipeB_writedata
+    } else {
+      
+      _b2i_62 = if io_pipeA_writereg == 29 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_62) != 0 {
+        regs_29 = io_pipeA_writedata
+      }
+    }
+    if (io_pipeB_wen & _GEN_29__w1) != 0 {
+      regs_30 = io_pipeB_writedata
+    } else {
+      
+      _b2i_63 = if io_pipeA_writereg == 30 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_63) != 0 {
+        regs_30 = io_pipeA_writedata
+      }
+    }
+    
+    _b2i_64 = if io_pipeB_writereg == 31 { 1 } else { 0 }
+    if (io_pipeB_wen & _b2i_64) != 0 {
+      regs_31 = io_pipeB_writedata
+    } else {
+      
+      _b2i_65 = if io_pipeA_writereg == 31 { 1 } else { 0 }
+      if (io_pipeA_wen & _b2i_65) != 0 {
+        regs_31 = io_pipeA_writedata
+      }
+    }
+  }
+  io_pipeA_readdata1 = casez_tmp
+  io_pipeA_readdata2 = casez_tmp_0
+  io_pipeB_readdata1 = casez_tmp_1
+  io_pipeB_readdata2 = casez_tmp_2
+}

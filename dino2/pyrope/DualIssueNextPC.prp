@@ -1,0 +1,26 @@
+pub comb DualIssueNextPC::[lg="DualIssueNextPC", hdl](io_branch:u1, io_jumptype:u2, io_inputx:u64, io_inputy:u64, io_funct3:u3, io_pc:u64, io_imm:u64, io_pipeB_valid:u1) -> (io_nextpc:u64, io_taken:u1) {
+  mut _GEN__w1 = 0
+  mut _b2i_1 = if io_funct3 == 0 { 1 } else { 0 }
+  mut _b2i_2 = if io_inputx == io_inputy { 1 } else { 0 }
+  mut _b2i_3 = if io_funct3 == 1 { 1 } else { 0 }
+  mut _b2i_4 = if io_inputx != io_inputy { 1 } else { 0 }
+  mut _b2i_5 = if io_funct3 == 4 { 1 } else { 0 }
+  mut _b2i_6 = if io_inputx#sext[0..=63] < io_inputy#sext[0..=63] { 1 } else { 0 }
+  mut _b2i_7 = if io_funct3 == 5 { 1 } else { 0 }
+  mut _b2i_8 = if io_inputx#sext[0..=63] >= io_inputy#sext[0..=63] { 1 } else { 0 }
+  mut _b2i_9 = if io_funct3 == 6 { 1 } else { 0 }
+  mut _b2i_10 = if io_inputx < io_inputy { 1 } else { 0 }
+  mut _b2i_11 = if io_funct3 == 7 { 1 } else { 0 }
+  mut _b2i_12 = if io_inputx >= io_inputy { 1 } else { 0 }
+  _GEN__w1 = (_b2i_1 & _b2i_2) | (_b2i_3 & _b2i_4) | (_b2i_5 & _b2i_6) | (_b2i_7 & _b2i_8) | (_b2i_9 & _b2i_10) | (_b2i_11 & _b2i_12)
+  mut _mux_13:u64 = if io_pipeB_valid != 0 { (io_pc + 8)#[0..=63]#[0..=63] } else { (io_pc + 4)#[0..=63]#[0..=63] }
+  mut _mux_14:u64 = if _GEN__w1 != 0 { (io_pc + io_imm)#[0..=63]#[0..=63] } else { _mux_13#[0..=63] }
+  mut _mux_15:u64 = if (io_jumptype & 1) != 0 { (io_inputx + io_imm)#[0..=63]#[0..=63] } else { (io_pc + io_imm)#[0..=63]#[0..=63] }
+  mut _mux_16:u64 = if io_pipeB_valid != 0 { (io_pc + 8)#[0..=63]#[0..=63] } else { (io_pc + 4)#[0..=63]#[0..=63] }
+  mut _mux_17:u64 = if io_jumptype != 0 { _mux_15#[0..=63] } else { _mux_16#[0..=63] }
+  mut _mux_18:u64 = if io_branch != 0 { _mux_14#[0..=63] } else { _mux_17#[0..=63] }
+  io_nextpc = _mux_18
+  mut _b2i_19 = if io_jumptype != 0 { 1 } else { 0 }
+  mut _mux_20:u1 = if io_branch != 0 { _GEN__w1 & 1 } else { _b2i_19 & 1 }
+  io_taken = _mux_20
+}
