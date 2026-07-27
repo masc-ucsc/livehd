@@ -1,76 +1,35 @@
 pub comb ALU::[lg="ALU", hdl](io_operation:u5, io_inputx:u64, io_inputy:u64) -> (io_result:u64) {
-  mut _b2i_1 = 0
-  mut _b2i_10 = 0
-  mut _b2i_11 = 0
-  mut _b2i_7 = 0
-  mut _b2i_8 = 0
-  mut _b2i_9 = 0
-  mut _io_result_T_10__w1 = 0
-  mut _io_result_T_20__w1 = 0
-  mut _io_result_T_2__w1 = 0
-  mut _io_result_T_36__w1 = 0
-  mut _io_result_T_44__w1 = 0
-  mut _io_result_T_50__w1 = 0
-  mut _mux_2 = 0
-  mut _mux_3 = 0
-  mut _mux_4 = 0
-  mut _mux_5 = 0
-  mut _mux_6 = 0
   mut casez_tmp = 0
-  _io_result_T_10__w1 = (io_inputx#[0..=31] - io_inputy#[0..=31])#[0..=31]
-  _io_result_T_20__w1 = (io_inputx#[0..=31]#sext[0..=31] >> io_inputy#[0..=4])#[0..=31]#sext[0..=31]#[0..=31]
-  _io_result_T_2__w1 = (io_inputx#[0..=31] + io_inputy#[0..=31])#[0..=31]
-  _io_result_T_36__w1 = io_inputx#[0..=31] >> io_inputy#[0..=4]
-  _io_result_T_44__w1 = ((io_inputx#[0..=31] | 0) << io_inputy#[0..=4])#[0..=62]
-  _io_result_T_50__w1 = ((io_inputx | 0) << io_inputy#[0..=5])#[0..=126]
   unique if io_operation#[0..=3] == 0 {
-    
     casez_tmp = io_inputx ^ io_inputy
   } elif io_operation#[0..=3] == 1 {
-    
-    _b2i_1 = if io_inputx < io_inputy { 1 } else { 0 }
-    casez_tmp = _b2i_1 | 0
+    casez_tmp = (if io_inputx < io_inputy { 1 } else { 0 }) | 0
   } elif io_operation#[0..=3] == 2 {
-    _mux_2 = if ((io_operation >> 4) & 1) != 0 { _io_result_T_36__w1#sext[0..=31]#[0..=63] } else { (io_inputx >> io_inputy#[0..=5])#[0..=63] }
-    casez_tmp = _mux_2
+    casez_tmp = if ((io_operation >> 4) & 1) != 0 { (io_inputx#[0..=31] >> io_inputy#[0..=4])#sext[0..=31]#[0..=63] } else { (io_inputx >> io_inputy#[0..=5])#[0..=63] }
   } elif io_operation#[0..=3] == 3 {
-    _mux_3 = if ((io_operation >> 4) & 1) != 0 { _io_result_T_20__w1#sext[0..=31]#[0..=63] } else { (io_inputx#sext[0..=63] >> io_inputy#[0..=5])#[0..=63]#sext[0..=63]#[0..=63]#[0..=63] }
-    casez_tmp = _mux_3
+    casez_tmp = if ((io_operation >> 4) & 1) != 0 { ((io_inputx#[0..=31]#sext[0..=31] >> io_inputy#[0..=4])#[0..=31]#sext[0..=31]#[0..=31])#sext[0..=31]#[0..=63] } else { (io_inputx#sext[0..=63] >> io_inputy#[0..=5])#[0..=63]#sext[0..=63]#[0..=63]#[0..=63] }
   } elif io_operation#[0..=3] == 4 {
-    _mux_4 = if ((io_operation >> 4) & 1) != 0 { _io_result_T_10__w1#sext[0..=31]#[0..=63] } else { (io_inputx - io_inputy)#[0..=63]#[0..=63] }
-    casez_tmp = _mux_4
+    casez_tmp = if ((io_operation >> 4) & 1) != 0 { ((io_inputx#[0..=31] - io_inputy#[0..=31])#[0..=31])#sext[0..=31]#[0..=63] } else { (io_inputx - io_inputy)#[0..=63]#[0..=63] }
   } elif io_operation#[0..=3] == 5 {
     casez_tmp = io_inputx | io_inputy
   } elif io_operation#[0..=3] == 6 {
     casez_tmp = io_inputx & io_inputy
   } elif io_operation#[0..=3] == 7 {
-    _mux_5 = if ((io_operation >> 4) & 1) != 0 { _io_result_T_2__w1#sext[0..=31]#[0..=63] } else { (io_inputx + io_inputy)#[0..=63]#[0..=63] }
-    casez_tmp = _mux_5
+    casez_tmp = if ((io_operation >> 4) & 1) != 0 { ((io_inputx#[0..=31] + io_inputy#[0..=31])#[0..=31])#sext[0..=31]#[0..=63] } else { (io_inputx + io_inputy)#[0..=63]#[0..=63] }
   } elif io_operation#[0..=3] == 8 {
-    _mux_6 = if ((io_operation >> 4) & 1) != 0 { _io_result_T_44__w1#sext[0..=31]#[0..=63] } else { _io_result_T_50__w1#[0..=63]#[0..=63] }
-    casez_tmp = _mux_6
+    casez_tmp = if ((io_operation >> 4) & 1) != 0 { (((io_inputx#[0..=31] | 0) << io_inputy#[0..=4])#[0..=62])#sext[0..=31]#[0..=63] } else { (((io_inputx | 0) << io_inputy#[0..=5])#[0..=126])#[0..=63]#[0..=63] }
   } elif io_operation#[0..=3] == 9 {
-    
-    _b2i_7 = if io_inputx#sext[0..=63] < io_inputy#sext[0..=63] { 1 } else { 0 }
-    casez_tmp = _b2i_7 | 0
+    casez_tmp = (if io_inputx#sext[0..=63] < io_inputy#sext[0..=63] { 1 } else { 0 }) | 0
   } elif io_operation#[0..=3] == 10 {
     casez_tmp = (~(io_inputx | io_inputy))#[0..=63]
   } elif io_operation#[0..=3] == 11 {
-    
-    _b2i_8 = if io_inputx#sext[0..=63] >= io_inputy#sext[0..=63] { 1 } else { 0 }
-    casez_tmp = _b2i_8 | 0
+    casez_tmp = (if io_inputx#sext[0..=63] >= io_inputy#sext[0..=63] { 1 } else { 0 }) | 0
   } elif io_operation#[0..=3] == 12 {
-    
-    _b2i_9 = if io_inputx >= io_inputy { 1 } else { 0 }
-    casez_tmp = _b2i_9 | 0
+    casez_tmp = (if io_inputx >= io_inputy { 1 } else { 0 }) | 0
   } elif io_operation#[0..=3] == 13 {
-    
-    _b2i_10 = if io_inputx == io_inputy { 1 } else { 0 }
-    casez_tmp = _b2i_10 | 0
+    casez_tmp = (if io_inputx == io_inputy { 1 } else { 0 }) | 0
   } elif io_operation#[0..=3] == 14 {
-    
-    _b2i_11 = if io_inputx != io_inputy { 1 } else { 0 }
-    casez_tmp = _b2i_11 | 0
+    casez_tmp = (if io_inputx != io_inputy { 1 } else { 0 }) | 0
   } else {
     casez_tmp = 0
   }

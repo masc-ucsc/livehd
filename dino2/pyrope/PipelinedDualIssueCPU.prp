@@ -17,12 +17,6 @@ const StageReg_8 = import("StageReg_8.StageReg_8")
 
 pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset:u1, io_imem_good:u1, io_imem_instruction:u64, io_imem_ready:u1, io_dmem_good:u1, io_dmem_readdata:u64) -> (io_imem_address:u64@[], io_imem_valid:u1@[], io_dmem_address:u64@[], io_dmem_valid:u1@[], io_dmem_writedata:u64@[], io_dmem_memread:u1@[], io_dmem_memwrite:u1@[], io_dmem_maskmode:u2@[], io_dmem_sext:u1@[]) {
   mut _mux_14 = 0
-  mut _pipeA_aluControl_io_operation__w1 = 0
-  mut _pipeA_alu_io_result__w1 = 0
-  mut _pipeA_immGen_io_sextImm__w1 = 0
-  mut _pipeB_aluControl_io_operation__w1 = 0
-  mut _pipeB_alu_io_result__w1 = 0
-  mut _pipeB_immGen_io_sextImm__w1 = 0
   mut casez_tmp = 0
   mut casez_tmp_0 = 0
   mut casez_tmp_1 = 0
@@ -131,13 +125,9 @@ pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset
   mut (pipeA_control__io_itype = Control.io_itype, pipeA_control__io_aluop = Control.io_aluop, pipeA_control__io_src1 = Control.io_src1, pipeA_control__io_src2 = Control.io_src2, pipeA_control__io_branch = Control.io_branch, pipeA_control__io_jumptype = Control.io_jumptype, pipeA_control__io_resultselect = Control.io_resultselect, pipeA_control__io_memop = Control.io_memop, pipeA_control__io_toreg = Control.io_toreg, pipeA_control__io_regwrite = Control.io_regwrite, pipeA_control__io_wordinst = Control.io_wordinst) = Control::[name=pipeA_control](io_opcode = _pipeA_if_id_io_data_instruction#[0..=6])
   mut (pipeB_control__io_itype = Control.io_itype, pipeB_control__io_aluop = Control.io_aluop, pipeB_control__io_src1 = Control.io_src1, pipeB_control__io_src2 = Control.io_src2, pipeB_control__io_branch = Control.io_branch, pipeB_control__io_jumptype = Control.io_jumptype, pipeB_control__io_resultselect = Control.io_resultselect, pipeB_control__io_memop = Control.io_memop, pipeB_control__io_toreg = Control.io_toreg, pipeB_control__io_regwrite = Control.io_regwrite, pipeB_control__io_wordinst = Control.io_wordinst) = Control::[name=pipeB_control](io_opcode = _pipeB_if_id_io_data_instruction#[0..=6])
   mut pipeA_immGen = ImmediateGenerator::[name=pipeA_immGen](io_instruction = pipeA_immGen_io_instruction__w1)
-  _pipeA_immGen_io_sextImm__w1 = pipeA_immGen
   mut pipeB_immGen = ImmediateGenerator::[name=pipeB_immGen](io_instruction = pipeB_immGen_io_instruction__w1)
-  _pipeB_immGen_io_sextImm__w1 = pipeB_immGen
   mut pipeA_aluControl = ALUControl::[name=pipeA_aluControl](io_aluop = _pipeA_id_ex_ctrl_io_data_ex_ctrl_aluop, io_itype = _pipeA_id_ex_ctrl_io_data_ex_ctrl_itype, io_funct7 = _pipeA_id_ex_io_data_instruction#[25..=31], io_funct3 = _pipeA_id_ex_io_data_instruction#[12..=14], io_wordinst = _pipeA_id_ex_ctrl_io_data_ex_ctrl_wordinst)
-  _pipeA_aluControl_io_operation__w1 = pipeA_aluControl
   mut pipeB_aluControl = ALUControl::[name=pipeB_aluControl](io_aluop = _pipeB_id_ex_ctrl_io_data_ex_ctrl_aluop, io_itype = _pipeB_id_ex_ctrl_io_data_ex_ctrl_itype, io_funct7 = _pipeB_id_ex_io_data_instruction#[25..=31], io_funct3 = _pipeB_id_ex_io_data_instruction#[12..=14], io_wordinst = _pipeB_id_ex_ctrl_io_data_ex_ctrl_wordinst)
-  _pipeB_aluControl_io_operation__w1 = pipeB_aluControl
   mut (forwarding__io_pipeA_forward1 = DualIssueForwardingUnit.io_pipeA_forward1, forwarding__io_pipeA_forward2 = DualIssueForwardingUnit.io_pipeA_forward2, forwarding__io_pipeB_forward1 = DualIssueForwardingUnit.io_pipeB_forward1, forwarding__io_pipeB_forward2 = DualIssueForwardingUnit.io_pipeB_forward2) = DualIssueForwardingUnit::[name=forwarding](io_ex_pipeA_rs1 = _pipeA_id_ex_io_data_instruction#[15..=19], io_ex_pipeA_rs2 = _pipeA_id_ex_io_data_instruction#[20..=24], io_ex_pipeB_rs1 = _pipeB_id_ex_io_data_instruction#[15..=19], io_ex_pipeB_rs2 = _pipeB_id_ex_io_data_instruction#[20..=24], io_mem_pipeA_rd = _pipeA_ex_mem_io_data_instruction#[7..=11], io_mem_pipeA_rw = _pipeA_ex_mem_ctrl_io_data_wb_ctrl_regwrite, io_mem_pipeB_rd = _pipeB_ex_mem_io_data_instruction#[7..=11], io_mem_pipeB_rw = _pipeB_ex_mem_ctrl_io_data_wb_ctrl_regwrite, io_wb_pipeA_rd = _pipeA_mem_wb_io_data_instruction#[7..=11], io_wb_pipeA_rw = _pipeA_mem_wb_ctrl_io_data_wb_ctrl_regwrite, io_wb_pipeB_rd = _pipeB_mem_wb_io_data_instruction#[7..=11], io_wb_pipeB_rw = _pipeB_mem_wb_ctrl_io_data_wb_ctrl_regwrite)
   mut _b2i_5 = if _pipeA_id_ex_ctrl_io_data_mem_ctrl_memop == 2 { 1 } else { 0 }
   mut _b2i_6 = if _pipeB_id_ex_ctrl_io_data_mem_ctrl_memop == 2 { 1 } else { 0 }
@@ -146,9 +136,9 @@ pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset
   _pipeA_if_id_io_data_instruction = pipeA_if_id.io_data_instruction
   mut pipeB_if_id = StageReg::[name=pipeB_if_id](clock = clock, reset = reset, io_in_instruction = issueUnit__io_pipeB_inst, io_in_pc = (pc + 4)#[0..=63], io_in_isValid = issueUnit__io_pipeB_valid, io_flush = hazard__io_if_id_flush, io_valid = (~hazard__io_if_id_stall) & 1)
   _pipeB_if_id_io_data_instruction = pipeB_if_id.io_data_instruction
-  mut pipeA_id_ex = StageReg_2::[name=pipeA_id_ex](clock = clock, reset = reset, io_in_pc = pipeA_if_id.io_data_pc, io_in_instruction = pipeA_immGen_io_instruction__w1, io_in_sextImm = _pipeA_immGen_io_sextImm__w1, io_in_readdata1 = registers.io_pipeA_readdata1, io_in_readdata2 = registers.io_pipeA_readdata2, io_in_isValid = pipeA_if_id.io_data_isValid, io_flush = hazard__io_id_ex_flush)
+  mut pipeA_id_ex = StageReg_2::[name=pipeA_id_ex](clock = clock, reset = reset, io_in_pc = pipeA_if_id.io_data_pc, io_in_instruction = pipeA_immGen_io_instruction__w1, io_in_sextImm = pipeA_immGen, io_in_readdata1 = registers.io_pipeA_readdata1, io_in_readdata2 = registers.io_pipeA_readdata2, io_in_isValid = pipeA_if_id.io_data_isValid, io_flush = hazard__io_id_ex_flush)
   _pipeA_id_ex_io_data_instruction = pipeA_id_ex.io_data_instruction
-  mut pipeB_id_ex = StageReg_2::[name=pipeB_id_ex](clock = clock, reset = reset, io_in_pc = pipeB_if_id.io_data_pc, io_in_instruction = pipeB_immGen_io_instruction__w1, io_in_sextImm = _pipeB_immGen_io_sextImm__w1, io_in_readdata1 = registers.io_pipeB_readdata1, io_in_readdata2 = registers.io_pipeB_readdata2, io_in_isValid = pipeB_if_id.io_data_isValid, io_flush = hazard__io_id_ex_flush)
+  mut pipeB_id_ex = StageReg_2::[name=pipeB_id_ex](clock = clock, reset = reset, io_in_pc = pipeB_if_id.io_data_pc, io_in_instruction = pipeB_immGen_io_instruction__w1, io_in_sextImm = pipeB_immGen, io_in_readdata1 = registers.io_pipeB_readdata1, io_in_readdata2 = registers.io_pipeB_readdata2, io_in_isValid = pipeB_if_id.io_data_isValid, io_flush = hazard__io_id_ex_flush)
   _pipeB_id_ex_io_data_instruction = pipeB_id_ex.io_data_instruction
   mut pipeA_id_ex_ctrl = StageReg_4::[name=pipeA_id_ex_ctrl](clock = clock, reset = reset, io_in_ex_ctrl_itype = pipeA_control__io_itype, io_in_ex_ctrl_aluop = pipeA_control__io_aluop, io_in_ex_ctrl_src1 = pipeA_control__io_src1, io_in_ex_ctrl_src2 = pipeA_control__io_src2, io_in_ex_ctrl_branch = pipeA_control__io_branch, io_in_ex_ctrl_jumptype = pipeA_control__io_jumptype, io_in_ex_ctrl_resultselect = pipeA_control__io_resultselect, io_in_ex_ctrl_wordinst = pipeA_control__io_wordinst, io_in_mem_ctrl_memop = pipeA_control__io_memop, io_in_wb_ctrl_toreg = pipeA_control__io_toreg, io_in_wb_ctrl_regwrite = pipeA_control__io_regwrite, io_flush = hazard__io_id_ex_flush)
   _pipeA_id_ex_ctrl_io_data_ex_ctrl_itype = pipeA_id_ex_ctrl.io_data_ex_ctrl_itype
@@ -309,18 +299,16 @@ pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset
   mut _b2i_16 = if pipeA_id_ex_ctrl.io_data_ex_ctrl_src2 == 2 { 1 } else { 0 }
   mut _mux_17:u64 = if pipeA_id_ex_ctrl.io_data_ex_ctrl_src2 == 1 { pipeA_id_ex.io_data_sextImm#[0..=63] } else { (0 | (_b2i_16 << 2) | 0)#[0..=63] }
   mut _mux_18:u64 = if pipeA_id_ex_ctrl.io_data_ex_ctrl_src2 == 0 { casez_tmp_0#[0..=63] } else { _mux_17#[0..=63] }
-  mut pipeA_alu = ALU::[name=pipeA_alu](io_operation = _pipeA_aluControl_io_operation__w1, io_inputx = _mux_15, io_inputy = _mux_18)
+  mut pipeA_alu = ALU::[name=pipeA_alu](io_operation = pipeA_aluControl, io_inputx = _mux_15, io_inputy = _mux_18)
   _mux_19 = casez_tmp_1#[0..=63]
-  _pipeA_alu_io_result__w1 = pipeA_alu
   if pipeB_id_ex_ctrl.io_data_ex_ctrl_src1 != 0 {
     _mux_19 = pipeB_id_ex.io_data_pc#[0..=63]
   }
   mut _b2i_20 = if pipeB_id_ex_ctrl.io_data_ex_ctrl_src2 == 2 { 1 } else { 0 }
   mut _mux_21:u64 = if pipeB_id_ex_ctrl.io_data_ex_ctrl_src2 == 1 { pipeB_id_ex.io_data_sextImm#[0..=63] } else { (0 | (_b2i_20 << 2) | 0)#[0..=63] }
   mut _mux_22:u64 = if pipeB_id_ex_ctrl.io_data_ex_ctrl_src2 == 0 { casez_tmp_2#[0..=63] } else { _mux_21#[0..=63] }
-  mut pipeB_alu = ALU::[name=pipeB_alu](io_operation = _pipeB_aluControl_io_operation__w1, io_inputx = _mux_19, io_inputy = _mux_22)
+  mut pipeB_alu = ALU::[name=pipeB_alu](io_operation = pipeB_aluControl, io_inputx = _mux_19, io_inputy = _mux_22)
   _mux_23 = pipeA_id_ex_ctrl.io_data_ex_ctrl_branch & 1
-  _pipeB_alu_io_result__w1 = pipeB_alu
   if pipeB_id_ex.io_data_isValid != 0 {
     _mux_23 = pipeB_id_ex_ctrl.io_data_ex_ctrl_branch & 1
   }
@@ -331,7 +319,7 @@ pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset
   mut _mux_28:u64 = if pipeB_id_ex.io_data_isValid != 0 { pipeB_id_ex.io_data_pc#[0..=63] } else { pipeA_id_ex.io_data_pc#[0..=63] }
   mut _mux_29:u64 = if pipeB_id_ex.io_data_isValid != 0 { pipeB_id_ex.io_data_sextImm#[0..=63] } else { pipeA_id_ex.io_data_sextImm#[0..=63] }
   mut (nextPCmod__io_nextpc = DualIssueNextPC.io_nextpc, nextPCmod__io_taken = DualIssueNextPC.io_taken) = DualIssueNextPC::[name=nextPCmod](io_branch = _mux_23, io_jumptype = _mux_24, io_inputx = _mux_25, io_inputy = _mux_26, io_funct3 = _mux_27, io_pc = _mux_28, io_imm = _mux_29, io_pipeB_valid = pipeB_id_ex.io_data_isValid)
-  _mux_30 = _pipeA_alu_io_result__w1#[0..=63]
+  _mux_30 = pipeA_alu#[0..=63]
   if pipeA_id_ex_ctrl.io_data_ex_ctrl_resultselect != 0 {
     _mux_30 = pipeA_id_ex.io_data_sextImm#[0..=63]
   }
@@ -341,7 +329,7 @@ pub mod PipelinedDualIssueCPU::[lg="PipelinedDualIssueCPU", hdl](clock:u1, reset
   _pipeA_ex_mem_io_data_mem_writedata = pipeA_ex_mem.io_data_mem_writedata
   _pipeA_ex_mem_io_data_nextpc = pipeA_ex_mem.io_data_nextpc
   _pipeA_ex_mem_io_data_taken = pipeA_ex_mem.io_data_taken
-  _mux_32 = _pipeB_alu_io_result__w1#[0..=63]
+  _mux_32 = pipeB_alu#[0..=63]
   _pipeA_ex_mem_io_data_instruction = pipeA_ex_mem.io_data_instruction
   if pipeB_id_ex_ctrl.io_data_ex_ctrl_resultselect != 0 {
     _mux_32 = pipeB_id_ex.io_data_sextImm#[0..=63]
