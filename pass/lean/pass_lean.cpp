@@ -1210,6 +1210,9 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
   auto ec = var.get("emit_cert");
   emit_cert = (ec == "false") ? false : true;
 
+  auto efb = var.get("emit_fast_bridge");
+  emit_fast_bridge = (efb == "true") ? true : false;
+
   top = std::string(var.get("top"));
   cert_wf = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
@@ -1251,6 +1254,7 @@ void Pass_lean::setup() {
   m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)", "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
+  m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.", "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
