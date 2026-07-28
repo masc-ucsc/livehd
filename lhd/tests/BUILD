@@ -534,6 +534,41 @@ sh_test(
     data = ["//lhd"],
 )
 
+# REGRESSION: a packed-struct field must lower to a LEAF net at every nesting
+# depth. `struct_port_bundle_ok` used to disqualify a whole port as soon as one
+# field was itself a struct, keeping it a packed WORD — so writing field X while
+# reading a DISJOINT field Y became a self-reference on that word, i.e. a FALSE
+# combinational cycle that `pass.lec` refused to encode. That cost three defs on
+# lhdsuite //bench:minion_lec (vpu_tensorfma, plus vpu_ctrl and vpu_ml which
+# instantiate it); see lhdsuite fixme.md issue 1b. Cases 2/3 are controls that
+# pass either way — they prove the RTL really is acyclic, so a case-1 failure is
+# a lowering defect. The structural check rejects any surviving packed-word
+# masking, so the test cannot be satisfied by a smarter cycle breaker.
+sh_test(
+    name = "struct_nested_field_leaf_test",
+    size = "medium",
+    srcs = ["struct_nested_field_leaf_test.sh"],
+    data = ["//lhd"],
+)
+
+# REGRESSION: the Pyrope writer must not hoist a clock gate's ENABLE CONE above
+# the always_comb that cone reads. Verilog always_comb is order-independent,
+# Pyrope assignment is sequential, so a relocated read landing above its writes
+# silently captures the seed value. The writer therefore never reorders body
+# statements for a `clock_pin`/`reset_pin` ref: the pin net is made
+# POSITION-INDEPENDENT instead (already a `wire`/`reg`, a `wire X` pre-declare,
+# or a minted `X__pinw` alias assigned the final value at the region end). The
+# old cone-relocation machinery this replaces caused lhdsuite
+# //bench:minion_lec's minion_dcache_cache_op_unit_l2 and
+# minion_frontend_thread_buffer{,_p1} refutations; see lhdsuite fixme.md 1f
+# and 1f-bis.
+sh_test(
+    name = "prp_writer_clock_cone_order_test",
+    size = "medium",
+    srcs = ["prp_writer_clock_cone_order_test.sh"],
+    data = ["//lhd"],
+)
+
 # REGRESSION: a TRUSTED def's struct ports must pair across the two front ends.
 # Box ports are keyed by NAME, so a flat bus on one side and per-leaf ports on
 # the other never meet — the box outputs become unrelated free symbols and the

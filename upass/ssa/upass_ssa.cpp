@@ -33,6 +33,31 @@ constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
          t <= Lnast_ntype::Lnast_ntype_ge;
 }
 
+// Statement kinds whose subtree is a SEPARATE name scope or pure name/type
+// structure — the ONLY statements process_child copies verbatim. Everything
+// else defaults to copy_with_rename, so an operand read not explicitly
+// excepted follows the live rename_map and a NEW statement kind fails CORRECT
+// (reads bind the live version) instead of failing STALE (reads silently kept
+// the base name, which downstream binds to the declaration-time value — the
+// escape hatch behind the arr[i]=v, tuple_get-index and clock_pin stale-read
+// miscompiles).
+//  - declare/type_spec: the name child plus a TYPE subtree (whose refs are
+//    field labels / comptime params typecheck resolves by base name).
+//  - for/while: own iteration scope; the runner unrolls them into plain stmts
+//    blocks which the NEXT elaboration round SSAs inline.
+//  - func_def + func_* family: a lambda body is a separate scope; the outer
+//    rename_map must not leak in (func_call is handled separately — its
+//    ARGUMENTS are reads of this scope).
+constexpr bool stmt_is_scope_barrier(Lnast_ntype::Lnast_ntype_int t) {
+  return Lnast_ntype::is_declare(t) || Lnast_ntype::is_type_spec(t) ||
+         Lnast_ntype::is_io(t) || Lnast_ntype::is_for(t) ||
+         Lnast_ntype::is_while(t) || Lnast_ntype::is_func_def(t) ||
+         Lnast_ntype::is_func_does(t) || Lnast_ntype::is_func_equals(t) ||
+         Lnast_ntype::is_func_in(t) || Lnast_ntype::is_func_has(t) ||
+         Lnast_ntype::is_func_case(t) || Lnast_ntype::is_func_break(t) ||
+         Lnast_ntype::is_func_continue(t) || Lnast_ntype::is_func_return(t);
+}
+
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
@@ -1483,12 +1508,27 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
       }
     } else if (Lnast_ntype::is_tuple_get(type) ||
                Lnast_ntype::is_tuple_add(type) ||
+               Lnast_ntype::is_tuple_concat(type) ||
                Lnast_ntype::is_attr_get(type) ||
-               Lnast_ntype::is_attr_set(type)) {
-      // dst/tuple_get/tuple_add/attr_get/attr_set: the first child is the
-      // target (a temp/user var being read, or — for attr_set — the entity
-      // being attributed) copied VERBATIM (these aren't SSA-versioned, as
-      // before), but the remaining children are READS that must follow the live
+               Lnast_ntype::is_attr_set(type) ||
+               Lnast_ntype::is_store(type)) {
+      // A `store` reaching here is the >=3-child TUPLE_SET form (`arr[i] = v`,
+      // `t.f = v`) — has_dest was cleared above so the bundle write is not
+      // versioned. Its target binds the LIVE version (rename_target below) and
+      // its INDEX and VALUE operands are plain READS that must follow the live
+      // rename_map exactly like every other read. They used to fall through to
+      // the structural `else` and be copied VERBATIM, so `mut m = 7;
+      // m = <expr>; arr[0] = m` stored the DECLARATION value: the def was
+      // renamed to `m___ssa_1` while this use stayed on the stale base `m`,
+      // which constprop then folded to 7 and DCE deleted the real write. A
+      // scalar `o = m` in the same def was correct, which is why it read as an
+      // array-store bug. See lhdsuite fixme.md 1h.
+      //
+      // dst/tuple_get/tuple_add/tuple_concat/attr_get/attr_set: the first
+      // child is the target (a temp/user var being read, or — for attr_set —
+      // the entity being attributed) copied VERBATIM (these aren't
+      // SSA-versioned, as before), but the remaining children are READS that
+      // must follow the live
       // rename_map — e.g. a `tuple_get` memory-read index, or a `tuple_add`
       // field, that reads an SSA-versioned comb net (a wire reassigned after
       // its declaration-time poison) must resolve to the live driver, not the
@@ -1503,11 +1543,25 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
       if (Lnast::srcid_carries(type)) {
         staging->set_srcid(stmt_node, lnast->get_srcid(child));
       }
+      // A tuple_set-store / tuple_add TARGET is a READ-MODIFY of the bundle:
+      // it must bind the LIVE version, not the base. A prior WHOLE
+      // reassignment (`arr = f(x)` — a 2-child store) IS versioned by the
+      // has_dest arm, so a verbatim target here landed `arr[0] = d` on the
+      // dead base while every later read resolved to arr___ssa_1 — the
+      // element write silently vanished. For a never-reassigned bundle (or a
+      // reg/memory — never in rename_map) the rename is a no-op and the base
+      // name is kept exactly as before. tuple_get/tuple_concat dsts (fresh
+      // temps) and attr_get/attr_set entities stay verbatim.
+      const bool rename_target =
+          Lnast_ntype::is_store(type) || Lnast_ntype::is_tuple_add(type);
       bool first = true;
       for (auto sub : lnast->children(child)) {
         if (first) {
-          copy_subtree(lnast, sub, staging,
-                       stmt_node); // write target — verbatim
+          if (rename_target) {
+            copy_with_rename(lnast, sub, staging, stmt_node, rename_map);
+          } else {
+            copy_subtree(lnast, sub, staging, stmt_node); // target — verbatim
+          }
           first = false;
         } else if (Lnast_ntype::is_tuple_add(type) &&
                    Lnast_ntype::is_store(lnast->get_type(sub))) {
@@ -1586,10 +1640,19 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
         for (auto gc : lnast->children(child)) {
           process_child(gc);
         }
-      } else {
-        // Other structural nodes (func_def, …) own a separate name scope — the
-        // outer rename_map must NOT leak in, so copy verbatim.
+      } else if (stmt_is_scope_barrier(type)) {
+        // Separate-scope / pure-structure nodes (func_def, declare, for, …):
+        // the outer rename_map must NOT leak in, so copy verbatim. This is an
+        // EXPLICIT closed list — see stmt_is_scope_barrier.
         copy_subtree(lnast, child, staging, new_stmts);
+      } else {
+        // DEFAULT: every remaining statement kind (cassert, timecheck, tick,
+        // step, …) has only READ operands in THIS scope — and so does any
+        // statement type added in the future. Copy with rename so those reads
+        // bind the live SSA version; falling back to a verbatim copy here is
+        // what silently bound reads to the declaration-time value (a cassert
+        // guard folding against the stale base instead of the live driver).
+        copy_with_rename(lnast, child, staging, new_stmts, rename_map);
       }
     }
   };

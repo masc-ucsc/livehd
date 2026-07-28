@@ -2164,8 +2164,27 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
   bool has_field = false;
   for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
     const auto& fct = f.getType().getCanonicalType();
-    if (!fct.isIntegral() || fct.isStruct() || fct.isPackedUnion()) {
-      return false;  // nested struct / union field — deferred, keep the flat port
+    if (fct.isPackedUnion()) {
+      return false;  // union field — still deferred (overlapping lanes have no leaf identity)
+    }
+    // A NESTED packed struct is flattened RECURSIVELY into dotted leaves
+    // (`req.read_en`), so a field access lowers identically at every depth.
+    // It used to disqualify the WHOLE port, which kept it a packed word — and
+    // then writing field X while reading a DISJOINT field Y became a
+    // self-reference on that one word, i.e. a FALSE combinational cycle in a
+    // design that is acyclic field-by-field. That cost `pass.lec` three defs on
+    // lhdsuite's minion (`vpu_tensorfma` plus the two parents instantiating
+    // it). See lhdsuite fixme.md issue 1b and
+    // lhd/tests/struct_nested_field_leaf_test.sh.
+    if (fct.isStruct()) {
+      if (!struct_port_bundle_ok(f.getType())) {
+        return false;
+      }
+      has_field = true;
+      continue;
+    }
+    if (!fct.isIntegral()) {
+      return false;
     }
     if (fct.isPackedArray()) {
       // A plain packed VECTOR (`logic [7:0]`, element = 1-bit scalar) is fine;
@@ -2183,13 +2202,30 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
   return has_field;
 }
 
+// LEAF field list of a bundled packed-struct port. A nested packed struct is
+// flattened RECURSIVELY: its children become dotted leaves (`req.read_en`) with
+// ABSOLUTE bit offsets, so every depth behaves like a one-level field and the
+// whole-struct reconstruct (which sums off/bits) is unchanged. Only leaves are
+// emitted — an intermediate level is a name prefix, never an entry — so nothing
+// double-counts. Gated by struct_port_bundle_ok, which vets the same nesting.
 std::vector<Slang_context::Struct_info::Field> Slang_context::struct_port_fields(const slang::ast::Type& t) {
   std::vector<Struct_info::Field> out;
-  const auto& st = t.getCanonicalType().as<slang::ast::PackedStructType>();
-  for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
-    auto fi = tinfo(f.getType());
-    out.push_back({std::string(f.name), static_cast<int64_t>(f.bitOffset), fi.bits, fi.is_signed});
-  }
+  auto                            collect = [&out](auto&& self, const slang::ast::Type& ty, std::string_view prefix,
+                                                   int64_t base_off) -> void {
+    const auto& st = ty.getCanonicalType().as<slang::ast::PackedStructType>();
+    for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
+      std::string nm  = prefix.empty() ? std::string(f.name) : absl::StrCat(prefix, ".", f.name);
+      const auto  off = base_off + static_cast<int64_t>(f.bitOffset);
+      const auto& fct = f.getType().getCanonicalType();
+      if (fct.isStruct() && fct.isIntegral()) {
+        self(self, f.getType(), nm, off);
+        continue;
+      }
+      auto fi = tinfo(f.getType());
+      out.push_back({std::move(nm), off, fi.bits, fi.is_signed});
+    }
+  };
+  collect(collect, t, "", 0);
   return out;
 }
 
@@ -4154,15 +4190,25 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   size_t                                           n_outputs_total = 0;
   bool                                             any_bundle_out  = false;
 
-  // M7: an input connection to a child BUNDLE port passes a TUPLE literal —
-  // tuple_add(tmp, store(field, v)…), then the func_call named arg
-  // store(port, ref tmp). Field values are computed BEFORE the tuple_add node
-  // (the builder appends ops sequentially; interleaving would emit them after
-  // the literal). expr == nullptr is the unconnected-input x per field.
-  auto build_bundle_actual = [&](const slang::ast::PortSymbol& bport, const slang::ast::Expression* aexpr) -> std::string {
-    auto                     pfields = struct_port_fields(bport.getType());
-    std::vector<std::string> fvals;
-    fvals.reserve(pfields.size());
+  // M7: an input connection to a child BUNDLE port passes ONE NAMED ACTUAL PER
+  // LEAF — `store(ref "<port>.<leaf>", v)` on the func_call — exactly mirroring
+  // the bundle OUTPUT side below, which already binds each leaf by its dotted
+  // name (`tuple_get(t, result, "<port>.<leaf>")`). tolg binds a named actual by
+  // exact GraphIO input name, so this works at ANY nesting depth.
+  //
+  // It used to pass a single TUPLE literal instead — tuple_add(tmp, store(field,
+  // v)...) plus `store(port, ref tmp)` — and uPass_runner then had to re-expand
+  // that tuple onto the child's flat leaf params. That expansion is ONE LEVEL
+  // only: once a nested struct flattens to dotted leaves (`din.req.bid`), the
+  // tuple's dotted keys become a NESTED bundle, `try_tuple_shape` reports the
+  // top level (`req`), `<prefix>.req` is not a leaf param, the expansion fails,
+  // the caller falls back to passing the struct WHOLE, and every instantiation
+  // dies with `fcall-unknown-arg`. Emitting the leaves directly sidesteps the
+  // re-expansion entirely and keeps input/output symmetric.
+  //
+  // expr == nullptr is the unconnected-input x per field.
+  auto build_bundle_actual = [&](const slang::ast::PortSymbol& bport, const slang::ast::Expression* aexpr) -> void {
+    auto pfields    = struct_port_fields(bport.getType());
     auto same_shape = [&](const std::vector<Struct_info::Field>& of) {
       if (of.size() != pfields.size()) {
         return false;
@@ -4178,8 +4224,9 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     bool done = false;
     if (aexpr == nullptr) {  // unconnected bundle input: every field reads x
       for (const auto& f : pfields) {
-        fvals.push_back(f.is_signed ? std::string("0sb?")
-                                    : absl::StrCat("0ub", std::string(static_cast<size_t>(f.bits), '?')));
+        in_args.emplace_back(absl::StrCat(bport.name, ".", f.name),
+                             f.is_signed ? std::string("0sb?")
+                                         : absl::StrCat("0ub", std::string(static_cast<size_t>(f.bits), '?')));
       }
       done = true;
     } else {
@@ -4193,7 +4240,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           if (same_shape(bsi->fields)) {  // (b) the parent's OWN bundle port: per-leaf reads
             auto aname = bundle_port_body_base(asym);
             for (const auto& f : pfields) {
-              fvals.push_back(read_leaf(absl::StrCat(aname, ".", f.name)));
+              in_args.emplace_back(absl::StrCat(bport.name, ".", f.name), read_leaf(absl::StrCat(aname, ".", f.name)));
             }
             done = true;
           }
@@ -4205,8 +4252,9 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
             const bool a_is_tuple = it->second.is_tuple;
             auto       aname      = lname_of(asym);
             for (const auto& f : pfields) {
-              fvals.push_back(a_is_tuple ? read_struct_field_get(aname, f.name)
-                                         : read_leaf(absl::StrCat(aname, ".", f.name)));
+              in_args.emplace_back(absl::StrCat(bport.name, ".", f.name),
+                                   a_is_tuple ? read_struct_field_get(aname, f.name)
+                                              : read_leaf(absl::StrCat(aname, ".", f.name)));
             }
             done = true;
           }
@@ -4224,19 +4272,9 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
         if (f.is_signed) {
           fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
         }
-        fvals.push_back(fv);
+        in_args.emplace_back(absl::StrCat(bport.name, ".", f.name), fv);
       }
     }
-    auto& bln = *builder_.lnast;
-    auto  tup = builder_.add_child(Lnast_ntype::create_tuple_add());
-    auto  tmp = builder_.create_lnast_tmp();
-    bln.add_child(tup, Lnast_node::create_ref(tmp));
-    for (size_t i = 0; i < pfields.size(); ++i) {
-      auto st = bln.add_child(tup, Lnast_ntype::create_store());
-      bln.add_child(st, Lnast_node::create_ref(pfields[i].name));
-      builder_.add_value_child_pub(st, fvals[i]);
-    }
-    return tmp;
   };
 
   for (const auto* conn : inst.getPortConnections()) {
@@ -4266,9 +4304,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       if (!is_out) {
         if (bundle) {
           set_pending_loc(inst.location);
-          auto tmp = build_bundle_actual(port, nullptr);
+          build_bundle_actual(port, nullptr);  // appends one named arg per leaf
           clear_pending_loc();
-          in_args.emplace_back(std::string(port.name), tmp);
         } else {
           auto ti = flat_or_tinfo(port.getType());
           // unconnected input reads x
@@ -4287,9 +4324,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       outs.push_back({&port, expr, bundle});
     } else if (bundle) {
       set_pending_loc(expr->sourceRange);
-      auto tmp = build_bundle_actual(port, expr);
+      build_bundle_actual(port, expr);  // appends one named arg per leaf
       clear_pending_loc();
-      in_args.emplace_back(std::string(port.name), tmp);
     } else {
       set_pending_loc(expr->sourceRange);
       auto v  = to_int_value(lower_rvalue(*expr));

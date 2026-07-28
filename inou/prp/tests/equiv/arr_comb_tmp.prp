@@ -4,27 +4,31 @@
 :verilog_top: arr_comb_tmp
 :pyrope_top: arr_comb_tmp
 */
-// TRACKER — a blocking temp feeding a comb-array store is DROPPED by the
-// slang front end (lhdsuite array_problem.md). Known-failing TWICE:
-// prp-equiv-arr_comb_tmp and prp-v2v-arr_comb_tmp are both tagged `fixme`.
+// A blocking temp feeding a comb-array store (`t = d; arr[0] = t`).
 //
 // This .prp is the VERBATIM `lhd compile arr_comb_tmp.v --emit-dir pyrope:`
-// output (headers added). The golden has `always_comb begin t = d;
-// arr[0] = t; ... end`; the emitted Pyrope below shows the loss directly —
-// `t = 0ub?` where `t = d` should be — so the drop happens on the
-// slang->LNAST side (BEFORE tolg): the direct .v->lg->.v round trip refutes
-// too (prp-v2v-arr_comb_tmp), unlike arr_comb_mux_const whose direct path is
-// fine. SOUNDNESS TRAP: the dropped assignment leaves a don't-care, so the
-// native cvc5 `lhd lec` of the two lgraphs returns a VACUOUS PROVEN — only
-// the yosys-referenced lgcheck flows (equiv, v2v) see this bug at all.
-// The clocked twin (blocking temp inside always_ff feeding a mem store)
-// lowers correctly.
+// output (headers added).
+//
+// USED TO FAIL (fixed 2026-07-27, lhdsuite fixme.md 1h). The emission read
+// `mut t = 0 … t = 0ub? … arr[0] = t`: the `t = d` assignment was lost and the
+// store took the declaration poison. It was NOT a slang->LNAST drop, as this
+// comment used to claim — the defect was in `upass.ssa`, which copied a
+// >=3-child (tuple_set) store VERBATIM and so left its VALUE operand on the
+// stale base name while the def had been renamed to `t___ssa_1`. constprop then
+// folded the base to its declaration value and DCE deleted the real write.
+// `upass_ssa.cpp` now routes such a store through the same
+// target-verbatim/operands-renamed path as tuple_get/tuple_add/attr_*, and `t`
+// collapses into the store as it should.
+//
+// SOUNDNESS TRAP worth keeping: while it was broken the dropped assignment left
+// a don't-care, so the native cvc5 `lhd lec` of the two lgraphs returned a
+// VACUOUS PROVEN — only the yosys-referenced lgcheck flows (equiv, v2v) saw the
+// bug at all. A PROVEN means nothing unless the comparison is sensitive to the
+// signal in question.
 pub comb arr_comb_tmp::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
-  mut t = 0
   mut arr:[2]u1 = 0
   o = 0ub?
-  t = 0ub?
-  arr[0] = t
+  arr[0] = d
   arr[1] = (~d) & 1
   o = arr[sel]
 }

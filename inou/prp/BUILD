@@ -450,12 +450,13 @@ _SIM_FIXME = [
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
-            # Comb-array store-loss trackers (lhdsuite array_problem.md): the
-            # per-entry store's RHS resolves stale (reassigned-mut din) or the
-            # feeding temp is dropped outright. Run via the fixme list below.
-            "tests/equiv/array_store_stale_rhs.prp",
-            "tests/equiv/arr_comb_mux_const.prp",
-            "tests/equiv/arr_comb_tmp.prp",
+            # NOTE: the three comb-array store-loss trackers
+            # (array_store_stale_rhs, arr_comb_mux_const, arr_comb_tmp) were
+            # PROMOTED out of this exclude list (2026-07-27). Root cause was
+            # upass.ssa copying a >=3-child (tuple_set) store VERBATIM, leaving
+            # its VALUE operand on the stale base name after the def had been
+            # renamed; see upass_ssa.cpp's is_store arm. All three prove now and
+            # run as ordinary prp-equiv-* pairs.
             # NOTE: the six latch_* pairs (latch_enable_hold, latch_hold_basic,
             # latch_active_low, latch_master_slave, latch_icg, latch_mixed_flop)
             # used to be excluded here as todo/livehd/2f-latch trackers. They
@@ -529,23 +530,19 @@ sh_test(
         # through the yosys-slang plugin (see the equiv-glob note above), so
         # the forward direction proves; they run as ordinary prp-equiv-* now.
         #
-        # Comb-array store-loss trackers (2026-07-27, lhdsuite
-        # array_problem.md). All three compile clean and LEC wrong; the
-        # clocked (`reg` array) twins of each shape lower correctly (see the
-        # mem_two_wr_prio / mem_sw_sr_data / mem_wr_seq_same green pairs):
-        # * array_store_stale_rhs: `m = d; arr[0] = m` stores m's DECLARATION
-        #   value (0), not d (pure-Pyrope isolation; golden is the semantic mux).
-        # * arr_comb_mux_const: same defect reached from Verilog — the
-        #   elaboration-constant ternary emits a reassigned `_mux_1` whose
-        #   stale version feeds the store din (the .prp is the verbatim
-        #   emitted Pyrope; the direct .v round trip prp-v2v-* PROVES).
-        # * arr_comb_tmp: `t = d; arr[0] = t` in always_comb drops `t = d`
-        #   on the slang->LNAST side (emitted Pyrope shows `t = 0ub?`);
-        #   also in _V2V_FIXME since even the direct .v round trip refutes,
-        #   while the native cvc5 lec is VACUOUSLY blind to it (don't-care).
-        "array_store_stale_rhs",
-        "arr_comb_mux_const",
-        "arr_comb_tmp",
+        # The three comb-array store-loss trackers (array_store_stale_rhs,
+        # arr_comb_mux_const, arr_comb_tmp) were PROMOTED out of this list
+        # (2026-07-27). One root cause covered all three: upass.ssa cleared
+        # has_dest for a >=3-child (tuple_set) store — correct, its DEST must
+        # not be versioned — but then let the node fall through to the
+        # structural verbatim copy, so its INDEX and VALUE operands never
+        # followed rename_map. A reassigned `mut` therefore reached the store
+        # din on its stale base name, constprop folded that to the declaration
+        # value and DCE deleted the real write. upass_ssa.cpp now routes such a
+        # store through the same target-verbatim/operands-renamed arm as
+        # tuple_get/tuple_add/attr_*. All three prove; arr_comb_tmp also left
+        # _V2V_FIXME. Surfaced by lhdsuite //bench:minion_lec
+        # (minion_dcache_tensor_load{,_p1}); see lhdsuite fixme.md 1h.
     ]
 ]
 
@@ -586,12 +583,11 @@ _V2PRP_FIXME = [
     # REFUTE is flat-confirmed before it can fail — see pass/lec/encode.hpp
     # (Comb_box / set_box_keys) and lec_hierarchical's flat confirmation.
     #
-    # array_store_stale_rhs (2026-07-27): the golden here is the SEMANTIC mux
-    # (array-free), so the impl side (golden -> slang -> Pyrope, correct)
-    # refutes against the reference .prp, which recompiles through the same
-    # comb-array store-loss bug this pair tracks (lhdsuite array_problem.md).
-    # NOT a prp_writer gap — flip it green by fixing the tolg store din.
-    "array_store_stale_rhs",
+    # array_store_stale_rhs was PROMOTED out of this list (2026-07-27): the
+    # reference .prp used to recompile through the comb-array store-loss bug, so
+    # the (correct) impl side refuted against it. The bug was upass.ssa dropping
+    # the rename on a tuple_set store's operands — not a tolg store-din gap, as
+    # this entry previously guessed. See the equiv note above.
     # mem_ordering_none (2026-07-27): the golden encodes the mode's undefined
     # read-during-write window as x, and the cvc5 BMC engine GROUNDS that x
     # to a concrete value instead of treating it as either-way (witness:
@@ -658,9 +654,9 @@ _V2V_FIXME = [
     # golden drives a value — same lost-assignment family as arr_comb_tmp.
     "tup_in_port",
     "tuple_in_port",
-    # Comb-array blocking-temp store: `t = d` dropped by the slang front end
-    # (see the equiv fixme list above and lhdsuite array_problem.md).
-    "arr_comb_tmp",
+    # arr_comb_tmp was PROMOTED out of this list (2026-07-27): the `t = d` drop
+    # was upass.ssa leaving a tuple_set store's VALUE operand on its stale base
+    # name, not a slang front-end drop — see the equiv note above.
 ]
 
 [

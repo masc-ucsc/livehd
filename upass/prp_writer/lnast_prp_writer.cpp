@@ -7,8 +7,8 @@
 #include <charconv>
 #include <format>
 #include <limits>
+#include <map>
 #include <optional>
-#include <queue>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -674,41 +674,15 @@ void Lnast_prp_writer::write_module() {
   auto stmts_nid = lnast->get_sibling_next(io_nid);
   collect_folded_attrs(stmts_nid);  // gather reg/mem attrs to fold into declares
   if (!stmts_nid.is_invalid()) {
-    // Compute the clock/reset-pin dependency CONE: every body net that
-    // transitively feeds a `clock_pin`/`reset_pin` ref.  These are relocated
-    // ahead of the reg declares (and excluded from the mut-hoist) so the `ref`
-    // binds to a real driver, not a hoisted 0.  Closure over the combinational
-    // drivers' read sets catches a multi-level derived clock
-    // (`inv = ~gate; gclk = clk_b & inv`).
-    //
-    // A cone net may be written by MORE than its seed store: a reset mux
-    // (`real_reset = mode ? lgc_rst : reset`) lowers to a seed store plus an
-    // in-`if` override, and the ref reads the value AFTER the override. So the
-    // cone tracks every top-level writer of a net — a plain defining statement
-    // or an `if` whose arms store it — and the closure chases the reads of ALL
-    // of them (relocating only the seed used to drop the override below the reg
-    // declares, silently rewiring the reset to the seed arm, AND left the net's
-    // original `declare` to re-declare it in the declare pass — the ResetGen
-    // duplicate-`mut _mux_1` miscompile).
-    // Stored names of an `if`/`unique_if`'s arms, nested ifs included.
-    auto collect_if_stores = [&](auto&& self, Lnast_nid n, std::unordered_set<std::string>& stored) -> void {
-      for (auto b = lnast->get_child(n); !b.is_invalid(); b = lnast->get_sibling_next(b)) {
-        if (!Lnast_ntype::is_stmts(lnast->get_type(b))) {
-          continue;  // a condition operand, not an arm
-        }
-        for (auto s = lnast->get_child(b); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
-          const auto st = lnast->get_type(s);
-          if (st == Lnast_ntype::Lnast_ntype_if || st == Lnast_ntype::Lnast_ntype_unique_if) {
-            self(self, s, stored);
-            continue;
-          }
-          auto s0 = lnast->get_child(s);
-          if (!s0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(s0)) && defines_child0(st)) {
-            stored.insert(std::string(strip_prefix(lnast->get_name(s0))));
-          }
-        }
-      }
-    };
+    // A `clock_pin=ref X` / `reset_pin=ref X` on a reg/latch declare READS X
+    // at the declare's emission point, and the declare pass emits every
+    // declare at the top of the function — usually before X's driver.  The
+    // writer used to fix this by RELOCATING X's whole dependency cone above
+    // the declares, with its own dependency graph, topological sort and a
+    // cycle-repair fallback — the machinery behind the fixme 1f/1f-bis silent
+    // miscompiles.  It now makes X POSITION-INDEPENDENT instead and leaves
+    // every statement in body order: see the pin_wire_hoist / pin_alias
+    // decision below.
     // Reads of an `if`/`unique_if`: condition operands plus every arm
     // statement's operands (written lhs excluded), fold-following throughout.
     auto collect_if_reads = [&](auto&& self, Lnast_nid n, std::unordered_set<std::string>& out) -> void {
@@ -735,22 +709,13 @@ void Lnast_prp_writer::write_module() {
     // `clock_pin=ref X` binds correctly wherever the store lands. Any emitted
     // ICG module shows the pattern: `wire clkgt:u1` at the top, the regs
     // declared with `clock_pin=ref clkgt`, and `clkgt = <gate>` assigned after
-    // the body. Such a net needs NO relocation — and the cone must not walk
-    // THROUGH it either.
-    //
-    // Walking through it is what produced a silent miscompile. The closure
-    // followed `clkgt` into the gate instance and on into the gate's ENABLE,
-    // dragging `busy_o`/`th_id_complete_o` above the always_comb that computes
-    // them. Those are SPLIT WIRES (`<net> = <net>__wtmp` bridges), so hoisting
-    // a bridge above its accumulator's writes captured the poison init: the
-    // nets became constant-unknown, silently deleting two terms from the clock
-    // gate's enable and making the re-emitted Pyrope inequivalent to its own
-    // Verilog source. See lhdsuite fixme.md issue 1f.
-    //
-    // Stopping at the wire keeps the relocation OTHER users need — a `mut` SSA
-    // temp defined after its readers (`wb_wdata__w1` in intpipe_csr_file) still
-    // relocates — while dropping the part that was never necessary.
+    // the body.
+    // A `reg`/`latch` net is position-independent too: its declare is emitted
+    // by the declare pass and a read of its Q is order-free flop state, so a
+    // `clock_pin=ref <reg>` (a divided clock: `always_ff @(posedge div_q)`)
+    // binds the Q pin wherever the flop's next-state store lands.
     std::unordered_set<std::string> wire_decl;
+    std::unordered_set<std::string> state_decl_pre;
     {
       auto scan_wires = [&](auto&& self, Lnast_nid n) -> void {
         for (auto s = lnast->get_child(n); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
@@ -769,85 +734,123 @@ void Lnast_prp_writer::write_module() {
           }
           auto d1 = lnast->get_sibling_next(d0);
           auto d2 = d1.is_invalid() ? d1 : lnast->get_sibling_next(d1);
-          if (!d2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(d2)) && lnast->get_name(d2) == "wire") {
-            wire_decl.insert(std::string(strip_prefix(lnast->get_name(d0))));
+          if (!d2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(d2))) {
+            const auto kind = lnast->get_name(d2);
+            if (kind == "wire") {
+              wire_decl.insert(std::string(strip_prefix(lnast->get_name(d0))));
+            } else if (kind == "reg" || kind == "latch") {
+              state_decl_pre.insert(std::string(strip_prefix(lnast->get_name(d0))));
+            }
           }
         }
       };
       scan_wires(scan_wires, stmts_nid);
     }
+    // ── Pin-net position-independence ──────────────────────────────────────
+    // Decide, per pin net X (a `clock_pin=ref X` / `reset_pin=ref X` target):
+    //  - X declared `wire`/`reg`/`latch`, or not driven in this region:
+    //    already position-independent — a wire binds any ref to its single
+    //    later driver, a flop/latch Q is order-free state, a port is in scope.
+    //  - X `mut` with exactly ONE driver — a plain top-level 2-child store and
+    //    no declare of its own: pre-declare `wire X` at the region top
+    //    (emitted with the other hoists below).  The store stays the wire's
+    //    one in-place driver.
+    //  - anything else (multi-driven, if-written, set_mask-driven, mut/const
+    //    declared, dotted): mint an alias — `wire <X__pinw>` at the region
+    //    top, `<X__pinw> = X` at the region END (X's FINAL value; nothing
+    //    after can rewrite it), and the folded attr rewritten to
+    //    `ref <X__pinw>`.  X itself stays untouched, in body order.
+    // Every statement keeps its body position: there is nothing to relocate,
+    // no writer-side dependency graph, and no cycle to repair.  A genuinely
+    // cyclic gated clock (an enable chain reading Qs of the flops it clocks)
+    // is broken where the semantics break it — at the position-independent
+    // wire / flop-Q reads.
+    // pin_cone_ ends up holding every name the EMITTED attr strings reference
+    // (the pin nets plus minted aliases): dead-signal removal and instance-
+    // output inlining must not fold a name an attr string spells out.
+    std::map<std::string, std::string> pin_alias;  // net -> alias (ordered for deterministic emission)
+    std::unordered_set<std::string>    pin_wire_hoist;
     pin_cone_ = pin_dep_nets_;
-    for (auto it = pin_cone_.begin(); it != pin_cone_.end();) {
-      it = (wire_decl.count(*it) != 0u) ? pin_cone_.erase(it) : std::next(it);
-    }
     if (!pin_dep_nets_.empty()) {
-      std::unordered_map<std::string, std::vector<Lnast_nid>> body_writers;  // stripped lhs -> its top-level writers
-      std::unordered_set<std::string>                         state_decl;    // reg/latch names — a flop-Q read is order-free
-      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        const auto ct = lnast->get_type(c);
-        auto       c0 = lnast->get_child(c);
-        if (c0.is_invalid()) {
+      // Count every definition of a name at ANY nesting depth (an if-arm store
+      // or a nested set_mask is a def) and remember each name's single
+      // top-level def when there is exactly one.
+      std::unordered_map<std::string, int>       def_count;
+      std::unordered_map<std::string, Lnast_nid> top_def;
+      std::unordered_set<std::string>            nonstate_declared;
+      std::function<void(Lnast_nid, bool)>       scan_defs = [&](Lnast_nid n, bool top) {
+        for (auto s = lnast->get_child(n); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+          const auto st = lnast->get_type(s);
+          if (Lnast_ntype::is_stmts(st) || st == Lnast_ntype::Lnast_ntype_if
+              || st == Lnast_ntype::Lnast_ntype_unique_if) {
+            scan_defs(s, false);
+            continue;
+          }
+          auto s0 = lnast->get_child(s);
+          if (s0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(s0)) || !defines_child0(st)) {
+            continue;
+          }
+          auto nm = std::string(strip_prefix(lnast->get_name(s0)));
+          if (st == Lnast_ntype::Lnast_ntype_declare) {
+            if (wire_decl.count(nm) == 0u && state_decl_pre.count(nm) == 0u) {
+              nonstate_declared.insert(nm);  // a mut/const declare (its init may drive)
+            }
+            continue;
+          }
+          if (++def_count[nm] == 1 && top) {
+            top_def.emplace(nm, s);
+          }
+        }
+      };
+      scan_defs(stmts_nid, true);
+      for (const auto& nm : pin_dep_nets_) {
+        if (wire_decl.count(nm) != 0u || state_decl_pre.count(nm) != 0u || declared_.count(nm) != 0u) {
+          continue;  // already position-independent / already in scope
+        }
+        auto dc = def_count.find(nm);
+        if (dc == def_count.end()) {
+          continue;  // no in-region driver (an input port, a package name)
+        }
+        bool plain_single_store = false;
+        if (dc->second == 1 && nonstate_declared.count(nm) == 0u && nm.find('.') == std::string::npos) {
+          if (auto td = top_def.find(nm);
+              td != top_def.end() && lnast->get_type(td->second) == Lnast_ntype::Lnast_ntype_store) {
+            auto s0 = lnast->get_child(td->second);
+            auto s1 = s0.is_invalid() ? s0 : lnast->get_sibling_next(s0);
+            // Only a plain 2-child store is a single assignment (a set_mask
+            // emits a copy plus a masked write — two drivers).
+            plain_single_store = !s1.is_invalid() && lnast->is_last_child(s1);
+          }
+        }
+        if (plain_single_store) {
+          pin_wire_hoist.insert(nm);
           continue;
         }
-        // A reg/latch declare is resolved in the declare pass, not relocatable;
-        // a clock that reads a flop Q keeps the declared reg ref.
-        if (ct == Lnast_ntype::Lnast_ntype_declare) {
-          if (Lnast_ntype::is_ref(lnast->get_type(c0))) {
-            auto c1 = lnast->get_sibling_next(c0);
-            auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-            if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
-                && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch")) {
-              state_decl.insert(std::string(strip_prefix(lnast->get_name(c0))));
+        std::string alias = nm + "__pinw";
+        std::replace(alias.begin(), alias.end(), '.', '_');
+        for (int i = 2; def_count.count(alias) != 0u || declared_.count(alias) != 0u
+                        || pin_cone_.count(alias) != 0u || wire_decl.count(alias) != 0u
+                        || state_decl_pre.count(alias) != 0u;
+             ++i) {
+          alias = nm + "__pinw" + std::to_string(i);
+          std::replace(alias.begin(), alias.end(), '.', '_');
+        }
+        // Rewrite every folded `…=ref nm` token (exact-name match) to the alias.
+        const std::string from = "=ref " + nm;
+        for (auto& [attr_var, attrs] : folded_attrs_) {
+          (void)attr_var;
+          for (size_t p = attrs.find(from); p != std::string::npos; p = attrs.find(from, p)) {
+            const size_t end = p + from.size();
+            if (end == attrs.size() || attrs[end] == ',' || attrs[end] == ' ') {
+              attrs.replace(p, from.size(), "=ref " + alias);
+              p += 5 + alias.size();
+            } else {
+              p = end;  // a longer net name that merely starts with nm
             }
           }
-          continue;
         }
-        if (is_folded_node(c) || emits_nothing_stmt(c)) {
-          continue;
-        }
-        if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
-          std::unordered_set<std::string> stored;
-          collect_if_stores(collect_if_stores, c, stored);
-          for (const auto& nm : stored) {
-            body_writers[nm].push_back(c);
-          }
-          continue;
-        }
-        if (!Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(ct)) {
-          continue;
-        }
-        body_writers[std::string(strip_prefix(lnast->get_name(c0)))].push_back(c);
-      }
-      std::vector<std::string> work(pin_dep_nets_.begin(), pin_dep_nets_.end());
-      while (!work.empty()) {
-        auto nm = work.back();
-        work.pop_back();
-        auto it = body_writers.find(nm);
-        if (it == body_writers.end()) {
-          continue;  // an interface port / reg / has no combinational body driver
-        }
-        std::unordered_set<std::string> reads;
-        for (const auto& w : it->second) {
-          const auto wt = lnast->get_type(w);
-          if (wt == Lnast_ntype::Lnast_ntype_if || wt == Lnast_ntype::Lnast_ntype_unique_if) {
-            collect_if_reads(collect_if_reads, w, reads);
-          } else {
-            collect_driver_reads(w, reads);
-          }
-        }
-        for (const auto& r : reads) {
-          if (state_decl.count(r)) {
-            continue;  // flop Q — position-independent, the reg declare stays put
-          }
-          if (wire_decl.count(r)) {
-            continue;  // a `wire` — position-independent too (see above); its forward
-                       // declaration binds any ref, so neither it nor anything it
-                       // depends on has to move.
-          }
-          if (body_writers.count(r) && pin_cone_.insert(r).second) {
-            work.push_back(r);
-          }
-        }
+        pin_cone_.insert(alias);
+        pin_alias.emplace(nm, alias);
       }
     }
     // With the clock/reset cone known, decide which submodule output-port reads
@@ -1016,64 +1019,6 @@ void Lnast_prp_writer::write_module() {
       }
     }
 
-    // Dry-run of the clock/reset-pin cone relocation (the emit loop below the
-    // hoist scan): which top-level statements WILL be emitted ahead of the
-    // declares, and which names those statements define.  The cone closure is an
-    // over-approximation — it pulls in every body-written net READ by a cone
-    // net's writer, including nets read inside a big `if` that also stores
-    // non-cone nets.  Such an `if` is NOT relocatable (relocating it would hoist
-    // its non-cone stores too), so a net whose only writers/declares live inside
-    // it gets nothing emitted up front — the hoist scan must NOT treat bare
-    // pin_cone_ membership as "already declared ahead" (that left a nested
-    // `mut X = 0` in one arm and an out-of-scope write in a sibling arm).
-    std::unordered_set<int64_t>     pin_net_reloc;  // statements the cone relocation emits
-    std::unordered_set<std::string> cone_predecl;   // names those statements define ahead of the declares
-    if (!pin_cone_.empty()) {
-      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        const auto ct = lnast->get_type(c);
-        auto       c0 = lnast->get_child(c);
-        if (c0.is_invalid() || is_folded_node(c) || emits_nothing_stmt(c)) {
-          continue;
-        }
-        bool                            relocate = false;
-        std::unordered_set<std::string> defs;
-        if (ct == Lnast_ntype::Lnast_ntype_declare) {
-          // Reg/latch declares are resolved by the declare pass, never here.
-          if (Lnast_ntype::is_ref(lnast->get_type(c0))) {
-            auto       c1       = lnast->get_sibling_next(c0);
-            auto       c2       = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-            const bool is_state = !c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
-                                  && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch");
-            auto nm  = std::string(strip_prefix(lnast->get_name(c0)));
-            relocate = !is_state && pin_cone_.count(nm) != 0u;
-            if (relocate) {
-              defs.insert(nm);
-            }
-          }
-        } else if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
-          collect_if_stores(collect_if_stores, c, defs);
-          relocate = !defs.empty();
-          for (const auto& nm : defs) {
-            if (pin_cone_.count(nm) == 0u) {
-              relocate = false;  // stores a non-cone net too — the whole if stays in place
-              break;
-            }
-          }
-        } else if (Lnast_ntype::is_ref(lnast->get_type(c0)) && defines_child0(ct)) {
-          auto nm  = std::string(strip_prefix(lnast->get_name(c0)));
-          relocate = pin_cone_.count(nm) != 0u;
-          if (relocate) {
-            defs.insert(nm);
-          }
-        }
-        if (!relocate) {
-          continue;
-        }
-        pin_net_reloc.insert(c.get_class_index().value);
-        cone_predecl.insert(defs.begin(), defs.end());
-      }
-    }
-
     {
       std::unordered_set<std::string>              top_decl, nonmut_decl, nested_mut_decl, store_lhs;
       std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")
@@ -1138,13 +1083,12 @@ void Lnast_prp_writer::write_module() {
       scan(scan, stmts_nid, true);
       // Position every top-level statement in EMIT order, so a name's single store
       // can be checked to precede every read of it.  Body emit order is: the
-      // clock/reset cone (relocated, below), then ALL declares (pass 0), then the
-      // non-declares in body order (pass 1).  So a read inside a *declare* lands
-      // ahead of EVERY non-declare store — such a name must keep its hoist, or the
-      // in-place declaration would come after its first read (Pyrope rejects a read
-      // of an undeclared name).  Reads inside the cone are not a risk: the cone is
-      // transitively closed over its drivers' reads, so a cone statement only ever
-      // reads cone nets / flop Qs / ports, never a candidate.
+      // hoisted prologue (mut seeds + wire pre-declares, incl. the pin wires),
+      // then ALL declares (pass 0), then the non-declares in body order
+      // (pass 1), then the pin-alias assignments.  A read inside a *declare*
+      // lands ahead of EVERY non-declare store — such a name must keep its
+      // hoist, or the in-place declaration would come after its first read
+      // (Pyrope rejects a read of an undeclared name).
       std::unordered_map<std::string, size_t> store_pos;   // name -> body index of its top-level store
       std::unordered_map<std::string, size_t> first_read;  // name -> earliest non-declare body index reading it
       std::unordered_set<std::string>         decl_read;   // read by a declare — emitted before every store
@@ -1246,13 +1190,13 @@ void Lnast_prp_writer::write_module() {
         if (bool_inline_.count(nm) != 0u || mux_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
           continue;  // inlined at their single read — no declaration ever emits
         }
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !cone_predecl.count(nm)
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_wire_hoist.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           if (no_hoist_needed(nm)) {
             single_store_.insert(nm);  // declared in place by its store, as `const X = <rhs>`
             continue;
           }
-          need.insert(nm);  // cone-relocated nets are emitted (as `mut net = driver`) ahead of the declares, not hoisted to 0
+          need.insert(nm);  // pin-wire-hoisted nets get a bare `wire` pre-declare instead (below)
         }
       }
       for (const auto& nm : nested_mut_decl) {
@@ -1260,7 +1204,7 @@ void Lnast_prp_writer::write_module() {
           suppress_decl_.insert(nm);  // inlined at its single read — no hoist, no in-place declare
           continue;
         }
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !cone_predecl.count(nm)
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           need.insert(nm);
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
@@ -1279,14 +1223,6 @@ void Lnast_prp_writer::write_module() {
       // declare is dropped via suppress_decl_.
       std::vector<std::string> wpre;
       for (const auto& [nm, ty] : nested_wire_decl) {
-        if (cone_predecl.count(nm)) {
-          // The relocated cone region declares this net (its first relocated
-          // write mints `mut <net> = <driver>`), so the nested in-place `wire`
-          // declare must be dropped — emitting it too would both shadow and
-          // leave an undriven wire.
-          suppress_decl_.insert(nm);
-          continue;
-        }
         if (!top_decl.count(nm) && !declared_.count(nm) && !instance_output_inlined_.count(nm)) {
           wpre.push_back(nm);
         }
@@ -1302,378 +1238,30 @@ void Lnast_prp_writer::write_module() {
         declared_.insert(nm);
         suppress_decl_.insert(nm);
       }
+      // Pin nets promoted to `wire`, plus the minted pin aliases: bare wire
+      // pre-declares at the function top.  Untyped — tolg restamps the buffer
+      // width from the single driver (the body store / the end-of-body alias
+      // assignment).  With the wire declared, decl_prefix leaves the body
+      // store a plain re-assignment instead of minting `mut X = <driver>`.
+      {
+        std::vector<std::string> pnw(pin_wire_hoist.begin(), pin_wire_hoist.end());
+        for (const auto& [nm, alias] : pin_alias) {
+          (void)nm;
+          pnw.push_back(alias);
+        }
+        std::sort(pnw.begin(), pnw.end());
+        for (const auto& nm : pnw) {
+          if (declared_.count(nm) != 0u) {
+            continue;
+          }
+          print_indent();
+          os << "wire " << nm << "\n";
+          declared_.insert(nm);
+        }
+      }
       // Any `wire` that has a real-statement store driver must not receive
       // write_declare's combinational `= 0` default (it is single-driver).
       wire_stored_.insert(store_lhs.begin(), store_lhs.end());
-    }
-    // Clock/reset-pin dependency CONE (e.g. a derived clock `gclk = clk_b &
-    // gate`, or a multi-level `inv = ~gate; gclk = clk_b & inv`) must be DEFINED
-    // before the reg declares that bind it via `clock_pin=ref <net>`.  Emit, in
-    // body order (so a dependency lands before its consumer), EVERY top-level
-    // statement that defines a cone net: the net's own `declare` (keeps its
-    // declared type, and the declare pass below then skips it instead of
-    // re-declaring a name the first-write already minted), every plain write,
-    // and any `if` whose arms store only cone nets (a reset-mux override must
-    // ride ahead of the reg with its seed, or the ref reads the seed arm only).
-    // Remember each so the body passes below skip them.  The relocation decision
-    // itself was precomputed (pin_net_reloc, above the hoist scan) so the hoist
-    // exclusions agree exactly with what is emitted here.
-    // Two passes, declares first: the reader's body order can place a flop's SSA
-    // update (`reg__w1#[..] = <pack of leaves>`, relocated as a cone statement)
-    // BEFORE the top-level declares of the leaf nets it reads (they live where
-    // the comb block sat).  Cone declares carry only constant inits (0 / poison),
-    // so hoisting them ahead of the non-declare cone statements is inert — the
-    // same justification as the main body's declare-first pass below.
-    std::unordered_set<int64_t> state_pre_emitted;  // reg/latch declares emitted ahead of the cone
-    if (!pin_net_reloc.empty()) {
-      // Cone statements may READ a flop Q (order-free in VALUE — flop state —
-      // but Pyrope scoping still needs the reg DECLARED first, and reg declares
-      // normally emit in the declare pass BELOW the cone).  Pre-emit every
-      // reg/latch declare whose folded attrs carry no `ref <net>` binding (a
-      // pin-bound reg must stay below its relocated pin driver; its Q being
-      // read by a cone statement would be genuinely circular).  Inert: these
-      // declares carry only constant attrs/inits.
-      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        if (lnast->get_type(c) != Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
-          continue;
-        }
-        auto c0 = lnast->get_child(c);
-        if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0))) {
-          continue;
-        }
-        auto c1 = lnast->get_sibling_next(c0);
-        auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-        const bool is_state = !c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
-                              && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch");
-        if (!is_state) {
-          continue;
-        }
-        auto nm = std::string(strip_prefix(lnast->get_name(c0)));
-        if (auto fa = folded_attrs_.find(nm); fa != folded_attrs_.end() && fa->second.find("=ref ") != std::string::npos) {
-          continue;  // pin-bound reg: joins the cone dependency graph below instead
-        }
-        print_indent();
-        cur = c;
-        write_node();
-        os << "\n";
-        state_pre_emitted.insert(c.get_class_index().value);
-      }
-      // Emit the relocated cone statements in DEPENDENCY (topological) order,
-      // not body order: the reader's body order can place a flop's SSA update
-      // (`reg__w1#[..] = <pack of leaves>`) before the comb statements — and
-      // the declares — producing the values it reads (the always_ff-before-
-      // always_comb shape).  Pin-bound reg/latch declares (attrs carrying a
-      // `ref <net>` binding) join the graph too: they must land AFTER the
-      // statements defining their pin nets and BEFORE any cone statement
-      // reading their Q — no single body position satisfies both.  Ties (and
-      // the cycle fallback) keep body order.
-      {
-        struct Cnode {
-          Lnast_nid                       nid;
-          std::unordered_set<std::string> defs, reads;
-          bool                            is_decl = false;
-        };
-        std::vector<Cnode> nodes;  // in body order
-        // The emitter renders bool_inline_/mux_inline_/value_inline_ names as
-        // their defining expression at the read site (their own def statement
-        // never emits), so a collected read of such a name must be resolved to
-        // the reads OF that expression — the text the statement actually emits.
-        auto resolve_inline_reads = [&](std::unordered_set<std::string>& reads) {
-          std::vector<std::string> work(reads.begin(), reads.end());
-          while (!work.empty()) {
-            auto r = work.back();
-            work.pop_back();
-            std::unordered_set<std::string> sub;
-            if (auto bit = bool_inline_.find(r); bit != bool_inline_.end()) {
-              collect_node_reads(bit->second, sub);
-            } else if (auto vit = value_inline_.find(r); vit != value_inline_.end()) {
-              collect_node_reads(vit->second, sub);
-            } else if (auto mit = mux_inline_.find(r); mit != mux_inline_.end()) {
-              if (auto mii = mux_info_.find(mit->second); mii != mux_info_.end()) {
-                for (const auto& arm : mii->second.arms) {
-                  collect_node_reads(arm.cond, sub);
-                  if (!arm.def.is_invalid()) {
-                    collect_driver_reads(arm.def, sub);
-                  }
-                }
-                if (!mii->second.else_def.is_invalid()) {
-                  collect_driver_reads(mii->second.else_def, sub);
-                }
-              }
-            } else {
-              continue;  // a real net — keep it
-            }
-            reads.erase(r);
-            for (const auto& s : sub) {
-              if (reads.insert(s).second) {
-                work.push_back(s);
-              }
-            }
-          }
-        };
-        {
-          for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-            const auto ct = lnast->get_type(c);
-            if (pin_net_reloc.count(c.get_class_index().value) != 0u) {
-              Cnode n;
-              n.nid     = c;
-              n.is_decl = ct == Lnast_ntype::Lnast_ntype_declare;
-              auto c0   = lnast->get_child(c);
-              if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
-                collect_if_stores(collect_if_stores, c, n.defs);
-                collect_if_reads(collect_if_reads, c, n.reads);
-                // A mux-collapsed if renders its else arm from a PRECEDING
-                // default store folded into it — that store's reads are part of
-                // this statement's emitted text.
-                if (auto mii = mux_info_.find(c.get_class_index().value);
-                    mii != mux_info_.end() && !mii->second.else_def.is_invalid()) {
-                  collect_driver_reads(mii->second.else_def, n.reads);
-                }
-              } else if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
-                n.defs.insert(std::string(strip_prefix(lnast->get_name(c0))));
-                if (!n.is_decl) {
-                  collect_driver_reads(c, n.reads);
-                }
-              }
-              resolve_inline_reads(n.reads);
-              nodes.push_back(std::move(n));
-              continue;
-            }
-            // Pin-bound reg/latch declare: reads = its `ref <net>` bindings.
-            if (ct != Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
-              continue;
-            }
-            auto c0 = lnast->get_child(c);
-            if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0))) {
-              continue;
-            }
-            auto       c1       = lnast->get_sibling_next(c0);
-            auto       c2       = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-            const bool is_state = !c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
-                                  && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch");
-            if (!is_state) {
-              continue;
-            }
-            auto nm = std::string(strip_prefix(lnast->get_name(c0)));
-            auto fa = folded_attrs_.find(nm);
-            if (fa == folded_attrs_.end() || fa->second.find("=ref ") == std::string::npos) {
-              continue;  // already pre-emitted above
-            }
-            Cnode n;
-            n.nid     = c;
-            n.is_decl = true;
-            n.defs.insert(nm);
-            for (size_t p = fa->second.find("=ref "); p != std::string::npos; p = fa->second.find("=ref ", p + 5)) {
-              auto s = p + 5;
-              auto e = fa->second.find_first_of(", ", s);
-              n.reads.insert(fa->second.substr(s, e == std::string::npos ? std::string::npos : e - s));
-            }
-            nodes.push_back(std::move(n));
-            state_pre_emitted.insert(c.get_class_index().value);  // main pass 0 skips it
-          }
-        }
-        // definers per net, in body order
-        std::unordered_map<std::string, std::vector<size_t>> definers;
-        for (size_t i = 0; i < nodes.size(); ++i) {
-          for (const auto& d : nodes[i].defs) {
-            definers[d].push_back(i);
-          }
-        }
-        // Pin nets referenced by a pin-bound reg declare (`clock_pin=ref X`)
-        // whose driver transitively reads a Q of a flop it clocks (a gated
-        // clock gated by its own flops' state) admit NO linear order: the
-        // declare needs X first, X's driver needs the Q, the Q needs the
-        // declare. Pre-declare such a single-driver pin net as a `wire` at the
-        // region top — the `ref` binds the wire (position-independent single-
-        // driver net), the driver stays its one later assignment, and the
-        // corresponding ordering edges demote to breakable value edges.
-        std::unordered_set<std::string> wire_hoisted;
-        for (const auto& n : nodes) {
-          if (!n.is_decl || n.reads.empty()) {
-            continue;  // only pin-bound reg/latch declares carry reads
-          }
-          for (const auto& r : n.reads) {
-            if (wire_hoisted.count(r) || declared_.count(r)) {
-              continue;
-            }
-            auto it = definers.find(r);
-            if (it == definers.end() || it->second.size() != 1) {
-              continue;  // no in-region driver, or multi-driven (a wire needs exactly one)
-            }
-            const auto& dn = nodes[it->second[0]];
-            // Only a plain 2-child store driver (`X = <value>`): its emission
-            // is a single assignment — the wire's one driver. A set_mask
-            // (which emits a copy + a masked write) would double-drive.
-            if (dn.is_decl || lnast->get_type(dn.nid) != Lnast_ntype::Lnast_ntype_store) {
-              continue;
-            }
-            auto s0 = lnast->get_child(dn.nid);
-            auto s1 = s0.is_invalid() ? s0 : lnast->get_sibling_next(s0);
-            if (s1.is_invalid() || !lnast->is_last_child(s1)) {
-              continue;
-            }
-            print_indent();
-            os << "wire " << r << "\n";
-            declared_.insert(r);
-            wire_hoisted.insert(r);
-          }
-        }
-        // Edges carry a kind: SCOPE edges (declare-before-any-read, declare-
-        // before-other-writers, and a pin-bound reg declare after its `ref` net
-        // definers) must NEVER be broken — violating one is a compile error.
-        // VALUE edges (reader after a non-declare definer) are SSA value
-        // ordering; a genuine cycle (a gated clock whose enable chain reads Qs
-        // of flops it clocks) is broken at a VALUE edge only.
-        std::vector<std::vector<std::pair<size_t, bool>>> succ(nodes.size());  // (target, is_scope)
-        std::vector<size_t>                               indeg(nodes.size(), 0), sdeg(nodes.size(), 0);
-        auto add_edge = [&](size_t a, size_t b, bool scope) {
-          if (a == b) {
-            return;
-          }
-          succ[a].emplace_back(b, scope);
-          ++indeg[b];
-          if (scope) {
-            ++sdeg[b];
-          }
-        };
-        // Scope anchor per net: the statement whose emission DECLARES the name —
-        // its declare node if the region has one, else the FIRST definer (whose
-        // store mints `mut <net> = <driver>` via decl_prefix) unless the name is
-        // already declared outside the region (hoist / port / bundle base).
-        std::unordered_map<std::string, size_t> scope_anchor;
-        for (const auto& [r, ds] : definers) {
-          size_t a = nodes.size();
-          for (auto d : ds) {
-            if (nodes[d].is_decl) {
-              a = d;
-              break;
-            }
-          }
-          if (a == nodes.size() && !declared_.count(r)) {
-            a = ds.front();
-          }
-          if (a != nodes.size()) {
-            scope_anchor.emplace(r, a);
-          }
-        }
-        for (size_t i = 0; i < nodes.size(); ++i) {
-          for (const auto& r : nodes[i].reads) {
-            auto it = definers.find(r);
-            if (it == definers.end()) {
-              continue;  // defined outside the region (hoist/port/pre-emitted reg) — already in scope
-            }
-            if (nodes[i].defs.count(r)) {
-              continue;  // accumulator (`x = x | y`) — same-net writers keep body order below
-            }
-            auto ai = scope_anchor.find(r);
-            for (auto d : it->second) {
-              // Scope-hard: reading a name before the statement that declares
-              // it, and a pin-bound reg declare's `ref <net>` bindings (need
-              // the net declared AND final before the declare) — EXCEPT a
-              // wire-hoisted pin net, whose `ref` binds the pre-declared wire
-              // position-independently.
-              add_edge(d, i,
-                       (nodes[i].is_decl && !wire_hoisted.count(r)) || (ai != scope_anchor.end() && ai->second == d));
-            }
-          }
-          // Same-net multi-writer: keep body order among definers, except a
-          // declare always precedes every other definer of its net (an
-          // assignment before the declaration would be a use-before-declare).
-          for (const auto& d : nodes[i].defs) {
-            const auto& ds = definers[d];
-            auto        ai = scope_anchor.find(d);
-            for (auto j : ds) {
-              if (j >= i) {
-                break;
-              }
-              if (nodes[i].is_decl && !nodes[j].is_decl) {
-                add_edge(i, j, true);  // late declare still precedes earlier writers
-              } else {
-                add_edge(j, i, ai != scope_anchor.end() && ai->second == j);
-              }
-            }
-          }
-        }
-        if (const char* dbg = ::getenv("PRPW_DBG"); dbg != nullptr) {
-          for (size_t i = 0; i < nodes.size(); ++i) {
-            if (nodes[i].defs.count(dbg) || nodes[i].reads.count(dbg)) {
-              std::string ds, rs;
-              for (const auto& d : nodes[i].defs) {
-                ds += d + " ";
-              }
-              for (const auto& r : nodes[i].reads) {
-                rs += r + " ";
-              }
-              std::string kids;
-              for (auto c = lnast->get_child(nodes[i].nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-                kids += std::string(lnast->get_name(c)) + "|";
-              }
-              fprintf(stderr, "PRPW_DBG topo node %zu type=%d decl=%d indeg=%zu DEFS[ %s] READS[ %s] KIDS[%s]\n", i,
-                      (int)lnast->get_type(nodes[i].nid), (int)nodes[i].is_decl, indeg[i], ds.c_str(), rs.c_str(),
-                      kids.c_str());
-            }
-          }
-        }
-        // Kahn, tie-break by body index (min-heap); cycle fallback: body order.
-        std::priority_queue<size_t, std::vector<size_t>, std::greater<>> ready;
-        for (size_t i = 0; i < nodes.size(); ++i) {
-          if (indeg[i] == 0) {
-            ready.push(i);
-          }
-        }
-        std::vector<char> emitted(nodes.size(), 0);
-        size_t            done = 0;
-        auto              emit_node = [&](size_t i) {
-          emitted[i] = 1;
-          ++done;
-          print_indent();
-          cur = nodes[i].nid;
-          write_node();  // a first write with no relocated declare -> decl_prefix mints `mut <net> = <driver>`
-          os << "\n";
-          for (auto [s, scope] : succ[i]) {
-            if (scope) {
-              --sdeg[s];
-            }
-            if (--indeg[s] == 0 && !emitted[s]) {
-              ready.push(s);
-            }
-          }
-        };
-        while (done < nodes.size()) {
-          if (ready.empty()) {
-            // Cycle repair: force the lowest-body-index stuck node whose SCOPE
-            // in-edges are all satisfied (break VALUE edges only); a pure scope
-            // cycle (should not happen) falls back to the lowest-index node.
-            size_t pick  = nodes.size();
-            size_t pick2 = nodes.size();
-            for (size_t i = 0; i < nodes.size(); ++i) {
-              if (emitted[i]) {
-                continue;
-              }
-              if (pick2 == nodes.size()) {
-                pick2 = i;
-              }
-              if (sdeg[i] == 0) {
-                pick = i;
-                break;
-              }
-            }
-            if (pick == nodes.size()) {
-              pick = pick2;
-            }
-            if (pick >= nodes.size()) {
-              break;
-            }
-            emit_node(pick);  // its successors unblock via the normal decrements
-            continue;
-          }
-          auto i = ready.top();
-          ready.pop();
-          if (!emitted[i]) {
-            emit_node(i);
-          }
-        }
-      }
     }
     // Emit top-level `declare` statements first.  The slang reader places an
     // `attr_set` (e.g. `data.[fwd]=0`, a reg's `reset_pin`/`sync`/`initial`)
@@ -1689,9 +1277,6 @@ void Lnast_prp_writer::write_module() {
         do {
           if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
             continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
-          }
-          if (pin_net_reloc.count(cur.get_class_index().value) || state_pre_emitted.count(cur.get_class_index().value)) {
-            continue;  // a clock/reset-pin net driver (or pre-emitted reg declare) already emitted ahead
           }
           const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
           if (is_decl != (pass == 0)) {
@@ -1710,6 +1295,14 @@ void Lnast_prp_writer::write_module() {
         } while (move_to_sibling());
         move_to_parent();  // cur -> stmts, pop
       }
+    }
+    // Pin aliases: each alias wire's single driver, at the region END so it
+    // reads the pin net's FINAL value (nothing after can rewrite it) — the
+    // same value the reg declare's old relocated `ref <net>` bound, with no
+    // statement moved to get it.
+    for (const auto& [nm, alias] : pin_alias) {
+      print_indent();
+      os << alias << " = " << nm << "\n";
     }
   }
 

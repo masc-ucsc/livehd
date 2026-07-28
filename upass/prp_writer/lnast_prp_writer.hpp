@@ -302,8 +302,10 @@ private:
   // A derived clock (`gclk = clk_b & gate`) is an internal combinational signal:
   // the declare-first hoist would emit the reg ahead of `<net>`'s driver, so the
   // `ref` would resolve to the net's pre-driver value (the `clock_pin '0'`
-  // tolg error). write_module emits each such net's driver BEFORE the reg
-  // declares and skips its in-body statement; the names are stripped (post-SSA).
+  // tolg error). write_module makes each such net POSITION-INDEPENDENT — a
+  // `wire` pre-declare when its single driver allows it, otherwise a minted
+  // `wire <net>__pinw` alias assigned the net's final value at the region end
+  // (the attr rewritten to `ref <net>__pinw`); the names are stripped (post-SSA).
   std::unordered_set<std::string>              pin_dep_nets_;
   // EVERY body net read as the ref value of a folded attribute, for ANY key (a
   // superset of pin_dep_nets_, which covers only the `_pin` keys whose driver is
@@ -311,12 +313,9 @@ private:
   // declare, and declares are emitted before every body write — so such a net is
   // read early and cannot be declared in place by its store (single_store_).
   std::unordered_set<std::string>              folded_attr_refs_;
-  // Transitive closure of pin_dep_nets_ over body-var operands: a derived clock
-  // can read ANOTHER internal wire (`inv = ~gate; gclk = clk_b & inv`), and that
-  // wire's driver must be relocated ahead of the declares too — otherwise the
-  // relocated `gclk` driver would read `inv` while it is still the hoisted 0
-  // (a silent dead clock).  Emitted in body order (combinational SSA defs
-  // precede their uses), so dependencies land before their consumers.
+  // Every name the EMITTED attr strings reference: pin_dep_nets_ plus any
+  // minted `__pinw` aliases.  Dead-signal removal and instance-output inlining
+  // must not fold a name an attr string spells out by name.
   std::unordered_set<std::string>              pin_cone_;
   // Collect the body-variable names a defining statement READS (operands after
   // child0), following single-use folded temps into their definitions so a

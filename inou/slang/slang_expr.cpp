@@ -933,16 +933,57 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         }
       }
     }
-    // M7: field read of a BUNDLE port — a plain read of the dotted io leaf
-    // (`req.cmd`), the hand-flattened-twin form the SSA port flatten produces.
-    // A part-select WITHIN a field (`req.f[3:0]`) recurses here through the
-    // generic select path below, so its offset math is already field-relative.
-    if (ma.value().kind == ExpressionKind::NamedValue) {
-      const auto& bsym = ma.value().as<slang::ast::NamedValueExpression>().symbol;
-      if (const auto* bsi = bundle_port_of(bsym)) {
-        const auto& field = ma.member.as<slang::ast::FieldSymbol>();
-        if (const auto* f = find_struct_field(*bsi, field.name)) {
-          return read_leaf(absl::StrCat(bundle_port_body_base(bsym), ".", f->name));
+    // A NESTED field read (`a.b.c`): walk the MemberAccess chain down to its
+    // base NamedValue and join the field path, so it resolves to exactly the
+    // SAME dotted leaf a one-level access resolves to. Every fast path below is
+    // guarded on the base being a NamedValue, so before this a nested chain fell
+    // through to the generic select at the end of this branch — extract the
+    // whole enclosing sub-struct, then shift the field out. That read is
+    // OVER-WIDE: it covers sibling lanes it never uses, so writing field X while
+    // reading disjoint field Y looked like a self-reference on one word and
+    // produced a FALSE combinational cycle. See struct_port_fields' recursive
+    // flatten and lhd/tests/struct_nested_field_leaf_test.sh.
+    {
+      std::vector<std::string_view> path;
+      const slang::ast::Expression* cur = &expr;
+      while (cur->kind == ExpressionKind::MemberAccess) {
+        const auto& m = cur->as<slang::ast::MemberAccessExpression>();
+        if (m.member.kind != slang::ast::SymbolKind::Field) {
+          break;
+        }
+        path.push_back(m.member.name);
+        cur = &m.value();
+      }
+      if (!path.empty() && cur->kind == ExpressionKind::NamedValue) {
+        std::string dotted;
+        for (auto it = path.rbegin(); it != path.rend(); ++it) {
+          if (!dotted.empty()) {
+            dotted += '.';
+          }
+          dotted += std::string(*it);
+        }
+        const auto& bsym = cur->as<slang::ast::NamedValueExpression>().symbol;
+        if (const auto* bsi = bundle_port_of(bsym)) {
+          // M7: field read of a BUNDLE port at any depth — a plain read of the
+          // dotted io leaf (`req.cmd`), the hand-flattened-twin form the SSA
+          // port flatten produces. A part-select WITHIN a field (`req.f[3:0]`)
+          // recurses here through the generic select path below, so its offset
+          // math is already field-relative.
+          if (const auto* f = find_struct_field(*bsi, dotted)) {
+            return read_leaf(absl::StrCat(bundle_port_body_base(bsym), ".", f->name));
+          }
+          // A WHOLE SUB-STRUCT read (`ctrl.req`) is deliberately NOT special-cased.
+          // An interior level is a name PREFIX, never a leaf entry, so it falls
+          // through to the generic tail below, which reconstructs from all the
+          // port's leaves and slices. That read is over-wide — and a narrower
+          // subtree-only reconstruct WAS written here and then REMOVED, because
+          // no fixture could tell the two apart. Once the leaves are separate
+          // NETS the over-wide read is harmless: the slice provably drops the
+          // sibling lanes and constprop folds the dependency away. The
+          // word-level cycle needed a `set_mask` CHAIN ON ONE NET, which a
+          // per-leaf port can no longer form. (A struct VARIABLE still can —
+          // that is vpu_ctrl; see lhdsuite fixme.md issue 1b.) Do not re-add it
+          // without a fixture that fails first.
         }
       }
     }
