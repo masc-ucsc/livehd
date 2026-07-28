@@ -554,4 +554,49 @@ theorem sext_bridge {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam) (hamt : 
   unfold bv_sext
   exact mk_bv_ofInt a.toInt
 
+--------------------------------------------------------------------------------
+-- MuxN (n-way select): reusable `muxn_fast` combinator + general bridge.
+-- The emitter targets `muxn_fast (BitVec.toNat sel) [option..]` for n-way Mux
+-- (options pre-resized to output width), making this bridge design-independent.
+--------------------------------------------------------------------------------
+
+/-- Fast-model n-way select combinator: the emitter targets this for n-way Mux
+(options pre-resized to the output width `w`), instead of a raw nested `if`. -/
+def muxn_fast {w : Nat} (sel : Nat) : List (BitVec w) → BitVec w
+  | [] => 0#w
+  | a :: l => if sel = 0 then a else muxn_fast (sel - 1) l
+
+/-- The certificate's `Op_MuxN` list-index (over encoded, width-`w` options)
+equals the encoded `muxn_fast`, for every selector value. -/
+theorem muxn_index {w : Nat} (opts : List (BitVec w)) : ∀ s : Nat,
+    (if s < (opts.map bvenc).length
+       then bv_resize w (((opts.map bvenc)[s]?).getD (mk_bv w 0)) else mk_bv w 0)
+      = bvenc (muxn_fast s opts) := by
+  induction opts with
+  | nil => intro s; simp [muxn_fast, bvenc]
+  | cons a l ih =>
+    intro s
+    cases s with
+    | zero =>
+      simp only [muxn_fast, List.map_cons, List.length_cons, Nat.zero_lt_succ,
+        List.getElem?_cons_zero, Option.getD_some, if_true]
+      rw [bv_resize_bvenc, bv_zext_id]
+    | succ k =>
+      simp only [muxn_fast, Nat.succ_ne_zero, if_false, Nat.succ_sub_one, List.map_cons,
+        List.length_cons, Nat.succ_lt_succ_iff, List.getElem?_cons_succ]
+      exact ih k
+
+/-- MuxN operator bridge: certificate `eval_op Op_MuxN` matches encoded `muxn_fast`. -/
+theorem muxn_bridge {w sw : Nat} (sel : BitVec sw) (opts : List (BitVec w)) :
+    eval_op LGraphOp.Op_MuxN w (bvenc sel :: opts.map bvenc)
+      = bvenc (muxn_fast sel.toNat opts) := by
+  have hidx : (bv_uint (bvenc sel)).toNat = sel.toNat := by rw [bv_uint_bvenc]; simp
+  show (let idx := (bv_uint (bvenc sel)).toNat;
+        if idx < (opts.map bvenc).length
+          then bv_resize w (((opts.map bvenc)[idx]?).getD (mk_bv w 0)) else mk_bv w 0)
+       = bvenc (muxn_fast sel.toNat opts)
+  simp only []
+  rw [hidx]
+  exact muxn_index opts sel.toNat
+
 end OpBridge
