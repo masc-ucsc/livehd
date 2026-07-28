@@ -424,6 +424,21 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression for the slang reader's STRUCT-net `wire` classification: a
+# module-scope struct net the dataflow sort places after one of its readers must
+# be wire-classified like the scalar in the same position. Pre-declaring struct
+# leaves before `wire_syms_` existed locked them into `mut`, so the early read
+# resolved to nil and the inter-module connection was silently severed (448
+# warnings / 85 X-tied ports on lhdsuite //bench:minion). Also pins the
+# deliberately-not-promoted RMW case and the wire-classified output port (just
+# //lhd).
+sh_test(
+    name = "slang_struct_net_wire_test",
+    size = "medium",
+    srcs = ["slang_struct_net_wire_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for SCALAR named-type aliases (`type W = u10; wire x:W`, local or
 # imported `pkg.W`) carrying their width to the declaration, plus the `pub type`
 # grammar needed to export a scalar alias from a package unit (just //lhd).

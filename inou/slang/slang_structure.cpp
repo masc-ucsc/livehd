@@ -1357,16 +1357,18 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       continue;
     }
     const auto& ct = vsym.getType().getCanonicalType();
-    // Pre-declare a module-scope STRUCT variable too: its leaf declares (and
-    // X-init poisons) must land at module top. Declared lazily at first use,
-    // they would be emitted INSIDE that use's if/uif arm — and a dotted poison
-    // store inside a unique_if (case) arm survives the branch merge in a
-    // field-store form tolg cannot lower (trans_top's f5_rom_response_l,
-    // first written inside a `unique case` arm).
-    if (ct.isStruct()) {
-      declare_value_symbol(vsym, /*force_reg=*/false);
-      continue;
-    }
+    // A module-scope STRUCT variable is pre-declared too — but INSIDE
+    // lower_members, right after the wire classification (see the
+    // "struct pre-declare" block there). Pre-declaring it here locked every
+    // struct net into `mut`, because declare_struct_leaves consults
+    // `wire_syms_`, which lower_members only fills later: a reader sorted
+    // ahead of its writer then resolved to nil and the connection was SEVERED
+    // (minion's id_vpu_core_ctrl, f8_trans_rom_response). It still lands at
+    // module top, so the reason this pre-declare exists at all — a lazy
+    // declare would emit the leaf declares INSIDE the first use's if/uif arm,
+    // and a dotted poison store in a unique_if arm survives the branch merge
+    // in a field-store form tolg cannot lower (trans_top's f5_rom_response_l)
+    // — is unchanged.
     if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
       continue;
     }
@@ -3185,10 +3187,13 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // reads through the wire see the resolved value. A wire stored at most once
   // keeps the plain single-driver form (a continuous-assign / one instance
   // output / one store).
+  //
+  // These three live OUTSIDE the block: the struct pre-declare further down
+  // reuses the same "is a plain single-driver wire valid here?" test.
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, int> store_counts;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>      partial_writes;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>      proc_written;  // written by an always block
   {
-    absl::flat_hash_map<const slang::ast::ValueSymbol*, int> store_counts;
-    absl::flat_hash_set<const slang::ast::ValueSymbol*>      partial_writes;
-    absl::flat_hash_set<const slang::ast::ValueSymbol*>      proc_written;  // written by an always block
     for (const auto& d : drivers) {
       Store_counter sc;
       sc.counts  = &store_counts;
@@ -3303,6 +3308,119 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
       wire_split_flat_.insert(wsym);
       sym_lname_[wsym] = wnet;  // readers resolve through the wire
+    }
+  }
+
+  // ── struct pre-declare (moved down from lower_module) ──────────────────────
+  // A module-scope STRUCT variable's leaf declares must land at module top (a
+  // lazy declare would emit them inside the first use's if/uif arm — see the
+  // note at the array pre-declare in lower_module), but declare_struct_leaves
+  // reads `wire_syms_`, so it cannot run before the classification above.
+  // Doing it there locked EVERY struct net into `mut`; a `mut` binds nothing in
+  // tolg until its first store, so a reader the dataflow sort placed ahead of
+  // the writer resolved to nil and the connection was silently severed
+  // (`unresolved ref 'id_vpu_core_ctrl.<leaf>'`, 428 leaves in minion, emitted
+  // as `65'sb1????…` in the netlist).
+  //
+  // Promote to `wire` ONLY where a plain single-driver wire is valid — the SAME
+  // test the split above uses to decide it needs no accumulator. The split
+  // device is scalar-only (it skips structs at the `ct.isStruct()` guard), so a
+  // procedurally / partially / multiply written struct has no accumulator to
+  // fall back on: a conditional write would branch-merge against the wire's own
+  // buffer output (a self-loop), and co-writers would silently last-wins. Those
+  // keep `mut` — same behavior as before this change, no regression — while the
+  // instance-output and single-continuous-assign nets that carry the severed
+  // inter-module connections get their position-independent read.
+  for (const auto& member : scope.members()) {
+    if (member.kind != SymbolKind::Variable) {
+      continue;
+    }
+    const auto& vsym = member.as<slang::ast::VariableSymbol>();
+    if (reg_syms_.contains(&vsym) || declared_.contains(&vsym)) {
+      continue;
+    }
+    if (!vsym.getType().getCanonicalType().isStruct()) {
+      continue;
+    }
+    if (wire_syms_.contains(&vsym)) {
+      auto      wit          = writers_of.find(&vsym);
+      const int driver_count = wit != writers_of.end() ? static_cast<int>(wit->second.size()) : 0;
+      auto      scit         = store_counts.find(&vsym);
+      const int store_count  = scit != store_counts.end() ? scit->second : 0;
+      if (driver_count > 1 || store_count > 1 || partial_writes.contains(&vsym) || proc_written.contains(&vsym)
+          || wire_split_tmp_.contains(&vsym)) {
+        wire_syms_.erase(&vsym);  // no scalar split to fall back on: keep `mut`
+      }
+    }
+    declare_value_symbol(vsym, /*force_reg=*/false);
+  }
+
+  // ── hoist every WIRE-classified scalar declare to module top ───────────────
+  // Same hazard as the regs hoisted in lower_module: the declare is otherwise
+  // emitted lazily at first use, and when that use sits in an if/case arm the
+  // `wire` declare lands INSIDE the arm — lower_branch then rolls the binding
+  // back at arm exit, so a sibling arm's read finds nothing
+  // (minion_dcache_cache_op_unit's clear_line). Module-top is where the buffer
+  // belongs; wire reads are position-independent by construction, so hoisting
+  // cannot change any value. Skips split wires (pass 4's preamble declares
+  // those, and it sets `declared_` precisely to suppress this) and anything
+  // with its own aggregate machinery.
+  for (const auto& member : scope.members()) {
+    if (member.kind != SymbolKind::Variable && member.kind != SymbolKind::Net) {
+      continue;
+    }
+    const auto& vsym = member.as<slang::ast::ValueSymbol>();
+    if (!wire_syms_.contains(&vsym) || declared_.contains(&vsym) || reg_syms_.contains(&vsym)
+        || wire_split_tmp_.contains(&vsym)) {
+      continue;
+    }
+    declare_value_symbol(vsym, /*force_reg=*/false);
+  }
+
+  // ── a WIRE-classified OUTPUT port needs its buffer too ─────────────────────
+  // An output port is declared from io_meta, so `declared_` already holds it
+  // and the lazy declare_value_symbol path never fires; the poison loop below
+  // then deliberately skips it (a wire is single-driver, a poison would be a
+  // second driver). Net effect today: the name binds NOTHING, so a read the
+  // dataflow sort placed ahead of the driver resolves to nil — prim_mul_div's
+  // `req_ready`, txfma_e2's `exp_res_2f3_f2a_h`, vpu_lane_tima's `tima_out_o`.
+  // Emit the same `wire` declare every other cyclic net gets: tolg binds the
+  // name to a passthrough buffer, stores route to its din, and build() wires
+  // the buffer output to the graph output sink. Deterministic order.
+  {
+    std::vector<const slang::ast::Symbol*> wouts;
+    for (const auto* sym : output_syms_) {
+      if (!wire_syms_.contains(sym) || reg_syms_.contains(sym) || !sym_lname_.contains(sym)) {
+        continue;
+      }
+      const auto* vs = sym->as_if<slang::ast::ValueSymbol>();
+      if (vs == nullptr || wire_split_tmp_.contains(sym)) {
+        continue;
+      }
+      // Scalars only: an aggregate output rides the bundle/shadow machinery.
+      const auto& ct = vs->getType().getCanonicalType();
+      if (!ct.isIntegral() || ct.isStruct() || ct.isPackedUnion() || is_scalar_struct_var(*vs)
+          || is_packed_array_bundle_var(*vs) || mem_syms_.contains(vs)) {
+        continue;
+      }
+      const auto& ln = sym_lname_.at(sym);
+      if (!ln.empty() && ln.front() == '`') {
+        continue;  // escaped (dotted) name — a struct/tuple LEAF, not a scalar
+      }
+      wouts.push_back(sym);
+    }
+    std::sort(wouts.begin(), wouts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : wouts) {
+      auto ti = tinfo(sym->as<slang::ast::ValueSymbol>().getType());
+      set_pending_loc(sym->location);
+      builder_.create_declare_stmts(sym_lname_.at(sym), "wire", int_max_str(ti.bits, ti.is_signed),
+                                    int_min_str(ti.bits, ti.is_signed));
+      clear_pending_loc();
     }
   }
 
