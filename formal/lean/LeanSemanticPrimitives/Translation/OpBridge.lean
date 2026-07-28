@@ -599,4 +599,143 @@ theorem muxn_bridge {w sw : Nat} (sel : BitVec sw) (opts : List (BitVec w)) :
   rw [hidx]
   exact muxn_index opts sel.toNat
 
+--------------------------------------------------------------------------------
+-- n-ary fold variants (And/Or/Xor/Ror/Sum).  The emitter targets the `*_fast`
+-- combinators for n-way gates (operands pre-resized to output width), so one
+-- general induction lemma per family covers every arity.
+--------------------------------------------------------------------------------
+
+-- Single-op bitwise bridge over equal width w (from bv_bitwise_eq + bv_bit_bvenc).
+theorem hfg_and {w : Nat} (x y : BitVec w) :
+    bv_bitwise w (fun a b => a && b) (bvenc x) (bvenc y) = bvenc (x &&& y) := by
+  apply bv_bitwise_eq; intro i hi; rw [bv_bit_bvenc, bv_bit_bvenc, BitVec.getLsbD_and]
+theorem hfg_or {w : Nat} (x y : BitVec w) :
+    bv_bitwise w (fun a b => a || b) (bvenc x) (bvenc y) = bvenc (x ||| y) := by
+  apply bv_bitwise_eq; intro i hi; rw [bv_bit_bvenc, bv_bit_bvenc, BitVec.getLsbD_or]
+theorem hfg_xor {w : Nat} (x y : BitVec w) :
+    bv_bitwise w (fun a b => xor a b) (bvenc x) (bvenc y) = bvenc (x ^^^ y) := by
+  apply bv_bitwise_eq; intro i hi; rw [bv_bit_bvenc, bv_bit_bvenc, BitVec.getLsbD_xor]
+
+-- General foldl bridge: a certificate bitwise fold matches the encoded BitVec fold.
+theorem foldl_bitwise_bvenc {w : Nat} (f : Bool → Bool → Bool) (g : BitVec w → BitVec w → BitVec w)
+    (hfg : ∀ x y : BitVec w, bv_bitwise w f (bvenc x) (bvenc y) = bvenc (g x y)) :
+    ∀ (l : List (BitVec w)) (seed : BitVec w),
+      (l.map bvenc).foldl (fun acc b => bv_bitwise w f acc b) (bvenc seed)
+        = bvenc (l.foldl g seed) := by
+  intro l
+  induction l with
+  | nil => intro seed; simp
+  | cons b l ih =>
+    intro seed
+    simp only [List.map_cons, List.foldl_cons]
+    rw [hfg seed b]
+    exact ih (g seed b)
+
+-- Fast combinators the emitter targets for n-way And/Or/Xor (operands pre-resized to w).
+def andn_fast {w : Nat} (a : BitVec w) (rest : List (BitVec w)) : BitVec w := rest.foldl (· &&& ·) a
+def orn_fast  {w : Nat} (l : List (BitVec w)) : BitVec w := l.foldl (· ||| ·) 0#w
+def xorn_fast {w : Nat} (l : List (BitVec w)) : BitVec w := l.foldl (· ^^^ ·) 0#w
+
+theorem andn_bridge {w : Nat} (a : BitVec w) (rest : List (BitVec w)) :
+    eval_op LGraphOp.Op_And w (bvenc a :: rest.map bvenc) = bvenc (andn_fast a rest) := by
+  show (rest.map bvenc).foldl (fun acc b => bv_bitwise w (fun x y => x && y) acc b)
+        (bv_resize w (bvenc a)) = _
+  rw [bv_resize_bvenc, bv_zext_id]
+  exact foldl_bitwise_bvenc _ _ hfg_and rest a
+
+theorem orn_bridge {w : Nat} (l : List (BitVec w)) :
+    eval_op LGraphOp.Op_Or w (l.map bvenc) = bvenc (orn_fast l) := by
+  show (l.map bvenc).foldl (fun acc b => bv_bitwise w (fun x y => x || y) acc b) (mk_bv w 0) = _
+  rw [show (mk_bv w 0) = bvenc (0#w) from by simp [bvenc]]
+  exact foldl_bitwise_bvenc _ _ hfg_or l 0#w
+
+theorem xorn_bridge {w : Nat} (l : List (BitVec w)) :
+    eval_op LGraphOp.Op_Xor w (l.map bvenc) = bvenc (xorn_fast l) := by
+  show (l.map bvenc).foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc b) (mk_bv w 0) = _
+  rw [show (mk_bv w 0) = bvenc (0#w) from by simp [bvenc]]
+  exact foldl_bitwise_bvenc _ _ hfg_xor l 0#w
+
+-- Reduction-OR (Op_Ror): fast combinator over the (width-w) input list.
+def rorn_fast {w : Nat} (l : List (BitVec w)) : BitVec 1 := bool_to_bv1 (l.any bitvec_nonzero)
+
+theorem rorn_bridge {w : Nat} (l : List (BitVec w)) :
+    eval_op LGraphOp.Op_Ror 1 (l.map bvenc) = bvenc (rorn_fast l) := by
+  show mk_bv 1 (if (l.map bvenc).any bv_nonzero then 1 else 0) = bvenc (rorn_fast l)
+  unfold rorn_fast
+  rw [bvenc_bool]
+  have hany : (l.map bvenc).any bv_nonzero = l.any bitvec_nonzero := by
+    rw [List.any_map]; congr 1; funext x
+    show bv_nonzero (bvenc x) = bitvec_nonzero x
+    exact bv_nonzero_bvenc x
+  rw [hany]
+
+--------------------------------------------------------------------------------
+-- n-ary Sum (adds/subs groups): fold-add + subtraction, all modulo 2^w.
+--------------------------------------------------------------------------------
+
+theorem mk_bv_add {w : Nat} (x y : BitVec w) :
+    mk_bv w (Int.ofNat (x + y).toNat) = mk_bv w (Int.ofNat x.toNat + Int.ofNat y.toNat) := by
+  apply mk_bv_eq_of_emod
+  rw [BitVec.toNat_add, Int.ofNat_eq_natCast, Int.natCast_emod, Nat.cast_add,
+      show ((2 ^ w : Nat) : Int) = (2 : Int) ^ w from by simp, Int.emod_emod_of_dvd _ (dvd_refl _)]
+  simp [Int.ofNat_eq_natCast]
+
+theorem mk_bv_sub_emod {w : Nat} (x y : BitVec w) :
+    Int.ofNat (x - y).toNat % (2 : Int) ^ w
+      = (Int.ofNat x.toNat - Int.ofNat y.toNat) % (2 : Int) ^ w := by
+  have hyle : y.toNat ≤ 2 ^ w := Nat.le_of_lt y.isLt
+  rw [BitVec.toNat_sub, Int.ofNat_eq_natCast, Int.natCast_emod, Nat.cast_add, Nat.cast_sub hyle,
+      show ((2 ^ w : Nat) : Int) = (2 : Int) ^ w from by simp, Int.emod_emod_of_dvd _ (dvd_refl _),
+      show ((2 : Int) ^ w - (y.toNat : Int) + (x.toNat : Int))
+             = (2 : Int) ^ w + ((x.toNat : Int) - (y.toNat : Int)) from by ring,
+      Int.add_emod_left]
+  simp [Int.ofNat_eq_natCast]
+
+def bvSum {w : Nat} (l : List (BitVec w)) : BitVec w := l.foldl (· + ·) 0#w
+def isum {w : Nat} (l : List (BitVec w)) : Int := (l.map (fun x => Int.ofNat x.toNat)).sum
+def sumn_fast {w : Nat} (adds subs : List (BitVec w)) : BitVec w := bvSum adds - bvSum subs
+
+theorem foldl_add_bvenc {w : Nat} :
+    ∀ (l : List (BitVec w)) (acc : BitVec w),
+      bvenc (l.foldl (· + ·) acc) = mk_bv w (Int.ofNat acc.toNat + isum l) := by
+  intro l
+  induction l with
+  | nil => intro acc; simp [isum, bvenc]
+  | cons b l ih =>
+    intro acc
+    simp only [List.foldl_cons]
+    rw [ih (acc + b)]
+    apply mk_bv_eq_of_emod
+    have hadd : Int.ofNat (acc + b).toNat % (2:Int)^w
+                  = (Int.ofNat acc.toNat + Int.ofNat b.toNat) % (2:Int)^w :=
+      mk_bv_emod_eq (mk_bv_add acc b)
+    simp only [isum, List.map_cons, List.sum_cons]
+    rw [Int.add_emod, hadd, ← Int.add_emod, add_assoc]
+
+theorem bvenc_bvSum {w : Nat} (l : List (BitVec w)) : bvenc (bvSum l) = mk_bv w (isum l) := by
+  unfold bvSum
+  rw [foldl_add_bvenc l 0#w]
+  simp
+
+theorem sumn_bridge {w : Nat} (adds subs : List (BitVec w)) :
+    eval_op (LGraphOp.Op_Sum adds.length) w (adds.map bvenc ++ subs.map bvenc)
+      = bvenc (sumn_fast adds subs) := by
+  have hmap : ∀ (l : List (BitVec w)),
+      (l.map bvenc).map bv_uint = l.map (fun x => Int.ofNat x.toNat) := by
+    intro l; rw [List.map_map]; apply List.map_congr_left; intro x _; exact bv_uint_bvenc x
+  have hcert : eval_op (LGraphOp.Op_Sum adds.length) w (adds.map bvenc ++ subs.map bvenc)
+                 = mk_bv w (isum adds - isum subs) := by
+    show mk_bv w ((((adds.map bvenc ++ subs.map bvenc).map bv_uint).take adds.length).sum
+                    - (((adds.map bvenc ++ subs.map bvenc).map bv_uint).drop adds.length).sum) = _
+    rw [List.map_append]
+    have hlen : ((adds.map bvenc).map bv_uint).length = adds.length := by simp
+    rw [List.take_left' hlen, List.drop_left' hlen, hmap adds, hmap subs]
+    rfl
+  rw [hcert]
+  unfold sumn_fast
+  apply mk_bv_eq_of_emod
+  have ha := mk_bv_emod_eq (bvenc_bvSum adds)
+  have hs := mk_bv_emod_eq (bvenc_bvSum subs)
+  rw [mk_bv_sub_emod, Int.sub_emod, ← ha, ← hs, ← Int.sub_emod]
+
 end OpBridge
