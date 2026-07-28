@@ -488,4 +488,41 @@ theorem shl_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     rw [getLsbD_zext_lt a hlt, BitVec.getLsbD]
     simp [hib, Nat.not_lt.mp hib]
 
+--------------------------------------------------------------------------------
+-- Mux (2-way bool), reduction-or (1 input), signed compares (SLT/SGT).
+--------------------------------------------------------------------------------
+
+theorem bv_nonzero_bvenc {w : Nat} (x : BitVec w) : bv_nonzero (bvenc x) = bitvec_nonzero x := by
+  have hiff : (bv_uint (bvenc x) ≠ 0) ↔ (x ≠ 0#w) := by
+    rw [bv_uint_bvenc]; simp [BitVec.toNat_eq]
+  unfold bv_nonzero bitvec_nonzero
+  exact decide_eq_decide.mpr hiff
+
+theorem muxbool_bridge {ws w1 w2 w : Nat} (sel : BitVec ws) (o1 : BitVec w1) (o2 : BitVec w2) :
+    eval_op LGraphOp.Op_MuxBool w [bvenc sel, bvenc o1, bvenc o2]
+      = bvenc (if bitvec_nonzero sel then (bv_zext o2 : BitVec w) else (bv_zext o1 : BitVec w)) := by
+  show (if bv_nonzero (bvenc sel) then bv_resize w (bvenc o2) else bv_resize w (bvenc o1)) = _
+  rw [bv_nonzero_bvenc, bv_resize_bvenc, bv_resize_bvenc]
+  by_cases h : bitvec_nonzero sel <;> simp [h]
+
+theorem ror1_bridge {wa : Nat} (a : BitVec wa) :
+    eval_op LGraphOp.Op_Ror 1 [bvenc a] = bvenc (bool_to_bv1 (bitvec_nonzero a)) := by
+  rw [show eval_op LGraphOp.Op_Ror 1 [bvenc a] = mk_bv 1 (if bitvec_nonzero a then (1:Int) else 0) from by
+        simp [eval_op, bv_nonzero_bvenc]]
+  rw [bvenc_bool]
+
+theorem slt_bridge {cw : Nat} (a b : BitVec cw) :
+    eval_op LGraphOp.Op_SLT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec cw).toInt < (bv_zext b : BitVec cw).toInt)) := by
+  rw [show eval_op LGraphOp.Op_SLT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if a.toInt < b.toInt then (1:Int) else 0) from by simp [eval_op, bv_sint_bvenc]]
+  rw [bvenc_bool]; simp only [bv_zext_id, decide_eq_true_eq]
+
+theorem sgt_bridge {cw : Nat} (a b : BitVec cw) :
+    eval_op LGraphOp.Op_SGT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec cw).toInt > (bv_zext b : BitVec cw).toInt)) := by
+  rw [show eval_op LGraphOp.Op_SGT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if a.toInt > b.toInt then (1:Int) else 0) from by simp [eval_op, bv_sint_bvenc]]
+  rw [bvenc_bool]; simp only [bv_zext_id, decide_eq_true_eq]
+
 end OpBridge
