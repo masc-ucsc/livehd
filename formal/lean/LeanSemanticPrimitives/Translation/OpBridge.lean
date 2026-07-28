@@ -738,4 +738,12 @@ theorem sumn_bridge {w : Nat} (adds subs : List (BitVec w)) :
   have hs := mk_bv_emod_eq (bvenc_bvSum subs)
   rw [mk_bv_sub_emod, Int.sub_emod, ← ha, ← hs, ← Int.sub_emod]
 
+
+/-- `eval_op`-form GetMask bridge (uniform with the other op bridges), so the
+generated per-node recurrence closes by a single `rw` regardless of operator. -/
+theorem getmask_bridge' {aw mw b : Nat} (X : BitVec aw) (M : BitVec mw)
+    (hb : (mask_indices M).length ≤ b) :
+    eval_op LGraphOp.Op_GetMask b [bvenc X, bvenc M] = bvenc (sem_get_mask X M : BitVec b) :=
+  getmask_bridge X M hb
+
 end OpBridge
