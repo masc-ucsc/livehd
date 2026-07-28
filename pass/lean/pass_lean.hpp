@@ -30,6 +30,7 @@ public:
   bool        strict;           // strict:true (default) — abort on unsupported ops
   bool        normalize;        // normalize:true (default) — fix pre-export IR width artifacts
   bool        emit_cert;        // emit_cert:true (default) — emit graph certificates and cert model
+  bool        emit_fast_bridge; // emit_fast_bridge:false (default) — emit fast-view bridge (step 5)
   std::string top;              // top module name override (informational)
   LeanCertWFMode cert_wf;       // cert_wf:skip|eval|sorry|chunked (default skip)
   LeanCertWFFallback cert_wf_fallback;
