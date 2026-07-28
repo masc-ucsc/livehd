@@ -1064,6 +1064,78 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       continue;
     }
 
+    if (op == Ntype_op::Set_mask) {
+      // A Set_mask rewrites ONLY the bits inside its own constant lane, so a
+      // slice DISJOINT from that lane reads exactly what the base `a` already
+      // held and the write can be skipped.
+      //
+      // Skipping it is what dissolves the word-level cycle that a per-field
+      // struct write chain creates. `c.f0 = ..; c.f1 = ..; c.f2 = ..` on one
+      // packed net lowers to Set_mask(Set_mask(Set_mask(base,..),..),..), and a
+      // later read of f0 binds to the LAST version -- so if f2's value depends
+      // on that read (through anything at all), the word-level graph closes a
+      // loop that does not exist bit-wise, because the fields never alias.
+      // Walking the read down to the version that actually wrote its lane is
+      // what the per-leaf (flattened) form gives for free.
+      //
+      // A PARTIAL overlap would need a concat of two sources, which creates
+      // nodes and would break this function's node-non-increasing contract, so
+      // that case stops the walk.
+      auto r = const_mask_range(m);
+      if (r.first < 0) {
+        break;  // non-constant / noncontiguous lane: cannot prove disjointness
+      }
+      if (hi <= r.first || lo >= r.second) {
+        auto x = drv_at(m, 0);  // `a`: the packed value before this field write
+        if (x.is_invalid()) {
+          break;
+        }
+        cur = x;  // [lo,hi) unchanged -- the slice means the same bits in `a`
+        continue;
+      }
+      if (lo >= r.first && hi <= r.second) {
+        // The slice lies ENTIRELY inside this lane, so it reads back exactly
+        // what `value` put there: re-base onto `value` and drop the dependency
+        // on `a` altogether.
+        //
+        // This leg is the one that matters for a struct FIELD read. Skipping
+        // the disjoint writes alone is not enough: the read would still land on
+        // the Set_mask that wrote its own lane, and that node's `a` operand
+        // keeps the WHOLE earlier write chain -- and everything those writes
+        // depend on -- upstream of the read. That is how the false cycle
+        // survives one round of skipping.
+        //
+        // Guard: `value` must be provably NON-NEGATIVE with a bounded bit
+        // footprint. footprint() bails on a signed or unbounded pin, and a bail
+        // refuses here -- the safe direction. Non-negative is what makes the
+        // two forms agree ABOVE `value`'s significant width: Get_mask reads 0
+        // there, and a zero-extended `value` is what the lane holds.
+        //
+        // Deliberately NOT required: that `value` fit inside the lane. A value
+        // WIDER than its lane is the common case, not the exception -- LiveHD
+        // stores bits = magnitude+1, so a w-bit field assigned a w-bit
+        // expression already presents as w+1 -- and Set_mask truncates the
+        // excess. Those truncated positions are outside [lo,hi) by construction
+        // (the slice is contained in the lane), so the read never observes
+        // them. An earlier version of this guard demanded `fv.second <= lane
+        // width` and refused EVERY real field write for exactly that off-by-one
+        // reason; it fired on none of minion's vpu_ctrl reads.
+        auto v = drv_at(m, 4);  // `value`
+        if (v.is_invalid()) {
+          break;
+        }
+        auto fv = footprint(v, 0);
+        if (fv.first < 0) {
+          break;
+        }
+        cur = v;
+        lo -= r.first;  // `value` is LSB-aligned to the lane's low bit
+        hi -= r.first;
+        continue;
+      }
+      break;  // straddles the lane boundary: would need a concat
+    }
+
     break;
   }
 
@@ -1148,16 +1220,20 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 
   auto [range_begin, range_end] = mask_const.get_mask_range();
 
-  if ((range_begin + 1) != range_end) {
-    return false;
+  if ((range_begin + 1) == range_end) {
+    auto dpin = try_find_single_driver_pin(a_master, range_begin);
+    if (!dpin.is_invalid()) {
+      return collapse_forward_for_pin(node, dpin);
+    }
   }
 
-  auto dpin = try_find_single_driver_pin(a_master, range_begin);
-  if (!dpin.is_invalid()) {
-    return collapse_forward_for_pin(node, dpin);
-  }
-
-  return false;
+  // A MULTI-BIT read of a Set_mask chain (or a single-bit one the exact-lane
+  // rule above could not resolve) used to return here unconditionally, which is
+  // why a packed struct's per-field write chain kept every read pinned to the
+  // LAST version -- the word-level false cycle. The packed-slice walker now has
+  // a Set_mask arm that skips the writes whose lane is provably disjoint from
+  // this slice, so hand the node to it instead of giving up.
+  return scalar_get_mask_packed(node, mask_const);
 }
 
 void Cprop::scalar_pass(hhds::Graph* g) {

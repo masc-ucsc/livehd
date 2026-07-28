@@ -1,0 +1,22 @@
+/*
+:name: struct_field_chain_disjoint
+:type: equiv
+:verilog_top: struct_field_chain_disjoint_top
+:pyrope_top: top
+:gold_reader: slang
+*/
+
+// Pyrope side of the per-field write-chain false comb loop (DISJOINT-lane
+// leg). See the golden .v for the shape being regressed: the interesting
+// direction is the Verilog ROUND TRIP (prp-v2v-struct_field_chain_disjoint),
+// which reads that golden through the slang front end and must not invent a
+// combinational cycle out of the nested struct variable's Set_mask chain.
+//
+// Field-wise: rm = s_i; imm = (s_i == 1) ? 0 : i_i; o = {rm, imm, s_i}.
+pub comb top(i_i:u2, s_i:u2) -> (o:u6) {
+  mut imm:u2 = 0
+  if s_i != 1 {
+    imm = i_i
+  }
+  o = (s_i << 4) | (imm << 2) | s_i
+}

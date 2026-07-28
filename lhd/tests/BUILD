@@ -111,6 +111,26 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The per-field WRITE CHAIN false combinational loop on a NESTED packed-struct
+# VARIABLE: `c.f0=..; c.f1=..; c.f2=..` in one always_comb lowers to a Set_mask
+# CHAIN on one packed net (a nested struct variable cannot be split into
+# per-leaf nets), so a later read of one field binds to the LAST version and any
+# field written after it that depends on that read closes a WORD-level cycle the
+# bit-level design does not have. Pins BOTH legs of the pass/cprop fix
+# separately -- the disjoint-lane skip and the contained-slice re-base onto
+# `value` -- by reusing the two equiv-corpus goldens. The equiv harnesses cannot
+# gate this (prp-equiv never reads the .v, prp-v2v goes through yosys, and
+# prp-v2prp deliberately scores an encoder refusal as inconclusive), so the
+# strict "must come back PROVEN" assertion lives here.
+sh_test(
+    name = "struct_field_chain_cycle_test",
+    srcs = ["struct_field_chain_cycle_test.sh"],
+    data = [
+        "//inou/prp:equiv_tests",
+        "//lhd",
+    ],
+)
+
 # `lhd sim` VCD clock/reset waveforms + the `tick clocks=(name=ratio)
 # resets=(name=ticks)` clause: the generated DUT body traces a toggling clock + a
 # reset window, drives the reset port functionally, and advances the period
