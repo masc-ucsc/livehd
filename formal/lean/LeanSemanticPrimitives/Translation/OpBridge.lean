@@ -525,4 +525,33 @@ theorem sgt_bridge {cw : Nat} (a b : BitVec cw) :
         = mk_bv 1 (if a.toInt > b.toInt then (1:Int) else 0) from by simp [eval_op, bv_sint_bvenc]]
   rw [bvenc_bool]; simp only [bv_zext_id, decide_eq_true_eq]
 
+--------------------------------------------------------------------------------
+-- Sign-extend (Op_Sext): certificate sign-extend if-form to fast bv_sext.
+--------------------------------------------------------------------------------
+
+theorem mk_bv_ofInt {w : Nat} (y : Int) : mk_bv w y = bvenc (BitVec.ofInt w y) := by
+  unfold bvenc
+  apply mk_bv_eq_of_emod
+  rw [show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp]
+  have hnn : 0 ≤ y % ((2 ^ w : Nat) : Int) := Int.emod_nonneg y (by positivity)
+  rw [BitVec.toNat_ofInt, Int.ofNat_eq_natCast, Int.toNat_of_nonneg hnn,
+      Int.emod_emod_of_dvd _ (dvd_refl _)]
+
+theorem sext_bridge {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam) (hamt : amt.toNat = wa) :
+    eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by
+  have hcert : eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = mk_bv w (bv_sint (bvenc a)) := by
+    simp only [eval_op, bv_uint_bvenc]
+    rw [show (Int.ofNat amt.toNat).toNat = wa from by simp [hamt]]
+    have hu : Int.ofNat a.toNat % (2:Int) ^ wa = Int.ofNat a.toNat := by
+      apply Int.emod_eq_of_lt (Int.natCast_nonneg _)
+      rw [show (2:Int) ^ wa = ((2 ^ wa : Nat) : Int) from by simp, Nat.cast_lt]
+      exact a.isLt
+    rw [hu]
+    unfold bv_sint
+    rw [show (bvenc a).width = wa from rfl, bv_uint_bvenc]
+    simp only [apply_ite (mk_bv w)]
+  rw [hcert, bv_sint_bvenc]
+  unfold bv_sext
+  exact mk_bv_ofInt a.toInt
+
 end OpBridge
