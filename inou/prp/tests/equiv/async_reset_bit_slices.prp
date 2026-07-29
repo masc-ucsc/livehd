@@ -1,0 +1,19 @@
+/*
+:name: async_reset_bit_slices
+:type: equiv
+:verilog_top: async_reset_bit_slices
+:pyrope_top: async_reset_bit_slices
+*/
+//
+// The golden's reset arm spells one constant value (10'b0000000001) across two
+// SLICES. The slang reader's async-rung harvest only accepted a WHOLE-reg
+// `NamedValue` write, so it rejected the arm and the whole always block fell
+// back to the synchronous demotion -- the reset stopped taking effect off the
+// clock edge, a behaviour change LEC refutes. Slices are now accumulated per
+// reg and folded into the one `init=` below once every bit is covered.
+pub mod async_reset_bit_slices::[timecheck=false](clk:u1, rst_b:u1, en:u1, d:u10) -> (q:u10@[]) {
+  reg q:u10:[init=1, reset_pin=ref rst_b, async=true, negreset=true]
+  if en != 0 {
+    q = d
+  }
+}

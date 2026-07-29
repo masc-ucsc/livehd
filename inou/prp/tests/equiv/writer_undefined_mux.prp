@@ -1,0 +1,20 @@
+/*
+:name: writer_undefined_mux
+:type: equiv
+:verilog_top: writer_undefined_mux
+:pyrope_top: writer_undefined_mux
+*/
+//
+// FIXME tracker -- prp_writer emits a `_mux_N` it never DECLARES.
+// Look at the Pyrope below: `_mux_1` is read but never defined anywhere, so our own
+// parser rejects our own output ("read of undefined variable '_mux_1'"). The shape
+// is an expression mux (a ternary) whose result is then overwritten by a
+// conditional assignment nested in an outer conditional: the writer folds the pair
+// into one if-expression but keeps the ternary only BY REFERENCE.
+// A writer self-consistency bug -- generated Pyrope must always re-parse.
+pub comb writer_undefined_mux::[timecheck=false](s0:u1, s1:u1, cond:u1) -> (out:u2) {
+  out = 0
+  if s0 != 0 {
+    out = if cond != 0 { 3 } else { _mux_1 }
+  }
+}

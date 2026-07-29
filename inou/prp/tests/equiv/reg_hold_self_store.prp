@@ -1,0 +1,23 @@
+/*
+:name: reg_hold_self_store
+:type: equiv
+:verilog_top: reg_hold_self_store
+:pyrope_top: reg_hold_self_store
+*/
+//
+// `n` is a combinational alias of `o`, so the register update `o <= n` folds to
+// `o <= o` (a hold). The writer's self-store fold only compared RAW LNAST names
+// (`o` vs `n___ssa_1`) and missed it, because `n___ssa_1 = o` is a single-use
+// temp INLINED at this very store -- what reached the file was `o = o`, which
+// Pyrope rejects on re-parse ("irrelevant assignment"), killing the v->prp->v
+// round trip. The `else` arm below holds `o` by NOT writing it.
+pub mod reg_hold_self_store::[timecheck=false](clk:u1, rst:u1, d:u2) -> (o:u2@[], p:u2@[]) {
+  reg o:u2
+  reg p:u2
+  if rst != 0 {
+    o = 0
+    p = 0
+  } else {
+    p = d
+  }
+}

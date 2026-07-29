@@ -1,0 +1,27 @@
+/*
+:name: async_mem_reset_demoted
+:type: equiv
+:verilog_top: async_mem_reset_demoted
+:pyrope_top: async_mem_reset_demoted
+*/
+//
+// FIXME tracker -- an ASYNC reset OF a memory is demoted to a synchronous clear.
+// The reset arm clears every element (`for (i=0;i<4;i=i+1) mem[i] <= 0`), which is
+// a real asynchronous reset of the array. The Pyrope below keeps it as an ordinary
+// `if rstn == 0 { mem[0] = 0 ... }` in the clocked body -- i.e. SYNCHRONOUS -- so
+// the array only clears on the next clock edge instead of immediately. LEC-refuted.
+// Distinct from mem_write_during_reset: there the memory has no reset at all
+// and loses its write GATING; here the memory's own reset loses its ASYNC-ness.
+pub mod async_mem_reset_demoted::[timecheck=false](clk:u1, rstn:u1, we:u1, a:u2, d:u4) -> (q:u4@[]) {
+  reg mem:[4]u4:[ordering="none"]
+  q = 0ub????
+  if rstn == 0 {
+    mem[0] = 0
+    mem[1] = 0
+    mem[2] = 0
+    mem[3] = 0
+  } elif we != 0 {
+    mem[a] = d
+  }
+  q = mem[a]
+}

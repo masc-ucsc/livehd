@@ -1,0 +1,20 @@
+/*
+:name: tolg_field_read_zero
+:type: equiv
+:verilog_top: tolg_field_read_zero
+:pyrope_top: tolg_field_read_zero
+*/
+//
+// FIXME tracker -- prp_writer DROPS an array's type and contents.
+// The emitted Pyrope below says `mut mem = 0`: both the `[2]u4` array type and the
+// `initial` block's element values are gone. tolg then meets the runtime index
+// `mem[sel]` on a base that resolved to the scalar constant 0 and aborts with
+// "field/index read of '0' could not be resolved". 4 corpus files.
+// FIX is in the writer: emit the array declaration (`mut mem:[2]u4 = (1, 2)`).
+pub comb tolg_field_read_zero::[timecheck=false](sel:u1, en:u1) -> (out:u4) {
+  mut mem = 0
+  out = 0
+  if en != 0 {
+    out = mem[sel]
+  }
+}

@@ -159,9 +159,19 @@ echo "ok: the same-phase twin (one '!' apart) is REJECTED — rule C keys on pha
 
 # Every shipped latch fixture must still compile. These are the designs the
 # whole task exists to support; a contract check that rejects them is worthless.
+#
+# latch_rule_a / latch_rule_b are deliberately NOT in that set: they are the
+# corpus-mined contract TRACKERS (tagged `fixme` in inou/prp/BUILD), whose whole
+# purpose is to be rejected today — rule_a is a genuine self-timed gate, rule_b
+# is the exhaustive-`case` false positive. Sweeping them here would assert the
+# bug is absent. When either is fixed, drop it from this skip list so the
+# acceptance half starts covering it.
 for f in inou/prp/tests/equiv/latch_*.prp; do
   [ -e "$f" ] || continue
   b=$(basename "$f" .prp)
+  case "$b" in
+    latch_rule_a | latch_rule_b) continue ;;
+  esac
   "$LHD" compile "$f" --workdir "$W/wf_$b" -q >"$W/f_$b.log" 2>&1 \
     || { tail -5 "$W/f_$b.log"; fail "shipped fixture $b no longer compiles under the contract check"; }
 done

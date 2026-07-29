@@ -1,0 +1,21 @@
+/*
+:name: latch_always_transparent
+:type: equiv
+:verilog_top: latch_always_transparent
+:pyrope_top: latch_always_transparent
+*/
+//
+// This `reg …:[latch=true]` is written on EVERY path, so upass.tolg wires no
+// `enable` pin ("the true const => unconditionally written (no enable
+// needed)"). cgen's process_latch treated the absent pin as a MALFORMED latch
+// and returned early, leaving the Q -- here a module output -- with no driver
+// at all: the netlist read X and LEC refuted it.
+//
+// The fix must also not spell it `always_latch`: a cell that stores nothing is
+// combinational, and yosys rejects an always_latch that infers no latch ("No
+// latch inferred for signal ... from always_latch process"), so the miter fails
+// and there is still no round trip. It goes out as `always_comb` + blocking `=`.
+pub mod latch_always_transparent::[timecheck=false](c:u2) -> (o:u8@[]) {
+  reg o:u8:[latch=true]
+  o = if c == 0 { 192 } else { 255 }
+}

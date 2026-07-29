@@ -1,0 +1,23 @@
+/*
+:name: signed_memory_dyn_index
+:type: equiv
+:verilog_top: signed_memory_dyn_index
+:pyrope_top: signed_memory_dyn_index
+*/
+//
+// A dynamic index turns the array into a memory, and the reader models memory
+// storage as RAW BITS -- an element read is `q[i]#sext[0..=W-1]`, so the value
+// flowing into an element write carries the UNSIGNED reinterpretation of that
+// storage (range [0, 2^W-1]). check_array_elem_fit judged it against the
+// SIGNED element envelope only, so `reg q:[4]s17` died on
+// "`q` (value 0) does not fit its declared range [-65536, 65535]" -- a range
+// that plainly contains 0. An unsigned array escaped only because that
+// judgement tests r.min, never r.max.
+pub mod signed_memory_dyn_index::[timecheck=false](clk:u1, en:u1, sel:u2, d:s17) -> (o:s17@[]) {
+  reg q:[4]s17:[ordering="none"]
+  o = 0sb?
+  if en != 0 {
+    q[sel] = d#[0..=16]
+  }
+  o = q[sel]#sext[0..=16]
+}

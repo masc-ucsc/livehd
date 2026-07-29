@@ -1195,3 +1195,20 @@ sh_test(
     data = ["//lhd"],
     tags = ["fixme"],
 )
+
+# LIVE fail-closed test: a variable BLOCKING-assigned in an EDGE-sensitive
+# process and read outside it is persistent flop state that `--reader slang`
+# does not model. collect_state_vars documented the refusal, but it only ever
+# fired for module OUTPUTS and unpacked arrays -- an internal scalar fell
+# through, was declared a plain `mut`, and the REGISTER VANISHED: a
+# `always @(posedge p) ms = ms + 1;` counter read by `assign o = ms` lowered to
+# a stateless `comb` whose output folded to a constant, exit 0 with no warning,
+# and lgcheck refuted it. Pins the diagnostic CODE (a crash also exits nonzero)
+# and the acceptance half: a process-LOCAL blocking temp and an ordinary `<=`
+# register must both still compile, with the register still real state.
+sh_test(
+    name = "blocking_ff_state_test",
+    size = "small",
+    srcs = ["blocking_ff_state_test.sh"],
+    data = ["//lhd"],
+)

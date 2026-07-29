@@ -669,9 +669,17 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 
   auto din_dpin = get_driver(find_sink_pin(node, "din"));
   auto en_dpin  = get_driver(find_sink_pin(node, "enable"));
-  if (din_dpin.is_invalid() || en_dpin.is_invalid()) {
+  if (din_dpin.is_invalid()) {
     return;  // malformed latch: leave the declared reg inert rather than emit garbage
   }
+  // A MISSING enable means ALWAYS TRANSPARENT, not malformed. upass.tolg only
+  // wires the pin when the enable is a real condition -- "the true const =>
+  // unconditionally written (no enable needed)" (see its finalize_regs). That
+  // contract is fine for a Flop, but this function used to bail on the absent
+  // pin and emit NOTHING, leaving the latch's Q (often a module output, since a
+  // `reg` written from an `always @(*)` lands here) with no driver at all. The
+  // netlist then read X and lgcheck REFUTED the round trip -- e.g. a full
+  // `case` with a `default`, which is transparent on every path.
   // VALUE context: get_expression, not get_wire_or_const (2f-latch M1). A
   // computed, single-fanout din/enable driver is INLINED into pin2expr and
   // never gets a wire of its own; get_wire_or_const ignores pin2expr and would
@@ -680,12 +688,25 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   // round-trip. The flop path already uses get_expression for exactly this
   // reason (see process_flop and the `initial` pin's rationale comment).
   auto din    = get_expression(din_dpin);
-  auto enable = get_expression(en_dpin);
+  auto enable = en_dpin.is_invalid() ? std::string{} : get_expression(en_dpin);
 
   bool neg_en      = false;
   auto posclk_dpin = get_driver(find_sink_pin(node, "posclk"));
   if (!posclk_dpin.is_invalid() && is_const_pin(posclk_dpin)) {
     neg_en = hydrate_const(posclk_dpin).is_known_false();
+  }
+
+  // A CONSTANT-TRUE enable is the always-transparent case spelled differently:
+  // the direct slang -> lg path wires an explicit `1` where the Pyrope path
+  // omits the pin entirely. Normalize to "no enable" so both spellings take the
+  // combinational emission below. A constant-FALSE enable is left alone -- `if
+  // (0)` is an honest rendering of a latch that never opens.
+  if (!enable.empty() && is_const_pin(en_dpin)) {
+    if (const auto c = hydrate_const(en_dpin); !c.has_unknowns()) {
+      if (neg_en ? c.is_known_zero() : !c.is_known_zero()) {
+        enable.clear();
+      }
+    }
   }
 
   // RESET (2f-latch M7). A latch's reset is inherently ASYNCHRONOUS — there is
@@ -719,6 +740,24 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   // front end (Verilog -> slang lost the Latch cell entirely). `always_latch`
   // also states the intent to every downstream tool instead of relying on
   // inference.
+  // ALWAYS TRANSPARENT (no enable pin): the cell stores nothing — every path
+  // writes it — so it is plain combinational logic and must be emitted as
+  // `always_comb` with a BLOCKING write. `always_latch` would be a lie yosys
+  // refuses outright ("No latch inferred for signal ... from always_latch
+  // process"), which lgcheck reports as a failed miter, i.e. still no round
+  // trip. This is the shape of a full `case` with a `default` inside an
+  // `always @(*)`.
+  if (enable.empty()) {
+    fout->append("always_comb begin\n");
+    if (rst_test.empty()) {
+      fout->append(absl::StrCat("  ", name, " = ", din, ";\n"));
+    } else {
+      fout->append(absl::StrCat("  if (", rst_test, ") ", name, " = ", rst_val, ";\n"));
+      fout->append(absl::StrCat("  else ", name, " = ", din, ";\n"));
+    }
+    fout->append("end\n");
+    return;
+  }
   fout->append("always_latch begin\n");
   if (rst_test.empty()) {
     fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " <= ", din, ";\n"));
@@ -1999,12 +2038,6 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     }
     first_arg = false;
 
-    if (e.is_input) {
-      fout->append("input signed ");
-    } else {
-      fout->append("output reg signed ");
-    }
-
     const auto name = get_scaped_name(e.name);
 
     // Prefer the concrete HHDS pin width when present. Some imported GraphIO
@@ -2012,6 +2045,31 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // has already been fixed by bitwidth propagation.
     hhds::Pin_class pin  = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
     const auto      bits = pin.is_invalid() ? e.bits : livehd::graph_util::bits_of(pin, *gio, e.name);
+
+    // INPUT ports are declared `signed` unconditionally: that is the contract
+    // upass.tolg lowers against — it wraps every unsigned input's body read in a
+    // to_positive Get_mask precisely because "cgen declares every port signed"
+    // (see upass_tolg.cpp's io_meta().inputs loop). Declaring them unsigned here
+    // would double-compensate.
+    //
+    // OUTPUT ports have no such compensation, and a `signed` lie is not harmless
+    // for them: an `output reg` that is also READ inside the module — the shape
+    // of every registered counter, since a flop whose Q drives an output reuses
+    // the port as its storage — then SIGN-extends. `cv == 8'hff` on an unsigned
+    // u8 counter became `cv == 9'shff` with `cv` signed [7:0], i.e. -1 == 255,
+    // so the terminal-count output was stuck at 0 (a silent miscompile, LEC
+    // refuted). Follow the driver's sign instead; an undriven output keeps the
+    // old `signed` spelling.
+    bool out_unsigned = false;
+    if (!e.is_input && !pin.is_invalid()) {
+      auto drv      = get_driver(pin);
+      out_unsigned  = !drv.is_invalid() && livehd::graph_util::is_unsign(drv);
+    }
+    if (e.is_input) {
+      fout->append("input signed ");
+    } else {
+      fout->append(out_unsigned ? "output reg " : "output reg signed ");
+    }
 
     if (bits > 1) {
       fout->append("[", std::to_string(bits - 1), ":0] ", name, "\n");
@@ -2022,6 +2080,9 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // Map the corresponding HHDS pin (driver for inputs, sink for outputs) into pin2var.
     if (!pin.is_invalid()) {
       pin2var.emplace(pin.get_class_index(), name);
+      if (out_unsigned) {
+        pin2var_unsigned_.insert(pin.get_class_index());
+      }
     }
   }
 

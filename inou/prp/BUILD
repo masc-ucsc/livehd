@@ -450,6 +450,37 @@ _SIM_FIXME = [
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
+            # The 2026-07-29 corpus TRACKERS: one minimal repro per remaining
+            # hard-failure category, each verified to fail TODAY. They carry no
+            # marker in their NAME -- the `fixme` TAG is what marks them -- so
+            # they are excluded here and re-emitted with `tags = ["fixme"]`
+            # below. Only the seven whose
+            # FORWARD direction (.prp -> verilog -> LEC) actually breaks are
+            # listed; blocking_ff_state and negative_array_index
+            # PROVE forward (their .prp is the hardware the Verilog means) and
+            # stay in this glob as ordinary, live coverage -- only their
+            # Verilog-reading legs are fixme.
+            "tests/equiv/latch_rule_a.prp",
+            "tests/equiv/latch_rule_b.prp",
+            "tests/equiv/dual_async_set_reset.prp",
+            "tests/equiv/tolg_field_read_zero.prp",
+            "tests/equiv/writer_undefined_mux.prp",
+            "tests/equiv/writer_bad_char.prp",
+            "tests/equiv/reg_clock_from_logic.prp",
+            "tests/equiv/mem_write_during_reset.prp",
+            "tests/equiv/async_mem_reset_demoted.prp",
+            "tests/equiv/reg_decl_init_dropped.prp",
+            "tests/equiv/selfref_slice_assign.prp",
+            "tests/equiv/selfref_concat_assign.prp",
+            # ...and the five LEC-REFUTED trackers: these round-trip fine, so
+            # the failure is a SILENT MISCOMPILE the miter catches.
+            # divided_clock_decl_order has TWO clock domains (a register clocked
+            # by another register's Q), which yosys' miter cannot decide -- the
+            # bounded check does not run to completion and the pair is
+            # INCONCLUSIVE, not refuted. What it regresses is the WRITER's
+            # declaration ordering, so its coverage lives in the round-trip
+            # directions (prp-v2prp-* / prp-v2v-*), which do run.
+            "tests/equiv/divided_clock_decl_order.prp",
             # NOTE: the three comb-array store-loss trackers
             # (array_store_stale_rhs, arr_comb_mux_const, arr_comb_tmp) were
             # PROMOTED out of this exclude list (2026-07-27). Root cause was
@@ -543,6 +574,27 @@ sh_test(
         # tuple_get/tuple_add/attr_*. All three prove; arr_comb_tmp also left
         # _V2V_FIXME. Surfaced by lhdsuite //bench:minion_lec
         # (minion_dcache_tensor_load{,_p1}); see lhdsuite fixme.md 1h.
+        #
+        # ── corpus-mined category trackers (2026-07-29) ──────────────────────
+        # One minimal repro per remaining hard-failure category found by the
+        # ChiGen/ChiBench sweep. Each .v is <= 25 lines with 1-4 bit signals and
+        # (where an array is needed) at most 4 entries of 4 bits, so the whole
+        # set costs well under a second. Every one FAILS today -- run them with
+        #   bazel test //inou/prp:prp-equiv-latch_rule_b --test_tag_filters=
+        # The root cause is written at the top of each .v/.prp pair.
+        "latch_rule_a",          # self-timed gate: enable reads its own Q
+        "latch_rule_b",          # exhaustive `case` mis-inferred as a latch (21 corpus files)
+        "dual_async_set_reset",  # a flop needs TWO async rungs; the cell has one slot
+        "tolg_field_read_zero",  # prp_writer drops an array's type AND contents
+        "writer_undefined_mux",  # prp_writer reads a `_mux_N` it never declares
+        "writer_bad_char",       # prp_writer does not escape MODULE names
+        "reg_clock_from_logic",  # `clk ^ inv` clock rejected by tolg's whitelist
+        # LEC-REFUTED categories (these COMPILE clean -- the miscompile is silent):
+        "mem_write_during_reset",   # memory write not gated by the async reset
+        "async_mem_reset_demoted",  # async reset OF a memory demoted to sync
+        "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
+        "selfref_slice_assign",     # concurrent slice assigns solved in source order
+        "selfref_concat_assign",    # self-referential whole-vector assign never driven
     ]
 ]
 
@@ -596,6 +648,33 @@ _V2PRP_FIXME = [
     # when the native encoder learns x-as-don't-care at outputs (the formal
     # `?` half of the ordering ruling, lhdsuite array_problem.md).
     "mem_ordering_none",
+    # latch_always_transparent (2026-07-29): an ALWAYS-transparent latch (every
+    # path writes it, so tolg wires no `enable`) stores nothing — it is plain
+    # combinational logic. cgen now emits it as such (that fix closed a real
+    # miscompile: the Q, a module output, had NO driver at all), but
+    # pass.single_edge still sees a Latch CELL whose enable cone is empty and
+    # declines with "unresolved-commit-class", so the native-LEC leg refuses the
+    # ref side. The forward directions (prp-equiv-*, prp-v2v-*) both PROVE.
+    # Flips green when the degenerate latch stops being a Latch cell at all —
+    # tolg should bypass it to a wire — or when commit_class_of admits an
+    # enable-less latch as combinational.
+    "latch_always_transparent",
+    #
+    # ── corpus-mined category trackers (2026-07-29) ──────────────────────────
+    # One minimal repro per remaining hard-failure category from the
+    # ChiGen/ChiBench sweep; the root cause is written at the top of each pair.
+    # ALL NINE break this direction (verilog -> Pyrope, then LEC against the
+    # reference .prp): three fail the READ itself, six emit Pyrope that does not
+    # recompile. Verified failing at check-in.
+    "latch_rule_a",
+    "latch_rule_b",
+    "dual_async_set_reset",
+    "tolg_field_read_zero",
+    "writer_undefined_mux",
+    "writer_bad_char",
+    "reg_clock_from_logic",
+    "negative_array_index",
+    "blocking_ff_state",
 ]
 
 [
@@ -631,9 +710,15 @@ _V2PRP_FIXME = [
 ]
 
 # v2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
-# is compiled by lhd (native slang reader, default O1 recipe) and re-emitted as
-# Verilog, and inou/yosys/lgcheck proves the emitted netlist equivalent to the
-# ORIGINAL .v. This is the only harness whose reference side is read
+# goes all the way THROUGH Pyrope and back --
+#   v -> (slang) -> lg -> prp_writer -> .prp -> (inou.prp) -> tolg -> cgen -> v
+# -- and inou/yosys/lgcheck proves the result equivalent to the ORIGINAL .v.
+# The Pyrope legs were added 2026-07-29: the harness used to go slang -> lg ->
+# cgen DIRECTLY, skipping upass/prp_writer and the Pyrope re-read, so a writer
+# that emitted lossy or un-re-parseable Pyrope passed here while failing
+# everywhere else (three such trackers had to be left untagged for exactly that
+# reason; they refute now). One run therefore covers the whole path the corpus
+# fuzzing exercises. This is the only harness whose reference side is read
 # INDEPENDENTLY of LiveHD (yosys read_verilog, or yosys-slang via the sibling
 # .prp's `:gold_reader: slang` header): prp-v2prp-* LECs two LiveHD-read sides
 # with the in-process cvc5 engine, so a slang misread — or a dropped
@@ -650,13 +735,42 @@ _V2V_FIXME = [
     # Dynamic bit-range round trip miscompiles: z reads 0 where the golden
     # keeps bits (witness: a=0x100 base=7 len=7 -> gold z=2, gate z=0).
     "bitrange_dyn",
-    # Struct/tuple input-port round trips leave `res` UNDRIVEN (x) where the
-    # golden drives a value — same lost-assignment family as arr_comb_tmp.
-    "tup_in_port",
-    "tuple_in_port",
+    # tup_in_port / tuple_in_port were PROMOTED out of this list (2026-07-29):
+    # they tracked the DIRECT slang -> lg -> cgen path leaving `res` UNDRIVEN
+    # (x) where the golden drives a value. Routing this harness through Pyrope
+    # (v -> prp -> v) proves both — the writer/recompile legs reconstruct the
+    # struct port binding the direct path dropped.
     # arr_comb_tmp was PROMOTED out of this list (2026-07-27): the `t = d` drop
     # was upass.ssa leaving a tuple_set store's VALUE operand on its stale base
     # name, not a slang front-end drop — see the equiv note above.
+    #
+    # ── corpus-mined category trackers (2026-07-29) ──────────────────────────
+    # ALL NINE repros (see _V2PRP_FIXME). The three pure prp_writer bugs
+    # (tolg_field_read_zero, writer_undefined_mux,
+    # writer_bad_char) used to PASS here and were deliberately left
+    # untagged, because this direction was the DIRECT slang -> lg -> cgen path
+    # and never ran the writer. v2v_test.py now routes through Pyrope
+    # (v -> prp -> v), so the writer IS exercised and all three refute --
+    # exactly the point of the change. Each pair's header states the root cause.
+    "tolg_field_read_zero",
+    "writer_undefined_mux",
+    "writer_bad_char",
+    "latch_rule_a",
+    "latch_rule_b",
+    "dual_async_set_reset",
+    "reg_clock_from_logic",
+    "negative_array_index",
+    "blocking_ff_state",
+    # The five LEC-REFUTED trackers. This is the only direction that catches
+    # them: they COMPILE clean both ways, so prp-v2prp-* (which LECs our own
+    # generated Pyrope against the identical checked-in .prp) trivially passes,
+    # and prp-equiv-* only sees four of the five.
+    "mem_write_during_reset",
+    "async_mem_reset_demoted",
+    "async_reset_pin_wire",
+    "reg_decl_init_dropped",
+    "selfref_slice_assign",
+    "selfref_concat_assign",
 ]
 
 [

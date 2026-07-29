@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Verilog ROUND-TRIP gated test: a golden `.v` is compiled by lhd (native
-slang reader, default O1 recipe) and re-emitted as Verilog, and
-inou/yosys/lgcheck proves the emitted netlist equivalent to the ORIGINAL `.v`.
+"""Verilog ROUND-TRIP gated test: a golden `.v` goes all the way THROUGH Pyrope
+and back, and inou/yosys/lgcheck proves the result equivalent to the ORIGINAL:
 
-    lhd compile foo.v --emit-dir verilog:DIR/ --workdir W      # slang -> lg -> cgen
-    lgcheck --reference foo.v --implementation DIR/all.v \
+    lhd compile foo.v      --emit-dir pyrope:P/   --workdir W1   # slang -> lg -> prp_writer
+    lhd compile P/*.prp    --emit-dir verilog:V/  --workdir W2   # inou.prp -> tolg -> cgen
+    lgcheck --reference foo.v --implementation V/all.v \
             --reference_top <vtop> --implementation_top <flat vtop>
+
+The Pyrope leg is deliberate. The old harness went slang -> lg -> cgen DIRECTLY,
+which skipped upass/prp_writer and the Pyrope re-read entirely, so a writer that
+emitted un-re-parseable or lossy Pyrope was invisible here (three such bugs --
+a dropped array type, an undeclared `_mux_N`, an unescaped module name -- passed
+this test while failing everywhere else). Routing through the writer makes ONE
+run cover the whole `v -> prp -> v` path, which is the path the corpus fuzzing
+actually exercises.
 
 Coverage this adds over the sibling harnesses: prp-v2prp-* LECs the emitted
 Pyrope against the hand-written .prp with the in-process cvc5 engine — LiveHD
@@ -105,20 +113,49 @@ def main():
     odir = os.path.join(work, "v")
     os.makedirs(odir, exist_ok=True)
 
-    # 1. Verilog -> LGraph -> Verilog (native slang reader, default recipe).
+    # 1a. Verilog -> LGraph -> PYROPE (native slang reader, default recipe).
     # `flat_top_io`: a struct is a BUNDLE everywhere inside LiveHD, but this
     # check miters the emitted netlist against the ORIGINAL .v, so the emitted
     # TOP interface must be the source module's packed port list. Only the top
     # needs it — yosys' miter compares the top, and submodule interfaces are
     # internal to each netlist (measured: a pair whose internal child differs
-    # bus-vs-leaf still proves).
+    # bus-vs-leaf still proves). It rides the Pyrope leg: the writer emits the
+    # flattened signature, and the recompile keeps it.
+    prpdir = os.path.join(work, "prp")
+    os.makedirs(prpdir, exist_ok=True)
     comp = subprocess.run(
-        [lhd, "compile", v, "--emit-dir", "verilog:" + odir + "/",
+        [lhd, "compile", v, "--emit-dir", "pyrope:" + prpdir + "/",
          "--set", "compile.slang.flat_top_io=true",
-         "--workdir", os.path.join(work, "w")],
+         "--workdir", os.path.join(work, "w1")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if comp.returncode != 0:
-        print("{} - v2v - FAILED: slang->verilog rc={}".format(name, comp.returncode))
+        print("{} - v2v - FAILED: slang->pyrope rc={}".format(name, comp.returncode))
+        print(comp.stdout.decode("utf-8", "ignore"))
+        return 1
+    prps = sorted(glob.glob(os.path.join(prpdir, "*.prp")))
+    if not prps:
+        print("{} - v2v - FAILED: no pyrope emitted in {}".format(name, prpdir))
+        return 1
+
+    # 1b. PYROPE -> LGraph -> Verilog. Emitting every unit at once is the normal
+    # case; a design whose units import each other rejects the duplicates, so
+    # fall back to the single unit that carries the top.
+    comp = subprocess.run(
+        [lhd, "compile"] + prps + ["--emit-dir", "verilog:" + odir + "/",
+                                   "--workdir", os.path.join(work, "w2")],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if comp.returncode != 0 and len(prps) > 1:
+        solo = [p for p in prps
+                if os.path.splitext(os.path.basename(p))[0] == impl_top]
+        if solo:
+            shutil.rmtree(odir, ignore_errors=True)
+            os.makedirs(odir, exist_ok=True)
+            comp = subprocess.run(
+                [lhd, "compile", solo[0], "--emit-dir", "verilog:" + odir + "/",
+                 "--workdir", os.path.join(work, "w2b")],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if comp.returncode != 0:
+        print("{} - v2v - FAILED: pyrope->verilog rc={}".format(name, comp.returncode))
         print(comp.stdout.decode("utf-8", "ignore"))
         return 1
 

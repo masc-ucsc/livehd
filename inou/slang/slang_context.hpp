@@ -126,6 +126,12 @@ private:
   // read mh_wb_req before the child instances wrote it — LEC-refuted).
   absl::flat_hash_set<const slang::ast::Symbol*> wire_split_flat_;
   absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)
+  // Vars BLOCKING-written by an edge process and READ OUTSIDE it. Such a var is
+  // persistent flop state (`always @(posedge p) ms = ms + 1;` + `assign o = ms`)
+  // that this reader does not model; without the diagnostic it lowered to a
+  // stateless `mut`, i.e. the whole register vanished. Filled by
+  // collect_blocking_ff_state, refused by lower_ff_process.
+  absl::flat_hash_set<const slang::ast::Symbol*>              blocking_ff_state_;
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   absl::flat_hash_set<const slang::ast::Symbol*>              declared_;   // declare stmt already emitted
@@ -149,6 +155,7 @@ private:
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
   void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
   void        collect_state_vars(const slang::ast::Scope& body);
+  void        collect_blocking_ff_state(const slang::ast::Scope& body);
   // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
   // dataflow dependency order, not source order: LNAST/tolg resolve reads
   // sequentially, while verilog wires are order-free nets. Combinational

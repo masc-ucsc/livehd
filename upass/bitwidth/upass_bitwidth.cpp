@@ -349,7 +349,24 @@ void uPass_bitwidth::check_array_elem_fit(std::string_view name, const Lnast_ran
   }
   // Same containment judgement as check_declared_fit.
   const bool is_unsigned_env = !env.is_signed();
-  const bool over            = is_unsigned_env ? (r.min > env.max || r.min < env.min) : !env.contains(r);
+  bool       over            = is_unsigned_env ? (r.min > env.max || r.min < env.min) : !env.contains(r);
+  if (over && !is_unsigned_env) {
+    // A SIGNED element declared W bits also legally holds any W-bit PATTERN.
+    // The reader models array storage as RAW BITS and sign-extends on read
+    // (`q[i]#sext[0..=W-1]`), so an element write carries the UNSIGNED
+    // reinterpretation of the same storage -- the very force/reinterpret
+    // semantics range_of_operand documents for scalars, where the equivalent
+    // scalar store is spelled `#[0..=W-1]#sext[0..=W-1]` and lands signed.
+    // Without this, EVERY signed memory (`reg signed [16:0] q [3:0]` read at a
+    // dynamic index) died on a self-contradictory "`q` (value 0) does not fit
+    // its declared range [-65536, 65535]". A value genuinely outside the
+    // storage (300 into an s4, or any negative, which no raw pattern is)
+    // still errors.
+    const int64_t sb = storage_bits_for_env(env);
+    if (sb > 0 && sb < 63 && r.min >= 0 && r.max <= ((int64_t{1} << sb) - 1)) {
+      over = false;
+    }
+  }
   if (over) {
     record_overflow(base, r, env);
   }

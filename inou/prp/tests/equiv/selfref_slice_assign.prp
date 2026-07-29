@@ -1,0 +1,25 @@
+/*
+:name: selfref_slice_assign
+:type: equiv
+:verilog_top: selfref_slice_assign
+:pyrope_top: selfref_slice_assign
+*/
+//
+// FIXME tracker -- concurrent slice assignments to one wire are ORDERED (LEC-
+// refuted). The three `assign` statements below drive disjoint bit-fields of `w`
+// and read each other; being CONCURRENT, they settle to w[3:2]=hi, w[1]=w[2]=hi[0],
+// w[0]=~w[1]. The reader instead threads them through SSA in source order, so
+// `w__w1#[0] = ~((w >> 1) & 1)` reads the ORIGINAL (poison) `w`, not the settled
+// w[1]. Reordering the same three assigns in the source changes the result, which
+// is the signature of the bug: continuous assigns must be solved, not sequenced.
+pub comb selfref_slice_assign::[timecheck=false](hi:u2) -> (q:u4) {
+  mut w = 0
+  w = 0ub????
+  mut w__w1 = w
+  w__w1#[0..=0] = ((~((w >> 1) & 1)) & 1)
+  mut w__w2 = w__w1
+  w__w2#[1..=1] = ((w__w1 >> 2) & 1)
+  mut w__w3 = w__w2
+  w__w3#[2..=3] = hi
+  q = w__w3
+}

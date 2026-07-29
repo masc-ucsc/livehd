@@ -1,0 +1,21 @@
+/*
+:name: blocking_ff_state
+:type: equiv
+:verilog_top: blocking_ff_state
+:pyrope_top: blocking_ff_state
+*/
+//
+// FIXME tracker -- a 2-flop synchronizer written with blocking `=`.
+// Every synthesis tool infers two flops here; `--reader slang` models state from
+// non-blocking `<=` only and now fail-closes (`blocking-ff-state`) rather than
+// silently lowering it to stateless logic, which used to DELETE the registers.
+// The refusal is correct behaviour for today's reader -- this pair tracks the
+// missing FEATURE. The .prp below is the hardware the Verilog means, and it PROVES
+// against the golden, so only the Verilog-reading legs are fixme.
+pub mod blocking_ff_state::[timecheck=false](clk:u1, d:u1) -> (q:u1@[]) {
+  reg sync_0:u1
+  reg sync_1:u1
+  sync_0 = d
+  sync_1 = sync_0
+  q = sync_1
+}

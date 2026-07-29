@@ -1,0 +1,22 @@
+/*
+:name: latch_rule_a
+:type: equiv
+:verilog_top: latch_rule_a
+:pyrope_top: latch_rule_a
+*/
+//
+// FIXME tracker -- latch contract rule A (self-timed gate).
+// `always @(d) if (d != state) state = d;` infers a level-sensitive latch whose
+// ENABLE cone reads the latch's own Q, so graph/latch_contract.cpp rejects it: the
+// commit-at-closing-edge model has no meaning when the gate depends on the value
+// being committed. Unlike rule B above this is a REAL violation of the model's
+// precondition, so the fix is a better latch model (or an explicit refusal that
+// does not block the whole module), not a checker relaxation.
+pub mod latch_rule_a::[timecheck=false](d:u2) -> (q:u2@[]) {
+  reg state:u2:[latch=true]
+  q = 0ub??
+  if d != state {
+    state = d
+  }
+  q = state
+}

@@ -1,0 +1,19 @@
+/*
+:name: negative_array_index
+:type: equiv
+:verilog_top: negative_array_index
+:pyrope_top: negative_array_index
+*/
+//
+// FIXME tracker -- a false "array index is negative".
+// `(sel + 1) % 4` is always in [0,3], but the slang reader expands `a % b` into
+// `a - (a/b)*b` (LNAST mod has no direct lowering) and upass.bitwidth's div() does
+// not narrow by the constant divisor, so the chain's inferred range comes out as
+// [-15, 4] and check_index_nonneg rejects it.
+// The forward direction (.prp below) PROVES -- only the Verilog leg is broken,
+// which is why just prp-v2prp-* / prp-v2v-* are fixme here.
+pub mod negative_array_index::[timecheck=false](clk:u1, sel:u2, din:u4) -> (dout:u4@[]) {
+  reg mem:[4]u4
+  mem[(sel + 1) % 4] = din
+  dout = mem[sel]
+}

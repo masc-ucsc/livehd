@@ -1,0 +1,21 @@
+/*
+:name: unsigned_output_reg_compare
+:type: equiv
+:verilog_top: unsigned_output_reg_compare
+:pyrope_top: unsigned_output_reg_compare
+*/
+//
+// cgen used to spell every port `signed`. For inputs that is the contract
+// upass.tolg lowers against (it wraps each unsigned input's body read in a
+// to_positive Get_mask), but outputs have no such compensation -- and the lie
+// is not harmless for an `output reg` that is also READ inside the module. A
+// flop whose Q drives an output reuses the port as its storage, so the terminal
+// -count compare `cv == 255` came out as `cv == 9'shff` with `cv` declared
+// `signed [7:0]`: -1 == 255, never true, so `tc` was stuck at 0. Silent
+// miscompile -- it compiled clean and LEC refuted it.
+pub mod unsigned_output_reg_compare::[timecheck=false](clk:u1) -> (tc:u1@[], cv:u8@[]) {
+  reg cv:u8
+  tc = 0ub?
+  cv = (cv + 1)#[0..=7]
+  tc = unsigned(cv == 255)
+}

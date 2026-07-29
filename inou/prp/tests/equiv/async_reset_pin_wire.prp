@@ -1,0 +1,21 @@
+/*
+:name: async_reset_pin_wire
+:type: equiv
+:verilog_top: async_reset_pin_wire
+:pyrope_top: async_reset_pin_wire
+*/
+//
+// FIXME tracker -- a flop's async reset pin driven by an internal WIRE is left
+// undriven in the emitted Verilog (LEC-refuted). `wire CLRn = ~CLR;` used as
+// `negedge CLRn` reads back correctly into Pyrope (`reset_pin=ref CLRn` plus
+// `CLRn = (~CLR) & 1`, both present below), but cgen does not wire the reset pin to
+// that net -- only a top-level input port reaches it -- so the reset never fires.
+// The clock-gating path already handles a derived net here; the reset path does not.
+pub mod async_reset_pin_wire::[timecheck=false](CLK:u1, CLR:u1, D:u1) -> (Q:u1@[]) {
+  reg r:u1:[init=0, reset_pin=ref CLRn, async=true, negreset=true, clock_pin=ref CLK]
+  wire CLRn:u1
+  CLRn = (~CLR) & 1
+  Q = 0ub?
+  r = D
+  Q = r
+}

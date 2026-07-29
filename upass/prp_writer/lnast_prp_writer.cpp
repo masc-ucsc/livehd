@@ -1302,15 +1302,77 @@ void Lnast_prp_writer::write_module() {
     // forward-referencing init (the slang reset value is the `nil` sentinel,
     // suppressed), so reordering is semantically inert; the non-declare
     // statements keep their original order.
-    for (int pass = 0; pass < 2; ++pass) {
+    //
+    // Order WITHIN the declare pass: a reg/latch whose Q drives another declare's
+    // `clock_pin=ref X` / `reset_pin=ref X` must be DECLARED FIRST.  A divided
+    // clock (`always_ff @(posedge div_q)`) otherwise emitted
+    // `reg data_o:…:[clock_pin=ref word_clk]` ABOVE `reg word_clk`, and the
+    // re-read failed with "read of undefined variable 'word_clk'".  The pin
+    // machinery above makes such a net position-independent for TOLG (a flop Q is
+    // order-free state), but Pyrope's scope check is textual, so the declaration
+    // still has to precede the reference.
+    // depth(X) = 0 when X's own declare references no other pin-referenced state
+    // net, else 1 + the max depth of the ones it does (a clock derived from a
+    // divided clock).  Declares go out lowest-depth first.
+    auto attr_refs = [this](const std::string& owner, const std::string& target) {
+      auto it = folded_attrs_.find(owner);
+      if (it == folded_attrs_.end()) {
+        return false;
+      }
+      const std::string from = "=ref " + target;
+      for (size_t p = it->second.find(from); p != std::string::npos; p = it->second.find(from, p + 1)) {
+        const size_t end = p + from.size();
+        if (end == it->second.size() || it->second[end] == ',' || it->second[end] == ' ') {
+          return true;  // exact name, not a longer net that merely starts with it
+        }
+      }
+      return false;
+    };
+    std::unordered_map<std::string, int> pin_state_depth;
+    for (const auto& nm : pin_dep_nets_) {
+      if (state_decl_pre.count(nm) != 0u) {
+        pin_state_depth.emplace(nm, 0);
+      }
+    }
+    for (size_t round = 0; round < pin_state_depth.size(); ++round) {
+      bool changed = false;
+      for (auto& [nm, d] : pin_state_depth) {
+        for (const auto& [other, od] : pin_state_depth) {
+          if (other != nm && d < od + 1 && attr_refs(nm, other)) {
+            d       = od + 1;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) {
+        break;  // fixpoint (a cyclic clock chain just stops at the round cap)
+      }
+    }
+    int max_pin_depth = 0;
+    for (const auto& [nm, d] : pin_state_depth) {
+      (void)nm;
+      max_pin_depth = std::max(max_pin_depth, d);
+    }
+    const int decl_pass = pin_state_depth.empty() ? 0 : max_pin_depth + 1;
+    const int body_pass = decl_pass + 1;
+    for (int pass = 0; pass <= body_pass; ++pass) {
       cur = stmts_nid;
       if (move_to_child()) {  // push stmts, cur -> first statement
         do {
           if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
             continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
           }
-          const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
-          if (is_decl != (pass == 0)) {
+          int want = body_pass;
+          if (current_ntype() == Lnast_ntype::Lnast_ntype_declare) {
+            want = decl_pass;
+            if (auto d0 = lnast->get_child(cur); !d0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(d0))) {
+              if (auto pit = pin_state_depth.find(std::string(strip_prefix(lnast->get_name(d0))));
+                  pit != pin_state_depth.end()) {
+                want = pit->second;
+              }
+            }
+          }
+          if (pass != want) {
             continue;
           }
           // Skip attr_set statements that were folded into a declare's `:[…]`.
@@ -1836,8 +1898,17 @@ void Lnast_prp_writer::write_stmts() {
       if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
         continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
       }
+      // Some statements decide to emit NOTHING only once they are being written
+      // (write_store's self-store folds, which must render the RHS first). Rewind
+      // the indent instead of leaving a whitespace-only line behind.
+      const auto before = os.tellp();
       print_indent();
+      const auto after_indent = os.tellp();
       write_node();
+      if (before != std::streampos(-1) && os.tellp() == after_indent) {
+        os.seekp(before);
+        continue;
+      }
       os << "\n";
     } while (move_to_sibling());
     move_to_parent();
@@ -2060,6 +2131,49 @@ void Lnast_prp_writer::write_if_chain(bool continuation) {
   const bool unique = Lnast_ntype::is_unique_if(current_ntype());
   if (!continuation && unique && try_write_match()) {
     return;
+  }
+  // A CONDITION-LESS if: children are [cond, stmts]* [else-stmts], so a lone
+  // `stmts` child means every condition arm is gone and only the else/`default`
+  // survives.  (An SV `case (x) default: … endcase` reads in exactly this shape.)
+  // The generic path below renders child0 as the CONDITION, so it emitted
+  // `unique if  {\n}` — no condition AND no body, which does not re-parse, so the
+  // v -> prp -> v round trip died at re-read.  With no conditions the else body
+  // runs unconditionally: splice its statements in at THIS level.  Not a braced
+  // block and not `if true {…}` — both open a scope, which would hide any
+  // declaration the arm makes from the statements that follow it.
+  {
+    int       nkids = 0;
+    Lnast_nid only{};
+    for (auto c = lnast->get_child(cur); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      only = c;
+      ++nkids;
+    }
+    if (nkids == 1 && Lnast_ntype::is_stmts(lnast->get_type(only))) {
+      move_to_child();  // -> the else-stmts
+      bool first_out = true;
+      if (move_to_child()) {
+        do {
+          if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
+            continue;
+          }
+          const auto before = os.tellp();
+          if (!first_out) {
+            os << "\n";
+            print_indent();  // the caller indented the first line for us
+          }
+          const auto after_sep = os.tellp();
+          write_node();
+          if (before != std::streampos(-1) && os.tellp() == after_sep) {
+            os.seekp(before);  // statement emitted nothing — drop its separator too
+            continue;
+          }
+          first_out = false;
+        } while (move_to_sibling());
+        move_to_parent();
+      }
+      move_to_parent();
+      return;
+    }
   }
   if (!move_to_child()) {
     return;
@@ -2520,6 +2634,23 @@ void Lnast_prp_writer::write_store() {
   // declaration: `mut x:T = v`.
   auto       val_nid = lnast->get_sibling_next(first);
   const bool scalar  = !val_nid.is_invalid() && lnast->is_last_child(val_nid);
+  // Second self-store fold, on the RENDERED value.  The raw-name test above only
+  // catches `x = x` spelled that way in the LNAST; the common shape is
+  // `o = n___ssa_1` where `n___ssa_1 = o` is a single-use temp INLINED right here,
+  // so what actually reaches the file is `o = o` — which Pyrope rejects on
+  // re-parse ("irrelevant assignment: `o` is assigned to itself"), breaking the
+  // v -> prp -> v round trip.  (A Verilog `n = o; … o <= n;` pair collapses to
+  // exactly this whenever the if-merge keeps the store as a statement instead of
+  // an if-expression.)  Guards: only a NON-declaring store may be dropped (else
+  // the name is never defined), a stage decl re-attaches to its store, and a
+  // `_mux_N` ref renders as an if-expression below, not through render_value.
+  if (scalar && (is_bundle_field(lhs) || declared_.count(lhs) != 0) && stage_decls_.find(lhs) == stage_decls_.end()
+      && !(lnast->get_type(val_nid) == Lnast_ntype::Lnast_ntype_ref
+           && mux_inline_.count(std::string(strip_prefix(lnast->get_name(val_nid)))) != 0)
+      && render_value(val_nid, /*operand_ctx=*/false) == lhs) {
+    move_to_parent();
+    return;
+  }
   std::string prefix = decl_prefix(lhs);
   print(prefix);
   print(lhs);

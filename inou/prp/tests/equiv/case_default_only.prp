@@ -1,0 +1,18 @@
+/*
+:name: case_default_only
+:type: equiv
+:verilog_top: case_default_only
+:pyrope_top: case_default_only
+*/
+//
+// A `case` whose only arm is `default` reads in as an if-node with a single
+// child -- the else-stmts, no cond/then pair. The writer rendered child0 as the
+// CONDITION, so it emitted `unique if  {\n}`: no condition and no body. That
+// does not re-parse ("expected '{'"), so the v -> prp -> v round trip died at
+// re-read. The arm's statements belong at THIS level, unconditionally.
+pub mod case_default_only::[timecheck=false](clk:u1, a:u2) -> (o:u4@[]) {
+  mut r = 0
+  reg o:u4
+  r = 0
+  o = r
+}

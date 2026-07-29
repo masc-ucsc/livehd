@@ -1,0 +1,23 @@
+/*
+:name: dual_async_set_reset
+:type: equiv
+:verilog_top: dual_async_set_reset
+:pyrope_top: dual_async_set_reset
+*/
+//
+// FIXME tracker -- a flop with TWO async rungs (async SET and async RESET).
+// `always @(posedge clk, negedge S, negedge R)` needs two async controls, but the
+// reader has a SINGLE async-reset slot per flop: it stamps `reset_pin_refname`
+// once per rung and upass.attributes is add-only, so the second rung collides with
+// "attribute `reset_pin_refname` of `Q` is already set to a different value".
+// There is no Pyrope spelling for the second rung either, so the .prp below models
+// only the async SET (R becomes synchronous) -- which is why the forward direction
+// refutes too. ALL THREE directions are fixme until the cell grows a second slot.
+pub mod dual_async_set_reset::[timecheck=false](clk:u1, D:u1, S:u1, R:u1) -> (Q:u1@[]) {
+  reg Q:u1:[init=1, reset_pin=ref S, negreset=true, async=true]
+  if R == 0 {
+    Q = 0
+  } else {
+    Q = D
+  }
+}
