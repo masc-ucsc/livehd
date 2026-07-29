@@ -1257,6 +1257,20 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
                  && !pristine.contains(name);  // derived this invocation, not a loaded unit
         });
       }
+      // Everything still standing walked to completion with every import
+      // resolved, so its body is FINAL. Freeze it: the next round exists only
+      // for the blocked files above, and re-walking a converged unit corrupts
+      // it — SSA demotes its private `___ssa_N` names into the `__wN`
+      // namespace the generated source already uses (two variables silently
+      // become one, then constprop folds live logic to a constant and DCE
+      // deletes the real cone), and uPass_pipe doubles its output flop. The
+      // blocked files were just restored to their pristine bodies, so they are
+      // NOT frozen and re-elaborate from scratch next round.
+      for (const auto& ln : var.lnasts) {
+        if (!prev_blocked.contains(std::string(ln->get_top_module_name()))) {
+          ln->set_upass_converged(true);
+        }
+      }
     }
   }
 

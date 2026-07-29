@@ -44,8 +44,13 @@ mod hard2(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
 EOF
 
 start=$(date +%s)
+# The floor is pinned to 1s EXPLICITLY (it used to ride the default). This case
+# asserts the budget REPORT and the freeze disclosure, not the default's value —
+# and when that default moved to 20s (2026-07-28) an unpinned run both blew this
+# test's cost model and made the "on the 1s floor" match below assert backwards.
 "$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=3 --set formal.split=none >"$W/budget.out" 2>&1
+  --set formal.bound=3 --set formal.timeout=3 --set formal.split=none \
+  --set formal.min_timeout=1 >"$W/budget.out" 2>&1
 rc=$?
 end=$(date +%s); elapsed=$((end-start))
 

@@ -263,6 +263,16 @@ private:
   // `___ssa_` names) but still registers it for call resolution and lowers it
   // via tolg. In-memory only; set by the kernel ln: import loader.
   bool                                             pre_elaborated_ = false;
+  // Converged in an earlier round of the kernel's import_defer iterate loop:
+  // this unit's walk completed with every import resolved, so its body is
+  // already the final post-upass form. A later round (run because some OTHER
+  // unit was still blocked) must not re-walk it — re-running SSA re-versions
+  // its private `___ssa_` names into the `__wN` namespace prp_writer already
+  // uses in generated sources, and uPass_pipe would double its output flop.
+  // Unlike pre_elaborated_ the body stays visible to the inliner/registry (a
+  // unit blocked this round may still need to inline a converged `comb`).
+  // In-memory only; set by the kernel iterate loop, never serialized.
+  bool                                             upass_converged_ = false;
   // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
   // by inou.slang on every tree it produces (the direct SV reader lowers
   // sequential `always` as comb and predates the timing conventions, so a
@@ -530,6 +540,10 @@ public:
   // ── pre-elaborated import (loaded post-upass; skip re-elaboration) ─────────
   bool is_pre_elaborated() const noexcept { return pre_elaborated_; }
   void set_pre_elaborated(bool v) noexcept { pre_elaborated_ = v; }
+
+  // ── converged in an earlier import_defer round (skip the re-walk) ──────────
+  bool is_upass_converged() const noexcept { return upass_converged_; }
+  void set_upass_converged(bool v) noexcept { upass_converged_ = v; }
 
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }

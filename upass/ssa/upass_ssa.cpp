@@ -243,33 +243,64 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   // stale — demote it out of the private namespace (`___ssa_<N>` -> `__w<N>`,
   // the same move pass.prp_writer makes on emit) so this run versions freely
   // without collision. A consistent rename keeps every def/use linked.
-  for (auto nid : lnast->depth_preorder(root)) {
-    if (nid.is_invalid()) {
-      continue;
-    }
-    std::string_view nm  = lnast->get_name(nid);
-    auto             pos = nm.rfind("___ssa_");
-    if (pos == std::string_view::npos) {
-      continue;
-    }
-    const size_t d = pos + 7;  // first char past "___ssa_"
-    if (d >= nm.size()) {
-      continue;  // bare "___ssa_" with no version — leave intact
-    }
-    bool all_digits = true;
-    for (size_t i = d; i < nm.size(); ++i) {
-      if (nm[i] < '0' || nm[i] > '9') {
-        all_digits = false;
-        break;
+  //
+  // `__wN` is NOT a free namespace: prp_writer emits it into generated sources
+  // (`lnast_prp_writer.cpp` strip_prefix), so a body can already hold a
+  // source-authored `x__w2` when `x___ssa_2` demotes onto it — silently
+  // aliasing two distinct variables, which constprop then folds to a constant.
+  // So the target is checked against the names ALREADY in this body (and
+  // against targets already handed out) and bumped until it is free. The map
+  // keeps the rename consistent: every occurrence of one stale name lands on
+  // the same demoted name, which is what preserves the def/use links.
+  {
+    absl::flat_hash_set<std::string>              taken;   // every name in the body
+    absl::flat_hash_map<std::string, std::string> demote;  // stale name -> demoted
+    for (auto nid : lnast->depth_preorder(root)) {
+      if (!nid.is_invalid()) {
+        taken.emplace(lnast->get_name(nid));
       }
     }
-    if (!all_digits) {
-      continue;  // not a pure-digit SSA suffix — not our version form
+    for (auto nid : lnast->depth_preorder(root)) {
+      if (nid.is_invalid()) {
+        continue;
+      }
+      std::string_view nm  = lnast->get_name(nid);
+      auto             pos = nm.rfind("___ssa_");
+      if (pos == std::string_view::npos) {
+        continue;
+      }
+      const size_t d = pos + 7;  // first char past "___ssa_"
+      if (d >= nm.size()) {
+        continue;  // bare "___ssa_" with no version — leave intact
+      }
+      bool all_digits = true;
+      for (size_t i = d; i < nm.size(); ++i) {
+        if (nm[i] < '0' || nm[i] > '9') {
+          all_digits = false;
+          break;
+        }
+      }
+      if (!all_digits) {
+        continue;  // not a pure-digit SSA suffix — not our version form
+      }
+      std::string stale(nm);
+      auto        it = demote.find(stale);
+      if (it == demote.end()) {
+        const std::string base(nm.substr(0, pos));
+        uint64_t          version = 0;
+        for (size_t i = d; i < nm.size() && version < (1ULL << 40); ++i) {
+          version = version * 10 + static_cast<uint64_t>(nm[i] - '0');
+        }
+        std::string cand;
+        do {
+          cand = base + "__w" + std::to_string(version);
+          ++version;
+        } while (taken.contains(cand));
+        taken.emplace(cand);
+        it = demote.emplace(std::move(stale), std::move(cand)).first;
+      }
+      lnast->set_name(nid, it->second);  // interns the demoted name
     }
-    std::string demoted(nm.substr(0, pos));
-    demoted += "__w";
-    demoted += nm.substr(d);
-    lnast->set_name(nid, demoted);  // interns the demoted name
   }
 
   // ── Detect post-func_extract shape: top must have an 'io' child ──────────

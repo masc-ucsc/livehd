@@ -116,7 +116,13 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
 #    UNKNOWN/CEX on the floor (user ruling). The two legitimate skips in run_def are
 #    verdict-CACHE hits (a known Proven, or a known-Unknown at >= this budget on an
 #    unchanged digest); a fresh workdir has neither, so every line is a real attempt.
-run_lec wall wide 2 30
+#    The floor is pinned to 1s EXPLICITLY (it used to ride the default): this
+#    case asserts the SCHEDULER's behavior — total-not-per-def, nobody skipped,
+#    overrun disclosed — none of which is about what the default happens to be.
+#    Leaving it on the default also broke the cost model above when that default
+#    moved to 20s (2026-07-28): four defs drawing a 20s floor turns a ~10s case
+#    into minutes and blows the `< 12s` window assertion below.
+run_lec wall wide 2 30 --set formal.min_timeout=1
 DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN)" "$OUTFILE")
 if [ "$DEFS_SEEN" -ge 4 ]; then
   echo "ok: all $DEFS_SEEN defs (3 leaves + top) got a verdict despite a 2s total"
@@ -157,12 +163,20 @@ else
 fi
 
 # 3) formal.min_timeout is the SOFT-budget floor, and the overrun is REPORTED.
-#    A/B on the cheap 1-leaf hierarchy at the same 1s target: the default 1s floor
-#    versus a 2s floor. Every def dispatched after the total is spent now draws 2s
-#    instead of 1s, so the run must take measurably longer AND say so. Without the
-#    report line a run that silently took several times its budget is
-#    indistinguishable from one that fit.
-run_lec base hard1 1 30
+#    A/B on the cheap 1-leaf hierarchy at the same 1s target: a 1s floor versus a
+#    2s floor. Every def dispatched after the total is spent draws 2s instead of
+#    1s, so the run must take measurably longer AND say so. Without the report
+#    line a run that silently took several times its budget is indistinguishable
+#    from one that fit.
+#
+#    BOTH arms pin the floor EXPLICITLY. The baseline used to be left on the
+#    default and described as "the 1s default"; when that default moved to 20s
+#    (2026-07-28, so a per-def verdict stops flipping run to run on a wide
+#    design) the comparison inverted and this case asserted backwards. The
+#    property under test — a bigger floor costs more solver time — has nothing to
+#    do with whatever the default happens to be, so pin both ends. Keeping the
+#    baseline at 1s also keeps this test fast.
+run_lec base hard1 1 30 --set formal.min_timeout=1
 BASE_ACTUAL=$ACTUAL
 if [ "$VERDICT" = "PROVEN equivalent" ]; then
   echo "FAIL: hard leaf under budget -> FALSE PROVEN"; fail=1
@@ -177,9 +191,9 @@ else
   echo "FAIL: a run that overshot its soft budget must report target/actual/units/floored: $(cat "$OUTFILE")"; fail=1
 fi
 if [ -n "${BASE_ACTUAL:-}" ] && [ "${FLOOR_ACTUAL:-0}" -gt "$BASE_ACTUAL" ]; then
-  echo "ok: min_timeout=2 cost more solver time than the 1s default (${FLOOR_ACTUAL}s vs ${BASE_ACTUAL}s)"
+  echo "ok: min_timeout=2 cost more solver time than the 1s floor (${FLOOR_ACTUAL}s vs ${BASE_ACTUAL}s)"
 else
-  echo "FAIL: min_timeout=2 (${FLOOR_ACTUAL:-<none>}s) must cost MORE than the 1s default (${BASE_ACTUAL:-<none>}s): raising the floor buys verdicts by overshooting"; fail=1
+  echo "FAIL: min_timeout=2 (${FLOOR_ACTUAL:-<none>}s) must cost MORE than the 1s floor (${BASE_ACTUAL:-<none>}s): raising the floor buys verdicts by overshooting"; fail=1
 fi
 # A bigger floor must still not turn an unprovable hierarchy into a false PROVEN.
 if [ "$VERDICT" = "PROVEN equivalent" ]; then

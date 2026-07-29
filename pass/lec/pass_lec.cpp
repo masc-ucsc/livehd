@@ -148,8 +148,10 @@ void Pass_lec::setup() {
                        "verdict yet still gets at least this much solver time, so it earns a real UNKNOWN/CEX instead "
                        "of a silent 'not checked'. A unit is one obligation (formal verify) or one def (hierarchical "
                        "lec). Overshooting `timeout` is intended — the bound is timeout + unsettled_units*min_timeout "
-                       "— and the run reports target/actual/units/floored so the overrun is never silent",
-                       "1");
+                       "— and the run reports target/actual/units/floored so the overrun is never silent. Default 20s: "
+                       "a 1s floor cannot earn a real verdict on a non-trivial def, so on a wide design the per-def "
+                       "verdicts flip run to run purely on dispatch order",
+                       "20");
   m.add_label_optional("spec_mining_timeout",
                        "independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase, never drawn from "
                        "`timeout`: the unproven-def straggler list, the cvc5 timeout-CORE diagnosis (which subset of "

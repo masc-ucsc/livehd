@@ -161,9 +161,22 @@ struct Lec_options {
   // attempt and then latches `unknown_at`, which the cycle loop skips. Removing
   // that freeze turns this into units x cycles x floor.
   //
-  // Default 1s = the value both floors were hardcoded to before it became a
-  // knob. Raise it to trade overrun for fewer Unknowns on a wide design.
-  int         min_timeout = 1;
+  // Default 20s (user ruling 2026-07-28). It was 1s — the value both floors
+  // were hardcoded to before it became a knob — and 1s is far too small for a
+  // unit to earn a real verdict on anything but a trivial def.
+  //
+  // The measured symptom on a wide design: minion_lec took
+  // `minion_dcache_miss_handler` to REFUTED in 2253ms on one run and to UNKNOWN
+  // on the next, because most defs land past the soft total and draw the floor
+  // (`budget 120s target / 485s actual over 116 def(s) solved, 92 on the 1s
+  // floor`). A verdict that flips run to run is unusable as an oracle to debug
+  // against, and a 1s floor mints Unknowns that read as design problems when
+  // they are pure scheduling.
+  //
+  // Lower it to trade Unknowns back for a tighter overrun; the bound is still
+  // `timeout + (unsettled units x min_timeout)` and the run always reports
+  // target/actual/units/floored, so the overrun is never silent.
+  int         min_timeout = 20;
   // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
   // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
   // still-Unknown obligations is jointly toxic), and P3 invariant MINING. All

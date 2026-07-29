@@ -1013,6 +1013,21 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# REGRESSION: a unit that converged in one round of the kernel's import_defer
+# loop must not be re-walked by a later round (run for some OTHER blocked
+# file). Re-walking is not idempotent: uPass_ssa demotes the unit's private
+# `___ssa_N` names into the `__wN` namespace prp_writer emits into generated
+# sources, aliasing two variables, after which constprop folds live logic to a
+# constant and DCE deletes the real cone. This was the root cause of lhdsuite
+# //bench:minion_lec's minion_dcache_miss_handler{,_p1} refutation (fixme.md
+# issue 1i): the SAME .prp compiled to 1515 nodes alone and 1476 in-tree.
+sh_test(
+    name = "upass_converged_rewalk_test",
+    size = "medium",
+    srcs = ["upass_converged_rewalk_test.sh"],
+    data = ["//lhd"],
+)
+
 # Task 1m-C — graph-library linker: merge lg: + ln: inputs into a new lg:
 # library (one defines `foo`, another imports it as a black box).
 sh_test(

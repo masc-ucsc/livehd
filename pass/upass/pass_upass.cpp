@@ -408,8 +408,8 @@ void Pass_upass::work(Eprp_var& var) {
   // and carry no func_def to split. SSA below harvests io_meta from them.
   for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
     const auto                  ln = var.lnasts.at(idx);
-    if (ln->is_pre_elaborated()) {
-      continue;  // a loaded import is already detupled + lambda-split
+    if (ln->is_pre_elaborated() || ln->is_upass_converged()) {
+      continue;  // already detupled + lambda-split (loaded import / earlier round)
     }
     TRACE_EVENT("pass", "upass.detuple_split", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider for any diagnostic emitted while this unit is split.
@@ -436,8 +436,8 @@ void Pass_upass::work(Eprp_var& var) {
   // io+stmts layout; run() is a no-op on top-level LNASTs.
   if (up.run_ssa) {
     for (const auto& ln : var.lnasts) {
-      if (ln->is_pre_elaborated()) {
-        continue;  // io_meta restored from the ln: manifest; body already SSA'd
+      if (ln->is_pre_elaborated() || ln->is_upass_converged()) {
+        continue;  // body already SSA'd (ln: manifest io_meta / earlier round)
       }
       TRACE_EVENT("pass", "upass.ssa", "unit", std::string(ln->get_top_module_name()));
       uPass_ssa::run(ln, &var.lnasts);
@@ -478,6 +478,17 @@ void Pass_upass::work(Eprp_var& var) {
     // runner on an already-elaborated tree is the dominant redundant cost and
     // re-versions its private `___ssa_` names.
     if (ln->is_pre_elaborated()) {
+      continue;
+    }
+
+    // Same for a unit that CONVERGED in an earlier round of the kernel's
+    // import_defer loop: a later round runs only because some other unit is
+    // still blocked, and re-walking an already-elaborated body is not just
+    // redundant — SSA would demote its private `___ssa_N` names into the
+    // `__wN` namespace the generated source already uses, aliasing two
+    // distinct variables, after which constprop folds live logic to a
+    // constant and DCE deletes the real cone.
+    if (ln->is_upass_converged()) {
       continue;
     }
 
@@ -578,8 +589,8 @@ void Pass_upass::work(Eprp_var& var) {
   // toln so the LSP pipeline gets the errors too. Whatever stays underived
   // lowers into the LG pending checks.
   for (const auto& ln : var.lnasts) {
-    if (ln->is_template() || ln->is_pre_elaborated()) {
-      continue;  // template: no timing yet; pre-elaborated: already timecheck'd
+    if (ln->is_template() || ln->is_pre_elaborated() || ln->is_upass_converged()) {
+      continue;  // template: no timing yet; pre-elaborated/converged: already timecheck'd
     }
     uPass_timecheck::run(ln, var.lnasts);
   }
@@ -593,9 +604,9 @@ void Pass_upass::work(Eprp_var& var) {
   // LSP) skips it along with everything else that shapes the output tree.
   if (up.run_toln) {
     for (const auto& ln : var.lnasts) {
-      if (ln->is_template() || ln->is_pre_elaborated()) {
-        continue;  // template: specialize first; pre-elaborated: output flop is
-                   // already in the loaded post-pipe body (re-running doubles it)
+      if (ln->is_template() || ln->is_pre_elaborated() || ln->is_upass_converged()) {
+        continue;  // template: specialize first; pre-elaborated/converged: output
+                   // flop is already in the post-pipe body (re-running doubles it)
       }
       uPass_pipe::run(ln);
     }
