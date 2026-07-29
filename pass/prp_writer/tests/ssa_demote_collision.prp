@@ -1,0 +1,23 @@
+// Fixture for the prp_writer `___ssa_N` -> `__wN` demotion collision.
+//
+// `v__w1` occupies the exact name that the writer's demotion mints for
+// `v___ssa_1`.  For the collision to be reachable an SSA version must SURVIVE
+// into the post-upass body: after the SSA rename-by-default work a flat
+// `if`/`else` is renamed away and leaves none, so `v` is written from a NESTED
+// conditional and then unconditionally — the shape that keeps `v___ssa_1`.
+//
+// `q` must read `v__w1` (i.e. the input `b`).  Under the bug the demoted
+// `v___ssa_1` lands on `v__w1`, both variables emit under one identifier, and
+// `q` silently returns `v` instead.
+pub mod ssa_demote_collision(a:u4, b:u4, s:u1, t:u1) -> (o:u4@[], q:u4@[]) {
+  mut v__w1 = b
+  mut v = a
+  if s != 0 {
+    if t != 0 {
+      v = v + 1
+    }
+  }
+  v = v + 3
+  o = v
+  q = v__w1
+}

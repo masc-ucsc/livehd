@@ -86,22 +86,56 @@ bool Lnast_prp_writer::is_tmp(std::string_view name) const {
   return emitted_tmp_names_.contains(std::string(name));
 }
 
-std::string Lnast_prp_writer::emit_name_for(std::string_view tmp) const {
+void Lnast_prp_writer::seed_emit_names() const {
   // One-time seed: every NON-temp ref name in the tree is reserved, so a
-  // synthesised `t<id>` can never collide with a user identifier or port.
-  if (!emit_names_seeded_) {
-    emit_names_seeded_ = true;
-    for (const auto& nid : lnast->depth_preorder()) {
-      if (!Lnast_ntype::is_ref(lnast->get_type(nid))) {
-        continue;
-      }
-      auto nm = lnast->get_name(nid);
-      if (nm.empty() || is_tmp(nm)) {
-        continue;  // a compiler temp — gets mapped to `t<id>`, not a reserved user name
-      }
-      used_emit_names_.insert(std::string(nm));
-    }
+  // synthesised name can never collide with a user identifier or port.
+  if (emit_names_seeded_) {
+    return;
   }
+  emit_names_seeded_ = true;
+  for (const auto& nid : lnast->depth_preorder()) {
+    if (!Lnast_ntype::is_ref(lnast->get_type(nid))) {
+      continue;
+    }
+    auto nm = lnast->get_name(nid);
+    if (nm.empty() || is_tmp(nm)) {
+      continue;  // a compiler temp — gets mapped to `t<id>`, not a reserved user name
+    }
+    used_emit_names_.insert(std::string(nm));
+  }
+}
+
+std::string Lnast_prp_writer::ssa_emit_name_for(std::string_view name, size_t pos) const {
+  // `<base>___ssa_<N>` -> `<base>__w<N>`, but `__wN` is NOT a free namespace:
+  // THIS writer mints it, so any Pyrope it generated is full of source-level
+  // `__wN` names, and a second trip through the writer can demote onto one.
+  // That would put two distinct variables under one emitted identifier — the
+  // emitted source then silently means something else (the `q` of
+  // pass/prp_writer/tests/ssa_demote_collision.prp stops reading its input).
+  // So reserve against every name already in the tree and bump the VERSION
+  // until it is free, memoizing so the def and every use agree.
+  seed_emit_names();
+  auto cached = ssa_emit_names_.find(std::string(name));
+  if (cached != ssa_emit_names_.end()) {
+    return cached->second;
+  }
+  const std::string base(name.substr(0, pos));
+  uint64_t          version = 0;
+  for (size_t i = pos + 7; i < name.size() && version < (1ULL << 40); ++i) {
+    version = version * 10 + static_cast<uint64_t>(name[i] - '0');
+  }
+  std::string cand;
+  do {
+    cand = base + "__w" + std::to_string(version);
+    ++version;
+  } while (used_emit_names_.contains(cand));
+  used_emit_names_.insert(cand);
+  ssa_emit_names_.emplace(std::string(name), cand);
+  return cand;
+}
+
+std::string Lnast_prp_writer::emit_name_for(std::string_view tmp) const {
+  seed_emit_names();
   auto cached = tmp_emit_names_.find(std::string(tmp));
   if (cached != tmp_emit_names_.end()) {
     return cached->second;
@@ -422,10 +456,7 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   if (pos + 7 >= name.size()) {
     return quote(std::string(name));  // bare `___ssa_` with no version — leave intact
   }
-  std::string out(name.substr(0, pos));
-  out += "__w";
-  out += name.substr(pos + 7);
-  return quote(out);
+  return quote(ssa_emit_name_for(name, pos));
 }
 
 // ── Main dispatch ─────────────────────────────────────────────────────────────

@@ -478,6 +478,13 @@ private:
   // until free.  Stable (the `%` suffix derives from the content hash) and
   // consistent (def and use share the cached mapping).
   std::string emit_name_for(std::string_view tmp) const;
+  // `<base>___ssa_<N>` -> a FREE `<base>__w<M>` (M >= N). `__wN` is the
+  // writer's own output namespace, so a re-emitted body can already hold the
+  // natural target; landing on it would merge two variables into one emitted
+  // identifier. Memoized so the def and every use agree.
+  void        seed_emit_names() const;
+  std::string ssa_emit_name_for(std::string_view name, size_t pos) const;
+  mutable std::unordered_map<std::string, std::string> ssa_emit_names_;     // <base>___ssa_<N> -> <base>__w<M>
   mutable std::unordered_map<std::string, std::string> tmp_emit_names_;     // %head -> t<id>
   mutable std::unordered_set<std::string>              used_emit_names_;    // every output name taken
   mutable std::unordered_set<std::string>              emitted_tmp_names_;  // mapped t<id> that ARE temps

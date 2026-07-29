@@ -168,10 +168,17 @@ struct Match_result {
 //     rewiring between same-named compare points must be ruled out here, and
 //   * the correspondence is CERTAIN -- no speculative tier-2 full-match pair and
 //     no caller-seeded pair carried the match (full_pairs == 0 && seed_pairs == 0);
-//     the spec self-certifies only the unbounded inductive proof, never these.
+//     the spec self-certifies only the unbounded inductive proof, never these, and
+//   * something was actually matched (a_matched > 0). Every clause above is an
+//     `== 0` test, so TWO EMPTY GRAPHS satisfied all of them and came back
+//     "identical" -- which let lec's no-solver skip report PROVEN, cached as
+//     definitive, for a match of literally zero nodes. An empty match is not an
+//     identity proof, it is the absence of one; every caller here is asking "may
+//     I skip real work because these are provably the same?", and for empty
+//     graphs the honest answer is no.
 [[nodiscard]] inline bool is_structural_identity(const Match_result& m) {
-  return m.a_unmatched == 0 && m.b_unmatched == 0 && m.cut_violated == 0 && m.cut_unknown == 0 && m.state.full_pairs == 0
-         && m.state.seed_pairs == 0;
+  return m.a_matched > 0 && m.a_unmatched == 0 && m.b_unmatched == 0 && m.cut_violated == 0 && m.cut_unknown == 0
+         && m.state.full_pairs == 0 && m.state.seed_pairs == 0;
 }
 
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id

@@ -1383,6 +1383,13 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
       }
     }
   }
+  // Reaching here IS the bijection: every node on both sides found a cross-side
+  // class. The shared predicate also requires the match to be non-empty (an empty
+  // match proves nothing), so report the one stat the completed bijection
+  // implies -- the fast path builds no other stats, and leaving these at 0 would
+  // make every identical pair read as "empty".
+  res.a_matched = static_cast<uint32_t>(sa.order.size());
+  res.b_matched = static_cast<uint32_t>(sb.order.size());
   return is_structural_identity(res);
 }
 

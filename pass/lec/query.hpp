@@ -71,6 +71,16 @@ struct Query_result {
   // run vacuous (2f-latch M0).
   bool unsupported = false;
 
+  // The miter was EMPTY: not one (output, cycle) pair entered the comparison —
+  // either side has no outputs/state at all, or no output could be paired across
+  // the two sides. Like `unsupported` (and unlike a solver give-up) this decided
+  // NOTHING, and no extra budget can change it, so a driver must exit non-zero
+  // regardless of formal.strict. Before this flag existed the empty miter was
+  // reported as `Proven` with detail "no comparable outputs": `lhd lec` on an
+  // empty module printed "PROVEN equivalent", status "pass", exit 0, with ZERO
+  // warnings. A check that compares nothing is not a proof of anything.
+  bool nothing_compared = false;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;

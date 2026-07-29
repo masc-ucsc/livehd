@@ -192,6 +192,16 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
 
+# A lec run that compares NOTHING (empty module, no output/state, or a top absent
+# on one side) is a hard equiv_fail, not a PROVEN and not a tolerated exit-0
+# inconclusive -- and a real proof / real refutation are unaffected.
+sh_test(
+    name = "lec_empty_module_test",
+    srcs = ["tests/lec_empty_module_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)
+
 # lecfail witness reproduction (`lhd lec` + --workdir): a REFUTED verdict writes a
 # self-contained Pyrope testbench (lec.prpfail) driving BOTH designs and runs
 # `lhd sim` to dump one VCD (lec.prpfailrun). Covers the default-on behavior, the

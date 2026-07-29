@@ -345,6 +345,10 @@ std::string serialize_result(const Query_result& r) {
   // flag died in the fork. Tail field: an older/truncated blob just leaves it
   // false, which is the pre-existing behavior.
   b.push_back(static_cast<char>(r.unsupported ? 1 : 0));
+  // Empty-miter flag, same process boundary and the same silent-loss trap as the
+  // refusal byte above: lose it in the fork and the parent sees
+  // nothing_compared=false, so an empty comparison reports a clean exit-0 pass.
+  b.push_back(static_cast<char>(r.nothing_compared ? 1 : 0));
   return b;
 }
 
@@ -505,6 +509,11 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     return true;  // best-effort tail: older blob, no refusal flag
   }
   r.unsupported = b.front() != 0;
+  b.remove_prefix(1);
+  if (b.empty()) {
+    return true;  // best-effort tail: older blob, no empty-miter flag
+  }
+  r.nothing_compared = b.front() != 0;
   b.remove_prefix(1);
   return true;
 }
@@ -1009,6 +1018,10 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   // Both engines share ONE encoder, so a refusal on either leg means the design
   // was never encoded — carry it so the CLI hard-fails instead of warning (M0).
   r.unsupported = ind.unsupported || bmc.unsupported;
+  // Both legs also share the miter, so "nothing to compare" is a property of the
+  // DESIGN PAIR, not of an engine. Require both legs to agree: if either one
+  // found a comparison to run, the miter was not empty.
+  r.nothing_compared = ind.nothing_compared && bmc.nothing_compared;
   // A sub-millisecond-to-low-ms Unknown is almost never the solver genuinely
   // giving up — it's usually a structural encode failure (unsupported op, an
   // unresolved combinational-cycle-looking operand) or a now-caught engine
@@ -3601,12 +3614,13 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
     }
     if (bad.isNull()) {
-      if (incomplete) {
-        res.verdict  = Verdict::Unknown;
-        res.detail  += "; no COMMON outputs to compare (correspondence incomplete)";
-      } else {
-        res.verdict = Verdict::Proven;
-      }
+      // NOTHING entered the miter. Never a proof: an empty comparison is the
+      // absence of evidence, not evidence of equivalence. Flagged so the driver
+      // hard-fails rather than degrading into the tolerated exit-0 inconclusive.
+      res.nothing_compared = true;
+      res.verdict          = Verdict::Unknown;
+      res.detail += incomplete ? "; no COMMON outputs to compare (correspondence incomplete)"
+                               : "; nothing to compare: neither side exposes an output or state cell";
       return res;
     }
     // Decomposed proof: a monolithic `bad` = OR of every (output,cycle) diff is a
@@ -4716,17 +4730,22 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   if (bad.isNull()) {
-    // Nothing left to compare: either there was no common cut point at all, or
-    // the cone pass just discharged every one of them. Vacuously equal only if
-    // the sets also fully matched (both empty); otherwise the comparison is
-    // empty AND incomplete.
-    if (incomplete) {
-      res.verdict  = Verdict::Unknown;
-      res.detail  += "; no COMMON outputs to compare (correspondence incomplete)";
-    } else {
-      res.verdict  = Verdict::Proven;
-      res.detail  += cones_proven > 0 ? "; every cut discharged by the cone pass" : "; no comparable outputs";
+    // Nothing left to compare. Two very different reasons land here:
+    //   * the cone pass already discharged every obligation (cones_proven > 0) --
+    //     a REAL proof, every compare point was checked and held; or
+    //   * there was no common cut point at all -- the miter is EMPTY, so this run
+    //     established nothing. That is not equivalence, and reporting it as
+    //     Proven made `lhd lec` on an empty module print "PROVEN equivalent" and
+    //     exit 0 with no warning. Flag it so the driver hard-fails instead.
+    if (!incomplete && cones_proven > 0) {
+      res.verdict = Verdict::Proven;
+      res.detail += "; every cut discharged by the cone pass";
+      return res;
     }
+    res.nothing_compared = true;
+    res.verdict          = Verdict::Unknown;
+    res.detail += incomplete ? "; no COMMON outputs to compare (correspondence incomplete)"
+                             : "; nothing to compare: neither side exposes an output or state cell";
     return res;
   }
 

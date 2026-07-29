@@ -1193,6 +1193,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   if (!have_top) {
     top_result.verdict = Verdict::Unknown;
     top_result.detail  = std::format("hierarchical: top '{}' not found in both libraries", top_name);
+    // The requested top never got compared, so this run decided nothing about it.
+    // Without the flag it degrades to the tolerated exit-0 inconclusive warning,
+    // i.e. "the module you asked me to check does not exist on both sides" is
+    // indistinguishable from success to any gate reading the exit code.
+    top_result.nothing_compared = true;
   }
   // A size refusal on ANY def (not just the top) is a hard admission failure for
   // the whole run, so surface it on the aggregate regardless of which def hit it.
@@ -2717,6 +2722,21 @@ void lec_command(Options& opts, Result& res) {
       throw Lhd_error{"equiv_fail",
                       std::format("'{}' is not equivalent ({} vs {})", impl_g->get_name(), opts.impl_path, opts.ref_path),
                       r.witness.empty() ? "" : std::format("counterexample: {}", r.witness)};
+    }
+    // An EMPTY miter: the module is empty, has no output/state, or does not exist
+    // on both sides, so not one compare point was checked. This used to surface
+    // as PROVEN (exit 0, zero warnings) or as the tolerated inconclusive warning
+    // — either way a gate reading the exit code read "verified" for a run that
+    // verified nothing. Hard-fail regardless of formal.strict, like the encoder
+    // refusal below. Checked ahead of the verdict split on purpose: the flag, not
+    // the verdict, is what says nothing was compared.
+    if (r.nothing_compared) {
+      throw Lhd_error{"equiv_fail",
+                      std::format("lec compared NOTHING for '{}': the module is empty or has no output/state to check",
+                                  impl_g->get_name()),
+                      std::format("{}. An equivalence check with no compare points is not a proof; give lec a module "
+                                  "that exists on both sides and drives at least one output or state cell.",
+                                  r.detail)};
     }
     if (r.verdict == livehd::lec::Verdict::Unknown) {
       // REFUTED above disproves equivalence (a real counterexample → hard fail).

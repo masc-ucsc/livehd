@@ -5,3 +5,4 @@ sim_alu
 sim_cpu
 tmp*
 verif_sim
+tmp

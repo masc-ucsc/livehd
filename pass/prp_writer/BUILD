@@ -36,6 +36,20 @@ sh_test(
     ],
 )
 
+# REGRESSION: the writer's `___ssa_N` -> `__wN` demotion must not land on a
+# name the source already uses — `__wN` is the writer's OWN output namespace,
+# so generated Pyrope is full of them. A collision merges two variables into
+# one emitted identifier (a silent miscompile of the emitted source). Twin of
+# the SSA-entry demotion gated by //lhd/tests:upass_converged_rewalk_test.
+sh_test(
+    name = "prp_writer_ssa_demote_collision_test.sh",
+    srcs = ["tests/prp_writer_ssa_demote_collision_test.sh"],
+    data = [
+        "tests/ssa_demote_collision.prp",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "prp_writer_kw_fields_test.sh",
     srcs = ["tests/prp_writer_kw_fields_test.sh"],
