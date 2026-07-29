@@ -465,9 +465,19 @@ std::string Cgen_verilog::flat_module_name(std::string_view full) const {
   return std::string(pos == std::string_view::npos ? full : full.substr(pos + 1));
 }
 
-bool Cgen_verilog::sra_operand_signed(const hhds::Pin_class& dpin) {
+bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
   if (dpin.is_invalid()) {
     return false;
+  }
+  // A constant pin carries no signed hint, but const_to_verilog emits a NEGATIVE
+  // value as a signed literal (`N'sh<two's complement>`) — so it reads signed in
+  // the emitted text and has to take the sign-extending path, or the surrounding
+  // unsigned context zero-extends it back to a positive number
+  // (`3'sb101 << 0` came out 16'h0005 instead of 16'hfffd). A non-negative
+  // constant zero- and sign-extend alike, so it needs no special handling.
+  if (is_const_pin(dpin)) {
+    auto c = hydrate_const(dpin);
+    return !c.has_unknowns() && c.is_negative();
   }
   if (!is_unsign(dpin)) {
     return true;
@@ -477,7 +487,7 @@ bool Cgen_verilog::sra_operand_signed(const hhds::Pin_class& dpin) {
   // though the inner SRA preserves the signed `a`. Walk through the SRA chain.
   auto node = dpin.get_master_node();
   if (!node.is_invalid() && type_op_of(node) == Ntype_op::SRA) {
-    return sra_operand_signed(get_driver(find_sink_pin(node, "a")));
+    return operand_reads_signed(get_driver(find_sink_pin(node, "a")));
   }
   return false;
 }
@@ -1775,8 +1785,47 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // single-fanout `a+b` folded inline) would be evaluated at its own narrow
     // operand width and WRAP before the zero-pad — e.g. `(in1+in2+7) << 1` would
     // truncate the sum to 8 bits. The OR's context width propagates into the add.
-    auto        obits    = bits_of(node.get_driver_pin(0));
-    std::string wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
+    // ...but a ZERO pad is only right for an UNSIGNED operand. Padding a signed
+    // value with `{N{1'b0}}` also turns the OR unsigned, so the operand
+    // zero-extends and a negative left operand comes out POSITIVE: `sa << 0`
+    // with sa = 3'sb100 (-4) emitted 16'h0004 instead of 16'hfffc. Widen with a
+    // SIGNED zero and an explicitly signed operand instead — the OR is still
+    // context-determined (so an inlined `a+b` operand still evaluates at the
+    // full width, which is why the OR form was chosen over a concat), but now
+    // the extension is a sign extension. Same operand-signedness question the
+    // SRA branch below answers, hence the shared operand_reads_signed.
+    auto obits = bits_of(node.get_driver_pin(0));
+    // The signed form below wraps the operand in `$signed(...)`, whose argument is
+    // SELF-determined. That is exact for text that already carries the operand's
+    // full width -- a declared variable (declared at bits_of) or a constant
+    // literal -- but WRONG for an inlined multi-operand expression, which
+    // self-determines at its own narrower natural width: `(10'sh12c + in1 - in2)`
+    // inlines as 10 bits, so 555 re-read as signed-10 is -469. Only take the
+    // signed path when the operand is self-contained; an inlined expression keeps
+    // the context-determined unsigned pad it has always had.
+    bool operand_is_self_contained = is_const_pin(val_dpin) || pin2var.contains(val_dpin.get_class_index());
+    const bool dest_declared_signed
+        = pin2var.contains(dpin.get_class_index()) && !pin2var_unsigned_.contains(dpin.get_class_index());
+    if (!operand_is_self_contained && operand_reads_signed(val_dpin) && dest_declared_signed) {
+      // An INLINED signed operand is the hard case: it is not self-contained, so
+      // `$signed()` would re-read it at its own narrow width, but the unsigned
+      // pad zero-extends a negative value (`(sb - sa) << ub` shifted +251 where
+      // the RTL says -1). Land it in this node's own destination first — that
+      // variable is declared at `obits` AND signed, so the assignment does the
+      // sign extension by declaration instead of by text width. Same trick the
+      // Not branch below uses to evaluate at the destination width.
+      if (auto var_pre = pin2var.find(dpin.get_class_index()); fout && var_pre != pin2var.end()) {
+        fout->append("  ", var_pre->second, " = ", val_expr, ";\n");
+        val_expr                  = var_pre->second;
+        operand_is_self_contained = true;
+      }
+    }
+    std::string wide_val;
+    if (operand_is_self_contained && operand_reads_signed(val_dpin)) {
+      wide_val = absl::StrCat("($signed(", std::to_string(obits), "'sb0) | $signed(", val_expr, "))");
+    } else {
+      wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
+    }
 
     // SHL b is single-driver (the one-hot multi-shift `(n<<b0)|(n<<b1)` form
     // was removed).
@@ -1801,7 +1850,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // forces the left operand signed even when `val`'s text would otherwise read
     // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
     // an unsigned value would sign-extend a value that should zero-fill.
-    if (!sra_operand_signed(a_dpin)) {
+    if (!operand_reads_signed(a_dpin)) {
       final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
     } else {
       // A nested SRA's operand also takes this branch (its inner shift already
@@ -2453,6 +2502,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
 
   std::string reg_str;
   if (out_unsigned) {
+    pin2var_unsigned_.insert(dpin.get_class_index());
     reg_str = "reg ";
     if (type_op_of(dpin.get_master_node()) == Ntype_op::Get_mask) {
       --bits;
@@ -2687,6 +2737,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   (void)verbose;
 
   pin2var.clear();
+  pin2var_unsigned_.clear();
   pin2expr.clear();
   mux2vector.clear();
   declared_name_counts.clear();

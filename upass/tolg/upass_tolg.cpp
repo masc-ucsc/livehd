@@ -60,11 +60,21 @@ struct Val {
 };
 
 // Bits to represent a non-negative value as unsigned (>=1).
+// Magnitude width of a constant, in the LiveHD `bits = magnitude + 1` convention
+// (the +1 sign bit is added by the caller).
+//
+// A NEGATIVE value used to collapse to 1 here, whatever its magnitude, so every
+// width computed from it was too small: `(-3) << ua` sized its result from
+// mw(-3)==1 instead of 2 and produced a 9-bit intermediate for a shift that
+// needs 10, silently wrapping `-3 << 7` from -384 to +128. Size a negative by
+// its magnitude, exactly like a positive.
 [[nodiscard]] int32_t mw_of_val(int64_t v) {
-  if (v <= 0) {
+  if (v == 0) {
     return 1;
   }
-  return static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(v)));
+  // |v| without overflowing at INT64_MIN (~v == |v|-1 for every v < 0).
+  const uint64_t mag = v < 0 ? static_cast<uint64_t>(~v) + 1U : static_cast<uint64_t>(v);
+  return std::max<int32_t>(1, static_cast<int32_t>(std::bit_width(mag)));
 }
 
 // Magnitude width of a driver pin: its stamped bits, or — for a const pin
@@ -5074,7 +5084,27 @@ private:
       break;
     }
     }
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mw);
+    auto out = node.create_driver_pin(0);
+    bind_result(lnast_->get_name(dst), out, mw);
+    // A SUBTRACTION can go negative, so the result must be stamped SIGNED —
+    // same reasoning (and same bug) as lower_unary's `~x`: bind_result stamps
+    // UNSIGNED, and an unsigned pin is defined to carry an always-0 spare sign
+    // bit. `0 - x` violates that invariant outright, and every consumer that
+    // widens the pin then zero-fills a value that had to sign-extend.
+    //
+    // cgen happened to paper over this: its Get_mask path re-declares an
+    // undeclared operand as signed, so `(0 - x)#[0..=15]` came out right —
+    // but ONLY when the Get_mask was visited before the Sum. Put the same Sum
+    // behind a mux and the Sum got declared (unsigned) first, the re-declare
+    // was skipped, and `-1` widened to `+15`. That order-dependence is the
+    // symptom; the wrong sign stamp is the cause.
+    //
+    // `first` is still true when the loop bound only ONE operand, i.e. a lone
+    // `-x`-shaped Sum with nothing on the subtract sink — that cannot go
+    // negative from the subtract side, so it keeps the unsigned stamp.
+    if (op == Ntype_op::Sum && !commutative && !first && opnd_idx >= 2) {
+      set_sign(out);
+    }
   }
 
   // LNAST sext(dst, a, b): reinterpret bit POSITION b of `a` as the sign

@@ -531,12 +531,29 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
 
     if (nconstants > 1) {
       first_const_edge.del_edge();
-      if (!result.is_known_zero()) {
-        auto dpin = create_const(*current_graph, result);
-        if (result.is_positive() || op == Ntype_op::Or) {
-          setup_sink_by_name(node, "as").connect_driver(dpin);
+      if (op == Ntype_op::And && result.is_known_zero()) {
+        // `x & 0` is 0 for EVERY x: a zero fold is And's ANNIHILATOR, not its
+        // identity. Sharing the "zero result => drop the constants and forward
+        // the remaining operand" path below (which is right for Sum's 0 and Or's
+        // 0) silently deleted the `& 0` and returned x — `(~&sb) & (~|3'b101)`
+        // emitted the bare comparison where the answer is a constant 0.
+        collapse_forward_for_pin(node, create_const(*current_graph, result));
+      } else if (!result.is_known_zero()) {
+        if (op == Ntype_op::Sum && !result.is_positive()) {
+          // `result` is the SIGNED fold (add_op for `as`, sub_op for `bs`), so a
+          // negative result is already "minus that much". The `bs` sink negates
+          // whatever it is given, so it must receive the MAGNITUDE — handing it
+          // the negative value negated it a second time and flipped the sign of
+          // the whole constant term: `0 - ua - 5` folded to result=-5, went to
+          // `bs`, and the node computed `-ua + 5`.
+          Dlop zero;
+          zero = Dlop::create_integer(0);
+          Dlop mag;
+          mag = zero.sub_op(result);
+          setup_sink_by_name(node, "bs").connect_driver(create_const(*current_graph, mag));
         } else {
-          setup_sink_by_name(node, "bs").connect_driver(dpin);
+          // Or/And have no subtract sink, so their fold always joins `as`.
+          setup_sink_by_name(node, "as").connect_driver(create_const(*current_graph, result));
         }
       } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
         // Same guard as the nconstants==0 case below: a lone pending operand on a

@@ -34,6 +34,11 @@ private:
 
   absl::flat_hash_map<pin_key_t, Expr>         pin2expr;
   absl::flat_hash_map<pin_key_t, std::string>  pin2var;
+  // Which pin2var entries were DECLARED unsigned. The pin's own signed hint is
+  // not the answer: add_to_pin2var's callers override it (a Get_mask declares
+  // its operand signed so the implicit widening sign-extends), so a consumer
+  // that needs to know how the net will re-read has to ask what was declared.
+  absl::flat_hash_set<pin_key_t>               pin2var_unsigned_;
   absl::flat_hash_map<node_key_t, std::string> mux2vector;
   absl::flat_hash_map<std::string, int>         declared_name_counts;
   // Chosen instance name per Sub node, computed once (in reserve_instance_names)
@@ -90,7 +95,7 @@ private:
   // result. SRA is the only right-shift cell, so it preserves its operand's
   // signedness — but tolg's bind_result tags every op output unsigned, so a
   // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
-  static bool sra_operand_signed(const hhds::Pin_class& dpin);
+  static bool operand_reads_signed(const hhds::Pin_class& dpin);
 
   std::string build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
