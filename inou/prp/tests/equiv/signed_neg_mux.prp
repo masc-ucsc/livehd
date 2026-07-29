@@ -1,0 +1,15 @@
+/*
+:name: signed_neg_mux
+:type: equiv
+:verilog_top: signed_neg_mux
+:pyrope_top: signed_neg_mux
+*/
+//
+// `-x` lowers to Sum(as={}, bs={x}), whose value is negative, but tolg's
+// bind_result stamped every op result UNSIGNED. cgen papered over that in its
+// Get_mask path (it re-declares an undeclared operand as signed), so the bare
+// `-x` came out right -- but putting the SAME Sum behind a mux made cgen visit
+// the Sum first, skip the re-declare, and widen -1 as +15.
+pub comb signed_neg_mux::[timecheck=false](c:u1, x:u2) -> (y:u16) {
+  y = if c != 0 { 57 } else { -x }
+}

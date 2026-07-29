@@ -1,0 +1,14 @@
+/*
+:name: neg_const_fold_sum
+:type: equiv
+:verilog_top: neg_const_fold_sum
+:pyrope_top: neg_const_fold_sum
+*/
+//
+// `0 - ua - 5` folds its constants to result = -5, and cprop then wired that
+// negative value to the Sum's `bs` (subtract) sink -- which negates it a second
+// time, so the node computed `-ua + 5`. The subtract sink must receive the
+// MAGNITUDE.
+pub comb neg_const_fold_sum::[timecheck=false](ua:u3) -> (y:u16) {
+  wrap y =  -(ua + 5)
+}

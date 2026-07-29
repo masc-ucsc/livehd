@@ -1,0 +1,19 @@
+/*
+:name: signed_shift_widen
+:type: equiv
+:verilog_top: signed_shift_widen
+:pyrope_top: signed_shift_widen
+*/
+//
+// Two distinct bugs meet here:
+//  * cgen widened a shift's left operand with `{N{1'b0}} | val`, an UNSIGNED
+//    OR, so a signed operand zero-extended and `sa << 0` turned -4 into +4.
+//  * mw_of_val() returned 1 for EVERY negative constant, so `(-3) << ua` was
+//    sized from magnitude 1 and its 9-bit intermediate wrapped `-3 << 7` from
+//    -384 to +128.
+pub comb signed_shift_widen::[timecheck=false](sa:s3, ua:u3) -> (y0:u16, y1:u16, y2:u16) {
+  wrap y0 = sa << ua
+  // y1 = (sa << 5)#sext[0..=15]#[0..=15]
+  y1 = (sa << 5)#sext[0..=15]
+  wrap y2 = -3 << ua
+}
