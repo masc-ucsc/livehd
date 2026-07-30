@@ -6,11 +6,13 @@
 #include <sys/wait.h>
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <regex>
 #include <sstream>
+#include <thread>
 
 #include "diag.hpp"
 #include "file_utils.hpp"
@@ -27,7 +29,23 @@ std::string shell_quote(const std::string& s);  // defined below (check section)
 // `lhd sim <file.prp> [test.name] [--arg k=v ...]` — lower the design's DUT
 // modules to Slop<N> structs (inou.cgen.sim) and, for each `test` block,
 // generate a C++ driver that runs the `tick` loop and turns `assert`s into
-// runtime checks, then bazel-build + run them and report pass/fail.
+// runtime checks, then host-compile + run it and report pass/fail.
+//
+// NOT bazel — this comment used to say "bazel-build", and it was wrong. Setup
+// does write a standalone bazel module next to the sources (BUILD +
+// MODULE.bazel, see sim_into in lhd_kernel_common.cpp) so the dir stays
+// hand-buildable with `cd <simdir> && bazel run //:drv`, but `lhd sim` never
+// invokes it: it shells out to the host compiler directly (the "fast run path"
+// below). A nested bazel would want its own server and lock, and that generated
+// MODULE.bazel archive_overrides iassert from GitHub — so it needs the network
+// on a cold build, and it pins hlop at `<cwd>/../hlop`, which only resolves in
+// the dev layout. `lhd sim` has to work inside SOMEONE ELSE'S bazel test
+// sandbox (that is how lhdsuite drives it), where none of that holds.
+//
+// The trade has a cost: the fast path gives up what bazel would hand us for
+// free, including per-TU parallelism and incremental rebuilds. The parallelism
+// is back (see sim.jobs at the build below); the rebuild skip is not — every
+// invocation still recompiles.
 void sim_command(Options& opts, Result& res) {
   res.command = "sim pyrope";
   if (opts.files.empty()) {
@@ -372,51 +390,105 @@ void sim_command(Options& opts, Result& res) {
   }
 
   const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
-  // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). MEASURED: compile
-  // time is IDENTICAL at -O1/-O2/-O3 (0.85s for a small driver, three runs
-  // each) because it is dominated by parsing the Slop/hlop headers, not by
-  // optimization — so the usual "higher -O costs build time" trade-off simply
-  // does not apply to this generated code, and the level is free to raise.
-  // NOT measured, and deliberately not claimed: a runtime speedup on a
-  // representative design. Every fixture in-tree is a few ticks of tiny logic,
-  // and a synthetic 200k-tick attempt was optimized away by the host compiler
-  // before it could be timed. -O2 is chosen over -O3 because -O3 measured no
-  // better here and inflates code size on generated straight-line arithmetic.
-  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O2 -I{} -I{} -I{}",
-                                      shell_quote(cxx),
-                                      shell_quote(simdir),
-                                      shell_quote(hlop_inc),
-                                      shell_quote(iassert_inc));
-  for (const auto& b : bodies) {
-    cc += " " + shell_quote(b);
-  }
-  cc += " " + shell_quote(drv_cpp);
+
+  // The translation units, in a FIXED order — the sorted DUT bodies, then the
+  // driver, then hlop's VCD writer when tracing was baked in. The order is what
+  // makes the object names and build.log reproducible; the link does not care.
+  std::vector<std::string> tus = bodies;
+  tus.push_back(drv_cpp);
   if (vcd_on) {
-    cc += " " + shell_quote(hlop_inc + "/vcd_writer.cpp");  // link the VCD writer
+    tus.push_back(hlop_inc + "/vcd_writer.cpp");
   }
-  cc += " -o " + shell_quote(exe) + " 2>&1";  // merge compiler diagnostics into the capture
-  int  build_rc  = 0;
-  auto build_out = capture(cc, build_rc);
-  if (build_rc != 0) {
-    // Persist the full compiler output (in JSONL mode it was previously
-    // swallowed entirely — "see the compiler output" pointed nowhere) and
-    // surface the first error line in the machine-readable message.
+
+  // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). The optimization
+  // level is NOT the lever here; the job count is. Measured 2026-07-30 on
+  // dino's whole-CPU driver (18 TUs, 5372 generated lines, 18-core arm64):
+  //
+  //   one serial clang++ over all TUs   -O2 36.5s  -O1 31.6s  -Os 30.9s  -O0 17.3s
+  //   per-TU -c in parallel, then link  -O2  6.9s
+  //   the simulation itself (20k cycles)  -O2 3.8s   -Os 6.5s  -Oz 11.0s
+  //
+  // So parallelism buys 5.3x where the level buys ~15%, and -Os pays for its
+  // 16% of build with 68% of the RUN. The note that used to sit here — "compile
+  // time is IDENTICAL at -O1/-O2/-O3" — was measured on a 1-2 TU driver and
+  // does not survive at 18; it reached the right conclusion (keep -O2) for a
+  // reason that no longer holds. -O3 still measures no better and inflates code
+  // size on generated straight-line arithmetic.
+  const std::string cflags = std::format("-std=c++23 -DNDEBUG -O2 -I{} -I{} -I{}",
+                                         shell_quote(simdir),
+                                         shell_quote(hlop_inc),
+                                         shell_quote(iassert_inc));
+
+  // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
+  // Pin it to make a build-time measurement reproducible, or to leave the
+  // machine usable while a big design builds.
+  int jobs = 0;
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.jobs") {
+      jobs = std::atoi(v.c_str());
+    }
+  }
+  if (jobs <= 0) {
+    jobs = static_cast<int>(std::thread::hardware_concurrency());
+  }
+  jobs = std::clamp(jobs, 1, static_cast<int>(tus.size()));
+
+  // Compile each TU to its own object, `jobs` at a time. This used to be ONE
+  // clang++ command over every source: a fully serial build of what is by
+  // construction an embarrassingly parallel job, since the generated bodies
+  // share nothing but headers. The workers share only the atomic cursor — each
+  // writes its own slot, and popen's child execs immediately.
+  const std::string objdir = simdir + "/obj";
+  std::error_code   ec_obj;
+  fs::remove_all(objdir, ec_obj);  // no stale objects from a previous, differently-shaped build
+  ensure_dir(objdir);
+
+  std::vector<std::string> objs(tus.size()), cmds(tus.size()), outs(tus.size());
+  std::vector<int>         rcs(tus.size(), 0);
+  {
+    std::atomic<size_t> cursor{0};
+    auto                worker = [&] {
+      for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
+        // Index-prefixed, so two sources sharing a basename (a design
+        // `vcd_writer.cpp` next to hlop's) cannot collide on one object.
+        objs[i] = std::format("{}/{:03}_{}.o", objdir, i, fs::path(tus[i]).stem().string());
+        cmds[i] = std::format("{} {} -c {} -o {} 2>&1",
+                              shell_quote(cxx),
+                              cflags,
+                              shell_quote(tus[i]),
+                              shell_quote(objs[i]));
+        outs[i] = capture(cmds[i], rcs[i]);
+      }
+    };
+    std::vector<std::thread> pool;
+    pool.reserve(static_cast<size_t>(jobs));
+    for (int t = 0; t < jobs; ++t) {
+      pool.emplace_back(worker);
+    }
+    for (auto& t : pool) {
+      t.join();
+    }
+  }
+
+  // fail_build LOG_BODY SHOWN — the one compile-failure exit. Persists the full
+  // compiler output (in JSONL mode it was previously swallowed entirely — "see
+  // the compiler output" pointed nowhere) and surfaces the first error line in
+  // the machine-readable message.
+  auto fail_build = [&](const std::string& log_body, const std::string& shown) {
     const std::string build_log = simdir + "/build.log";
     {
       std::ofstream bl(build_log);
       if (bl.is_open()) {
-        bl << cc << "\n\n" << build_out;
+        bl << log_body;
       }
     }
-    std::string first_err;
-    {
-      std::istringstream iss(build_out);
-      std::string        ln;
-      while (std::getline(iss, ln)) {
-        if (ln.find("error") != std::string::npos) {
-          first_err = ln;
-          break;
-        }
+    std::string        first_err;
+    std::string        ln;
+    std::istringstream iss(shown);
+    while (std::getline(iss, ln)) {
+      if (ln.find("error") != std::string::npos) {
+        first_err = ln;
+        break;
       }
     }
     res.status        = "fail";
@@ -426,14 +498,48 @@ void sim_command(Options& opts, Result& res) {
                                     first_err.empty() ? std::string{"see the log"} : first_err);
     res.exit_code     = exit_code_for(res.error_class);
     if (pretty) {
-      std::istringstream iss(build_out);
-      std::string        ln;
-      while (std::getline(iss, ln)) {
+      std::istringstream sis(shown);
+      while (std::getline(sis, ln)) {
         std::print("    {}\n", ln);
       }
       std::fflush(stdout);
     }
-    return;
+  };
+
+  {
+    // Every TU's command + output reaches build.log in TU order, so the log is
+    // the same whatever order the workers finished in. What is PRINTED is only
+    // the FIRST failing TU: one bad generated header fails all 18 identically,
+    // and eighteen copies of the one diagnostic bury it.
+    std::string log_body, shown;
+    size_t      n_failed = 0;
+    for (size_t i = 0; i < tus.size(); ++i) {
+      log_body += cmds[i] + "\n\n" + outs[i] + "\n";
+      if (rcs[i] != 0 && n_failed++ == 0) {
+        shown = outs[i];
+      }
+    }
+    if (n_failed != 0) {
+      if (n_failed > 1) {
+        shown += std::format("({} more translation unit(s) also failed; see build.log)\n", n_failed - 1);
+      }
+      fail_build(log_body, shown);
+      return;
+    }
+  }
+
+  {
+    std::string link = shell_quote(cxx);
+    for (const auto& o : objs) {
+      link += " " + shell_quote(o);
+    }
+    link += " -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
+    int  link_rc  = 0;
+    auto link_out = capture(link, link_rc);
+    if (link_rc != 0) {
+      fail_build(link + "\n\n" + link_out, link_out);
+      return;
+    }
   }
 
   // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes

@@ -1,0 +1,98 @@
+/*
+:name: mem_wensize_lanes
+:type: simulation
+*/
+// Sub-word write enable (`wensize`): the Memory cell's `enable` pin is a
+// wensize-bit LANE vector, and a lane whose bit is 0 keeps the stored value.
+// cgen.sim used to ignore `wensize` entirely and write the whole entry -- a
+// silent miscompile against cgen_memory_*.v (whose per-MASKSIZE always_comb
+// blocks resolve each lane on its own) and against pass.lean / pass.isabelle /
+// pass.lec, all of which already read the enable as a wensize-wide mask.
+//
+// A plain `if cond { m[a] = d }` cannot express this: tolg drives the write
+// enable from the 1-bit PATH CONDITION, so the lane vector is unreachable that
+// way (it comes from a Verilog chunked write, `mem[addr][chunk] <= data`).
+// __memory(cfg) takes the Memory cell pins verbatim, so it can drive a real
+// wensize-wide enable.
+//
+// wensize=2 over u8 gives two 4-bit lanes: lane 0 is bits 0..3, lane 1 is 4..7.
+mod wen_sim(wa:u2, wd:u8, we:u2, ra:u2) -> (q:u8@[0]) {
+  mut cfg = (
+    const addr    = (ra, wa),
+    const bits    = 8,
+    const size    = 4,
+    const din     = (0, wd),
+    const enable  = (1, we),
+    const fwd     = false,
+    const type    = 0,
+    const wensize = 2,
+    const rdport  = (1, 0),
+  )
+  mut res = __memory(cfg)
+  q = res[0]
+}
+
+test wen_sim.lane0 {
+  mut acc = wen_sim
+  mut v   = nil
+  tick 3 {
+    acc.wa = 1
+    acc.wd = 0xFF
+    acc.we = 0ub01     // lane 0 only
+    acc.ra = 1
+    v      = acc.q
+    step
+  }
+  assert(v == 0x0F, "wensize=2: only lane 0 (bits 0..3) is written")
+}
+
+test wen_sim.lane1 {
+  mut acc = wen_sim
+  mut v   = nil
+  tick 3 {
+    acc.wa = 1
+    acc.wd = 0xFF
+    acc.we = 0ub10     // lane 1 only
+    acc.ra = 1
+    v      = acc.q
+    step
+  }
+  assert(v == 0xF0, "wensize=2: only lane 1 (bits 4..7) is written")
+}
+
+test wen_sim.both_lanes {
+  mut acc = wen_sim
+  mut v   = nil
+  tick 3 {
+    acc.wa = 1
+    acc.wd = 0xFF
+    acc.we = 0ub11     // both lanes
+    acc.ra = 1
+    v      = acc.q
+    step
+  }
+  assert(v == 0xFF, "wensize=2: both lanes enabled writes the whole entry")
+}
+
+test wen_sim.disabled_lane_keeps_its_value {
+  mut acc = wen_sim
+  mut v   = nil
+  // Fill both lanes with 0xFF, then write 0x00 through lane 0 only: lane 1 must
+  // survive. This is the case a whole-entry write silently destroys.
+  tick 2 {
+    acc.wa = 2
+    acc.wd = 0xFF
+    acc.we = 0ub11
+    acc.ra = 2
+    step
+  }
+  tick 2 {
+    acc.wa = 2
+    acc.wd = 0x00
+    acc.we = 0ub01     // lane 0 only
+    acc.ra = 2
+    v      = acc.q
+    step
+  }
+  assert(v == 0xF0, "a disabled lane keeps the stored value")
+}

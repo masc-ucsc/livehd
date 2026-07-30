@@ -278,6 +278,10 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
      "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
+    {"jobs", "0", Sim_set_option::Kind::non_neg_num,
+     "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
+     "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
+     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
     {"checkpoint", "true", Sim_set_option::Kind::boolean,
      "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
     {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,

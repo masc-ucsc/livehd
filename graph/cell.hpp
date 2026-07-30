@@ -135,7 +135,8 @@ public:
   // Keep in lockstep with get_sink_name's `% Memory_port_stride` wrap and every
   // consumer that decodes a Memory raw_pid (tolg, cgen_verilog, cgen_sim, bitwidth,
   // pass/lec). Was 12; widened to 16 to fit the whole-array pins update(12)/
-  // update_enable(13)/reset(14) (pid 15 reserved).
+  // update_enable(13)/reset(14) and, since the `ordering` work, undef(15).
+  // The cell-global block is now FULL: a new singleton pin needs a wider stride.
   static constexpr hhds::Port_id Memory_port_stride = 16;
   // Reserved DRIVER pid for the async whole-array `read_all` output (width
   // size*bits). Driver pids are sparse, so a high reserved value cannot collide
