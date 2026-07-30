@@ -1,3 +1,15 @@
+STALE -- DO NOT RUN cgen_memory_generate.
+It has drifted from the shipped ware/rtl/cgen_memory_*.v (different clock port
+name, scalar FWD instead of the per-(read,write) matrix, no INIT, no UNDEF
+collision matrix, no multiclock variant, opposite multi-write priority) and
+running it would overwrite them with semantically different modules. No BUILD
+rule references it; it is kept for history only.
+
+The shipped ware/rtl/*.v are hand-maintained, and
+inou/cgen/cgen_verilog.cpp::gen_mem_wrapper() emits the matching module inline
+for shapes ware/rtl does not ship. Keep those two in lockstep.
+
+--- original notes ---
 cgen_memory_generate.cpp
 Script written for use with MASC LiveHD/Pyrope
 Given a number of read ports and write ports, automatically generates

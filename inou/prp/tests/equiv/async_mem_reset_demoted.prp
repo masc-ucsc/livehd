@@ -13,7 +13,7 @@
 // Distinct from mem_write_during_reset: there the memory has no reset at all
 // and loses its write GATING; here the memory's own reset loses its ASYNC-ness.
 pub mod async_mem_reset_demoted::[timecheck=false](clk:u1, rstn:u1, we:u1, a:u2, d:u4) -> (q:u4@[]) {
-  reg mem:[4]u4:[ordering="none"]
+  reg mem:[4]u4:[ordering="old"]
   q = 0ub????
   if rstn == 0 {
     mem[0] = 0

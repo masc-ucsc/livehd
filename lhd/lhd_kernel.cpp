@@ -143,7 +143,11 @@ std::vector<Set_option> list_set_options() {
                            "lhd",
                            "false",
                            "print the pass's aggregate statistics report; the canonical form of the --stats flag (either "
-                           "spelling works). Consumed by the passes that have one (pass.color, pass.semdiff)"});
+                           "spelling works). Consumed by the passes that have one (pass.color, pass.semdiff, pass.lec). "
+                           "For `lhd lec` / `lhd formal verify` (canonical knob formal.stats) it prints a cvc5 "
+                           "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
+                           "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
+                           "SLOWER -- a diagnosis tool, not something to leave on or to time a run with"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.

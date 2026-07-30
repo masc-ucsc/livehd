@@ -13,11 +13,13 @@ cc_library(
         "cone_abc.cpp",
         "encode.cpp",
         "query.cpp",
+        "solve_stats.cpp",
     ],
     hdrs = [
         "cone_abc.hpp",
         "encode.hpp",
         "query.hpp",
+        "solve_stats.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -141,6 +143,14 @@ sh_test(
     srcs = ["tests/lec_cache_flat_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # 2f-fcore F2 tail: verdict cache on the flat (non-hierarchical) lec path
+)
+
+sh_test(
+    name = "lec_stats_test",
+    srcs = ["tests/lec_stats_test.sh"],
+    size = "small",  # ~4s: the fixture is proven in ms; the report, not the solve, is under test
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # formal.stats: the cvc5 solve-insight report must cross the fork/wire codec
 )
 
 sh_test(

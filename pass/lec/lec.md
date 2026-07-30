@@ -343,9 +343,20 @@ N-deep shift register (N state vars). Output `q = driver_pin(0)`.
 (`get_sink_name` does `pid % 16`); per-port logical pins `0 addr, 2 clock_pin,
 3 din, 4 enable, 10 rdport (1=read/0=write)`; comptime / cell-global pins (block
 0 only) `1 bits, 5 fwd, 6 posclk, 7 type (0 async-rd / 1 sync-rd / 2 array-ROM),
-8 wensize, 9 size, 11 init, 12 update, 13 update_enable, 14 reset` (15 reserved).
+8 wensize, 9 size, 11 init, 12 update, 13 update_enable, 14 reset, 15 undef`.
 Read-data output for read port *N* = `driver_pin(wr_ports + N)`; the whole-array
 async read uses the reserved driver pid `Memory_readall_pid`.
+
+`fwd` and `undef` are the two per-(read,write) matrices, both indexed `bit
+(r*n_wr + w)`: `fwd` says read *r* sees write *w*'s NEW data on a same-cycle
+same-address collision, `undef` (Pyrope `ordering="none"`) says it sees nothing
+DEFINED. Both clear = the committed value, defined. The encoder models `undef`
+purely as an X bit-plane (`Val::x_mask`) on the read dout — the value stays
+`select(a_cur, addr)`, so the `shared_cur` dout-merge is untouched — and the
+plane is minted only on the REFERENCE side (`formal.lec.gold_x=ignore`) and only
+for latency-0 reads (`next_read` threads a bare Term with no plane slot; dropping
+it for `type==1` only makes the miter stricter). Gated by
+`//lhd/tests:lec_mem_undef_test`.
 
 ## `lhd lec` CLI & options
 

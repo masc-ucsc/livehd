@@ -20,10 +20,19 @@
 # Expected FWD (1 write port, so row r is bit r):
 #   program (default) -> 0b10 = 2   only the later read forwards
 #   fwd               -> 0b11 = 3   position-blind: both forward
+#   old               -> 0b00 = 0   nothing forwards; the read is defined OLD
 #   none              -> 0b00 = 0   nothing forwards
 #
 # A transposed or position-blind lowering yields 1, 3 or 0 for ALL THREE modes,
 # which no golden-Verilog pair with a single read port would notice.
+#
+# "old" and "none" share FWD(0), so FWD alone cannot tell them apart — that is
+# exactly why the Memory cell grew the parallel `undef` matrix (graph/cell.cpp
+# pid 15) and the wrappers grew the UNDEF parameter. Expected UNDEF:
+#   program / fwd / old -> absent (the pin is only driven when non-zero)
+#   none                -> 0b11 = 3   BOTH reads are undefined on a collision
+# If `undef` were ever dropped again, "none" would silently collapse back onto
+# "old" and the formal `?` half of the ruling would be gone with no test red.
 
 set -u
 LHD=./bazel-bin/lhd/lhd
@@ -50,7 +59,7 @@ pub mod m$1(clk:u1, a1:u2, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
 EOF
 }
 
-check() { # $1 = label, $2 = reg attribute text, $3 = expected FWD
+check() { # $1 = label, $2 = reg attribute text, $3 = expected FWD, $4 = expected UNDEF ("" = absent)
   gen "" "$2"
   rm -rf "${TMP}/v" "${TMP}/w"
   if ! "${LHD}" compile "${TMP}/m.prp" --top m --emit-dir "verilog:${TMP}/v/" \
@@ -65,15 +74,35 @@ check() { # $1 = label, $2 = reg attribute text, $3 = expected FWD
     echo "FAIL: ${1}: expected FWD($3), got FWD(${got:-<none>})"
     grep -hE 'cgen_memory' "${TMP}"/v/*.v | head -2
     rc=1
-  else
-    echo "ok: ${1} -> FWD(${got})"
+    return
   fi
+  # `undef` is driven only when non-zero, so the parameter is ABSENT for every
+  # mode but "none" — which also keeps every pre-existing netlist byte-identical.
+  ugot=$(grep -ohE '\.UNDEF\([0-9]+\)' "${TMP}"/v/*.v | head -1 | tr -dc '0-9')
+  if [ "${ugot}" != "$4" ]; then
+    echo "FAIL: ${1}: expected UNDEF(${4:-<absent>}), got UNDEF(${ugot:-<absent>})"
+    grep -hE 'cgen_memory' "${TMP}"/v/*.v | head -2
+    rc=1
+    return
+  fi
+  echo "ok: ${1} -> FWD(${got}) UNDEF(${ugot:-<absent>})"
 }
 
-check "default (program)"   ""                     2
-check 'ordering="program"'  ':[ordering="program"]' 2
-check 'ordering="fwd"'      ':[ordering="fwd"]'     3
-check 'ordering="none"'     ':[ordering="none"]'    0
+check "default (program)"   ""                      2 ""
+check 'ordering="program"'  ':[ordering="program"]' 2 ""
+check 'ordering="fwd"'      ':[ordering="fwd"]'     3 ""
+check 'ordering="old"'      ':[ordering="old"]'     0 ""
+check 'ordering="none"'     ':[ordering="none"]'    0 3
+
+# The shipped wrapper must actually CARRY the UNDEF parameter — an override
+# against a module that lacks it is a hard elaboration error in every reader, so
+# a wrapper/cgen skew would surface far from here.
+if ! grep -q 'UNDEF' ware/rtl/cgen_memory_2rd_1wr.v 2>/dev/null; then
+  echo "FAIL: ware/rtl/cgen_memory_2rd_1wr.v has no UNDEF parameter but cgen emits .UNDEF()"
+  rc=1
+else
+  echo "ok: shipped wrapper carries UNDEF"
+fi
 
 # A bogus value must be a hard error, never a silent accept-and-ignore (which
 # is how `ordering` behaved before it was implemented).

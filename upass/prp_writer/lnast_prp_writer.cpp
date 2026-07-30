@@ -313,6 +313,87 @@ static std::string_view unquote_callee(std::string_view s) {
   return s;
 }
 
+// A Verilog ESCAPED identifier (`\s\m`, `\a-b`, `\1foo`) is a perfectly legal
+// module name, and it arrives at the writer verbatim.  Signal names go through
+// strip_prefix's `quote` lambda; MODULE names did not, so `module \s\m` emitted
+// `pub comb s\m::[…]` — and `\` is not a legal Pyrope token, so the generated
+// file could not even be TOKENIZED ("unexpected character in input").  Same
+// leak at the two other places a module name reaches the text: the file-scope
+// `const <name> = import(…)` binding and the `<name>::[name=u1](…)` call site.
+// A backtick-quoted name lexes back to the identical identifier (verified for
+// `.`/`-`/`\`/space/`$`/keyword spellings), so quoting is always safe; the
+// predicate below keeps a normal name BYTE-IDENTICAL to before.
+static std::string escape_string(std::string_view s);  // defined with the string-literal writers below
+
+static bool is_plain_pyrope_ident(std::string_view s) {
+  if (s.empty() || (!std::isalpha(static_cast<unsigned char>(s[0])) && s[0] != '_')) {
+    return false;  // empty, or starts with a digit / punctuation
+  }
+  for (char c : s) {
+    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '$') {
+      return false;
+    }
+  }
+  return !is_pyrope_reserved_ident(s);
+}
+
+// Index of the next `.` at or after `from` that is NOT inside a backtick-quoted
+// span, or npos.  A Pyrope-origin escaped identifier arrives ALREADY wrapped
+// (prp2lnast's canonical_escaped_ident keeps the quotes), and a `\a.b` Verilog
+// escaped id then carries a dot that belongs to the NAME, not to the
+// file/entity separator — splitting on it would cut the quoted span in half.
+static size_t next_unquoted_dot(std::string_view path, size_t from) {
+  bool in_tick = false;
+  for (size_t i = from; i < path.size(); ++i) {
+    if (path[i] == '`') {
+      in_tick = !in_tick;
+    } else if (path[i] == '.' && !in_tick) {
+      return i;
+    }
+  }
+  return std::string_view::npos;
+}
+
+// Strip one surrounding pair of escape backticks, if present.  Quoting has to be
+// IDEMPOTENT: the same name reaches this decorator both bare (slang provenance:
+// `d\e`) and already-escaped (Pyrope provenance: `` `s\m` ``), and re-wrapping
+// the latter emitted ``s\m`` — two adjacent quoted spans the lexer cannot read
+// at all ("unexpected character in input").
+static std::string_view peel_escape_ticks(std::string_view s) {
+  if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+    s.remove_prefix(1);
+    s.remove_suffix(1);
+  }
+  return s;
+}
+
+// Backtick-escape each `.`-component of a module path that is not a plain Pyrope
+// identifier.  Per-component (not whole-name) so a Pyrope-origin `file.entity`
+// callee (`ALU.ALU`) keeps its dot as the file/entity separator instead of
+// collapsing into one opaque quoted leaf.
+static std::string quote_module_path(std::string_view path) {
+  std::string out;
+  size_t      start = 0;
+  for (;;) {
+    auto             dot  = next_unquoted_dot(path, start);
+    std::string_view comp = path.substr(start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
+    comp                  = peel_escape_ticks(comp);
+    if (is_plain_pyrope_ident(comp)) {
+      out.append(comp);
+    } else {
+      out.push_back('`');
+      out.append(comp);
+      out.push_back('`');
+    }
+    if (dot == std::string_view::npos) {
+      break;
+    }
+    out.push_back('.');
+    start = dot + 1;
+  }
+  return out;
+}
+
 static std::string quote_kw_path(std::string_view path) {
   std::string out;
   size_t      start = 0;
@@ -550,10 +631,14 @@ void Lnast_prp_writer::write_top() {
     // cross-package defining exprs need their imports at file scope
     if (!lnast->get_imported_packages().empty()) {
       for (const auto& pkg : lnast->get_imported_packages()) {
+        // Same escaping as the module-import binding below: an SV package can
+        // be named for a Pyrope keyword (`match`, `mut`, `step`, …) or be a
+        // Verilog escaped id, neither of which lexes bare.  The PATH is a
+        // string literal, so it takes escape_string.
         print("const ");
-        print(pkg);
+        print(quote_module_path(pkg));
         print(" = import(\"");
-        print(pkg);
+        print(escape_string(pkg));
         print("\")\n");
       }
       print("\n");
@@ -663,8 +748,11 @@ void Lnast_prp_writer::write_module() {
           alias += "_t";                                 // disambiguating suffix
         } while (inst_names.count(alias) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
       }
-      import_alias_[nm] = alias;
-      os << "const " << alias << " = import(\"" << path << "\")\n";
+      import_alias_[nm] = alias;  // stored BARE — write_func_call quotes at the call site
+      // The binding identifier needs the same escaping as the lambda header; the
+      // PATH is a string literal, so it takes escape_string (a `\` in an escaped
+      // Verilog id would otherwise start a string escape sequence).
+      os << "const " << quote_module_path(alias) << " = import(\"" << escape_string(path) << "\")\n";
     }
     if (!imports.empty()) {
       os << "\n";
@@ -676,7 +764,9 @@ void Lnast_prp_writer::write_module() {
   // lambda-body import does not lower, so these MUST sit at file scope here.
   if (!lnast->get_imported_packages().empty()) {
     for (const auto& pkg : lnast->get_imported_packages()) {
-      os << "const " << pkg << " = import(\"" << pkg << "\")\n";
+      // Escaped exactly like the module-import binding above (a package named
+      // for a Pyrope keyword, or a Verilog escaped id, does not lex bare).
+      os << "const " << quote_module_path(pkg) << " = import(\"" << escape_string(pkg) << "\")\n";
     }
     os << "\n";
   }
@@ -1017,8 +1107,33 @@ void Lnast_prp_writer::write_module() {
     }
 
     // 1-D declared array sizes (`x:[N]T`, any mode) — write_store expands a
-    // whole array-to-array copy (`d = q`) into per-element stores.
+    // whole array-to-array copy (`d = q`) into per-element stores.  Records the
+    // ref/type child pair of one `declare`; the nested-declare scan below feeds
+    // it too, so an array the reader declared inside an `if` (and that the
+    // prologue hoists to the function top) is registered like a top-level one.
     array_decl_size_.clear();
+    auto record_array_decl_size = [this](Lnast_nid c0, Lnast_nid ty) -> void {
+      if (ty.is_invalid() || lnast->get_type(ty) != Lnast_ntype::Lnast_ntype_comp_type_array) {
+        return;
+      }
+      auto elem = lnast->get_child(ty);
+      if (elem.is_invalid() || lnast->get_type(elem) == Lnast_ntype::Lnast_ntype_comp_type_array) {
+        return;  // multi-dim: element access spelling differs — leave alone
+      }
+      auto size_n = lnast->get_sibling_next(elem);
+      if (size_n.is_invalid()) {
+        return;
+      }
+      std::string sz(lnast->get_name(size_n));  // "[N]"
+      if (sz.size() < 3 || sz.front() != '[' || sz.back() != ']') {
+        return;
+      }
+      int64_t n = 0;
+      if (auto [p, ec] = std::from_chars(sz.data() + 1, sz.data() + sz.size() - 1, n);
+          ec == std::errc() && p == sz.data() + sz.size() - 1 && n > 0) {
+        array_decl_size_[std::string(strip_prefix(lnast->get_name(c0)))] = n;
+      }
+    };
     for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (lnast->get_type(c) != Lnast_ntype::Lnast_ntype_declare) {
         continue;
@@ -1027,32 +1142,37 @@ void Lnast_prp_writer::write_module() {
       if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0))) {
         continue;
       }
-      auto ty = lnast->get_sibling_next(c0);
-      if (ty.is_invalid() || lnast->get_type(ty) != Lnast_ntype::Lnast_ntype_comp_type_array) {
-        continue;
-      }
-      auto elem = lnast->get_child(ty);
-      if (elem.is_invalid() || lnast->get_type(elem) == Lnast_ntype::Lnast_ntype_comp_type_array) {
-        continue;  // multi-dim: element access spelling differs — leave alone
-      }
-      auto size_n = lnast->get_sibling_next(elem);
-      if (size_n.is_invalid()) {
-        continue;
-      }
-      std::string sz(lnast->get_name(size_n));  // "[N]"
-      if (sz.size() < 3 || sz.front() != '[' || sz.back() != ']') {
-        continue;
-      }
-      int64_t n = 0;
-      if (auto [p, ec] = std::from_chars(sz.data() + 1, sz.data() + sz.size() - 1, n);
-          ec == std::errc() && p == sz.data() + sz.size() - 1 && n > 0) {
-        array_decl_size_[std::string(strip_prefix(lnast->get_name(c0)))] = n;
-      }
+      record_array_decl_size(c0, lnast->get_sibling_next(c0));
     }
 
     {
-      std::unordered_set<std::string>              top_decl, nonmut_decl, nested_mut_decl, store_lhs;
+      std::unordered_set<std::string>              top_decl, nonmut_decl, store_lhs;
       std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")
+      // Nested `mut` declares, keyed name -> the declaration the hoist must
+      // REBUILD.  This MUST carry the type and the initializer, not just the name:
+      // the hoisted prologue below re-emits the declaration and `suppress_decl_`
+      // deletes the original, so anything not captured here is LOST.  Three ways
+      // that bit:
+      //   * an ARRAY read at a runtime index whose only use is inside an `if`
+      //     (`reg [3:0] mem[1:0]; … if (en) out = mem[sel];`) — the reader declares
+      //     it at that first nested use, so the hoist printed `mut mem = 0`, the
+      //     `[2]u4` was gone, and the recompile's tolg met `mem[sel]` on a base that
+      //     constprop had folded to the scalar 0: "field/index read of '0' could not
+      //     be resolved" (a hard error — the emitted Pyrope did not even compile).
+      //   * that SAME array losing its CONTENTS.  The reader folds a `initial
+      //     mem[0]<=1; mem[1]<=2;` ROM into the declare as a `tuple_add(1,2)`
+      //     initializer, and the hardcoded `= 0` threw it away — restoring only the
+      //     type would swap the loud tolg error for a SILENT wrong answer (mem reads
+      //     0,0 where the golden reads 1,2).  Type and init must land together.
+      //   * a nested `_mux_N` temp losing the `:u2`/`:s8` the slang reader stamps to
+      //     pin its width/sign (the CLZ priority-encoder divergence its own comment
+      //     cites).  Latent, but the same missing byte.
+      // A later nested declare of the same name keeps the FIRST non-empty field.
+      struct Nested_mut {
+        std::string ty;    // rendered type suffix, or "" (untyped)
+        std::string init;  // rendered comptime initializer, or "" (seed with 0)
+      };
+      std::unordered_map<std::string, Nested_mut> nested_mut_decl;
       // Definition count per name, over EVERY statement that writes it, in any
       // scope and of any node type (a `store` re-bind, an op node whose child0 is
       // the def — `x = a + b` is a `plus`, not a `store` — a set_mask, a func_call
@@ -1097,7 +1217,24 @@ void Lnast_prp_writer::write_module() {
                 nested_wire_decl.emplace(nm, c1.is_invalid() ? std::string{} : render_type_at(c1));
               }
             } else if (!top) {
-              nested_mut_decl.insert(nm);
+              // declare( ref, type, const(qualifier), [init] ) — same child walk as
+              // write_declare, whose emission this hoist replaces.
+              auto        ty = c1.is_invalid() ? std::string{} : render_type_at(c1);
+              auto        c3 = c2.is_invalid() ? c2 : lnast->get_sibling_next(c2);
+              std::string init;
+              if (is_comptime_init(c3)) {
+                init = render_comptime_init(c3);
+              }
+              auto [it, fresh] = nested_mut_decl.try_emplace(nm, Nested_mut{ty, init});
+              if (!fresh) {  // first non-empty wins, per field
+                if (it->second.ty.empty()) {
+                  it->second.ty = std::move(ty);
+                }
+                if (it->second.init.empty()) {
+                  it->second.init = std::move(init);
+                }
+              }
+              record_array_decl_size(v, c1);  // the hoist makes it a top-level array
             }
           } else if (v_ref && Lnast_ntype::is_store(t) && !is_tmp(lnast->get_name(v))
                      && lnast->get_type(n) == Lnast_ntype::Lnast_ntype_stmts) {
@@ -1214,9 +1351,12 @@ void Lnast_prp_writer::write_module() {
       // A combinational `mut` var written/declared in a nested scope but used in
       // SIBLING scopes must be declared at the function top (its first write
       // otherwise emits `mut` inside one scope, leaving sibling writes out of
-      // scope). Hoist `mut X = 0` for: store-driven vars with no declare, and
+      // scope). Hoist `mut X[:T] = 0` for: store-driven vars with no declare, and
       // vars with a NESTED `mut` declare. Skip top-declared / io / reg|latch|const.
-      std::unordered_set<std::string> need;
+      // The map's value is the declaration to rebuild: empty for a store-driven var
+      // (no declare to take a type/init from — its width comes from the store's
+      // RHS, and `0` is just a seed), the nested declare's own type/init otherwise.
+      std::unordered_map<std::string, Nested_mut> need;
       for (const auto& nm : store_lhs) {
         if (bool_inline_.count(nm) != 0u || mux_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
           continue;  // inlined at their single read — no declaration ever emits
@@ -1227,25 +1367,35 @@ void Lnast_prp_writer::write_module() {
             single_store_.insert(nm);  // declared in place by its store, as `const X = <rhs>`
             continue;
           }
-          need.insert(nm);  // pin-wire-hoisted nets get a bare `wire` pre-declare instead (below)
+          need.try_emplace(nm);  // pin-wire-hoisted nets get a bare `wire` pre-declare instead (below)
         }
       }
-      for (const auto& nm : nested_mut_decl) {
+      for (const auto& [nm, decl] : nested_mut_decl) {
         if (bool_inline_.count(nm) != 0u || mux_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
           suppress_decl_.insert(nm);  // inlined at its single read — no hoist, no in-place declare
           continue;
         }
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
-          need.insert(nm);
+          need[nm] = decl;            // the declare's type/init outrank a store-driven empty
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
         }
       }
-      std::vector<std::string> pre(need.begin(), need.end());
+      std::vector<std::string> pre;
+      pre.reserve(need.size());
+      for (const auto& [nm, decl] : need) {
+        (void)decl;
+        pre.push_back(nm);
+      }
       std::sort(pre.begin(), pre.end());
       for (const auto& nm : pre) {
+        const auto& decl = need[nm];
         print_indent();
-        os << "mut " << nm << " = 0\n";
+        os << "mut " << nm;
+        if (!decl.ty.empty()) {
+          os << ":" << decl.ty;
+        }
+        os << " = " << (decl.init.empty() ? std::string("0") : decl.init) << "\n";
         declared_.insert(nm);
       }
       // Hoist nested `wire` declares to the function top as a bare `wire X:T`
@@ -1745,12 +1895,17 @@ bool Lnast_prp_writer::body_has_state(Lnast_nid nid) const {
 
 std::string Lnast_prp_writer::lambda_name() const {
   std::string_view full = lnast->get_top_module_name();
-  auto             dot  = full.rfind('.');
+  // LAST unquoted dot: an already-escaped `` `a.b` `` name owns its dot, so
+  // rfind('.') would cut the quoted span and leave a dangling backtick.
+  size_t dot = std::string_view::npos;
+  for (size_t at = 0; (at = next_unquoted_dot(full, at)) != std::string_view::npos; ++at) {
+    dot = at;
+  }
   std::string_view tail = (dot == std::string_view::npos) ? full : full.substr(dot + 1);
   if (tail.empty()) {
     tail = full;
   }
-  return std::string(tail);
+  return quote_module_path(tail);  // a Verilog escaped id (`\s\m`) needs backticks
 }
 
 std::string Lnast_prp_writer::render_attr_value(Lnast_nid value_nid) const {
@@ -2516,6 +2671,58 @@ static std::optional<std::pair<int, int>> contiguous_run(std::string_view s) {
   return std::make_pair(lo, hi);
 }
 
+// True if `n` is a declare initializer made only of compile-time constants: a
+// `const`, or a `tuple_add` every child of which is one.  Only such an
+// initializer may be MOVED (the nested-mut hoist relocates it from inside an
+// `if` to the function top): a `ref`/op/func_call operand reads a net defined
+// LATER in the body, and hoisting it above that definition emits Pyrope that
+// fails the recompile's "read of undefined variable" check.
+// `const 'nil'` is excluded — it is the slang reader's "no reset / no
+// initializer" sentinel, and `= nil` is not a reparsable integer initializer
+// (write_declare suppresses it for the same reason).
+bool Lnast_prp_writer::is_comptime_init(Lnast_nid n) const {
+  if (n.is_invalid()) {
+    return false;
+  }
+  const auto t = lnast->get_type(n);
+  if (Lnast_ntype::is_const(t)) {
+    return lnast->get_name(n) != "nil";
+  }
+  if (t != Lnast_ntype::Lnast_ntype_tuple_add) {
+    return false;
+  }
+  auto c = lnast->get_child(n);
+  if (c.is_invalid()) {
+    return false;  // an empty tuple carries no value
+  }
+  for (; !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (!is_comptime_init(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Render an `is_comptime_init` node as Pyrope text: `5`, or `(1, 2)` for a
+// tuple_add.  Same output as write_tuple_literal(), but nid-based and returning
+// a string — the hoist runs before the cursor walk, so it cannot drive `cur`.
+std::string Lnast_prp_writer::render_comptime_init(Lnast_nid n) {
+  if (lnast->get_type(n) != Lnast_ntype::Lnast_ntype_tuple_add) {
+    return render_value(n, /*operand_ctx=*/false);
+  }
+  std::string out("(");
+  bool        first = true;
+  for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (!first) {
+      out += ", ";
+    }
+    out += render_comptime_init(c);
+    first = false;
+  }
+  out += ")";
+  return out;
+}
+
 std::string Lnast_prp_writer::render_type() { return render_type_at(cur); }
 
 std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
@@ -2806,7 +3013,7 @@ void Lnast_prp_writer::write_func_call() {
   print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
-  print(callee_ref);
+  print(quote_module_path(callee_ref));  // a Verilog escaped-id callee needs backticks
   if (name_instance) {
     print("::[name=");
     print(lhs);
@@ -3891,6 +4098,30 @@ void Lnast_prp_writer::analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_ni
         // `_mux_N` name in the call.
         if (!Lnast_ntype::is_stmts(lnast->get_type(lnast->get_parent(snode)))) {
           continue;
+        }
+        // …and it must still BE emitted. Every other folded_node_ producer runs
+        // BEFORE this one (analyze_folding, compute_dead_signals, analyze_muxes —
+        // see the call order in write_module; analyze_folding is also the only
+        // place the set is cleared), and any of them can fold this very store
+        // away: most often as the unconditional `seed` that becomes an enclosing
+        // mux's else value (`x = _mux_1; if c { x = V }` → `x = if c {V} else
+        // {_mux_1}`), also as a foldable `%t = _mux_1` copy, or as the def of a
+        // dead signal. A folded store renders through render_mux_expr /
+        // render_value → render_def_rhs, which does NOT inline a mux expression
+        // (or is not rendered at all), so inlining here would drop THIS mux's
+        // definition and leave a bare `_mux_N` read that nothing declares — the
+        // emitted Pyrope then fails to re-parse ("read of undefined variable
+        // '_mux_1'", writer_undefined_mux). Keeping the definition emits the mux
+        // as its own statement, which the folded store's RHS then names.
+        // `break`, not `continue`: one folded consumer disqualifies the whole
+        // candidate. (This guard covers the FOLDED consumers only. An arm /
+        // explicit-else value-def of an enclosing mux also renders through
+        // render_def_rhs but is never folded — that family is unreachable solely
+        // because arm_value_def rejects an arm holding an if-like statement, and
+        // a `_mux_N` definition always IS one. Loosening arm_value_def would
+        // reopen the hole here.)
+        if (folded_node_.count(snode.get_class_index().value) != 0) {
+          break;
         }
         mux_inline_.emplace(lhs, key);
         folded_node_.insert(key);

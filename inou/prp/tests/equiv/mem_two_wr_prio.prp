@@ -10,11 +10,11 @@
 // output (headers added): the front end resolves Verilog's in-process write
 // ordering into two explicit write ports of one Memory cell, whose storage
 // priority is last-port-wins — so `we1`'s write beats `we0`'s on a
-// same-address collision, matching the golden. `ordering="none"` is what the
+// same-address collision, matching the golden. `ordering="old"` is what the
 // Verilog reader emits (the async read sees committed state, never this
 // cycle's writes). The round trip PROVES.
 pub mod mem_two_wr_prio::[timecheck=false](clk:u1, we0:u1, we1:u1, wa0:u2, wd0:u2, wa1:u2, wd1:u2, raddr:u2) -> (rdata:u2@[]) {
-  reg mem:[4]u2:[ordering="none"]
+  reg mem:[4]u2:[ordering="old"]
   rdata = 0ub??
   if we0 != 0 {
     mem[wa0] = wd0

@@ -5,16 +5,30 @@
 :pyrope_top: writer_undefined_mux
 */
 //
-// FIXME tracker -- prp_writer emits a `_mux_N` it never DECLARES.
-// Look at the Pyrope below: `_mux_1` is read but never defined anywhere, so our own
-// parser rejects our own output ("read of undefined variable '_mux_1'"). The shape
-// is an expression mux (a ternary) whose result is then overwritten by a
-// conditional assignment nested in an outer conditional: the writer folds the pair
-// into one if-expression but keeps the ternary only BY REFERENCE.
-// A writer self-consistency bug -- generated Pyrope must always re-parse.
+// prp_writer regression pair -- it used to emit a `_mux_N` it never DECLARED.
+// A Verilog ternary lowers to a merge temp (`mut _mux_1 = 2; if s1 { _mux_1 = 1
+// }`) plus the store that consumes it (`out = _mux_1`). analyze_expr_inlines
+// selected that store as the temp's single use, inlined the mux expression there
+// and DROPPED the temp's definition -- but analyze_muxes had already folded that
+// same store away, as the unconditional seed that becomes the enclosing
+// `if cond { out = 3 }` mux's else value. The else value therefore rendered
+// through render_def_rhs (which does not inline a mux), so the emitted Pyrope
+// read a bare `_mux_1` no statement declared and did not re-parse
+// ("read of undefined variable '_mux_1'"). Fixed by declining the inline when
+// the consuming store is itself folded; the temp keeps its own statement.
+//
+// The Pyrope below is the hand-written source form of that shape: an
+// if-expression whose result an outer conditional then overwrites. The forward
+// direction (prp-equiv-*) proves it against the golden; the writer half is what
+// prp-v2v-* / prp-v2prp-* exercise. The parser half -- an undefined name in an
+// if-expression arm must be a compile error -- is pinned by
+// inou/prp/tests/errors/undefined_read_if_expr_arm.prp.
 pub comb writer_undefined_mux::[timecheck=false](s0:u1, s1:u1, cond:u1) -> (out:u2) {
   out = 0
   if s0 != 0 {
-    out = if cond != 0 { 3 } else { _mux_1 }
+    out = if s1 != 0 { 1 } else { 2 }
+    if cond != 0 {
+      out = 3
+    }
   }
 }

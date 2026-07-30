@@ -50,7 +50,7 @@ echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
-echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"false"' || fail "formal.strict missing: $out"
+echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
 echo "$out" | grep -q '"name":"compile.isabelle.' && fail "compile.isabelle.* must not exist (canonical is formal.isabelle.*): $out"
@@ -198,6 +198,6 @@ grep -q "maybe you meant:" "$W/r12.json" || fail "leaf-match suggestion missing:
 # so nobody has to run the second command themselves
 grep -q "sim.vcd=false" "$W/r12.json" || fail "inline sim.vcd=default line missing: $(cat "$W/r12.json")"
 "$LHD" compile "$PRP" --set cgen.strict=1 --workdir "$W/w12b" -q >"$W/r12b.json" 2>/dev/null && fail "--set cgen.strict must fail"
-grep -q "formal.strict=false" "$W/r12b.json" || fail "wrong-pass inline suggestion missing: $(cat "$W/r12b.json")"
+grep -q "formal.strict=true" "$W/r12b.json" || fail "wrong-pass inline suggestion missing: $(cat "$W/r12b.json")"
 
 echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options / sim namespace"

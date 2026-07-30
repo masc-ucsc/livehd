@@ -4,18 +4,28 @@
 :verilog_top: mem_ordering_none
 :pyrope_top: mem_ordering_none
 */
-// `ordering="none"` showcase (lhdsuite array_problem.md, ruled 2026-07-27):
-// no ordering hardware at all — a read of an address written this same cycle
-// is UNDEFINED (simulation: random, since sim does not model `?`; formal:
-// `?`, i.e. either value is acceptable). Reads of non-written addresses
-// return the stored value as usual. The golden .v encodes the undefined
-// window as x, which the LEC miter treats as don't-care — so this pair
-// proves for ANY refinement (today's fwd lowering included): by construction
-// it can never refute an implementation, it pins only the defined
-// (non-colliding) behavior and documents the mode. The user-visible payoff
-// of "none" is cheapest hardware + the formal `?` that lets equivalence
-// prove when collision values genuinely do not matter (in which case
-// program ordering was never needed).
+// `ordering="none"` showcase (lhdsuite array_problem.md, ruled 2026-07-27;
+// really UNDEFINED since 2026-07-29): no ordering hardware at all — a read of
+// an address written this same cycle is UNDEFINED (simulation: random, since
+// Slop has no x; emitted Verilog: x; formal: a don't-care, i.e. either value is
+// acceptable). Reads of non-written addresses return the stored value as usual.
+//
+// The mode used to be REFINED to "read the committed value", which made it
+// bit-identical to the new `ordering="old"` and pinned exactly the value it is
+// supposed to leave free. It now drives the Memory cell's `undef` matrix
+// (graph/cell.cpp pid 15): cgen passes it as the wrapper's UNDEF parameter and
+// the cvc5 encoder turns it into an X bit-plane on the read dout, so the miter
+// excludes the collision window on the REFERENCE side. The golden .v below
+// encodes the same window as x for the yosys path.
+//
+// This pair therefore proves for ANY refinement — committed-value, forwarding,
+// or anything else — while still pinning the defined (non-colliding) behavior.
+// The two-way freedom is what `//lhd/tests:lec_mem_undef_test` asserts directly;
+// here it is what makes the v2prp direction green (the golden's x is on the
+// IMPL side, and only a ref-side plane can excuse it). The user-visible payoff
+// of "none" is cheapest hardware + the formal don't-care that lets equivalence
+// prove when collision values genuinely do not matter (in which case program
+// ordering was never needed).
 pub mod mem_ordering_none(clk:u1, a1:u2, we:u1, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
   reg mem:[4]u2:[ordering="none"] = 0
   o1 = mem[a1]

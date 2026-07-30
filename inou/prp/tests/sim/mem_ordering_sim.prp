@@ -1,0 +1,87 @@
+/*
+:name: mem_ordering_sim
+:type: simulation
+*/
+// Simulation of all four same-cycle `ordering` modes, one memory each. Each
+// lowers to a distinct hlop::Memory_* type (hlop/memory.hpp), so this is the
+// end-to-end check that cgen.sim picks the right one and that the staged-write
+// protocol resolves as the cgen_memory_*.v wrapper does.
+//
+// Every memory is written at address `wa` with `wd` and read at the same
+// address, so every read is a collision:
+//
+//   ordering="old"      -> the committed (previous-cycle) value
+//   ordering="fwd"      -> the new data, even though the read precedes the write
+//   ordering="program"  -> old before the write, new after it
+//   ordering="none"     -> UNDEFINED (a PRNG draw in Slop), so only the
+//                          NON-colliding address is asserted here
+mod ord_sim(wa:u2, wd:u4, ra:u2) -> (o_old:u4@[0], f_pre:u4@[0], p_pre:u4@[0], p_post:u4@[0], n_clean:u4@[0], rmw_pre:u4@[0], rmw_post:u4@[0]) {
+  reg m_old:[4]u4:[ordering="old"] = 0
+  o_old      = m_old[wa]
+  m_old[wa]  = wd
+
+  reg m_fwd:[4]u4:[ordering="fwd"] = 0
+  f_pre      = m_fwd[wa]        // read BEFORE the write: fwd is position-blind
+  m_fwd[wa]  = wd
+
+  reg m_prog:[4]u4:[ordering="program"] = 0
+  p_pre      = m_prog[wa]       // read BEFORE the write -> old
+  m_prog[wa] = wd
+  p_post     = m_prog[wa]       // read AFTER the write  -> new
+
+  reg m_none:[4]u4:[ordering="none"] = 0
+  m_none[wa] = wd
+  n_clean    = m_none[ra]       // a DIFFERENT address: no collision, so defined
+
+  // Read-modify-write under the default ordering: the write's data DEPENDS on
+  // an earlier read of the same memory. That is legal hardware (the read takes
+  // the array, not the write's data), but it is a false combinational cycle for
+  // any codegen that stages the write before the read it feeds on.
+  reg m_rmw:[4]u4:[ordering="program"] = 0
+  const seen = m_rmw[wa]        // read BEFORE the write -> the committed value
+  mut nxt:u4 = 0
+  wrap nxt   = seen + 1
+  m_rmw[wa]  = nxt              // ... which then drives the write
+  rmw_pre  = seen
+  rmw_post = m_rmw[wa]          // read AFTER the write -> forwards seen+1
+}
+
+test ord_sim.modes {
+  mut acc      = ord_sim
+  mut old_v    = nil
+  mut fwd_v    = nil
+  mut pre_v    = nil
+  mut post_v   = nil
+  mut clean_v  = nil
+  mut rmw_a    = nil
+  mut rmw_b    = nil
+
+  // Write address 1 every cycle with `clock`, and read the untouched address 2
+  // from the ordering="none" memory. The outputs are sampled BEFORE `step`: a
+  // read after the edge sees the array already holding this cycle's data, which
+  // makes "old" and "fwd" agree and hides the whole distinction.
+  tick 6 {
+    acc.wa  = 1
+    acc.wd  = clock
+    acc.ra  = 2
+    old_v   = acc.o_old
+    fwd_v   = acc.f_pre
+    pre_v   = acc.p_pre
+    post_v  = acc.p_post
+    clean_v = acc.n_clean
+    rmw_a   = acc.rmw_pre
+    rmw_b   = acc.rmw_post
+    step
+  }
+
+  // On the last iteration clock=5 is the data being written, while address 1
+  // still holds 4 (written when clock=4).
+  assert(fwd_v == 5, "ordering=fwd: a read before the write still sees the new data")
+  assert(post_v == 5, "ordering=program: the read AFTER the write sees it")
+  assert(old_v == 4, "ordering=old: the collision reads the committed value")
+  assert(pre_v == 4, "ordering=program: the read BEFORE the write does not see it")
+  assert(clean_v == 0, "ordering=none: a non-colliding address is still defined")
+  // m_rmw[1] increments once per cycle: after 5 committed cycles it holds 5.
+  assert(rmw_a == 5, "read-modify-write: the pre-write read is the committed value")
+  assert(rmw_b == 6, "read-modify-write: the post-write read forwards seen+1")
+}

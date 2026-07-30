@@ -353,7 +353,9 @@ CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 ```
 
 > Two shared latent bugs surfaced while porting and were fixed in `pass.lean`
-> (both should also be applied to `pass.isabelle`):
+> (item 1 was applied to `pass.isabelle` on 2026-07-29, when the new `undef` pin
+> at 15 made the mis-decode reachable — `15 % 11 == 4` fabricated a phantom
+> port-1 `enable`):
 > 1. the per-port pin stride is `Ntype::Memory_port_stride` (now **16**), not the
 >    hardcoded `11` both passes used — stale `11` mis-decodes memory port pins;
 > 2. the `fwd` / `posclk` policy pins are parsed but unused in the async/array

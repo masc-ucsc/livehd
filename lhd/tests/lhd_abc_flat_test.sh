@@ -103,6 +103,51 @@ cat "$D2/rev/"*.v > "$D2/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
 echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
 
+# A CONSTANT actual on a child's input port must survive the flatten.
+#
+# Regression: the port-width coercion tolg puts on every instance actual is the
+# zero-extend idiom Get_mask(a, -1). pass.abc blasted it by taking every source
+# position from the negative-mask fill loop, bounded by gu::bits_of(a) -- which
+# is 0 for a CONSTANT driver (const pins carry the value, never a `bits` attr).
+# The position list came out EMPTY and every output bit was emitted as const0,
+# so the literal was silently replaced by 0. abc_bit is never reached on that
+# path, so its unmaterialized-driver diagnostic could not warn either: the
+# netlist just came out wrong, with a `_const0_` tie cell where the value
+# belonged.
+#
+# The hierarchy is what hides it: unflattened, the constant sits on a Sub node's
+# input pin, which is a region BOUNDARY and never enters the blaster. Flatten
+# dissolves the boundary and the coercion becomes region-internal. So the guard
+# has to run under `color flat`, and the value needs bits set both low and high
+# (0xa5) so a dropped literal cannot coincide with a correct one.
+FIX3="$W/abc_flat_const_port.prp"
+cat > "$FIX3" <<'EOF'
+mod const_port_sub(din:u8, sel:u8) -> (q:u8@[1]) {
+  reg r:u8 = 0
+  q = r
+  r = din ^ sel
+}
+
+mod top(din:u8) -> (o:u8@[1]) {
+  stage[1] a = const_port_sub(din=din, sel=0xa5)
+  o = a
+}
+EOF
+TOP3=abc_flat_const_port.top
+D3="$W/flatconst"
+mkdir -p "$D3"
+run compile "$FIX3" --top "$TOP3" --recipe O1 --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
+run pass color flat --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
+run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set abc.library="$LIB" --workdir "$D3/w3"
+run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
+run compile lg:"$D3/net" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
+run compile lg:"$D3/re" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
+cat "$D3/netv/"*.v "$D/modelsv/"*.v > "$D3/impl.v"
+cat "$D3/rev/"*.v > "$D3/ref.v"
+run lec --set formal.solver=lgyosys --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
+    --workdir "$D3/wc"
+echo "PASS: a constant instance-port actual survives the whole-design flatten (LEC-proven)"
+
 # Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
 # it into one flat module. Each def is one region here, so it is emitted under
 # its own name (delayer, stage_unit, top) -- no pointless __c wrapper.

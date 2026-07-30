@@ -454,18 +454,33 @@ _SIM_FIXME = [
             # hard-failure category, each verified to fail TODAY. They carry no
             # marker in their NAME -- the `fixme` TAG is what marks them -- so
             # they are excluded here and re-emitted with `tags = ["fixme"]`
-            # below. Only the seven whose
+            # below. Only the six whose
             # FORWARD direction (.prp -> verilog -> LEC) actually breaks are
             # listed; blocking_ff_state and negative_array_index
             # PROVE forward (their .prp is the hardware the Verilog means) and
             # stay in this glob as ordinary, live coverage -- only their
             # Verilog-reading legs are fixme.
+            # writer_undefined_mux was PROMOTED out of this exclude list
+            # (2026-07-29): it never belonged here. Its `.prp` was the writer's
+            # own BROKEN OUTPUT pasted in, reading an undeclared `_mux_1`, so the
+            # forward direction failed as a COMPILE ERROR (rc=6) -- not as an
+            # equivalence gap. The writer bug is fixed (see the pair's header),
+            # the `.prp` is the real hand-written source form of the shape, and
+            # all three directions prove; the parser half is pinned by
+            # tests/errors/undefined_read_if_expr_arm.prp.
+            # tolg_field_read_zero and writer_bad_char were PROMOTED out of this
+            # exclude list (2026-07-29), for the same reason writer_undefined_mux
+            # was: both `.prp` files held the writer's own BROKEN OUTPUT, so the
+            # forward direction failed as a TOKENIZE/COMPILE error rather than as
+            # an equivalence gap. Both writer bugs are fixed (see each pair's
+            # header -- the nested-mut hoist now carries the declare's type AND
+            # its comptime init; module names are backtick-escaped), the `.prp`
+            # files are the real source form of each shape, and all three
+            # directions prove. The writer half of both is pinned as a TEXT gate
+            # by //pass/prp_writer:prp_writer_decl_emit_test.sh.
             "tests/equiv/latch_rule_a.prp",
             "tests/equiv/latch_rule_b.prp",
             "tests/equiv/dual_async_set_reset.prp",
-            "tests/equiv/tolg_field_read_zero.prp",
-            "tests/equiv/writer_undefined_mux.prp",
-            "tests/equiv/writer_bad_char.prp",
             "tests/equiv/reg_clock_from_logic.prp",
             "tests/equiv/mem_write_during_reset.prp",
             "tests/equiv/async_mem_reset_demoted.prp",
@@ -585,9 +600,12 @@ sh_test(
         "latch_rule_a",          # self-timed gate: enable reads its own Q
         "latch_rule_b",          # exhaustive `case` mis-inferred as a latch (21 corpus files)
         "dual_async_set_reset",  # a flop needs TWO async rungs; the cell has one slot
-        "tolg_field_read_zero",  # prp_writer drops an array's type AND contents
-        "writer_undefined_mux",  # prp_writer reads a `_mux_N` it never declares
-        "writer_bad_char",       # prp_writer does not escape MODULE names
+        # The three pure prp_writer trackers were all PROMOTED out (2026-07-29) --
+        # writer_undefined_mux (undeclared `_mux_N`), tolg_field_read_zero (the
+        # nested-mut hoist dropped an array's type AND its `initial` contents) and
+        # writer_bad_char (module names were not backtick-escaped). Each proves in
+        # all three directions now; the writer half of the last two is pinned as a
+        # TEXT gate by //pass/prp_writer:prp_writer_decl_emit_test.sh.
         "reg_clock_from_logic",  # `clk ^ inv` clock rejected by tolg's whitelist
         # LEC-REFUTED categories (these COMPILE clean -- the miscompile is silent):
         "mem_write_during_reset",   # memory write not gated by the async reset
@@ -640,14 +658,15 @@ _V2PRP_FIXME = [
     # the (correct) impl side refuted against it. The bug was upass.ssa dropping
     # the rename on a tuple_set store's operands — not a tolg store-din gap, as
     # this entry previously guessed. See the equiv note above.
-    # mem_ordering_none (2026-07-27): the golden encodes the mode's undefined
-    # read-during-write window as x, and the cvc5 BMC engine GROUNDS that x
-    # to a concrete value instead of treating it as either-way (witness:
-    # o1 ref=2 impl=0 on a we=1 collision) — so this direction refutes even
-    # though yosys lgcheck (-ignore_gold_x) proves the same pair. Flips green
-    # when the native encoder learns x-as-don't-care at outputs (the formal
-    # `?` half of the ordering ruling, lhdsuite array_problem.md).
-    "mem_ordering_none",
+    # mem_ordering_none was PROMOTED out of this list (2026-07-29): the formal
+    # `?` half of the ordering ruling landed. `ordering="none"` now drives a real
+    # per-(read,write) `undef` matrix on the Memory cell (graph/cell.cpp pid 15)
+    # instead of an all-zeros `fwd` that meant defined-OLD, so the REFERENCE side
+    # carries an X bit-plane over the collision window and the existing
+    # formal.lec.gold_x=ignore miter excludes it. (The old diagnosis here — "cvc5
+    # grounds the x" — was wrong: the golden's `2'bxx` is on the IMPL side, and
+    # gold_x masks ref-x only, so nothing was ever excluded.) The reader's
+    # "no forwarding, but DEFINED" state moved to the new ordering="old".
     # latch_always_transparent (2026-07-29): an ALWAYS-transparent latch (every
     # path writes it, so tolg wires no `enable`) stores nothing — it is plain
     # combinational logic. cgen now emits it as such (that fix closed a real
@@ -663,15 +682,17 @@ _V2PRP_FIXME = [
     # ── corpus-mined category trackers (2026-07-29) ──────────────────────────
     # One minimal repro per remaining hard-failure category from the
     # ChiGen/ChiBench sweep; the root cause is written at the top of each pair.
-    # ALL NINE break this direction (verilog -> Pyrope, then LEC against the
-    # reference .prp): three fail the READ itself, six emit Pyrope that does not
-    # recompile. Verified failing at check-in.
+    # ALL NINE broke this direction (verilog -> Pyrope, then LEC against the
+    # reference .prp) at check-in: three fail the READ itself, six emit Pyrope
+    # that does not recompile. All THREE pure prp_writer trackers were PROMOTED
+    # out (2026-07-29) -- the writer no longer drops the definition of a `_mux_N`
+    # whose consuming store an enclosing mux collapse already folded
+    # (writer_undefined_mux), no longer drops a hoisted nested `mut`'s type and
+    # comptime init (tolg_field_read_zero), and backtick-escapes module names
+    # (writer_bad_char). All three re-parse and this direction proves for each.
     "latch_rule_a",
     "latch_rule_b",
     "dual_async_set_reset",
-    "tolg_field_read_zero",
-    "writer_undefined_mux",
-    "writer_bad_char",
     "reg_clock_from_logic",
     "negative_array_index",
     "blocking_ff_state",
@@ -732,9 +753,15 @@ _V2PRP_FIXME = [
 # io_bundle_selfref, packed_assign), 4 are real round-trip miscompiles tracked
 # below, 2 cannot be compared by any available reference reader (excluded).
 _V2V_FIXME = [
-    # Dynamic bit-range round trip miscompiles: z reads 0 where the golden
-    # keeps bits (witness: a=0x100 base=7 len=7 -> gold z=2, gate z=0).
-    "bitrange_dyn",
+    # bitrange_dyn was PROMOTED out of this list (2026-07-29). It tracked "z
+    # reads 0 where the golden keeps bits (witness a=0x100 base=7 len=7 ->
+    # gold z=2, gate z=0)", and the cause was NOT the range lowering: LiveHD's
+    # IR was right (the shift-amount pin carries bits:5). cgen folded that
+    # amount into the shift as text, and Verilog SELF-determines a shift's
+    # amount operand, so the inlined `(len_u + 1)` evaluated at 3 bits and
+    # wrapped 8 to 0. Cgen_verilog::shift_amount_expr now pads it. The new
+    # bitrange_dyn_narrow pair gates the same hole on the NATIVE `#[lo..=hi]`
+    # path, which bitrange_dyn's own widths happened to hide.
     # tup_in_port / tuple_in_port were PROMOTED out of this list (2026-07-29):
     # they tracked the DIRECT slang -> lg -> cgen path leaving `res` UNDRIVEN
     # (x) where the golden drives a value. Routing this harness through Pyrope
@@ -750,11 +777,17 @@ _V2V_FIXME = [
     # writer_bad_char) used to PASS here and were deliberately left
     # untagged, because this direction was the DIRECT slang -> lg -> cgen path
     # and never ran the writer. v2v_test.py now routes through Pyrope
-    # (v -> prp -> v), so the writer IS exercised and all three refute --
-    # exactly the point of the change. Each pair's header states the root cause.
-    "tolg_field_read_zero",
-    "writer_undefined_mux",
-    "writer_bad_char",
+    # (v -> prp -> v), so the writer IS exercised and all three refuted --
+    # exactly the point of the change, and all three are FIXED and PROMOTED out
+    # (2026-07-29). writer_undefined_mux: the undeclared `_mux_N` read is fixed
+    # (analyze_expr_inlines declines the inline when the consuming store is
+    # already folded). tolg_field_read_zero: the nested-mut hoist rebuilt the
+    # declaration from the NAME alone, so a `mut mem:[2]u4 = (1, 2)` declared
+    # inside an `if` came back as `mut mem = 0` -- type and contents both gone.
+    # writer_bad_char: module names now go through the same backtick escaper
+    # signal names always did. Each pair's header states the root cause; the
+    # writer half of the last two is pinned as a TEXT gate by
+    # //pass/prp_writer:prp_writer_decl_emit_test.sh.
     "latch_rule_a",
     "latch_rule_b",
     "dual_async_set_reset",

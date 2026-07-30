@@ -293,6 +293,10 @@ struct Memory_info {
   int64_t                       type       = 0;
   int64_t                       fwd        = 0;
   int64_t                       posclk     = 1;
+  // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision
+  // window undefined? Kept as a bool, not the matrix — the emitter refuses the
+  // whole memory on the first set bit, and a wide matrix does not fit an i64.
+  bool                          undef      = false;
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
@@ -540,8 +544,8 @@ int64_t const_pin_int(const Ctx& ctx, const Node_pin& pin, const Node& owner, st
 std::string memory_policy_summary(const Memory_info& mi) {
   std::ostringstream oss;
   oss << "memory node n_" << mi.nid << " bits=" << mi.bits << " size=" << mi.size << " addr_width=" << mi.addr_width
-      << " type=" << mi.type << " fwd=" << mi.fwd << " posclk=" << mi.posclk << " wensize=" << mi.wensize
-      << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
+      << " type=" << mi.type << " fwd=" << mi.fwd << " undef=" << (mi.undef ? 1 : 0) << " posclk=" << mi.posclk
+      << " wensize=" << mi.wensize << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
   for (const auto& p : mi.ports) {
     oss << " port" << p.port_id << "{" << (p.rdport ? "rd" : "wr") << ",addr=" << (p.addr.is_invalid() ? "missing" : "ok")
         << ",enable=" << (p.enable.is_invalid() ? "missing" : "ok") << ",din=" << (p.din.is_invalid() ? "missing" : "ok")
@@ -557,8 +561,14 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
 
   for (const auto& e : inp_edges_ordered(node)) {
     const auto raw_pid = static_cast<size_t>(e.sink.get_port_id());
-    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % 11));
-    const auto port_id = raw_pid / 11;
+    // Memory sink pids are laid out in blocks of Ntype::Memory_port_stride
+    // (graph/cell.hpp). This used to hardcode 11, which both truncated the
+    // cell-global pins (`init`/`update`/`reset`/`undef` all live at pid >= 11)
+    // and fabricated phantom ports for them (e.g. `undef` at pid 15 decoded as
+    // port 1's `enable`).
+    constexpr size_t mem_stride = static_cast<size_t>(Ntype::Memory_port_stride);
+    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
+    const auto port_id = raw_pid / mem_stride;
     if (mi.ports.size() <= port_id) {
       mi.ports.resize(port_id + 1);
     }
@@ -595,6 +605,20 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
         if (fv.is_just_i64()) {
           mi.fwd = fv.to_just_i64();
         }
+      }
+    } else if (pname == "undef") {
+      // ordering="none": the read-during-write window is UNDEFINED. This
+      // emitter's memory model is a plain committed `mem_read`, which pins ONE
+      // concrete value there — so a certificate about such a memory asserts
+      // behavior the emitted RTL (x on collision) does not have. Refuse it
+      // below rather than export a proof of a different design.
+      //
+      // Tested with is_known_false() rather than to_just_i64() so a matrix
+      // wider than the 62-bit i64 window still registers as set, and a
+      // non-const driver on this comptime pin refuses instead of guessing.
+      mi.undef = true;
+      if (pin_is_const(e.driver)) {
+        mi.undef = !pin_const_value(e.driver).is_known_false();
       }
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int(ctx, e.driver, node, pname);
@@ -662,6 +686,13 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
     fatal(ctx,
           memory_policy_summary(mi)
               + ". pass.isabelle memory v1 supports async/array memories only; sync-read memories need explicit read-data state.");
+  }
+  if (mi.undef) {
+    fatal(ctx,
+          memory_policy_summary(mi)
+              + ". pass.isabelle memory v1 cannot model ordering=\"none\" (the `undef` matrix): its `mem_read` returns the "
+                "committed entry, so the certificate would assert a defined value in a window the emitted RTL leaves x. "
+                "Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
   }
 
   return mi;

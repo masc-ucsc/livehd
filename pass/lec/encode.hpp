@@ -76,7 +76,13 @@ struct Encoded {
   // matching a front-end that models the same sync read as a comb array feeding an
   // external flop. type==0 (async) and type==2 (comb) reads stay latency-0 and do
   // NOT appear here (they tie their dout within the cycle via `equalities`).
-  Io_name_map<cvc5::Term> next_read;  // "<key>:rd<N>" -> next-state read value
+  //
+  // Carried as a Val (not a bare Term) so an ordering="none" read port's X
+  // bit-plane threads across the cycle boundary with its value — exactly how
+  // the flop state map does it. A bare Term had no plane slot, so the encoder
+  // had to skip the plane for sync reads entirely and REFUTED a legitimate
+  // forwarding implementation inside a window the reference left undefined.
+  Io_name_map<Val> next_read;  // "<key>:rd<N>" -> next-state read value (+ X plane)
 
   // Per-port memory obligations (lec.cones). The next-state array is a chain
   //   a[k+1] = store(a[k], addr[k], (~wmask[k] & select(a[k],addr[k])) | (wmask[k] & din[k]))
@@ -337,12 +343,13 @@ public:
   // reuse that array (this is how corresponding memories collapse across two
   // designs); memories not present get a fresh array `mkConst`.
   // `shared_reads` (optional): a map from "<mem_state_key>:rd<N>" to an already-
-  // built BV term for a type==1 (sync) read port's CURRENT registered dout. Read
-  // ports whose key is present reuse that term (the sync-read latency-1 state cut,
-  // threaded across cycles like shared_mems); absent keys get a fresh symbol.
+  // built Val for a type==1 (sync) read port's CURRENT registered dout — its
+  // value AND its X bit-plane. Read ports whose key is present reuse both (the
+  // sync-read latency-1 state cut, threaded across cycles like shared_mems);
+  // absent keys get a fresh symbol and no plane.
   Encoded encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs = nullptr,
                  std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr,
-                 const Io_name_map<cvc5::Term>* shared_reads = nullptr);
+                 const Io_name_map<Val>* shared_reads = nullptr);
 
   // lec.gold_x=ignore: while true, constants with unknown ('?') bits source an
   // undef bit-plane on every Val (see Val::undef) instead of being silently

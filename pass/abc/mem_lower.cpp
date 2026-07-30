@@ -22,7 +22,7 @@ namespace {
 // raw_pid = port*16 + field. Field offsets within a block:
 constexpr int kMemStride = 16;
 enum Mem_off { kAddr = 0, kBits = 1, kClk = 2, kDin = 3, kEnable = 4, kFwd = 5, kPosclk = 6, kType = 7, kWensize = 8,
-               kSize = 9, kRdport = 10, kInit = 11 };  // 12/13/14 = whole-array update/enable/reset (unsupported here)
+               kSize = 9, kRdport = 10, kInit = 11, kUndef = 15 };  // 12/13/14 = whole-array update/enable/reset (unsupported here)
 
 // A one-hot mask constant with only bit `b` set (MSB-first binary string).
 spool_ptr<Dlop> bit_mask(int b) {
@@ -122,7 +122,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   int             bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
   spool_ptr<Dlop> fwd;  // per-(read,write) matrix; arbitrary precision
   hhds::Pin_class init_drv;
-  bool            whole_array = false;
+  bool            whole_array   = false;
+  bool            undef_refined = false;  // ordering="none" matrix dropped by the bit-blast
   std::map<int, Port> ports;
   for (auto e : mem.inp_edges()) {
     int  raw  = static_cast<int>(e.sink.get_port_id());
@@ -146,6 +147,20 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
       case kWensize: wensize = const_i(drv, wensize); break;
       case kSize: size = const_i(drv, size); break;
       case kInit: init_drv = drv; break;
+      case kUndef:
+        // ordering="none" (undefined read-during-write). Bit-blasting cannot
+        // carry an x, so the netlist REFINES it to the committed value -- which
+        // is what dropping the matrix here already does. Sound in the direction
+        // lec runs: the abc netlist is the IMPL and the unmapped design the REF,
+        // and every refinement of a ref-side don't-care proves. (Falling through
+        // to `default` would set whole_array and refuse to bit-blast the memory
+        // at all.) Reported below rather than dropped silently: the choice is
+        // only sound in ONE lec direction, and it makes the emitted RTL differ
+        // (x vs. the committed value) depending on whether abc ran.
+        if (gu::is_const_pin(drv) && !gu::hydrate_const(drv).is_known_false()) {
+          undef_refined = true;
+        }
+        break;
       default: whole_array = true; break;  // update/update_enable/reset bus
     }
   }
@@ -188,6 +203,19 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   // read port r forwards write port w. Dlop::bit_test is arbitrary precision,
   // so wide (many-port) shapes do not truncate.
   auto fwd_bit = [&](int r, int w) -> int { return (fwd && fwd->bit_test(r * n_wr + w)) ? 1 : 0; };
+
+  // Past every bail(): this memory IS being bit-blasted, so an ordering="none"
+  // matrix is about to be refined away. Say so once, here, rather than have the
+  // netlist quietly disagree with the un-mapped design's emitted RTL.
+  if (undef_refined) {
+    livehd::diag::warn("pass.abc", "memory-undef-refined", "unsupported")
+        .msg("pass.abc memory=true: memory in '{}' declares ordering=\"none\" (undefined read-during-write), but a "
+             "bit-blasted netlist cannot carry an x — the collision window is REFINED to the committed value. The "
+             "emitted RTL therefore differs from the un-mapped design (x there), and lec is only sound with this "
+             "netlist as the IMPL side. Set pass.abc memory=false to keep it a native memory instance",
+             std::string{g.get_name()})
+        .emit();
+  }
 
   int32_t color     = gu::has_color(mem) ? gu::color_of(mem) : 0;
   bool    has_color = gu::has_color(mem);

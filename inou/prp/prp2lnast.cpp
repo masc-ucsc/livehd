@@ -4186,9 +4186,16 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
   }
 
+  // canonical_escaped_ident like every other ident route: a module whose name
+  // collides with a Pyrope keyword is WRITTEN back escaped (`` `pipe` ``, see
+  // prp_writer's quote_module_path), and the backticks are lexical armor, not
+  // part of the name. Reading them into the func_def ref verbatim produced a
+  // ref text `` `pipe` `` that pass.lnastfmt rejects ("a backtick-escaped
+  // pure-alnum name means the producer didn't normalize it"), so the writer's
+  // own output would not round-trip.
   Lnast_node lambda_ref = !hoist_name.empty()          ? Lnast_node::create_ref(hoist_name)
                           : ts_node_is_null(name_node) ? builder.mint_tmp_ref()
-                                                       : Lnast_node::create_ref(get_text(name_node));
+                                                       : Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(name_node))));
 
   auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   lnast->add_child(fd_idx, lambda_ref);
@@ -6536,7 +6543,8 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       "enable",
       "negreset",
       "posclk",
-      // Memory same-cycle read/write ordering: "none"|"fwd"|"program"
+      // Memory same-cycle read/write ordering:
+      // "program"|"fwd"|"old"|"none"
       // (upass.tolg validates the VALUE; this list gates the NAME).
       "ordering",
       // Latch-facing spelling of `posclk` (2f-latch M2): on a Latch that pin is

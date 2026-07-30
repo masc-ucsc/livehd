@@ -16,7 +16,8 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_multiclock_1rd_1wr
-  #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1)
+  #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1,
+    parameter [255:0] UNDEF = 0)
     (
       // RD PORT 0
       input [`log2(SIZE)-1:0]  rd_addr_0
@@ -51,6 +52,10 @@ end
 //forwards to read port k iff FWD bit (k*N_WR + j) is set). LATENCY_0==1 flops the resolved value ONCE at the
 //output (exactly one edge, same contract as the single-clock wrappers);
 //==0 is fully asynchronous.
+//The parallel UNDEF matrix (same bit layout) marks a collision UNDEFINED
+//instead: read port k returns x when write port j collides and UNDEF bit
+//(k*N_WR + j) is set. FWD and UNDEF are mutually exclusive per pair; both
+//clear = the DEFINED committed value (Pyrope ordering="old" vs "none").
 reg [BITS-1:0]        d0_mem;
 reg [BITS-1:0]        d0_fwd;
 
@@ -66,6 +71,8 @@ generate
   for(fwd_j0=0;fwd_j0<WENSIZE;fwd_j0=fwd_j0+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
       d0_fwd[fwd_j0*MASKSIZE +: MASKSIZE] =
+        (((UNDEF >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
         wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
         d0_mem[fwd_j0*MASKSIZE +: MASKSIZE];

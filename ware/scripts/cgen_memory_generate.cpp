@@ -2,6 +2,24 @@
  * Script written for use with MASC LiveHD/Pyrope
  * Given a number of read ports and write ports, automatically generates
  * Verilog memory module with forwarding/latency/masking parameters.
+ *
+ * STALE -- DO NOT RUN. This has drifted far from the shipped
+ * ware/rtl/cgen_memory_*.v and running it OVERWRITES them with semantically
+ * different modules: it names the clock `clock` (not `clk`), treats FWD as a
+ * scalar boolean instead of the per-(read,write) MATRIX, has no INIT/INIT_EN,
+ * no UNDEF collision matrix, no multiclock variant, and resolves a
+ * same-address multi-write in the OPPOSITE priority order. No BUILD rule
+ * references it.
+ *
+ * The two live generators are:
+ *   ware/rtl/cgen_memory_*.v            -- hand-maintained, shipped, `include`d
+ *                                          by cgen output and read back by
+ *                                          slang/yosys/iverilog
+ *   inou/cgen/cgen_verilog.cpp
+ *     Cgen_verilog::gen_mem_wrapper()   -- emits a matching module inline for
+ *                                          any (R,W,clock) shape ware/rtl does
+ *                                          not ship
+ * Keep those two in lockstep; this file is kept only for history.
  */
 
 #include <stdio.h>

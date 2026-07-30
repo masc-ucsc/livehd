@@ -5,14 +5,29 @@
 :pyrope_top: tolg_field_read_zero
 */
 //
-// FIXME tracker -- prp_writer DROPS an array's type and contents.
-// The emitted Pyrope below says `mut mem = 0`: both the `[2]u4` array type and the
-// `initial` block's element values are gone. tolg then meets the runtime index
-// `mem[sel]` on a base that resolved to the scalar constant 0 and aborts with
+// FIXED 2026-07-29 -- prp_writer DROPPED an array's type and contents.
+// The emitted Pyrope said `mut mem = 0`: both the `[2]u4` array type and the
+// `initial` block's element values were gone. tolg then met the runtime index
+// `mem[sel]` on a base that resolved to the scalar constant 0 and aborted with
 // "field/index read of '0' could not be resolved". 4 corpus files.
-// FIX is in the writer: emit the array declaration (`mut mem:[2]u4 = (1, 2)`).
+//
+// The slang reader was NEVER at fault -- it emits the complete
+// `declare(mem, comp_type_array(u4,[2]), mut, tuple_add(1,2))`, contents and all,
+// and that survives every upass intact. The loss was the writer's NESTED-MUT
+// HOIST: `mem`'s only use is inside `if (en)`, so the reader declares it there,
+// and a nested `mut` declare is rewritten as a bare `mut X = 0` at the function
+// top with its original declare deleted (suppress_decl_). The hoist recorded
+// only the NAME, so both the type child and the init child died with it.
+// It now carries both -- and they had to land TOGETHER: restoring just the type
+// would have swapped a loud tolg error for a silent wrong answer (mem reading
+// 0,0 where the golden reads 1,2). The relocated initializer is gated on
+// is_comptime_init, since moving a value-dependent init above its definition
+// would read an undefined name.
+//
+// Not array-specific and not slang-specific: a nested `mut t:u8 = 7` lost its
+// width the same way, in Pyrope-source input too.
 pub comb tolg_field_read_zero::[timecheck=false](sel:u1, en:u1) -> (out:u4) {
-  mut mem = 0
+  mut mem:[2]u4 = (1, 2)
   out = 0
   if en != 0 {
     out = mem[sel]

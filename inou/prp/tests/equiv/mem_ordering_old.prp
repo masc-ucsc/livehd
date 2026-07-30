@@ -1,0 +1,28 @@
+/*
+:name: mem_ordering_old
+:type: equiv
+:verilog_top: mem_ordering_old
+:pyrope_top: mem_ordering_old
+*/
+// `ordering="old"` showcase (lhdsuite array_problem.md; the fourth value, added
+// 2026-07-29 with the `undef` matrix). Nothing forwards AND the colliding read
+// is the DEFINED committed value — the state yosys $mem_v2 spells "neither
+// RD_TRANSPARENCY_MASK nor RD_COLLISION_X_MASK", and the one a single `fwd` bit
+// could not express: a zero `fwd` row used to mean both "defined old" and
+// "undefined", so `ordering="none"` was silently the same hardware as this.
+//
+// This is the mode every Verilog reader emits, because a nonblocking write is
+// never visible to a same-timestep read. It is NOT the `ordering="program"`
+// default: o4 is textually AFTER the write, so program order would forward it.
+// The golden below is exactly the Verilog the slang reader consumes, so this
+// pair is also the alarm for the reader's own lowering — if `old` ever mapped
+// back onto `none`, o1/o4 would become don't-cares in the collision window and
+// the mem_ordering_none pair would stop being the only place x can appear.
+pub mod mem_ordering_old(clk:u1, a1:u2, we:u1, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
+  reg mem:[4]u2:[ordering="old"] = 0
+  o1 = mem[a1]
+  if we != 0 {
+    mem[a2] = d2
+  }
+  o4 = mem[a4]
+}

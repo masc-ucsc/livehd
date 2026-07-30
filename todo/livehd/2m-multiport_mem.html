@@ -70,8 +70,11 @@ lhd compile --reader slang --top data_mem_8x4 --recipe O1 --emit-dir verilog:imp
   <code>addr</code>(0, ×n_ports), <code>bits</code>(1), <code>clock_pin</code>(2, ×1 or n_ports),
   <code>din</code>(3), <code>enable</code>(4), <code>fwd</code>(5), <code>posclk</code>(6),
   <code>type</code>(7; 0 async / 1 sync / 2 array), <code>wensize</code>(8 = #write-enable bits),
-  <code>size</code>(9), <code>rdport</code>(10), <code>init</code>(11); port stride
-  <code>kMemPortStride = 12</code>. Per-port pins live at <code>port_n*12 + offset</code>.</li>
+  <code>size</code>(9), <code>rdport</code>(10), <code>init</code>(11),
+  <code>update</code>(12), <code>update_enable</code>(13), <code>reset</code>(14),
+  <code>undef</code>(15 = the per-(read,write) UNDEFINED-on-collision matrix, same layout
+  as <code>fwd</code>); port stride <code>Ntype::Memory_port_stride = 16</code>. Per-port pins
+  live at <code>port_n*16 + offset</code>.</li>
 <li><strong>How the reference does it:</strong> <code>--reader yosys-slang</code> compiles
   <code>data_mem_8x4</code> fine — yosys infers the multiport/multiclock <code>$mem_v2</code> directly,
   so it is the LEC golden. The yosys-side memory construction is in

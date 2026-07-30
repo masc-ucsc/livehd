@@ -1,0 +1,30 @@
+/*
+:name: bitrange_dyn_narrow
+:type: equiv
+:verilog_top: bitrange_dyn_narrow.rsel_n
+:pyrope_top: rsel_n
+*/
+
+// Runtime contiguous bit-range select (`a#[lo ..= hi]`, the same NATIVE form
+// bitrange_dyn covers) but with a NARROW low endpoint, which is what makes this
+// pair distinct coverage rather than a duplicate.
+//
+// tolg's lower_dynamic_range_select emits `(a>>lo) & ((1<<(hi-lo+1))-1)`, so the
+// shift AMOUNT here is `1 + base + len - base`. Verilog SELF-determines a
+// shift's amount operand -- it is the one binary operand that does NOT inherit
+// the expression's context width -- so an amount cgen folds inline is evaluated
+// at its own natural width. With `base:u1` that natural width is only
+// max(2,1,3,1) = 3 bits while the real range is 1..8 (LiveHD infers 6), so
+// `len==7` wrapped 8 to 0: the `(1<<n)-1` mask came out 0 and `z` read 0 for
+// every base (74 of 640 vectors wrong, iverilog-measured) until cgen started
+// landing a shift amount in its own DECLARED variable (the shift-amount pass at
+// the end of Cgen_verilog::create_locals) instead of folding it into the shift
+// text -- a declaration carries the inferred width AND the signedness, which an
+// in-place `({N{1'b0}} | ...)` pad cannot.
+//
+// bitrange_dyn does NOT catch this: with `base:u4` the same amount happens to be
+// 4 bits wide, which already holds 8. The `#[base ..= (base+len)]` shape keeps
+// `hi >= lo` for every input, so there is no descending-range corner case.
+pub comb rsel_n(a:u16, base:u1, len:u3) -> (z:u16) {
+  z = a#[base ..= (base+len)]
+}

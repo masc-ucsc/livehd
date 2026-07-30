@@ -200,12 +200,22 @@ void Pass_lec::setup() {
                        "auto");
   m.add_label_optional("conelimit", "per-cone abc SAT backtrack budget; 0 = abc's own default", "10000");
   m.add_label_optional("strict",
-                       "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard "
-                       "failure; default false (REFUTED fails, witness-free UNKNOWN is a deferred warning)",
-                       "false");
+                       "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard failure; "
+                       "default TRUE -- an inconclusive run proved nothing, so exiting 0 would make it "
+                       "indistinguishable from a real proof. Set false to downgrade it to a warning that exits "
+                       "cleanly (REFUTED still fails either way)",
+                       "true");
   m.add_label_optional("allow_oversize",
                        "skip the design-size gate; default false (a design over ~1M nodes is refused as "
                        "UNKNOWN because encoding it as one unit may exhaust host memory)",
+                       "false");
+  m.add_label_optional("stats",
+                       "print a cvc5 solve-insight report: problem size (atoms, input atoms, clause literals), "
+                       "conflicts / learned clauses, decisions, propagations, restarts, theory lemmas, resource "
+                       "units and time — aggregated over the whole run (every cvc5 solver it spawned, every "
+                       "hierarchical def). `--stats` is the CLI sugar for the same knob. WARNING: it also "
+                       "registers a cvc5 plugin (the only way to see learned-clause CONTENT) that makes the "
+                       "solve ~8x SLOWER, so this is for DIAGNOSIS, never for timing a run",
                        "false");
   register_pass(m);
 }
@@ -232,11 +242,12 @@ void Pass_lec::lec(Eprp_var& var) {
   o.decompose    = std::string{var.get("decompose", "auto")};
   o.cones        = std::string{var.get("cones", "auto")};
   o.conelimit    = str_tools::to_i(var.get("conelimit", "10000"));
-  o.strict       = parse_bool(var.get("strict", "false"));
+  o.strict       = parse_bool(var.get("strict", "true"));
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions   = str_tools::to_i(var.get("partitions", "4"));
   o.split        = std::string{var.get("split", "auto")};
   o.allow_oversize = parse_bool(var.get("allow_oversize", "false"));
+  o.stats          = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
   // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;
@@ -278,6 +289,14 @@ void Pass_lec::lec(Eprp_var& var) {
   auto mod  = std::string{impl->get_name()};
 
   auto r = lec::prove_equal(ref.get(), impl.get(), o);
+
+  // BEFORE the switch: the Refuted/Unknown arms below are .fatal(), so a report
+  // printed after them would be lost in exactly the two cases where knowing how hard
+  // the solver worked matters most. Without this, `pass.lec stats:true` used as a
+  // direct pipe step would pay the ~8x plugin cost and print nothing at all.
+  if (o.stats) {
+    livehd::lec::report_cvc5_stats("lec", r.cvc5);
+  }
 
   switch (r.verdict) {
     case lec::Verdict::Proven : std::print("lec: '{}' PROVEN equivalent ({})\n", mod, r.detail); break;

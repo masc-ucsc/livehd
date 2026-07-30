@@ -1,0 +1,24 @@
+/*
+:name: undefined_read_if_expr_arm
+:type: error
+:error: read of undefined variable '_mux_1'
+*/
+
+// An if-EXPRESSION arm is an ordinary read position: a name that is never
+// declared is a compile error there too, exactly as in statement position
+// (04-variables.md — a variable is visible from its declaration to the end of
+// its scope; an undefined read does NOT read as nil).
+//
+// This is the shape upass/prp_writer used to EMIT while lowering a Verilog
+// ternary whose merge temp was consumed by an enclosing mux collapse: the
+// `_mux_1` read survived but its definition statements were dropped, so the
+// generated Pyrope did not re-parse (inou/prp/tests/equiv/writer_undefined_mux
+// tracked it). The writer fix keeps the definition; this test pins the other
+// half of the contract — the parser must never accept such a read, so a
+// regressed writer fails loudly instead of silently emitting a dangling name.
+pub comb undefined_read_if_expr_arm::[timecheck=false](s0:u1, s1:u1, cond:u1) -> (out:u2) {
+  out = 0
+  if s0 != 0 {
+    out = if cond != 0 { 3 } else { _mux_1 } // locate_error_here
+  }
+}

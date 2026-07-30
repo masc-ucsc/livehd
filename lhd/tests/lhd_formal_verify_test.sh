@@ -14,8 +14,9 @@
 #     assume_nocheck_formal is accepted as a free UNCHECKED constraint (warned +
 #     disclosed); assume_nocheck_synth is invisible to verify;
 #   * per-obligation timeout isolation: a hard obligation goes UNKNOWN on its
-#     own budget while its easy sibling still proves; UNKNOWN is a warning
-#     (exit 0) unless formal.strict=true;
+#     own budget while its easy sibling still proves; UNKNOWN FAILS the run
+#     (formal.strict defaults TRUE) and is only a warning (exit 0) when the user
+#     explicitly opts out with --set formal.strict=false;
 #   * knob namespaces: formal.* and the legacy lec.* spelling both work;
 #   * `lhd formal lec` is the lec command (behavior-preserving alias);
 #   * a design with no obligations is UNKNOWN (never a vacuous PASS).
@@ -153,7 +154,22 @@ grep -q 'under 1 input assume(s)' "$OUT" || fail "the headline must disclose the
 # ---------------------------------------------------------------------------
 # 3. Per-obligation timeout isolation: a 32-bit multiply identity blows the 2s
 #    budget and goes UNKNOWN at its first checked cycle; the easy sibling still
-#    proves. UNKNOWN is a loud warning with exit 0; formal.strict makes it fail.
+#    proves.
+#
+#    `distrib` is DELIBERATELY undecidable-in-practice, not merely under-budgeted:
+#    it is a bit-vector multiplier-distributivity miter, (a*b)*((a*c)+1) ==
+#    a*a*b*c + a*b, which is TRUE mod 2^32 (so no counterexample exists) but whose
+#    bit-blasted proof is exponential in the operand width. Measured: at u4 it
+#    PROVES inductively in 0.7s; at u8 it is already UNKNOWN against a 120s
+#    per-query budget; at u32 it is still UNKNOWN at 120s (240s wall). Raising the
+#    budget does not move it — that is the point of the fixture.
+#
+#    SEVERITY (user ruling 2026-07-29, "an inconclusive should be a fail, user can
+#    ignore but not be the default option"): formal.strict defaults TRUE, so an
+#    UNKNOWN FAILS the run by default and the failure explains itself. The opt-out
+#    --set formal.strict=false restores the exit-0 warning. Both directions are
+#    pinned below; the per-obligation isolation (easy PROVEN / distrib UNKNOWN
+#    alone) must hold on BOTH, since it is orthogonal to the severity knob.
 # ---------------------------------------------------------------------------
 cat >"$W/hard.prp" <<'EOF'
 mod hard(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
@@ -166,14 +182,27 @@ mod hard(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
   }
 }
 EOF
+# 3a. DEFAULT (formal.strict is on): the UNKNOWN fails the run, and the failure
+#     says it could not DECIDE — it must never read as a refutation, and it must
+#     point at the budget knob so the user can retry or opt out.
 verify hard hard --top hard --set formal.bound=2 --set formal.timeout=2
-[ "$RC" -eq 0 ] || fail "UNKNOWN must be a warning, not a failure (got rc=$RC): $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "an UNKNOWN must FAIL by default (formal.strict defaults true) (got rc=0): $(cat "$OUT")"
+grep -q 'could not decide' "$OUT" || fail "the failure must say the run was UNDECIDED, not refuted: $(cat "$OUT")"
+grep -q '"class":"unsupported"' "$OUT" || fail "an undecided run must fail as 'unsupported', not as a proof failure: $(cat "$OUT")"
+grep -q 'raise --set formal.timeout' "$OUT" || fail "the failure must point at the budget knob so the user can retry: $(cat "$OUT")"
+grep -q 'REFUTED' "$OUT" && fail "an undecided run must not be reported as a refutation: $(cat "$OUT")"
+# Timeout isolation is orthogonal to the severity knob: it holds here too.
 grep -q "'easy'.*PROVEN" "$OUT" || fail "the easy sibling must still prove: $(cat "$OUT")"
 grep -q "'distrib'.*UNKNOWN (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE: $(cat "$OUT")"
-grep -q 'formal-inconclusive' "$OUT" || fail "UNKNOWN must emit the loud inconclusive warning: $(cat "$OUT")"
 
-verify hard hard_strict --top hard --set formal.bound=2 --set formal.timeout=2 --set formal.strict=true
-[ "$RC" -ne 0 ] || fail "formal.strict=true must turn UNKNOWN into a failure (got rc=0): $(cat "$OUT")"
+# 3b. The explicit opt-out restores the old exit-0 warning — and it must still be
+#     LOUD (the formal-inconclusive diagnostic), never a silent pass.
+verify hard hard_nostrict --top hard --set formal.bound=2 --set formal.timeout=2 --set formal.strict=false
+[ "$RC" -eq 0 ] || fail "--set formal.strict=false must accept an UNKNOWN as a warning (got rc=$RC): $(cat "$OUT")"
+grep -q 'formal-inconclusive' "$OUT" || fail "the opted-out UNKNOWN must still emit the loud inconclusive warning: $(cat "$OUT")"
+grep -q 'proves nothing and disproves nothing' "$OUT" || fail "the warning must say the run proved nothing: $(cat "$OUT")"
+grep -q "'easy'.*PROVEN" "$OUT" || fail "the easy sibling must still prove under the opt-out: $(cat "$OUT")"
+grep -q "'distrib'.*UNKNOWN (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE under the opt-out: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 4. No obligations: UNKNOWN with an explicit note — never a vacuous PASS.
@@ -674,8 +703,9 @@ grep -q "must NOT be provable" "$OUT" || fail "the refutation must name the asse
 #     `guard implies cond`, which is right but introduced a new silent failure:
 #     a guard that can NEVER hold proves trivially while checking nothing. Each
 #     obligation now carries `guarded` + `vacuous_guard` in formal_report.json,
-#     prints a VACUOUS continuation row, warns by default, and FAILS under
-#     formal.strict.
+#     prints a VACUOUS continuation row, and — since formal.strict defaults TRUE
+#     (user ruling 2026-07-29) — FAILS the run; --set formal.strict=false demotes
+#     it back to a loud warning.
 #
 #     10d is the load-bearing case: the measure must be a FREE frame, not the
 #     unrolled window. "Was the guard ever true in the cycles we checked?" is
@@ -697,7 +727,8 @@ EOF
 WDV="$W/wd_vacuity"
 mkdir -p "$WDV"
 verify vacuity vacuity --top vacuity --set formal.bound=4 --workdir "$WDV"
-[ "$RC" -eq 0 ] || fail "a vacuous obligation is a WARNING, not a failure, by default (rc=$RC): $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "a vacuous obligation FAILS by default (formal.strict defaults true) (rc=$RC): $(cat "$OUT")"
+grep -q "VACUOUS obligation" "$OUT" || fail "the default failure must name the vacuous obligations: $(cat "$OUT")"
 grep -q "obligation(s) VACUOUS (guard can never be true)" "$OUT" || fail "the run detail must count vacuous obligations: $(cat "$OUT")"
 grep -q "formal-vacuous-guard" "$OUT" || fail "a vacuous obligation must emit the formal-vacuous-guard warning: $(cat "$OUT")"
 grep -q "VACUOUS: its \`if\`/\`match\` guard can never be true" "$OUT" || fail "the obligation's own row must carry the vacuity note: $(cat "$OUT")"
@@ -718,12 +749,20 @@ assert live["guarded"] and not live["vacuous_guard"], live
 assert dead["verdict"] == "proven" and live["verdict"] == "proven", (dead, live)
 PYEOF
 
-# 10c. formal.strict promotes it to a failure (the existing "this outcome proves
-#      nothing" lever). It is deliberately NOT a hard error by default: a guard
-#      unreachable at THIS top can be reachable under another parent, and unlike
-#      a contradictory assume set the obligation is still genuinely true.
+# 10c. --set formal.strict=false demotes it back to a warning (exit 0) — the
+#      escape hatch, not the default. It exists because a guard unreachable at
+#      THIS top can be reachable under another parent, and unlike a contradictory
+#      assume set the obligation is still genuinely true. Demoted, it must stay
+#      LOUD: the diagnostic and the row note both survive the opt-out, so the
+#      knob buys a green exit code and nothing else.
+verify vacuity vacuity_nostrict --top vacuity --set formal.bound=4 --set formal.strict=false
+[ "$RC" -eq 0 ] || fail "--set formal.strict=false must demote a vacuous obligation to a warning (rc=$RC): $(cat "$OUT")"
+grep -q "formal-vacuous-guard" "$OUT" || fail "the opted-out vacuity must still emit its warning: $(cat "$OUT")"
+grep -q "VACUOUS: its \`if\`/\`match\` guard can never be true" "$OUT" || fail "the opted-out vacuity must still carry the row note: $(cat "$OUT")"
+grep -q "'dead guard'\": PROVEN" "$OUT" || fail "the opt-out must not change the verdict, only the exit code: $(cat "$OUT")"
+# Explicit strict=true is still accepted and agrees with the new default.
 verify vacuity vacuity_strict --top vacuity --set formal.bound=4 --set formal.strict=true
-[ "$RC" -ne 0 ] || fail "formal.strict must turn a vacuous obligation into a failure: $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "explicit formal.strict=true must keep a vacuous obligation a failure: $(cat "$OUT")"
 grep -q "VACUOUS obligation" "$OUT" || fail "the strict failure must name the vacuous obligations: $(cat "$OUT")"
 
 # 10d. BOUND- AND ENGINE-INDEPENDENCE (the reason the measure is a free frame).
@@ -766,9 +805,11 @@ PYEOF
 # 10e. The vacuity flag must cross the fork codec. The default (no --workdir) run
 #      above races strategies through serialize_verify; assert the dead-guard
 #      design still reports it there, not only on the --workdir path used in 10a.
+#      A lost flag now shows up twice over: the row note disappears AND the run
+#      goes green, since the default severity rides on the same bit.
 verify vacuity vacuity_fork --top vacuity --set formal.bound=4
-[ "$RC" -eq 0 ] || fail "the fork-path vacuity run must still pass: $(cat "$OUT")"
 grep -q "VACUOUS: its" "$OUT" || fail "vacuous_guard was LOST across the verify fork codec (serialize_verify/deserialize_verify): $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "the fork-path vacuity must also FAIL by default — a green exit means the flag did not survive the codec: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 11. Code-review fixes on the R1 / Phase-2 work (2026-07-26). Each case below
@@ -887,4 +928,4 @@ grep -q "block 'blk.bad'" "$OUT" \
 grep -q "contradictory assume set in the design" "$OUT" \
   && fail "the fork path blamed the DESIGN for a BLOCK's contradictory assumes: $(cat "$OUT")"
 
-echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"
+echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; inconclusive/vacuous FAIL by default with the formal.strict=false opt-out; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"

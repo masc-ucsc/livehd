@@ -420,6 +420,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The MEMORY half of the same machinery: `ordering="none"` (the Memory cell's
+# `undef` matrix) must leave a same-cycle read-during-write window undefined for
+# the miter, so BOTH the committed-value and the forwarding implementation of it
+# prove -- while a bug OUTSIDE that window still refutes.
+sh_test(
+    name = "lec_mem_undef_test",
+    size = "large",
+    srcs = ["lec_mem_undef_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for the slang reader lowering a scalar packed-struct variable as a
 # per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
 # whose '{...} write computes a field from reads of its OTHER fields (the
@@ -625,8 +636,12 @@ sh_test(
     srcs = ["mem_ordering_test.sh"],
     # _FLOW_DATA (lhd + the yosys lgcheck scripts) + the hermetic Liberty: the
     # abc write-priority case tech-maps and LECs, so it needs all three or it
-    # degrades to a "skip" and stops covering anything.
-    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    # degrades to a "skip" and stops covering anything. The shipped wrappers are
+    # read directly (the UNDEF-parameter skew check).
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//ware:cgen_memory_rtl",
+    ],
 )
 
 sh_test(

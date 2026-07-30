@@ -14,7 +14,7 @@
 // that plainly contains 0. An unsigned array escaped only because that
 // judgement tests r.min, never r.max.
 pub mod signed_memory_dyn_index::[timecheck=false](clk:u1, en:u1, sel:u2, d:s17) -> (o:s17@[]) {
-  reg q:[4]s17:[ordering="none"]
+  reg q:[4]s17:[ordering="old"]
   o = 0sb?
   if en != 0 {
     q[sel] = d#[0..=16]

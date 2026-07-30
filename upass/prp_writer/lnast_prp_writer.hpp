@@ -182,6 +182,10 @@ private:
   // the tree directly rather than through the shared cursor). Also handles
   // comp_type_array -> "[N]T".
   std::string render_type_at(Lnast_nid type_nid);
+  // A declare initializer built only from compile-time constants (`5`, `(1, 2)`)
+  // — the only kind the nested-mut hoist may RELOCATE to the function top.
+  bool        is_comptime_init(Lnast_nid n) const;
+  std::string render_comptime_init(Lnast_nid n);
 
   // Emits the `comb|mod NAME(in:T, …) -> (out:T, …)` header from the io node
   // (cursor-independent; reads the io subtree via direct tree accessors).

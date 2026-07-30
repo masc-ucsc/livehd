@@ -238,7 +238,20 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
         case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)
         case 14: return "reset";          // runtime  x 1 -- 1-bit reset condition (active high; tolg pre-inverts negreset)
-        // pid 15 reserved (keeps Memory_port_stride a power of two).
+        case 15: return "undef";      // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED matrix, bit-identical
+                                      // layout to `fwd`: bit (r*n_wr + w) set => read port r's data is UNDEFINED (x)
+                                      // when write port w collides (same address, enabled) in the same cycle. `fwd`
+                                      // and `undef` are MUTUALLY EXCLUSIVE per (r,w): fwd says "see the NEW data",
+                                      // undef says "see nothing definite", both clear says "see the COMMITTED data".
+                                      // That third state is why this pin exists -- a zero `fwd` row alone cannot tell
+                                      // "defined old" from "undefined", which is yosys $mem_v2's
+                                      // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built from the Pyrope
+                                      // `ordering` attr: "none" => every USER write column set (restore/reset ports
+                                      // never, exactly like `fwd`); "program"/"fwd"/"old" => all zeros.
+                                      // Consumers: cgen passes it as the wrapper's UNDEF parameter (x on collision);
+                                      // the cvc5 lec encoder turns it into a read-dout X bit-plane so the miter
+                                      // treats the window as don't-care; every bit-blasting consumer (pass.abc,
+                                      // cgen_sim) may REFINE it to any concrete value.
         default: return "invalid";
       }
       break;

@@ -16,7 +16,8 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_1rd_0wr
-  #(parameter BITS = 4, SIZE = 128, parameter [255:0] FWD = 1, parameter LATENCY_0 = 1, WENSIZE = 1)
+  #(parameter BITS = 4, SIZE = 128, parameter [255:0] FWD = 1, parameter LATENCY_0 = 1, WENSIZE = 1,
+    parameter [255:0] UNDEF = 0)
     (input clk
 
       // RD PORT 0
@@ -25,6 +26,8 @@ module cgen_memory_1rd_0wr
      ,output reg [BITS-1:0]    rd_dout_0
      );
 
+  // No write ports: the FWD / UNDEF collision matrices are declared for
+  // interface uniformity with the other cgen_memory_* wrappers and unused.
   (*ram_style = "block" *) reg [BITS-1:0] data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
 
   generate

@@ -2553,12 +2553,35 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           transp = Dlop::from_pyrope(val);
         }
       }
+      // RD_COLLISION_X_MASK is the OTHER half of yosys's three-state
+      // read-during-write model and shares RD_TRANSPARENCY_MASK's rd*WR_PORTS+wr
+      // layout, so it transfers verbatim into the Memory cell's `undef` matrix
+      // (graph/cell.cpp pid 15). Reading only the transparency half landed an
+      // "undefined collision" memory in LGraph as defined-OLD, and lec then
+      // REFUTED a forwarding implementation on a window the source RTL had
+      // explicitly left undefined.
+      spool_ptr<Dlop> collx;
+      if (cell->hasParam(ID::RD_COLLISION_X_MASK)) {
+        const RTLIL::Const& xv = cell->getParam(ID::RD_COLLISION_X_MASK);
+        if (!xv.is_fully_zero()) {
+          std::string val = "0ub";
+          for (char c : xv.as_string()) {  // MSB first
+            val += c == '1' ? '1' : '0';
+          }
+          collx = Dlop::from_pyrope(val);
+        }
+      }
       auto     rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
       auto     wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd")
           .connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));
+      // Driven only when non-zero, exactly like the cgen UNDEF parameter: every
+      // pre-existing graph stays byte-identical.
+      if (collx) {
+        setup_sink_by_name(exit_node, "undef").connect_driver(create_const(*g, *collx));
+      }
       setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(wr_clkp)));
       setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(rd_clke)));
       setup_sink_by_name(exit_node, "wensize").connect_driver(create_const(*g, *Dlop::create_integer(width)));

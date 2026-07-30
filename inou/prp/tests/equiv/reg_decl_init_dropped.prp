@@ -12,7 +12,7 @@
 // initial values, so this refutes. 3 corpus files (HLS-generated FIFOs, where the
 // `full_n` handshake bit is exactly this idiom).
 pub mod reg_decl_init_dropped::[timecheck=false](clk:u1, we:u1, a:u2, d:u4) -> (q:u4@[], full_n:u1@[]) {
-  reg mem:[4]u4:[ordering="none"]
+  reg mem:[4]u4:[ordering="old"]
   reg internal_full_n:u1
   full_n = 0ub?
   q = 0ub????

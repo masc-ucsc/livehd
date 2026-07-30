@@ -5,12 +5,20 @@
 :pyrope_top: s\m
 */
 //
-// FIXME tracker -- prp_writer does not ESCAPE module names.
-// Signal names go through the writer's backtick escaper; module names do not. A
-// Verilog escaped identifier (`\s\m`) is therefore emitted verbatim into the
-// Pyrope module header and file name, and `\` is not a legal Pyrope token, so the
-// generated file cannot even be TOKENIZED ("unexpected character in input").
-// Same family as the `mod` keyword collision seen elsewhere in the corpus.
-pub comb s\m::[timecheck=false](a:u2) -> (o:u2) {
+// FIXED 2026-07-29 -- prp_writer now ESCAPES module names.
+// Signal names went through the writer's backtick escaper; module names did not.
+// A Verilog escaped identifier (`\s\m`) was emitted verbatim into the Pyrope
+// module header, and `\` is not a legal Pyrope token, so the generated file could
+// not even be TOKENIZED ("unexpected character in input").  quote_module_path()
+// now backtick-quotes any `.`-component of a module name that is not a plain
+// Pyrope identifier, at all three places a module name reaches the text: this
+// header, the file-scope `const <name> = import(…)` binding, and the
+// `<name>::[name=<inst>](…)` call site.  A normal name is byte-identical to
+// before (the predicate accepts `[A-Za-z_][A-Za-z0-9_$]*` minus the reserved
+// words), so only escaped-id modules change.
+//
+// The emitted file is still named `s\m.prp` (the module name verbatim) -- that
+// is what `:verilog_top:` resolves and what both harnesses open, so it stays.
+pub comb `s\m`::[timecheck=false](a:u2) -> (o:u2) {
   o = (~a)#[0..=1]
 }

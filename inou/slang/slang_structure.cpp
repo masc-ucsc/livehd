@@ -1727,9 +1727,12 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     set_pending_loc(sym.location);
     emit_tuple_typedef(rec);
     // Verilog nonblocking memory reads see the committed contents, i.e. NO
-    // read forwards any write: ordering="none" (an all-zeros per-(read,write)
-    // matrix). The reader cannot use the ordering="program" default because it
-    // emits memory reads AFTER the writes in LNAST order, which program order
+    // read forwards any write AND the value is DEFINED: ordering="old" (an
+    // all-zeros `fwd` matrix and an all-zeros `undef` matrix). NOT
+    // ordering="none" — that now means the collision window is UNDEFINED (x),
+    // which would make every imported memory a formal don't-care. The reader
+    // cannot use the ordering="program" default either, because it emits
+    // memory reads AFTER the writes in LNAST order, which program order
     // would (correctly, for Pyrope source) forward. detuple does
     // not split attr_set, so emit the attr on each post-split `mem.field` name
     // directly (it lands before the per-field declares detuple synthesizes).
@@ -1738,7 +1741,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
         auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
         ln.add_child(aidx, Lnast_node::create_ref(absl::StrCat(name, ".", f.name)));
         ln.add_child(aidx, Lnast_node::create_const("ordering"));
-        ln.add_child(aidx, Lnast_node::create_const("\"none\""));
+        ln.add_child(aidx, Lnast_node::create_const("\"old\""));
       }
     }
     auto didx = builder_.add_child(Lnast_ntype::create_declare());
@@ -1768,7 +1771,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
     ln.add_child(aidx, Lnast_node::create_ref(name));
     ln.add_child(aidx, Lnast_node::create_const("ordering"));
-    ln.add_child(aidx, Lnast_node::create_const("\"none\""));
+    ln.add_child(aidx, Lnast_node::create_const("\"old\""));
   }
   auto didx = builder_.add_child(Lnast_ntype::create_declare());
   ln.add_child(didx, Lnast_node::create_ref(name));
@@ -1962,12 +1965,13 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
       auto  name = lname_of(sym);
       auto& ln   = *builder_.lnast;
       set_pending_loc(sym.location);
-      // Verilog nonblocking memory reads see old (committed) contents — fwd=0.
+      // Verilog nonblocking memory reads see old (committed) contents, and that
+      // value is DEFINED, not x: ordering="old" (fwd=0, undef=0).
       {
         auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
         ln.add_child(aidx, Lnast_node::create_ref(name));
         ln.add_child(aidx, Lnast_node::create_const("ordering"));
-        ln.add_child(aidx, Lnast_node::create_const("\"none\""));
+        ln.add_child(aidx, Lnast_node::create_const("\"old\""));
       }
       auto didx = builder_.add_child(Lnast_ntype::create_declare());
       ln.add_child(didx, Lnast_node::create_ref(name));

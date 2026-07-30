@@ -1215,6 +1215,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         int              mb     = mask.get_bits();
         int              pmb    = neg ? mb - 1 : mb;
         int              a_bits = gu::bits_of(a_drv);
+        if (a_bits == 0 && gu::is_const_pin(a_drv)) {
+          // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
+          // eff_width above — create_const stamps only the value, never a width).
+          // The zero-extend idiom Get_mask(a, -1) puts EVERY source position in
+          // the negative fill loop below, which is bounded by a_bits: left at 0
+          // it yields an empty `pos` and the final loop writes const0 into every
+          // output bit, silently replacing the literal with 0. Note abc_bit is
+          // never reached, so its unmaterialized-driver diagnostic cannot warn.
+          // Size the literal from its VALUE, exactly as eff_width does.
+          a_bits = std::max(1, static_cast<int>(gu::hydrate_const(a_drv).get_bits()));
+        }
         std::vector<int> pos;
         for (int k = 0; k < pmb; ++k) {
           bool sel = neg ? !mask.bit_test(k) : mask.bit_test(k);

@@ -1,10 +1,10 @@
-// FIXME tracker -- prp_writer emits a `_mux_N` it never DECLARES.
-// Look at the Pyrope below: `_mux_1` is read but never defined anywhere, so our own
-// parser rejects our own output ("read of undefined variable '_mux_1'"). The shape
-// is an expression mux (a ternary) whose result is then overwritten by a
-// conditional assignment nested in an outer conditional: the writer folds the pair
-// into one if-expression but keeps the ternary only BY REFERENCE.
-// A writer self-consistency bug -- generated Pyrope must always re-parse.
+// prp_writer regression golden -- it used to emit a `_mux_N` it never DECLARED.
+// The ternary below lowers to a merge temp whose single use (`out = _mux_1`) the
+// enclosing `if (cond)` mux collapse had ALREADY folded away, so inlining the
+// mux expression at that store dropped the temp's definition and left a bare
+// `_mux_1` read: generated Pyrope that our own parser rejects ("read of
+// undefined variable '_mux_1'"). A writer self-consistency bug -- generated
+// Pyrope must always re-parse. Root cause and fix: see the sibling .prp.
 module writer_undefined_mux (
   input        s0,
   input        s1,

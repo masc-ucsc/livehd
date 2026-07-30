@@ -270,6 +270,10 @@ namespace {
 // per-query formal.timeout already bounds each child's checkSat so it self-limits.
 
 void put_u32(std::string& b, uint32_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+// Native-endian POD i64, the same scheme the inlined elapsed_ms / solve_ms
+// memcpys already use (they predate this helper and are left as they are).
+void put_i64(std::string& b, int64_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+void put_u64(std::string& b, uint64_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
 void put_str(std::string& b, std::string_view s) {
   put_u32(b, static_cast<uint32_t>(s.size()));
   b.append(s.data(), s.size());
@@ -303,6 +307,57 @@ void put_trace(std::string& b, const Witness_trace& tr) {
   put_str(b, tr.root_ref);
   put_str(b, tr.root_impl);
   put_str(b, tr.root_src);
+}
+
+// ── Cvc5_stats codec (formal.stats) ─────────────────────────────────────────
+// Shared by BOTH result codecs, for the reason spelled out at serialize_result's
+// tail: the solve runs in a FORKED CHILD that _exit(0)s, so a field that is not
+// on the wire comes back all-zeros in the parent with no warning. The stats
+// struct is entirely produced inside those children, so ALL of it has to ride
+// here or `--stats` reports a wall of zeros on every forking path (auto
+// portfolio, case split, verify strategy race) while being correct only under
+// --workdir -- exactly the shape of the four bugs this file already documents.
+//
+// Layout: i32 solvers, every int64 scalar in DECLARATION ORDER (see
+// solve_stats.hpp), the deep_active byte, deep_clauses, then the four histograms
+// as u32 count + (key, value) pairs. clause_widths is keyed by uint64_t, the
+// other three by string.
+void put_cvc5_stats(std::string& b, const Cvc5_stats& st) {
+  put_u32(b, static_cast<uint32_t>(st.solvers));
+  put_i64(b, st.checks);
+  put_i64(b, st.atoms);
+  put_i64(b, st.input_atoms);
+  put_i64(b, st.clause_literals);
+  put_i64(b, st.conflicts);
+  put_i64(b, st.decisions);
+  put_i64(b, st.propagations);
+  put_i64(b, st.restarts);
+  put_i64(b, st.learnt_literals);
+  put_i64(b, st.tot_literals);
+  put_i64(b, st.max_literals);
+  put_i64(b, st.theory_lemmas);
+  put_i64(b, st.theory_conflicts);
+  put_i64(b, st.resource_units);
+  put_i64(b, st.total_ms);
+  put_i64(b, st.cnf_ms);
+  put_i64(b, st.theory_check_ms);
+  b.push_back(static_cast<char>(st.deep_active ? 1 : 0));
+  put_i64(b, st.deep_clauses);
+  auto put_smap = [&b](const std::map<std::string, uint64_t>& m) {
+    put_u32(b, static_cast<uint32_t>(m.size()));
+    for (const auto& [k, v] : m) {
+      put_str(b, k);
+      put_u64(b, v);
+    }
+  };
+  put_smap(st.lemma_kinds);
+  put_smap(st.resource_steps);
+  put_u32(b, static_cast<uint32_t>(st.clause_widths.size()));
+  for (const auto& [k, v] : st.clause_widths) {
+    put_u64(b, k);
+    put_u64(b, v);
+  }
+  put_smap(st.deep_lemma_kinds);
 }
 
 // Serialize a Query_result over the worker pipe (same binary on both ends, so
@@ -349,10 +404,31 @@ std::string serialize_result(const Query_result& r) {
   // refusal byte above: lose it in the fork and the parent sees
   // nothing_compared=false, so an empty comparison reports a clean exit-0 pass.
   b.push_back(static_cast<char>(r.nothing_compared ? 1 : 0));
+  // cvc5 solve statistics (formal.stats). Same tail discipline, and the same
+  // silent-loss trap: the whole solve happens in the child, so WITHOUT this the
+  // parent's `--stats` report is all zeros on every forked path. Strict tail,
+  // no version byte: an older/truncated blob just leaves Cvc5_stats{}.
+  put_cvc5_stats(b, r.cvc5);
   return b;
 }
 
 bool get_u32(std::string_view& b, uint32_t& v) {
+  if (b.size() < sizeof v) {
+    return false;
+  }
+  std::memcpy(&v, b.data(), sizeof v);
+  b.remove_prefix(sizeof v);
+  return true;
+}
+bool get_i64(std::string_view& b, int64_t& v) {
+  if (b.size() < sizeof v) {
+    return false;
+  }
+  std::memcpy(&v, b.data(), sizeof v);
+  b.remove_prefix(sizeof v);
+  return true;
+}
+bool get_u64(std::string_view& b, uint64_t& v) {
   if (b.size() < sizeof v) {
     return false;
   }
@@ -424,6 +500,70 @@ bool get_trace(std::string_view& b, Witness_trace& tr) {
   }
   return true;
 }
+
+// Inverse of put_cvc5_stats. ALL-OR-NOTHING: any short read returns false and
+// leaves `st` default-constructed, so a truncated / older blob reads as "no cvc5
+// query ran" (Cvc5_stats::empty()) instead of as a half-filled report that would
+// be indistinguishable from real numbers.
+bool get_cvc5_stats(std::string_view& b, Cvc5_stats& st) {
+  Cvc5_stats t;
+  uint32_t   solvers = 0;
+  if (!get_u32(b, solvers)) {
+    return false;
+  }
+  t.solvers = static_cast<int32_t>(solvers);
+  // Declaration order, mirroring put_cvc5_stats exactly.
+  if (!get_i64(b, t.checks) || !get_i64(b, t.atoms) || !get_i64(b, t.input_atoms) || !get_i64(b, t.clause_literals)
+      || !get_i64(b, t.conflicts) || !get_i64(b, t.decisions) || !get_i64(b, t.propagations) || !get_i64(b, t.restarts)
+      || !get_i64(b, t.learnt_literals) || !get_i64(b, t.tot_literals) || !get_i64(b, t.max_literals)
+      || !get_i64(b, t.theory_lemmas) || !get_i64(b, t.theory_conflicts) || !get_i64(b, t.resource_units)
+      || !get_i64(b, t.total_ms) || !get_i64(b, t.cnf_ms) || !get_i64(b, t.theory_check_ms)) {
+    return false;
+  }
+  if (b.empty()) {
+    return false;
+  }
+  t.deep_active = b.front() != 0;
+  b.remove_prefix(1);
+  if (!get_i64(b, t.deep_clauses)) {
+    return false;
+  }
+  auto get_smap = [&b](std::map<std::string, uint64_t>& m) {
+    uint32_t n = 0;
+    if (!get_u32(b, n)) {
+      return false;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+      std::string k;
+      uint64_t    v = 0;
+      if (!get_str(b, k) || !get_u64(b, v)) {
+        return false;
+      }
+      m.emplace(std::move(k), v);
+    }
+    return true;
+  };
+  if (!get_smap(t.lemma_kinds) || !get_smap(t.resource_steps)) {
+    return false;
+  }
+  uint32_t nw = 0;
+  if (!get_u32(b, nw)) {
+    return false;
+  }
+  for (uint32_t i = 0; i < nw; ++i) {
+    uint64_t k = 0, v = 0;
+    if (!get_u64(b, k) || !get_u64(b, v)) {
+      return false;
+    }
+    t.clause_widths.emplace(k, v);
+  }
+  if (!get_smap(t.deep_lemma_kinds)) {
+    return false;
+  }
+  st = std::move(t);
+  return true;
+}
+
 bool deserialize_result(std::string_view b, Query_result& r) {
   if (b.empty()) {
     return false;
@@ -515,6 +655,10 @@ bool deserialize_result(std::string_view b, Query_result& r) {
   }
   r.nothing_compared = b.front() != 0;
   b.remove_prefix(1);
+  // cvc5 statistics tail (mirror serialize_result). All-or-nothing inside
+  // get_cvc5_stats: a truncated tail leaves Cvc5_stats{}, which reads as "no
+  // cvc5 query ran" rather than as a half-filled report.
+  (void)get_cvc5_stats(b, r.cvc5);
   return true;
 }
 
@@ -612,6 +756,11 @@ std::string serialize_verify(const Verify_result& v) {
   for (const auto& sc : v.vacuous_scopes) {
     put_str(b, sc);
   }
+  // cvc5 solve statistics (formal.stats) — TAIL, same trap as every field above:
+  // the F3 verify strategy race forks, so a stats struct missing here comes back
+  // ALL ZEROS in the parent and `--stats` silently prints a wall of zeros on the
+  // default (forking) path while being correct under --workdir.
+  put_cvc5_stats(b, v.cvc5);
   return b;
 }
 
@@ -795,6 +944,9 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     }
     v.vacuous_scopes.push_back(std::move(sc));
   }
+  // cvc5 statistics tail (mirror serialize_verify). All-or-nothing: a truncated
+  // tail leaves Cvc5_stats{} == "no cvc5 query ran".
+  (void)get_cvc5_stats(b, v.cvc5);
   return true;
 }
 
@@ -1061,6 +1213,11 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   const Query_result& src = (!ind.unmatched_ref.empty() || !ind.unmatched_impl.empty()) ? ind : bmc;
   r.unmatched_ref         = src.unmatched_ref;
   r.unmatched_impl        = src.unmatched_impl;
+  // `r` is a FRESH result, so both legs' cvc5 accounting would be thrown away
+  // here -- and both legs really did burn that CPU (the `solvers` count is what
+  // discloses that two ran). Sum them; every auto ladder funnels through this.
+  r.cvc5  = ind.cvc5;
+  r.cvc5 += bmc.cvc5;
   return r;
 }
 
@@ -1127,15 +1284,17 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   rb.engine       = "bmc";
   rb.elapsed_ms   = now_ms(tb);
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
+    rb.detail  = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
+    rb.cvc5   += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
     return rb;
   }
   Query_result bp;
-  if (try_bounded_proven(rb, bp)) {
-    bp.elapsed_ms = now_ms(t0);
+  if (try_bounded_proven(rb, bp)) {  // bp is a copy of rb, so it already carries rb.cvc5
+    bp.elapsed_ms  = now_ms(t0);
+    bp.cvc5       += ri.cvc5;
     return bp;
   }
-  return make_inconclusive(ri, rb, opts, now_ms(t0));
+  return make_inconclusive(ri, rb, opts, now_ms(t0));  // merges both legs itself
 }
 
 // A LEC pair is "combinational" when neither design — nor any descended sub-body
@@ -1503,12 +1662,23 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
 
   std::string tag = pick.name + "[" + std::to_string(pick.width) + "b] " + std::to_string(nworkers) + " workers x "
                   + std::to_string(nvals) + " cubes";
+  // cvc5 accounting over EVERY cube worker that came back, not just the winner:
+  // each one solved its own slice in its own process, and reporting only the
+  // first-REFUTED cube's numbers would hide the whole sweep's cost. A worker
+  // that was killed (or never deserialized) contributes an empty struct.
+  Cvc5_stats cubes;
+  for (int i = 0; i < nworkers; ++i) {
+    if (done[i]) {
+      cubes += got[i].cvc5;
+    }
+  }
   if (refuter >= 0) {
     Query_result out = got[refuter];
     out.engine       = "casesplit";
     out.split_used   = pick.name;
     out.elapsed_ms   = now_ms(t0);
     out.detail       = "auto: case-split " + tag + " REFUTED; " + out.detail;
+    out.cvc5         = cubes;  // assign: got[refuter].cvc5 is already one of the summands
     return out;
   }
   int proven = 0, unknown = 0;
@@ -1523,6 +1693,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   out.engine     = "casesplit";
   out.split_used = pick.name;
   out.elapsed_ms = now_ms(t0);
+  out.cvc5       = cubes;
   if (unknown == 0) {
     out.verdict = Verdict::Proven;
     out.detail  = "auto: case-split " + tag + " PROVEN (every cube UNSAT)";
@@ -1536,6 +1707,11 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
 
 Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                 const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // cvc5 accounting of attempts whose RESULT is discarded (the strategy-hint
+  // probe below, a non-decisive case split). They really ran, so their effort
+  // rides along on whatever verdict this function ends up returning; without
+  // this a `--stats` report silently under-counts a hinted run.
+  Cvc5_stats carried;
   // Cache hints are ordering only. Try the previous winner once; if an edit
   // made it inconclusive, continue through the unchanged auto portfolio below.
   if (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc") {
@@ -1560,8 +1736,10 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     }
     if (trusted) {
       hr.detail = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
+      hr.cvc5  += carried;
       return hr;
     }
+    carried += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
   }
   if (opts._isolated_worker) {
     // The hierarchy Taskflow already supplies parallelism and process
@@ -1577,6 +1755,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     absl::flat_hash_set<hhds::Graph*> seen;
     const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
     if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
+      ri.cvc5 += carried;
       return ri;
     }
     Lec_options ob = opts;
@@ -1587,14 +1766,20 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     rb.engine      = "bmc";
     rb.elapsed_ms  = now_ms(tb);
     if (rb.verdict == Verdict::Refuted) {
+      rb.cvc5 += ri.cvc5;  // the ind leg of this ladder ran too
+      rb.cvc5 += carried;
       return rb;
     }
     Query_result bp;
-    if (try_bounded_proven(rb, bp)) {
-      bp.elapsed_ms = ri.elapsed_ms + rb.elapsed_ms;
+    if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
+      bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
+      bp.cvc5       += ri.cvc5;
+      bp.cvc5       += carried;
       return bp;
     }
-    return make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);
+    Query_result inc  = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
+    inc.cvc5         += carried;
+    return inc;
   }
   // Purely combinational pair: skip the bmc racer (and the fork). Run one ind
   // query and return its verdict directly — for a stateless design the inductive
@@ -1609,8 +1794,10 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       if (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
         Query_result cs = run_case_split(ref, impl, opts, sub_lib);
         if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
+          cs.cvc5 += carried;
           return cs;
         }
+        carried += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
       }
       Lec_options o   = opts;
       o.engine        = "ind";
@@ -1619,6 +1806,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       r.engine        = "ind";
       r.elapsed_ms    = now_ms(tc);
       r.detail        = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
+      r.cvc5         += carried;
       return r;
     }
   }
@@ -1643,7 +1831,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   };
   auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
   if (!race.forked) {
-    return run_auto_sequential(ref, impl, opts, sub_lib);
+    // No child ran, so the race total below is empty; the sequential ladder
+    // accounts for its own two legs. MERGE (never assign) or that would be wiped.
+    Query_result seq  = run_auto_sequential(ref, impl, opts, sub_lib);
+    seq.cvc5         += carried;
+    return seq;
   }
   // A child that died without a serialized result surfaces as the default
   // Query_result (empty engine): tag it, exactly as the old inline poll loop did.
@@ -1654,19 +1846,31 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       race.results[i].detail  = std::string(engines[i]) + " worker terminated without a result";
     }
   }
+  // The RACE total: BOTH racers' cvc5 effort, whichever one is reported. The
+  // loser really did burn that CPU, and the summed `solvers` count is what
+  // discloses to the reader that two solvers ran. Every return below is stamped
+  // with it (assignment, not +=: the winner's own stats are already inside
+  // `both`, so merging again would double-count them).
+  Cvc5_stats both  = race.results[0].cvc5;
+  both            += race.results[1].cvc5;
+  both            += carried;
+  auto with = [&both](Query_result r) {
+    r.cvc5 = both;
+    return r;
+  };
   if (race.winner >= 0) {
     Query_result r = race.results[race.winner];
     r.engine       = engines[race.winner];
     r.detail       = "auto: " + std::string(engines[race.winner]) + " reached " + vname(r.verdict) + " first in "
                      + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
-    return r;
+    return with(std::move(r));
   }
   Query_result bp;
   if (try_bounded_proven(race.results[1], bp)) {
     bp.elapsed_ms = now_ms(t0);
-    return bp;
+    return with(std::move(bp));
   }
-  return make_inconclusive(race.results[0], race.results[1], opts, now_ms(t0));
+  return with(make_inconclusive(race.results[0], race.results[1], opts, now_ms(t0)));
 }
 
 bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Encoder& enc, const std::vector<Monitor>* monitors,
@@ -1864,8 +2068,15 @@ std::vector<Port_bundle> detect_port_bundles(hhds::Graph* ref, hhds::Graph* impl
 
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
 
-Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
-                         const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+// The real engine. `acc` is the caller-owned cvc5 statistics accumulator
+// (formal.stats): NULL when stats are off, which makes every Solve_probe /
+// Stats_guard / capture_cvc5_stats call below a no-op, so no call site needs an
+// `if (stats)` guard and the off path costs nothing. The public prove_equal()
+// wrapper below owns the accumulator and merges it into the result -- it must
+// NOT be a destructor mutating the returned object, because NRVO is permitted
+// but not guaranteed; the engine writes through this pointer instead.
+static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                                     const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, Cvc5_stats* acc) {
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
   res.engine = opts.engine;  // the auto portfolio overrides this with the winning engine
@@ -1913,6 +2124,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       Lec_options bare = opts;
       bare.uncertain_match.clear();
       Query_result rf = prove_equal(ref, impl, bare, sub_lib);
+      // The pairs-applied solve `r` is discarded as a verdict, but it was a full
+      // cvc5 run: carry its accounting onto the confirming result either way.
+      rf.cvc5 += r.cvc5;
       if (rf.verdict != Verdict::Unknown) {
         rf.detail = "tier-2 confirm (REFUTED under " + tag + "; dropped all, re-solved pair-free): " + rf.detail;
         return rf;
@@ -1974,6 +2188,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     r2.detail       = (r2.verdict == Verdict::Proven ? "full: equivalent in BOTH just_reset and after_reset; after_reset stage: "
                            : "full / after_reset stage (just_reset already PROVEN): ")
                 + r2.detail;
+    r2.cvc5 += r1.cvc5;  // the just_reset stage's solver ran too; r2 keeps its own
     return r2;
   }
 
@@ -2073,8 +2288,23 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
   const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
 
+  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER of
+  // these four lines is mandatory and load-bearing (verified empirically; none
+  // of it is documented in cvc5.h):
+  //   * Solve_probe BEFORE the Solver -- the plugin must OUTLIVE it, or the
+  //     destruction order SIGSEGVs.
+  //   * attach() BEFORE any assertFormula/push -- cvc5 throws "Cannot add plugin
+  //     after the solver has been fully initialized" otherwise.
+  //   * Stats_guard AFTER the Solver -- its dtor snapshots getStatistics(), so it
+  //     must run while the solver is still alive.
+  // The guard exists (rather than a capture before each `return`) because this
+  // function has 21 return points past this line; a tail capture would silently
+  // miss most of them. A null `acc` makes all three no-ops.
   cvc5::TermManager tm;
+  Solve_probe       probe(tm, acc);
   cvc5::Solver      solver(tm);
+  probe.attach(solver);
+  Stats_guard stats_guard(solver, probe, acc);
 
   // Subnode Gids of collapsed leaves, so the inductive/BMC flop collection
   // below can skip descending into them (their state is the box's, not a set of
@@ -2507,7 +2737,22 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   };
   // Re-arm the per-checkSat cap to the budget remaining. Must be called immediately
   // before each decisive checkSat; a no-op when the budget is off.
+  //
+  // INVARIANT (verified by grep, and the reason the counter lives here): every
+  // solver.checkSat() in this function is immediately preceded by exactly one
+  // arm_solve_budget() call -- 1:1, no exceptions. cvc5 exposes NO checkSat
+  // counter under bv-solver=bitblast-internal (the whole
+  // theory::bv::BVSolverBitblast::cadical::* family is absent), so LiveHD counts
+  // them itself here. Adding a checkSat WITHOUT an arm_solve_budget() in front
+  // both leaves it unbounded and makes `--stats` undercount.
+  //
+  // The increment is deliberately OUTSIDE the `if (budget_on)` body: budget_on is
+  // false whenever formal.timeout=0 or formal.rlimit>0, so counting inside would
+  // report 0 checks on the common configurations.
   auto arm_solve_budget = [&]() {
+    if (acc != nullptr) {
+      ++acc->checks;
+    }
     if (budget_on) {
       solver.setOption("tlimit-per", std::to_string(budget_left_ms()));
     }
@@ -3243,7 +3488,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // dout via the cycle prefix, flushed within the reset-hold window); each side
     // carries its OWN keys (a sync memory on one side may correspond to a comb
     // array + external flop on the other, whose latency comes from that flop).
-    Io_name_map<cvc5::Term> ref_reads, impl_reads;
+    Io_name_map<Val> ref_reads, impl_reads;
 
     cvc5::Term bad;
     std::vector<std::pair<std::string, cvc5::Term>> decomp_diffs;  // per-(output,cycle) diffs for decomposed proof
@@ -4938,6 +5183,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   return res;
 }
 
+Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                         const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  Cvc5_stats   acc;
+  Query_result res = prove_equal_impl(ref, impl, opts, sub_lib, opts.stats ? &acc : nullptr);
+  // MERGE, never assign. Under engine=auto `res` already carries the forked
+  // CHILD's deserialized stats while THIS process constructed no Solver at all,
+  // so `res.cvc5 = acc` would erase the entire run's numbers.
+  res.cvc5 += acc;
+  return res;
+}
+
 namespace {
 
 // Fork ONE isolated worker running safe_prove_equal under `opts` and read its
@@ -5078,16 +5334,18 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
     rb.detail = "bmc retry worker also died: " + bmc_why;
   }
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail = died_note + rb.detail;
+    rb.detail  = died_note + rb.detail;
+    rb.cvc5   += ri.cvc5;  // the ind retry worker ran too
     return rb;
   }
   Query_result bp;
-  if (try_bounded_proven(rb, bp)) {
-    bp.detail     = died_note + bp.detail;
-    bp.elapsed_ms = ri.elapsed_ms + rb.elapsed_ms;
+  if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
+    bp.detail      = died_note + bp.detail;
+    bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
+    bp.cvc5       += ri.cvc5;
     return bp;
   }
-  Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);
+  Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
   out.engine       = "isolated-worker";
   out.detail       = died_note + out.detail;
   return out;
@@ -5201,8 +5459,12 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
 
 }  // namespace
 
-Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
-                               const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
+// The real property engine. `acc` is the caller-owned cvc5 statistics
+// accumulator (formal.stats), NULL when stats are off -- see prove_equal_impl's
+// note; the public prove_properties() wrapper below owns it and merges.
+static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_options& opts,
+                                           const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                                           const std::vector<Monitor>* monitors, Cvc5_stats* acc) {
   const auto    t0 = std::chrono::steady_clock::now();
   Verify_result res;
   res.detail = "solver=cvc5 (bmc property engine, phase=" + opts.phase + ")";
@@ -5299,11 +5561,16 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       }
     }
     if (winner >= 0) {
-      Verify_result r = (winner == 0) ? std::move(A) : std::move(B);
-      r.detail        = "auto verify: " + std::string(winner == 0 ? "bmc-first" : "ind-first")
+      // Sum BEFORE the move: the loser's strategy really ran (or was cancelled
+      // mid-solve) and its cvc5 effort is part of this run's cost.
+      Cvc5_stats both  = A.cvc5;
+      both            += B.cvc5;
+      Verify_result r  = (winner == 0) ? std::move(A) : std::move(B);
+      r.detail         = "auto verify: " + std::string(winner == 0 ? "bmc-first" : "ind-first")
                  + " settled every obligation definitively" + (cache_active ? "" : " (cancelled the other strategy)") + "; "
                  + r.detail;
       r.elapsed_ms = now_ms(t0);
+      r.cvc5       = both;  // assign: the winner's own stats are already inside `both`
       return r;
     }
     // A crashed child surfaces as the DEFAULT Verify_result (empty detail AND no
@@ -5316,6 +5583,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       res.verdict    = Verdict::Unknown;
       res.detail     = "auto verify: both strategies crashed without a result (fork children died)";
       res.elapsed_ms = now_ms(t0);
+      // Nothing to merge: neither child produced a blob, so both A.cvc5 and
+      // B.cvc5 are the default-constructed empty struct.
       return res;
     }
     if (!a_ran || !b_ran || A.props.size() != B.props.size()) {
@@ -5327,10 +5596,15 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       r.detail             = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
                + " (the other strategy crashed or produced a differing obligation count); " + r.detail;
       r.elapsed_ms = now_ms(t0);
+      r.cvc5       = A.cvc5;   // assign then merge: whichever side `r` is, this
+      r.cvc5      += B.cvc5;   // rebuilds the pair exactly once (a crashed side is empty)
       return r;
     }
     Verify_result m = A;  // carries checked_steps / reset_hold base; props recomputed below
     m.props.clear();
+    // Both strategies solved to completion here, so both cvc5 budgets were spent.
+    m.cvc5  = A.cvc5;
+    m.cvc5 += B.cvc5;
     int n_ind_unbounded = 0;
     for (size_t i = 0; i < A.props.size(); ++i) {
       const auto& a = A.props[i];
@@ -5433,6 +5707,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     Verify_result r1 = prove_properties(design, o1, sub_lib, monitors);
     Verify_result r2 = prove_properties(design, o2, sub_lib, monitors);
     Verify_result m  = std::move(r2);  // after_reset is the primary view
+    m.cvc5 += r1.cvc5;  // both windows built their own solver; both count
     m.detail = "full: just_reset AND after_reset; " + m.detail + " | just_reset: " + r1.detail;
     if (m.props.size() == r1.props.size()) {
       for (size_t i = 0; i < m.props.size(); ++i) {
@@ -5458,8 +5733,17 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     return m;
   }
 
+  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER is
+  // mandatory and load-bearing -- probe BEFORE the Solver (the plugin must
+  // outlive it), attach() BEFORE any assertFormula/push (cvc5 throws otherwise),
+  // Stats_guard AFTER the Solver (its dtor snapshots getStatistics() and must run
+  // while the solver is alive). See the twin in prove_equal_impl. Null `acc` ==
+  // no-op, so nothing is paid when stats are off.
   cvc5::TermManager tm;
+  Solve_probe       probe(tm, acc);
   cvc5::Solver      solver(tm);
+  probe.attach(solver);
+  Stats_guard stats_guard(solver, probe, acc);
   solver.setLogic("QF_ABV");
   if (opts.timeout > 0) {
     solver.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
@@ -5560,6 +5844,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     return it == scope_act.end() ? cvc5::Term() : it->second;
   };
   auto budget_check = [&](const cvc5::Term& bad, const cvc5::Term& act = cvc5::Term()) -> cvc5::Result {
+    if (acc != nullptr) {  // --stats: LiveHD counts checks itself (cvc5 exposes none)
+      ++acc->checks;
+    }
     if (solve_budget_on) {
       const long long remaining = solve_budget_ms - solve_spent_ms;
       last_check_floored        = remaining < min_ms;  // this check runs past the soft total, on the floor
@@ -5968,7 +6255,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       for (const auto& [key, a] : pmem) {
         targets.insert(a.getId());
       }
-      Io_name_map<cvc5::Term> preads;
+      Io_name_map<Val>       preads;
       Encoded                 pe = enc.encode(design, &psh, "p_", &pmem, &preads);
       // Defining equalities (lhs symbol -> rhs term): the encoder introduces
       // intermediate symbols whose cones live on the rhs, so the support walk
@@ -6065,7 +6352,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       }
     }
   }
-  Io_name_map<cvc5::Term> reads;
+  Io_name_map<Val> reads;
 
   // Per-cycle input symbols for the witness trace.
   struct Wit_in {
@@ -6463,6 +6750,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   long long                                    mine_spent_ms = 0;
   const long long                              mine_budget_ms = static_cast<long long>(opts.spec_mining_timeout) * 1000;
   auto mine_check = [&](const cvc5::Term& t) -> cvc5::Result {
+    if (acc != nullptr) {  // --stats: LiveHD counts checks itself (cvc5 exposes none)
+      ++acc->checks;
+    }
     solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, mine_budget_ms - mine_spent_ms)));
     const auto   tq = std::chrono::steady_clock::now();
     cvc5::Result r  = solver.checkSatAssuming(t);
@@ -6615,7 +6905,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     // one reachable model of the live frame (produce-models is armed).
     if (!stuck_keys.empty() && mine_spent_ms < mine_budget_ms) {
       solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, mine_budget_ms - mine_spent_ms)));
-      const auto   ts  = std::chrono::steady_clock::now();
+      const auto ts = std::chrono::steady_clock::now();
+      if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
+        ++acc->checks;
+      }
       cvc5::Result smp = solver.checkSat();
       mine_spent_ms += now_ms(ts);
       if (smp.isSat()) {
@@ -6813,7 +7106,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       for (const auto& [key, a] : mem) {
         fmem[key] = tm.mkConst(a.getSort(), "km0_" + key);
       }
-      Io_name_map<cvc5::Term> freads;
+      Io_name_map<Val>      freads;
       // occ_key -> per-frame cond Val (design + monitor obligations alike).
       absl::flat_hash_map<int, Val> cond_f[2];
       bool                          ind_ok = true;
@@ -6921,6 +7214,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           }
         }
         // Step-vacuity guard: a contradictory free frame would "prove" anything.
+        if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
+          ++acc->checks;
+        }
         cvc5::Result base = solver.checkSat();
         if (base.isSat()) {
           // Houdini fixpoint over the candidate set.
@@ -7077,8 +7373,11 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       if (design_tier_vacuous) {
         break;  // already voided everything; the per-block answers are moot
       }
-      cvc5::Term   act = act_of(scope);
-      cvc5::Result r   = act.isNull() ? solver.checkSat() : solver.checkSatAssuming(act);
+      cvc5::Term act = act_of(scope);
+      if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
+        ++acc->checks;
+      }
+      cvc5::Result r = act.isNull() ? solver.checkSat() : solver.checkSatAssuming(act);
       bool         bad_scope = false;
       if (r.isUnsat()) {
         bad_scope   = true;
@@ -7167,7 +7466,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     for (const auto& [key, a] : mem) {
       vmem[key] = tm.mkConst(a.getSort(), "vgm_" + key);
     }
-    Io_name_map<cvc5::Term> vreads;
+    Io_name_map<Val>       vreads;
     Encoded                 ve = enc.encode(design, &vsh, "vg_", &vmem, &vreads);
     if (ve.ok) {
       // PUSH/POP around the frame. This is the only place in prove_properties
@@ -7185,6 +7484,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       }
       // Baseline: if the frame itself cannot be satisfied, "guard is UNSAT here"
       // says nothing about the guard. Report nothing rather than accuse.
+      if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
+        ++acc->checks;
+      }
       if (!solver.checkSat().isSat()) {
         solver.pop();
         vg.clear();
@@ -7429,6 +7731,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     }
     if (!bads.empty()) {
       try {
+        if (acc != nullptr) {  // --stats: a full solve of its own, counted like a check
+          ++acc->checks;
+        }
         auto tc = solver.getTimeoutCoreAssuming(bads);
         std::vector<bool> consumed(bads.size(), false);
         std::string       names;
@@ -7486,6 +7791,16 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     res.verdict = Verdict::Proven;
   }
   res.elapsed_ms = now_ms(t0);
+  return res;
+}
+
+Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
+                               const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
+  Cvc5_stats    acc;
+  Verify_result res = prove_properties_impl(design, opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
+  // MERGE, never assign: under engine=auto `res` already carries the forked
+  // strategy children's deserialized stats while this process built no Solver.
+  res.cvc5 += acc;
   return res;
 }
 

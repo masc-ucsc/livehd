@@ -456,7 +456,17 @@ Options parse_args(int argc, char** argv) {
       opts.depfile = need_value(a, i, argc, argv);
     } else if (a == "--unused-inputs") {  // Bazel unused_inputs_list (compile)
       opts.unused_inputs = need_value(a, i, argc, argv);
-    } else if (a == "--stats") {  // pass semdiff: the aggregate match report
+      // The consuming pass decides what the report is: pass.semdiff the aggregate
+      // match report, pass.color the partition-size report, and lec / formal verify
+      // (formal.stats) the cvc5 solve-insight report — that last one costs ~8x.
+      //
+      // On the formal paths that ~8x is NOT purely observational: it eats the same
+      // formal.timeout budget the proof does, so a run that proves in time without
+      // --stats can time out with it and return UNKNOWN, which the default
+      // formal.strict=true turns into a non-zero exit. Both help blocks
+      // (lhd_meta.cpp `lec` and `formal verify`) say so; raise formal.timeout when
+      // diagnosing a run that still has to pass.
+    } else if (a == "--stats") {
       opts.stats = true;
     } else if (a == "--recipe") {
       opts.recipe = need_value(a, i, argc, argv);

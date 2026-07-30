@@ -45,8 +45,9 @@ inline bool is_builtin_attr_name(std::string_view name) {
       // pid 6 is the enable POLARITY, not a clock edge.
       "enable_high",
       "reset_pin", "valid", "stop", "lat", "num", "addr", "fwd", "wensize", "rdport", "defer", "inputs", "outputs",
-      // Memory same-cycle read/write ordering ("none"|"fwd"|"program"); `fwd`
-      // above is its deprecated low-level (explicit-matrix) predecessor.
+      // Memory same-cycle read/write ordering
+      // ("program"|"fwd"|"old"|"none"); `fwd` above is its deprecated
+      // low-level (explicit-matrix) predecessor.
       "ordering",
       // Category C — synthesis hints
       "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay", "max_load",

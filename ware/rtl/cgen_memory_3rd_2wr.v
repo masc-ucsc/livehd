@@ -17,7 +17,8 @@
 
 module cgen_memory_3rd_2wr
   #(parameter BITS = 4, SIZE=128, parameter [255:0] FWD = 1, parameter LATENCY_0=1, WENSIZE=1,
-    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)
+    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0,
+    parameter [255:0] UNDEF = 0)
     (input clk
 
      // RD PORT 0
@@ -82,7 +83,13 @@ end
 //READ PORT 0 — combinational read of the CURRENT address, then the
 //per-(read,write) FWD matrix resolves same-cycle writes (write port j
 //forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
-//write port wins, matching the storage priority above). LATENCY_0==1
+//write port wins, matching the storage priority above). The parallel UNDEF
+//matrix (same bit layout) marks a collision UNDEFINED instead: read port k
+//returns x when write port j collides and UNDEF bit (k*N_WR + j) is set. FWD
+//and UNDEF are mutually exclusive per pair; both clear = the DEFINED committed
+//value. That third state is what Pyrope's ordering="old" vs "none" needs (and
+//what yosys $mem_v2 spells RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK).
+//LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d0_mem;
@@ -100,8 +107,12 @@ generate
   for(fwd_j0=0;fwd_j0<WENSIZE;fwd_j0=fwd_j0+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
       d0_fwd[fwd_j0*MASKSIZE +: MASKSIZE] =
+        (((UNDEF >> 1) & 1) != 0 && wr_enable_1[fwd_j0] && (wr_addr_1 == rd_addr_0)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 1) & 1) != 0 && wr_enable_1[fwd_j0] && (wr_addr_1 == rd_addr_0)) ?
         wr_din_1[fwd_j0*MASKSIZE +: MASKSIZE] :
+        (((UNDEF >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
         wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
         d0_mem[fwd_j0*MASKSIZE +: MASKSIZE];
@@ -122,7 +133,13 @@ endgenerate
 //READ PORT 1 — combinational read of the CURRENT address, then the
 //per-(read,write) FWD matrix resolves same-cycle writes (write port j
 //forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
-//write port wins, matching the storage priority above). LATENCY_0==1
+//write port wins, matching the storage priority above). The parallel UNDEF
+//matrix (same bit layout) marks a collision UNDEFINED instead: read port k
+//returns x when write port j collides and UNDEF bit (k*N_WR + j) is set. FWD
+//and UNDEF are mutually exclusive per pair; both clear = the DEFINED committed
+//value. That third state is what Pyrope's ordering="old" vs "none" needs (and
+//what yosys $mem_v2 spells RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK).
+//LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d1_mem;
@@ -140,8 +157,12 @@ generate
   for(fwd_j1=0;fwd_j1<WENSIZE;fwd_j1=fwd_j1+1) begin:FWD_BLOCK_CALC_1
     always_comb begin
       d1_fwd[fwd_j1*MASKSIZE +: MASKSIZE] =
+        (((UNDEF >> 3) & 1) != 0 && wr_enable_1[fwd_j1] && (wr_addr_1 == rd_addr_1)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 3) & 1) != 0 && wr_enable_1[fwd_j1] && (wr_addr_1 == rd_addr_1)) ?
         wr_din_1[fwd_j1*MASKSIZE +: MASKSIZE] :
+        (((UNDEF >> 2) & 1) != 0 && wr_enable_0[fwd_j1] && (wr_addr_0 == rd_addr_1)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 2) & 1) != 0 && wr_enable_0[fwd_j1] && (wr_addr_0 == rd_addr_1)) ?
         wr_din_0[fwd_j1*MASKSIZE +: MASKSIZE] :
         d1_mem[fwd_j1*MASKSIZE +: MASKSIZE];
@@ -162,7 +183,13 @@ endgenerate
 //READ PORT 2 — combinational read of the CURRENT address, then the
 //per-(read,write) FWD matrix resolves same-cycle writes (write port j
 //forwards to read port k iff FWD bit (k*N_WR + j) is set; the LAST enabled
-//write port wins, matching the storage priority above). LATENCY_0==1
+//write port wins, matching the storage priority above). The parallel UNDEF
+//matrix (same bit layout) marks a collision UNDEFINED instead: read port k
+//returns x when write port j collides and UNDEF bit (k*N_WR + j) is set. FWD
+//and UNDEF are mutually exclusive per pair; both clear = the DEFINED committed
+//value. That third state is what Pyrope's ordering="old" vs "none" needs (and
+//what yosys $mem_v2 spells RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK).
+//LATENCY_0==1
 //flops the resolved value ONCE at the output (exactly one edge); ==0 is
 //fully asynchronous.
 reg [BITS-1:0]        d2_mem;
@@ -180,8 +207,12 @@ generate
   for(fwd_j2=0;fwd_j2<WENSIZE;fwd_j2=fwd_j2+1) begin:FWD_BLOCK_CALC_2
     always_comb begin
       d2_fwd[fwd_j2*MASKSIZE +: MASKSIZE] =
+        (((UNDEF >> 5) & 1) != 0 && wr_enable_1[fwd_j2] && (wr_addr_1 == rd_addr_2)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 5) & 1) != 0 && wr_enable_1[fwd_j2] && (wr_addr_1 == rd_addr_2)) ?
         wr_din_1[fwd_j2*MASKSIZE +: MASKSIZE] :
+        (((UNDEF >> 4) & 1) != 0 && wr_enable_0[fwd_j2] && (wr_addr_0 == rd_addr_2)) ?
+        {MASKSIZE{1'bx}} :
         (((FWD >> 4) & 1) != 0 && wr_enable_0[fwd_j2] && (wr_addr_0 == rd_addr_2)) ?
         wr_din_0[fwd_j2*MASKSIZE +: MASKSIZE] :
         d2_mem[fwd_j2*MASKSIZE +: MASKSIZE];

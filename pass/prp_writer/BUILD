@@ -58,3 +58,33 @@ sh_test(
         "//lhd",
     ],
 )
+
+# REGRESSION: generated Pyrope must always RE-PARSE. Two analyses used to claim
+# the same statement — analyze_muxes folded a ternary's consuming store away as
+# an enclosing mux's else seed, while analyze_expr_inlines picked that same store
+# as the merge temp's single use and dropped the temp's definition — so the
+# writer emitted a read of a `_mux_N` it never declared. Equivalence coverage of
+# the same shape: //inou/prp:prp-v2v-writer_undefined_mux (and prp-v2prp-*).
+sh_test(
+    name = "prp_writer_mux_decl_test.sh",
+    srcs = ["tests/prp_writer_mux_decl_test.sh"],
+    data = [
+        "tests/mux_seed_fold.v",
+        "//lhd",
+    ],
+)
+
+# REGRESSION: the writer must not LOSE information when it rebuilds a nested
+# `mut` declaration at the function top (it used to record the NAME only, so an
+# array declared inside an `if` came back as `mut mem = 0` — type and `initial`
+# contents both gone), and must backtick-escape a module name Pyrope cannot
+# tokenize bare (a Verilog escaped id, `\d\e`). Equivalence coverage of the same
+# two shapes: //inou/prp:prp-v2v-tolg_field_read_zero and prp-v2v-writer_bad_char.
+sh_test(
+    name = "prp_writer_decl_emit_test.sh",
+    srcs = ["tests/prp_writer_decl_emit_test.sh"],
+    data = [
+        "tests/decl_emit.v",
+        "//lhd",
+    ],
+)

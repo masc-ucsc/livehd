@@ -473,7 +473,7 @@ std::string box_node_key(const hhds::Node_class& n) {
 }
 
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
-                        const Io_name_map<cvc5::Term>* shared_mems, const Io_name_map<cvc5::Term>* shared_reads) {
+                        const Io_name_map<cvc5::Term>* shared_mems, const Io_name_map<Val>* shared_reads) {
   Encoded out;
   auto    gio = g->get_io();
 
@@ -807,6 +807,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // Held as the const itself — Dlop::bit_test is arbitrary precision, and
     // n_rd*n_wr overflows an int on wide (many-port) shapes.
     spool_ptr<Dlop>     fwd;
+    // Per-(read,write) UNDEFINED matrix (graph/cell.cpp pid 15), same layout as
+    // `fwd`: ordering="none" says a colliding read has no defined value. On the
+    // REFERENCE side that becomes an X bit-plane on the read dout, so the miter
+    // excludes the collision window from the compare (the memory analogue of a
+    // '?' constant under formal.lec.gold_x=ignore). The VALUE is untouched.
+    spool_ptr<Dlop>     undef;
     int                 mtype   = -1;
     bool                is_rom  = false;
     cvc5::Term          a_cur;
@@ -816,6 +822,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                    // (type==1 sync, threaded via next_read).
     std::vector<hhds::Pin_class> rd_addr;
     std::vector<std::string>     rd_key;  // "<key>:rd<N>" per read port (sync threading)
+    std::vector<Term>            rd_xmask;  // per read port: deferred X bit-plane symbol (null = fully known)
+    std::vector<Term>            rd_xcur;   // sync (type==1) only: the plane threaded IN from last cycle (null = none)
     // Whole-array support (the `update` bus is driven): one update/read_all bus
     // instead of N per-entry ports. `is_comb` (type==2, no clock) => no persistent
     // state (no next_mem); reads/read_all reflect the post-update array.
@@ -915,6 +923,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
       } else if (pn == "fwd") {
         mc.fwd = Dlop::clone(gu::hydrate_const(e.driver));
+      } else if (pn == "undef") {
+        mc.undef = Dlop::clone(gu::hydrate_const(e.driver));
       } else if (pn == "update") {
         mc.update   = e.driver;
         mc.is_whole = true;
@@ -979,6 +989,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (mc.a_cur.isNull()) {
       mc.a_cur = tm_.mkConst(asort, std::string(prefix) + mc.key);
     }
+    // Cell write-port count: the `undef`/`fwd` matrices are laid out with THIS
+    // stride (bit r*n_wr_cells + w). Phase 2's `n_wr` is the same count
+    // (applied_upto gets one entry per non-read port plus a sentinel), so the
+    // two agree by construction.
+    size_t n_wr_cells = 0;
+    for (auto& p : mc.ports) {
+      if (!p.rd) {
+        ++n_wr_cells;
+      }
+    }
     // Seed each read port's dout with a fresh symbol at driver pid (n_wr + k).
     int n_rd_pos = 0;
     for (auto& p : mc.ports) {
@@ -994,9 +1014,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // emitted in phase 2 into out.next_read[rk]. type==0/2 keep a within-cycle
       // fresh var tied to select(...) in phase 2 (latency-0).
       Term fresh;
-      if (mtype == 1 && shared_reads != nullptr) {
+      Term carried_xm;  // sync read: LAST cycle's X plane, threaded in with the value
+      const bool sync_threaded = (mtype == 1 && shared_reads != nullptr);
+      if (sync_threaded) {
         if (auto it = shared_reads->find(rk); it != shared_reads->end()) {
-          fresh = it->second;
+          fresh      = it->second.term;
+          carried_xm = it->second.x_mask;
         }
       }
       if (fresh.isNull()) {
@@ -1005,6 +1028,33 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!dout_dpin.is_invalid()) {
         pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn};
       }
+      // ordering="none" (the `undef` matrix): this read has no defined value in
+      // a collision window. Mint a deferred X bit-plane symbol NOW and tie it to
+      // the collision predicate in phase 2, exactly like the dout value itself —
+      // driver_val() hands out COPIES of the Val, and the combinational fixpoint
+      // runs between the phases, so a plane attached in phase 2 would arrive
+      // after every consumer already snapshotted a plane-less Val.
+      //   * only on the REFERENCE side (x_dontcare_): an impl-side plane would
+      //     let the implementation mask away its own bugs.
+      //   * mtype==1 (registered dout) mints the plane too, but for the NEXT
+      //     state: the dout visible THIS cycle is last cycle's registered read,
+      //     so the plane visible now is last cycle's plane (`carried_xm`, come
+      //     in through shared_reads with the value). `xm` is this cycle's read
+      //     plane and leaves through next_read. Without shared_reads the caller
+      //     is not threading state at all, so the latency-0 tie below applies
+      //     and `xm` IS the visible plane.
+      Term xm;
+      if (x_dontcare_ && mc.undef && !mc.is_whole && !mc.is_comb && n_wr_cells > 0 && !dout_dpin.is_invalid()) {
+        for (size_t w = 0; w < n_wr_cells; ++w) {
+          if (mc.undef->bit_test(static_cast<int>(static_cast<size_t>(n_rd_pos) * n_wr_cells + w))) {
+            xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
+            pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
+            break;
+          }
+        }
+      }
+      mc.rd_xmask.push_back(xm);
+      mc.rd_xcur.push_back(sync_threaded ? carried_xm : Term{});
       mc.rd_fresh.push_back(fresh);
       mc.rd_addr.push_back(p.addr);
       mc.rd_key.push_back(rk);
@@ -2760,6 +2810,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // fold but still occupies a column of the `fwd` matrix.
     std::vector<Term> a_after;
     std::vector<size_t> applied_upto;
+    // Per cell write-port ordinal (lockstep with `applied_upto`): the resolved
+    // (address, per-bit write mask) this port drives, for the `undef` X-plane
+    // below. A null address = "this column writes nothing this cycle".
+    std::vector<std::pair<Term, Term>> wr_am;
     a_after.emplace_back(a_next);
     for (auto& p : mc.ports) {
       if (p.rd) {
@@ -2767,6 +2821,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       applied_upto.emplace_back(a_after.size() - 1);
       if (p.din.is_invalid()) {
+        wr_am.emplace_back(Term{}, Term{});
         continue;
       }
       Val av = driver_val(p.addr, ok);
@@ -2802,6 +2857,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!mem_commit.isNull()) {
         wmask = tm_.mkTerm(Kind::ITE, {mem_commit, wmask, bv_const(tm_, mc.sig.bits, 0)});
       }
+      // Record AFTER the commit gate so the X-plane inherits the enable, the
+      // per-bit wensize mask and the gated clock for free.
+      wr_am.emplace_back(addr, wmask);
       Term old      = tm_.mkTerm(Kind::SELECT, {a_next, addr});
       Term keep     = tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old});
       Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
@@ -2882,6 +2940,45 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
       Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
+      // ordering="none": tie the deferred X bit-plane minted in phase 1 to this
+      // read's collision predicate. The plane is the OR of every undefined write
+      // column's write mask, gated on that column hitting THIS read address —
+      // so it is bit-exact (a per-bit wensize write only clouds the bits it
+      // writes) and empty on every non-colliding cycle. The VALUE above is
+      // untouched: `rd_src` stays a_cur, so the `shared_cur` dout-merge route
+      // keeps working and no false PROVEN is introduced.
+      if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
+        Term zero    = bv_const(tm_, mc.sig.bits, 0);
+        Term plane   = zero;
+        Term claimed = zero;  // bits a HIGHER-priority write column already resolved
+        // Walk the write columns HIGH -> LOW, the priority gen_mem_wrapper's ITE
+        // chain gives the emitted RTL: the first rung that HITS decides the bit,
+        // and a plain (neither fwd nor undef) column emits no rung, so it does
+        // not stop the chain. Bits an upper FWD column forwards are DEFINED —
+        // they read that column's din — so a lower undef column must not cloud
+        // them. ORing every undef column unconditionally masked those bits too
+        // and let a real difference inside the window pass as PROVEN.
+        for (size_t wi = std::min(n_wr, wr_am.size()); wi-- > 0;) {
+          const bool u = mc.undef && mc.undef->bit_test(static_cast<int>(k * n_wr + wi));
+          if (!u && !fwd_bit(k, wi)) {
+            continue;
+          }
+          if (wr_am[wi].first.isNull()) {
+            continue;  // no din this cycle: the column writes nothing and claims nothing
+          }
+          Term hit  = tm_.mkTerm(Kind::EQUAL, {wr_am[wi].first, addr});
+          Term rung = tm_.mkTerm(Kind::ITE, {hit, wr_am[wi].second, zero});
+          if (u) {
+            // UNDEF is emitted BEFORE FWD inside one write port's step, so it
+            // wins a pair that sets both (upass_tolg rejects that spelling; a
+            // matrix built elsewhere still lands on the wrapper's answer).
+            plane = tm_.mkTerm(Kind::BITVECTOR_OR,
+                               {plane, tm_.mkTerm(Kind::BITVECTOR_AND, {rung, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed})})});
+          }
+          claimed = tm_.mkTerm(Kind::BITVECTOR_OR, {claimed, rung});
+        }
+        out.equalities.emplace_back(mc.rd_xmask[k], plane);
+      }
       // A dout that reads the SHARED committed contents is a candidate for
       // merging with the other design's matching port: equal address + the same
       // array term => provably equal values. A forwarding / combinational read
@@ -2899,8 +2996,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // step the gate suppressed must HOLD it. This is the third commit point
         // and the easiest to miss: writes look correctly gated while the read
         // port quietly re-registers every step.
-        out.next_read[mc.rd_key[k]]
-            = mem_commit.isNull() ? real : tm_.mkTerm(Kind::ITE, {mem_commit, real, mc.rd_fresh[k]});
+        Val nv{mem_commit.isNull() ? real : tm_.mkTerm(Kind::ITE, {mem_commit, real, mc.rd_fresh[k]}), mc.sig.bits, false};
+        // ordering="none": the dout REGISTER captures this cycle's X plane along
+        // with the value, so a gate-suppressed step must hold BOTH — otherwise
+        // the plane would appear a cycle early or vanish. `is_signed` stays false:
+        // the consumer only re-seeds this map and phase 1 re-derives the sign
+        // from the dout pin.
+        if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
+          Term held = (k < mc.rd_xcur.size() && !mc.rd_xcur[k].isNull()) ? mc.rd_xcur[k] : bv_const(tm_, mc.sig.bits, 0);
+          nv.x_mask = mem_commit.isNull() ? mc.rd_xmask[k] : tm_.mkTerm(Kind::ITE, {mem_commit, mc.rd_xmask[k], held});
+        }
+        out.next_read[mc.rd_key[k]] = nv;
       } else {
         out.equalities.emplace_back(mc.rd_fresh[k], real);
       }

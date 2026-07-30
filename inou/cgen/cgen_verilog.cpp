@@ -774,9 +774,10 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 // multi-clock RF). Semantics match the templates exactly: port-order write
 // priority (the highest enabled write port wins a same-address collision, i.e.
 // the LAST program write), a per-(READ,WRITE) FWD matrix (bit k*n_wr+j forwards
-// write port j to read port k), and LATENCY_0 (==1 flops the output
-// once, ==0 async). Uses $clog2 instead of the `log2 macro to avoid depending
-// on a macro that may not be in scope when emitted inline.
+// write port j to read port k), the parallel UNDEF matrix (same layout; the
+// collision reads x instead — Pyrope `ordering="none"`), and LATENCY_0 (==1
+// flops the output once, ==0 async). Uses $clog2 instead of the `log2 macro to
+// avoid depending on a macro that may not be in scope when emitted inline.
 std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock) {
   std::string s;
   s          += absl::StrCat("module ", mod_name, "\n");
@@ -790,7 +791,11 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
   s          += absl::StrCat("  #(parameter BITS = 4, SIZE=128, parameter [",
                              fwd_w - 1,
                              ":0] FWD=1, parameter LATENCY_0=1, WENSIZE=1,\n");
-  s          += "    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)\n  (\n";
+  // UNDEF is the same shape as FWD and goes LAST so no existing positional
+  // parameter moves; defaulting to 0 keeps every caller that omits it identical.
+  s          += absl::StrCat("    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0, parameter [",
+                             fwd_w - 1,
+                             ":0] UNDEF=0)\n  (\n");
   bool first  = true;
   auto port   = [&](const std::string& decl) {
     s     += (first ? "    " : "   ,") + decl + "\n";
@@ -867,7 +872,22 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
     // to read port k. Later write ports override earlier ones so a same-address
     // multi-write forwards the LAST writer, matching the storage priority in
     // the always block above (which is why this chain runs j high -> low).
+    // UNDEF is the same matrix for "the collision is undefined": its rung goes
+    // FIRST within a write port (the two bits are mutually exclusive, so the
+    // order only matters if a caller sets both) but stays INSIDE the per-port
+    // step, so a low port's UNDEF can never beat a high port's FWD.
     for (int j = n_wr - 1; j >= 0; --j) {
+      s += absl::StrCat("    (((UNDEF >> ",
+                        k * n_wr + j,
+                        ") & 1) != 0 && wr_enable_",
+                        j,
+                        "[fwd_j",
+                        k,
+                        "] && (wr_addr_",
+                        j,
+                        " == rd_addr_",
+                        k,
+                        ")) ? {MASKSIZE{1'bx}} :\n");
       s += absl::StrCat("    (((FWD >> ",
                         k * n_wr + j,
                         ") & 1) != 0 && wr_enable_",
@@ -924,6 +944,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   int mem_size    = 0;
   int mem_bits    = 0;
   hhds::Pin_class mem_fwd_dpin;  // per-(read,write) forwarding matrix (may exceed 64 bits)
+  hhds::Pin_class mem_undef_dpin;  // per-(read,write) UNDEFINED-on-collision matrix (same layout)
   int mem_type    = 2;  // array by default
   int mem_wensize = 0;
 
@@ -986,6 +1007,14 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         return;
       }
       mem_fwd_dpin = e.driver;
+    } else if (pin_name == "undef") {
+      if (!is_const_pin(e.driver)) {
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for undef not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
+        return;
+      }
+      mem_undef_dpin = e.driver;
     } else if (pin_name == "init") {
       // For a plain memory `init` is the comptime power-on contents; for a
       // whole-array cell (the `update` pin is driven) it is the RUNTIME reset
@@ -1213,6 +1242,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fwd_txt  = fv.is_just_i64() ? std::to_string(fv.to_just_i64()) : const_to_verilog(fv);
       }
       parameters = absl::StrCat(parameters, first_entry ? "" : " ,", ".FWD", "(", fwd_txt, ")");
+    }
+    if (!mem_undef_dpin.is_invalid()) {
+      // ordering="none": the same matrix shape saying "this collision reads x".
+      // Emitted only when non-zero (tolg drives the pin only then), so every
+      // netlist that predates the mode is byte-identical.
+      auto        uv = hydrate_const(mem_undef_dpin);
+      std::string undef_txt
+          = uv.is_just_i64() ? std::to_string(uv.to_just_i64()) : const_to_verilog(uv);
+      parameters = absl::StrCat(parameters, first_entry ? "" : " ,", ".UNDEF", "(", undef_txt, ")");
     }
     if (!mem_init_dpin.is_invalid()) {
       // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
@@ -1868,12 +1906,15 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
 
     // SHL b is single-driver (the one-hot multi-shift `(n<<b0)|(n<<b1)` form
     // was removed).
+    // The amount rides a declared variable or a literal, never an inlined
+    // expression — create_locals guarantees it (Verilog SELF-determines this
+    // position; see the shift-amount pass there).
     auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));
     final_expr    = absl::StrCat("(", wide_val, " << ", amt_expr, ")");
   } else if (op == Ntype_op::SRA) {
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(a_dpin);
-    auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));
+    auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));  // declared: see create_locals
     // `>>>` is an *arithmetic* (sign-filling) shift only when its left operand
     // is signed IN THE EVALUATION CONTEXT. Verilog makes the whole enclosing
     // expression unsigned if ANY operand is unsigned (e.g. the deliberate SHL
@@ -2783,6 +2824,57 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
 
     add_to_pin2var(fout, dpin, name, out_unsigned);
+  }
+
+  // Second pass — a shift's AMOUNT operand must never be an inlined expression.
+  //
+  // The RHS of `<<` / `>>` / `>>>` is the one binary operand Verilog
+  // SELF-determines: it does NOT inherit the expression's context width. A
+  // declared variable (declared at bits_of, `signed` unless the pin is unsigned)
+  // or a constant literal carries its full width and signedness there, but an
+  // expression folded inline is evaluated at its own natural Verilog width —
+  // max(operand widths) — and WRAPS.
+  //
+  // That silently truncated the length of a runtime bit-range select. For
+  // `a#[base ..= base+len]` (and the `(1 << (len+1)) - 1` mask a Verilog round
+  // trip produces) the amount is a Sum whose LiveHD pin is 5 bits (0..8) while
+  // its inlined text `(get_mask_32_u + (2'sh1))` was only max(3,2) = 3 bits, so
+  // len==7 shifted by 0 and the mask came out 0 — z read 0 where the golden kept
+  // bits (witness a=0x100 base=7 len=7: gold 2, gate 0).
+  //
+  // Landing the amount in its own variable — rather than padding the text in
+  // place — is what makes this correct for BOTH signednesses: a Verilog
+  // assignment evaluates its RHS at the destination's width, and the declaration
+  // decides whether the extension is zero or sign. An in-place `({N{1'b0}} | …)`
+  // pad (the idiom the SHL *left* operand uses) forces the amount unsigned, which
+  // zero-extends a negative index: `a[$signed(b) +: 4]` lowers to
+  // `(a<<4) >>> (sext(b)+4)` and b = 3'b111 must shift by 3, not by 11.
+  //
+  // Runs as its own pass so it sees the FINAL pin2var: a Get_mask amount, a named
+  // amount, or a fanout>=2 amount is already declared above and is left alone.
+  for (auto node : graph->fast_class()) {
+    auto op = type_op_of(node);
+    if (op != Ntype_op::SHL && op != Ntype_op::SRA) {
+      continue;
+    }
+    if (!node.has_out_edges()) {
+      continue;  // dead shift: no statement is emitted for it
+    }
+    auto amt_dpin = get_driver(find_sink_pin(node, "b"));
+    if (amt_dpin.is_invalid() || is_const_pin(amt_dpin) || pin2var.contains(amt_dpin.get_class_index())) {
+      continue;
+    }
+    // A pin the first pass parked in pin2expr (AttrSet, an inlined const) has NO
+    // assignment emitter: build_simple_expr returns {} for it, so declaring a
+    // variable here would mint a wire nothing ever drives — and get_expression
+    // prefers pin2var over pin2expr, so the shift would read that dangling net
+    // (x in sim, an unconstrained amount after synthesis) instead of the alias
+    // text. Leave those alone; the pre-existing inlined text is still correct
+    // for them, just not width-declared.
+    if (pin2expr.contains(amt_dpin.get_class_index())) {
+      continue;
+    }
+    add_to_pin2var(fout, amt_dpin, get_scaped_name(pin_wire_name(amt_dpin)), is_unsign(amt_dpin));
   }
 }
 

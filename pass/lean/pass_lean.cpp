@@ -204,6 +204,10 @@ struct Memory_info {
   int64_t                       type       = 0;
   int64_t                       fwd        = 0;
   int64_t                       posclk     = 1;
+  // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision
+  // window undefined? Kept as a bool, not the matrix — the emitter refuses the
+  // whole memory on the first set bit, and a wide matrix does not fit an i64.
+  bool                          undef      = false;
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
@@ -309,8 +313,8 @@ int64_t const_pin_int_or(const Node_pin& pin, int64_t dflt) {
 std::string memory_policy_summary(const Memory_info& mi) {
   std::ostringstream oss;
   oss << "memory node n_" << mi.nid << " bits=" << mi.bits << " size=" << mi.size << " addr_width=" << mi.addr_width
-      << " type=" << mi.type << " fwd=" << mi.fwd << " posclk=" << mi.posclk << " wensize=" << mi.wensize
-      << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
+      << " type=" << mi.type << " fwd=" << mi.fwd << " undef=" << (mi.undef ? 1 : 0) << " posclk=" << mi.posclk
+      << " wensize=" << mi.wensize << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
   return oss.str();
 }
 
@@ -351,6 +355,20 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       mi.type = const_pin_int(ctx, e.driver, node, pname);
     } else if (pname == "fwd") {
       mi.fwd = const_pin_int_or(e.driver, 0);  // unused in async emission; tolerate non-const
+    } else if (pname == "undef") {
+      // ordering="none": the read-during-write window is UNDEFINED. The policy
+      // tuple below only knows the two DEFINED answers (write_first from a set
+      // `fwd` bit, read_first from a clear one), so a certificate about such a
+      // memory asserts a concrete value in a window the emitted RTL leaves x.
+      // Refuse it below rather than export a proof of a different design.
+      //
+      // Tested with is_known_false() rather than the i64 window so a matrix
+      // wider than 62 bits still registers as set, and a non-const driver on
+      // this comptime pin refuses instead of guessing.
+      mi.undef = true;
+      if (pin_is_const(e.driver)) {
+        mi.undef = !pin_const_value(e.driver).is_known_false();
+      }
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
     } else if (pname == "rdport") {
@@ -415,6 +433,13 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // read data, modeled with a read-data register field + sram_sync_read_reg_next).
   if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
     fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only.");
+  }
+  if (mi.undef) {
+    fatal(ctx,
+          memory_policy_summary(mi)
+              + ". pass.lean cannot model ordering=\"none\" (the `undef` matrix): sram_1r1w_{read,write}_first only express "
+                "the two DEFINED collision answers, so the certificate would assert a value in a window the emitted RTL "
+                "leaves x. Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
   }
   mi.sync = (mi.type == 1);
 

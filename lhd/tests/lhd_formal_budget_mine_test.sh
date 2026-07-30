@@ -14,6 +14,10 @@
 #     unusable for tuning.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
+#   * INCONCLUSIVE is a FAILURE by default (`formal.strict`, default true since
+#     2026-07-29): an UNKNOWN proves nothing, so the run EXITS 7 and says why.
+#     `--set formal.strict=false` is the opt-out and demotes it back to an
+#     `formal-inconclusive` warning with rc 0. Both directions are pinned below.
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
 #     unequal-reset twin is still REFUTED — induction never manufactures a proof.
@@ -54,7 +58,17 @@ start=$(date +%s)
 rc=$?
 end=$(date +%s); elapsed=$((end-start))
 
-[ "$rc" -eq 0 ] || fail "a budget-limited UNKNOWN must be a warning, not a failure (rc=$rc): $(cat "$W/budget.out")"
+# A budget-limited UNKNOWN is still an UNKNOWN: it proves nothing and disproves
+# nothing, so the DEFAULT (`formal.strict`, flipped true 2026-07-29) is to FAIL
+# with the `unsupported` class (rc 7) rather than exit 0 on a warning. The
+# hardness here is real and not a tool bug: the same three obligations are
+# PROVEN inductively in ~1.5s at 4-bit operands, and only the 32-bit
+# bit-blasted nonlinear products outrun the solver (120s/obligation still
+# UNKNOWN) — exactly the budget-limited case this file exists to account for.
+# The failure must NAME that cause, not just die.
+[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 under the default formal.strict (rc=$rc): $(cat "$W/budget.out")"
+grep -q "could not decide" "$W/budget.out" \
+  || fail "the strict failure must explain WHY it failed (could not decide): $(cat "$W/budget.out")"
 grep -q "budget-limited depth" "$W/budget.out" \
   || fail "the budget-freeze disclosure must appear: $(cat "$W/budget.out")"
 grep -qE "budget 3s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [0-9]+ on the 1s floor" "$W/budget.out" \
@@ -68,6 +82,27 @@ grep -qE "'distrib[12]'.*UNKNOWN" "$W/budget.out" \
 if [ "$elapsed" -ge 12 ]; then
   fail "total solver budget not honored: ${elapsed}s (want < 12s; per-check would be 12s+)"
 fi
+
+# 1-strict. The other direction of the same policy: `--set formal.strict=false`
+#   is the documented opt-out ("a user can ignore it, but not by default"), and
+#   it must restore the pre-2026-07-29 behavior EXACTLY — rc 0, with the verdict
+#   demoted to a `formal-inconclusive` warning that still names the budget. Same
+#   design and same knobs as above; only the policy flag differs, so any
+#   difference in the report is the flag leaking into the solving.
+"$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
+  --set formal.bound=3 --set formal.timeout=3 --set formal.split=none \
+  --set formal.min_timeout=1 --set formal.strict=false --workdir "$W/lax" \
+  >"$W/lax.out" 2>&1
+lax_rc=$?
+[ "$lax_rc" -eq 0 ] || fail "formal.strict=false must demote the inconclusive to a warning (rc=$lax_rc): $(cat "$W/lax.out")"
+grep -q "formal-inconclusive" "$W/lax.out" \
+  || fail "the opt-out must still WARN (formal-inconclusive) about the undecided run: $(cat "$W/lax.out")"
+grep -q "formal verify INCONCLUSIVE" "$W/lax.out" \
+  || fail "the demoted warning must say the run was INCONCLUSIVE: $(cat "$W/lax.out")"
+grep -q "budget-limited depth" "$W/lax.out" \
+  || fail "the demoted warning must still name the budget cause: $(cat "$W/lax.out")"
+echo "ok: inconclusive fails by default (rc=7, cause named); formal.strict=false warns and exits 0"
+
 # 1a. NO obligation may be silently skipped for lack of budget. `timeout` is a
 #     soft target, so an obligation that outlives it falls back to the
 #     min_timeout floor and earns a real UNKNOWN/CEX — it never comes back
@@ -99,7 +134,7 @@ start=$(date +%s)
   >"$W/floor.out" 2>&1
 rc=$?
 end=$(date +%s); floor_elapsed=$((end-start))
-[ "$rc" -eq 0 ] || fail "raising the floor must not change the verdict class (rc=$rc): $(cat "$W/floor.out")"
+[ "$rc" -eq 7 ] || fail "raising the floor must not change the verdict class (still an inconclusive rc=7) (rc=$rc): $(cat "$W/floor.out")"
 grep -qE "budget 3s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [1-9][0-9]* on the 4s floor" "$W/floor.out" \
   || fail "the report must show the raised 4s floor and a non-zero floored count: $(cat "$W/floor.out")"
 # The floored count is per UNIT, never per check: an obligation is checked once

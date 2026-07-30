@@ -16,7 +16,7 @@
 // reset next to a memory write, and a counter next to a memory write).
 pub mod mem_write_during_reset::[timecheck=false](clk:u1, rst:u1, we:u1, a:u2, din:u4) -> (ack:u4@[], dout:u4@[]) {
   reg ack:u4:[init=0, reset_pin=ref rst, async=true]
-  reg m:[4]u4:[ordering="none"]
+  reg m:[4]u4:[ordering="old"]
   dout = 0ub????
   if we != 0 {
     m[a] = din

@@ -65,9 +65,17 @@ echo "PASS: real difference still FAILs through the pair-free confirming re-solv
 # 4. Planted BOGUS (crossed) pair hint on the EQUIVALENT pair: ind goes SAT
 #    (distrusted), bmc bounded-proves — and the bounded PASS is SUPPRESSED
 #    under uncertain pairs. Honest UNKNOWN, never a wrong verdict.
+#
+#    The suppression is a deliberate POLICY refusal, NOT a budget shortfall
+#    (raising formal.bound to 256 still bounded-proves in milliseconds and the
+#    verdict stays UNKNOWN). Because the run therefore proved *nothing*, the
+#    default `formal.strict=true` makes it a hard FAIL; `--set
+#    formal.strict=false` downgrades the very same UNKNOWN to a warning and
+#    exits clean. Both directions are pinned below.
 # ---------------------------------------------------------------------------
-mkdir -p "$W/wd4"
-cat > "$W/wd4/formal_cache.json" <<'EOF'
+plant_crossed_hint() {
+  mkdir -p "$1"
+  cat > "$1/formal_cache.json" <<'EOF'
 {
   "schema": 1,
   "salt": "0000000000000000",
@@ -79,20 +87,46 @@ cat > "$W/wd4/formal_cache.json" <<'EOF'
   }
 }
 EOF
+}
+
+# 4a. Default (strict): a suppressed bounded PASS decided nothing, so it must
+#     NOT exit 0 — and it must read as undecided, never as a disproof.
+plant_crossed_hint "$W/wd4"
 OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" 2>&1)
 RC=$?
-[ "$RC" -eq 0 ] || fail "#4 suppressed bounded PASS is a non-strict UNKNOWN, clean exit (rc=$RC): $OUT"
-echo "$OUT" | grep -q "bounded bmc PASS suppressed under 2 uncertain tier-2 pair(s)" || fail "#4 missing suppression: $OUT"
-echo "$OUT" | grep -q "UNKNOWN" || fail "#4 verdict should be UNKNOWN: $OUT"
-echo "$OUT" | grep -q "PROVEN equivalent" && fail "#4 a crossed speculative pairing must never PROVE: $OUT"
-# Self-heal: the stale hint whose solve did not PASS is dropped, so the next
+[ "$RC" -ne 0 ] || fail "#4a a suppressed bounded PASS proves nothing; strict (the default) must FAIL (rc=$RC): $OUT"
+echo "$OUT" | grep -q "bounded bmc PASS suppressed under 2 uncertain tier-2 pair(s)" || fail "#4a missing suppression: $OUT"
+echo "$OUT" | grep -q "UNKNOWN" || fail "#4a verdict should be UNKNOWN: $OUT"
+echo "$OUT" | grep -q "PROVEN equivalent" && fail "#4a a crossed speculative pairing must never PROVE: $OUT"
+echo "$OUT" | grep -q "REFUTED" && fail "#4a an undecided run must not be reported as a disproof: $OUT"
+echo "$OUT" | grep -q "could not decide equivalence of 'impl.dut'" || fail "#4a the failure must say the run is undecided: $OUT"
+echo "$OUT" | grep -q "formal.strict=false" || fail "#4a the failure must name the opt-out knob: $OUT"
+# Self-heal: the stale hint whose solve did not PASS is dropped, so a later
 # run pairs fresh and reaches the true (unbounded) PROVEN.
-grep -q '"ra", "xb"' "$W/wd4/formal_cache.json" && fail "#4 stale crossed hint must be cleared: $(cat "$W/wd4/formal_cache.json")"
+grep -q '"ra", "xb"' "$W/wd4/formal_cache.json" && fail "#4a stale crossed hint must be cleared: $(cat "$W/wd4/formal_cache.json")"
+echo "PASS: strict (default) turns the suppressed bounded PASS into a hard FAIL"
+
+# 4b. --set formal.strict=false is the opt-in tolerance: the identical UNKNOWN
+#     is only a warning, the run exits clean, and the warning denies being a
+#     proof. (Re-plant the hint — 4a already self-healed it away.)
+plant_crossed_hint "$W/wd4"
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" --set formal.strict=false 2>&1)
+RC=$?
+[ "$RC" -eq 0 ] || fail "#4b formal.strict=false must accept the UNKNOWN and exit clean (rc=$RC): $OUT"
+echo "$OUT" | grep -q "bounded bmc PASS suppressed under 2 uncertain tier-2 pair(s)" || fail "#4b missing suppression: $OUT"
+echo "$OUT" | grep -q "lec INCONCLUSIVE" || fail "#4b the tolerated UNKNOWN must still warn: $OUT"
+echo "$OUT" | grep -q "NOT a proof of equivalence" || fail "#4b the warning must deny being a proof: $OUT"
+echo "$OUT" | grep -q "PROVEN equivalent" && fail "#4b a crossed speculative pairing must never PROVE: $OUT"
+grep -q '"ra", "xb"' "$W/wd4/formal_cache.json" && fail "#4b stale crossed hint must be cleared: $(cat "$W/wd4/formal_cache.json")"
+echo "PASS: formal.strict=false downgrades the same UNKNOWN to a warning, clean exit"
+
+# 4c. Both runs above self-healed the hint, so this one pairs fresh and reaches
+#     the true (unbounded) PROVEN.
 OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" 2>&1)
 RC=$?
-[ "$RC" -eq 0 ] || fail "#4 post-heal re-run should be PROVEN (rc=$RC): $OUT"
-echo "$OUT" | grep -q "PROVEN with 2 uncertain tier-2 pair(s) applied" || fail "#4 post-heal run should pair fresh and prove: $OUT"
-grep -q '"ra", "xa"' "$W/wd4/formal_cache.json" || fail "#4 post-heal run should store the correct hint"
+[ "$RC" -eq 0 ] || fail "#4c post-heal re-run should be PROVEN (rc=$RC): $OUT"
+echo "$OUT" | grep -q "PROVEN with 2 uncertain tier-2 pair(s) applied" || fail "#4c post-heal run should pair fresh and prove: $OUT"
+grep -q '"ra", "xa"' "$W/wd4/formal_cache.json" || fail "#4c post-heal run should store the correct hint"
 echo "PASS: bogus crossed pair hint ends UNKNOWN (bounded PASS suppressed), self-heals, then PROVEs fresh"
 
 # ---------------------------------------------------------------------------

@@ -1931,8 +1931,12 @@ private:
     // read port is minted — the number of program writes that textually
     // precede it. finalize_mems() turns this into the per-(read,write) `fwd`
     // matrix. "fwd" forwards every write to every read (position-blind),
-    // "none" forwards nothing.
-    enum class Mem_order { program, fwd, none };
+    // "old" forwards nothing and every read is the DEFINED committed value,
+    // "none" forwards nothing and a colliding read is UNDEFINED (the `undef`
+    // matrix, graph/cell.cpp pid 15). "old" vs "none" is the distinction a
+    // single `fwd` bit cannot make; the Verilog readers need "old" because a
+    // nonblocking write is never visible to a same-timestep read.
+    enum class Mem_order { program, fwd, old, none };
     int64_t legacy_fwd_mask = 0; // set when the deprecated `fwd=` attr is used
     bool has_legacy_fwd = false;
     std::vector<int> rd_wr_before; // per read port: writes minted before it
@@ -2965,14 +2969,14 @@ private:
 
     // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
     static constexpr std::string_view known[] = {
-        "addr",   "bits", "clock_pin", "din",  "enable", "fwd",
+        "addr",   "bits", "clock_pin", "din",  "enable", "fwd",   "undef",
         "posclk", "type", "wensize",   "size", "rdport", "init"};
     for (const auto &[k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
         error_here("upass.tolg: unknown __memory config field '{}' — the "
                    "vocabulary is the Memory cell pins verbatim "
-                   "(addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/"
-                   "size/rdport/init; no `latency`, no `clock`)",
+                   "(addr/bits/clock_pin/din/enable/fwd/undef/posclk/type/"
+                   "wensize/size/rdport/init; no `latency`, no `clock`)",
                    k);
         return true;
       }
@@ -3010,11 +3014,13 @@ private:
       return true;
     };
 
-    int64_t bits = 0, size = 0, type = 0, fwd = 0, wensize = 1, posclk = 1;
+    int64_t bits = 0, size = 0, type = 0, fwd = 0, undef = 0, wensize = 1,
+            posclk = 1;
     if (!cfg_const("bits", 0, true, bits) ||
         !cfg_const("size", 0, true, size) ||
         !cfg_const("type", 0, false, type) ||
         !cfg_const("fwd", 0, false, fwd) ||
+        !cfg_const("undef", 0, false, undef) ||
         !cfg_const("wensize", 1, false, wensize) ||
         !cfg_const("posclk", 1, false, posclk)) {
       return true;
@@ -3091,15 +3097,37 @@ private:
     // matrix (the RTL escape hatch: __memory's vocabulary is the cell verbatim).
     const int n_rd_cfg = n_ports - n_wr_cfg;
     const int fwd_bits = n_rd_cfg * n_wr_cfg;
-    if (fwd == 1 && fwd_bits > 62) {
-      error_here("upass.tolg: __memory has {} read x {} write ports — fwd=true "
-                 "exceeds the 62-bit matrix this path builds; pass an explicit "
-                 "matrix instead",
+    // The all-ones expansion is keyed on the BOOLEAN literal, not on the value
+    // 1. from_pyrope collapses `true` and `1` to the same integer, so testing
+    // the value made the one-bit matrix `undef=1` (= read 0 / write 0 only)
+    // unreachable: it silently became all-ones, and the lec X plane then masked
+    // away EVERY read port's collision window — a genuinely wrong read port
+    // proved equivalent. A numeric value is always an explicit matrix now.
+    auto cfg_is_true_literal = [&](std::string_view key) {
+      auto it = cfg.named.find(std::string(key));
+      return it != cfg.named.end() && lnast_->get_name(it->second) == "true";
+    };
+    const bool fwd_all   = cfg_is_true_literal("fwd");
+    const bool undef_all = cfg_is_true_literal("undef");
+    if ((fwd_all || undef_all) && fwd_bits > 62) {
+      error_here("upass.tolg: __memory has {} read x {} write ports — "
+                 "fwd=true/undef=true exceeds the 62-bit matrix this path "
+                 "builds; pass an explicit matrix instead",
                  n_rd_cfg, n_wr_cfg);
       return true;
     }
-    const int64_t fwd_mask =
-        fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << fwd_bits) - 1 : fwd);
+    const int64_t fwd_mask = fwd_all ? (int64_t{1} << fwd_bits) - 1 : fwd;
+    // `undef` is the same shape (graph/cell.cpp pid 15) and takes the same
+    // 0/true/explicit-matrix spellings. It is mutually exclusive with `fwd`
+    // per (read,write) pair: forwarded data is defined by construction.
+    const int64_t undef_mask = undef_all ? (int64_t{1} << fwd_bits) - 1 : undef;
+    if ((fwd_mask & undef_mask) != 0) {
+      error_here("upass.tolg: __memory has fwd and undef both set for the same "
+                 "(read,write) pair (fwd={:#x}, undef={:#x}) — a forwarded "
+                 "read returns the new data, so it cannot also be undefined",
+                 fwd_mask, undef_mask);
+      return true;
+    }
 
     auto mem = make_node(Ntype_op::Memory);
     // Stamp the RESULT name on the Memory node (same rationale as the
@@ -3123,6 +3151,10 @@ private:
         .connect_driver(create_const(*g_, *Dlop::create_integer(type)));
     setup_sink_by_name(mem, "fwd")
         .connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
+    if (undef_mask != 0) {
+      setup_sink_by_name(mem, "undef")
+          .connect_driver(create_const(*g_, *Dlop::create_integer(undef_mask)));
+    }
     setup_sink_by_name(mem, "wensize")
         .connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
     if (type != 2) {
@@ -3503,7 +3535,14 @@ private:
       //   "program" (default): row r = the writes that textually precede read r
       //                        (a PREFIX, recorded in rd_wr_before)
       //   "fwd":               every read forwards every user write
-      //   "none":              nothing forwards
+      //   "old":               nothing forwards; a colliding read is the
+      //                        DEFINED committed value (what the Verilog
+      //                        readers need — a nonblocking write is invisible
+      //                        to a same-timestep read)
+      //   "none":              nothing forwards and a colliding read is
+      //                        UNDEFINED — the parallel `undef` matrix below,
+      //                        which is the only thing that distinguishes it
+      //                        from "old" (a zero `fwd` row cannot)
       // A type=2 array keeps its legacy single-bit value: it has no clock and
       // is lowered writes-before-reads, so every encoder reads the post-write
       // array unconditionally and the matrix is unused.
@@ -3524,11 +3563,14 @@ private:
             ordering = Mem_info::Mem_order::program;
           } else if (ov == "fwd") {
             ordering = Mem_info::Mem_order::fwd;
+          } else if (ov == "old") {
+            ordering = Mem_info::Mem_order::old;
           } else if (ov == "none") {
             ordering = Mem_info::Mem_order::none;
           } else {
             error_here("upass.tolg: memory '{}' has ordering=\"{}\" — the legal "
-                       "values are \"program\" (default), \"fwd\" and \"none\"",
+                       "values are \"program\" (default), \"fwd\", \"old\" and "
+                       "\"none\"",
                        name, ov);
           }
         }
@@ -3542,42 +3584,64 @@ private:
         // consumer reads it with Dlop::bit_test (arbitrary precision).
         const int n_bits = n_rd * mi.n_wr_total;
         std::string bits(static_cast<size_t>(n_bits), '0');
+        // ordering="none": the SAME layout, but the bits mean "undefined on a
+        // collision" rather than "forward". A zero `fwd` row alone cannot say
+        // whether the read is defined-OLD or undefined, so "none" needs its own
+        // matrix (graph/cell.cpp pid 15). Only the USER write ports go in it —
+        // a restore (reset) port is deterministic, exactly as for `fwd`.
+        std::string ubits(static_cast<size_t>(n_bits), '0');
         for (int r = 0; r < n_rd; ++r) {
-          int fwd_upto = 0;
+          int fwd_upto   = 0;
+          int undef_upto = 0;
           switch (ordering) {
           case Mem_info::Mem_order::program:
             fwd_upto = mi.rd_wr_before[static_cast<size_t>(r)];
             break;
           case Mem_info::Mem_order::fwd: fwd_upto = mi.n_user_wr; break;
-          case Mem_info::Mem_order::none: fwd_upto = 0; break;
+          case Mem_info::Mem_order::old: fwd_upto = 0; break;
+          case Mem_info::Mem_order::none: undef_upto = mi.n_user_wr; break;
           }
           for (int w = 0; w < fwd_upto; ++w) {
             bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] =
                 '1';
           }
-        }
-        spool_ptr<Dlop> matrix;
-        if (n_bits <= 62) { // compact form: emitted Verilog stays unchanged
-          int64_t v = 0;
-          for (int b = 0; b < n_bits; ++b) {
-            if (bits[static_cast<size_t>(n_bits - 1 - b)] == '1') {
-              v |= int64_t{1} << b;
-            }
+          for (int w = 0; w < undef_upto; ++w) {
+            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] =
+                '1';
           }
-          matrix = Dlop::create_integer(v);
-        } else {
-          matrix = Dlop::from_pyrope("0ub" + bits);
         }
-        if (matrix) {
+        // Same encoding for both: compact int64 while it fits (so the emitted
+        // Verilog stays a plain decimal), exact `0ub…` text beyond that.
+        auto pack = [&](const std::string &b) -> spool_ptr<Dlop> {
+          if (n_bits <= 62) {
+            int64_t v = 0;
+            for (int i = 0; i < n_bits; ++i) {
+              if (b[static_cast<size_t>(n_bits - 1 - i)] == '1') {
+                v |= int64_t{1} << i;
+              }
+            }
+            return Dlop::create_integer(v);
+          }
+          return Dlop::from_pyrope("0ub" + b);
+        };
+        auto redrive = [&](int pid, std::string_view pin_name,
+                           const spool_ptr<Dlop> &matrix) {
+          if (!matrix) {
+            return;
+          }
           for (const auto &e : mi.node.inp_edges()) {
             if (!e.sink.is_invalid() &&
-                static_cast<int>(e.sink.get_port_id()) == 5) { // fwd (pid 5)
+                static_cast<int>(e.sink.get_port_id()) == pid) {
               e.del_edge();
               break;
             }
           }
-          setup_sink_by_name(mi.node, "fwd")
+          setup_sink_by_name(mi.node, pin_name)
               .connect_driver(create_const(*g_, *matrix));
+        };
+        redrive(5, "fwd", pack(bits));  // fwd (pid 5)
+        if (ubits.find('1') != std::string::npos) {
+          redrive(15, "undef", pack(ubits));  // undef (pid 15)
         }
       }
       // Chunked masked writes (mem[addr][chunk]<=data) set a wensize > 1 via a

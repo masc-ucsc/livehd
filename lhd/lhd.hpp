@@ -105,7 +105,15 @@ struct Options {
   bool        tool_invert  = false; // `tool grep -v`: keep records that do NOT match
   bool        tool_match   = false; // `tool diff --match`: visualize via the semdiff `match` attribute
 
-  bool        stats = false;  // `pass semdiff --stats`: aggregate node/register/memory match report
+  // `--stats` (canonical `--set lhd.stats=true`): ask whichever pass runs for its
+  // aggregate report. Meaning is per consumer: `pass semdiff` prints the
+  // node/register/memory match report, `pass color` the partition-size report, and
+  // `lhd lec` / `lhd formal verify` (canonical knob `formal.stats`) a cvc5
+  // solve-insight report (problem size, conflicts = learned clauses, decisions,
+  // propagations, restarts, theory lemmas, resource units, timings). The formal
+  // consumer also registers a cvc5 plugin that makes the solve ~8x SLOWER, so it is a
+  // diagnosis tool — never leave it on, and never time a run with it.
+  bool        stats = false;
 
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref

@@ -44,8 +44,9 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "bound", "cache", "engine", "jobs", "mine", "min_timeout", "partitions", "phase", "report",
-    "reset", "reset_cycles", "retry", "rlimit", "solver", "spec_mining_timeout", "split", "strict", "timeout", "witness",
+    "allow_oversize", "bound",  "cache",  "engine",       "jobs",    "mine",   "min_timeout", "partitions",
+    "phase",          "report", "reset",  "reset_cycles", "retry",   "rlimit", "solver",      "spec_mining_timeout",
+    "split",          "stats",  "strict", "timeout",      "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one

@@ -1154,22 +1154,24 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     auto r = trunc_to(builder_.create_sra_stmts(p, shamt), sel_bits);
     return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
   }
-  const int bias = sel_bits;
-  // Resize the shift amount so `+ bias` cannot wrap. `dyn_low` carries only the
-  // index expression's (often tiny) width, but the real shift reaches bi.bits +
-  // bias. cgen inlines this `+ bias` into the shift operand, where Verilog's
-  // self-determined width is just max(operand widths) and the carry is dropped:
-  // a 4-bit idx makes `idx + 1 == 0` at idx==15, shifting by 0 and returning the
-  // wrong element. Widen `dyn_low` (zero-extend via get_mask) to a width that
-  // holds bi.bits + bias before adding the bias.
-  int amt_bits = 0;
-  for (int t = bi.bits + bias; t > 0; t >>= 1) {
-    ++amt_bits;
-  }
-  ++amt_bits;  // headroom for the +bias carry
-  shamt        = builder_.create_plus_stmts(trunc_to(shamt, amt_bits), std::to_string(bias));
-  auto shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)), shamt);
-  auto r       = trunc_to(shifted, sel_bits);
+  const int bias    = sel_bits;
+  // `+ bias` is plain IR arithmetic: bitwidth infers the Sum wide enough for the
+  // carry, and cgen honours that width (Verilog SELF-determines a shift's amount
+  // operand, so cgen's create_locals lands it in a declared variable instead of
+  // folding it into the shift text — see the shift-amount pass there).
+  //
+  // Do NOT pre-widen `shamt` with a zero-extending get_mask here. That used to
+  // guard the same carry -- "a 4-bit idx makes `idx + 1 == 0` at idx==15" -- back
+  // when cgen dropped it, but it works by REINTERPRETING the index as unsigned,
+  // which silently discards the sign of a SIGNED index: `a[$signed(b) +: 4]` with
+  // b = 3'b111 became `31 + 4 = 35` instead of `-1 + 4 = 3`, so the select read 0
+  // where the source keeps a[2:0]. cvc5 refuted that graph against the intended
+  // lowering (witness a=1 b=5: 8 vs 0) -- the emitted Verilog only looked right
+  // because cgen's truncation cancelled it. Keeping `shamt` at its own
+  // signedness lets `sext(b) + bias` stay signed and land in 0..bi.bits.
+  auto      shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)),
+                                                builder_.create_plus_stmts(shamt, std::to_string(bias)));
+  auto      r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
 }
 

@@ -64,11 +64,23 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   // LEC pairs `x.counter` against a regenerated `plain.counter`. Match on the
   // entity of BOTH sides — accepted only when exactly one name matches, and
   // always announced by the warning below.
-  const std::string_view want_entity = top_entity_of(want);
+  //
+  // The entity is compared with its Pyrope escape-backticks PEELED. A special-
+  // character identifier keeps its backticks in the internal name by design
+  // (prp2lnast's canonical_escaped_ident only unquotes plain alnum inner text),
+  // so a Verilog escaped module `\s\m` elaborates as ``file.`s\m` `` while every
+  // flat-name tool — the Verilog spelling, the emitted `.prp` FILE name, a test
+  // header's `:pyrope_top:` — calls it `s\m`. Backticks are escape SYNTAX, not
+  // part of the name, so `--top s\m` must find it without the caller having to
+  // know LiveHD's internal spelling.
+  auto peel = [](std::string_view s) {
+    return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? s.substr(1, s.size() - 2) : s;
+  };
+  const std::string_view want_entity = peel(top_entity_of(want));
   std::string            hit;
   int                    n_hits = 0;
   for (const auto& n : names) {
-    if (top_entity_of(n) == want_entity) {
+    if (peel(top_entity_of(n)) == want_entity) {
       hit = n;
       ++n_hits;
     }
