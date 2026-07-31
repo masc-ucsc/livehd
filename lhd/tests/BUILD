@@ -298,6 +298,21 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `lhd formal verify` test-unit face: a `formal` block is an INDEPENDENT test, so
+# it enumerates and selects exactly like a sim `test`. `--list-tests` is a pure
+# parse of the blocks -> JSON in sim's envelope (no design load, no solver — it
+# works against a design that does not even compile) or a human listing in pretty
+# mode; a lone non-path positional selects one block (anywhere among the
+# positionals, glob accepted) through the same filter --formal drives; the two
+# spellings together are a usage error; and a selector that matches nothing FAILS
+# rather than silently proving only the design's own obligations.
+sh_test(
+    name = "lhd_formal_list_tests_test",
+    size = "large",
+    srcs = ["lhd_formal_list_tests_test.sh"],
+    data = ["//lhd"],
+)
+
 # F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
 # induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
 # per-obligation merge takes bmc-first's deep reachable refute, and auto never

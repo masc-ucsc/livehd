@@ -82,7 +82,7 @@ void sim_command(Options& opts, Result& res) {
   const std::string file       = sources.back();
   const bool        setup_only = opts.sim_setup_only;
   const bool        run_only   = opts.sim_run_only;
-  const bool        list_only  = opts.sim_list_tests;
+  const bool        list_only  = opts.list_tests;
   const bool        pretty     = opts.diag_fmt == Diag_fmt::pretty;
   if (setup_only && run_only) {
     throw Lhd_error{"usage", "--setup-only and --run-only are mutually exclusive", ""};

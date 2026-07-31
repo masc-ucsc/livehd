@@ -3154,6 +3154,64 @@ static std::string json_esc(std::string_view s) {
   return o;
 }
 
+// ---- `formal verify --list-tests` --------------------------------------------
+// A formal block is an INDEPENDENT test (its assumes scope to itself), which is
+// why it enumerates through the same `--list-tests` face `lhd sim` gives its
+// `test` blocks. The JSON keeps sim's envelope — {"file":…,"tests":[{"name":…,
+// "params":[]}]} — so one enumerator reads both commands; `params` is always
+// empty because the grammar gives a formal block no parameter list (parse_formal:
+// "No parameter list: a formal block takes no runtime arguments"). The extra
+// per-test fields (file / target / line / assert+assume counts) are additive.
+struct Formal_test_info {
+  std::string file;    // the .prp the block was read from (design or sidecar)
+  std::string name;    // dotted block name — the selector handle
+  std::string target;  // module the alias chain binds to ("" = the verified top)
+  int         line    = 0;
+  int         asserts = 0;  // assert / assert_always statements
+  int         assumes = 0;  // assume / assume_nocheck_* statements
+};
+
+static Formal_test_info formal_test_info(const std::string& file, const livehd::formal_blocks::Block& blk) {
+  Formal_test_info t;
+  t.file   = file;
+  t.name   = blk.name;
+  t.target = blk.target;
+  t.line   = blk.line;
+  for (const auto& st : blk.stmts) {
+    // The extractor already rejected anything that is not one of these forms, so
+    // the leading keyword classifies the statement.
+    if (st.text.compare(0, 6, "assume") == 0) {
+      ++t.assumes;
+    } else {
+      ++t.asserts;
+    }
+  }
+  return t;
+}
+
+static std::string formal_tests_to_json(const std::vector<std::string>& block_files, const std::vector<Formal_test_info>& tests) {
+  // "file" mirrors sim's single-source envelope: the LAST block source, which is
+  // the sidecar in the canonical `verify <design> <sidecar>` call. Every entry
+  // also carries its own "file", so a multi-sidecar run stays unambiguous.
+  std::string j = "{\"file\":\"";
+  j += json_esc(block_files.empty() ? std::string{} : block_files.back());
+  j += "\",\"tests\":[";
+  for (size_t i = 0; i < tests.size(); ++i) {
+    const auto& t = tests[i];
+    j += (i != 0 ? ",{\"name\":\"" : "{\"name\":\"");
+    j += json_esc(t.name);
+    j += "\",\"params\":[],\"file\":\"";
+    j += json_esc(t.file);
+    j += "\",\"line\":" + std::to_string(t.line);
+    j += ",\"target\":\"" + json_esc(t.target);
+    j += "\",\"asserts\":" + std::to_string(t.asserts);
+    j += ",\"assumes\":" + std::to_string(t.assumes);
+    j += "}";
+  }
+  j += "]}";
+  return j;
+}
+
 // The machine-readable run report an agent parses each loop iteration: written
 // on EVERY run (PROVEN / REFUTED / UNKNOWN alike — UNKNOWN is exactly the case
 // the agent must act on), covering every obligation with its verdict, cycles,
@@ -3389,6 +3447,38 @@ void formal_verify_command(Options& opts, Result& res) {
   std::string              kind = opts.impl_kind;
   std::string              path = opts.impl_path;
   std::vector<std::string> extras(opts.files.begin() + (opts.files.empty() ? 0 : 1), opts.files.end());
+
+  // A LONE NON-PATH positional is the block selector — the same shape `lhd sim`
+  // gives its `test` blocks (`lhd sim tb.prp my.test`), since a formal block IS
+  // an independent test. Split it off BEFORE the design pick so the selector may
+  // sit anywhere among the positionals (the design is then the first remaining
+  // path, exactly as before). It feeds the same fnmatch filter as --formal, so a
+  // plain dotted name selects one block and a glob still selects a family.
+  std::string block_sel;
+  {
+    std::vector<std::string> paths;
+    for (const auto& f : extras) {
+      auto ends = [&](std::string_view s) { return f.size() > s.size() && f.compare(f.size() - s.size(), s.size(), s) == 0; };
+      if (ends(".prp") || ends(".v") || ends(".sv")) {
+        paths.push_back(f);
+      } else if (block_sel.empty()) {
+        block_sel = f;
+      } else {
+        throw Lhd_error{"usage",
+                        std::format("formal verify: '{}' and '{}' both look like a formal-block selector", block_sel, f),
+                        "pass at most ONE selector; use --formal '<glob>' to select a family of blocks"};
+      }
+    }
+    extras = std::move(paths);
+  }
+  if (!block_sel.empty()) {
+    if (!opts.formal_filter.empty() && opts.formal_filter != block_sel) {
+      throw Lhd_error{"usage",
+                      std::format("formal verify: the block selector '{}' conflicts with --formal '{}'", block_sel, opts.formal_filter),
+                      "pass the selector as a positional OR as --formal, not both"};
+    }
+    opts.formal_filter = block_sel;
+  }
   if (path.empty() && !opts.ins.empty()) {
     // An explicitly routed lg:DIR is the design; every .prp positional stays a
     // formal-block sidecar (the pre-compiled flow for import-heavy designs).
@@ -3396,18 +3486,11 @@ void formal_verify_command(Options& opts, Result& res) {
     path = opts.ins.front().path;
   }
   if (path.empty() && !extras.empty()) {
-    const std::string& f    = extras.front();
-    auto               ends = [&](std::string_view s) { return f.size() > s.size() && f.compare(f.size() - s.size(), s.size(), s) == 0; };
-    if (ends(".prp")) {
-      kind = "pyrope";
-    } else if (ends(".v") || ends(".sv")) {
-      kind = "verilog";
-    } else {
-      throw Lhd_error{"usage",
-                      std::format("formal verify: cannot infer the design kind of '{}'", f),
-                      "pass --impl KIND:PATH (verilog:/pyrope:/lg:) or a .prp/.v/.sv path"};
-    }
-    path = f;
+    // extras now holds only .prp/.v/.sv paths (the selector split above), so the
+    // extension decides the kind outright.
+    const std::string& f = extras.front();
+    kind                 = (f.size() > 4 && f.compare(f.size() - 4, 4, ".prp") == 0) ? "pyrope" : "verilog";
+    path                 = f;
     extras.erase(extras.begin());
   }
   if (path.empty() && !opts.ins.empty()) {
@@ -3435,6 +3518,58 @@ void formal_verify_command(Options& opts, Result& res) {
                       std::format("formal verify: unexpected extra input '{}'", f),
                       "extra inputs must be .prp formal-block (sidecar) files"};
     }
+  }
+  std::string block_src;  // the block sources, for the listing + selector diagnostics
+  for (const auto& bf : block_files) {
+    block_src += (block_src.empty() ? "" : ", ") + bf;
+  }
+
+  // ---- --list-tests: a pure parse of the `formal` blocks -> their dotted names
+  // (the SAME contract `lhd sim --list-tests` has for `test` blocks). No design
+  // load and no solver, so tooling can enumerate the tests cheaply — and even
+  // when the design does not compile. Output honors --diag-fmt: JSON by default
+  // when piped, a human listing in pretty mode.
+  if (opts.list_tests) {
+    if (block_files.empty()) {
+      throw Lhd_error{"usage",
+                      std::format("formal verify --list-tests: '{}' carries no formal blocks (not a Pyrope source)", path),
+                      "pass the sidecar holding the `formal` blocks: `lhd formal verify <design> <sidecar.prp> --list-tests`"};
+    }
+    std::vector<Formal_test_info> listed;
+    for (const auto& bf : block_files) {
+      for (auto& blk : livehd::formal_blocks::extract(bf, /*allow_nocheck=*/true)) {
+        if (!blk.error.empty()) {
+          throw Lhd_error{"usage", std::format("formal block error: {}", blk.error), ""};
+        }
+        if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
+          continue;
+        }
+        listed.push_back(formal_test_info(bf, blk));
+      }
+    }
+    if (listed.empty()) {
+      throw Lhd_error{"usage",
+                      opts.formal_filter.empty()
+                          ? std::format("no formal blocks found in {}", block_src)
+                          : std::format("no formal block named '{}' in {}", opts.formal_filter, block_src),
+                      "run `lhd formal verify <design> <sidecar.prp> --list-tests` to see the block names"};
+    }
+    if (opts.diag_fmt == Diag_fmt::pretty) {
+      std::print("{} formal block(s) in {}:\n", listed.size(), block_src);
+      for (const auto& t : listed) {
+        std::print("  {}{} [{} assert(s), {} assume(s)] at {}:{}\n",
+                   t.name,
+                   t.target.empty() ? std::string{} : std::format(" -> {}", t.target),
+                   t.asserts,
+                   t.assumes,
+                   t.file,
+                   t.line);
+      }
+    } else {
+      std::print("{}\n", formal_tests_to_json(block_files, listed));
+    }
+    std::fflush(stdout);
+    return;  // status stays pass (a pure query — nothing was proved)
   }
 
   // The in-compile pass.formal gate keeps its normal FAIL policy on the USER'S
@@ -3644,7 +3779,9 @@ void formal_verify_command(Options& opts, Result& res) {
       auto d = n.rfind('.');
       return d == std::string_view::npos ? n : n.substr(d + 1);
     };
-    int gen_ix = 0;
+    int         gen_ix = 0;
+    int         sel_hits = 0;     // blocks the selector kept (only meaningful when one was given)
+    std::string all_names;        // every block name seen, for the "no such block" diagnostic
     for (const auto& bf : block_files) {
       for (auto& blk : livehd::formal_blocks::extract(bf, /*allow_nocheck=*/true)) {
         if (!blk.error.empty()) {
@@ -3652,9 +3789,11 @@ void formal_verify_command(Options& opts, Result& res) {
                           std::format("formal block error: {}", blk.error),
                           "formal blocks: alias bindings + assert/assume/assert_always/assume_nocheck_* over dotted signal paths"};
         }
+        all_names += (all_names.empty() ? "" : ", ") + blk.name;
         if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
           continue;
         }
+        ++sel_hits;
         if (blk.stmts.empty()) {
           continue;  // nothing to prove (aliases only)
         }
@@ -3887,6 +4026,16 @@ void formal_verify_command(Options& opts, Result& res) {
           mons.push_back(std::move(im));
         }
       }
+    }
+    // A selector that matches NOTHING must not quietly degrade into "prove the
+    // design's own obligations": that run reports PROVEN while the block the
+    // user named was never checked. Same contract as `lhd sim <tb> <name>`,
+    // which refuses an unknown test rather than running the others.
+    if (!opts.formal_filter.empty() && sel_hits == 0) {
+      throw Lhd_error{"usage",
+                      std::format("no formal block named '{}' in {}", opts.formal_filter, block_src),
+                      all_names.empty() ? std::string{"that source declares no `formal` blocks"}
+                                        : std::format("available blocks: {}", all_names)};
     }
   }
 

@@ -146,10 +146,15 @@ struct Options {
   bool quiet   = false;
   bool verbose = false;
 
+  // `--list-tests`: enumerate the source's TEST UNITS as JSON (or a human list in
+  // pretty mode) and exit without building/proving anything. Shared by the two
+  // test-bearing commands so they read the same: `sim` lists its `test` blocks,
+  // `formal verify` lists its `formal` blocks (each is an independent test).
+  bool list_tests = false;
+
   // `sim` command modifiers
   bool sim_setup_only = false;  // generate the C++ sim, do NOT build/run
   bool sim_run_only   = false;  // build/run an already-generated sim (needs --workdir), no regen
-  bool sim_list_tests = false;  // print the design's tests + parameters as JSON, then exit (no build)
   // `sim --arg key=value` (repeatable): bind a `test name(params)` parameter; an
   // override wins over the parameter's default. A param with neither is an error.
   std::vector<std::pair<std::string, std::string>> sim_args;

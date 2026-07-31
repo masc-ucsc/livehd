@@ -85,7 +85,7 @@ done
 #    the generic `lhd pass` overview.
 # ---------------------------------------------------------------------------
 for pair in "pass color" "pass partition" "pass abc" "pass liberty" "pass semdiff" \
-            "pyrope fmt" "pyrope lsp"; do
+            "pyrope fmt" "pyrope lsp" "formal verify"; do
   # jsonl: the record's "name" is the two-word sub-command.
   "$LHD" $pair --help --diag-fmt jsonl 2>&1 | grep -qF "\"name\":\"$pair\"" \
     || fail "'$pair --help' (jsonl) name is not '$pair'"
@@ -110,6 +110,33 @@ for mode in pretty jsonl; do
   c=$("$LHD" help formal lec --diag-fmt $mode 2>&1)
   [ "$c" = "$b" ] || fail "help formal lec ($mode) != lec --help ($mode)"
 done
+
+# `formal` is a FAMILY: its page lists the subcommands and stays short, while each
+# subcommand page is its own. `formal --help` used to print the verify page
+# verbatim, so neither `verify` nor `lec` had a page of its own.
+FAM=$("$LHD" formal --help --diag-fmt pretty 2>&1)
+VER=$("$LHD" formal verify --help --diag-fmt pretty 2>&1)
+LEC=$("$LHD" formal lec --help --diag-fmt pretty 2>&1)
+[ "$FAM" != "$VER" ] || fail "formal --help must not be the verify page"
+[ "$FAM" != "$LEC" ] || fail "formal --help must not be the lec page"
+[ "$VER" != "$LEC" ] || fail "formal verify --help must not be the lec page"
+echo "$FAM" | grep -q 'subcommands:'          || fail "the formal family page must list its subcommands: $FAM"
+echo "$FAM" | grep -q 'lhd formal verify'     || fail "the formal family page must name verify: $FAM"
+echo "$FAM" | grep -q 'lhd formal lec'        || fail "the formal family page must name lec: $FAM"
+# ...and it is SHORT: the family page is a signpost, not a copy of a subcommand page
+[ "$(echo "$FAM" | wc -l)" -lt "$(echo "$VER" | wc -l)" ] \
+  || fail "the formal family page must be shorter than the verify page"
+# each runnable page carries the four common sections
+for sec in 'usage:' 'flags:' 'examples:' 'options ('; do
+  echo "$VER" | grep -qF "$sec" || fail "formal verify --help is missing the '$sec' section"
+  echo "$LEC" | grep -qF "$sec" || fail "formal lec --help is missing the '$sec' section"
+done
+# the verify page documents its test-unit face; the lec page must not claim it
+echo "$VER" | grep -q -- '--list-tests' || fail "formal verify --help must document --list-tests"
+echo "$LEC" | grep -q -- '--list-tests' && fail "lec has no test blocks; its page must not document --list-tests"
+# an unknown subcommand is named, not silently rendered as the family page
+"$LHD" help formal bogus --diag-fmt pretty >/dev/null 2>&1 \
+  && fail "help formal bogus must fail"
 
 # ---------------------------------------------------------------------------
 # 5. `help sim` is the sim COMMAND, distinct from the `sim` emit-kind describe

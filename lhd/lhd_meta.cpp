@@ -277,14 +277,21 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"scan","description":"Pyrope import/dependency discovery: parse each .prp and report its import strings (raw, as written; path resolution lands with the import resolver). For depfile writers and BUILD generators (gazelle-style)","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"result-json","type":"path"}]},"inputs":["pyrope"],"outputs":["result.scan"],"examples":["lhd scan f1.prp f2.prp"]})json");
     return 0;
   }
-  if (name == "lec") {
+  if (name == "lec" || name == "formal lec") {
     print_json_line(
         R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo"]})json");
     return 0;
   }
-  if (name == "formal" || name == "formal verify" || name == "formal lec") {
+  // `formal` names the FAMILY (a dispatcher); the runnable thing is the
+  // subcommand, so each gets its own record. `formal lec` IS `lec`.
+  if (name == "formal") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal","description":"Formal command family (2f-verify). `formal verify` proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. `formal lec` is the equivalence check (alias of `lhd lec`). Knobs: --set formal.* (bound/timeout/phase/reset/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true},{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR (verify; lec takes --impl/--ref)","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal lec --impl impl.prp --ref ref.v"]})json");
+        R"json({"schema_version":1,"name":"formal","description":"Formal verification command family (2f-verify): a dispatcher, not a flow. `formal verify <design> [sidecar.prp ...] [BLOCK]` proves ONE design's assert/assert_always/assume obligations by BMC from reset — use it to answer \"does this design satisfy the properties I wrote?\". `formal lec --impl X --ref Y` is the equivalence check (an alias of `lhd lec`) — use it to answer \"are these two designs the same function?\". Both share the --set formal.* knob namespace (bound/timeout/solver/strict/...; legacy lec.* spellings stay accepted). Describe a subcommand for its own record: `lhd describe 'formal verify'` / `lhd describe lec`","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true}],"optional":[]},"subcommands":[{"name":"verify","summary":"prove one design's assert/assume obligations by BMC from reset"},{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl) (= lhd lec)"}],"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo","lhd formal verify ALU.prp ALU.verify.prp --list-tests","lhd formal lec --impl impl.prp --ref ref.v"]})json");
+    return 0;
+  }
+  if (name == "formal verify") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds formalfail.prp/.json. Knobs: --set formal.* (bound/timeout/phase/reset/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -932,7 +939,20 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n", sub);
     return 1;
   }
-  // compile / lec / formal / scan / tool, plus every non-command describe topic
+  // `formal` is a family: the record follows the SUBCOMMAND, so
+  // `lhd formal verify --help --diag-fmt jsonl` describes verify, not the family
+  // (`formal lec` was already folded to the `lec` topic above).
+  if (topic == "formal") {
+    if (sub.empty()) {
+      return describe_as("formal");
+    }
+    if (sub == "verify") {
+      return describe_as("formal verify");
+    }
+    std::print(stderr, "lhd help: unknown formal subcommand '{}' (verify | lec)\n", sub);
+    return 1;
+  }
+  // compile / lec / scan / tool, plus every non-command describe topic
   // (recipe:NAME, emit-kind, pass.flag, dump, config): describe renders the JSON.
   return describe_as(topic);
 }
@@ -1005,7 +1025,7 @@ int help_command(const Options& opts) {
   }
   if (topic == "lec") {
     std::print(
-        "lhd lec — logic equivalence (LEC): prove_equal(ref, impl)\n"
+        "lhd lec — logic equivalence (LEC): prove_equal(ref, impl)   [= lhd formal lec]\n"
         "\n"
         "usage: lhd lec --impl KIND:PATH --ref KIND:PATH [formal-block.prp ...] [flags]\n"
         "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred).\n"
@@ -1017,86 +1037,158 @@ int help_command(const Options& opts) {
         "    lgyosys  inou/yosys/lgcheck (the former `lhd check`; reads Verilog directly,\n"
         "             the path for gate-level / yosys-origin netlists)\n"
         "\n"
+        "  lec asks \"are these two designs the same function?\". To prove properties OF one\n"
+        "  design (assert/assume, formal blocks), that is `lhd formal verify` — lec takes no\n"
+        "  formal-block sidecar, because a block is an independent test while lec has the\n"
+        "  single obligation impl == ref.\n"
+        "\n"
         "flags:\n"
         "  --impl KIND:PATH   --ref KIND:PATH\n"
         "  --top T            --impl-top T   --ref-top T   (T = full `file.entity` name, or\n"
         "                     the bare entity when unique — a top-entity-fallback warning notes it)\n"
-        "  --reader R         --set formal.flag=value   --formal GLOB\n"
+        "  --reader R         slang | yosys-slang | yosys-verilog (default slang)\n"
+        "  --lib lg:DIR       cell-model libraries for instantiated cells (repeatable)\n"
+        "  --collapse DEF     treat DEF as already-proven: force the sound black-box path (repeatable)\n"
+        "  --trust DEF        ASSUME DEF equivalent without proving it — disclosed, never silent\n"
+        "                     (the escape hatch for a cell the encoder cannot model) (repeatable)\n"
         "  --stats            (= --set formal.stats=true) cvc5 solve insight, off by default\n"
+        "  --set formal.flag=value   engine knobs (the options block below; legacy lec.* accepted)\n"
+        "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"
         "  assume_nocheck_formal warns and is disclosed; assume_nocheck_synth is ignored.\n"
         "\n"
-        "--stats (canonical --set formal.stats=true; boolean, default false) reports what\n"
-        "  the cvc5 solve actually did: problem size (atoms, clause literals), conflicts\n"
-        "  (= learned clauses), decisions, propagations, restarts, theory lemmas, resource\n"
-        "  units and timings, plus the hottest defs by conflict count. It also registers a\n"
-        "  cvc5 plugin to see learned-clause CONTENT, which makes the solve ~8x SLOWER --\n"
-        "  so it is a DIAGNOSIS tool for a solve that is too slow or too big, never\n"
-        "  something to leave on, and never a way to time a run. That slowdown can CHANGE\n"
-        "  THE VERDICT: a proof that fits formal.timeout without it may time out with it\n"
-        "  and return UNKNOWN, which under the default formal.strict=true exits non-zero.\n"
-        "  Raise formal.timeout when diagnosing a run that has to keep passing.\n"
-        "  `no cvc5 query ran` is a normal outcome (semdiff, the verdict cache and abc\n"
-        "  cone decomposition settle defs without calling cvc5). `lhd formal verify` also\n"
-        "  writes the same numbers into formal_report.json; `lhd lec` prints them only.\n"
+        "  --stats reports what the cvc5 solve actually did: problem size (atoms, clause\n"
+        "  literals), conflicts (= learned clauses), decisions, propagations, restarts,\n"
+        "  theory lemmas, resource units and timings, plus the hottest defs by conflict\n"
+        "  count. It also registers a cvc5 plugin to see learned-clause CONTENT, which makes\n"
+        "  the solve ~8x SLOWER — so it is a DIAGNOSIS tool for a solve that is too slow or\n"
+        "  too big, never something to leave on, and never a way to time a run. That slowdown\n"
+        "  can CHANGE THE VERDICT: a proof that fits formal.timeout without it may time out\n"
+        "  with it and return UNKNOWN, which under the default formal.strict=true exits\n"
+        "  non-zero. Raise formal.timeout when diagnosing a run that has to keep passing.\n"
+        "  `no cvc5 query ran` is a normal outcome (semdiff, the verdict cache and abc cone\n"
+        "  decomposition settle defs without calling cvc5). `lhd formal verify` also writes\n"
+        "  the same numbers into formal_report.json; `lhd lec` prints them only.\n"
         "\n"
         "examples:\n"
-        "  lhd lec --impl impl.prp --ref ref.v\n"
+        "  lhd lec --impl impl.prp --ref ref.v            # the common case\n"
+        "  lhd lec --impl net.v --ref gold.v --top foo    # name the top explicitly\n"
         "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind\n"
         "  lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo\n"
-        "  lhd lec --impl impl.prp --ref ref.v --stats   # why is this solve slow? (~8x)\n");
+        "  lhd lec --impl impl.prp --ref ref.v --stats    # why is this solve slow? (~8x)\n");
     return print_options_section({"formal."});
   }
-  if (topic == "formal" || topic == "formal verify") {
+  // `lhd formal --help` is the FAMILY page: what the two subcommands are and
+  // which one to reach for. The detail lives on the subcommand pages
+  // (`formal verify --help` / `formal lec --help`) — one page per thing you can
+  // actually run, so neither dumps the other's flags.
+  if (topic == "formal" && sub.empty()) {
     std::print(
         "lhd formal — formal verification family (2f-verify)\n"
         "\n"
-        "usage: lhd formal verify <design> [--top T] [flags]\n"
-        "       lhd formal lec    --impl KIND:PATH --ref KIND:PATH [flags]   (= lhd lec)\n"
+        "usage: lhd formal <subcommand> [args] [flags]\n"
         "\n"
-        "verify proves ONE design's assert / assert_always / assume obligations by BMC\n"
-        "from reset (the pass/lec engine): each obligation is checked per cycle as its\n"
-        "own solver query, every proven fact immediately prunes the search for the rest\n"
-        "(frontier assumes), and a timeout costs one obligation at one cycle — the run\n"
-        "reports a per-assert verdict table, not a single verdict:\n"
-        "  PROVEN to cycle k   BOUNDED (no violation within the unrolled window)\n"
-        "  REFUTED at cycle k  a REACHABLE violation + the per-cycle input trace (fails)\n"
-        "  UNKNOWN             solver gave up / blackbox artifact / contradictory assumes\n"
-        "                      (FAILS the run: an undecided check proved nothing, so it must\n"
-        "                      not exit 0. --set formal.strict=false downgrades it to a warning)\n"
-        "`assume` over PRIMARY INPUTS only is an environment constraint (free, in force\n"
-        "at every cycle, disclosed — verdicts are conditional on it); an assume touching\n"
-        "design STATE is a PROOF OBLIGATION (prove-then-use): proven cycles constrain\n"
-        "later obligations, a refuted one fails the run, an unproven one is NOT used.\n"
-        "assume_nocheck_formal (formal blocks) is a free UNCHECKED constraint by user\n"
-        "fiat (warned + disclosed); assume_nocheck_synth is invisible to verify.\n"
+        "subcommands:\n"
+        "  verify   prove ONE design's assert / assert_always / assume obligations by\n"
+        "           BMC from reset, per obligation and per cycle. Extra .prp positionals\n"
+        "           are formal-block sidecars, each block an independent test\n"
+        "             lhd formal verify <design> [sidecar.prp ...] [BLOCK] [flags]\n"
+        "  lec      logic equivalence: prove_equal(ref, impl). An alias of `lhd lec`\n"
+        "             lhd formal lec --impl KIND:PATH --ref KIND:PATH [flags]\n"
         "\n"
-        "the design: a bare .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR.\n"
-        "\n"
-        "machine-readable feedback (agents): EVERY run writes formal_report.json into\n"
-        "the workdir (per-obligation verdicts/cycles/solve_ms, assume classes, the\n"
-        "structured spec_mining_timeout core, witness artifact paths) — pass --workdir to keep\n"
-        "it; a REFUTED run adds formalfail.prp/.json (+ VCD replay). Knob formal.report.\n"
-        "with formal.spec_mining_timeout set, a stuck run also MINES invariants (base-proven +\n"
-        "induction-surviving) into a paste-ready formal_mined.prp + the report's\n"
-        "mined[]; formal.mine=speculative adds step-dropped bounded candidates.\n"
-        "\n"
-        "knobs (--set): formal.* (bound, timeout, phase, reset, reset_cycles,\n"
-        "  witness, strict, solver, report, spec_mining_timeout, stats, ...); legacy lec.* accepted.\n"
-        "  formal.stats (= the --stats flag; boolean, default false) adds a cvc5 solve-insight\n"
-        "  report — problem size, conflicts (= learned clauses), decisions, propagations,\n"
-        "  restarts, theory lemmas, resource units, timings — at a ~8x SLOWER solve, so use it\n"
-        "  to diagnose a slow proof, never to time one. That slowdown can CHANGE THE VERDICT:\n"
-        "  a proof that fits formal.timeout without it may time out with it and return\n"
-        "  UNKNOWN, which under the default formal.strict=true exits non-zero. Raise\n"
-        "  formal.timeout when diagnosing a run that has to keep passing. The numbers also\n"
-        "  land in formal_report.json (this command writes it; `lhd lec` only prints them).\n"
+        "which one: `verify` answers \"does this design satisfy the properties I wrote?\"\n"
+        "(one design + its asserts/assumes); `lec` answers \"are these two designs the\n"
+        "same function?\" (two designs, no properties). Both share the --set formal.*\n"
+        "knob namespace (bound, timeout, solver, strict, ...; legacy lec.* accepted).\n"
         "\n"
         "examples:\n"
-        "  lhd formal verify foo.prp --top foo --set formal.bound=12\n"
-        "  lhd formal verify net.v --set formal.timeout=60 --set formal.strict=true\n"
-        "  lhd formal verify design.prp --set formal.phase=full   # reset window too\n");
+        "  lhd formal verify foo.prp --top foo            # prove foo's own obligations\n"
+        "  lhd formal verify ALU.prp ALU.verify.prp       # ...plus a sidecar's blocks\n"
+        "  lhd formal lec --impl impl.prp --ref ref.v     # equivalence instead\n"
+        "\n"
+        "full help:\n"
+        "  lhd formal verify --help\n"
+        "  lhd formal lec --help    (= lhd lec --help)\n");
+    return 0;
+  }
+  if (topic == "formal" && sub != "verify") {
+    std::print(stderr, "lhd help: unknown formal subcommand '{}' (verify | lec)\n", sub);
+    return 1;
+  }
+  if (topic == "formal") {  // sub == "verify"
+    std::print(
+        "lhd formal verify — prove one design's assert/assume obligations by BMC from reset\n"
+        "\n"
+        "usage: lhd formal verify <design> [sidecar.prp ...] [BLOCK] [flags]\n"
+        "  <design> is a bare .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR. Every EXTRA\n"
+        "  .prp positional is a formal-block sidecar (never compiled as design), and a\n"
+        "  lone NON-path positional selects one block — the same shape `lhd sim` uses.\n"
+        "\n"
+        "  Each obligation is checked per cycle as its own solver query, every proven\n"
+        "  fact immediately prunes the search for the rest (frontier assumes), and a\n"
+        "  timeout costs one obligation at one cycle — so the run reports a per-assert\n"
+        "  verdict table, not a single verdict:\n"
+        "    PROVEN to cycle k   BOUNDED (no violation within the unrolled window)\n"
+        "    REFUTED at cycle k  a REACHABLE violation + the per-cycle input trace (fails)\n"
+        "    UNKNOWN             solver gave up / blackbox artifact / contradictory assumes\n"
+        "                        (FAILS the run: an undecided check proved nothing, so it\n"
+        "                        must not exit 0. --set formal.strict=false = warning)\n"
+        "\n"
+        "  `assume` over PRIMARY INPUTS only is an environment constraint (free, in force\n"
+        "  at every cycle, disclosed — verdicts are conditional on it); an assume touching\n"
+        "  design STATE is a PROOF OBLIGATION (prove-then-use): proven cycles constrain\n"
+        "  later obligations, a refuted one fails the run, an unproven one is NOT used.\n"
+        "  assume_nocheck_formal (formal blocks) is a free UNCHECKED constraint by user\n"
+        "  fiat (warned + disclosed); assume_nocheck_synth is invisible to verify.\n"
+        "\n"
+        "  formal BLOCKS: a sidecar's `formal name.dotted {{ ... }}` blocks are the design's\n"
+        "  test units — the Pyrope design file is a block source too, so one file may hold\n"
+        "  both. Each block is INDEPENDENT: its assumes scope to itself, so two blocks may\n"
+        "  carry mutually-exclusive assumes and both still prove.\n"
+        "\n"
+        "flags:\n"
+        "  --top T              top module (full `file.entity`, or the bare entity when\n"
+        "                       unique — a top-entity-fallback warning notes it)\n"
+        "  --list-tests         list the formal blocks, then exit — a pure parse: no design\n"
+        "                       load, no solver (JSON, or a human listing per --diag-fmt).\n"
+        "                       Same envelope as `lhd sim --list-tests`; `params` is always\n"
+        "                       [] because a formal block takes no runtime arguments\n"
+        "  <BLOCK>              (positional) run ONE block by its dotted name; fnmatch, so a\n"
+        "                       glob selects a family. A selector that matches nothing FAILS\n"
+        "                       rather than silently proving only the design's obligations\n"
+        "  --formal GLOB        the same filter spelled as a flag (passing both is an error)\n"
+        "  --impl KIND:PATH     the design, when not given as a positional (--impl-top T)\n"
+        "  --lib lg:DIR         cell-model libraries for instantiated cells (repeatable)\n"
+        "  --workdir DIR        keep formal_report.json + the refutation artifacts here\n"
+        "  --stats              (= --set formal.stats=true) cvc5 solve insight, off by default\n"
+        "  --set formal.flag=value   engine knobs (the options block below; legacy lec.* accepted)\n"
+        "\n"
+        "  machine-readable feedback (agents): EVERY run writes formal_report.json into the\n"
+        "  workdir (per-obligation verdicts/cycles/solve_ms, assume classes, the structured\n"
+        "  spec_mining_timeout core, witness artifact paths) — pass --workdir to keep it; a\n"
+        "  REFUTED run adds formalfail.prp/.json (+ VCD replay). Knob formal.report. With\n"
+        "  formal.spec_mining_timeout set, a stuck run also MINES invariants (base-proven +\n"
+        "  induction-surviving) into a paste-ready formal_mined.prp + the report's mined[];\n"
+        "  formal.mine=speculative adds step-dropped bounded candidates.\n"
+        "\n"
+        "  --stats / formal.stats reports what the solve actually did — problem size,\n"
+        "  conflicts (= learned clauses), decisions, propagations, restarts, theory lemmas,\n"
+        "  resource units, timings — at a ~8x SLOWER solve, so use it to diagnose a slow\n"
+        "  proof, never to time one. That slowdown can CHANGE THE VERDICT: a proof that fits\n"
+        "  formal.timeout without it may time out with it and return UNKNOWN, which under\n"
+        "  the default formal.strict=true exits non-zero. Raise formal.timeout when\n"
+        "  diagnosing a run that has to keep passing.\n"
+        "\n"
+        "examples:\n"
+        "  lhd formal verify foo.prp --top foo                      # prove foo's obligations\n"
+        "  lhd formal verify ALU.prp ALU.verify.prp --list-tests     # enumerate the blocks\n"
+        "  lhd formal verify ALU.prp ALU.verify.prp alu.addw --top ALU   # prove ONE block\n"
+        "  lhd formal verify ALU.prp ALU.verify.prp --formal 'alu.*'     # ...or a family\n"
+        "  lhd formal verify foo.prp --top foo --set formal.bound=12     # unroll deeper\n"
+        "  lhd formal verify net.v --set formal.timeout=60               # per-query budget\n"
+        "  lhd formal verify design.prp --set formal.phase=full          # reset window too\n"
+        "  lhd formal verify foo.prp --workdir w/    # keep w/formal_report.json (+ formalfail)\n");
     return print_options_section({"formal."});
   }
   if (topic == "semdiff") {

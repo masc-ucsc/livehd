@@ -569,8 +569,8 @@ Options parse_args(int argc, char** argv) {
       opts.sim_setup_only = true;
     } else if (a == "--run-only") {  // `sim`: build/run an existing sim (needs --workdir)
       opts.sim_run_only = true;
-    } else if (a == "--list-tests") {  // `sim`: print the tests + parameters as JSON, then exit (no build)
-      opts.sim_list_tests = true;
+    } else if (a == "--list-tests") {  // `sim`/`formal verify`: print the test units as JSON, then exit (no build/proof)
+      opts.list_tests = true;
     } else if (a == "--arg") {  // `sim`: bind a test parameter, repeatable: --arg key=value
       auto v  = std::string{need_value(a, i, argc, argv)};
       auto eq = v.find('=');
