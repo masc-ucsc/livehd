@@ -116,6 +116,21 @@ sh_test(
     tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
 )
 
+# A collapsed STATELESS child must not blind the ABC cone pass. EXPECTED TO FAIL
+# until Comb_box emits `bbin:` obligations + a comb analogue of boxcong
+# (todo/livehd/2f-lec.html, "Hierarchy and collapse"), so it is tagged `fixme`
+# (.bazelrc filters -fixme) to keep `bazel test //...` green. Run it with:
+#   bazel test //pass/lec:lec_comb_box_cone_test --test_tag_filters=
+sh_test(
+    name = "lec_comb_box_cone_test",
+    srcs = ["tests/lec_comb_box_cone_test.sh"],
+    data = ["//lhd"],
+    tags = [
+        "fixme",
+        "no-sandbox",  # compiles RTL + runs the in-process cvc5/ABC cone pass
+    ],
+)
+
 sh_test(
     name = "lec_mem_whole_test",
     srcs = ["tests/lec_mem_whole_test.sh"],

@@ -1,0 +1,25 @@
+/*
+:name: phase_clock_gate_invert
+:type: equiv
+:verilog_top: phase_clock_gate_invert
+:pyrope_top: phase_clock_gate_invert
+*/
+
+// Twin of the inverted-gate golden, written as an ENABLE rather than a gated
+// clock — the reduction Clock_cell recognition is meant to perform
+// (endpoint_enable & clock_guard), with the guard sampled on the inactive phase
+// before the cell's own active edge.
+//
+// `late` is a negedge register, so its enable cone is evaluated in the negedge
+// batch and the read of `early` there sees the value the rise batch committed.
+// That is the whole point of the pair: pinning the guard sample to the rise
+// instead would read the PREVIOUS period's `early`.
+pub mod phase_clock_gate_invert::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
+  reg early:u3:[clock_pin=ref clk]
+  reg late:u3:[clock_pin=ref clk, posclk=false]
+  early = d
+  if (early & 1) != 0 {
+    late = d ^ 0ub111
+  }
+  q = late ^ early
+}

@@ -495,6 +495,10 @@ _SIM_FIXME = [
             "tests/equiv/phase_latch_flop_edges.prp",
             "tests/equiv/phase_hier_latch_neg.prp",
             "tests/equiv/phase_clock_gate_chain.prp",
+            # phase_two_clock_ports / phase_clock_gate_invert are NOT excluded:
+            # their FORWARD direction proves (lgcheck's bounded miter decides
+            # both), so marking them fixme here would hide a forward regression.
+            # They fail in prp-v2prp-* -- see _V2PRP_FIXME below.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -664,6 +668,17 @@ _V2PRP_FIXME = [
     "phase_hier_latch_neg",
     "phase_clock_gate_chain",
     "phase_mem_write_read",
+    # Added 2026-07-31 from the 2f-lec plan review. Both FORWARD directions and
+    # both v2v round trips pass; only the native cvc5 leg refuses, with exactly
+    # the message the phase scheduler exists to retire:
+    #   phase_two_clock_ports   -> `def `phase_two_clock_ports_cell` holds
+    #                              1 negedge flop(s), 2 clock nets, and
+    #                              normalizing across a module boundary is not
+    #                              supported yet`
+    #   phase_clock_gate_invert -> `2 clock nets and no known integer ratio
+    #                              between them`
+    "phase_two_clock_ports",
+    "phase_clock_gate_invert",
     # latch_enable_hold was PROMOTED out of this list (2026-07-20): the shipped
     # `reg NAME:TYPE:[latch=true]` spelling IS the Pyrope source equivalent of
     # an inferred latch, the fixture was rewritten to it, and the reverse

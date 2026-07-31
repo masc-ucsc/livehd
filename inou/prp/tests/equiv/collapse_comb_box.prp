@@ -1,0 +1,20 @@
+/*
+:name: collapse_comb_box
+:type: equiv
+:verilog_top: collapse_comb_box
+:pyrope_top: collapse_comb_box
+*/
+
+// Same hierarchy as the golden, different child body: (a & b) ^ (a | b) is a ^ b.
+// Keeping the instance on BOTH sides is what makes the pair exercise the
+// Comb_box path — a flat twin would just be inlined and prove. See the golden .v.
+pub comb collapse_comb_box_fn(a:u3, b:u3) -> (y:u3) {
+  y = a ^ b
+}
+
+pub mod collapse_comb_box::[timecheck=false](clk:u1, a:u3, b:u3) -> (q:u3@[]) {
+  mut mixed = collapse_comb_box_fn::[name=u_fn](a = a, b = b)
+  reg acc:u3:[clock_pin=ref clk]
+  acc = acc ^ mixed
+  q = acc
+}

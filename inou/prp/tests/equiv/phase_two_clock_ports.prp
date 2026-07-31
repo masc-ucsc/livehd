@@ -1,0 +1,18 @@
+/*
+:name: phase_two_clock_ports
+:type: equiv
+:verilog_top: phase_two_clock_ports
+:pyrope_top: phase_two_clock_ports
+*/
+
+// Flat twin of the golden's two-clock-port cell. Both of the cell's clock ports
+// are bound to `clk`, so the whole design has ONE root; `fall` is a negedge reg
+// and reads `rise` in the SAME source period, after the rise batch committed it.
+// See the golden .v for why the clock analysis has to be design-wide.
+pub mod phase_two_clock_ports::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
+  reg rise:u3:[clock_pin=ref clk]
+  reg fall:u3:[clock_pin=ref clk, posclk=false]
+  rise = d
+  fall = rise
+  q = fall
+}

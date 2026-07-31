@@ -26,6 +26,25 @@
   preserve that contract. An abstraction may cause more work or an UNKNOWN,
   never a wrong verdict.</p>
 
+<p><strong>An encode ABORT compared nothing and must be gated as such.</strong>
+  Today all four encode-failure returns (<code>query.cpp:4425</code>/<code>:4433</code>
+  for ind, <code>:3641</code>/<code>:3649</code> for bmc) leave
+  <code>res.nothing_compared</code> false, so the driver's two guards
+  (<code>lhd_kernel_formal.cpp:2798</code> and <code>:2825</code>), both of which
+  are documented as firing regardless of <code>formal.strict</code>, never see
+  it. A def whose encode aborted therefore reports as an ordinary solver
+  <code>Unknown</code> — live in the current run, where <code>core_top</code>
+  produced zero compare points after the WORD-LEVEL CYCLE refusal — and under
+  <code>--set formal.strict=false</code> that degrades to an exit-0 warning,
+  which is exactly the vacuity those guards exist to prevent. Set BOTH
+  <code>nothing_compared</code> and <code>unsupported</code> at all four returns,
+  including the plain <code>fail()</code> (structural) path: a refusal decides
+  nothing and a bigger timeout cannot change it, which is the doctrine
+  <code>encode.cpp</code> already states for <code>fail_unsupported()</code>.
+  Setting both makes the run hard-fail independently of strict AND report the
+  reason through the named-refusal path instead of a generic "could not
+  decide".</p>
+
 <h2 id="phase-schedule">Pending — hierarchy-aware formal phase scheduler</h2>
 
 <p><strong>This replaces formal coloring and single-edge graph
@@ -43,10 +62,32 @@
   memory reader does not retain <code>RD_CLK_POLARITY</code>. These are the
   remaining implementation gaps.</p>
 
+<h3>Clock-graph propagation (runs first)</h3>
+
+<p>Before any scheduling, run one top-down pass that traverses <em>only</em> the
+  clock input signals and propagates them through the whole hierarchy, deciding
+  the relationships between clocks once for the entire design. The normal case
+  is a single root that propagates and splits. If a def presents two clock
+  inputs, assume they are synchronous — same frequency, unknown offset — emit a
+  warning, and allow an explicit ratio specification to override the
+  assumption.</p>
+
+<p><strong>This pass is what makes leaf proofs possible at all, so it cannot be
+  folded into per-def scheduling.</strong> The leaves-first driver proves every
+  def with that def as its own top, where its clock ports are unbound free
+  inputs. <code>prim_rf_3r2w_preview</code> refuses standalone today with
+  <code>2 clock nets and no known integer ratio between them</code>, yet at all
+  32 instantiation sites both of its clock ports are bound to one net
+  (<code>rf_clk_i = clk_i</code> / <code>= clkgt</code>). Resolving clocks only
+  "starting at the selected top" would therefore fail closed on the whole
+  14-member <code>prim_rf_*_preview</code> family — the largest block of the
+  trust list this work exists to retire, and the family that gates
+  <code>vpu_lane</code> and <code>minion_dcache_top</code>.</p>
+
 <h3>Schedule analysis and cone construction</h3>
 
-<p>Starting at the selected top, resolve clocks through actual instance
-  bindings and assign a semantic phase to every instantiated register or latch
+<p>With clock relationships fixed by the pass above, assign a semantic phase to
+  every instantiated register or latch
   and to every synchronous memory port. For each endpoint and phase, walk its
   data, enable, reset, address, write-data, and observation cones backward
   across non-opaque hierarchy. Stop at constants, primary inputs, state
@@ -82,22 +123,67 @@
 <h3><code>Clock_cell</code></h3>
 
 <p>A <code>Clock_cell</code> is timing metadata, not an SMT data value and not a
-  scheduled state endpoint. Canonicalize a chain to its root clock, edge parity,
-  and active-high guard. Sample the guard before the reference rise, reuse that
-  sample for all affected rise/fall consumers in the period, and combine it with
-  each endpoint's own enable as
+  scheduled state endpoint. <strong>It is never passed to formal.</strong> The
+  cell may be built from a latch or an AND, but that structure is not modeled:
+  it is recognized as "this clock got gated (or divided)" and its only effect is
+  to control the enables of the endpoints — register, memory port, or nested
+  cell — that consume its clock output. Canonicalize a chain to its root clock,
+  edge parity, and active-high guard, and combine that guard with each
+  endpoint's own enable as
   <code>endpoint_enable &amp; clock_guard</code>. Inversion swaps the consumer edge;
   <code>div != 1</code> remains a named refusal.</p>
+
+<p><strong>The guard's sample point follows the cell's own parity</strong> — the
+  inactive phase immediately preceding the cell's active edge — and one sample
+  serves every consumer of that cell in the period. For an ordinary gate the
+  consumers fire at the root rise, so the pre-rise sample is right, and that
+  holds for a negedge consumer too because a gated clock can only fall if it
+  rose. For an inverted cell the active edge is the root fall, so the guard is
+  the pre-fall sample. Pinning the sample unconditionally to the rise would read
+  a guard half a period early on an inverted cell, which is a wrong-verdict
+  direction rather than an UNKNOWN, and it would also contradict the microstep
+  list above, where an active-high clock-role latch already closes before the
+  fall. Deriving it from parity needs no look inside the cell.</p>
 
 <h3>Memories</h3>
 
 <p>Retain read and write polarity for each synchronous port in the Memory IR,
   including <code>RD_CLK_POLARITY</code> from Yosys; keep a compatibility fallback
-  for graphs that only carry the legacy global polarity. Schedule only the ports
+  for graphs that only carry the legacy global polarity (<code>posclk</code> is a
+  single global pin today). Schedule only the ports
   active in a phase. Ports in one batch keep the existing simultaneous write,
   forwarding, and collision policy. This fixes formal timing only; the separate
   Verilog-codegen work remains in
   <a class="xref" href="2m-multiport_mem.html">2m-multiport_mem</a>.</p>
+
+<p><strong>A WHOLE-ARRAY update does not mix with per-port writes.</strong> The
+  whole-array update is last: any provisional per-port write is simply dropped.
+  Read forwarding is not allowed on that shape, and reads always see the
+  last-cycle (pre-write) contents. Anything else is an error — reject a
+  whole-array memory that carries a per-port write, any <code>fwd</code>/
+  <code>undef</code> bit, or any <code>ordering</code> other than read-old, and
+  reject it in <code>upass/tolg</code> where the shape is built, not downstream.</p>
+
+<p>Two facts to reconcile while doing it. First, the encoder currently documents
+  and implements the <em>inverse</em> priority — <code>encode.cpp</code>'s
+  whole-array branch says "per-port writes below STORE on top of it (per-port
+  wins)" — and <code>rd_source()</code> returns the post-update array for an
+  <code>is_whole</code> memory whenever <code>fwd</code> is set, so it honours
+  forwarding on exactly the shape that must now refuse. Under this ruling both
+  become unreachable, and the explicit tolg error is what keeps the encoder's
+  silent priority from deciding anything. It also retires the soundness caveat on
+  <code>Encoded::Mem_whole</code>, which exists only because the per-port chain's
+  base is not the shared <code>a_cur</code>. Second,
+  <code>upass_tolg.cpp:3581</code> already builds the per-(read,write)
+  <code>fwd</code>/<code>undef</code> matrix only when
+  <code>!mi.has_update</code>, so <code>ordering=</code> on a whole-array
+  declaration is accepted and then ignored; today's behaviour is correct only
+  because the encoder's <code>is_whole</code> fallback happens to read committed
+  state. The error above turns that coincidence into a stated contract.</p>
+
+<p>Unrelated but in the same import path: <code>WR_PRIORITY_MASK</code> has zero
+  hits repo-wide, so the Yosys reader still drops two-write-port priority that
+  the slang reader gets right.</p>
 
 <h3>Hierarchy and collapse</h3>
 
@@ -107,6 +193,38 @@
   guards. Collapse a child only after its intermediate phase contracts prove;
   otherwise leave it expanded. A body-less trusted black box is conservatively
   allowed to transition on both edges of every declared clock.</p>
+
+<p><strong>Give <code>Comb_box</code> the same treatment.</strong> A collapsed
+  STATELESS proven child takes the <code>Comb_box</code> branch
+  (<code>query.cpp:2549</code>), whose outputs are
+  <code>APPLY_UF(uf_cb:&lt;def&gt;:&lt;port&gt;, in_concat)</code>
+  (<code>encode.cpp:1464</code>) — and that branch <code>continue</code>s before
+  the <code>bbin:</code> obligation loop at <code>:1471-1487</code>, so unlike a
+  <code>State_box</code> it emits no per-port compare points and has no analogue
+  of the <code>boxcong</code> rule at <code>query.cpp:5027-5085</code>. ABC
+  abstracts an <code>APPLY_UF</code> to a free input keyed by term identity, so
+  the two sides' applications become unrelated primary inputs and every cut
+  downstream of a comb box is undecidable in the cone pass. Emit
+  <code>bbin:</code> obligations for comb boxes and add the comb analogue of
+  <code>boxcong</code>: once every input port of a comb box is proven equal, its
+  two applications are equal by congruence. The same
+  <code>continue</code> also skips the <code>bbox:</code> presence marker at
+  <code>encode.cpp:1498</code>, so a one-sided comb instance is currently
+  invisible to the correspondence gate; emit that too.</p>
+
+<p>This needs none of the phase machinery and can land first. It is measured, not
+  speculative: 52 of <code>minion_dcache_top</code>'s 78 residual cuts and all
+  four of <code>vpu_lane</code>'s come from it, and
+  <code>minion_dcache_top</code> reaches PROVEN as soon as its four comb boxes
+  are expanded. The cascade is worth knowing because it looks like many
+  independent failures and is one: an unprovable
+  <code>bbin:...:bid_i</code> that reads a comb-box output breaks its parent's
+  <code>boxcong</code> group, which leaves the arbiter-fed memory write ports
+  unproven, which stops <code>query.cpp:4998</code> unlocking those arrays'
+  read-port dout merges, which makes all 18 fields of two output bundles come
+  back as exact-blast diffs — every one of them spurious. Note also that the
+  acceptance criterion "collapse yields the same verdict as expansion" is exactly
+  the property this restores; it does not hold today.</p>
 
 <h3>Scope and failure policy</h3>
 
@@ -130,39 +248,67 @@
 <li>flop/latch encoding with edge-specific inputs and two output observations;</li>
 <li>per-port memory polarity and phase scheduling, including registered reads;</li>
 <li>phase-aware sequential boxes and proof-gated hierarchical collapse;</li>
-<li>remove mandatory <code>pass.single_edge</code> preprocessing from LEC and verify;</li>
+<li>remove mandatory <code>pass.single_edge</code> preprocessing from LEC and verify
+  — this is also the preflight <code>minion_synth_lec_synth</code> dies in, so it
+  unblocks a third bench target, not just <code>minion_lec</code> and
+  <code>minion_lec_incremental</code>;</li>
 <li>measure minion and remove trust entries only for definitions that actually prove.</li>
 </ol>
+
+<p>The <code>Comb_box</code> compare points under "Hierarchy and collapse" are
+  independent of all six steps and can land ahead of them.</p>
+
+<p>No wall-clock target is set for the phase path: correctness only. Those 31
+  defs are not proven at all today, so any finite cost is progress; the existing
+  acceptance line still holds the plain-posedge and unrelated-root flop-only
+  paths to their present performance envelope.</p>
 
 <h2 id="memory-pairing">Pending — same-shape memory permutation retry</h2>
 
 <p>Memory state currently pairs by shape and occurrence. The landed diverged-use
   guard prevents a confident semdiff mismatch from being collapsed, but it
   cannot distinguish structurally symmetric, same-shape memories reordered
-  between REF and IMPL. An occurrence pairing can therefore lose a valid proof;
-  on reset-based BMC it must never be allowed to turn crossed initial arrays into
-  a trusted refutation.</p>
+  between REF and IMPL.</p>
 
-<p>When a solver result touches an ambiguous same-shape bucket, enumerate its
-  small set of alternative permutations as <em>uncertain</em> memory pairs. Reuse
-  the state-pairing discipline: a proof under a complete candidate mapping may
-  pass and disclose the mapping; a refutation under a candidate is not final and
-  must be rechecked without it; timeout or unresolved ambiguity stays UNKNOWN.
-  Cap combinatorial search and report the skipped bucket when the cap is
-  exceeded. Include the chosen permutation in the cache key and pair hint only
-  when the hint is complete and revalidates against the current graphs.</p>
+<p><strong>v1 is the SOUNDNESS half only.</strong> On reset-based BMC an
+  occurrence pairing must never be allowed to turn crossed initial arrays into a
+  trusted refutation: when a result touches an ambiguous same-shape bucket, the
+  verdict stays UNKNOWN rather than becoming a disproof. That guard is cheap and
+  unconditionally right.</p>
+
+<p>The completeness half — enumerate the bucket's alternative permutations as
+  <em>uncertain</em> memory pairs, let a proof under a complete candidate mapping
+  pass and disclose the mapping, recheck a candidate refutation without it, cap
+  the search and report a skipped bucket, and include the chosen permutation in
+  the cache key and pair hint only when the hint revalidates — is DEFERRED until
+  a live instance appears. None has been found on this corpus.</p>
+
+<p><strong>The obvious candidate is measured NOT to be one.</strong>
+  <code>intpipe_csr_file</code> holds exactly two <code>[2]u49</code> arrays
+  (<code>reg_stval</code>, <code>reg_mtval</code>) — the textbook ambiguous
+  bucket — and its two <code>mem:2x49#*</code> cuts are the def's only unproven
+  obligations, cvc5-SAT in about 1.2 s each. Swapping the two declarations in a
+  copy of <code>intpipe_csr_file.prp</code> and re-LEC'ing leaves both cuts DIFF,
+  so the pairing is not crossed and the two sides genuinely compute different
+  next-state contents. What makes exactly those two arrays unusual is a
+  variable-index read of their NEXT (comb) value at
+  <code>intpipe_csr_file.sv:2410</code> — the <code>needs_array</code> forwarding
+  case at <code>query.cpp:4855-4880</code>. That, not permutation retry, is what
+  keeps the def UNKNOWN.</p>
 
 <h2>Acceptance</h2>
 
 <ul class="subtasks">
 <li>posedge-to-negedge and negedge-to-posedge pipelines observe the earlier phase's committed state.</li>
 <li>Active-low and active-high clock-role latches close before the corresponding edge batch; a data-gated latch and same-batch flop update simultaneously.</li>
-<li>A chained <code>Clock_cell</code> feeds both phases from one rise-sampled guard; inversion changes edge parity and division refuses.</li>
-<li>A child communicates rise-to-fall state through phase-aware contracts, and collapse yields the same verdict as expansion.</li>
-<li>Mixed-edge read/write memory ports preserve polarity, registered-read behavior, forwarding, and collision rules.</li>
+<li>A clock-input-only propagation pass fixes clock relationships design-wide before scheduling; a def whose clock ports are unbound as a top is still scheduled from that pass, and two roots warn and assume synchronous unless a ratio is given.</li>
+<li>A chained <code>Clock_cell</code> feeds every consumer in the period from ONE guard sampled on the inactive phase before the cell's own active edge; inversion moves both the consumer edge and the sample point, and division refuses.</li>
+<li>A child communicates rise-to-fall state through phase-aware contracts, and collapse yields the same verdict as expansion — for a stateless (<code>Comb_box</code>) child as well as a stateful one.</li>
+<li>Mixed-edge read/write memory ports preserve polarity, registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
 <li>Reset lengths, source-period bounds, output comparisons, assertions, cache keys, and edge-labelled witnesses follow the new schedule.</li>
+<li>An encode abort sets both <code>nothing_compared</code> and <code>unsupported</code>, so it hard-fails under <code>formal.strict=false</code> and names its reason.</li>
 <li>The plain-posedge path and unrelated-root flop-only path retain their present verdicts and performance envelope.</li>
-<li>A reordered same-shape memory pair proves through permutation retry; a real mismatch still fails only after a pair-free confirmation.</li>
+<li>An ambiguous same-shape memory bucket never yields a refutation on reset-based BMC; it stays UNKNOWN.</li>
 <li>Re-run the focused formal tests and the lhdsuite dino/minion LEC scenarios; shrink minion's trust list only from measured proofs, without changing the suite's known-failure policy.</li>
 </ul>
 
