@@ -1,0 +1,21 @@
+/*
+:name: phase_posneg_pipeline
+:type: equiv
+:verilog_top: phase_posneg_pipeline
+:pyrope_top: phase_posneg_pipeline
+*/
+
+// Phase-order regression: `rise` commits first and `fall` consumes that new
+// value later in the same source period. Conversely, `rise` sees the `fall`
+// value committed in the preceding period. Rise and fall may sample different
+// values of d; a formal scheduler must not collapse them into one input sample.
+pub mod phase_posneg_pipeline::[timecheck=false](clk:u1, d:u4) -> (rise_o:u4@[], fall_o:u4@[]) {
+  reg rise:u4:[clock_pin=ref clk]
+  reg fall:u4:[clock_pin=ref clk, posclk=false]
+
+  wrap rise = fall + d
+  fall = rise ^ d
+
+  rise_o = rise
+  fall_o = fall
+}

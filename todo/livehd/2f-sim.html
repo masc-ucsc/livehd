@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-sim — agent-oriented lhd sim query API</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-sim</strong> Agent-oriented <code>lhd sim</code> query API</h1>
+
+<p>Give a coding agent a stable, non-interactive way to inspect a simulation without
+  generating and parsing a whole VCD or learning a collection of presentation-oriented
+  CLI flags. The interface is one stateless invocation with a versioned JSON request and
+  result. A request may batch several questions; <code>lhd</code> chooses the nearest
+  checkpoint, replays once, and answers every question whose time range is covered.</p>
+
+<pre><code>lhd sim design.prp test.name \
+  --workdir run \
+  --query queries.json \
+  --result-json answers.json</code></pre>
+
+<p>The existing <code>--list-signals</code>, <code>--probe</code>, and
+  <code>--break-when</code> options remain supported as compatibility sugar over this
+  query engine. VCD remains an export for waveform viewers, not the query database.</p>
+
+<h2>Request and result contract</h2>
+
+<p><code>--query</code> accepts a file path or <code>-</code> for stdin. The request has
+  a schema name and an ordered array of independently identified queries:</p>
+
+<pre><code>{
+  "schema": "lhd.sim.query/v1",
+  "queries": [
+    {
+      "id": "pc",
+      "op": "value",
+      "signal": "cpu.fetch.pc",
+      "at": {"cycle": 10420, "phase": "post"}
+    },
+    {
+      "id": "redirect",
+      "op": "next_change",
+      "signal": "cpu.fetch.redirect",
+      "after": {"cycle": 10420, "phase": "post"}
+    },
+    {
+      "id": "rob_delta",
+      "op": "diff",
+      "scope": "cpu.rob",
+      "from": {"cycle": 10419, "phase": "post"},
+      "to": {"cycle": 10420, "phase": "post"}
+    }
+  ]
+}</code></pre>
+
+<p>The response preserves request order and IDs. Each result is independently
+  <code>ok</code> or carries a structured error; one bad signal must not erase unrelated
+  answers. The top-level metadata records the design hash, selected test and arguments,
+  seed, checkpoint used, cycles replayed, sampling phase, and whether any result was
+  truncated. Deterministic ordering makes the JSON suitable for agent tools and tests.</p>
+
+<pre><code>{
+  "schema": "lhd.sim.query-result/v1",
+  "run": {
+    "design_hash": "8f31d5c0",
+    "test": "test.name",
+    "checkpoint_used": 10000,
+    "cycles_replayed": 421
+  },
+  "results": [
+    {
+      "id": "pc",
+      "ok": true,
+      "at": {"cycle": 10420, "phase": "post"},
+      "value": {
+        "bits": 64,
+        "signed": false,
+        "hex": "0000000080001040",
+        "known_mask": "ffffffffffffffff"
+      }
+    }
+  ]
+}</code></pre>
+
+<h2>Five v1 operation families</h2>
+
+<ol>
+<li><strong><code>signals</code>.</strong> Enumerate queryable signals by exact name,
+  stable ID, scope/module, glob or regex, and kind. Return hierarchical name, aliases,
+  width, signedness, kind, clock domain, port direction, source location, and supported
+  operations. Unknown and ambiguous selectors are errors with suggested matches.</li>
+<li><strong><code>value</code> / <code>values</code>.</strong> Read one signal or a
+  selector-defined set at an exact cycle and phase. Values are full-width hardware bit
+  vectors, not host <code>long</code>s: return width, signedness, binary/hex text and a
+  known-bit mask so wide and X/Z-bearing values are lossless.</li>
+<li><strong><code>changes</code> / <code>next_change</code>.</strong> Return value
+  transitions for a signal or scope over a bounded interval, or the first transition
+  after a point. Results identify old/new values and the exact observation cycle. This is
+  the direct agent primitive missing from today's per-cycle <code>--probe</code> rows.</li>
+<li><strong><code>find</code>.</strong> Search a bounded interval, forward or backward,
+  for the first cycle satisfying a typed expression. The initial expression language
+  supports comparisons, Boolean composition, signal-to-signal comparisons, bit slices,
+  and <code>changed</code>/<code>rising</code>/<code>falling</code>. Stop replay once a
+  forward search is answered instead of merely recording a hit and finishing the run.</li>
+<li><strong><code>snapshot</code> / <code>diff</code>.</strong> Return all selected state
+  at one cycle, or only values that differ between two cycles. Selection is explicit and
+  bounded by scope/kind/glob plus a result cap; a response reports truncation rather than
+  silently omitting state.</li>
+</ol>
+
+<h2>Execution and semantics</h2>
+
+<ul>
+<li>Require exactly one selected test, matching today's observability modes.</li>
+<li>Plan the complete batch before replay: union its time ranges, load the nearest
+  compatible checkpoint at or before the earliest required cycle, and traverse the
+  interval once.</li>
+<li>For v1, sample only the current simulator's settled post-step state. Every timestamp
+  spells this as <code>{"cycle":N,"phase":"post"}</code>; unsupported phases fail
+  explicitly rather than aliasing to post-step.</li>
+<li>Honor <code>max_results</code> and a query timeout. Return <code>complete</code>,
+  <code>truncated</code>, and the searched interval so absence is distinguishable from an
+  incomplete search.</li>
+<li>Validate checkpoint design hash and replay configuration. Report seed, randomized
+  draw/restoration status, checkpoint cycle, and replay distance so an agent can judge
+  whether an answer is reproducible.</li>
+<li>Do not materialize a VCD to answer a query. Generated typed accessors observe the
+  running design directly; exact checkpoint-cycle state may be read without replay when
+  the checkpoint already contains the requested signals.</li>
+</ul>
+
+<h2>Relationship to existing tasks</h2>
+
+<ul>
+<li><a class="xref" href="4c.html">4c</a> owns the durable checkpoint format and reload
+  validator. 2f-sim consumes checkpoint discovery/reload and must disclose validation
+  results in every query response.</li>
+<li><a class="xref" href="4e.html">4e</a> remains the later queryable indexed trace store.
+  It may become a backend for repeated historical queries, but 2f-sim's public request
+  and response contract must work first with checkpoint plus replay and must not depend
+  on a persistent trace index.</li>
+<li><a class="xref" href="5f.html">5f</a> owns benchmark contracts and agent-loop latency.
+  2f-sim defines the WaveformQA protocol, coverage and correctness metrics; 5f may promote
+  a stable smoke subset and performance thresholds after the full harness is calibrated.</li>
+<li><code>lhd tool --diag-fmt jsonl</code> already exposes structural LGraph inspection.
+  Joining runtime signal IDs to fan-in/fan-out/source-cone queries is a follow-on, not one
+  of the five v1 simulation operations.</li>
+</ul>
+
+<h2>WaveformQA agent benchmark</h2>
+
+<p>Use
+  <a href="https://arxiv.org/html/2607.20638v1">WaveformQA: Benchmarking LLM
+  Temporal Reasoning on Digital Waveforms</a> and its
+  <a href="https://github.com/tenstorrent/waveformqa">code/data repository</a> as the
+  first external acceptance benchmark for this API. WaveformQA supplies 360 questions
+  with programmatically generated ground truth across eight categories and 24
+  subcategories. Its 13 RISC-V traces span roughly 338&ndash;4,185 signals and
+  5,000&ndash;60,000 transitions, so it tests both semantic coverage and scaling beyond
+  hand-written unit fixtures.</p>
+
+<p>The benchmark target is <strong>agent plus tool</strong>, not an agent reading a raw
+  waveform. For every question, give the coding agent the natural-language question, the
+  <code>signals</code> result, and the v1 query schema. The agent creates one or more JSON
+  queries, invokes <code>lhd sim --query</code>, and returns the final answer. Compare that
+  answer with WaveformQA's ground truth and retain the complete query/tool transcript.</p>
+
+<table>
+<thead><tr><th>WaveformQA category</th><th>Expected v1 building blocks</th><th>Examples covered</th></tr></thead>
+<tbody>
+<tr><td>Lookup</td><td><code>value</code>, <code>values</code>, <code>find</code></td><td>value at time/edge, value when another signal changes, first match</td></tr>
+<tr><td>Counting</td><td><code>changes</code>, <code>find</code></td><td>transition, rising-edge and conditionally gated counts</td></tr>
+<tr><td>Arithmetic</td><td><code>changes</code> plus agent arithmetic</td><td>period, frequency and time difference</td></tr>
+<tr><td>Temporal</td><td><code>changes</code>, <code>next_change</code>, <code>find</code></td><td>before/after, event ordering and last value before an event</td></tr>
+<tr><td>Multistep</td><td><code>find</code> followed by <code>value</code> or another <code>find</code></td><td>cycles after trigger, nth-event value and conditional sequences</td></tr>
+<tr><td>Correlation</td><td><code>find</code>, <code>values</code>, <code>next_change</code></td><td>dual/triple conditions and which signal changes first or last</td></tr>
+<tr><td>Misdirection</td><td><code>signals</code>, <code>find</code>, <code>value</code></td><td>high-order occurrences, event-after-event and glitch-resistant stable values</td></tr>
+<tr><td>FSM</td><td><code>changes</code>, <code>find</code></td><td>state sequences, next state and return counts</td></tr>
+</tbody>
+</table>
+
+<p>Do not add an operation merely to mirror a benchmark subcategory. First record whether
+  an agent can compose the five primitives correctly and efficiently. A category that
+  requires excessive result rows, tool calls or replay work is evidence for a later
+  aggregation or expression-language extension.</p>
+
+<h3>Coverage ruling</h3>
+
+<p>WaveformQA is an event-time benchmark, while v1 deliberately observes one settled
+  post-step value per simulation cycle. Therefore the full published score is
+  <strong>not</strong> a valid v1 acceptance gate without qualification. Classify every
+  question before running it and publish the denominator in each class:</p>
+
+<ul>
+<li><strong>V1-native.</strong> Exact-cycle lookup, state correlation, FSM sequence and
+  bounded transition questions whose relevant events are visible at post-step sampling
+  and whose signals exist in the query catalog.</li>
+<li><strong>V1-composable.</strong> Counting, nth occurrence, ordering and multistep
+  questions answerable by composing <code>changes</code>, <code>find</code> and
+  <code>value</code>, even if they require several tool calls or agent-side arithmetic.
+  Measure excess calls/result rows as an API-efficiency signal.</li>
+<li><strong>Extension required.</strong> Physical-time period/frequency questions,
+  subcycle glitches, multiple clock domains/phases, transitions hidden between post-step
+  samples, true four-state behavior the simulator does not preserve, or internal signals
+  absent from the catalog. Record the missing capability; never drop these questions or
+  count them as ordinary wrong answers.</li>
+</ul>
+
+<p>Report both <strong>coverage</strong> (questions expressible with the current API) and
+  <strong>accuracy on covered questions</strong>. The long-term evaluation target is to
+  grow coverage without weakening exact semantics. In particular, WaveformQA can provide
+  evidence for a later timestamp/phase extension, but it does not overturn v1's explicit
+  cycle/post boundary.</p>
+
+<h3>Benchmark layers and metrics</h3>
+
+<ol>
+<li><strong>Artifact and reproduction gate.</strong> Pin an accessible WaveformQA commit
+  and checksums for questions, ground truth, VCD and event-time JSON. Record licenses.
+  Recreate each core/workload under <code>lhd sim</code>, map published signal identities
+  to stable query IDs, and compare a reference transition slice before claiming an
+  end-to-end result. A non-equivalent regenerated trace is a setup failure, not an agent
+  error.</li>
+<li><strong>Engine oracle.</strong> Translate each covered question to a reviewed canonical query
+  sequence and require <code>lhd sim</code> to reproduce the published ground truth. This
+  isolates API semantics and simulator correctness from model behavior.</li>
+<li><strong>Query synthesis.</strong> Score whether the agent emits valid queries, selects
+  the correct signals/time bounds and reaches the canonical answer. Keep query-schema,
+  unknown-signal, wrong-signal and wrong-order failures separate from final arithmetic
+  mistakes.</li>
+<li><strong>End-to-end agent answer.</strong> Score exact/normalized answer accuracy for
+  all eight categories and every signal/transition complexity bin. Report aggregate
+  accuracy, accuracy among completed runs, and incomplete/resource-limited runs
+  separately.</li>
+<li><strong>Speed and cost.</strong> Record agent planning time, number of tool calls,
+  input/output tokens, simulator setup/build time, checkpoint selected, cycles replayed,
+  query execution time, result bytes and peak RSS. Publish median, p95 and per-category
+  values; a single end-to-end wall time hides whether the bottleneck is the agent, build,
+  replay or an over-broad query.</li>
+</ol>
+
+<p>Run three comparable baselines: the paper's raw VCD prompt, its event-time JSON prompt,
+  and agent-generated <code>lhd sim</code> queries. The first two measure direct waveform
+  consumption; the third should avoid context growth with total trace size by retrieving
+  only the evidence needed for an answer. Use the published waveform/answer artifacts as
+  the oracle. For the full performance result, recreate or import each design/workload
+  into a real <code>lhd sim</code> run so checkpoint/replay time is measured; a VCD-only
+  adapter may validate query semantics but does not count as the end-to-end result.</p>
+
+<p>For reproducibility, pin the coding-agent model and version, system/tool prompt, query
+  schema, sampling policy, context limit, temperature/seed and maximum tool calls. Keep
+  per-question transcripts and run repeated trials when the agent is nondeterministic.
+  Because the public benchmark may enter model training data, also use WaveformQA's
+  generator to create held-out questions and trace windows with the same 24-subcategory
+  stratification.</p>
+
+<h2>Subtasks — pending</h2>
+
+<ul class="subtasks">
+<li><strong>A — schema and CLI seam.</strong> Add <code>--query FILE|-</code>, parse
+  <code>lhd.sim.query/v1</code>, define structured per-query success/error results, and
+  embed the response in the normal result envelope. Reject unknown schema versions,
+  operations, fields, phases, and invalid ranges.</li>
+<li><strong>B — signal catalog and lossless values.</strong> Extend generated signal
+  metadata with stable identity, signedness, hierarchy and source information; replace
+  the low-64-bit probe map with full-width values and known masks. Add exact, scope, glob,
+  regex and kind selectors with deterministic expansion.</li>
+<li><strong>C — batch planner and evaluators.</strong> Implement the five operation
+  families, union time windows, select/validate one checkpoint, replay once, early-stop
+  answered forward searches, and enforce result/time limits.</li>
+<li><strong>D — compatibility.</strong> Lower <code>--list-signals</code>,
+  <code>--probe</code>, and <code>--break-when</code> onto the shared catalog/evaluator
+  without changing their documented outputs. Keep windowed VCD and failure-VCD replay
+  behavior independent.</li>
+<li><strong>E — agent contract tests and help.</strong> Pin deterministic JSON, batched
+  single-replay behavior, nearest-checkpoint selection, full-width/X values, hierarchy
+  selectors, next-change observations, forward/backward find, snapshot diff,
+  truncation, bad-name suggestions, invalid queries, and equivalence with the legacy
+  flags. Add the schema and examples to <code>lhd help sim</code> and
+  <code>lhd describe sim</code>.</li>
+<li><strong>F — WaveformQA harness.</strong> Import the published questions, answers and
+  waveform metadata at a pinned revision; build the coverage manifest and canonical query
+  sequences for all 24 subcategories; add the artifact/reproduction, engine-oracle,
+  query-synthesis and end-to-end agent modes above; regenerate/import the five RISC-V
+  designs as real <code>lhd sim</code> workloads; and emit coverage, accuracy and
+  decomposed speed/cost reports by category and complexity bin. Preserve all unsupported
+  and setup-failed cases in the report. Keep this as a benchmark, not a hermetic
+  per-commit unit test; add a small representative smoke subset to CI.</li>
+</ul>
+
+<h2>V1 boundaries</h2>
+
+<p>No interactive debugger or resident daemon; no VCD parser/index as a prerequisite;
+  no arbitrary combinational-temporary or subcycle observation; no memory-content,
+  structural-cone, causal/provenance, or multi-clock phase queries. Those can extend the
+  versioned protocol after the five operations establish a reliable agent loop.</p>
+
+<h2>Acceptance</h2>
+
+<ul>
+<li>One batch asking for a value, a next transition and a scope diff near cycle one
+  million loads one checkpoint and performs one bounded replay, with that plan disclosed
+  in JSON.</li>
+<li>A value wider than 64 bits round-trips exactly, including unknown bits; no numeric
+  truncation is permitted.</li>
+<li><code>next_change</code> and <code>find</code> return the first qualifying post-step
+  cycle inside their bounds, or a complete not-found result; forcing a smaller result or
+  time limit produces an explicit incomplete result.</li>
+<li>Every signal named by a result resolves back to one catalog record and source/hierarchy
+  identity; invalid or ambiguous names never become zero or disappear silently.</li>
+<li>The existing observability test suite remains green, and equivalent legacy and JSON
+  queries report the same cycles and values.</li>
+<li>The WaveformQA engine-oracle mode answers every covered canonical query exactly and
+  publishes the full native/composable/extension-required manifest. The agent mode reports
+  per-category coverage, accuracy and decomposed latency/cost without silently dropping
+  setup-failed, unsupported, context-exceeded, invalid-query or resource-limited cases.</li>
+</ul>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

@@ -1,0 +1,18 @@
+/*
+:name: phase_clock_gate_chain
+:type: equiv
+:verilog_top: phase_clock_gate_chain
+:pyrope_top: phase_clock_gate_chain
+*/
+
+// Normalized Pyrope side of the golden's two hierarchical glitch-free clock
+// gates. A clock is structural and is never read or combined as data here.
+// Clock_cell recognition must translate the Verilog chain to the root-clock
+// register enable `en0 & en1` before comparing the two representations.
+pub mod phase_clock_gate_chain::[timecheck=false](clk:u1, en0:u1, en1:u1, d:u3) -> (q:u3@[]) {
+  reg state:u3:[clock_pin=ref clk]
+  if en0 and en1 {
+    state = d
+  }
+  q = state
+}

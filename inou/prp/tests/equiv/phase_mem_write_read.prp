@@ -1,0 +1,19 @@
+/*
+:name: phase_mem_write_read
+:type: equiv
+:verilog_top: phase_mem_write_read
+:pyrope_top: phase_mem_write_read
+*/
+
+// Tiny mixed-edge memory: a 2-entry x 2-bit array writes on rise and its
+// registered read samples on fall. The falling read must see a write committed
+// earlier in the same source period. Keeping the array tiny makes BMC and
+// memory-correspondence retries cheap.
+pub mod phase_mem_write_read::[timecheck=false](clk:u1, we:u1, wa:u1, wd:u2, ra:u1) -> (q:u2@[]) {
+  reg mem:[2]u2:[ordering="old", clock_pin=ref clk]
+  reg q:u2:[clock_pin=ref clk, posclk=false]
+  if we != 0 {
+    mem[wa] = wd
+  }
+  q = mem[ra]
+}

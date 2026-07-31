@@ -1,0 +1,20 @@
+/*
+:name: phase_latch_flop_edges
+:type: equiv
+:verilog_top: phase_latch_flop_edges
+:pyrope_top: phase_latch_flop_edges
+*/
+
+// Normalized Pyrope side of both clock-role latch boundaries. Clock signals are
+// structural in Pyrope and are never read as data: the golden's active-low
+// latch + posedge flop reduces to `rise`, and its active-high latch + negedge
+// flop reduces to `fall`. The LEC scheduler must establish those equivalences.
+pub mod phase_latch_flop_edges::[timecheck=false](clk:u1, d_lo:u3, d_hi:u3) -> (rise_o:u3@[], fall_o:u3@[]) {
+  reg rise:u3:[clock_pin=ref clk]
+  reg fall:u3:[clock_pin=ref clk, posclk=false]
+
+  rise = d_lo
+  fall = d_hi
+  rise_o = rise
+  fall_o = fall
+}

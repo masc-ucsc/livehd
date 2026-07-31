@@ -487,6 +487,14 @@ _SIM_FIXME = [
             "tests/equiv/reg_decl_init_dropped.prp",
             "tests/equiv/selfref_slice_assign.prp",
             "tests/equiv/selfref_concat_assign.prp",
+            # Pending hierarchy-aware formal phase scheduler (2f-lec / M10).
+            # These pairs intentionally compare normalized Pyrope state against
+            # Verilog that retains latch-close or Clock_cell timing. Today's
+            # bounded lgcheck finds the expected mismatch; keep them as fixme
+            # targets until the common phase model replaces that path.
+            "tests/equiv/phase_latch_flop_edges.prp",
+            "tests/equiv/phase_hier_latch_neg.prp",
+            "tests/equiv/phase_clock_gate_chain.prp",
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -621,6 +629,11 @@ sh_test(
         "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
         "selfref_slice_assign",     # concurrent slice assigns solved in source order
         "selfref_concat_assign",    # self-referential whole-vector assign never driven
+        # Formal phase-scheduler trackers. Pyrope uses only structural
+        # clock_pin references; the Verilog side retains the timed cells.
+        "phase_latch_flop_edges",   # close-before-edge latch normalization
+        "phase_hier_latch_neg",     # phase contract through a child instance
+        "phase_clock_gate_chain",   # chained ICGs -> sampled root-clock enable
     ]
 ]
 
@@ -643,6 +656,14 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
 _V2PRP_FIXME = [
+    # Pending hierarchy-aware formal phase scheduler (2f-lec / 2f-latch M10).
+    # phase_posneg_pipeline already proves through the landed flat P=2 path;
+    # these four hit the still-honest coincident-edge, hierarchy, and memory
+    # refusals. Their v2v round trips pass and remain untagged.
+    "phase_latch_flop_edges",
+    "phase_hier_latch_neg",
+    "phase_clock_gate_chain",
+    "phase_mem_write_read",
     # latch_enable_hold was PROMOTED out of this list (2026-07-20): the shipped
     # `reg NAME:TYPE:[latch=true]` spelling IS the Pyrope source equivalent of
     # an inferred latch, the fixture was rewritten to it, and the reverse

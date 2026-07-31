@@ -1,0 +1,20 @@
+/*
+:name: phase_hier_latch_neg
+:type: equiv
+:verilog_top: phase_hier_latch_neg
+:pyrope_top: phase_hier_latch_neg
+*/
+
+// Normalized Pyrope side of a hierarchical active-high latch + negedge flop.
+// `clk` is used only as the structural clock_pin; the golden retains the latch.
+// The child phase contract must prove before hierarchical collapse.
+pub mod phase_hier_latch_neg_cell::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
+  reg captured:u3:[clock_pin=ref clk, posclk=false]
+  captured = d ^ 0ub101
+  q = captured
+}
+
+pub mod phase_hier_latch_neg::[timecheck=false](clk:u1, d:u3, mask:u3) -> (q:u3@[]) {
+  mut child_q = phase_hier_latch_neg_cell::[name=u_phase](clk=clk, d=d)
+  q = child_q ^ mask
+}
