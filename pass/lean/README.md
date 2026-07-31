@@ -113,52 +113,68 @@ evaluated certificate.  The remaining hard bridge is the fast-view theorem:
 <Top>_next i s = <Top>_next_cert i s
 ```
 
-### Step 5 — fast-view bridge (in progress)
+### Step 5 — fast-view bridge (emitted behind `emit_fast_bridge`)
 
 This is the "first link" above (generated fast model = evaluated certificate),
-the keystone that ties the executable model to the graph semantics (and, via the
-LEC gate, to the RTL).  It is *not fully emitted yet*, but the reusable core is
-proven.  Architecture (design- and operator-independent library + a small
-per-design instantiation the emitter generates):
+the keystone tying the executable model to the graph semantics (and, via the LEC
+gate, to the RTL).  It is now **generated end-to-end** for the non-memory op set,
+gated by `--set formal.lean.emit_fast_bridge=true` (default off, so ordinary
+output is unchanged).  Architecture: a design-/operator-independent library plus
+a small per-design instantiation the emitter prints.
 
-- **General theorem (proven)** — `GraphRefine.evalGraph_of_localAgree`
-  (`formal/lean/LeanSemanticPrimitives/Translation/GraphRefine.lean`): `evalGraph`
-  computes the unique topological fixpoint of a dependency-ordered graph, so any
-  environment `φ` that agrees with the source env on off-topo deps and satisfies
-  the per-node recurrence `φ n = evalNode G φ n` equals `evalGraph` on every topo
-  node.  Every design's step 5 reduces to this by instantiating `φ` with its
-  encoded fast-model node values.  Mathlib-free; includes a decidable
-  `DepOrderedB` so a concrete graph discharges dependency ordering by
-  `native_decide`.
+- **Piece B — general theorem (proven)** — `GraphRefine.evalGraph_of_localAgree`
+  (`.../Translation/GraphRefine.lean`): `evalGraph` computes the unique
+  topological fixpoint of a dependency-ordered graph, so any environment `φ` that
+  agrees with the source env on off-topo deps and satisfies the per-node
+  recurrence `φ n = evalNode G φ n` equals `evalGraph` on every topo node.  Every
+  design's step 5 reduces to this by instantiating `φ` with its encoded
+  fast-model node values.  Mathlib-free; a decidable `DepOrderedB` discharges
+  dependency ordering by `native_decide`.
 
-- **Per-operator bridge lemmas (in progress)** —
-  `formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean`: relate the
-  certificate evaluator `eval_op` (width-erased `BV`) to the native `BitVec`
-  fast-model op, under the encoding `bvenc x = mk_bv w (Int.ofNat x.toNat)`.
-  Proven so far: `bv_to_bitvec_bvenc` (round trip), `bv_zext_id`,
-  `bv_uint_bvenc`, `bv_bit_bvenc` (`bv_bit (bvenc x) i = x.getLsbD i`, the crux
-  for all bit ops), plus the `GetMask` building blocks (`mask_indices_bvenc`,
-  `toNat_one_shiftLeft`, `pack_low_toNat_lt`).  These discharge the per-node
-  recurrence; the general theorem then closes `<Top>_comb = <Top>_comb_cert`, and
-  `FastModelBridge.generated_step_equals_lgraph_step` lifts `_comb`/`_next` to
-  `_step`.
+- **Piece A — per-operator bridge library (complete for DINO's op set)** —
+  `.../Translation/OpBridge.lean`: relate the certificate evaluator `eval_op`
+  (width-erased `BV`) to the native `BitVec` fast op under the encoding
+  `bvenc x = mk_bv w (Int.ofNat x.toNat)`.  Covers GetMask, And/Or/Xor/Not, Ror,
+  the compares (EQ/ULT/UGT/SLT), SHL/SRA, MuxBool/MuxN, Sext, and Sum
+  (add and add/subtract) — binary bridges are width-polymorphic (`{wa wb w}` +
+  `bv_zext`), and the genuinely n-ary operators (Or of arbitrary arity, MuxN,
+  the And/Or/Xor/Sum folds) are handled by fold/`muxn_fast`/`orn_bv_bridge`
+  combinators so one lemma covers every arity.  Crux helpers: `bv_bit_bvenc`,
+  `bv_to_bitvec_bvenc`(`_zext`), `mk_bv_ofInt`, `mk_bv_add`/`mk_bv_sub_emod`.
 
-- **Mathlib dependency** — the op-bridge proofs need Mathlib's `BitVec`/`Nat`/`Int`
-  lemma library, so `formal/lean` now requires `mathlib @ v4.31.0` (matching the
-  pinned toolchain).  Fetch the prebuilt oleans once with:
-  ```bash
-  cd <livehd-new>/formal/lean && lake exe cache get
-  ```
-  `OpBridge` is intentionally NOT imported by the package root, so non-bridge
-  generated files stay Mathlib-free; the emitter adds
-  `import LeanSemanticPrimitives.Translation.OpBridge` only to bridge-enabled
-  output.
+- **Piece C — emitter (`emit_fast_bridge`)** — per design it prints: `φ`
+  (`<Top>_phi`), per-source `sourceEnv id = bvenc leaf` facts, `native_decide`
+  well-formedness/ordering facts, one **standalone** recurrence theorem per topo
+  node (`<Top>_rec<id>`) discharged by that node's op bridge, a thin combiner
+  (`<Top>_bridge_rec`), and finally `<Top>_comb_refines_fast` (+ for sequential
+  designs `<Top>_next_refines_fast` and `<Top>_step_refines_fast`) closing with
+  `evalGraph_of_localAgree`.  Node values are factored into `<Top>_fv<id>` defs so
+  `φ` and the per-node recurrence can name them; each node's φ-lookups are
+  resolved by *defeq* in a `show` (not `simp [phi]`) to avoid an O(n²) blow-up.
 
-Remaining: finish the operator bridge library (assemble `GetMask`; add
-`Sum`/`And`/`Or`/`Xor`/`Not`/`EQ`/compares, then `SRA`/`SHL`), the
-source-agreement lemma, then the emitter (per-node have-chain + `native_decide`
-well-formedness facts behind an `emit_fast_bridge` knob), and validate the
-add2 → small-sequential → DINO `SingleCycleCPU` ladder.
+- **Two cert-emission bugs step 5 surfaced and fixed** — const **shift**
+  amounts (SHL/SRA) and the **Sext** amount operand were emitted at `pin_width`,
+  truncating the value (e.g. a `32` on a 1-bit pin → `mk_bv 1 32 = 0`); the fast
+  model widens them to fit the value, so cert ≠ fast until the cert was fixed to
+  widen identically (`shift_dep_width`).
+
+- **Mathlib dependency** — the op-bridge proofs need Mathlib, so `formal/lean`
+  requires `mathlib @ v4.31.0`; fetch oleans once with `lake exe cache get`.
+  `OpBridge` is NOT imported by the package root (non-bridge output stays
+  Mathlib-free); the emitter adds the import only to bridge-enabled files.
+  `.../Translation/Add2BridgeExample.lean` is the emitter's actual `add2` output,
+  checked in as a buildable, sorry-free reference.
+
+**Status:** the emitter generates a **sorry-free** bridge for DINO
+`SingleCycleCPU` (all 4772 nodes) and `add2` typechecks green.  The one open item
+is **scale of the single-file check**: DINO-in-one-file elaborates to ~28 GB and
+tens of minutes (per-declaration state for ~4772 theorems in one process — the
+defs are cheap, the proofs accumulate).  It is correct but heavy; the fix is
+**file-splitting / chunked checking** (bounded memory per compiled module),
+tracked under "Remaining Implementation Work" item 1.  Because this machine is a
+shared NFS server, always run the check as a good citizen, e.g.
+`LEAN_NUM_THREADS=8 taskset -c 0-7 nice -n 19 ionice -c 3 lake env lean <file>`
+(or a cgroup `systemd-run --user --scope -p CPUQuota=800%`).
 
 ## Remaining Implementation Work
 
@@ -169,11 +185,13 @@ add2 → small-sequential → DINO `SingleCycleCPU` ladder.
    - chunked uniqueness
    - eventually dense topological certificates
 
-2. Emit per-design fast-view bridge theorems — **in progress** (see "Step 5 —
-   fast-view bridge" above; general theorem + bridge foundations proven).
-   - `<Top>_comb = <Top>_comb_cert`
-   - `<Top>_next = <Top>_next_cert`
-   - `<Top>_step = <Top>_step_cert`
+2. Emit per-design fast-view bridge theorems — **done, behind
+   `--set formal.lean.emit_fast_bridge=true`** (see "Step 5 — fast-view bridge"
+   above; sorry-free for DINO `SingleCycleCPU`).  Remaining sub-item: reduce the
+   single-file typecheck cost via the file-split in item 1.
+   - `<Top>_comb = <Top>_comb_cert` ✓
+   - `<Top>_next = <Top>_next_cert` ✓
+   - `<Top>_step = <Top>_step_cert` ✓
 
 3. Memory-node emission — **done** (fast model): function-valued memory state
    fields, read/write/byte-enable policy extraction, any number of read/write
