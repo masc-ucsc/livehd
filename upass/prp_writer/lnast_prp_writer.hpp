@@ -444,6 +444,21 @@ private:
   // (d, u) — the condition that makes moving a pure expression to its single use
   // value-preserving.
   bool        operands_stable(Lnast_nid def_node, int d, int u) const;
+  // Same question, but through the operands whose OWN definition is inlined at
+  // this site: those carry their def's reads along, so they must be stable over
+  // the same window. See the definition for the miscompile this exists to stop.
+  // `on_stack` detects a cycle, `done` memoizes an already-verified cone so a
+  // re-converging DAG is not mistaken for one.
+  bool operands_stable_deep(Lnast_nid def_node, int d, int u, std::unordered_set<std::string>& on_stack,
+                            std::unordered_set<std::string>& done, int walk_depth) const;
+  bool operands_stable_deep(Lnast_nid def_node, int d, int u) const {
+    std::unordered_set<std::string> on_stack;
+    std::unordered_set<std::string> done;
+    return operands_stable_deep(def_node, d, u, on_stack, done, 0);
+  }
+  // Order-independent "this name could be folded into its uses" test; see the
+  // definition. Used only by operands_stable_deep.
+  bool may_inline_name(const std::string& nm) const;
   // True if `name` is a `___tmp` selected for inlining.
   bool        is_foldable(std::string_view name) const { return foldable_.count(std::string(name)) != 0; }
   // True if a node's def-key is in folded_node_ (its statement is suppressed).

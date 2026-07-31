@@ -816,6 +816,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     int                 mtype   = -1;
     bool                is_rom  = false;
     cvc5::Term          a_cur;
+    // a_cur came from `shared_mems` (the SAME symbol on both designs) rather
+    // than being minted per-design. The whole-array bulk-update record is only
+    // meaningful then: `a_next = cond ? from_bus(bus) : a_cur` proves nothing
+    // about the hold arm when each side holds a DIFFERENT free array.
+    bool                a_cur_shared = false;
     std::vector<Term>   rd_fresh;  // dout symbol per read port (port order): a
                                    // fresh within-cycle var (async/comb, tied via
                                    // equalities) OR a seeded current-state symbol
@@ -983,7 +988,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     mc.is_rom   = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
     if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
-        mc.a_cur = it->second;
+        mc.a_cur        = it->second;
+        mc.a_cur_shared = true;
       }
     }
     if (mc.a_cur.isNull()) {
@@ -2766,18 +2772,44 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // const-broadcast update (e.g. a reset/flush arm writing all-zeros) folds to
       // a NARROW const, and array_from_bus would then extract past its end. cgen
       // (wire [busw-1:0]) and cgen_sim (operand(.,W)) zero-extend the same way.
-      Term a_upd = array_from_bus(mc.a_cur, fit_unsigned(uv, mc.sig.size * mc.sig.bits));
+      Term upd_bus = fit_unsigned(uv, mc.sig.size * mc.sig.bits);
+      Term a_upd   = array_from_bus(mc.a_cur, upd_bus);
+      // Mirror every arm applied below into `whole` so the cones consumer can
+      // discharge this array cut with bit-vector obligations instead of the
+      // array theory (Encoded::Mem_whole). An arm the encode SKIPS (a
+      // non-encodable update_enable) makes the record inexact, which the
+      // consumer reads as "keep the array cut" rather than as "unconditional".
+      Encoded::Mem_whole whole;
+      whole.bus = upd_bus;
       if (!mc.update_enable.is_invalid()) {
         Val ev = driver_val(mc.update_enable, ok);
         if (ok) {
           Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
           a_upd       = tm_.mkTerm(Kind::ITE, {en_hot, a_upd, mc.a_cur});
+          whole.cond  = en_hot;
+        } else {
+          whole.exact = false;
         }
       }
       if (!mem_commit.isNull()) {
         a_upd = tm_.mkTerm(Kind::ITE, {mem_commit, a_upd, mc.a_cur});  // gated clock did not tick: HOLD
+        whole.cond
+            = whole.cond.isNull() ? mem_commit : tm_.mkTerm(Kind::AND, {whole.cond, mem_commit});
       }
-      a_next = a_upd;
+      if (whole.cond.isNull()) {
+        whole.cond = tm_.mkTrue();
+      }
+      // The hold arm of the record is `a_cur`, so the obligations it stands for
+      // only imply equal next-states when BOTH designs hold the same a_cur.
+      // build_shared_mems declines a memory with no out_edges or an ambiguous
+      // shape bucket, and then each side minted its own free array symbol --
+      // equal cond and equal bus would "prove" a pair whose hold behaviour was
+      // never compared. Mark it inexact so the consumer keeps the array cut.
+      if (!mc.a_cur_shared) {
+        whole.exact = false;
+      }
+      out.mem_whole[mc.key] = whole;
+      a_next                = a_upd;
     } else if (mc.is_comb && !mc.init.is_invalid()) {
       // type==2 combinational array / ROM: the base contents each cycle are the
       // comptime `init` constant, built PER-DESIGN (not the shared free symbol),
@@ -2884,13 +2916,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         Term rst_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
         Term init_bus;
         if (!mc.init.is_invalid()) {
-          Val iv   = driver_val(mc.init, ok);
-          init_bus = ok ? iv.term : bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
+          Val iv = driver_val(mc.init, ok);
+          // Same widening the update arm needs: an all-zeros / broadcast reset
+          // value folds to a NARROW const, and array_from_bus would then
+          // bv_extract past its end (which throws, aborting the run).
+          init_bus = ok ? fit_unsigned(iv, mc.sig.size * mc.sig.bits) : bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
         } else {
           init_bus = bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
         }
-        Term a_init = array_from_bus(mc.a_cur, init_bus);
-        a_next      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
+        Term a_init                 = array_from_bus(mc.a_cur, init_bus);
+        a_next                      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
+        out.mem_whole[mc.key].reset = rst_hot;
+        out.mem_whole[mc.key].init  = init_bus;  // raw, as fed to array_from_bus; the consumer sort-checks
+      } else {
+        out.mem_whole[mc.key].exact = false;  // a reset arm we could not model tops the next-state
       }
     }
 

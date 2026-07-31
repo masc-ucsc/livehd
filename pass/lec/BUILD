@@ -117,6 +117,13 @@ sh_test(
 )
 
 sh_test(
+    name = "lec_mem_whole_test",
+    srcs = ["tests/lec_mem_whole_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # whole-array bulk update: cone decomposition + the array-SELECT abstraction
+)
+
+sh_test(
     name = "lec_mem_init_test",
     srcs = ["tests/lec_mem_init_test.sh"],
     data = ["//lhd"],

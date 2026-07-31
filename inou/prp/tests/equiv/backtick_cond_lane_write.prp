@@ -1,0 +1,24 @@
+/*
+:name: backtick_cond_lane_write
+:type: equiv
+:verilog_top: backtick_cond_lane_write_top
+:pyrope_top: top
+:gold_reader: slang
+*/
+
+// Pyrope side of the conditional partial write to a BACKTICK-ESCAPED name.
+// Spelled the way pass/prp_writer emits a struct leaf (`` `v.addr` ``) rather
+// than as a tuple, because the escaped spelling IS the regression: upass/tolg's
+// set_mask_base probed pin_map_ with the raw, still-quoted name, missed, and
+// substituted a 0sb? base -- dropping `addr[4:0]` under the branch. See the
+// golden .v for the full account.
+pub comb top(a_i:u10, c_i:u1) -> (o:u11) {
+  mut `v.addr` = 0
+  mut `v.flag` = 0
+  `v.addr` = a_i
+  `v.flag` = 0
+  if c_i != 0 {
+    `v.addr`#[5..=9] = (a_i#[5..=9] + 1)#[0..=4]
+  }
+  o = (`v.addr` << 1) | `v.flag`
+}

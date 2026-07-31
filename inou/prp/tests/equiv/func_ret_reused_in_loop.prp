@@ -1,0 +1,18 @@
+/*
+:name: func_ret_reused_in_loop
+:type: equiv
+:verilog_top: func_ret_reused_in_loop
+:pyrope_top: top
+*/
+
+// Pyrope twin of the golden: the unrolled body, written out. `f` is a single
+// `mut` reused by both iterations exactly as the SystemVerilog function's
+// return variable is -- so the second write must NOT be visible to the first
+// iteration's read. See the golden .v for the writer fold that broke that.
+pub comb top(a_i:u4) -> (o:u1) {
+  mut f = 0
+  f = if (a_i#[0..=1] == 0) or (a_i#[0..=1] == 3) { 0 } else { 1 }
+  const acc0 = 0 | f
+  f = if (a_i#[2..=3] == 0) or (a_i#[2..=3] == 3) { 0 } else { 1 }
+  o = acc0 | f
+}

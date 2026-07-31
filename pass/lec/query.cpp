@@ -4495,6 +4495,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   cvc5::Term bad;
   std::vector<std::pair<std::string, cvc5::Term>> ind_diffs;  // per-cut diffs for decomposed proof
   absl::flat_hash_map<size_t, std::string>        mem_key_of;  // ind_diffs index -> raw memory cut key
+  // Memory keys whose two next-state terms are the SAME term, so no cut was
+  // built at all. They are proven equal by construction and seed `mem_proven`.
+  absl::flat_hash_set<std::string>                mem_equal_terms;
   for (const auto& t : bridge_diffs) {  // bank<->memory next-state equalities
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
@@ -4575,6 +4578,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.unmatched_ref.push_back("mem:" + display_name(key));
       continue;
     }
+    if (rmem == it->second) {
+      // Literally the same (hash-consed) term — e.g. a persistent array with no
+      // writer on either side, where both a_next ARE the shared a_cur symbol.
+      // ABC cannot touch an array sort, so without this the trivially-equal cut
+      // sat in the residue and dragged the whole def onto cvc5's array theory.
+      //
+      // It is a PROOF, not a skip: record the key so the forwarding-read dout
+      // merges that require `mem_proven` still fire. Dropping the cut without
+      // this left `needs_array` merges permanently rejected, and every cone
+      // downstream of the memory read stayed Unknown.
+      mem_equal_terms.insert(key);
+      continue;
+    }
     cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rmem, it->second});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
     mem_key_of[ind_diffs.size()] = key;  // raw key (display_name mangles it) for the port decomposition
@@ -4612,13 +4628,101 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     size_t      parent;  // index into ind_diffs this helps discharge
     cvc5::Term  term;
     std::string label;
+    // A SAT port obligation is a real write-logic difference, so it may refute
+    // the parent. A bulk-update obligation is only SUFFICIENT for array
+    // equality, never necessary (a bulk write of the value the array already
+    // holds is invisible), so a SAT one must degrade to Unknown, never refute.
+    bool can_refute = true;
+  };
+  // Whole-array bulk update: `a_next_base = cond ? from_bus(bus) : a_cur`, with
+  // an optional reset arm on top. Equal `cond` plus equal `bus` under `cond`
+  // (and likewise for the reset arm) makes the two bases the same function of
+  // the same a_cur -- bit-vector obligations for what is otherwise the array
+  // theory. This is also what keeps the per-port route below SOUND on such a
+  // memory: equal write ports do not imply equal next-state when the BASE the
+  // ports store onto is not the shared a_cur.
+  auto mem_whole_subs
+      = [&](const std::string& key, size_t parent, std::vector<Sub_obligation>& out, bool& present) -> bool {
+    auto rh  = re.mem_whole.find(key);
+    auto ih  = ie.mem_whole.find(key);
+    present  = rh != re.mem_whole.end() || ih != ie.mem_whole.end();
+    if (!present) {
+      return true;  // a plain memory: nothing to add, the port route stands alone
+    }
+    if (rh == re.mem_whole.end() || ih == ie.mem_whole.end()) {
+      // One front end modeled this array as ONE bulk `q <= d` and the other as
+      // per-entry write ports. Not decomposable, and worth naming: the array cut
+      // that remains is a real cross-model comparison, not a missing feature.
+      if (std::getenv("LEC_CONE_LOG") != nullptr) {
+        std::fprintf(stderr, "[LEC_CONE] memcut %-24s bulk update on %s side only\n", key.c_str(),
+                     rh != re.mem_whole.end() ? "REF" : "IMPL");
+      }
+      return false;
+    }
+    const auto& a = rh->second;
+    const auto& b = ih->second;
+    if (!a.exact || !b.exact || a.bus.getSort() != b.bus.getSort() || a.reset.isNull() != b.reset.isNull()) {
+      return false;
+    }
+    auto add_arm = [&](const cvc5::Term& ca, const cvc5::Term& cb, const cvc5::Term& da, const cvc5::Term& db,
+                       std::string_view tag) {
+      if (!(ca == cb)) {  // identical Terms are hash-consed: skip the trivially-UNSAT cone
+        out.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {ca, cb}), key + ":" + std::string(tag) + ".cond", false});
+      }
+      cvc5::Term d = tm.mkTerm(cvc5::Kind::DISTINCT, {da, db});
+      out.push_back({parent, ca.isNull() || ca == tm.mkTrue() ? d : tm.mkTerm(cvc5::Kind::AND, {ca, d}),
+                     key + ":" + std::string(tag) + ".bus", false});
+    };
+    add_arm(a.cond, b.cond, a.bus, b.bus, "whole");
+    if (!a.reset.isNull()) {
+      if (a.init.getSort() != b.init.getSort()) {
+        return false;
+      }
+      add_arm(a.reset, b.reset, a.init, b.init, "wholerst");
+    }
+    return true;
+  };
+  // Why a memory cut could not be decomposed, for LEC_CONE_LOG. An array cut
+  // left whole is the single most expensive obligation in the run, so when one
+  // shows up in the residue the first question is always which precondition
+  // failed.
+  auto cone_log = [](const std::string& key, std::string_view why) {
+    if (std::getenv("LEC_CONE_LOG") != nullptr) {
+      std::fprintf(stderr, "[LEC_CONE] memcut %-24s NOT decomposed: %s\n", key.c_str(), std::string(why).c_str());
+    }
   };
   auto mem_port_subs = [&](const std::string& key, size_t parent, std::vector<Sub_obligation>& out) -> bool {
+    std::vector<Sub_obligation> pre;
+    bool                        whole_present = false;
+    if (!mem_whole_subs(key, parent, pre, whole_present)) {
+      cone_log(key, "bulk-update record missing/inexact on one side");
+      return false;
+    }
     auto rw = re.mem_wr.find(key);
     auto iw = ie.mem_wr.find(key);
+    if (rw != re.mem_wr.end() && iw != ie.mem_wr.end() && rw->second.size() != iw->second.size()) {
+      cone_log(key, "write-port COUNT differs (" + std::to_string(rw->second.size()) + " ref vs "
+                        + std::to_string(iw->second.size()) + " impl)");
+    }
     if (rw == re.mem_wr.end() || iw == ie.mem_wr.end() || rw->second.size() != iw->second.size()
         || rw->second.empty()) {
-      return false;  // no exported ports (whole-array / ROM / reset override): keep the array cut
+      // The bulk-update obligations discharge the cut ONLY when they are the
+      // whole next-state function -- i.e. NEITHER side layers write ports on
+      // top. encode.cpp explicitly supports a whole-array that also has ports
+      // ("per-port writes below, STORE on top"), and there the bulk record says
+      // nothing about them: accepting it when the two sides' port counts merely
+      // DIFFER would prove equivalence for two designs whose extra write port
+      // is exactly what differs (a false PROVEN).
+      const bool ref_no_ports  = rw == re.mem_wr.end() || rw->second.empty();
+      const bool impl_no_ports = iw == ie.mem_wr.end() || iw->second.empty();
+      if (!whole_present || pre.empty() || !ref_no_ports || !impl_no_ports) {
+        cone_log(key, !whole_present            ? "no write ports and no bulk update"
+                      : pre.empty()             ? "bulk update present but no obligation built"
+                                                : "bulk update with UNPAIRED write ports on top");
+        return false;
+      }
+      out.insert(out.end(), pre.begin(), pre.end());
+      return true;
     }
     const auto& rp = rw->second;
     const auto& ip = iw->second;
@@ -4688,11 +4792,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           cvc5::Term both_en   = tm.mkTerm(cvc5::Kind::AND,
                                            {tm.mkTerm(cvc5::Kind::DISTINCT, {rp[k].wmask, zero_k}),
                                             tm.mkTerm(cvc5::Kind::DISTINCT, {rp[j].wmask, zero_j})});
+          // can_refute=false: a SAT collision means only that the PERMUTED
+          // pairing assumption does not hold, never that the two designs' write
+          // logic differs. Refuting the parent on it points a user debugging two
+          // equivalent designs at a memory that has no mismatch.
           subs.push_back({parent, tm.mkTerm(cvc5::Kind::AND, {same_addr, both_en}),
-                          key + ":collision" + std::to_string(k) + "v" + std::to_string(j)});
+                          key + ":collision" + std::to_string(k) + "v" + std::to_string(j), false});
         }
       }
     }
+    out.insert(out.end(), pre.begin(), pre.end());  // the bulk-update base, when this is a whole-array
     out.insert(out.end(), subs.begin(), subs.end());
     return true;
   };
@@ -4722,6 +4831,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // of formal.timeout. A cone the deadline cuts off simply stays with cvc5.
     const int64_t cone_deadline_ms = opts.timeout > 0 ? std::max<int64_t>(1000, static_cast<int64_t>(opts.timeout) * 250)
                                                       : 60000;
+    // ...and it is an ABSOLUTE budget for the WHOLE pass, not a per-call one.
+    // abc_prove_unsat_batch restarts its own clock on every call, so handing
+    // each of the three rounds (r1, the merge-assisted sub retry, the
+    // merge-assisted cut retry) the full `cone_deadline_ms` would let the
+    // pre-pass spend 75% of formal.timeout before cvc5 is asked anything --
+    // enough to turn a PROVEN run into an inconclusive (and, with
+    // formal.strict, nonzero-exit) one.
+    auto cone_budget_left = [&]() -> int64_t {
+      const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      return std::max<int64_t>(1, cone_deadline_ms - spent);
+    };
     // Cache lookup first: a cone obligation is self-contained, so its structural
     // digest is a complete key — the same digest is literally the same formula,
     // and a PROVEN transfers with no re-proof. This is what makes lec
@@ -4811,7 +4931,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
 
     std::vector<Cone_stats>         stats;
-    const std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_deadline_ms, &stats);
+    const std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats);
     if (std::getenv("LEC_CONE_LOG") != nullptr) {
       int addr_ok = 0;
       for (size_t k = 0; k < merge_obl.size(); ++k) {
@@ -4827,35 +4947,91 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // A memory cut is discharged exactly when EVERY one of its port obligations
     // is. A port obligation that is definitively SAT means the write logic really
     // differs -- report the parent as a diff (it localizes to that port), rather
-    // than a vague "unknown".
+    // than a vague "unknown". Only obligations that are NECESSARY for array
+    // equality may do that (`can_refute`): a bulk-update obligation is merely
+    // sufficient, so a SAT one leaves the parent Unknown for cvc5 to settle.
     absl::flat_hash_set<std::string> mem_proven;  // mem keys whose next-state arrays are proven equal
-    for (const auto& [parent, ix] : subs_of) {
-      bool all = true, any_sat = false;
-      for (size_t k : ix) {
-        all     = all && r1[n_direct + k] == Cone_verdict::Proven;
-        any_sat = any_sat || r1[n_direct + k] == Cone_verdict::Refuted;
-      }
-      verdicts[parent] = all ? Cone_verdict::Proven : (any_sat ? Cone_verdict::Refuted : Cone_verdict::Unknown);
-      if (all) {
-        mem_proven.insert(mem_key_of[parent]);
-      }
+    std::vector<Cone_verdict>        sub_v(n_sub, Cone_verdict::Unknown);
+    for (size_t k = 0; k < n_sub; ++k) {
+      sub_v[k] = r1[n_direct + k];
     }
+    auto aggregate_mem = [&]() {
+      mem_proven = mem_equal_terms;  // no cut was built for these: equal by construction
+      for (const auto& [parent, ix] : subs_of) {
+        bool all = true, any_sat = false;
+        for (size_t k : ix) {
+          all     = all && sub_v[k] == Cone_verdict::Proven;
+          any_sat = any_sat || (sub_v[k] == Cone_verdict::Refuted && subs[k].can_refute);
+        }
+        verdicts[parent] = all ? Cone_verdict::Proven : (any_sat ? Cone_verdict::Refuted : Cone_verdict::Unknown);
+        if (all) {
+          mem_proven.insert(mem_key_of[parent]);
+        }
+      }
+    };
+    aggregate_mem();
 
     // ---- round 2: retry the residue with the DISCHARGED dout merges ---------
     // NOT cacheable: a merge-assisted proof is a weaker claim than the cone's
     // digest stands for (it assumes the two douts equal), and the digest does not
     // cover the address cones that justify it — a later run with the same cone but
     // different addresses would falsely hit. Re-proving costs milliseconds.
-    Cone_merge_map merge;
-    for (const auto& c : merge_cands) {
-      const bool addr_ok  = r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
-      const bool array_ok = !c.needs_array || mem_proven.contains(c.mem_key);
-      if (addr_ok && array_ok) {
-        merge.emplace(c.impl_dout, c.ref_dout);
+    auto build_merge = [&]() {
+      Cone_merge_map m;
+      for (const auto& c : merge_cands) {
+        const bool addr_ok  = r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
+        const bool array_ok = !c.needs_array || mem_proven.contains(c.mem_key);
+        if (addr_ok && array_ok) {
+          m.emplace(c.impl_dout, c.ref_dout);
+        }
       }
-    }
+      return m;
+    };
+    Cone_merge_map    merge = build_merge();
     int               merged_proven = 0;
     std::vector<bool> merge_assisted(ind_diffs.size(), false);
+    // ---- round 1b: the memory sub-obligations get the merges too -------------
+    // A whole-array register file is routinely written from a function of
+    // ITSELF (`ex_mask_rf_q <= f8_mask_rf_wdata_d`, which starts life as a copy
+    // of `ex_mask_rf_q`), so its bulk-update bus reads the array's own douts.
+    // ABC sees each side's dout as a separate free input, which makes that
+    // obligation spuriously SAT in round 1 — the same blindness the merge set
+    // exists to fix for the direct cuts. Re-run the residue under it before
+    // giving up on the parent array cut.
+    if (!merge.empty() && n_sub > 0) {
+      std::vector<size_t>     s_ix;
+      std::vector<cvc5::Term> s_terms;
+      for (size_t k = 0; k < n_sub; ++k) {
+        if (sub_v[k] != Cone_verdict::Proven) {
+          s_ix.push_back(k);
+          s_terms.push_back(subs[k].term);
+        }
+      }
+      if (!s_terms.empty()) {
+        std::vector<Cone_stats>         s_stats;
+        const std::vector<Cone_verdict> rs
+            = abc_prove_unsat_batch(s_terms, opts.conelimit, cone_budget_left(), &s_stats, &merge);
+        bool moved = false;
+        for (size_t k = 0; k < s_ix.size(); ++k) {
+          if (rs[k] == Cone_verdict::Proven) {
+            sub_v[s_ix[k]] = Cone_verdict::Proven;
+            moved          = true;
+          }
+        }
+        if (moved) {
+          const auto before = mem_proven;
+          aggregate_mem();
+          // A merge-assisted array proof must not be cached: the digest covers
+          // the cut, not the address equalities that justified the merge.
+          for (const auto& [parent, ix] : subs_of) {
+            if (verdicts[parent] == Cone_verdict::Proven && !before.contains(mem_key_of[parent])) {
+              merge_assisted[parent] = true;
+            }
+          }
+          merge = build_merge();  // a newly proven array unlocks its forwarding reads' merges
+        }
+      }
+    }
     if (!merge.empty()) {
       std::vector<size_t>     m_ix;
       std::vector<cvc5::Term> m_terms;
@@ -4868,7 +5044,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!m_terms.empty()) {
         std::vector<Cone_stats>         m_stats;
         const std::vector<Cone_verdict> r2
-            = abc_prove_unsat_batch(m_terms, opts.conelimit, cone_deadline_ms, &m_stats, &merge);
+            = abc_prove_unsat_batch(m_terms, opts.conelimit, cone_budget_left(), &m_stats, &merge);
         for (size_t k = 0; k < m_ix.size(); ++k) {
           if (r2[k] == Cone_verdict::Proven) {
             verdicts[m_ix[k]]       = Cone_verdict::Proven;
@@ -4880,7 +5056,75 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
 
+    // ---- box congruence: a boxed leaf's next STATE follows from its inputs ----
+    // A collapsed / trusted leaf is modeled as
+    //     outputs    = UF_out(state)        next_state = UF_next(inputs, state)
+    // with the UF symbols, the state symbol AND the input-concat LAYOUT all
+    // SHARED between the two designs (encode.hpp `State_box`). So
+    // `nxt:leafstate:<box>` is a pure congruence consequence of the per-port
+    // `bbin:<box>:<port>` obligations: equal inputs over one layout give one
+    // application, hence one next state.
+    //
+    // Neither engine gets there on its own. ABC cannot blast an APPLY_UF at all,
+    // and cvc5 with several UF boxes is in QF_AUFBV with the eager bit-blaster
+    // off, where it answers `unknown` in milliseconds — `vpu_lane`,
+    // `minion_dcache_replay_queue` and `intpipe_csr_file` each had EVERY `bbin:`
+    // cut proven and were left UNKNOWN by exactly these leafstate cuts.
+    //
+    // Requires the correspondence to be COMPLETE (`unmatched_*` empty): a port
+    // one side connects and the other does not has no `bbin:` cut to prove, and
+    // contributes 0 to that side's concat — the one way equal-inputs could be
+    // claimed without being checked.
+    if (res.unmatched_ref.empty() && res.unmatched_impl.empty()) {
+      absl::flat_hash_map<std::string, std::pair<int, int>> bbin_tot_ok;  // box tag -> (obligations, proven)
+      for (size_t i = 0; i < ind_diffs.size(); ++i) {
+        const std::string& n = ind_diffs[i].first;
+        if (!n.starts_with("bbin:")) {
+          continue;
+        }
+        const auto last = n.rfind(':');  // the port name is the final component
+        if (last == std::string::npos || last <= 5) {
+          continue;
+        }
+        auto& e = bbin_tot_ok[n.substr(5, last - 5)];
+        ++e.first;
+        e.second += (verdicts[i] == Cone_verdict::Proven) ? 1 : 0;
+      }
+      // display_name only strips the OUTER control byte of a next-state key, so
+      // the leafstate cut reads "nxt:\x01leafstate:<tag>" (the \x01 is invisible
+      // in the log, which is exactly how it hides).
+      static constexpr std::string_view kLeaf = "nxt:\x01leafstate:";
+      for (size_t i = 0; i < ind_diffs.size(); ++i) {
+        // Never overwrite a REFUTED cut. The pass may only SUBTRACT what an
+        // engine settled; promoting a definitive counterexample to Proven on a
+        // congruence argument would turn a real diff into a PROVEN run.
+        if (verdicts[i] == Cone_verdict::Proven || verdicts[i] == Cone_verdict::Refuted
+            || !ind_diffs[i].first.starts_with(kLeaf)) {
+          continue;
+        }
+        auto it = bbin_tot_ok.find(ind_diffs[i].first.substr(kLeaf.size()));
+        if (std::getenv("LEC_CONE_LOG") != nullptr) {
+          const std::string got
+              = it == bbin_tot_ok.end()
+                    ? std::string{"no bbin group"}
+                    : std::to_string(it->second.second) + "/" + std::to_string(it->second.first) + " inputs proven";
+          std::fprintf(stderr, "[LEC_CONE] boxcong %-56s %s\n", ind_diffs[i].first.c_str(), got.c_str());
+        }
+        if (it == bbin_tot_ok.end() || it->second.first == 0 || it->second.first != it->second.second) {
+          continue;  // some input not proven equal (or no input obligations at all)
+        }
+        verdicts[i] = Cone_verdict::Proven;
+        // Justified by the SIBLING cuts, not by this cut's own digest — the
+        // cache key would not carry that, so it must never be stored.
+        merge_assisted[i] = true;
+      }
+    }
+
     if (std::getenv("LEC_CONE_LOG") != nullptr) {
+      for (size_t k = 0; k < n_sub; ++k) {
+        std::fprintf(stderr, "[LEC_CONE] sub %-56s %s\n", subs[k].label.c_str(),
+                     std::string{cone_verdict_name(sub_v[k])}.c_str());
+      }
       for (size_t i = 0; i < ind_diffs.size(); ++i) {
         std::fprintf(stderr, "[LEC_CONE] %-40s %-12s %s pis=%d ands=%d %s\n", ind_diffs[i].first.c_str(),
                      std::string{cone_verdict_name(verdicts[i])}.c_str(),

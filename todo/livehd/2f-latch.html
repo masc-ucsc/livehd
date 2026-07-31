@@ -26,6 +26,14 @@
   negedge state before the solver ever sees them. M4's in-encoder approach stays
   RETIRED.</p>
 
+<p><strong>Pending M10 supersedes M8 only inside formal.</strong> M8 remains a
+  landed standalone transformation and the independent source-vs-normalized
+  Icarus oracle. The remaining hierarchy/memory work will not extend its phase
+  counter or rewrite definitions in place: <a href="#m10">M10</a> gives
+  LEC/BMC/verify a read-only hierarchy-aware phase schedule and encodes one
+  combinational cone per consuming phase. Compile, synthesis, simulation and
+  emitted LGraphs remain on the source representation.</p>
+
 <table>
 <tr><th>Was red</th><th>Now</th><th>How</th></tr>
 <tr><td><code>latch_verify_hold</code>, <code>latch_verify_low</code></td>
@@ -654,18 +662,97 @@
   Measured directly: <code>minion_lec</code> with an EMPTY trust list refuses
   with <code>def `prim_rf_1r1w_preview_p2` holds 1 latch cell(s), 1 negedge
   flop(s), and normalizing across a module boundary is not supported yet</code>.
-  All 32 entries exist for that reason — they are not a workaround for the
-  encoder's old Latch refusal (that is gone), they are hierarchy.
-  <strong>What would close it:</strong> normalize each reachable def IN PLACE,
-  bottom-up. The <strong>P=1 subset is the safe and valuable part</strong> — a def
-  whose latches are all one commit class is a pure retype, with no divider and
-  therefore no cross-module timing question at all, and that covers most of
-  minion's 32 (the <code>prim_write_commit_*</code> and RF-preview families).
-  P&gt;1 inside a def needs the phase counter port-threaded first (open question
-  6). Tracker: <code>lhd/tests/single_edge_hier_latch_test.sh</code>, which pins
-  that the refusal is honest and NAMES the def, that <code>formal.lec.trust</code>
-  still works, and — the part that keeps it a real test — that the refusal stays
-  NARROW (a posedge-only def and an instantiated ICG cell must both still pass).</p>
+  At that measurement 32 names were configured; <code>Clock_cell</code>
+  recognition later made <code>prim_clk_gate</code> inert, leaving 31 effective
+  trusted definitions. Those 31 are not a workaround for the encoder's old
+  Latch refusal (that is gone): their remaining blocker is hierarchy.
+  <strong>What will close it:</strong> M10 schedules instantiated state directly
+  in the formal encoder. It does not normalize definitions, synthesize a phase
+  counter, or port-thread timing state through hierarchy. Tracker:
+  <code>lhd/tests/single_edge_hier_latch_test.sh</code> continues to pin today's
+  honest refusal until the formal pipeline stops depending on that pass.</p>
+
+<h2 id="m10">M10 — hierarchy-aware formal phase scheduler <span class="status">PENDING</span></h2>
+
+<p><strong>No coloring and no graph rewrite.</strong> Starting at the selected
+  top, the formal driver resolves clocks through the actual instance bindings
+  and assigns a semantic phase to every instantiated register/latch and every
+  synchronous memory port. For each endpoint it walks data, enable, reset,
+  address and write-data cones backward across non-opaque hierarchy, stopping at
+  constants, primary inputs, state, and opaque boxes. Gates are memoized inside
+  one phase; a gate feeding two phases is deliberately encoded twice.</p>
+
+<h3>Single-root v1 schedule</h3>
+
+<ol>
+<li>active-LOW <em>clock-role</em> latches close immediately before rise;</li>
+<li>posedge flops, posedge memory ports and <em>data-gated</em> latches update simultaneously;</li>
+<li>active-HIGH clock-role latches close immediately before fall;</li>
+<li>negedge flops and negedge memory ports update simultaneously.</li>
+</ol>
+
+<p>A same-batch state read sees the incoming value; a later batch in the same
+  period sees the earlier committed value. The latch-close microstep and its
+  edge batch share one symbolic input snapshot, while rise and fall get
+  independent snapshots shared between REF and IMPL. LEC observes external
+  outputs after rise and after fall. An unclocked formal assertion is evaluated
+  at the full-period boundary by default.</p>
+
+<p><strong>Data-role is not clock-role.</strong> A data-gated latch has Pyrope's
+  ordinary tick semantics and joins the rise/base batch; active-low polarity
+  changes its write test, not its phase. Only a latch whose controlling cone
+  resolves to the root clock gets close-before-edge treatment. This is the live
+  <code>latch_mixed_flop</code> behavior and corrects the old “data gate &rarr;
+  last slot” planning text.</p>
+
+<p><strong><code>Clock_cell</code> remains timing metadata, never an SMT data
+  value or scheduled endpoint.</strong> Canonicalize a chain to its reference
+  clock, parity and active-high guard. Sample the guard before the reference
+  rise, reuse it for the affected rise/fall consumers, and combine it as
+  <code>endpoint_enable &amp; clock_guard</code>. Inversion changes the consumer
+  edge; <code>div != 1</code> remains a named refusal.</p>
+
+<p><strong>Memories are scheduled per synchronous port.</strong> The Memory IR
+  must retain read and write edge polarity per port (with a compatibility
+  fallback for the current global value); the Yosys import must stop dropping
+  <code>RD_CLK_POLARITY</code>. Each phase applies only its ports, while writes
+  in the same phase retain the existing simultaneous forwarding/collision
+  policy. This formal correction does not close the separate
+  <a href="2m-multiport_mem.html">2m-multiport_mem</a> Verilog-codegen issue.</p>
+
+<p><strong>Hierarchy composes through phase-aware state boxes.</strong> Replace
+  the current one-transition-per-period <code>State_box</code> with shared
+  transition and Moore-output contracts per semantic phase. A child collapses
+  only after those intermediate contracts prove; otherwise it stays expanded.
+  Each instance resolves the child's phases through its own parent clock binding
+  and sampled <code>Clock_cell</code> guard. A body-less trusted blackbox is
+  conservatively allowed to transition on both edges of each declared clock.</p>
+
+<p><strong>Scope and failure policy.</strong> v1 orders one root clock. An
+  unrelated-root, flop-only design retains the encoder's existing detected-edge
+  path. If a latch, phase-sensitive memory, or phase box would require a total
+  order between unrelated roots, formal fails closed. Fluid flops, unresolved
+  latch clock/data classification, and clock division also remain named
+  refusals.</p>
+
+<h3>Delivery and gates</h3>
+
+<ol>
+<li>read-only schedule analysis plus deterministic per-phase diagnostics;</li>
+<li>flop/latch phase encoding with edge-specific inputs and output compares;</li>
+<li>per-port memory scheduling, including registered reads;</li>
+<li>phase-aware sequential boxes and hierarchical collapse;</li>
+<li>remove mandatory <code>pass.single_edge</code> preprocessing from LEC and verify;</li>
+<li>measure minion and remove trust entries only for definitions that prove.</li>
+</ol>
+
+<p>Acceptance covers posedge&rarr;negedge pipelines, both clock-latch polarities,
+  the simultaneous data-latch/flop case, one <code>Clock_cell</code> feeding both
+  phases with one rise-sampled guard, hierarchical rise-to-fall communication,
+  mixed-edge memory ports, resets, and the unrelated-clock fallback. Bounds and
+  reset counts remain source periods; cache keys include the schedule signature;
+  witnesses name <code>(cycle,rise|fall)</code> and replay refuses explicitly
+  until it can reproduce edge-specific stimulus.</p>
 
 <h2 id="scope">Scope ruling (user, 2026-07-20) — BINDING: SIMPLE LATCHES, NO TIME BORROWING</h2>
 
@@ -871,7 +958,7 @@
   sends a stateful one to the blackbox path (<code>def = nullptr</code>).</li>
 </ul>
 
-<h2 id="m8">M8 — edge normalization <span class="status">PLAN OF RECORD</span></h2>
+<h2 id="m8">M8 — edge normalization <span class="status">LANDED; FORMAL WORKAROUND</span></h2>
 
 <p>One LGraph&rarr;LGraph pass — <code>pass.single_edge</code> (name open) — that
   <strong>removes latches and negedge state</strong>, and is
@@ -901,7 +988,7 @@
 <tr><td><code>Flop</code>, <code>posclk</code> known-false</td><td>clk fall</td><td>1</td></tr>
 <tr><td><code>Latch</code>, gate = clk, active-<strong>low</strong></td><td>gate rise</td><td>0</td></tr>
 <tr><td><code>Latch</code>, gate = clk, active-<strong>high</strong></td><td>gate fall</td><td>1</td></tr>
-<tr><td><code>Latch</code>, gate = <strong>data</strong> (not a clock net)</td><td>end of period</td><td>last</td></tr>
+<tr><td><code>Latch</code>, gate = <strong>data</strong> (not a clock net)</td><td>ordinary module tick</td><td>0 (rise/base batch)</td></tr>
 <tr><td><code>Flop</code> on clk_x, known ratio <em>r</em></td><td>every <em>r</em>-th rise</td><td>&equiv; 0 mod <em>r</em>&middot;P</td></tr>
 </table>
 

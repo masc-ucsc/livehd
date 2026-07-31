@@ -172,20 +172,37 @@ TEST(ConeAbc, SliceAndExtend) {
   expect_agree(tm, distinct(tm, tm.mkTerm(ze, {a}), tm.mkTerm(se, {a})), "zero_extend vs sign_extend");
 }
 
-// ---- the fragment boundary: arrays must bail, never mis-prove ---------------
-TEST(ConeAbc, ArraysAreUnsupported) {
+// ---- the fragment boundary: arrays are ABSTRACTED, one way only -------------
+TEST(ConeAbc, ArraySelectIsAbstractedSoundly) {
   TermManager tm;
   Sort        bv4 = tm.mkBitVectorSort(4);
   Sort        arr = tm.mkArraySort(bv4, bv4);
   Term        m   = tm.mkConst(arr, "m");
+  Term        m2  = tm.mkConst(arr, "m2");
   Term        i   = tm.mkConst(bv4, "i");
   Term        rd  = tm.mkTerm(Kind::SELECT, {m, i});
+  Term        rd2 = tm.mkTerm(Kind::SELECT, {m2, i});
 
   livehd::lec::Cone_stats st;
-  // Trivially UNSAT for cvc5, but SELECT is outside the fragment: the blaster
-  // must decline (leaving the cut to cvc5), not claim a proof.
-  EXPECT_EQ(abc_prove_unsat(distinct(tm, rd, rd), kLimit, &st), Cone_verdict::Unsupported);
-  EXPECT_FALSE(st.why.empty());
+  // SELECT is outside the blastable fragment, so it becomes a free input KEYED
+  // BY THE TERM. The SAME select on both sides is then the same input, and the
+  // cut proves -- which is the whole point: a whole-array register file written
+  // from a function of ITSELF puts a select in every one of its obligations, and
+  // declining the cone left the array cut for cvc5's array theory alone.
+  EXPECT_EQ(abc_prove_unsat(distinct(tm, rd, rd), kLimit, &st), Cone_verdict::Proven);
+
+  // The abstraction is an OVER-approximation, so the other direction must never
+  // be reported: two DIFFERENT arrays read at one index really are unequal in
+  // general, but a bit-level "difference" over free inputs is not evidence of
+  // one. Unknown (the cut stays with cvc5), never Refuted.
+  EXPECT_EQ(abc_prove_unsat(distinct(tm, rd, rd2), kLimit, &st), Cone_verdict::Unknown);
+
+  // An ARRAY-SORTED root is still outside the fragment: it is not a value the
+  // blaster can hand back a bit for.
+  Term arr_eq = tm.mkTerm(Kind::DISTINCT, {m, m2});
+  livehd::lec::Cone_stats st2;
+  EXPECT_EQ(abc_prove_unsat(arr_eq, kLimit, &st2), Cone_verdict::Unsupported);
+  EXPECT_FALSE(st2.why.empty());
 }
 
 // ---- randomized differential fuzz over the whole supported op set -----------

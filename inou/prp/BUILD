@@ -496,6 +496,14 @@ _SIM_FIXME = [
             # declaration ordering, so its coverage lives in the round-trip
             # directions (prp-v2prp-* / prp-v2v-*), which do run.
             "tests/equiv/divided_clock_decl_order.prp",
+            # comb_array_const_index_read is the same shape of exclusion: it is
+            # a MEMORY design, and lgcheck's bounded miter does not run to
+            # completion on it (INCONCLUSIVE, not refuted). What it regresses --
+            # a const-indexed read of a written comb-array entry folding to the
+            # array's init -- is created by the WRITER's per-entry expansion of
+            # a whole-array copy, so its coverage lives in the round-trip
+            # directions (prp-v2prp-* / prp-v2v-*), which do run and do decide.
+            "tests/equiv/comb_array_const_index_read.prp",
             # NOTE: the three comb-array store-loss trackers
             # (array_store_stale_rhs, arr_comb_mux_const, arr_comb_tmp) were
             # PROMOTED out of this exclude list (2026-07-27). Root cause was

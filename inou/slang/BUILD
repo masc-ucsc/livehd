@@ -41,6 +41,15 @@ cc_binary(
     ],
 )
 
+# Verilog -> Pyrope emission must be byte-reproducible: the reader linearizes
+# pointer-keyed sets, and a non-total sort key let generate-loop replicas
+# permute, which RENAMES them through lname_of's `_sN` uniquing.
+sh_test(
+    name = "slang_emit_determinism",
+    srcs = ["tests/slang_emit_determinism.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "slang_test.sh",
     srcs = ["tests/slang_test.sh"],

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <type_traits>
 #include <vector>
 
 #include "slang/ast/ASTVisitor.h"
@@ -27,6 +28,64 @@ using slang::ast::StatementKind;
 using slang::ast::SymbolKind;
 
 namespace {
+
+// A STABLE TOTAL ORDER over AST symbols — for every place this reader has to
+// linearize a pointer-keyed container before appending IR.
+//
+// `(location, name)` is NOT a total order. A generate-loop body is elaborated
+// once per index, so every replica of a symbol declared INSIDE it shares both
+// keys: the comparator then reports each pair equivalent and `std::sort` keeps
+// whatever order the `flat_hash_set` handed it, which abseil perturbs by the
+// table's heap address. That leaked straight into the output. Two back-to-back
+// `--emit-dir pyrope:` runs over minion produced 22 DIFFERING files, and
+// because `lname_of`'s `_sN` uniquing numbers names in first-reference order,
+// the differences were not only statement order but SIGNAL IDENTITY:
+// `intpipe_csr_msgs` came out pairing `oob_mem` with `oob_wr_ptr_s6` in one run
+// and with `_s7` in the next. A checked-in Pyrope tree cannot be LEC'd against
+// a freshly compiled Verilog reference under that: the two sides' state names
+// permute and the miter compares the wrong replicas (the `nxt:oob_rd_ptr_sN`
+// counterexamples that moved from run to run).
+//
+// The hierarchical path (`…gen_msg_ptrs_port[1].oob_rd_ptr`) is unique per
+// ELABORATED symbol and identical across runs, so it separates exactly the
+// symbols that tie. It is built only on a tie, so the common case pays nothing.
+bool sym_emit_less(const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+  if (a == b) {
+    return false;
+  }
+  if (a->location != b->location) {
+    return a->location < b->location;
+  }
+  if (a->name != b->name) {
+    return a->name < b->name;
+  }
+  return a->getHierarchicalPath() < b->getHierarchicalPath();
+}
+
+// Sorted (sym_emit_less) copy of a pointer-keyed container — the KEYS for a
+// map, the elements for a set. Every loop in this reader that iterates a
+// `flat_hash_set`/`flat_hash_map` of AST symbols to APPEND IR has to go through
+// this: abseil's iteration order varies with the table's heap address, and the
+// name uniquing downstream turns that into differing output (see sym_emit_less).
+// One helper rather than the copy/sort spelled out at each site, so the next
+// container that needs linearizing cannot get a subtly different version.
+template <class C>
+auto emit_ordered(const C& c) {
+  using Elem = std::remove_cvref_t<decltype(*c.begin())>;
+  if constexpr (requires(const Elem& e) { e.first; }) {
+    std::vector<std::remove_cvref_t<decltype(c.begin()->first)>> v;
+    v.reserve(c.size());
+    for (const auto& e : c) {
+      v.push_back(e.first);
+    }
+    std::sort(v.begin(), v.end(), sym_emit_less);
+    return v;
+  } else {
+    std::vector<Elem> v(c.begin(), c.end());
+    std::sort(v.begin(), v.end(), sym_emit_less);
+    return v;
+  }
+}
 
 // True iff `type` bottoms out in plain bits with no STRUCT anywhere in its
 // shape (recurses through any number of packed/unpacked array dimensions).
@@ -1461,14 +1520,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // uniquing — in that order makes the IR (and occasionally the generated
   // signal names) nondeterministic. Emit in a stable source-location order.
   {
-    std::vector<const slang::ast::Symbol*> regs(reg_syms_.begin(), reg_syms_.end());
-    std::sort(regs.begin(), regs.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
-    for (const auto* sym : regs) {
+    for (const auto* sym : emit_ordered(reg_syms_)) {
       declare_reg(sym->as<slang::ast::ValueSymbol>());
     }
   }
@@ -3369,7 +3421,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
       }
     }
-    for (const auto* wsym : wire_syms_) {
+    // wire_syms_ is pointer-keyed: linearize before this loop mints `__wtmp`
+    // names — the order decides `lname_of`'s `_sN` numbering.
+    for (const auto* wsym : emit_ordered(wire_syms_)) {
       const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
       if (vs == nullptr) {
         continue;
@@ -3422,7 +3476,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // with the split's naming inverted — the pre-declared mut cannot become
     // the wire). Split unconditionally: the bridge is always the wire's one
     // driver, so the driver/store-count refinements don't apply.
-    for (const auto* wsym : wire_syms_) {
+    for (const auto* wsym : emit_ordered(wire_syms_)) {
       const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
       if (vs == nullptr || wire_split_tmp_.contains(wsym) || !declared_.contains(wsym)) {
         continue;
@@ -3545,12 +3599,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       wouts.push_back(sym);
     }
-    std::sort(wouts.begin(), wouts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
+    std::sort(wouts.begin(), wouts.end(), sym_emit_less);
     for (const auto* sym : wouts) {
       auto ti = tinfo(sym->as<slang::ast::ValueSymbol>().getType());
       set_pending_loc(sym->location);
@@ -3590,12 +3639,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       couts.push_back(sym);
     }
-    std::sort(couts.begin(), couts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
+    std::sort(couts.begin(), couts.end(), sym_emit_less);
     for (const auto* sym : couts) {
       const auto [bits, is_signed] = output_info_.at(sym);
       set_pending_loc(sym->location);
@@ -3624,12 +3668,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       }
       bouts.push_back(sym);
     }
-    std::sort(bouts.begin(), bouts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
+    std::sort(bouts.begin(), bouts.end(), sym_emit_less);
     for (const auto* sym : bouts) {
       const auto  fields = bundle_port_info_.at(sym).fields;  // copy (builder can rehash)
       std::string stem   = sym_lname_.at(sym);
@@ -3664,8 +3703,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // Split wires (multiply-written): pre-declare `mut <tmp>` (poison) + `wire
   // <net>` (real width) up front, before any driver — the wire is
   // position-independent so an early read binds to its later bridge driver.
-  for (const auto& [wsym, tmp] : wire_split_tmp_) {
-    const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+  // wire_split_tmp_ is pointer-keyed; this loop appends IR, so linearize it.
+  for (const auto* wsym : emit_ordered(wire_split_tmp_)) {
+    const std::string& tmp = wire_split_tmp_.at(wsym);
+    const auto*        vs  = wsym->as_if<slang::ast::ValueSymbol>();
     if (vs == nullptr) {
       continue;
     }
@@ -3783,13 +3824,13 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
 
   // Split-wire bridges: the single driver of each split wire, `<net> =
   // <net>__wtmp`, emitted after every write to the accumulator has landed.
-  for (const auto& [wsym, tmp] : wire_split_tmp_) {
+  for (const auto* wsym : emit_ordered(wire_split_tmp_)) {
     const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
     if (vs == nullptr) {
       continue;
     }
     set_pending_loc(vs->location);
-    builder_.create_assign_stmts(lname_of(*vs), tmp);
+    builder_.create_assign_stmts(lname_of(*vs), wire_split_tmp_.at(wsym));
     clear_pending_loc();
   }
 
@@ -3801,12 +3842,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     for (const auto& [sym, shadow] : bundle_out_shadow_) {
       bports.push_back(sym);
     }
-    std::sort(bports.begin(), bports.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
+    std::sort(bports.begin(), bports.end(), sym_emit_less);
     for (const auto* sym : bports) {
       auto it = bundle_port_info_.find(sym);
       if (it == bundle_port_info_.end() || !sym_lname_.contains(sym)) {
@@ -4457,14 +4493,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     // Emit the clock_pin / posclk attr_set nodes in a stable source order:
     // wc.nonblocking is a pointer-keyed flat_hash_set with run-to-run-varying
     // iteration order, and this loop appends IR.
-    std::vector<const slang::ast::ValueSymbol*> ff_syms(wc.nonblocking.begin(), wc.nonblocking.end());
-    std::sort(ff_syms.begin(), ff_syms.end(), [](const slang::ast::ValueSymbol* a, const slang::ast::ValueSymbol* b) {
-      if (a->location != b->location) {
-        return a->location < b->location;
-      }
-      return a->name < b->name;
-    });
-    for (const auto* sym : ff_syms) {
+    for (const auto* sym : emit_ordered(wc.nonblocking)) {
       if (!reg_syms_.contains(sym)) {
         continue;
       }

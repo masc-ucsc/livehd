@@ -110,6 +110,28 @@ struct Encoded {
   Io_name_map<std::vector<Mem_wr_port>> mem_wr;  // mem key -> write ports, in port order
   Io_name_map<std::vector<Mem_rd_port>> mem_rd;  // mem key -> read ports, in port order
 
+  // Whole-array BULK UPDATE (`is_whole`). The per-port chain above starts from
+  // the SHARED a_cur; a whole-array memory does not -- its base is the update
+  // bus scattered over the array, optionally held under an enable / gated-clock
+  // commit and overridden by a reset arm:
+  //   a_next = reset ? from_bus(init) : (cond ? from_bus(update) : a_cur)
+  // Recording it makes two things possible. (a) A register file written as one
+  // `q <= d` (minion's `ex_mask_rf_q`) has NO write ports at all, so the port
+  // decomposition had nothing to offer and the array cut went to cvc5 whole --
+  // the single obligation that kept `vpu_mask` UNKNOWN after ABC had discharged
+  // all 44 of its other cuts. (b) It keeps the port route HONEST when a
+  // whole-array ALSO has ports: equal ports alone do not imply equal next-state
+  // once the base differs, so the consumer must discharge this entry too.
+  // `exact=false` means the encode could not model an arm -- do not decompose.
+  struct Mem_whole {
+    cvc5::Term cond;          // Bool: the bulk update applies this step (mkTrue = unconditional)
+    cvc5::Term bus;           // size*bits update bus
+    cvc5::Term reset;         // Bool reset-arm predicate; null when there is no reset arm
+    cvc5::Term init;          // size*bits init bus (meaningful only with `reset`)
+    bool       exact = true;  // false => an arm was not modeled; the array cut must stand
+  };
+  Io_name_map<Mem_whole> mem_whole;  // mem key -> bulk-update obligation
+
   // Side constraints the caller must assert (EQUAL lhs rhs). Used to tie an
   // async read dout (a fresh symbol seeded before the combinational loop so
   // downstream logic can consume it) to its select(array, addr) once the read

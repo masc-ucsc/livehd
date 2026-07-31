@@ -1717,7 +1717,9 @@ private:
       // can use a 0sb? base instead of erroring (see lower_set_mask).
       if (mode == "mut" || mode == "const" || mode.starts_with("mut ") ||
           mode.starts_with("const ")) {
-        scalar_decl_.insert(std::string(lnast_->get_name(name_nid)));
+        // CANONICAL key: set_mask_base tests it against pin_map_, which
+        // record()/resolve() key on the backtick-stripped name.
+        scalar_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
       }
       return;
     }
@@ -4441,7 +4443,7 @@ private:
         return; // discharged at LNAST
       }
     }
-    const std::string name(lnast_->get_name(ref));
+    const std::string name(canon_io_name(lnast_->get_name(ref)));  // pin_map_ is keyed canonically
     auto it = pin_map_.find(name);
     if (it == pin_map_.end()) {
       error_here("upass.tolg: `@[N]` check on '{}' — the value never "
@@ -4957,9 +4959,20 @@ private:
   // unknown (0sb?), exactly as `= 0` would leave it 0. Only a name that was
   // DECLARED as a scalar mut/const gets this 0sb? base — a genuine undriven
   // reference (typo, dropped value) still errors through leaf()/resolve().
+  //
+  // Both lookups MUST go through canon_io_name. `pin_map_` is keyed on the
+  // canonical (backtick-stripped) name because record()/resolve() canonicalize,
+  // so probing it with the RAW name misses on every backtick-escaped
+  // identifier -- `` `req_written_rearm.addr` ``, i.e. every struct leaf the
+  // Pyrope writer emits. The miss then read as "declared but never driven" and
+  // substituted a 0sb? base, DISCARDING the value the variable was carrying:
+  // `x = a; if c { x#[hi..=lo] = v }` silently lost `a`'s uncovered bits under
+  // the branch. It refuted `minion_dcache_replay_queue`; the shape is a
+  // conditional partial write, which is why the unconditional form and a plain
+  // identifier both looked fine.
   [[nodiscard]] Val set_mask_base(const Lnast_nid &val) {
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
-      std::string name{lnast_->get_name(val)};
+      const std::string name{canon_io_name(lnast_->get_name(val))};
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
         return {nil_pin(), 1};
       }

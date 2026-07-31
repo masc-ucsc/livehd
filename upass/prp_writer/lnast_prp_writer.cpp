@@ -3488,6 +3488,76 @@ bool Lnast_prp_writer::is_pure_copy(Lnast_nid store_node) const {
   return vt == Lnast_ntype::Lnast_ntype_ref || vt == Lnast_ntype::Lnast_ntype_const;
 }
 
+// Operand stability THROUGH the inlines this writer performs.
+//
+// `operands_stable` looks only at a def's DIRECT operands. That is not enough
+// once a chain of single-use temps is folded: the fold moves the whole cone to
+// the LAST use, so every name anywhere in the folded cone has to be unchanged
+// over the full window, not just the names the outermost node mentions.
+//
+// The shape that broke: a SystemVerilog `function automatic` returns through a
+// variable named after the function, and an unrolled loop calls it once per
+// iteration, so the reader emits N writes to that ONE name, each immediately
+// consumed by the accumulator (`o |= is_used(states_q[i])`). Every `%t = acc |
+// is_used` was adjacent to its use and folded, and then the `o__wN` copies
+// folded on top — which slid all N reads of `is_used` down past all N writes.
+// vpu_trans came out as `id_trans_busy_o = ((0 | is_used) | is_used) | …`,
+// seven reads of the LAST iteration's value: a silent miscompile that
+// `//bench:minion_lec` caught as `id_trans_busy_o(ref=1 impl=0)`.
+//
+// Whether to recurse is decided by `may_inline_name` — the NAME policy — and
+// NOT by membership in `foldable_`: analyze_folding fills that set from an
+// unordered_map walk while consulting it, so a candidate reached early cannot
+// see that a name it reads will itself be folded later, and which of the two
+// orders you get depends on string hashing. Treating every single-def temp as
+// if it will be folded is conservative — the worst case is one fold declined
+// and one extra emitted line.
+bool Lnast_prp_writer::operands_stable_deep(Lnast_nid def_node, int d, int u, std::unordered_set<std::string>& on_stack,
+                                            std::unordered_set<std::string>& done, int walk_depth) const {
+  if (walk_depth > 32) {
+    return false;  // pathological chain: decline rather than walk it
+  }
+  int pos = 0;
+  for (auto c = lnast->get_child(def_node); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
+    if (pos == 0) {
+      continue;  // the LHS being defined
+    }
+    if (lnast->get_type(c) != Lnast_ntype::Lnast_ntype_ref) {
+      continue;  // const / type leaf — never changes
+    }
+    const std::string nm(lnast->get_name(c));
+    if (may_inline_name(nm) && done.count(nm) == 0) {
+      // `on_stack` catches a genuine CYCLE; `done` remembers a cone already
+      // verified over this same (d, u) window. Both are needed: a cone that
+      // re-converges (`%d = %b + %c` with `%b`/`%c` both reading `%a` — the
+      // normal shape after CSE) is a DAG, not a loop, and a single
+      // never-unwound `seen` set rejected it and lost the fold.
+      if (!on_stack.insert(nm).second) {
+        return false;  // already on the walk: refuse rather than loop
+      }
+      if (!operands_stable_deep(fold_info_.find(nm)->second.def_node, d, u, on_stack, done, walk_depth + 1)) {
+        return false;
+      }
+      on_stack.erase(nm);
+      done.insert(nm);
+      // Fall through to the write-index check anyway: `may_inline_name` answers
+      // "COULD be folded", so a name that ends up emitted still has to hold its
+      // own value over the window. (A name that really is folded has its single
+      // def before `d`, so the check is a no-op there.)
+    }
+    auto it = write_idx_.find(nm);
+    if (it == write_idx_.end()) {
+      continue;  // never assigned (io input / const-fed) — stable
+    }
+    for (int w : it->second) {
+      if (w > d && w < u) {
+        return false;  // operand reassigned between the def and its last use
+      }
+    }
+  }
+  return true;
+}
+
 bool Lnast_prp_writer::operands_stable(Lnast_nid def_node, int d, int u) const {
   int pos = 0;
   for (auto c = lnast->get_child(def_node); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
@@ -3620,6 +3690,32 @@ static std::string_view ssa_base(std::string_view n) {
     b = b.substr(1);
   }
   return b;
+}
+
+// True when `nm` is a name the writer COULD inline at its use sites — i.e. it
+// passes analyze_folding's naming policy (a `%`/`___` compiler temp, a firtool
+// `_`-prefixed intermediate, or an `___ssa_N` version) and has exactly one
+// definition to inline. analyze_instance_inline's `_t = inst.port` temps are
+// covered by the `_` prefix.
+//
+// Deliberately a NAME test rather than `foldable_.count(nm)`: analyze_folding
+// fills `foldable_` from an unordered walk over `fold_info_` while querying it,
+// so the answer for a not-yet-visited name would depend on hash order. Being
+// wrong in the "could" direction only costs an extra (conservative) recursion
+// in operands_stable_deep; being wrong the other way slid a read past a write.
+bool Lnast_prp_writer::may_inline_name(const std::string& nm) const {
+  if (nm.empty()) {
+    return false;
+  }
+  auto fit = fold_info_.find(nm);
+  if (fit == fold_info_.end() || fit->second.def_count != 1 || fit->second.def_node.is_invalid()) {
+    return false;
+  }
+  if (is_tmp(nm) || ends_with_ssa_version(nm)) {
+    return true;
+  }
+  const auto base = ssa_base(nm);
+  return !base.empty() && base.front() == '_';
 }
 
 void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid) {
@@ -4162,6 +4258,13 @@ void Lnast_prp_writer::analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_ni
     } else if (vt != Lnast_ntype::Lnast_ntype_const) {
       continue;
     }
+    // The value moves to the USE site, so everything it reads — including the
+    // cone of any temp folded into it — must be unchanged in between. Without
+    // this the rule slid a folded `acc | is_used` past six reassignments of
+    // `is_used` (see operands_stable_deep).
+    if (!operands_stable_deep(snode, fit->second.def_index, fit->second.use_index)) {
+      continue;
+    }
     value_inline_.emplace(nm, v);
     folded_node_.insert(snode.get_class_index().value);
   }
@@ -4276,7 +4379,7 @@ void Lnast_prp_writer::analyze_folding() {
     // operands must be stable from the def through the LAST use (use_index), so an
     // N-use inline reads the same operand values at every site. (In SSA every
     // operand is itself write-once, so this is the common-case fast path.)
-    if (!operands_stable(fi.def_node, fi.def_index, fi.use_index)) {
+    if (!operands_stable_deep(fi.def_node, fi.def_index, fi.use_index)) {
       continue;
     }
     foldable_.insert(name);

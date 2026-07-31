@@ -4534,12 +4534,15 @@ void uPass_constprop::process_tuple_set() {
       check_unsigned_positive_overflow(tuple_var + "." + name, *v);   // ... and fit its declared range (cat 3)
       // Update bundle in place; scalar values are propagated by tuple_get.
       bundle->set(bundle_path::of_string(name), *v);
-    } else if (val_child.is_ref && st().has_bundle(val_child.text)) {
-      auto sub = st().get_bundle(val_child.text);
-      if (sub) {
-        bundle->set(bundle_path::of_string(name), sub);
-      }
     }
+    // NOTE: a runtime value is deliberately NOT invalidated on this
+    // named-positional path. Writing `Symbol_table::invalid_lconst` into the
+    // Bundle slot does not mark it unknown — it makes the FIELD itself
+    // unreadable, and `apply_each`'s `self.a = f(self.a); … self.c` then fails
+    // with "unknown field `c` on tuple `self`" (inou/prp comptime/fcall6). The
+    // stale-fold hazard this file cares about is the ARRAY-ELEMENT one, which
+    // takes the keyed path below (a decimal path segment is not
+    // named-positional).
     move_to_parent();
     return;
   }
@@ -4551,6 +4554,22 @@ void uPass_constprop::process_tuple_set() {
   }
   auto key = tuple_var + field;
 
+  // A RUNTIME store must INVALIDATE the slot. Unlike a scalar, an element /
+  // field key is never SSA-versioned — `d[0]` writes and reads the one key
+  // `d.0` — so leaving the previous comptime content in place lets a later read
+  // fold to it and DELETE the write:
+  //
+  //     mut d:[2]u3 = 5
+  //     d[0] = a            // runtime: nothing was recorded for `d.0`
+  //     o   = d[0]          // folded to 5 — the emitted netlist has no read
+  //                         // port on `d` at all
+  //
+  // That is a silent miscompile, and not a corner case: the Pyrope writer
+  // emits a whole-array copy as N CONST-INDEXED per-entry stores (Pyrope has no
+  // runtime whole-array assignment), so `q[i] = d[i]` over a comb array is the
+  // ordinary shape — minion's `minion_dcache_replay_queue` lost its whole
+  // `uc_load_id_q <= uc_load_id_d` this way, every write port's din a constant.
+  auto invalidate_key = [&]() { st().set(key, Symbol_table::invalid_lconst); };
   if (val_child.is_ref) {
     if (st().has_trivial(val_child.text)) {
       const auto rv = st().get_trivial(val_child.text);
@@ -4561,7 +4580,11 @@ void uPass_constprop::process_tuple_set() {
       auto b = st().get_bundle(val_child.text);
       if (b) {
         st().set(key, b);  // bundle pointer store (not a scalar value)
+      } else {
+        invalidate_key();
       }
+    } else {
+      invalidate_key();
     }
   } else {
     Dlop val = *Dlop::from_pyrope(val_child.text);
@@ -4569,6 +4592,8 @@ void uPass_constprop::process_tuple_set() {
       check_field_store_kind(key, val);            // field/array write must keep its kind (cat 3)
       check_unsigned_positive_overflow(key, val);  // ... and fit its declared range (cat 3)
       store_trivial(key, val);
+    } else {
+      invalidate_key();
     }
   }
   move_to_parent();

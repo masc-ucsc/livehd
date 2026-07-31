@@ -84,6 +84,11 @@ public:
   [[nodiscard]] bool               bad() const { return bad_; }
   [[nodiscard]] const std::string& why() const { return why_; }
   [[nodiscard]] int                pis() const { return npi_; }
+  // True when some subterm was replaced by a free input (opaque_leaf). The AIG
+  // is then an OVER-approximation: UNSAT still transfers, but SAT does NOT --
+  // the counterexample may assign the abstracted leaves inconsistently. Callers
+  // must degrade such a SAT to Unknown, never report it as a difference.
+  [[nodiscard]] bool               abstracted() const { return abstracted_; }
 
 private:
   // ---- AIG primitives ------------------------------------------------------
@@ -218,6 +223,58 @@ private:
   // ---- traversal -----------------------------------------------------------
   bool done(const cvc5::Term& t) const { return bv_.count(t) != 0 || bl_.count(t) != 0; }
 
+  // A subterm outside the blastable fragment (an array SELECT, a UF
+  // application, a divide) but whose OWN sort is BitVector/Boolean is
+  // abstracted to a free primary input KEYED BY THE TERM: identical terms share
+  // an input, distinct ones get independent ones. Replacing a subterm by a free
+  // variable is an OVER-approximation, so UNSAT on the abstraction is UNSAT on
+  // the original -- the only direction this pass may conclude (a SAT verdict is
+  // already just a lead: the cut goes to cvc5 either way, and the caller marks
+  // the obligations whose SAT is not a sound refutation). Without this one
+  // `select(a_cur, i)` anywhere in a cone made the whole cut "unsupported",
+  // which is what kept a whole-array register file written from a function of
+  // ITSELF (`ex_mask_rf_q <= f(ex_mask_rf_q)`) out of reach: every bulk-update
+  // obligation reads the array it is writing.
+  static bool opaque_leaf(const cvc5::Term& t) {
+    const cvc5::Sort srt = t.getSort();
+    if (!srt.isBitVector() && !srt.isBoolean()) {
+      return false;  // an Array-sorted term is not a value: let supported() refuse it
+    }
+    switch (t.getKind()) {
+      case cvc5::Kind::SELECT:
+      case cvc5::Kind::APPLY_UF:
+      case cvc5::Kind::BITVECTOR_UDIV:
+      case cvc5::Kind::BITVECTOR_UREM:
+      case cvc5::Kind::BITVECTOR_SDIV:
+      case cvc5::Kind::BITVECTOR_SREM:
+      case cvc5::Kind::BITVECTOR_SMOD: return true;
+      default: return false;
+    }
+  }
+
+  void emit_opaque(const cvc5::Term& t) {
+    abstracted_        = true;
+    const cvc5::Term rep = canon(t);
+    if (t.getSort().isBitVector()) {
+      auto it = sym_pi_.find(rep);
+      if (it == sym_pi_.end()) {
+        const uint32_t   w = t.getSort().getBitVectorSize();
+        std::vector<Bit> r(w);
+        for (uint32_t i = 0; i < w; ++i) {
+          r[i] = new_pi(rep.getId(), i);
+        }
+        it = sym_pi_.emplace(rep, std::move(r)).first;
+      }
+      bv_.emplace(t, it->second);
+    } else {
+      auto it = sym_bit_.find(rep);
+      if (it == sym_bit_.end()) {
+        it = sym_bit_.emplace(rep, new_pi(rep.getId(), 0)).first;
+      }
+      bl_.emplace(t, it->second);
+    }
+  }
+
   bool supported(const cvc5::Term& t) {
     const cvc5::Sort srt = t.getSort();
     if (!srt.isBitVector() && !srt.isBoolean()) {
@@ -281,6 +338,11 @@ private:
         continue;
       }
       if (!entry.second) {
+        if (opaque_leaf(entry.first)) {  // abstract: a leaf, so do NOT descend into it
+          st.pop_back();
+          emit_opaque(entry.first);
+          continue;
+        }
         if (!supported(entry.first)) {
           return;
         }
@@ -536,7 +598,8 @@ private:
   Abc_Ntk_t*  ntk_ = nullptr;
   Abc_Aig_t*  man_ = nullptr;
   Bit         one_ = nullptr;
-  bool        bad_ = false;
+  bool        bad_        = false;
+  bool        abstracted_ = false;
   int         npi_ = 0;
   std::string why_;
 
@@ -720,14 +783,18 @@ Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_sta
 
   // Structural hashing alone often settles a cut (the two sides collapse to the
   // same AIG node): const-0 output = UNSAT, const-1 = always different.
-  const int cst = Abc_NtkMiterIsConstant(ntk);
+  // A SAT/"always different" answer is only reportable when the blast was
+  // EXACT: with an abstracted subterm the AIG over-approximates, so SAT proves
+  // nothing (see Blaster::abstracted). Proven transfers either way.
+  const bool exact = !b.abstracted();
+  const int  cst   = Abc_NtkMiterIsConstant(ntk);
   if (cst == 1) {
     Abc_NtkDelete(ntk);
     return Cone_verdict::Proven;
   }
   if (cst == 0) {
     Abc_NtkDelete(ntk);
-    return Cone_verdict::Refuted;
+    return exact ? Cone_verdict::Refuted : Cone_verdict::Unknown;
   }
 
   // This is an OPPORTUNISTIC pre-pass, not a last-resort prover: a cone that is
@@ -755,7 +822,7 @@ Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_sta
   if (rv == 1) {
     return Cone_verdict::Proven;
   }
-  return rv == 0 ? Cone_verdict::Refuted : Cone_verdict::Unknown;
+  return (rv == 0 && exact) ? Cone_verdict::Refuted : Cone_verdict::Unknown;
 }
 }  // namespace
 

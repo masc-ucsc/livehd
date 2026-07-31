@@ -1,0 +1,36 @@
+/*
+:name: comb_array_const_index_read
+:type: equiv
+:verilog_top: comb_array_const_index_read
+:pyrope_top: top
+*/
+
+// Pyrope twin: the comb array `d` is copied out of `q` entry by entry with
+// CONSTANT indices, which is exactly what pass/prp_writer emits for the
+// golden's `d = q` / `q <= d` (Pyrope has no runtime whole-array assignment).
+// The const-indexed READ of a written comb-array entry is the regression — see
+// the golden .v.
+pub mod top(clk_i:u1, en_i:u1, wa_i:u3, wd_i:u3, ra_i:u3) -> (rd_o:u3@[]) {
+  reg q:[8]u3:[ordering="old", clock_pin=ref clk_i]
+  mut d:[8]u3 = 0
+  d[0] = q[0]
+  d[1] = q[1]
+  d[2] = q[2]
+  d[3] = q[3]
+  d[4] = q[4]
+  d[5] = q[5]
+  d[6] = q[6]
+  d[7] = q[7]
+  d[wa_i] = wd_i
+  if en_i != 0 {
+    q[0] = d[0]
+    q[1] = d[1]
+    q[2] = d[2]
+    q[3] = d[3]
+    q[4] = d[4]
+    q[5] = d[5]
+    q[6] = d[6]
+    q[7] = d[7]
+  }
+  rd_o = q[ra_i]
+}
