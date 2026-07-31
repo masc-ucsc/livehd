@@ -746,4 +746,25 @@ theorem getmask_bridge' {aw mw b : Nat} (X : BitVec aw) (M : BitVec mw)
     eval_op LGraphOp.Op_GetMask b [bvenc X, bvenc M] = bvenc (sem_get_mask X M : BitVec b) :=
   getmask_bridge X M hb
 
+
+/-- `max`-width EQ bridge: fixes the compare width to `max wa wb` so it is
+determined by the operands (the emitter uses `max(pin widths)`), avoiding a free
+implicit in the generated `rw`. -/
+theorem eq_bridge_max {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_EQ 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext b : BitVec (max wa wb)) = (bv_zext a : BitVec (max wa wb)))) :=
+  eq_bridge a b (Nat.le_max_left wa wb) (Nat.le_max_right wa wb)
+
+/-- `max`-width unsigned-less-than bridge. -/
+theorem ult_bridge_max {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_ULT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec (max wa wb)) < (bv_zext b : BitVec (max wa wb)))) :=
+  ult_bridge a b (Nat.le_max_left wa wb) (Nat.le_max_right wa wb)
+
+/-- `max`-width unsigned-greater-than bridge. -/
+theorem ugt_bridge_max {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_UGT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 ((bv_zext a : BitVec (max wa wb)) > (bv_zext b : BitVec (max wa wb)))) :=
+  ugt_bridge a b (Nat.le_max_left wa wb) (Nat.le_max_right wa wb)
+
 end OpBridge

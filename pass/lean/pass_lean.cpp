@@ -1020,6 +1020,7 @@ struct CertBuild {
   // emitter can generate `<base>_src<id> : sourceEnv id = bvenc <leaf>` facts.
   std::map<uint32_t, std::string> source_leaf;  // BitVec expr: i.f / s.f / BitVec.ofInt w c
   std::map<uint32_t, int>         source_kind;  // 0 = input, 1 = const, 2 = flop
+  std::map<uint32_t, uint32_t>    source_width; // BitVec width of the source leaf
   uint32_t next_synth_id = 1000000000;
 };
 
@@ -1039,6 +1040,7 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
     build.source_exprs[sid] = "mk_bv " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
     build.source_leaf[sid]  = "BitVec.ofInt " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
     build.source_kind[sid]  = 1;
+    build.source_width[sid] = expected_w;
     return sid;
   }
   if (pin_is_input(pin)) {
@@ -1053,6 +1055,7 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
                              + ctx.input_field.at(pname) + "))";
     build.source_leaf[sid]  = "i." + ctx.input_field.at(pname);
     build.source_kind[sid]  = 0;
+    build.source_width[sid] = ctx.input_width.at(pname);
     return sid;
   }
   if (node_is_flop(n)) {
@@ -1062,9 +1065,23 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
                              + ctx.flop_field.at(sid) + "))";
     build.source_leaf[sid]  = "s." + ctx.flop_field.at(sid);
     build.source_kind[sid]  = 2;
+    build.source_width[sid] = ctx.flop_width.at(sid);
     return sid;
   }
   return node_id(n);
+}
+
+// Shift-amount certificate width: mirror the fast model (shift_amount_expr_at /
+// SRA `sw`), which widens a constant shift to fit its VALUE rather than trust a
+// possibly-too-narrow pin width.  Keeps the cert shift value equal to the fast
+// model's so the step-5 bridge holds (e.g. a const 32 on a 1-bit pin becomes
+// `mk_bv 6 32`, not `mk_bv 1 32` = 0).
+uint32_t shift_dep_width(const LeanCtx& ctx, const Node_pin& dpin, const Node& owner) {
+  uint32_t w = pin_width(ctx, dpin, owner);
+  if (pin_is_const(dpin)) {
+    w = std::max<uint32_t>(w, minimal_unsigned_const_width(pin_const_value(dpin)));
+  }
+  return w;
 }
 
 std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& node, CertNodeInfo* info = nullptr) {
@@ -1158,14 +1175,24 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
     }
     case Ntype_op::SHL:
       op_expr = "LGraphOp.Op_SHL";
-      for (const auto& e : inp_edges_ordered(node)) {
-        deps.push_back(cert_dep_id(ctx, build, e.driver, pin_width(ctx, e.driver, node)));
+      {
+        size_t di = 0;
+        for (const auto& e : inp_edges_ordered(node)) {
+          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
+          ++di;
+        }
       }
       break;
     case Ntype_op::SRA:
       op_expr = "LGraphOp.Op_SRA";
-      for (const auto& e : inp_edges_ordered(node)) {
-        deps.push_back(cert_dep_id(ctx, build, e.driver, pin_width(ctx, e.driver, node)));
+      {
+        size_t di = 0;
+        for (const auto& e : inp_edges_ordered(node)) {
+          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
+          ++di;
+        }
       }
       break;
     case Ntype_op::Mux: {
@@ -1920,6 +1947,21 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     const std::string G = base_name + "_graphCert";
     int bridge_gaps = 0;
 
+    // Width of any cert id (topo node or source), for ops whose bridge needs an
+    // explicit operand/compare width (e.g. EQ/ULT: the compare width is not
+    // determined by the goal, so the emitter supplies it as a literal).
+    std::map<uint32_t, uint32_t> nwidth;
+    for (const auto& ci : cert_infos) {
+      nwidth[ci.nid] = ci.width;
+    }
+    for (const auto& kv : cert_build.source_width) {
+      nwidth[kv.first] = kv.second;
+    }
+    auto width_of = [&](uint32_t id) -> uint32_t {
+      auto it = nwidth.find(id);
+      return it == nwidth.end() ? 0 : it->second;
+    };
+
     ofs << "\n-- Step-5 fast-view bridge: fast model = certificate model.\n\n";
 
     // φ: encoded fast node values on topo nodes, sourceEnv on leaves.
@@ -1949,9 +1991,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "theorem " << base_name << "_bridge_depord : GraphRefine.DepOrdered " << G << " " << G << ".topo :=\n";
     ofs << "  GraphRefine.depOrdered_of_bool " << G << " " << G << ".topo (by native_decide)\n\n";
 
-    // Per-node recurrence, discharged by the op bridge for that node's operator.
-    ofs << "theorem " << base_name << "_bridge_rec " << P << " : ∀ n ∈ " << G << ".topo, "
-        << base_name << "_phi " << A << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n := by\n";
+    // Per-node recurrence: one standalone theorem per topo node so each proof
+    // elaborates independently (avoids a single ~5000-node proof term).
     for (const auto& info : cert_infos) {
       std::string deplist;
       for (size_t k = 0; k < info.deps.size(); ++k) {
@@ -1972,8 +2013,29 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "or_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Xor" && info.deps.size() == 2) {
         bridge_call = "xor_bridge";
-      } else if (info.op_expr == "LGraphOp.Op_Not") {
+      } else if (info.op_expr == "LGraphOp.Op_Not" && info.deps.size() == 1) {
         bridge_call = "not_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_SHL" && info.deps.size() == 2) {
+        bridge_call = "shl_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Ror" && info.deps.size() == 1) {
+        bridge_call = "ror1_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_MuxBool" && info.deps.size() == 3) {
+        bridge_call = "muxbool_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_SRA" && info.deps.size() == 2) {
+        bridge_call = "sra_bridge _ _ (by decide)";
+      } else if ((info.op_expr == "LGraphOp.Op_EQ" || info.op_expr == "LGraphOp.Op_ULT"
+                  || info.op_expr == "LGraphOp.Op_UGT") && info.deps.size() == 2) {
+        // Compare width is the fast model's cmp/eq width = max(operand widths);
+        // supply it (and the operand widths) as literals so `wa ≤ cw` decides and
+        // the RHS type matches the fast model with no symbolic `max` to reduce.
+        const uint32_t w0 = width_of(info.deps[0]);
+        const uint32_t w1 = width_of(info.deps[1]);
+        const uint32_t cw = std::max(w0, w1);
+        const std::string base_lemma = info.op_expr == "LGraphOp.Op_EQ"  ? "eq_bridge"
+                                     : info.op_expr == "LGraphOp.Op_ULT" ? "ult_bridge"
+                                                                          : "ugt_bridge";
+        bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " "
+                      + std::to_string(cw) + " _ _ (by decide) (by decide)";
       } else {
         supported = false;
       }
@@ -1983,28 +2045,31 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           srcfacts += base_name + "_src" + std::to_string(d) + " " + A + ", ";
         }
       }
-      ofs << "  have h_" << info.nid << " : " << base_name << "_phi " << A << " " << info.nid
-          << " = evalNode " << G << " (" << base_name << "_phi " << A << ") " << info.nid << " := by\n";
+      ofs << "theorem " << base_name << "_rec" << info.nid << " " << P << " : " << base_name << "_phi " << A
+          << " " << info.nid << " = evalNode " << G << " (" << base_name << "_phi " << A << ") " << info.nid << " := by\n";
       if (supported) {
-        ofs << "    show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op ("
+        ofs << "  show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op ("
             << info.op_expr << ") " << info.width << " [" << deplist << "]\n";
-        ofs << "    simp only [" << base_name << "_phi]\n";
-        ofs << "    norm_num\n";
-        ofs << "    rw [" << srcfacts << bridge_call << "]\n";
+        ofs << "  simp only [" << base_name << "_phi]\n";
+        ofs << "  norm_num\n";
+        ofs << "  rw [" << srcfacts << bridge_call << "]\n";
         // Unfold the factored node def and normalize constant Int spellings
         // (fast model emits `15`/`-1`; the cert source facts use `Int.ofNat 15` /
         // `-Int.ofNat 1` — same value, so normalize casts to close by rfl).
-        ofs << "    simp only [" << base_name << "_fv" << info.nid
-            << ", Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one]\n";
+        ofs << "  simp only [" << base_name << "_fv" << info.nid
+            << ", bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one]\n";
       } else {
-        ofs << "    sorry -- TODO(step5): op bridge for " << info.op_expr << " (arity " << info.deps.size() << ")\n";
+        ofs << "  sorry -- TODO(step5): op bridge for " << info.op_expr << " (arity " << info.deps.size() << ")\n";
         ++bridge_gaps;
       }
     }
+    // Thin combiner: dispatch each topo node to its standalone recurrence theorem.
+    ofs << "theorem " << base_name << "_bridge_rec " << P << " : ∀ n ∈ " << G << ".topo, "
+        << base_name << "_phi " << A << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n := by\n";
     ofs << "  intro n hn\n";
     ofs << "  simp only [" << G << ", List.mem_cons, List.not_mem_nil, or_false] at hn\n";
     if (topo_ids.size() == 1) {
-      ofs << "  subst hn\n  exact h_" << topo_ids[0] << "\n\n";
+      ofs << "  subst hn\n  exact " << base_name << "_rec" << topo_ids[0] << " " << A << "\n\n";
     } else {
       std::string pat;
       for (size_t k = 0; k < topo_ids.size(); ++k) {
@@ -2012,7 +2077,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       ofs << "  rcases hn with " << pat << " <;> subst h\n";
       for (const auto id : topo_ids) {
-        ofs << "  · exact h_" << id << "\n";
+        ofs << "  · exact " << base_name << "_rec" << id << " " << A << "\n";
       }
       ofs << "\n";
     }
