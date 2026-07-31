@@ -2177,6 +2177,44 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
     ofs << "  simp only [bv_to_bitvec_bvenc, bv_zext_id]\n\n";
 
+    // Sequential designs: _next_refines_fast (each flop din) and _step_refines_fast.
+    if (sequential) {
+      ofs << "theorem " << base_name << "_next_refines_fast " << P << " : " << base_name << "_next " << A
+          << " = " << base_name << "_next_cert " << A << " := by\n";
+      ofs << "  have hb := GraphRefine.evalGraph_of_localAgree " << G << " (" << base_name << "_phi " << A
+          << ") (" << base_name << "_sourceEnv " << A << ")\n";
+      ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name
+          << "_bridge_some (" << base_name << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
+      ofs << "  unfold " << base_name << "_next " << base_name << "_next_cert " << base_name << "_nextStateFromCert\n";
+      int seq_gaps = 0;
+      for (const auto& fn : flop_nodes) {
+        const auto fid = node_id(fn);
+        const auto dit = flop_din_cert_ids.find(fid);
+        if (dit == flop_din_cert_ids.end()) {
+          continue;  // no din driver -> both sides use the zero literal, already equal
+        }
+        const uint32_t d = dit->second;
+        if (topo_set.count(d)) {
+          ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d
+              << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by simp [" << base_name << "_phi]]\n";
+        } else {
+          ofs << "  -- TODO(step5): flop din " << d << " is a source (off-topo); needs evalGraph-off-topo lemma\n";
+          ++seq_gaps;
+        }
+      }
+      ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n";
+      if (seq_gaps != 0) {
+        ofs << "  sorry -- " << seq_gaps << " source flop din(s) unhandled\n";
+      }
+      ofs << "\n";
+
+      ofs << "theorem " << base_name << "_step_refines_fast " << P << " : " << base_name << "_step " << A
+          << " = " << base_name << "_step_cert " << A << " := by\n";
+      ofs << "  unfold " << base_name << "_step " << base_name << "_step_cert\n";
+      ofs << "  rw [" << base_name << "_next_refines_fast " << A << ", " << base_name << "_comb_refines_fast "
+          << A << "]\n\n";
+    }
+
     if (bridge_gaps != 0) {
       ofs << "-- NOTE: " << bridge_gaps << " node(s) used a `sorry` op-bridge placeholder (unsupported op/arity).\n";
     }
