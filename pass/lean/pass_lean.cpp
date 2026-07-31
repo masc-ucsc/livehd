@@ -2020,7 +2020,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       std::string closer = "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
       bool supported = true;
       if (info.op_expr.rfind("LGraphOp.Op_GetMask", 0) == 0) {
-        bridge_call = "getmask_bridge' _ _ (by native_decide)";
+        // `decide` (kernel), not `native_decide`: native_decide compiles a
+        // decision procedure into the environment PER node — over ~2000 wide-mask
+        // GetMask nodes that env bloat dominates memory (tens of GB).  `decide`
+        // evaluates the (small, concrete) mask-length check with no env artifact.
+        bridge_call = "getmask_bridge' _ _ (by decide)";
       } else if (info.op_expr == "LGraphOp.Op_Sum 2" && info.deps.size() == 2) {
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
