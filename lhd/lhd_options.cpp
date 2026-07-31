@@ -681,9 +681,15 @@ Options parse_args(int argc, char** argv) {
       // may intervene); inferred from the source-file extensions (.prp ->
       // pyrope, .v/.sv -> verilog) when omitted.
       opts.language = a;
-    } else if (opts.command == "compile" || opts.command == "pass") {
+    } else if (opts.command == "compile" || opts.command == "pass" || opts.command == "sim") {
       // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
       // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
+      // `sim` positionals are the .prp source(s) plus an optional test selector,
+      // and its IR inputs are routed exactly like compile's (ln:DIR ->
+      // opts.in_dirs, lg:DIR -> opts.ins) so a design compiled once can be
+      // simulated without re-reading its sources. Routing them here is what makes
+      // that possible: sim classifies a positional by extension, so an unrouted
+      // `lg:dir` was silently taken as the TEST NAME (the design never loaded).
       if (!route_positional(opts, a)) {
         // The first `pass` positional is the sub-command (abc/color/partition/
         // liberty): extend the command path to pass.<sub> so a --set to its

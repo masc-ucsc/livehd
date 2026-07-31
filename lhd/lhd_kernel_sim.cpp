@@ -59,6 +59,14 @@ void sim_command(Options& opts, Result& res) {
   // co-loaded units (no relative path or `-I` needed). A lone non-`.prp` token is
   // the test selector. The LAST source is the primary, test-containing file;
   // any earlier sources are the units it imports.
+  //
+  // `ln:DIR` / `lg:DIR` positionals never reach here: the option parser routes
+  // them to opts.in_dirs / opts.ins exactly as it does for `lhd compile`, and
+  // gather_ir_inputs below hands them to the same compile_sources. So the DUT
+  // may equally be a pre-elaborated ln: forest (`import("ln:Cpu")`) or a
+  // pre-compiled lg: library (`import("lg:Cpu")`) instead of a .prp beside the
+  // testbench — the `test` blocks still need a .prp, which is why one is
+  // required regardless.
   std::vector<std::string> sources;
   std::string              test_sel;
   for (const auto& f : opts.files) {

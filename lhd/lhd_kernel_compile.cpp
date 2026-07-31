@@ -266,6 +266,11 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
   for (const auto& in : opts.ins) {
     if (in.kind == "lg") {
       ir.lg_dirs.push_back(in.path);
+    } else if (in.kind == "ln") {
+      // `--in ln:DIR` is the SAME input as the positional `ln:DIR` (which
+      // route_positional files under in_dirs). Accepting only one of the two
+      // spellings was an accident of the two parse paths, not a rule.
+      ir.ln_dirs.push_back(in.path);
     } else {
       throw Lhd_error{"usage", std::format("{} does not accept {}: inputs", cmd, in.kind), "IR inputs are ln:DIR or lg:DIR"};
     }
@@ -1520,6 +1525,11 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
     }
   }
   lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+  // Same rule as the source+lg: path in compile_sources: the absorbed graphs are
+  // part of the linked design, so every emit sees them (the lg: emit already did
+  // — it IS the library — but `--emit verilog:` would have dropped the black-box
+  // bodies). Eprp_var::add dedups by shared_ptr against what tolg just created.
+  load_lg_into_var(lib_path, var);
   graph_pipeline_and_emits(opts, res, var, lib_path);
 }
 
@@ -1553,6 +1563,18 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
     lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty());
+    // An absorbed lg: library is part of the DESIGN, not just a name table for
+    // `import("lg:…")` to bind against. Put its graphs on `var` so every emit
+    // sees them: without this the source-side modules were emitted alone and a
+    // `--emit verilog:`/`--emit-dir sim:` netlist referenced instances whose
+    // bodies were nowhere (`lhd sim lg:DIR tb.prp` failed outright with "no
+    // synthesizable modules", the black box being the whole DUT). Adding them
+    // after the lowering keeps tolg's freshly created graphs first, and
+    // Eprp_var::add dedups by shared_ptr — the library hands back the same
+    // handle tolg created, so a name defined on both sides is added once.
+    if (!ir.lg_dirs.empty()) {
+      load_lg_into_var(lib_path, var);
+    }
     if (ln_out != nullptr) {
       publish_source_ln(opts, res, var, n_imports, ln_out->path);
     }
@@ -1574,7 +1596,14 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         // PACKAGE unit exports pub values/types, so persist its `__pub`
         // wrapper alongside the forest (a later `import("pkg")` from this
         // ln: dir would otherwise bind a value-less namespace).
-        auto units = filter_top(var.lnasts, opts.top);
+        //
+        // The WHOLE forest is published, never `filter_top`: --top already rode
+        // into slang, so what came back IS the top's elaborated cone. Filtering
+        // again here kept the single unit whose name equals --top and dropped
+        // every module it instantiates — unlike the lg:/pyrope: emits, which
+        // never filter — so `--top X --emit-dir ln:` wrote a one-unit dir that
+        // could not be linked ("call to undefined function '<child>'").
+        auto units = var.lnasts;
         std::vector<std::shared_ptr<Lnast>> wrappers;
         for (const auto& ln : units) {
           if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {

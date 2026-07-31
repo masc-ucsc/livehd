@@ -169,6 +169,20 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `lhd sim` takes ln:/lg: IR inputs like `lhd compile` does, so a design compiled
+# once simulates without re-reading its sources: the positionals route through the
+# shared route_positional (an lg:DIR used to be swallowed as the TEST NAME), the
+# absorbed lg: library joins the DESIGN so the DUT body is actually emitted, and a
+# slang `--top X --emit-dir ln:` publishes the whole forest (it used to drop every
+# module X instantiates, leaving an ln: dir that could not be linked). Structural
+# checks are hermetic; with the sibling ../hlop + ../iassert headers it also runs
+# both IR forms and the plain two-source baseline and requires the same verdict.
+sh_test(
+    name = "lhd_sim_ir_inputs_test",
+    srcs = ["lhd_sim_ir_inputs_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` structured + LOCATED assert failures: a failed `assert` prints the
 # source location (prp:line), the cycle (the `clock` value, which survives the
 # tick loop), and both operand VALUES of a top-level comparison (a literal operand
