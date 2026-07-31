@@ -767,4 +767,76 @@ theorem ugt_bridge_max {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
       = bvenc (bool_to_bv1 ((bv_zext a : BitVec (max wa wb)) > (bv_zext b : BitVec (max wa wb)))) :=
   ugt_bridge a b (Nat.le_max_left wa wb) (Nat.le_max_right wa wb)
 
+/-- Fixed-arity (2-option) MuxN bridge matching the fast if-chain directly, with
+mixed-width options (each zero-extended to the output width).  DINO's MuxN nodes
+are all arity 3 (selector + 2 data). -/
+theorem muxn3_bridge {sw w0 w1 w : Nat} (sel : BitVec sw) (o0 : BitVec w0) (o1 : BitVec w1) :
+    eval_op LGraphOp.Op_MuxN w [bvenc sel, bvenc o0, bvenc o1]
+      = bvenc (if sel.toNat = 0 then (bv_zext o0 : BitVec w)
+               else if sel.toNat = 1 then (bv_zext o1 : BitVec w) else 0#w) := by
+  have hs : (bv_uint (bvenc sel)).toNat = sel.toNat := by rw [bv_uint_bvenc]; simp
+  show (if (bv_uint (bvenc sel)).toNat < 2
+          then bv_resize w (([bvenc o0, bvenc o1][(bv_uint (bvenc sel)).toNat]?).getD (mk_bv w 0))
+          else mk_bv w 0) = _
+  rw [hs]
+  by_cases h0 : sel.toNat = 0
+  · simp only [h0, if_pos, Nat.zero_lt_succ, List.getElem?_cons_zero, Option.getD_some]
+    rw [bv_resize_bvenc]
+  · by_cases h1 : sel.toNat = 1
+    · simp only [h1, List.getElem?_cons_succ, List.getElem?_cons_zero, Option.getD_some, if_neg h0]
+      rw [bv_resize_bvenc]
+      norm_num
+    · have h2 : ¬ sel.toNat < 2 := by omega
+      simp only [if_neg h2, if_neg h0, if_neg h1]
+      simp [bvenc]
+
+--------------------------------------------------------------------------------
+-- n-ary Or over the certificate's width-erased BV list (any arity, mixed widths).
+-- Emitter: rw [orn_bv_bridge] then unfold the fold + bv_to_bitvec_bvenc_zext + zero_or.
+--------------------------------------------------------------------------------
+
+theorem bv_to_bitvec_getLsbD {w : Nat} (B : BV) (i : Nat) (hi : i < w) :
+    (bv_to_bitvec w B).getLsbD i = bv_bit B i := by
+  have hnn : 0 ≤ bv_uint B := by unfold bv_uint; exact Int.emod_nonneg _ (by positivity)
+  unfold bv_to_bitvec bv_bit
+  rw [BitVec.getLsbD, BitVec.toNat_ofInt]
+  have hcast : (bv_uint B % ((2 ^ w : Nat) : Int)).toNat = (bv_uint B).toNat % 2 ^ w := by
+    conv_lhs => rw [← Int.toNat_of_nonneg hnn]
+    rw [← Int.natCast_emod, Int.toNat_natCast]
+  rw [hcast, Nat.testBit_mod_two_pow]
+  simp only [hi, decide_true, Bool.true_and]
+  rw [testBit_div_mod, Nat.shiftRight_eq_div_pow]
+
+theorem bv_bitwise_or_step {w : Nat} (A : BitVec w) (B : BV) :
+    bv_bitwise w (fun x y => x || y) (bvenc A) B = bvenc (A ||| bv_to_bitvec w B) := by
+  apply bv_bitwise_eq
+  intro i hi
+  rw [bv_bit_bvenc, BitVec.getLsbD_or, bv_to_bitvec_getLsbD B i hi]
+
+theorem orn_bv_foldl {w : Nat} : ∀ (bvs : List BV) (acc : BitVec w),
+    bvs.foldl (fun a b => bv_bitwise w (fun x y => x || y) a b) (bvenc acc)
+      = bvenc (bvs.foldl (fun a b => a ||| bv_to_bitvec w b) acc) := by
+  intro bvs
+  induction bvs with
+  | nil => intro acc; simp
+  | cons b bs ih =>
+    intro acc
+    simp only [List.foldl_cons]
+    rw [bv_bitwise_or_step]
+    exact ih (acc ||| bv_to_bitvec w b)
+
+theorem orn_bv_bridge {w : Nat} (bvs : List BV) :
+    eval_op LGraphOp.Op_Or w bvs
+      = bvenc (bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w) := by
+  show bvs.foldl (fun a b => bv_bitwise w (fun x y => x || y) a b) (mk_bv w 0) = _
+  rw [show (mk_bv w 0) = bvenc (0#w) from by simp [bvenc]]
+  exact orn_bv_foldl bvs 0#w
+
+theorem bv_to_bitvec_bvenc_zext {wv w : Nat} (v : BitVec wv) :
+    bv_to_bitvec w (bvenc v) = (bv_zext v : BitVec w) := by
+  unfold bv_to_bitvec bv_zext
+  rw [bv_uint_bvenc]
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_ofInt, BitVec.toNat_ofNat, Int.ofNat_eq_natCast, ← Int.natCast_emod, Int.toNat_natCast]
+
 end OpBridge
