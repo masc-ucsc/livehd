@@ -600,6 +600,18 @@ public:
       if (p > 0 && (std::isalnum(static_cast<unsigned char>(src_[p - 1])) || src_[p - 1] == '_')) {
         continue;  // not a whole-word `import`
       }
+      // Skip a `//`-commented line. Testbenches routinely keep the previous
+      // spelling of an import commented out just above the live one, and a
+      // textual scan that reads both binds the SAME name twice — the dead line
+      // then supplies a `unit.entry` the live one does not have, which is
+      // exactly the shape rvalue_module falls back to.
+      {
+        const size_t bol     = src_.rfind('\n', p) == std::string::npos ? 0 : src_.rfind('\n', p) + 1;
+        const size_t comment = src_.find("//", bol);
+        if (comment != std::string::npos && comment < p) {
+          continue;
+        }
+      }
       size_t q = p + 6;
       while (q < src_.size() && (src_[q] == ' ' || src_[q] == '\t')) {
         ++q;
@@ -632,9 +644,23 @@ public:
           size_t qe = src_.find('"', qb + 1);
           if (qe != std::string::npos) {
             std::string path = src_.substr(qb + 1, qe - qb - 1);
-            auto        dot  = path.find_last_of('.');
+            // `lg:NAME` / `ln:NAME` name a compiled artifact: the rest of the
+            // string IS the module's name, so it is the first thing to try as a
+            // dut key (an lg: graph name is commonly dotless — `PipelinedDualIssueCPU`
+            // — which the unit/entry split below cannot even see), and the one
+            // form where failing to find it is an ERROR rather than a cue to
+            // guess (see rvalue_module).
+            const bool artifact = path.starts_with("lg:") || path.starts_with("ln:");
+            if (artifact) {
+              path = path.substr(3);
+              import_artifact_.insert(bound);
+            }
+            import_ref_[bound] = path;
+            auto dot           = path.find_last_of('.');
             if (dot != std::string::npos) {
               import_path_[bound] = {path.substr(0, dot), path.substr(dot + 1)};
+            } else {
+              import_path_.erase(bound);  // a rebind must not inherit the old split
             }
           }
         }
@@ -857,6 +883,8 @@ private:
   std::vector<std::pair<std::string, TSNode>>     assigns_;     // (local, rhs) pairs, for width inference
   std::set<std::string>                           import_bound_;  // names bound by `= import(...)` (module refs)
   std::map<std::string, std::pair<std::string, std::string>> import_path_;  // bound name -> {unit, entry}
+  std::map<std::string, std::string>              import_ref_;       // bound name -> import string, `lg:`/`ln:` stripped
+  std::set<std::string>                           import_artifact_;  // ...of those, the ones that named lg:/ln: explicitly
 
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
@@ -873,6 +901,35 @@ private:
         // no dut key. Bind an IMPORT-BOUND name to the sole DUT; a scalar/param/
         // literal (`mut acc = base`, `mut v_final = nil`) is never import-bound.
         if (import_bound_.count(nm)) {
+          // The import string names the module directly. `duts_` is keyed by the
+          // ENTITY tail (mod_of_hpp), so both spellings have to be tried: an lg:
+          // graph name is often dotless (`PipelinedDualIssueCPU`) while a
+          // Pyrope-origin one is `unit.entity` against the key `entity`.
+          if (auto rit = import_ref_.find(nm); rit != import_ref_.end()) {
+            const std::string& ref = rit->second;
+            if (duts_.count(ref) != 0) {
+              return ref;
+            }
+            if (const auto dot = ref.find_last_of('.');
+                dot != std::string::npos && duts_.count(ref.substr(dot + 1)) != 0) {
+              return ref.substr(dot + 1);
+            }
+            // An `import("lg:X")`/`import("ln:X")` is EXACT by construction — X
+            // is the graph's own name in the library — so the two lookups above
+            // are the whole answer, and everything below (the lg=-rename split,
+            // then two shape guesses) could only bind some OTHER module.
+            // Guessing here is how `import("lg:Typo")` used to set up cleanly
+            // and simulate whatever module happened to be the root: exit 0, zero
+            // diagnostics, wrong DUT.
+            if (import_artifact_.count(nm) != 0) {
+              std::string avail;
+              for (const auto& [k, d] : duts_) {
+                avail += avail.empty() ? "" : ", ";
+                avail += k;
+              }
+              fail("testbench imports `" + ref + "`, which is not one of the simulated modules: " + avail);
+            }
+          }
           // an lg=-renamed entry emits its module as `<unit>_<entry>` (or the
           // lg value directly matching the entry) -- try the import path first
           if (auto it = import_path_.find(nm); it != import_path_.end()) {
@@ -884,6 +941,9 @@ private:
               return joined;
             }
           }
+          // Everything below GUESSES which module the tb meant. That is right
+          // for a bare `import("x")`, whose string is a unit/pub name that may
+          // legitimately differ from the emitted module (the lg= rename above).
           if (duts_.size() == 1) {
             return duts_.begin()->first;
           }

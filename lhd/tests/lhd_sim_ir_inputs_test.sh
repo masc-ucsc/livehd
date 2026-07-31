@@ -7,7 +7,7 @@
 #   lhd compile dut.prp --emit-dir lg:L        # (or --emit-dir ln:LN)
 #   lhd sim lg:L tb.prp                        # tb: const c = import("lg:dut.cnt")
 #
-# Three things this pins down.
+# Four things this pins down.
 #  1. ROUTING. `sim` classifies a positional by extension, so before the shared
 #     route_positional an `lg:DIR` token was silently taken as the TEST NAME and
 #     the library never loaded — the run then died on the testbench's unresolved
@@ -17,7 +17,11 @@
 #     black-box Sub; unless the absorbed library's graphs join the design, the
 #     emit sees only the testbench side and `sim` fails with "no synthesizable
 #     modules to emit as sim:" — the DUT body being nowhere.
-#  3. A slang `--top X --emit-dir ln:` publishes the WHOLE elaborated forest.
+#  3. AN ARTIFACT IMPORT IS EXACT. `import("lg:X")` names a graph, so if X is not
+#     among the simulated modules the testbench is wrong. The binder used to fall
+#     back to "the sole module" / "the unique root", which meant a typo simulated
+#     a DIFFERENT module and exited 0 with no diagnostics.
+#  4. A slang `--top X --emit-dir ln:` publishes the WHOLE elaborated forest.
 #     It used to filter to the one unit named X, dropping every module X
 #     instantiates, so the ln: dir could not be linked back ("call to undefined
 #     function '<child>'") — which made ln: useless as a sim input for any
@@ -47,12 +51,15 @@ pub mod cnt(enable:bool) -> (value:u8@[0]) {
 }
 EOF
 
-# One testbench body, three import spellings (sibling / lg: / ln:).
+# One testbench body, three import spellings (sibling / lg: / ln:). The bound
+# name is deliberately NOT the module's own name: a bound name that happens to
+# equal a dut key short-circuits the import binding entirely, which would hide
+# every resolution bug this test is about.
 tb() {  # tb <import-string> <outfile>
   cat > "$2" <<EOF
-const cnt = import("$1")
-test cnt.held(cycles:u20 = 20) {
-  mut acc = cnt
+const dutmod = import("$1")
+test dutmod.held(cycles:u20 = 20) {
+  mut acc = dutmod
   mut v = 0
   tick cycles {
     acc.enable = true
@@ -89,7 +96,7 @@ for kind in lg ln; do
     || fail "sim over $kind: failed: $(cat "$W/rs_$kind.json" 2>/dev/null)"
   [ -f "$W/s_$kind/sim/drv.cpp" ] || fail "sim over $kind: generated no driver"
   [ -s "$W/s_$kind/sim/dut.cnt.cpp" ] || fail "sim over $kind: generated no DUT body (dut.cnt.cpp): $(ls "$W/s_$kind/sim")"
-  grep -q '_run_cnt_held' "$W/s_$kind/sim/drv.cpp" || fail "sim over $kind: driver misses the cnt.held test"
+  grep -q '_run_dutmod_held' "$W/s_$kind/sim/drv.cpp" || fail "sim over $kind: driver misses the dutmod.held test"
 done
 
 # ---- 2. --in KIND:DIR is the same input as the positional -------------------
@@ -110,7 +117,28 @@ out=$("$LHD" sim "lg:$W/nope/" "$W/tb_lg.prp" --setup-only --workdir "$W/s_bad" 
 [ $? -ne 0 ] || fail "a nonexistent lg: input must fail"
 grep -q 'lg: input not found' <<<"$out" || fail "expected a missing-lg: diagnosis, got: $out"
 
-# ---- 4. slang --top publishes the whole forest, so ln: stays linkable --------
+# ---- 4. an lg:/ln: import that names no simulated module is an ERROR ---------
+# The DUT a `test` block drives is bound from the import STRING, and the binder
+# used to fall back to "the sole module" / "the unique root" when the string
+# matched nothing — so a typo simulated some other module and passed with zero
+# diagnostics. An artifact reference is exact by construction, so it must not
+# guess. (A BARE `import("x")` keeps the fallbacks: an lg=-renamed pub entry
+# legitimately differs from the emitted module name.)
+tb "lg:NoSuchModule" "$W/tb_typo.prp"
+out=$("$LHD" sim lg:"$W/L/" "$W/tb_typo.prp" --setup-only --workdir "$W/s_typo" -q 2>&1)
+[ $? -ne 0 ] || fail "an lg: import naming no simulated module must fail, got: $out"
+grep -q 'NoSuchModule'                  <<<"$out" || fail "the error must name the bad import: $out"
+grep -q 'simulated modules: cnt'        <<<"$out" || fail "the error must list the modules that ARE simulated: $out"
+
+# A commented-out import above the live one must not bind the DUT: the scan is
+# textual, and the dead line used to contribute a `unit.entry` split that the
+# live line had no way to override.
+{ echo '// const cnt = import("stale.leftover")'; cat "$W/tb_lg.prp"; } > "$W/tb_cmt.prp"
+"$LHD" sim lg:"$W/L/" "$W/tb_cmt.prp" --setup-only --workdir "$W/s_cmt" -q --result-json "$W/r_cmt.json" \
+  || fail "a commented-out import broke the live one: $(cat "$W/r_cmt.json" 2>/dev/null)"
+grep -q 'dut_cnt acc' "$W/s_cmt/sim/drv.cpp" || fail "driver bound the wrong DUT: $(grep -n ' acc;' "$W/s_cmt/sim/drv.cpp")"
+
+# ---- 5. slang --top publishes the whole forest, so ln: stays linkable --------
 cat > "$W/hier.sv" <<'EOF'
 module leaf(input logic [7:0] a, output logic [7:0] y);
   assign y = a + 8'd1;
@@ -145,14 +173,14 @@ fi
 # assert — an IR input must not change what is simulated.
 "$LHD" sim "$W/dut.prp" "$W/tb_src.prp" --workdir "$W/run_src" --diag-fmt pretty > "$W/run_src.out" 2>&1 \
   || fail "baseline .prp run failed: $(cat "$W/run_src.out")"
-grep -q 'PASS cnt.held' "$W/run_src.out" || fail "baseline did not pass: $(cat "$W/run_src.out")"
+grep -q 'PASS dutmod.held' "$W/run_src.out" || fail "baseline did not pass: $(cat "$W/run_src.out")"
 
 "$LHD" sim lg:"$W/L/" "$W/tb_lg.prp" --workdir "$W/run_lg" --diag-fmt pretty > "$W/run_lg.out" 2>&1 \
   || fail "lg: run failed: $(cat "$W/run_lg.out")"
-grep -q 'PASS cnt.held' "$W/run_lg.out" || fail "lg: run did not pass: $(cat "$W/run_lg.out")"
+grep -q 'PASS dutmod.held' "$W/run_lg.out" || fail "lg: run did not pass: $(cat "$W/run_lg.out")"
 
 "$LHD" sim ln:"$W/LN/" "$W/tb_ln.prp" --workdir "$W/run_ln" --diag-fmt pretty > "$W/run_ln.out" 2>&1 \
   || fail "ln: run failed: $(cat "$W/run_ln.out")"
-grep -q 'PASS cnt.held' "$W/run_ln.out" || fail "ln: run did not pass: $(cat "$W/run_ln.out")"
+grep -q 'PASS dutmod.held' "$W/run_ln.out" || fail "ln: run did not pass: $(cat "$W/run_ln.out")"
 
 echo "PASS: lhd sim ln:/lg: IR inputs (structure + run)"
