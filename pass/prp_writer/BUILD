@@ -64,7 +64,7 @@ sh_test(
 # an enclosing mux's else seed, while analyze_expr_inlines picked that same store
 # as the merge temp's single use and dropped the temp's definition — so the
 # writer emitted a read of a `_mux_N` it never declared. Equivalence coverage of
-# the same shape: //inou/prp:prp-v2v-writer_undefined_mux (and prp-v2prp-*).
+# the same shape: //inou/prp:prp-v2prp2v-writer_undefined_mux.
 sh_test(
     name = "prp_writer_mux_decl_test.sh",
     srcs = ["tests/prp_writer_mux_decl_test.sh"],
@@ -79,7 +79,8 @@ sh_test(
 # array declared inside an `if` came back as `mut mem = 0` — type and `initial`
 # contents both gone), and must backtick-escape a module name Pyrope cannot
 # tokenize bare (a Verilog escaped id, `\d\e`). Equivalence coverage of the same
-# two shapes: //inou/prp:prp-v2v-tolg_field_read_zero and prp-v2v-writer_bad_char.
+# two shapes: //inou/prp:prp-v2prp2v-tolg_field_read_zero and
+# prp-v2prp2v-writer_bad_char.
 sh_test(
     name = "prp_writer_decl_emit_test.sh",
     srcs = ["tests/prp_writer_decl_emit_test.sh"],

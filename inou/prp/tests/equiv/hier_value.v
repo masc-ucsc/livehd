@@ -11,8 +11,8 @@
 // `stage[i]` generate instances: each `stage[i].acc` reads `stage[i-1].acc`
 // (a HierarchicalValue), and the output reads `stage[3].acc`.
 //
-// Status: SUPPORTED. Every reader ingests this file, so the prp-v2prp test runs
-// the full dual-reader LEC (native-slang Pyrope vs the .v read by yosys-slang):
+// Status: SUPPORTED. Every reader ingests this file, so prp-v2prp2v runs both
+// the native-Pyrope and independently read original-Verilog checks:
 //   standalone `slang` (v11)          -> OK (0 errors)
 //   `yosys2 -m slang.so` (read_slang) -> OK (compiles hval_popcnt)
 //   `lhd --reader yosys-slang`        -> OK (emits Verilog)

@@ -20,7 +20,7 @@
 // The Pyrope below is the hand-written source form of that shape: an
 // if-expression whose result an outer conditional then overwrites. The forward
 // direction (prp-equiv-*) proves it against the golden; the writer half is what
-// prp-v2v-* / prp-v2prp-* exercise. The parser half -- an undefined name in an
+// prp-v2prp2v-* exercises. The parser half -- an undefined name in an
 // if-expression arm must be a compile error -- is pinned by
 // inou/prp/tests/errors/undefined_read_if_expr_arm.prp.
 pub comb writer_undefined_mux::[timecheck=false](s0:u1, s1:u1, cond:u1) -> (out:u2) {

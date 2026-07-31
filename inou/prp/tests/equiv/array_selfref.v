@@ -27,7 +27,7 @@
 // `vec.e1`) -- the array analogue of the per-field struct bundle. A sibling read
 // `vec[0]` routes to its own leaf net (via the ElementSelect intercept in
 // slang_expr.cpp / slang_lvalue.cpp), breaking the false cycle. This test guards
-// the fix (both prp-equiv-array_selfref and prp-v2prp-array_selfref PASS).
+// the fix (both prp-equiv-array_selfref and prp-v2prp2v-array_selfref PASS).
 module \array_selfref.top (
   input  [1:0] a_0,
   input  [1:0] a_1,

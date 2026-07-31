@@ -15,7 +15,7 @@
 // store din from a STALE version of `_mux_1` — `o` reads the wrong value for
 // sel==0. The emitted Pyrope below is CORRECT (the last `_mux_1` write is
 // `d & 1`); the defect is in lowering it (upass tolg), which is why the
-// direct .v round trip (prp-v2v-arr_comb_mux_const) PROVES while this pair
+// original-Verilog leg of prp-v2prp2v-arr_comb_mux_const PROVES while this pair
 // REFUTES. Same root cause as array_store_stale_rhs (reassigned-mut RHS);
 // the clocked twin (mem[waddr] <= 1 ? wdata : ~wdata) lowers correctly.
 pub comb arr_comb_mux_const::[timecheck=false](sel:u1, d:u1) -> (o:u1) {

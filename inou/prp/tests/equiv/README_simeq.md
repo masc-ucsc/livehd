@@ -11,7 +11,7 @@ compare an output **signature** (hash):
 
 This checks the **`lhd sim` C++ code generator** (`inou/cgen/cgen_sim.cpp`)
 against an independent oracle, complementing the *formal* `prp-equiv-*` (LEC)
-and `prp-v2prp-*` checks. A miscompile that both LEC and the Verilog cgen happen
+and `prp-v2prp2v-*` checks. A miscompile that both LEC and the Verilog cgen happen
 to share can still be caught here, because the reference is Icarus, not LiveHD.
 
 ## How stimulus/hash parity is guaranteed

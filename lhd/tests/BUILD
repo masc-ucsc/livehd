@@ -131,9 +131,10 @@ sh_test(
 # bit-level design does not have. Pins BOTH legs of the pass/cprop fix
 # separately -- the disjoint-lane skip and the contained-slice re-base onto
 # `value` -- by reusing the two equiv-corpus goldens. The equiv harnesses cannot
-# gate this (prp-equiv never reads the .v, prp-v2v goes through yosys, and
-# prp-v2prp deliberately scores an encoder refusal as inconclusive), so the
-# strict "must come back PROVEN" assertion lives here.
+# gate this (prp-equiv never reads the .v, while prp-v2prp2v's original-Verilog
+# leg goes through yosys and its native leg deliberately scores an encoder
+# refusal as inconclusive), so the strict "must come back PROVEN" assertion
+# lives here.
 sh_test(
     name = "struct_field_chain_cycle_test",
     srcs = ["struct_field_chain_cycle_test.sh"],

@@ -2264,7 +2264,7 @@ void lec_command(Options& opts, Result& res) {
   // most dangerous failure mode of a conditional pass: if one side holds a
   // latch and the other is its already-lowered round-trip, a per-side trigger
   // fires on ONE side and the two are compared in different time bases — a
-  // guaranteed false REFUTED, and exactly the shape of the prp-v2prp-latch_*
+  // guaranteed false REFUTED, and exactly the shape of the prp-v2prp2v-latch_*
   // corpus. So: if EITHER side needs it, BOTH are normalized (a side with
   // nothing to lower still runs the pass; at P=1 that is a no-op for it).
   //

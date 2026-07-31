@@ -11,8 +11,8 @@
 // last so it wins -- the behavioral equivalent of the Verilog nested ternary.
 //
 // The Pyrope tolg path lowers this CORRECTLY, so prp-equiv-clz_nest LEC-PASSES
-// against the golden .v (read by yosys's own read_verilog), and prp-v2prp also
-// passes (slang reads the .v correctly).  Both PASS on purpose: they prove the
+// against the golden .v (read by yosys's own read_verilog), and prp-v2prp2v also
+// passes (slang reads the .v correctly). Both PASS on purpose: they prove the
 // golden + the slang/pyrope path are right, isolating the bug to LiveHD's
 // `--reader yosys-verilog` front-end, which prp-yvr-clz_nest reproduces (REFUTED).
 pub comb clz(io_in:u10) -> (io_out:u4) {

@@ -19,7 +19,8 @@
 // The active-low (negedge-reset) flops use their own explicit `reset_n`
 // input rather than the implicit `reset` with a bare `negreset=true`
 // override: `pass/lec/query.cpp`'s reset-hold phase (used by the
-// BMC-from-reset `prp-v2prp-*` check) keys a primary reset input's asserted
+// BMC-from-reset native check in `prp-v2prp2v-*`) keys a primary reset input's
+// asserted
 // level by PORT NAME, so two flops sharing one name with opposite polarity
 // make that phase ambiguous (whichever flop is visited last wins, which can
 // differ between the two sides of a LEC and cause a spurious refute). One

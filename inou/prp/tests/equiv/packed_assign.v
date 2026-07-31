@@ -10,8 +10,8 @@
 // which uses it) CANNOT parse `'{...}` -- it tokenizes the `'` as a cast.
 // `--reader slang` and `--reader yosys-slang` parse it fine.  So this is a
 // yosys-front-end gap, not a correctness bug: reproduced by prp-yvr-packed_assign
-// (the read fails, 0 graphs).  Excluded from prp-equiv / prp-v2prp because those
-// LEC the golden via yosys read_verilog, which cannot read this file.
+// (the read fails, 0 graphs). Excluded from the ordinary prp-equiv path because
+// that LEC reads the golden via yosys read_verilog, which cannot read this file.
 module \packed_assign.pa (
   input  [1:0] sel,
   output [3:0] z

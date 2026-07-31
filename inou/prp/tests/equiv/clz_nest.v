@@ -12,7 +12,7 @@
 // `--reader yosys-slang` lower it CORRECTLY (slang matches the source).  yosys's
 // own `read_verilog` parses this file fine — the bug is purely in LiveHD's
 // yosys-verilog front-end, so it is reproduced by the prp-yvr-clz_nest target
-// (NOT by prp-equiv / prp-v2prp, which use the slang + pyrope path and PASS).
+// (NOT by prp-equiv / prp-v2prp2v, whose slang + Pyrope legs PASS).
 module \clz_nest.clz (
   input  [9:0] io_in,
   output [3:0] io_out

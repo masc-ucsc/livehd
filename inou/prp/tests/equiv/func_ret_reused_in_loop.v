@@ -17,7 +17,7 @@
 // The fix is operand stability THROUGH the inlines the writer performs
 // (operands_stable_deep): a fold may only move a cone across statements that
 // write nothing the cone reads. The interesting direction here is therefore the
-// round trip -- prp-v2prp-* / prp-v2v-* -- which reads this golden and re-emits
+// round trip -- prp-v2prp2v-* -- which reads this golden and re-emits
 // it as Pyrope.
 module func_ret_reused_in_loop (
   input  logic [3:0] a_i,

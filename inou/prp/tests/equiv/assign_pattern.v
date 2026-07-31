@@ -16,8 +16,9 @@
 // reader now lowers the '{...} lvalue (assign_to_pattern in slang_lvalue.cpp,
 // decomposing the flattened child-output bus per array element). yosys-slang's
 // read_slang still cannot ingest the '{...} lvalue, so no yosys reference can be
-// built and the prp-v2prp harness runs this as a slang-only test (the native
-// compile is the gate). Equivalence was verified at implementation time by
+// built; the native leg of prp-v2prp2v still checks the slang-emitted Pyrope
+// against the hand-written reference. Equivalence was verified at implementation
+// time by
 // LEC-ing the native-slang-emitted Verilog against a hand-written flattened
 // golden (PROVEN equivalent).
 //   standalone `slang` (v11)          -> OK (0 errors)  <- valid SV

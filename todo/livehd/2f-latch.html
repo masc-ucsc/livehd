@@ -42,7 +42,7 @@
 <tr><td><code>flop_verify_posneg</code></td>
     <td><strong>PROVEN</strong>; the blind encoder's own answer (<code>bq == previous aq</code>) now REFUTES</td>
     <td>phase divider + slot enables at P=2, plus the period-boundary assert guard</td></tr>
-<tr><td>7 <code>prp-v2prp-latch_*</code>, <code>prp-v2prp-flop_reset_matrix</code></td>
+<tr><td>7 <code>prp-v2prp2v-latch_*</code>, <code>prp-v2prp2v-flop_reset_matrix</code></td>
     <td><strong>all 8 carry REAL verdicts</strong> (were <code>equivalence UNCHECKED</code>, rc 0)</td>
     <td>miter-wide normalization; <code>latch_enable_hold</code> additionally needed the slang reader to stop losing an inferred latch</td></tr>
 <tr><td><code>lhd formal verify</code> without <code>--workdir</code></td>
@@ -147,7 +147,7 @@
   OVER-fire on a fully covered <code>case</code> with no <code>default</code>,
   and the oracle gaps below.</p>
 
-<p><strong>Two oracle corrections.</strong> The 8 <code>prp-v2prp</code> latch
+<p><strong>Two oracle corrections.</strong> The 8 <code>prp-v2prp2v</code> latch
   targets CANNOT FAIL: the harness returns 0 for INCONCLUSIVE and UNKNOWN, so
   step 3f's stated gate was never implemented. And the iverilog leg — the only
   INDEPENDENT oracle for the whole transformation — skips silently when iverilog
@@ -1049,7 +1049,7 @@
   one side holds a latch and the other is its already-lowered round-trip, the pass
   fires on one side only and the two are compared in different time bases — a
   guaranteed false REFUTED, and exactly the shape of the
-  <code>prp-v2prp-latch_*</code> corpus. If either side needs normalization, both
+  <code>prp-v2prp2v-latch_*</code> corpus. If either side needs normalization, both
   are normalized.</li>
 <li><strong>Slot assignment derived structurally</strong> from the commit class —
   never from node or traversal order. In LEC the pass must run <em>inside</em> the
@@ -1154,7 +1154,7 @@
 <tr><td>2d</td><td><strong>the guard LANDED; decimation NOT done.</strong> BOTH replay generators now emit a named honest SKIP when P&gt;1 instead of a testbench that cannot reproduce: they re-emit the un-normalized source and drive the trace at an index that now counts sub-steps, and a replay that runs clean reads as "the counterexample was spurious".</td></tr>
 <tr><td>3a</td><td><strong>LANDED.</strong> "Skipped, not run-as-a-no-op" is now falsifiable: byte-identical Verilog from the pass's input and output libraries, AND the over-fire direction asserted.</td></tr>
 <tr><td>3b</td><td><strong>LANDED — and it is the iverilog leg, not a sim-vs-sim leg.</strong> The plan expected to build a two-DUT <code>--emit-dir sim:</code> harness. Better turned out to be available: <code>--emit-dir verilog:</code> works on BOTH graphs, so source and normalized are compared directly under Icarus in one testbench. That needed a real cgen fix (below) and gives the independent oracle the gating rule requires without a new Python harness.</td></tr>
-<tr><td>3c</td><td><strong>LANDED, and the plan's DIAGNOSIS WAS WRONG.</strong> <code>prp-v2prp-latch_enable_hold</code> was filed as a trigger-disagreement fixture. Measured cause: the SLANG READER lost the latch. <code>always @(*) if (en) q = d;</code> — a blocking write on an incomplete path, the textbook inferred latch — was classified as pure comb and emitted <code>q = en ? d : X</code>. Fixed with a definite-assignment analysis biased toward comb (an unmodelled statement kind reports every write beneath it as definite, because inserting state the source never had is a NEW miscompile while missing a latch is the status quo). <code>if</code>/<code>else</code>, a default-then-override, and a <code>case</code> with <code>default</code> stay comb; an <code>if</code> with no <code>else</code> and a <code>case</code> with no <code>default</code> become latches.</td></tr>
+<tr><td>3c</td><td><strong>LANDED, and the plan's DIAGNOSIS WAS WRONG.</strong> <code>prp-v2prp2v-latch_enable_hold</code> was filed as a trigger-disagreement fixture. Measured cause: the SLANG READER lost the latch. <code>always @(*) if (en) q = d;</code> — a blocking write on an incomplete path, the textbook inferred latch — was classified as pure comb and emitted <code>q = en ? d : X</code>. Fixed with a definite-assignment analysis biased toward comb (an unmodelled statement kind reports every write beneath it as definite, because inserting state the source never had is a NEW miscompile while missing a latch is the status quo). <code>if</code>/<code>else</code>, a default-then-override, and a <code>case</code> with <code>default</code> stay comb; an <code>if</code> with no <code>else</code> and a <code>case</code> with no <code>default</code> become latches.</td></tr>
 <tr><td>3d</td><td><strong>LANDED.</strong> The three cases that asserted the encoder refusal as CORRECT are inverted, and replaced by what survives: a real non-vacuous verdict, invocation-shape agreement, and a lec pair that PROVES equivalent / REFUTES a polarity flip.</td></tr>
 <tr><td>3e</td><td><strong>LANDED.</strong> All three verify fixtures untagged; <code>lec_clock_blindness_test.sh</code> case 3 flipped from note to <code>expect_refuted</code> and gained a vacuity guard; the stale "Tagged fixme" header is gone.</td></tr>
 <tr><td>3f</td><td><strong>LANDED.</strong> All 8 print success with real verdicts.</td></tr>
@@ -1261,10 +1261,10 @@
 <tr><th>#</th><th>Step</th><th>Size</th><th>Deps</th><th>Gate</th></tr>
 <tr><td>3a</td><td><strong>No-op proof.</strong> <code>diff -r</code> on <code>--emit-dir lg:</code> with the pass available vs forced-off, on a posedge-only design, plus an observable <code>skipped</code> stat. Today "skipped, not run-as-a-no-op" is unfalsifiable.</td><td>S</td><td>0c, 1a</td><td><code>diff -r</code> clean AND the pass reports <code>skipped</code>; forcing it to run fails the test</td></tr>
 <tr><td>3b</td><td><strong>Source-vs-normalized differential sim harness</strong> — see <a href="#validation">Validation</a>. Buildable <em>before</em> the pass exists, against the hand-lowered graph.</td><td>M</td><td>1c or 1e</td><td>period-boundary traces match over &ge;200 cycles; forcing the normalized side to P=1 fails. Stimulus must respect the <a href="#visibility">visibility rule</a> or the iverilog leg false-fails on every latch fixture</td></tr>
-<tr><td>3c</td><td><strong>Trigger-disagreement miter fixture</strong> (condition 1). The live instance already exists: <code>prp-v2prp-latch_enable_hold</code> — ref is <code>reg …:[latch=true]</code>, impl round-trips to a pure <code>comb</code> with no state element.</td><td>M</td><td>0c, 1g</td><td>latch-vs-lowered and latch-vs-latch return the same verdict; per-side trigger evaluation makes it REFUTE</td></tr>
+<tr><td>3c</td><td><strong>Trigger-disagreement miter fixture</strong> (condition 1). The live instance already exists: <code>prp-v2prp2v-latch_enable_hold</code> — ref is <code>reg …:[latch=true]</code>, impl round-trips to a pure <code>comb</code> with no state element.</td><td>M</td><td>0c, 1g</td><td>latch-vs-lowered and latch-vs-latch return the same verdict; per-side trigger evaluation makes it REFUTE</td></tr>
 <tr><td>3d</td><td><strong>Re-baseline <code>latch_fail_closed_test.sh</code>.</strong> Three cases assert the encoder refusal as CORRECT and go red the moment 1c lands. Invert them in the same commit; keep the surviving fail-closed coverage.</td><td>S</td><td>1c</td><td>three cases assert PROVEN; <code>gated-clock-unsupported</code> still fires</td></tr>
 <tr><td>3e</td><td><strong>Promote the three fixme verify fixtures</strong> out of the <code>else ["fixme"]</code> arm of <code>prp-tbd-%s</code>; flip <code>lec_clock_blindness_test.sh</code> case 3 from note to <code>expect_refuted</code>; fix its stale "Tagged <code>fixme</code>" header comment.</td><td>S</td><td>1c, 1d, 1e</td><td>the three targets green with no tag filter; blindness test asserts three REFUTEDs</td></tr>
-<tr><td>3f</td><td><strong>Real verdicts for the 7 <code>prp-v2prp-latch_*</code> + <code>flop_reset_matrix</code></strong> — all 8 pass vacuously today via the refusal branch.</td><td>M</td><td>1c, 1e</td><td>all 8 print <code>success</code>; <code>v2prp_test.py</code> <em>errors</em> if a <code>latch_*</code> base reaches the refusal branch</td></tr>
+<tr><td>3f</td><td><strong>Real verdicts for the 7 <code>prp-v2prp2v-latch_*</code> + <code>flop_reset_matrix</code></strong> — all 8 pass vacuously today via the refusal branch.</td><td>M</td><td>1c, 1e</td><td>all 8 print <code>success</code>; <code>v2prp2v_test.py</code> <em>errors</em> if a <code>latch_*</code> base reaches the refusal branch</td></tr>
 <tr><td>3g</td><td><strong>All-four-classes fixture</strong> (posedge + negedge + transparent-high + transparent-low in one module). No such design exists; without it a slot table that collapses two classes passes everything.</td><td>M</td><td>1e</td><td>verify twin proves both relational asserts; collapsing transparent-low onto transparent-high makes it REFUTE</td></tr>
 <tr><td>3h</td><td><strong>Free/aperiodic second clock must be DECLINED.</strong> <code>sim/multiclock_two_domain.prp</code> drives <code>clkb</code> aperiodically and pins <code>qb == 28</code> (coincident edges sample PRE-tick). Slotting it silently changes meaning.</td><td>M</td><td>step 6</td><td>the pass reports <code>skipped: no known ratio</code>; forcing P=2 makes <code>qb == 28</code> fail</td></tr>
 </table>
@@ -1521,8 +1521,8 @@
   <code>latch_active_low</code>, <code>latch_master_slave</code>,
   <code>latch_icg</code>, <code>latch_mixed_flop</code>, plus
   <code>latch_reset</code> from M7), all PROVEN via lgcheck's bounded miter.
-  <strong>Their <code>prp-v2prp-latch_*</code> reverse targets now carry REAL
-  verdicts</strong> (all 8 including <code>prp-v2prp-flop_reset_matrix</code>);
+  <strong>Their <code>prp-v2prp2v-latch_*</code> reverse targets now carry REAL
+  verdicts</strong> (all 8 including <code>prp-v2prp2v-flop_reset_matrix</code>);
   they used to pass VACUOUSLY with <code>encoder REFUSED a cell … equivalence
   UNCHECKED</code>. Step 3f.</li>
 <li><code>lhd/tests/lec_latch_polarity_test.sh</code> — pins the lgyosys latch

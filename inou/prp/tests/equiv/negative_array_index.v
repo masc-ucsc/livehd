@@ -4,7 +4,7 @@
 // not narrow by the constant divisor, so the chain's inferred range comes out as
 // [-15, 4] and check_index_nonneg rejects it.
 // The forward direction (.prp below) PROVES -- only the Verilog leg is broken,
-// which is why just prp-v2prp-* / prp-v2v-* are fixme here.
+// which is why just prp-v2prp2v-* is fixme here.
 module negative_array_index(
     input            clk,
     input      [1:0] sel,

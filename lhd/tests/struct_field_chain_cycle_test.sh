@@ -33,12 +33,10 @@
 # data, so there is one source of truth), but NONE of the harnesses over that
 # corpus can gate this bug:
 #   * prp-equiv-*  lowers the .prp and never reads the golden Verilog at all;
-#   * prp-v2v-*    proves through yosys lgcheck, which packs the struct happily;
-#   * prp-v2prp-*  uses the cvc5 engine that DOES refuse -- but v2prp_test.py
-#                  deliberately scores an encoder refusal as INCONCLUSIVE, not a
-#                  failure (see its "REFUSAL, not a timeout" branch, which the
-#                  latch round trips ride). That gate is correct and must not be
-#                  tightened for this bug.
+#   * prp-v2prp2v-* proves through yosys lgcheck, which packs the struct
+#                    happily; its native cvc5 leg DOES refuse but deliberately
+#                    scores that refusal as INCONCLUSIVE, not a failure. That
+#                    gate is correct and must not be tightened for this bug.
 # So the strict assertion lives here: the round trip must come back PROVEN, with
 # no cycle refusal anywhere.
 

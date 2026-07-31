@@ -4784,7 +4784,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     // inside assign_to (assign_struct_whole_value) — a flat store would be
     // dead (reads resolve through the leaves; the .prp text round-trip used
     // to lose the flat↔leaf relation, and a nested-struct var dropped the
-    // binding entirely). Guard: prp-v2prp/prp-simfail-instance_out_struct_ident.
+    // binding entirely). Guard: prp-v2prp2v/prp-simfail-instance_out_struct_ident.
     assign_to(*oc.expr, materialize_conversion(v, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
   }
   clear_pending_loc();

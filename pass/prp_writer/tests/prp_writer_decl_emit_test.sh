@@ -3,11 +3,11 @@
 # declaration, and must not emit a module name Pyrope cannot tokenize.
 #
 # Both bugs below reached the emitted TEXT, and both were invisible to the
-# equivalence harnesses at the time (prp-v2v-* went slang -> lg -> cgen directly
+# equivalence harnesses at the time (the old prp-v2v-* went slang -> lg -> cgen directly
 # and never ran the writer). This gate asserts on the text itself, in ~0.1s with
 # no yosys and no solver. Equivalence coverage of the same two shapes lives in
-# //inou/prp:prp-v2v-tolg_field_read_zero and prp-v2v-writer_bad_char (plus the
-# prp-v2prp-* and prp-equiv-* legs of each).
+# //inou/prp:prp-v2prp2v-tolg_field_read_zero and
+# prp-v2prp2v-writer_bad_char (plus the prp-equiv-* leg of each).
 #
 # 1. NESTED-MUT HOIST DROPPED THE DECLARATION. A `mut` declared in a nested
 #    scope but usable from sibling scopes is hoisted to the function top and its

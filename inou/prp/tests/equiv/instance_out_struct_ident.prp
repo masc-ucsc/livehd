@@ -10,7 +10,7 @@
 // ExeUnitImp_4/VSetRiWvf category and the root cause of the XiangShan
 // fp-convert family fails (INT2FP/CVT64: Lzc instance struct output stored
 // FLAT, read via never-written 0-init leaves in the recompiled Pyrope).
-// The prp-v2prp direction REFUTES until lower_instance splits the output
+// The native leg of prp-v2prp2v REFUTES until lower_instance splits the output
 // binding per field (blocked on the tolg/cgen wire-leaf feedback lowering —
 // see the KNOWN OPEN comment in slang_structure.cpp lower_instance).
 // Semantically: r = {a==0, ~lzc3(a)} where lzc3 is the 4-case priority above.

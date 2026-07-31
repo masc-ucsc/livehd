@@ -5,8 +5,8 @@ must recompile and stay logically equivalent to its golden `.v`.
     lhd compile foo.prp --emit-dir pyrope:DIR/                          # prp -> upass -> prp
     lhd lec --set formal.solver=lgyosys --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
 
-This is the FORWARD-direction companion of v2prp_test.py (which round-trips a
-`.v`).  It exists to lock in the constructs the writer fully supports — notably
+This is the FORWARD-direction companion of v2prp2v_test.py (which round-trips a
+`.v`). It exists to lock in the constructs the writer fully supports — notably
 the pipeline (`stage[N]` / `@[N]`), `type_spec`, and `tuple_concat` emission.
 The prp_writer safety net makes the first step fail the compile if it hits an
 unimplemented construct (rather than silently emitting a /* TODO */ stub), so a

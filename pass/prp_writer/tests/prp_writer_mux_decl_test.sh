@@ -19,8 +19,8 @@
 # The gate is the invariant, not the mechanism: RE-COMPILING the writer's own
 # output must succeed. The `_mux_` declaration check below is a corroborating
 # mechanism check, skipped if a future writer spells the shape without a temp.
-# Sibling coverage: //inou/prp:prp-v2v-writer_undefined_mux and
-# prp-v2prp-writer_undefined_mux prove the round trip EQUIVALENT (this test only
+# Sibling coverage: //inou/prp:prp-v2prp2v-writer_undefined_mux proves both
+# round-trip equivalence checks (this test only
 # proves it re-parses, in 0.1s and with no yosys/solver); and
 # //inou/prp:prp-undefined_read_if_expr_arm pins the other half of the contract
 # — such a read is a compile error, so a regressed writer fails loudly.

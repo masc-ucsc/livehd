@@ -3,7 +3,7 @@
 // INTERNAL instance; its top is flat). It guards the `flat_top_io` contract:
 // a struct is a bundle everywhere inside LiveHD, but the emitted TOP interface
 // must stay a packed bus so the generated netlist is a drop-in replacement for
-// this module and yosys can miter the two (prp-v2v-struct_top_port).
+// this module and yosys can miter the two (prp-v2prp2v-struct_top_port).
 package stp_pkg;
   typedef struct packed {
     logic       fp;

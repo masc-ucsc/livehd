@@ -14,8 +14,8 @@
 // the `'{...}` assignment pattern (`syntax error, unexpected OP_CAST`), so this
 // golden has NO yosys-readable form -- the same gap that makes the XiangShan
 // BlockCipherModule / HPerfCounter / UopInfoGen / SRT* / VFAlu / ... block
-// `--reader yosys-verilog` read-fails. It is excluded from prp-equiv / prp-v2prp
-// (both LEC via yosys read_verilog, which fails here) and is reproduced instead
+// `--reader yosys-verilog` read-fails. It is excluded from ordinary prp-equiv
+// (which uses yosys read_verilog) and is reproduced instead
 // by prp-yvr-packed_assign (the yosys-verilog read fails outright). `--reader
 // slang` and `--reader yosys-slang` read the `'{...}` pattern fine.
 pub comb pa(sel:u2) -> (z:u4) {

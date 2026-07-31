@@ -22,7 +22,7 @@
 //
 // SOUNDNESS TRAP worth keeping: while it was broken the dropped assignment left
 // a don't-care, so the native cvc5 `lhd lec` of the two lgraphs returned a
-// VACUOUS PROVEN — only the yosys-referenced lgcheck flows (equiv, v2v) saw the
+// VACUOUS PROVEN — only the yosys-referenced lgcheck flows (equiv, v2prp2v) saw the
 // bug at all. A PROVEN means nothing unless the comparison is sensitive to the
 // signal in question.
 pub comb arr_comb_tmp::[timecheck=false](sel:u1, d:u1) -> (o:u1) {

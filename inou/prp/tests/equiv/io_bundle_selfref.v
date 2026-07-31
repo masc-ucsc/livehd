@@ -19,7 +19,7 @@
 // FIXED (2026-06-30) by field_type_is_struct_free() in slang_structure.cpp: a
 // plain (possibly multi-dim) array field no longer forces the flat-bus
 // fallback, so `io` splits into independent per-field leaf nets and the false
-// self-reference is gone. This test guards the fix (prp-v2prp-io_bundle_selfref
+// self-reference is gone. This test guards the fix (prp-v2prp2v-io_bundle_selfref
 // must PASS, not fixme).
 module \io_bundle_selfref.top (
   input  [1:0] io_a,

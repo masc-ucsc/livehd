@@ -5,16 +5,15 @@
 :pyrope_top: array_store_stale_rhs
 */
 // TRACKER — SILENT MISCOMPILE in tolg's array-element store (lhdsuite
-// array_problem.md). Known-failing: the prp-equiv-array_store_stale_rhs target
-// is tagged `fixme` (and the pair sits in _V2PRP_FIXME); it moved here from
-// tests/fixme/ (compile-only, which could never observe a clean-compile
-// miscompile) so the failure is LEC-gated against the golden .v.
+// array_problem.md). This moved here from tests/fixme/ (compile-only, which
+// could never observe a clean-compile miscompile) so the failure could be
+// LEC-gated against the golden .v; the implementation has since been fixed.
 //
 // `arr[0] = m` stores m's DECLARATION value (0) instead of its live value (d).
 // Emitted netlist: `arr_data['sb0] = 'sb0;` — a constant zero, where it must be
 // `d`. So `o` reads 0 for sel==0 regardless of `d`. The golden .v beside this
 // file is the SEMANTIC mux (o = sel ? 0 : d), deliberately array-free so yosys
-// reads it exactly and the v2v round trip of the golden stays green.
+// reads it exactly and the v2prp2v round trip of the golden stays green.
 //
 // BOTH ingredients are required (each verified by a passing counter-variant):
 //   * the READ index must be non-constant (`arr[sel]`). With `arr[0]` the front

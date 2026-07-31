@@ -8,7 +8,7 @@
 
 // Pyrope side of the per-field write-chain false comb loop (CONTAINED-lane
 // leg). See the golden .v for the shape being regressed: the interesting
-// direction is the Verilog ROUND TRIP (prp-v2v-struct_field_chain_own_lane),
+// direction is the Verilog ROUND TRIP (prp-v2prp2v-struct_field_chain_own_lane),
 // which reads that golden through the slang front end. This ordering is the
 // one the disjoint-lane skip alone cannot dissolve -- it needs the read to
 // re-base onto the writing Set_mask's `value`.

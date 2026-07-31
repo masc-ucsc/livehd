@@ -20,7 +20,7 @@
 // `uc_load_id_q` update, which is what //bench:minion_lec saw as an
 // undecidable `mem:8x3#0` cut.
 //
-// The interesting direction is the ROUND TRIP (prp-v2prp-* / prp-v2v-*): it is
+// The interesting direction is the ROUND TRIP (prp-v2prp2v-*): it is
 // the writer's per-entry expansion that creates the shape.
 module comb_array_const_index_read (
   input  logic       clk_i,

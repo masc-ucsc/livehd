@@ -23,7 +23,7 @@
 // struct's own `'{...}` pattern-assign LHS as a whole-copy. `io` splits into
 // per-field leaf nets (`io.sub` its own net), so `c`'s read of `io.sub.x` routes
 // to the independent leaf and the false self-reference is gone. This test guards
-// the fix (both prp-equiv-io_bundle_nested and prp-v2prp-io_bundle_nested PASS).
+// the fix (both prp-equiv-io_bundle_nested and prp-v2prp2v-io_bundle_nested PASS).
 module \io_bundle_nested.top (
   input        io_x,
   input  [1:0] io_a,

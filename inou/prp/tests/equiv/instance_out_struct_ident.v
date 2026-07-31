@@ -10,7 +10,7 @@
 // bundle-declared struct var onto its per-field leaves
 // (assign_struct_whole_value), so `.out(_lzc_out)` emits
 // `` `_lzc_out.data` = u_lzc#[1..=3] `` etc. and the .prp text round-trips.
-// This test is the guard: prp-v2prp-* (LEC vs the original .prp) and
+// This test is the guard: the native LEC leg of prp-v2prp2v-* and
 // prp-simfail-* mode v2prp-sim (emitted-text sim == slang in-memory sim) are
 // both green; prp-equiv-* stays fixme only for the yosys '{...} reader gap.
 // Functionally: r = {in==0, ~lzc(in)}.

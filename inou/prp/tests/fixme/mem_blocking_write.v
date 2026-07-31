@@ -17,7 +17,7 @@
 // TO FIX: model a blocking-written array as state, the way yosys does —
 // demote it to per-entry registers, or infer a memory whose read port carries
 // the matching transparency bit. Then this file should COMPILE and its
-// prp-v2v-* round trip should PROVE.
+// prp-v2prp2v-* round trip should PROVE.
 module mem_blocking_write(input logic clk, input logic we,
                           input logic [1:0] wa, input logic [1:0] wd,
                           input logic [1:0] ra, output logic [1:0] q);

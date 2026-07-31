@@ -146,7 +146,7 @@ Worked examples (`inou/prp/tests/equiv/`), both now supported by `--reader slang
 
 | test | standalone slang | yosys-slang | `--reader slang` | equiv test |
 |---|---|---|---|---|
-| `hier_value.v` (`HierarchicalValue`) | ✅ | ✅ | ✅ (read as a `ValueExpressionBase`, `slang_expr.cpp`) | `:type: equiv` (prp-equiv + prp-v2prp round-trip) |
+| `hier_value.v` (`HierarchicalValue`) | ✅ | ✅ | ✅ (read as a `ValueExpressionBase`, `slang_expr.cpp`) | `:type: equiv` (prp-equiv + prp-v2prp2v round-trip) |
 | `assign_pattern.v` (`SimpleAssignmentPattern` lvalue) | ✅ | ❌ | ✅ (`assign_to_pattern`, `slang_lvalue.cpp`) | `:type: equiv_slang` (yosys can't read the `'{...}` lvalue) |
 
 ### equiv testing: `:type: equiv` vs `:type: equiv_slang`
@@ -156,9 +156,10 @@ header's `:type:` selects how the readers are exercised:
 
 - **`:type: equiv`** (default, `prplib.run_equiv`): the `.prp` lowers to Verilog
   and lgchecks against the golden `.v` (yosys `read_verilog`). The matching
-  `prp-v2prp-<name>` target additionally round-trips the `.v` through
-  `--reader slang` → Pyrope → recompile → LEC, so the native reader is exercised
-  too. Use when yosys can read the `.v` (e.g. `hier_value.v`, plain module name).
+  `prp-v2prp2v-<name>` target additionally round-trips the `.v` through
+  `--reader slang` → Pyrope → Verilog, checking the emitted Pyrope against the
+  hand-written twin and the generated Verilog against the original. Use when
+  yosys can read the `.v` (e.g. `hier_value.v`, plain module name).
 - **`:type: equiv_slang`** (`prplib.run_equiv_slang`): for a `.v` that yosys's
   `read_slang`/`read_verilog` cannot ingest (e.g. `'{...}` assignment-pattern
   lvalues in `assign_pattern.v`). The `.v` is read by the NATIVE `--reader slang`

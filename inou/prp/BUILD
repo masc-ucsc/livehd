@@ -498,7 +498,8 @@ _SIM_FIXME = [
             # phase_two_clock_ports / phase_clock_gate_invert are NOT excluded:
             # their FORWARD direction proves (lgcheck's bounded miter decides
             # both), so marking them fixme here would hide a forward regression.
-            # They fail in prp-v2prp-* -- see _V2PRP_FIXME below.
+            # They fail the native leg of prp-v2prp2v-* -- see
+            # _V2PRP2V_NATIVE_FIXME below.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -506,7 +507,7 @@ _SIM_FIXME = [
             # bounded check does not run to completion and the pair is
             # INCONCLUSIVE, not refuted. What it regresses is the WRITER's
             # declaration ordering, so its coverage lives in the round-trip
-            # directions (prp-v2prp-* / prp-v2v-*), which do run.
+            # combined prp-v2prp2v direction, which does run.
             "tests/equiv/divided_clock_decl_order.prp",
             # comb_array_const_index_read is the same shape of exclusion: it is
             # a MEMORY design, and lgcheck's bounded miter does not run to
@@ -514,7 +515,7 @@ _SIM_FIXME = [
             # a const-indexed read of a written comb-array entry folding to the
             # array's init -- is created by the WRITER's per-entry expansion of
             # a whole-array copy, so its coverage lives in the round-trip
-            # directions (prp-v2prp-* / prp-v2v-*), which do run and do decide.
+            # combined prp-v2prp2v direction, which does run and does decide.
             "tests/equiv/comb_array_const_index_read.prp",
             # NOTE: the three comb-array store-loss trackers
             # (array_store_stale_rhs, arr_comb_mux_const, arr_comb_tmp) were
@@ -607,7 +608,7 @@ sh_test(
         # value and DCE deleted the real write. upass_ssa.cpp now routes such a
         # store through the same target-verbatim/operands-renamed arm as
         # tuple_get/tuple_add/attr_*. All three prove; arr_comb_tmp also left
-        # _V2V_FIXME. Surfaced by lhdsuite //bench:minion_lec
+        # _V2PRP2V_VERILOG_FIXME. Surfaced by lhdsuite //bench:minion_lec
         # (minion_dcache_tensor_load{,_p1}); see lhdsuite fixme.md 1h.
         #
         # ── corpus-mined category trackers (2026-07-29) ──────────────────────
@@ -641,9 +642,9 @@ sh_test(
     ]
 ]
 
-# 2f-v2prp: the REVERSE direction over the same equiv corpus. The slang reader
-# lowers each golden <name>.v to Pyrope (upass/prp_writer); `lhd lec` recompiles
-# that Pyrope and proves it equivalent to the ORIGINAL hand-written <name>.prp
+# Native-Pyrope check within v2prp2v. The slang reader lowers each golden
+# <name>.v to Pyrope (upass/prp_writer); `lhd lec` recompiles that Pyrope and
+# proves it equivalent to the ORIGINAL hand-written <name>.prp
 # (NOT the .v) via the in-process cvc5 BMC engine (the default since the
 # ind->bmc flip). Proving against the .prp directly sidesteps yosys read_verilog
 # gaps on the reference side (e.g. the `'{...}` assignment pattern that blocked
@@ -658,18 +659,18 @@ sh_test(
 # tagged `fixme` (the repo's known-broken convention; .bazelrc filters `-fixme`
 # so `bazel test //...` stays green) with the specific root cause; flipping one
 # green is the fix:
-#   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
-_V2PRP_FIXME = [
+#   bazel test //inou/prp:prp-v2prp2v-mem_rom --test_tag_filters=
+_V2PRP2V_NATIVE_FIXME = [
     # Pending hierarchy-aware formal phase scheduler (2f-lec / 2f-latch M10).
     # phase_posneg_pipeline already proves through the landed flat P=2 path;
     # these four hit the still-honest coincident-edge, hierarchy, and memory
-    # refusals. Their v2v round trips pass and remain untagged.
+    # refusals. Their original-Verilog checks pass.
     "phase_latch_flop_edges",
     "phase_hier_latch_neg",
     "phase_clock_gate_chain",
     "phase_mem_write_read",
     # Added 2026-07-31 from the 2f-lec plan review. Both FORWARD directions and
-    # both v2v round trips pass; only the native cvc5 leg refuses, with exactly
+    # both original-Verilog checks pass; only the native cvc5 leg refuses, with exactly
     # the message the phase scheduler exists to retire:
     #   phase_two_clock_ports   -> `def `phase_two_clock_ports_cell` holds
     #                              1 negedge flop(s), 2 clock nets, and
@@ -717,7 +718,7 @@ _V2PRP_FIXME = [
     # miscompile: the Q, a module output, had NO driver at all), but
     # pass.single_edge still sees a Latch CELL whose enable cone is empty and
     # declines with "unresolved-commit-class", so the native-LEC leg refuses the
-    # ref side. The forward directions (prp-equiv-*, prp-v2v-*) both PROVE.
+    # ref side. The forward and original-Verilog directions both PROVE.
     # Flips green when the degenerate latch stops being a Latch cell at all —
     # tolg should bypass it to a wire — or when commit_class_of admits an
     # enable-less latch as combinational.
@@ -742,6 +743,10 @@ _V2PRP_FIXME = [
     "blocking_ff_state",
 ]
 
+# Two goldens cannot be checked against their original Verilog: both available
+# yosys readers reject the compound async-reset edge form. Keep the native-only
+# v2prp targets for those cases; every other former v2prp target is folded into
+# the v2prp2v family below.
 [
     sh_test(
         name = "prp-v2prp-%s" % base,
@@ -750,31 +755,21 @@ _V2PRP_FIXME = [
             "-i",
             "$(location //inou/prp:tests/equiv/%s.v)" % base,
         ],
-        # The harness LECs the emitted Pyrope against the original .prp, so BOTH
-        # the golden .v (the input) and the .prp (the reference) are runfiles.
         data = [
             "//inou/prp:tests/v2prp_test.py",
             "//inou/prp:tests/equiv/%s.v" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
         ],
-        tags = ["fixme"] if base in _V2PRP_FIXME else [],
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
-        f.split("/")[-1][:-2]
-        for f in glob(
-            ["tests/equiv/*.v"],
-            # `*_tb.v` are the generated differential-sim golden drivers
-            # (prp-simeq-*), not equiv goldens — keep them out of the v2prp glob.
-            exclude = [
-                "tests/equiv/*_tb.v",
-            ],
-        )
+        "async_negreset_compound",
+        "async_reset_enable",
     ]
 ]
 
-# v2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
+# v2prp2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
 # goes all the way THROUGH Pyrope and back --
 #   v -> (slang) -> lg -> prp_writer -> .prp -> (inou.prp) -> tolg -> cgen -> v
 # -- and inou/yosys/lgcheck proves the result equivalent to the ORIGINAL .v.
@@ -785,18 +780,17 @@ _V2PRP_FIXME = [
 # reason; they refute now). One run therefore covers the whole path the corpus
 # fuzzing exercises. This is the only harness whose reference side is read
 # INDEPENDENTLY of LiveHD (yosys read_verilog, or yosys-slang via the sibling
-# .prp's `:gold_reader: slang` header): prp-v2prp-* LECs two LiveHD-read sides
-# with the in-process cvc5 engine, so a slang misread — or a dropped
-# assignment that lec sees as a vacuous don't-care (arr_comb_tmp) — is
-# invisible to it, while this family refutes. Gate semantics match
-# v2prp_test.py: lgcheck INCONCLUSIVE (exit 2) and timeouts pass with an
-# honest note; only a counterexample or a hard yosys error fails.
+# .prp's `:gold_reader: slang` header). The harness also runs the former
+# v2prp native LEC check against the hand-written .prp, reusing the emitted
+# Pyrope rather than repeating the conversion. lgcheck INCONCLUSIVE (exit 2)
+# and timeouts pass with an honest note; only a counterexample or a hard yosys
+# error fails.
 #
 # Census 2026-07-27 (lhdsuite array_problem.md): 169 of 179 pairs prove, 5 are
 # honest-inconclusive (array_selfref, assign_pattern, io_bundle_nested,
 # io_bundle_selfref, packed_assign), 4 are real round-trip miscompiles tracked
 # below, 2 cannot be compared by any available reference reader (excluded).
-_V2V_FIXME = [
+_V2PRP2V_VERILOG_FIXME = [
     # bitrange_dyn was PROMOTED out of this list (2026-07-29). It tracked "z
     # reads 0 where the golden keeps bits (witness a=0x100 base=7 len=7 ->
     # gold z=2, gate z=0)", and the cause was NOT the range lowering: LiveHD's
@@ -816,11 +810,11 @@ _V2V_FIXME = [
     # name, not a slang front-end drop — see the equiv note above.
     #
     # ── corpus-mined category trackers (2026-07-29) ──────────────────────────
-    # ALL NINE repros (see _V2PRP_FIXME). The three pure prp_writer bugs
+    # ALL NINE repros (see _V2PRP2V_NATIVE_FIXME). The three pure prp_writer bugs
     # (tolg_field_read_zero, writer_undefined_mux,
     # writer_bad_char) used to PASS here and were deliberately left
     # untagged, because this direction was the DIRECT slang -> lg -> cgen path
-    # and never ran the writer. v2v_test.py now routes through Pyrope
+    # and never ran the writer. v2prp2v_test.py now routes through Pyrope
     # (v -> prp -> v), so the writer IS exercised and all three refuted --
     # exactly the point of the change, and all three are FIXED and PROMOTED out
     # (2026-07-29). writer_undefined_mux: the undeclared `_mux_N` read is fixed
@@ -839,9 +833,8 @@ _V2V_FIXME = [
     "negative_array_index",
     "blocking_ff_state",
     # The five LEC-REFUTED trackers. This is the only direction that catches
-    # them: they COMPILE clean both ways, so prp-v2prp-* (which LECs our own
-    # generated Pyrope against the identical checked-in .prp) trivially passes,
-    # and prp-equiv-* only sees four of the five.
+    # them: they COMPILE clean both ways, so the native Pyrope check trivially
+    # passes, and prp-equiv-* only sees four of the five.
     "mem_write_during_reset",
     "async_mem_reset_demoted",
     "async_reset_pin_wire",
@@ -852,21 +845,23 @@ _V2V_FIXME = [
 
 [
     sh_test(
-        name = "prp-v2v-%s" % base,
-        srcs = ["tests/v2v_test.py"],
+        name = "prp-v2prp2v-%s" % base,
+        srcs = ["tests/v2prp2v_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:tests/equiv/%s.v)" % base,
         ],
-        # The sibling .prp is a runfile only for its `:verilog_top:` /
-        # `:gold_reader:` headers; the round trip itself never compiles it.
+        # The sibling .prp supplies the headers and is the native LEC reference.
         data = [
-            "//inou/prp:tests/v2v_test.py",
+            "//inou/prp:tests/v2prp2v_test.py",
             "//inou/prp:tests/equiv/%s.v" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
         ],
-        tags = ["fixme"] if base in _V2V_FIXME else [],
+        tags = ["fixme"] if (
+            base in _V2PRP2V_NATIVE_FIXME or
+            base in _V2PRP2V_VERILOG_FIXME
+        ) else [],
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
@@ -956,7 +951,7 @@ _V2V_FIXME = [
         # SIM-side pin of the fp-convert fail family (FCVT/FPCVT/FP_INCVT/
         # CVT32ModuleS0/ByteMaskTailGen — instance-output struct dual
         # identity). FIXED 2026-07-03 (assign_to splits the bound value onto
-        # the bundle leaves); green together with its prp-v2prp companion.
+        # the bundle leaves); green together with its prp-v2prp2v companion.
         "instance_out_struct_ident": "v2prp-sim",
         # ---- 2026-07-03 lhd-sim failure-class synthetics (verification.html
         # sim column, ~63 comb-loop errors + 3 sub-feedback + 2 segv). Each
@@ -1051,7 +1046,7 @@ _V2V_FIXME = [
 ]
 
 # prp->prp round-trip: a Pyrope source re-emitted through pass.prp_writer must
-# recompile and LEC against its golden .v (the FORWARD companion of prp-v2prp).
+# recompile and LEC against its golden .v (the FORWARD companion of v2prp2v).
 # This locks in the constructs the writer fully supports — the pipeline
 # (`stage[N]` / `@[N]`), `type_spec`, `tuple_concat`.  Curated allow-list: the
 # prp->prp writer path is still maturing (many equiv pairs emit clean Pyrope

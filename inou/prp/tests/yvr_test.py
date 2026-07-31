@@ -5,7 +5,7 @@ LiveHD's `--reader yosys-verilog` front end and stays logically equivalent.
     lhd compile --reader yosys-verilog foo.v --emit-dir verilog:DIR/   # yosys-verilog -> lg -> verilog
     inou/yosys/lgcheck --reference foo.v --implementation DIR/foo.v    # LEC the reader output vs the source
 
-Unlike prp-v2prp (which exercises `--reader slang`), this targets the
+Unlike prp-v2prp2v (which exercises `--reader slang`), this targets the
 `--reader yosys-verilog` path (lgyosys_tolg / proc / cgen). It is the minimal
 reproducer for the two XiangShan failure classes that the slang/pyrope tests
 canNOT catch (slang reads those files correctly):
@@ -18,7 +18,7 @@ canNOT catch (slang reads those files correctly):
 Exit: 0 = the yosys-verilog reader handled it correctly (bug absent/fixed);
 1 = read-fail or miscompile (bug present — the expected state for the repro
 cases). A lgcheck TIMEOUT is inconclusive (exit 0, not a fail), matching
-v2prp_test.py's gate semantics.
+v2prp2v_test.py's gate semantics.
 
   python3 inou/prp/tests/yvr_test.py -i inou/prp/tests/equiv/clz_nest.v
 """

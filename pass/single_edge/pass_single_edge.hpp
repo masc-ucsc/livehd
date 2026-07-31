@@ -97,7 +97,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs = {}, con
 // The miter-wide rule (task page, condition 1) is that if EITHER side of a
 // comparison needs normalization, BOTH are normalized — otherwise the two are
 // compared in different time bases, a guaranteed false REFUTED and exactly the
-// shape of the prp-v2prp-latch_* corpus.
+// shape of the prp-v2prp2v-latch_* corpus.
 [[nodiscard]] bool needed(hhds::Graph* g, const std::vector<hhds::Graph*>& defs = {});
 
 }  // namespace livehd::single_edge

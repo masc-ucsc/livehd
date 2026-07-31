@@ -21,10 +21,12 @@ Per-side tops come from the reference's `:verilog_top:` (the emitted module,
 
 `lhd lec` is the authoritative gate: equivalent => pass, not-equivalent => fail,
 and a TIMEOUT => inconclusive (exit 0, NOT a fail — per the task's gate
-semantics).  This is the per-file form driven by the `prp-v2prp-<name>` bazel
-targets; inou/prp/tests/v2prp_census.py is the whole-corpus census.
+semantics). Most corpus coverage lives in `v2prp2v_test.py`, which reuses this
+native check before continuing back to Verilog. This standalone harness remains
+only for goldens which no independent yosys reference reader can ingest.
 
-  python3 inou/prp/tests/v2prp_test.py -i inou/prp/tests/equiv/trivial_if.v
+  python3 inou/prp/tests/v2prp_test.py \
+      -i inou/prp/tests/equiv/async_negreset_compound.v
 """
 
 import argparse

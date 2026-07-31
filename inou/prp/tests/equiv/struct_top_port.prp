@@ -9,7 +9,7 @@
 // instance — so the `flat_top_io` contract (a struct is a bundle everywhere
 // inside LiveHD; only the top interface is packed, for generated-vs-original
 // Verilog equivalence) shipped untested until this pair existed.
-// prp-v2v-struct_top_port is the direction that exercises it: it miters the
+// prp-v2prp2v-struct_top_port is the direction that exercises it: it miters the
 // emitted netlist against the .v, which only matches if the top stayed packed.
 //
 // The ports are written FLAT (u7) here to mirror the golden's packed top

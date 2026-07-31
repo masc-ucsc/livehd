@@ -11,7 +11,7 @@
 // FIXED, so both directions now PROVE:
 //   * forward prp-equiv: cgen emits `reg signed; b = (sext < 'sb0)`, yosys
 //     lgcheck proves it equals the golden `assign b = x[3]`.
-//   * reverse prp-v2prp: cvc5 proves the slang-reconstructed Pyrope equivalent.
+//   * reverse native leg of prp-v2prp2v: cvc5 proves the reconstructed Pyrope.
 // The golden .v module is the escaped full name `\signed_one_bit_cmp.p ` to
 // match the :verilog_top: header (the filename.func convention, like trivial_if.v).
 pub comb p(x:u8) -> (b:bool) {
