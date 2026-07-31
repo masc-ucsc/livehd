@@ -839,4 +839,17 @@ theorem bv_to_bitvec_bvenc_zext {wv w : Nat} (v : BitVec wv) :
   apply BitVec.eq_of_toNat_eq
   rw [BitVec.toNat_ofInt, BitVec.toNat_ofNat, Int.ofNat_eq_natCast, ← Int.natCast_emod, Int.toNat_natCast]
 
+/-- Binary add/subtract (Op_Sum 1 = one add, one subtract), mixed operand widths. -/
+theorem sum1_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op (LGraphOp.Op_Sum 1) w [bvenc a, bvenc b]
+      = bvenc ((bv_zext a : BitVec w) - (bv_zext b : BitVec w)) := by
+  rw [show eval_op (LGraphOp.Op_Sum 1) w [bvenc a, bvenc b]
+        = mk_bv w (Int.ofNat a.toNat - Int.ofNat b.toNat) from by simp [eval_op, bv_uint_bvenc]]
+  unfold bvenc
+  apply mk_bv_eq_of_emod
+  rw [mk_bv_sub_emod]
+  simp only [bv_zext, BitVec.toNat_ofNat, Int.ofNat_eq_natCast]
+  push_cast
+  rw [← Int.sub_emod]
+
 end OpBridge

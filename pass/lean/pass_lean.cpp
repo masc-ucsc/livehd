@@ -1215,8 +1215,17 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
     }
     case Ntype_op::Sext:
       op_expr = "LGraphOp.Op_Sext";
-      for (const auto& e : inp_edges_ordered(node)) {
-        deps.push_back(cert_dep_id(ctx, build, e.driver, pin_width(ctx, e.driver, node)));
+      {
+        // Op_Sext's amount operand (index 1) encodes the source width (the sign
+        // position). Like a const shift, it must be widened to hold its value, not
+        // truncated to pin_width — else e.g. amount 32 on a 1-bit pin becomes
+        // mk_bv 1 32 = 0 and the sext_bridge amt.toNat = a.width side goal fails.
+        size_t di = 0;
+        for (const auto& e : inp_edges_ordered(node)) {
+          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
+          ++di;
+        }
       }
       break;
     case Ntype_op::Get_mask: {
@@ -1971,6 +1980,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       return base_name + "_sourceEnv " + A + " " + std::to_string(d);
     };
+    // The un-encoded operand (BitVec) behind a dependency: its factored fv def
+    // (topo) or its source leaf BitVec (source).  Used to pass operands
+    // explicitly to a bridge whose side goal (e.g. Sext's amt.toNat = a.width)
+    // needs concrete operands for `decide`.
+    auto raw_dep = [&](uint32_t d) -> std::string {
+      if (topo_set.count(d)) {
+        return "(" + base_name + "_fv" + std::to_string(d) + " " + A + ")";
+      }
+      auto it = cert_build.source_leaf.find(d);
+      return "(" + (it == cert_build.source_leaf.end() ? std::string("0#0") : it->second) + ")";
+    };
 
     ofs << "\n-- Step-5 fast-view bridge: fast model = certificate model.\n\n";
 
@@ -2061,6 +2081,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
                                                                           : "ugt_bridge";
         bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " "
                       + std::to_string(cw) + " _ _ (by decide) (by decide)";
+      } else if (info.op_expr == "LGraphOp.Op_Sext" && info.deps.size() == 2) {
+        // operands passed explicitly so the amt.toNat = a.width side goal decides.
+        bridge_call = "sext_bridge " + raw_dep(info.deps[0]) + " " + raw_dep(info.deps[1]) + " (by decide)";
+      } else if (info.op_expr == "LGraphOp.Op_SLT" && info.deps.size() == 2
+                 && width_of(info.deps[0]) == width_of(info.deps[1])) {
+        bridge_call = "slt_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Sum 1" && info.deps.size() == 2) {
+        bridge_call = "sum1_bridge";
       } else {
         supported = false;
       }
