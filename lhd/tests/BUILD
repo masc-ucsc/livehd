@@ -98,6 +98,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
+# Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
+# the module's .cpp but NOT its .hpp (else every parent's object is needlessly
+# invalidated). Those mtimes are what the generated build.ninja keys on, so this
+# is the test that keeps the host build incremental. Steps 1-3 need only
+# --setup-only; the end-to-end warm-rebuild check self-skips without ninja.
+sh_test(
+    name = "lhd_sim_incremental_test",
+    srcs = ["lhd_sim_incremental_test.sh"],
+    data = ["//lhd"],
+)
+
 # Stage 0 of the cgen_sim false-combinational-loop fix: a combinational
 # sub-instance whose output feeds back through parent comb logic into one of its
 # own inputs is a FALSE comb loop the single-pass sim schedule cannot order.

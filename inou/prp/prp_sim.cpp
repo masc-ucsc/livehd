@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "file_output.hpp"
 #include "prp_ast_facade.hpp"
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
@@ -3035,9 +3036,15 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 
-  std::ofstream ofs(simdir + "/" + kDriverBasename + ".cpp");
-  ofs << o.str();
-  ofs.close();
+  // File_output, not a raw ofstream: it skips the write when the bytes are
+  // unchanged, so an unchanged driver keeps its mtime and the host build stays
+  // incremental. Every other generated sim file already goes through it — this
+  // was the lone holdout, and it re-compiled + re-linked the driver on every
+  // setup even when nothing about the design or its tests had moved.
+  {
+    File_output ofs(simdir + "/" + kDriverBasename + ".cpp");
+    ofs.append(o.str());
+  }
   return 0;
 }
 

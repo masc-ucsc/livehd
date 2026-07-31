@@ -42,9 +42,91 @@ static std::string strerror_threadsafe(int err) {
 #endif
 }
 
+// Does the file already hold EXACTLY the bytes we are about to write? Then the
+// write is a no-op that would still stamp a new mtime, and every downstream
+// build system keys staleness on mtime — so skipping it is what turns
+// "regenerate the tree" into an incremental rebuild.
+//
+// This is the mechanism behind the sim host build's incrementality, and it is
+// what gives it INTERFACE-vs-BODY precision for free: inou.cgen.sim re-emits a
+// module's .hpp and .cpp together whenever its structural digest moves, so a
+// body-only edit rewrites the .cpp while the .hpp comes out byte-identical.
+// Without this check the untouched header still gets a fresh mtime and every
+// parent that includes it rebuilds — the exact recompilation the by-value
+// header split exists to avoid. With it, the byte compare does the
+// interface/body split implicitly, and no separate interface digest is needed.
+//
+// Cost is one read of a file we were about to overwrite anyway, and only when
+// it already exists. Correctness note: this compares CONTENT, so it can never
+// skip a write that would have changed the file. core/tests/file_output_test
+// pins that, because a wrong `true` here leaves a stale artifact on disk that
+// every downstream consumer then agrees with (the emit manifests hash the file
+// back, so they would record the stale bytes as correct).
+//
+// SCOPE: this covers File_output only, which today means the Verilog emitter
+// (inou/cgen/cgen_verilog.cpp) and the sim emitter (inou/cgen/cgen_sim.cpp plus
+// the sim driver). `pass.prp_writer` still writes Pyrope through a plain
+// std::ofstream, so a re-emitted Pyrope tree is NOT yet mtime-quiet — routing
+// it through here is the obvious follow-up, and would cut the diff churn the
+// manual regeneration recipe warns about.
+bool File_output::same_on_disk() const {
+  int fd = ::open(filename.c_str(), O_RDONLY);
+  if (fd < 0) {
+    return false;  // no such file (the common first-emission case)
+  }
+  bool same = false;
+  auto len  = ::lseek(fd, 0, SEEK_END);
+  if (len >= 0 && static_cast<size_t>(len) == sz) {
+    // Size matches, so compare the bytes. Streaming the pieces against a
+    // modest buffer keeps this allocation-free for the large emissions
+    // (a whole re-emitted Pyrope tree) where a second full copy would hurt.
+    same = true;
+    if (::lseek(fd, 0, SEEK_SET) == 0) {
+      // Streamed against a fixed buffer rather than slurping the file: the
+      // emissions this guards are per-module C++ bodies, but nothing stops a
+      // caller from writing something far larger, and a second full copy of it
+      // would be a poor trade for a comparison.
+      char   buf[64 * 1024];
+      size_t have = 0, off = 0;  // `have` bytes buffered from disk, `off` consumed
+      for (const auto& e : sequence) {
+        size_t done = 0;
+        while (done < e.size()) {
+          if (off == have) {
+            auto n = ::read(fd, buf, sizeof buf);
+            if (n <= 0) {
+              same = false;
+              break;
+            }
+            have = static_cast<size_t>(n);
+            off  = 0;
+          }
+          const size_t chunk = std::min(e.size() - done, have - off);
+          if (::memcmp(buf + off, e.data() + done, chunk) != 0) {
+            same = false;
+            break;
+          }
+          off  += chunk;
+          done += chunk;
+        }
+        if (!same) {
+          break;
+        }
+      }
+    } else {
+      same = false;
+    }
+  }
+  ::close(fd);
+  return same;
+}
+
 File_output::~File_output() {
   if (aborted) {
     return;
+  }
+
+  if (same_on_disk()) {
+    return;  // byte-identical: leave the file, and its mtime, alone
   }
 
   //---------------------------------- OPEN

@@ -79,6 +79,22 @@ sh_test(
     ],
 )
 
+# File_output is write-if-different: an unchanged emission must leave the file
+# AND its mtime alone, because that mtime is what the generated build.ninja keys
+# on. A false "same" would leave a stale artifact behind a green run, so both
+# directions are pinned, including payloads that straddle the 64 KiB compare
+# buffer.
+cc_test(
+    name = "file_output_test",
+    srcs = [
+        "tests/file_output_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "diag_test",
     srcs = [

@@ -23,6 +23,12 @@ class File_output {
 
   static size_t count_nl(std::string_view s) { return static_cast<size_t>(std::count(s.begin(), s.end(), '\n')); }
 
+  // True when `filename` already holds exactly the bytes queued in `sequence`,
+  // so the destructor can skip the write and leave the file's mtime alone. See
+  // the comment on the definition: this is what makes a regenerated tree
+  // incremental for any mtime-keyed build system downstream.
+  [[nodiscard]] bool same_on_disk() const;
+
 public:
   File_output(std::string_view fname);
   ~File_output();

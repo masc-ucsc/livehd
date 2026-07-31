@@ -278,6 +278,12 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
      "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
+    {"ninja", "", Sim_set_option::Kind::bool_or_file,
+     "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
+     "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
+     "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
+     "its dependents); the built-in path always rebuilds every translation unit. A `build.ninja` reproducing the "
+     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
     {"jobs", "0", Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
