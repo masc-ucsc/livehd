@@ -1961,6 +1961,16 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       auto it = nwidth.find(id);
       return it == nwidth.end() ? 0 : it->second;
     };
+    const std::set<uint32_t> topo_set(topo_ids.begin(), topo_ids.end());
+    // Resolve a dependency id to its φ value by DEFEQ (topo node → its factored
+    // fv def; source → sourceEnv), so the per-node `show` never has to unfold the
+    // whole φ if-chain (that materialization is O(n) per node → O(n²) blow-up).
+    auto phi_dep = [&](uint32_t d) -> std::string {
+      if (topo_set.count(d)) {
+        return "bvenc (" + base_name + "_fv" + std::to_string(d) + " " + A + ")";
+      }
+      return base_name + "_sourceEnv " + A + " " + std::to_string(d);
+    };
 
     ofs << "\n-- Step-5 fast-view bridge: fast model = certificate model.\n\n";
 
@@ -1986,8 +1996,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "\n";
 
     // Graph well-formedness / dependency ordering (concrete graph, native_decide).
-    ofs << "theorem " << base_name << "_bridge_nodup : " << G << ".topo.Nodup := by decide\n";
-    ofs << "theorem " << base_name << "_bridge_some : ∀ n ∈ " << G << ".topo, (" << G << ".nodes n).isSome := by decide\n";
+    // native_decide (not decide): `decide` on Nodup / membership over an ~5000-node
+    // list builds an O(n^2) kernel proof term (multi-GB); native_decide runs it
+    // compiled with a tiny proof.
+    ofs << "theorem " << base_name << "_bridge_nodup : " << G << ".topo.Nodup := by native_decide\n";
+    ofs << "theorem " << base_name << "_bridge_some : ∀ n ∈ " << G << ".topo, (" << G << ".nodes n).isSome := by native_decide\n";
     ofs << "theorem " << base_name << "_bridge_depord : GraphRefine.DepOrdered " << G << " " << G << ".topo :=\n";
     ofs << "  GraphRefine.depOrdered_of_bool " << G << " " << G << ".topo (by native_decide)\n\n";
 
@@ -1999,9 +2012,12 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         if (k != 0) {
           deplist += ", ";
         }
-        deplist += base_name + "_phi " + A + " " + std::to_string(info.deps[k]);
+        deplist += phi_dep(info.deps[k]);
       }
       std::string bridge_call;
+      // Post-bridge closer simp set; the default unfolds the node def + normalizes
+      // constant Int spellings.  Some ops extend it (e.g. n-ary Or unfolds a fold).
+      std::string closer = "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
       bool supported = true;
       if (info.op_expr.rfind("LGraphOp.Op_GetMask", 0) == 0) {
         bridge_call = "getmask_bridge' _ _ (by native_decide)";
@@ -2009,8 +2025,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
         bridge_call = "and_bridge";
-      } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 2) {
-        bridge_call = "or_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Or") {
+        // n-ary Or over the certificate BV list (any arity, mixed widths).
+        bridge_call = "orn_bv_bridge";
+        closer = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, BitVec.zero_or, "
+                 "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
       } else if (info.op_expr == "LGraphOp.Op_Xor" && info.deps.size() == 2) {
         bridge_call = "xor_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Not" && info.deps.size() == 1) {
@@ -2021,6 +2040,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "ror1_bridge";
       } else if (info.op_expr == "LGraphOp.Op_MuxBool" && info.deps.size() == 3) {
         bridge_call = "muxbool_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_MuxN" && info.deps.size() == 3) {
+        bridge_call = "muxn3_bridge";
       } else if (info.op_expr == "LGraphOp.Op_SRA" && info.deps.size() == 2) {
         bridge_call = "sra_bridge _ _ (by decide)";
       } else if ((info.op_expr == "LGraphOp.Op_EQ" || info.op_expr == "LGraphOp.Op_ULT"
@@ -2050,14 +2071,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (supported) {
         ofs << "  show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op ("
             << info.op_expr << ") " << info.width << " [" << deplist << "]\n";
-        ofs << "  simp only [" << base_name << "_phi]\n";
-        ofs << "  norm_num\n";
         ofs << "  rw [" << srcfacts << bridge_call << "]\n";
         // Unfold the factored node def and normalize constant Int spellings
         // (fast model emits `15`/`-1`; the cert source facts use `Int.ofNat 15` /
         // `-Int.ofNat 1` — same value, so normalize casts to close by rfl).
-        ofs << "  simp only [" << base_name << "_fv" << info.nid
-            << ", bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one]\n";
+        ofs << "  simp only [" << base_name << "_fv" << info.nid << ", " << closer << "]\n";
       } else {
         ofs << "  sorry -- TODO(step5): op bridge for " << info.op_expr << " (arity " << info.deps.size() << ")\n";
         ++bridge_gaps;
