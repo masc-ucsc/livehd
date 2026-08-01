@@ -79,11 +79,6 @@ void Pass_abc::setup() {
                        "false");
   m.add_label_optional("multiplier", "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
                        "array");
-  m.add_label_optional("use_proven_assume", "true|false feed pass.formal-PROVEN assume conditions to ABC as don't-cares",
-                       "true");
-  m.add_label_optional("use_all_assume",
-                       "true|false also feed DECLARED (unproven) assume conditions (aggressive: undefined outside contract)",
-                       "false");
   m.add_label_optional("qor",
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
@@ -293,8 +288,6 @@ void Pass_abc::work(Eprp_var& var) {
   auto adder_s = std::string{var.get("adder", "rca")};
   auto bs_s    = std::string{var.get("block_size", "0")};
   auto mult_s  = std::string{var.get("multiplier", "array")};
-  bool use_proven_assume = truthy(var.get("use_proven_assume", "true"));
-  bool use_all_assume    = truthy(var.get("use_all_assume", "false"));
   auto qor_path          = std::string{var.get("qor", "")};
   auto region_opts_s     = std::string{var.get("region_opts", "")};
   auto mem_budget_s      = std::string{var.get("memory_budget_mb", "0")};
@@ -356,8 +349,6 @@ void Pass_abc::work(Eprp_var& var) {
   opts.adder      = adder.value();
   opts.block_size = block_size;
   opts.multiplier = multiplier.value();
-  opts.use_proven_assume = use_proven_assume;
-  opts.use_all_assume    = use_all_assume;
   opts.memory_budget_mb  = memory_budget_mb;
   opts.allow_oversize    = allow_oversize;
   if (allow_oversize) {
@@ -461,8 +452,7 @@ void Pass_abc::work(Eprp_var& var) {
     }
     incr = std::make_unique<livehd::abc::Incr_cache>(
         cache_dir,
-        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, opts.dff_cell,
-                                           opts.use_proven_assume, opts.use_all_assume));
+        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, opts.dff_cell));
   }
 
   livehd::abc::Mapper mapper(opts);

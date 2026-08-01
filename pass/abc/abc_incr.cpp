@@ -509,8 +509,8 @@ void Incr_cache::save() {
   livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
 }
 
-uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_cell,
-                               bool use_proven_assume, bool use_all_assume) {
+uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory,
+                               std::string_view dff_cell) {
   // Bump the tag whenever the mapper's read-back or the cache shape changes:
   // stale bodies must never survive a semantic change.
   // v3: lgraph-compare cache -- keyed by module name, stores pre+mapped bodies,
@@ -519,7 +519,9 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // so an all-HIT reuse can re-declare them into outlib -- a v3 cache lacks them.
   // v5: partition boundary INPUT naming is now bidirectional (producer + consumer
   // cone, Proposal 2), so a v4 cache's port names no longer match.
-  uint64_t      h = hstr("abc-incr-v5");
+  // v6: the formal-assume don't-care inputs left the salt with the EXDC item
+  // (2026-08-01) -- a v5 salt mixed in two bools that no longer exist.
+  uint64_t      h = hstr("abc-incr-v6");
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -529,7 +531,6 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   }
   h = hcombine(h, static_cast<uint64_t>(map_register) << 1U | static_cast<uint64_t>(map_memory));
   h = hcombine(h, hstr(dff_cell));
-  h = hcombine(h, static_cast<uint64_t>(use_proven_assume) << 1U | static_cast<uint64_t>(use_all_assume));
   return h;
 }
 

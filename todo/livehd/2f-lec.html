@@ -24,43 +24,76 @@
   timeout, unsupported timing, and ambiguous correspondence remain
   INCONCLUSIVE. Collapse, pairing, phase scheduling, and every retry must
   preserve that contract. An abstraction may cause more work or an UNKNOWN,
-  never a wrong verdict.</p>
+  never a wrong verdict. <code>rc 7</code> ("could not decide") and
+  <code>rc 10</code> ("here is a counterexample") must never be conflated —
+  <code>pass/lec/tests/lec_verdict_policy_test.sh</code> is the contract.</p>
 
-<p><strong>An encode ABORT compared nothing and must be gated as such.</strong>
-  Today all four encode-failure returns (<code>query.cpp:4425</code>/<code>:4433</code>
-  for ind, <code>:3641</code>/<code>:3649</code> for bmc) leave
-  <code>res.nothing_compared</code> false, so the driver's two guards
-  (<code>lhd_kernel_formal.cpp:2798</code> and <code>:2825</code>), both of which
-  are documented as firing regardless of <code>formal.strict</code>, never see
-  it. A def whose encode aborted therefore reports as an ordinary solver
-  <code>Unknown</code> — live in the current run, where <code>core_top</code>
-  produced zero compare points after the WORD-LEVEL CYCLE refusal — and under
-  <code>--set formal.strict=false</code> that degrades to an exit-0 warning,
-  which is exactly the vacuity those guards exist to prevent. Set BOTH
-  <code>nothing_compared</code> and <code>unsupported</code> at all four returns,
-  including the plain <code>fail()</code> (structural) path: a refusal decides
-  nothing and a bigger timeout cannot change it, which is the doctrine
-  <code>encode.cpp</code> already states for <code>fail_unsupported()</code>.
-  Setting both makes the run hard-fail independently of strict AND report the
-  reason through the named-refusal path instead of a generic "could not
-  decide".</p>
+<p><strong>An encode ABORT compared nothing — LANDED 2026-08-01, but NOT the way
+  this page asked, and the difference matters.</strong> The page said to set BOTH
+  <code>nothing_compared</code> and <code>unsupported</code> at all four
+  encode-failure returns, "including the plain <code>fail()</code> (structural)
+  path". Implemented literally that is a WRONG-VERDICT bug, and it was caught by
+  an adversarial re-check after being written:</p>
 
-<h2 id="phase-schedule">Pending — hierarchy-aware formal phase scheduler</h2>
+<ul>
+  <li><code>nothing_compared</code> is not a synonym for "hard-fail". The driver's
+    FIRST guard maps it to <code>equiv_fail</code> &rarr; <strong>exit 10</strong>,
+    i.e. "the designs DIFFER, here is a counterexample", under the headline "the
+    module is empty or has no output/state to check".</li>
+  <li>A plain <code>fail()</code> is ALSO how a <code>formal.timeout</code>
+    budget-out during encode reports. Flagging that <code>nothing_compared</code>
+    turns a pure TIMEOUT into a disproof — the exact conflation the contract
+    forbids, and the opposite of "timeout stays INCONCLUSIVE".</li>
+  <li>It is factually wrong besides: a BMC encode that aborts at unroll step k
+    already asserted the compares for steps 0..k-1, so "compared NOTHING" is
+    false.</li>
+</ul>
+
+<p>What actually shipped is the sound reading. A STRUCTURAL encode failure — the
+  encoder cannot ORDER the cone (a real word-level combinational cycle, or a
+  driver it cannot build) — is a REFUSAL, so it now rides
+  <code>fail_unsupported()</code> (<code>encode.cpp</code>, the post-fixpoint
+  unresolved-node diagnosis). That hard-fails by NAME regardless of
+  <code>formal.strict</code>, at exit 7, which is what the item wanted. A
+  budget-out keeps plain <code>fail()</code> and stays an ordinary strict-gated
+  Unknown, because a bigger timeout genuinely can change it.
+  <code>nothing_compared</code> is left to the empty-miter case it was built for.</p>
+
+<h2 id="phase-schedule">LANDED (v1, 2026-07-31) — hierarchy-aware formal phase scheduler</h2>
+
+<p><strong>STATUS.</strong> The read-only schedule, the encoder's per-microstep
+  commit gating, the native <code>Latch</code> encoding, the 4-microstep BMC
+  unroll and a phase-composed inductive step are LANDED
+  (<code>pass/lec/phase_sched.{hpp,cpp}</code> plus
+  <code>encode.cpp</code>/<code>query.cpp</code>), behind
+  <code>--set formal.phase_sched</code> (default TRUE). What is NOT yet done is
+  listed under <a href="#phase-open">still open</a> at the end of this section.</p>
 
 <p><strong>This replaces formal coloring and single-edge graph
   normalization.</strong> The scheduler is a read-only formal analysis: it does
   not color partitions, rewrite an LGraph, synthesize a phase counter, or thread
   timing state through module ports. <code>pass.single_edge</code> remains a
-  landed standalone transform and an Icarus/formal oracle, but LEC and verify
-  stop depending on it when this work lands.</p>
+  landed standalone transform and an Icarus/formal oracle.</p>
 
-<p>Today the formal preflight normalizes the whole reachable tree before the
-  leaves-first driver starts. It therefore refuses mixed latch/edge hierarchy,
-  refuses the memory-bearing multi-phase path, and prevents otherwise-provable
-  children from reaching the existing prove-then-collapse loop. The encoder's
-  sequential boxes also expose only one transition per source period, and the
-  memory reader does not retain <code>RD_CLK_POLARITY</code>. These are the
-  remaining implementation gaps.</p>
+<p><strong>What actually changed in the driver: the M8 preflight stopped being
+  MANDATORY, not stopped running.</strong> A decline used to end the run
+  ("lec refused the &lt;side&gt;", nothing compared); it now hands the design to
+  the schedule instead. The rewrite is still PREFERRED where it applies, for one
+  measured reason: it also normalizes a SYNC reset into the enable/din shape on
+  BOTH sides, and that is what lets semdiff's state pairing match a flop whose
+  reset the other front-end spells in the body
+  (<code>tests/equiv/flop_reset_matrix</code>). Skipping it where it would have
+  worked costs real verdicts until the pairing learns that fold — so the split
+  is "M8 when it applies, schedule when it declines", and the schedule is what
+  every previously-refused shape now takes.</p>
+
+<p>Three refusals inside <code>pass.single_edge</code> were tightened while
+  doing this, because a decline is now cheap: a state element clocked through a
+  recognized <code>Clock_cell</code> declines by name (a slot lowering has no
+  sub-period to sample the gate's enable in, so it would either drop the gate or
+  read it half a period early), and the probe's rule-4 / plan diagnostics are
+  suppressed on a dry run (an error-severity diagnostic would fail an otherwise
+  clean, PROVEN run through the CLI's error count).</p>
 
 <h3>Clock-graph propagation (runs first)</h3>
 
@@ -185,46 +218,22 @@
   hits repo-wide, so the Yosys reader still drops two-write-port priority that
   the slang reader gets right.</p>
 
-<h3>Hierarchy and collapse</h3>
+<h3>Hierarchy and collapse <span class="status">RESOLVED 2026-08-01 — by deletion, not by patching</span></h3>
 
-<p>Replace the one-transition-per-period sequential <code>State_box</code> with
-  transition and Moore-output contracts for each semantic phase. An instance
-  resolves those phases through its own parent clock bindings and sampled clock
-  guards. Collapse a child only after its intermediate phase contracts prove;
-  otherwise leave it expanded. A body-less trusted black box is conservatively
-  allowed to transition on both edges of every declared clock.</p>
-
-<p><strong>Give <code>Comb_box</code> the same treatment.</strong> A collapsed
-  STATELESS proven child takes the <code>Comb_box</code> branch
-  (<code>query.cpp:2549</code>), whose outputs are
-  <code>APPLY_UF(uf_cb:&lt;def&gt;:&lt;port&gt;, in_concat)</code>
-  (<code>encode.cpp:1464</code>) — and that branch <code>continue</code>s before
-  the <code>bbin:</code> obligation loop at <code>:1471-1487</code>, so unlike a
-  <code>State_box</code> it emits no per-port compare points and has no analogue
-  of the <code>boxcong</code> rule at <code>query.cpp:5027-5085</code>. ABC
-  abstracts an <code>APPLY_UF</code> to a free input keyed by term identity, so
-  the two sides' applications become unrelated primary inputs and every cut
-  downstream of a comb box is undecidable in the cone pass. Emit
-  <code>bbin:</code> obligations for comb boxes and add the comb analogue of
-  <code>boxcong</code>: once every input port of a comb box is proven equal, its
-  two applications are equal by congruence. The same
-  <code>continue</code> also skips the <code>bbox:</code> presence marker at
-  <code>encode.cpp:1498</code>, so a one-sided comb instance is currently
-  invisible to the correspondence gate; emit that too.</p>
-
-<p>This needs none of the phase machinery and can land first. It is measured, not
-  speculative: 52 of <code>minion_dcache_top</code>'s 78 residual cuts and all
-  four of <code>vpu_lane</code>'s come from it, and
-  <code>minion_dcache_top</code> reaches PROVEN as soon as its four comb boxes
-  are expanded. The cascade is worth knowing because it looks like many
-  independent failures and is one: an unprovable
-  <code>bbin:...:bid_i</code> that reads a comb-box output breaks its parent's
-  <code>boxcong</code> group, which leaves the arbiter-fed memory write ports
-  unproven, which stops <code>query.cpp:4998</code> unlocking those arrays'
-  read-port dout merges, which makes all 18 fields of two output bundles come
-  back as exact-blast diffs — every one of them spurious. Note also that the
-  acceptance criterion "collapse yields the same verdict as expansion" is exactly
-  the property this restores; it does not hold today.</p>
+<p><strong>What landed instead.</strong> The section below asks for
+  <code>bbin:</code> obligations and a comb analogue of <code>boxcong</code> on
+  the <code>Comb_box</code>. Both became unnecessary: a proven child is a
+  SEQUENCE TRANSDUCER, so the parent proves its inputs equal and SHARES one free
+  symbol per (instance, port, cycle) for its outputs — no state cut, no
+  uninterpreted function, no congruence rule, and comb and stateful children are
+  the same object because from the caller's side they are.
+  (<code>formal.lec.box_model=seq</code>, the default; <code>uf</code> keeps the
+  old encoding.) That removes the QF_AUFBV penalty on cvc5's eager bit-blaster,
+  the missing comb-box obligations, and the crossed-state hazard in one change.
+  <code>//pass/lec:lec_comb_box_cone_test</code> is green and out of the
+  <code>fixme</code> arm. The algorithm is written up in
+  <code>pass/lec/README.md</code>. The original analysis has been deleted: every
+  measurement in it was an argument for a design that is no longer built.</p>
 
 <h3>Scope and failure policy</h3>
 
@@ -241,22 +250,62 @@
   witness replay can drive edge-specific input snapshots, it must refuse replay
   explicitly instead of silently flattening them into one cycle input.</p>
 
+<h3 id="phase-open">Delivered, and still open</h3>
+
+<p>DELIVERED. Read-only schedule with deterministic per-phase diagnostics;
+  flop/latch/memory phase encoding with edge-specific input snapshots (microsteps
+  0-1 share one, 2-3 the next) and output compares at the two observation
+  microsteps; native <code>Latch</code> encoding including the clock-role gate
+  ABSORPTION and the always-transparent (enable-less) latch as a combinational
+  buffer; <code>Clock_cell</code> chain canonicalization to (root, parity,
+  guard) with the guard SAMPLED on the cell's own inactive phase; the active-low
+  gate flavour (<code>clk | ~en_latch</code>) recognized at the <code>Sub</code>
+  boundary; a sync reset moved INSIDE the commit gate under a schedule (an async
+  one stays outside); the phase-composed inductive step, which is what keeps an
+  UNBOUNDED proof available when the state correspondence rests on a speculative
+  tier-2 pair.</p>
+
+<p><strong>MEASURED on lhdsuite <code>//bench:minion_lec</code></strong> (opt),
+  after the sequence-transducer box landed: <strong>166/170 definitions proven
+  leaves-first</strong> (from 110/140), <strong>1 trusted</strong> (from 32),
+  <strong>0 clock-modelling refusals</strong> — no schedule refusal, no derived
+  clock, no latch/negedge decline. The def that REFUTED before
+  (<code>minion_dcache_cache_op_unit_l2</code>) proves, which is what a gate model
+  that finally canonicalizes chains should do. The four residual UNKNOWNs are NOT
+  timing: <code>core_top</code>, <code>intpipe_top</code> and
+  <code>minion_top</code> hit a word-level combinational cycle in the reference
+  encode (now a NAMED <code>unsupported</code>, exit 7 — see Verdict discipline),
+  and <code>intpipe_csr_file</code> needs <code>needs_array</code> forwarding.</p>
+
+<p>STILL OPEN. Per-PORT memory polarity (the Memory cell still carries ONE
+  global <code>posclk</code>, so a memory is scheduled whole; the Yosys reader
+  still drops <code>RD_CLK_POLARITY</code>); the schedule signature in the
+  verdict-cache key; edge-labelled witnesses (a counterexample still names a
+  source period, not <code>(period, rise|fall)</code>) and the explicit
+  witness-replay refusal; multi-ROOT scheduling (two unrelated roots keep the
+  encoder's detected-edge path, and a multi-root design that also needs
+  microsteps is refused by name); and <code>div != 1</code>, which stays a named
+  refusal.</p>
+
+<p>The "phase-aware sequential/comb BOX contract" that used to be listed here is
+  GONE, not deferred: the sequence-transducer box has no transition to be phased.
+  Its outputs are free symbols per (instance, port, cycle), so a collapsed child
+  is already schedule-agnostic and a phase-scheduled parent can box a stateful
+  child. See <code>pass/lec/README.md</code> §2.</p>
+
 <h3>Delivery order</h3>
 
 <ol>
-<li>read-only hierarchy schedule analysis and deterministic per-phase diagnostics;</li>
-<li>flop/latch encoding with edge-specific inputs and two output observations;</li>
+<li><span class="status">DONE</span> read-only hierarchy schedule analysis and deterministic per-phase diagnostics;</li>
+<li><span class="status">DONE</span> flop/latch encoding with edge-specific inputs and two output observations;</li>
 <li>per-port memory polarity and phase scheduling, including registered reads;</li>
-<li>phase-aware sequential boxes and proof-gated hierarchical collapse;</li>
-<li>remove mandatory <code>pass.single_edge</code> preprocessing from LEC and verify
-  — this is also the preflight <code>minion_synth_lec_synth</code> dies in, so it
-  unblocks a third bench target, not just <code>minion_lec</code> and
-  <code>minion_lec_incremental</code>;</li>
-<li>measure minion and remove trust entries only for definitions that actually prove.</li>
+<li>remove mandatory <code>pass.single_edge</code> preprocessing from verify
+  (<span class="status">DONE for LEC</span>) — the verify half is also the
+  preflight <code>minion_synth_lec_synth</code> dies in, so it unblocks a third
+  bench target;</li>
+<li><span class="status">DONE</span> measure minion and remove trust entries only
+  for definitions that actually prove: 32 &rarr; 1.</li>
 </ol>
-
-<p>The <code>Comb_box</code> compare points under "Hierarchy and collapse" are
-  independent of all six steps and can land ahead of them.</p>
 
 <p>No wall-clock target is set for the phase path: correctness only. Those 31
   defs are not proven at all today, so any finite cost is progress; the existing
@@ -303,10 +352,13 @@
 <li>Active-low and active-high clock-role latches close before the corresponding edge batch; a data-gated latch and same-batch flop update simultaneously.</li>
 <li>A clock-input-only propagation pass fixes clock relationships design-wide before scheduling; a def whose clock ports are unbound as a top is still scheduled from that pass, and two roots warn and assume synchronous unless a ratio is given.</li>
 <li>A chained <code>Clock_cell</code> feeds every consumer in the period from ONE guard sampled on the inactive phase before the cell's own active edge; inversion moves both the consumer edge and the sample point, and division refuses.</li>
-<li>A child communicates rise-to-fall state through phase-aware contracts, and collapse yields the same verdict as expansion — for a stateless (<code>Comb_box</code>) child as well as a stateful one.</li>
+<li>Collapse yields the same verdict as expansion, for a stateless child as well as a stateful one — the box model makes no distinction between them.</li>
 <li>Mixed-edge read/write memory ports preserve polarity, registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
 <li>Reset lengths, source-period bounds, output comparisons, assertions, cache keys, and edge-labelled witnesses follow the new schedule.</li>
-<li>An encode abort sets both <code>nothing_compared</code> and <code>unsupported</code>, so it hard-fails under <code>formal.strict=false</code> and names its reason.</li>
+<li>A STRUCTURAL encode abort rides <code>unsupported</code>, so it hard-fails by
+  name regardless of <code>formal.strict</code>, at exit 7 — and never
+  <code>nothing_compared</code>, which the driver reads as a DISPROOF. A
+  budget-out stays an ordinary strict-gated Unknown. <span class="status">DONE</span></li>
 <li>The plain-posedge path and unrelated-root flop-only path retain their present verdicts and performance envelope.</li>
 <li>An ambiguous same-shape memory bucket never yields a refutation on reset-based BMC; it stays UNKNOWN.</li>
 <li>Re-run the focused formal tests and the lhdsuite dino/minion LEC scenarios; shrink minion's trust list only from measured proofs, without changing the suite's known-failure policy.</li>
@@ -316,7 +368,7 @@
 
 <ul class="subtasks">
 <li>Latch lowering, landed <code>pass.single_edge</code> history, Clock-cell recognition, and the matching M10 specification — <a class="xref" href="2f-latch.html#m10">2f-latch M10</a>.</li>
-<li>Formal assertions and verification policy — <a class="xref" href="2f-formal.html">2f-formal</a>.</li>
+<li>Formal assertions and verification policy — <a class="xref" href="2f-verify.html">2f-verify</a> (the 2f-formal page was retired 2026-08-01; its binding rulings moved to that page's Soundness rules F and G).</li>
 <li>Multiport memory lowering and Verilog code generation — <a class="xref" href="2m-multiport_mem.html">2m-multiport_mem</a>.</li>
 <li>Functional matching that can avoid solver work on matched regions — <a class="xref" href="3f-semdiff.html">3f-semdiff</a>.</li>
 <li>Transaction-level equivalence for elastic interfaces — <a class="xref" href="4f-fluid-lec.html">4f-fluid-lec</a>.</li>

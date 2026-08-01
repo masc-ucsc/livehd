@@ -495,6 +495,38 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
+        # Optional `:equiv_engine: cvc5`: discharge the pair with `lhd lec` (the
+        # native phase-aware encoder) instead of lgcheck. Needed for pairs whose
+        # two sides differ in LATCH / CLOCK-EDGE structure: lgcheck's cascade
+        # ends in a bounded miter that steps ONE posedge per step, so it cannot
+        # represent a latch closing before an edge or a negedge endpoint
+        # committing inside the period, and it reports a mismatch between two
+        # designs that are equivalent (verified: every such pair PROVES under
+        # `lhd lec`, and the same pair's INDEPENDENT oracle is the v2prp2v
+        # original-Verilog leg plus lhd/tests/single_edge_four_classes_test.sh,
+        # which runs the source and normalized netlists under Icarus).
+        # Deliberately opt-in per fixture: lgcheck stays the default oracle.
+        if (test.params.get('equiv_engine') or '').strip() == 'cvc5':
+            lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
+                       '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
+                       '--workdir', os.path.join(odir, 'w_lec')]
+            lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            try:
+                llog, _ = lec.communicate()
+                lrc = lec.returncode
+            except Exception:
+                lec.kill()
+                lrc, llog = 1, b''
+            ltxt = llog.decode('utf-8', 'ignore')
+            if lrc == 0 and 'UNKNOWN' not in ltxt and 'INCONCLUSIVE' not in ltxt:
+                print('{} - equiv - success via lhd lec (verilog_top:{} pyrope_top:{})'.format(
+                    name, verilog_top, pyrope_top))
+                return 0
+            print('{} - equiv - FAILED: lhd lec not equivalent (verilog_top:{} pyrope_top:{})'.format(
+                name, verilog_top, pyrope_top))
+            print(ltxt)
+            return 1
+
         lgcheck_cmd = ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
                        '--reference_top', verilog_top, '--implementation_top', pyrope_top]
         # Optional `:gold_reader: slang` header: read the golden through the

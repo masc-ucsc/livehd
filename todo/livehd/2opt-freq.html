@@ -131,12 +131,12 @@
   (<code>abc_map.cpp:60</code>) against the netlist-LEC bug-catcher tests
   (retiming breaks cycle-accurate state correspondence by construction — why
   do the seq tests pass, and should <code>dretime</code> stay default?).
-  Define the interplay of block attributes with
-  <code>use_proven_assume</code>/<code>use_all_assume</code> and the future
-  EXDC network (<a class="xref" href="2f-formal.html">2f-formal</a>): a block
-  attribute must never silently create an unsound don't-care — the
-  <code>assume_nocheck_synth</code> user-fiat precedent (LEC ignores it by
-  contract) is the model.</li>
+  <span class="status">MOOT 2026-08-01</span> the block-attribute /
+  formal-assume don't-care interplay: the EXDC network was DROPPED by user
+  ruling, and <code>use_proven_assume</code>/<code>use_all_assume</code> were
+  deleted with it (they gated a gathering loop that discarded its own result).
+  The standing rule survives them: a block attribute must never silently create
+  an unsound don't-care.</li>
 <li><strong>F — acceptance.</strong> Committed: an <code>lhd_abc_test.sh</code>-style
   test where a block attribute creates its own region, a per-region flow
   override observably changes that region's mapping, <code>qor.json</code>
@@ -220,8 +220,9 @@
   <code>livehd/08-synth.md</code> (the loop recipe + both oracles + what an
   agent can move) and <code>pyrope/04b-attributes.md</code> block-attribute
   section. Assume/don't-care soundness note: no block attribute creates
-  don't-cares today; <code>use_all_assume</code> remains the only unsound knob
-  and the EXDC network stays with <a class="xref" href="2f-formal.html">2f-formal</a>.</li>
+  don't-cares today, and since the EXDC network was dropped (2026-08-01,
+  taking <code>use_all_assume</code> — the only unsound knob — with it) nothing
+  in <code>pass.abc</code> does.</li>
 <li><strong>F (partial) — acceptance (2026-07-12).</strong> Committed:
   <code>lhd_block_attr_test</code> + <code>lhd_opentimer_test</code> (above).
   Uncommitted demos: XiangShan-scale oracle run (xs_core_prp

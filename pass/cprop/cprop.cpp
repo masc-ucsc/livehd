@@ -82,15 +82,20 @@ using livehd::graph_util::setup_sink_by_name;
 // rules (Mux/EQ/distribute) this deliberately does NOT duplicate.
 
 [[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid) {
-  for (const auto& e : n.inp_edges()) {
-    if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
-      return e.driver;
-    }
+  // Cprop only asks for required single-driver ports of a well-formed builtin.
+  // Go directly through that sink's fan-in instead of materializing and
+  // filtering every input edge of the node for each port lookup.
+  auto sink    = n.get_sink_pin(static_cast<hhds::Port_id>(pid));
+  auto drivers = sink.get_driver_pins();
+  if (drivers.size() == 1) {
+    return drivers.front();
   }
   return {};
 }
 
 constexpr std::pair<int, int> kFpBail{-1, -1};
+constexpr int                 kPackedSliceWalkLimit  = 64;
+constexpr int                 kPackedSliceFanInLimit = 64;
 
 // The CONSTANT shift amount of a SHL, or <0 when not a bounded constant.
 [[nodiscard]] int const_shl_amount(const hhds::Node_class& m) {
@@ -988,15 +993,19 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
     return false;
   }
 
-  auto cur = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  auto cur = drv_at(node, 0);
 
   // No decreasing measure exists: the Or rule descends with [lo,hi) UNCHANGED, so
   // an Or->operand->Or chain inside a word-level SCC can revisit the same slice
   // and spin forever. A repeat means the slice depends on itself -- a GENUINE
   // bit-level cycle -- so stop and leave the node alone.
   absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> seen;
+  int                                                          walk_depth = 0;
 
   for (;;) {
+    if (++walk_depth > kPackedSliceWalkLimit) {
+      break;  // keep the original graph instead of charging an unbounded chain walk
+    }
     if (cur.is_invalid() || is_const_pin(cur)) {
       break;
     }
@@ -1013,8 +1022,13 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       // Or is N-ary on ONE sink; a driver on any other port is not this shape.
       hhds::Pin_class overlapper;
       int             n_over  = 0;
+      int             fan_in  = 0;
       bool            bad_pid = false;
       for (const auto& e : m.inp_edges()) {
+        if (++fan_in > kPackedSliceFanInLimit) {
+          bad_pid = true;  // conservative bailout: do not fold a very wide Or
+          break;
+        }
         if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
           bad_pid = true;
           break;
@@ -1156,7 +1170,7 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
     break;
   }
 
-  auto a_now = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  auto a_now = drv_at(node, 0);
   if (cur.is_invalid() || cur == a_now) {
     return false;  // nothing resolved
   }
@@ -1177,16 +1191,16 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
 
   // The bypassed pack/wire-buffer chain is usually dead now; bwd_del_node also
   // sweeps the inputs that become dead behind it.
-  if (!old_master.is_invalid() && !livehd::graph_util::is_builtin_node(old_master)
-      && !Ntype::is_loop_last(type_op_of(old_master)) && !old_master.has_out_edges()) {
+  if (!old_master.is_invalid() && !livehd::graph_util::is_builtin_node(old_master) && !Ntype::is_loop_last(type_op_of(old_master))
+      && !old_master.has_out_edges()) {
     bwd_del_node(old_master);
   }
   return false;  // rewired in place, not deleted
 }
 
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {
-  auto a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
-  auto mask_pin = livehd::graph_util::get_driver_of_sink_name(node, "mask");
+  auto a_pin    = drv_at(node, 0);
+  auto mask_pin = drv_at(node, 2);
   if (a_pin.is_invalid() || mask_pin.is_invalid() || !node.has_out_edges()) {
     node.del_node();
     return true;

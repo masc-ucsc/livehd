@@ -174,6 +174,30 @@
   Sound forms only: BMC discharges <em>base cases</em>; helpers assumed in the step
   must be true invariants (sidecar) or folded into the conjunctive obligation.
   Base depth ≥ induction depth used.</li>
+<li><strong>F. Reset exclusion is COARSE, and the per-flop refinement is UNSOUND</strong>
+  (migrated from the retired 2f-formal page, resolved 2026-07-12; the trap is the
+  point). What ships is sound: the coarse BMC-window guard
+  (<code>pass/formal/pass_formal.cpp</code> ~:504) plus primary reset INPUT
+  pinning in the induction rung (<code>reset_negset</code> gated on
+  <code>is_graph_input_pin</code>). <strong>DO NOT resurrect the per-flop guard
+  that pins a flop's own <code>reset_pin</code>/<code>negreset</code> inactive in
+  the step</strong> — attempted and REVERTED. <code>reset_pin</code> can carry a
+  DESIGN-CONTROLLED derived signal (Pyrope <code>reset_pin=ref &lt;wire&gt;</code>,
+  slang soft-reset nets, Yosys ARST/SRST/ALOAD/CLR), so pinning it drops
+  REACHABLE mid-trace soft-reset states &rarr; false unbounded-Proven &rarr;
+  <code>set_proven</code> silently ELIDES the runtime assert &rarr; miscompile;
+  the step-vacuity <code>base.isSat()</code> guard does NOT catch it. Only a
+  PRIMARY reset INPUT inherits the &ldquo;no mid-trace reset&rdquo; environment
+  assumption, and the same holds for reset-less power-on-initial flops.</li>
+<li><strong>G. Asymmetric soundness in the compile tier.</strong> <code>pass.formal</code>
+  hard-errors ONLY on a definitive refutation that cannot be an artifact (a
+  stateless cone, or a reachable-by-BMC witness, after assumes). Budget, Unknown
+  and possibly-unreachable NEVER error — a budget mistune must never turn a good
+  build into a false error. Only PROVEN assumes are hypotheses (no circular
+  self-proof); the consistency check runs before any removal, and a contradictory
+  assume set yields a warning with removals suppressed.
+  <code>assume_nocheck_synth</code> facts are never proof hypotheses, and
+  <code>assume_nocheck_formal</code> is ignored by this tier entirely.</li>
 </ul>
 
 <h2>cvc5 1.3.4 API inventory (verified against the vendored headers)</h2>
@@ -208,6 +232,17 @@
 
 <h2>Traps</h2>
 <ul class="subtasks">
+<li><strong><code>assume_nocheck_synth</code> is consumed by NOTHING, and now permanently.</strong>
+  It parses in a formal block and is then skipped by every engine
+  (<code>lhd/lhd_kernel_formal.cpp</code>, &ldquo;invisible to verify&rdquo; by
+  contract, pinned by <code>lhd_formal_verify_test.sh</code>). Its only planned
+  consumer was the ABC EXDC don't-care network, and that item was DROPPED by
+  user ruling 2026-08-01 — along with <code>pass.abc</code>'s
+  <code>use_proven_assume</code>/<code>use_all_assume</code> options and the
+  constraint-gathering loop they gated, which had been advertising a capability
+  that discarded its own result with a <code>(void)</code>. So writing an
+  <code>assume_nocheck_synth</code> today is a silent no-op with no path to
+  becoming anything else: either give it a diagnostic or retire the form.</li>
 <li><strong>tlimit-per is per-checkSat</strong> — only the global TOTAL budget
   prevents (N+1)×timeout runs.</li>
 <li><strong>Deepening after assuming</strong> — on <code>--deepen</code>, frontier

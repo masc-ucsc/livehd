@@ -40,7 +40,7 @@ public:
   // when true only a `/* TODO */` comment is emitted so a developer can inspect
   // the partial output.  Either way the marker is written, the difference is
   // whether the surrounding compile is allowed to pass.
-  void set_debug(bool d) { debug_ = d; }
+  void                            set_debug(bool d) { debug_ = d; }
   // True if write_all() emitted any /* TODO */ for an unimplemented construct.
   bool                            has_unimplemented() const { return !unimplemented_.empty(); }
   const std::vector<std::string>& unimplemented() const { return unimplemented_; }
@@ -60,10 +60,10 @@ public:
   void set_instantiated_modules(const std::unordered_set<std::string>* m) { instantiated_modules_ = m; }
 
 private:
-  std::ostream&          os;
-  std::shared_ptr<Lnast> lnast;
-  int                    depth{0};
-  bool                   debug_{false};
+  std::ostream&            os;
+  std::shared_ptr<Lnast>   lnast;
+  int                      depth{0};
+  bool                     debug_{false};
   // Human-readable descriptions of every unimplemented construct hit (one per
   // emitted /* TODO */); pass.prp_writer reads this to fail the compile.
   std::vector<std::string> unimplemented_;
@@ -92,47 +92,50 @@ private:
   void emit_unimplemented(std::string_view what);
 
   // ── Node writers ─────────────────────────────────────────────────────────
-  void write_top();
-  void write_module();  // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
-  void write_stmts();
-  void write_if();
+  void      write_top();
+  // Emit file-scope imports for sibling modules called by this unit. Shared by
+  // slang-origin io/body units and Pyrope-origin func_def units.
+  void      write_module_imports();
+  void      write_module();  // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
+  void      write_stmts();
+  void      write_if();
   // The body of write_if. `continuation` renders this if-node as an ` elif …`
   // continuing the caller's chain (else-flattening) instead of opening one.
-  void write_if_chain(bool continuation);
+  void      write_if_chain(bool continuation);
   // A `unique if` chain whose every condition is `<scrutinee> == K` (or an
   // `or` of such, K a constant / imported pkg.PARAM) is an SV case statement —
   // render it as `match <scrutinee> { == K {…} in (K1, K2) {…} else {…} }`.
   // Prints and returns true (cursor back on the if node), or false to fall
   // through to the plain chain rendering.
-  bool try_write_match();
+  bool      try_write_match();
   // The single REAL statement of an else-stmts block when it is a PLAIN
   // (non-unique, non-mux-collapsed) if — the `else { if … }` nesting the reader
   // produces for SV `else if` ladders, flattened to ` elif ` by write_if_chain.
   // Invalid when the block holds anything else.
   Lnast_nid flattenable_nested_if(Lnast_nid stmts_nid) const;
-  void write_declare();  // declare(ref, type, qualifier, [value])
-  void write_store();    // store(var, level0..levelN, value)
-  void write_ref();
-  void write_const();
-  void write_cassert();
-  void write_func_call();
-  void write_func_def();
+  void      write_declare();  // declare(ref, type, qualifier, [value])
+  void      write_store();    // store(var, level0..levelN, value)
+  void      write_ref();
+  void      write_const();
+  void      write_cassert();
+  void      write_func_call();
+  void      write_func_def();
   // for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
   // -> `for <value> in [ref ]<iterable> { <body> }`, or with index/key binds
   // `for (<idx>, <value>[, <key>]) in …` (Pyrope binds the INDEX first).  A runtime
   // `for` only survives to the writer inside a generic/template lambda the
   // runner could not monomorphize (the comptime unroll handles every concrete
   // instantiation); re-emitting it keeps that template lambda parseable.
-  void write_for();
-  void write_tuple_add();
+  void      write_for();
+  void      write_tuple_add();
   // tuple_concat( dst, src0, src1, … ) -> `dst = (...src0, ...src1, …)` (spread
   // concatenation): each source tuple is splatted into one combined literal.
-  void write_tuple_concat();
+  void      write_tuple_concat();
   // Renders a tuple_add node in EXPRESSION position (no LHS child) as a Pyrope
   // tuple literal `(v0, v1, …)` — used for a memory declare's initializer.
-  void write_tuple_literal();
-  void write_attr_set();
-  void write_delay_assign();
+  void      write_tuple_literal();
+  void      write_attr_set();
+  void      write_delay_assign();
 
   // Statement form of a value-producing op (`lhs = <rhs>`).  The RHS itself is
   // rendered by render_def_rhs(), which also inlines single-use temps.  Used for
@@ -154,14 +157,14 @@ private:
   // Format a stages(min,max) node into a Pyrope cycle-annotation body: "N"
   // when min==max, "A..=B" otherwise, "" for the unconstrained bare-pipe (1,0)
   // sentinel (renders as `@[]`).  Cursor-independent.
-  std::string format_stages(Lnast_nid stages_nid) const;
+  std::string                                  format_stages(Lnast_nid stages_nid) const;
   // The first `stages` child of a node (io-port store / pipe declare), or an
   // invalid nid when there is none.
-  Lnast_nid   find_stages_child(Lnast_nid nid) const;
+  Lnast_nid                                    find_stages_child(Lnast_nid nid) const;
   // A statement that write_node() renders to nothing — a `type_spec` (folded
   // into a declaration) or a stage `declare` (re-attached to its store as
   // `stage[N] x = v`).  Skipped by the body emit loops so no blank line is left.
-  bool        emits_nothing_stmt(Lnast_nid nid) const;
+  bool                                         emits_nothing_stmt(Lnast_nid nid) const;
   // Per-variable pipeline depth recorded by a `reg` declare carrying a trailing
   // stages node (the `stage[N] x = v` lowering): the next store to the var
   // emits `stage[<depth>] x = v`; the bare declare itself is suppressed.
@@ -172,7 +175,13 @@ private:
   // 1-D declared array sizes (`x:[N]T`, any mode): write_store expands a whole
   // array-to-array copy (`d = q`) into per-element stores (the recompile has
   // no lowering for a multi-element store between memories).
-  std::unordered_map<std::string, int64_t> array_decl_size_;
+  std::unordered_map<std::string, int64_t>     array_decl_size_;
+  // The reader lowers `lhs = rhs@[N]` into a timecheck statement followed by
+  // the store.  The immutable LNAST is indexed once so write_store never walks
+  // all preceding siblings to rediscover the matching timecheck.
+  std::unordered_map<int64_t, Lnast_nid>       store_timechecks_;
+  void                                         index_store_timechecks();
+  std::string                                  render_timecheck_suffix(Lnast_nid check) const;
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",
@@ -219,27 +228,27 @@ private:
   // node; Pyrope rejects assignment to an undeclared variable, so the first
   // write to such a name must carry a `mut`.  `___`-prefixed compiler temps
   // auto-declare and are never tracked.
-  std::unordered_set<std::string> declared_;
+  std::unordered_set<std::string>                                  declared_;
   // Vars whose nested `mut` declare was hoisted to a `mut X = 0` at the function
   // top (see emit_module): write_declare drops the in-place nested declare.
-  std::unordered_set<std::string> suppress_decl_;
+  std::unordered_set<std::string>                                  suppress_decl_;
   // Store-driven body nets that need NO hoist: the name has exactly ONE definition
   // in the whole body, that definition is a top-level `store`, and nothing reads it
   // before that store.  Its declaration rides on the store itself as an in-place
   // `const X = <rhs>` (decl_prefix), instead of a `mut X = 0` prologue line plus a
   // far-away re-bind.  See the eligibility scan in emit_module.
-  std::unordered_set<std::string> single_store_;
+  std::unordered_set<std::string>                                  single_store_;
   // Single-store nets whose value is an imported-package comptime const
   // (`x = pkg.PARAM`). Declared `mut` (not `const`): a `const` bound to a
   // comptime value BECOMES comptime, and copying it into a conditionally-driven
   // net (a mux target) makes that net look comptime too → "const rebind" on
   // recompile. `mut` keeps the value runtime and breaks the cascade.
-  std::unordered_set<std::string> pkg_valued_store_;
+  std::unordered_set<std::string>                                  pkg_valued_store_;
   // `wire` net names that have a real-statement store driver somewhere in the
   // body (populated by write_module's pre-scan).  A `wire` is a single-driver
   // net, so write_declare must NOT add the combinational `= 0` default to such a
   // wire — the store is its sole driver and a `= 0` would make it multi-driven.
-  std::unordered_set<std::string> wire_stored_;
+  std::unordered_set<std::string>                                  wire_stored_;
   // Bundle reconstruction: a base name (`io`) -> its leaf field set (`operation`,
   // `inputx`, …). upass.detuple split a scalar tuple `wire io:(...)` into dotted
   // leaf nets (`io.operation`); the writer regroups them back into ONE
@@ -259,31 +268,31 @@ private:
   // the base's later leaf stores (already covered by the group entry). Keyed
   // by nid so write_func_def's port lists (never scanned) keep the per-leaf
   // printing unchanged.
-  std::unordered_map<int64_t, std::string> port_group_text_;
-  std::unordered_set<int64_t>              port_group_skip_;
-  void collect_port_groups(Lnast_nid io_nid, bool is_mod);
+  std::unordered_map<int64_t, std::string>                         port_group_text_;
+  std::unordered_set<int64_t>                                      port_group_skip_;
+  void                                                             collect_port_groups(Lnast_nid io_nid, bool is_mod);
   // True if `name` is a known bundle field `base.field` (rendered unescaped).
-  bool is_bundle_field(std::string_view name) const;
-  bool is_imported_pkg_path(std::string_view name) const;  // `pkg.PARAM` on an imported package
+  bool                                                             is_bundle_field(std::string_view name) const;
+  bool is_imported_pkg_path(std::string_view name) const;      // `pkg.PARAM` on an imported package
   bool is_imported_package_name(std::string_view name) const;  // bare `pkg` is an imported package
 
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.
-  const std::unordered_set<std::string>* known_modules_{nullptr};
+  const std::unordered_set<std::string>*       known_modules_{nullptr};
   // Set of every module name emitted in this run, tail-keyed (see
   // set_instantiated_modules); a func_call to one of these is a real submodule
   // instantiation and the writer emits a `::[name=<lhs>]` call-site
   // instance-name annotation.
-  const std::unordered_set<std::string>* instantiated_modules_{nullptr};
+  const std::unordered_set<std::string>*       instantiated_modules_{nullptr};
   // Distinct func_call callee names seen in this unit (populated in scan_node).
-  std::unordered_set<std::string> func_call_callees_;
+  std::unordered_set<std::string>              func_call_callees_;
   // Import-const alias per callee module name, used when the natural import name
   // (`const X = import("X.X")`) would EXACTLY collide with a submodule instance
   // variable of the same spelling.  Names are case-sensitive, so the firtool
   // camelCase instance `subModule` does NOT collide with the import const
   // `SubModule`.  Maps module name -> emitted alias (== module name when no
   // collision).  Cleared per module.
-  std::unordered_map<std::string, std::string>                     import_alias_;
+  std::unordered_map<std::string, std::string> import_alias_;
 
   // Storage-class prefix to print before an assignment LHS: a pending
   // attr_set-type keyword if one is queued, else "mut " on the first write to
@@ -297,11 +306,11 @@ private:
   // (`reg r:T:[init=N, reset_pin=rst]`), so write_module pre-collects them here
   // keyed by variable name (assembled "k=v, k=v" body) and write_declare emits
   // the `:[…]` suffix; the standalone attr_set statements are then skipped.
-  std::unordered_map<std::string, std::string> folded_attrs_;
+  std::unordered_map<std::string, std::string>                     folded_attrs_;
   // Per (var,attr) pairs folded above (key "var\x01attr"), so write_attr_set
   // skips re-emitting a folded attr that occurs deeper than the top-level body
   // (e.g. a memory's `mem.[wensize]=N` written inside the always block).
-  std::unordered_set<std::string>              folded_keys_;
+  std::unordered_set<std::string>                                  folded_keys_;
   // Body nets a reg binds as its clock/reset pin (`reg q:[clock_pin=ref <net>]`).
   // A derived clock (`gclk = clk_b & gate`) is an internal combinational signal:
   // the declare-first hoist would emit the reg ahead of `<net>`'s driver, so the
@@ -310,24 +319,28 @@ private:
   // `wire` pre-declare when its single driver allows it, otherwise a minted
   // `wire <net>__pinw` alias assigned the net's final value at the region end
   // (the attr rewritten to `ref <net>__pinw`); the names are stripped (post-SSA).
-  std::unordered_set<std::string>              pin_dep_nets_;
+  std::unordered_set<std::string>                                  pin_dep_nets_;
   // EVERY body net read as the ref value of a folded attribute, for ANY key (a
   // superset of pin_dep_nets_, which covers only the `_pin` keys whose driver is
   // relocated ahead of the declares).  A folded attr rides on its variable's
   // declare, and declares are emitted before every body write — so such a net is
   // read early and cannot be declared in place by its store (single_store_).
-  std::unordered_set<std::string>              folded_attr_refs_;
+  std::unordered_set<std::string>                                  folded_attr_refs_;
+  // Structured form of ref-valued folded attributes.  Keeping both directions
+  // avoids reparsing/scanning every rendered attribute string for each pin net.
+  std::unordered_map<std::string, std::unordered_set<std::string>> folded_attr_refs_by_owner_;
+  std::unordered_map<std::string, std::unordered_set<std::string>> folded_attr_owners_by_ref_;
   // Every name the EMITTED attr strings reference: pin_dep_nets_ plus any
   // minted `__pinw` aliases.  Dead-signal removal and instance-output inlining
   // must not fold a name an attr string spells out by name.
-  std::unordered_set<std::string>              pin_cone_;
+  std::unordered_set<std::string>                                  pin_cone_;
   // Collect the body-variable names a defining statement READS (operands after
   // child0), following single-use folded temps into their definitions so a
   // `gclk = clk_b & inv` whose `& ` is an inlined temp still reports `inv`.
-  void collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
+  void                                         collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
   // Same fold-following read collection applied to `node` ITSELF (a condition
   // ref, an if arm, …) rather than a defining statement's operand tail.
-  void collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const;
+  void                                         collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,
@@ -344,15 +357,15 @@ private:
   // flattening so the emitted Pyrope reads like the source (`res = a + 1`).
   struct Fold_info {
     Lnast_nid                    def_node;
-    Lnast_ntype::Lnast_ntype_int def_type  = Lnast_ntype::Lnast_ntype_invalid;
-    int                          def_count = 0;   // assignments to this name
-    int                          use_count = 0;   // reads of this name
-    int                          def_index = -1;  // pre-order index of the (single) def
-    int                          use_index = -1;  // pre-order index of the (single) use
+    Lnast_ntype::Lnast_ntype_int def_type      = Lnast_ntype::Lnast_ntype_invalid;
+    int                          def_count     = 0;        // assignments to this name
+    int                          use_count     = 0;        // reads of this name
+    int                          def_index     = -1;       // pre-order index of the (single) def
+    int                          use_index     = -1;       // pre-order index of the (single) use
     int                          min_use_index = 1 << 30;  // pre-order index of the FIRST (earliest) use
   };
-  std::unordered_map<std::string, Fold_info>                           fold_info_;    // by raw name
-  std::unordered_map<std::string, std::vector<int>>                    write_idx_;    // name -> sorted write pre-order indices
+  std::unordered_map<std::string, Fold_info>        fold_info_;  // by raw name
+  std::unordered_map<std::string, std::vector<int>> write_idx_;  // name -> sorted write pre-order indices
   // name -> EXCLUSIVE end pre-order index of the func_call subtree that defines it
   // (one past the last index used by that statement, i.e. by the result var, the
   // callee, and EVERY argument expression). A read whose index falls inside
@@ -363,26 +376,27 @@ private:
   // BEFORE the call's first node (which `inst_def_index` alone cannot detect,
   // since every argument is itself a descendant of the call and so sorts AFTER
   // the call's own start index).
-  std::unordered_map<std::string, int>                                 func_call_end_idx_;
-  std::unordered_set<std::string>                                      foldable_;     // temp names to inline at their use
-  std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
-  std::unordered_set<std::string>                                      dead_signals_; // stripped names written but never read (dropped)
+  std::unordered_map<std::string, int>              func_call_end_idx_;
+  std::unordered_set<std::string>                   foldable_;      // temp names to inline at their use
+  std::unordered_set<int64_t>                       folded_node_;   // def-node keys (get_class_index) to skip
+  std::unordered_set<std::string>                   dead_signals_;  // stripped names written but never read (dropped)
   // Every READ name plus its dotted ancestor prefixes (`a.b.c` read -> {a, a.b,
   // a.b.c}). Lets the bundle reconstruction skip re-grouping a NEVER-read tuple
   // base into `wire base:(...) = nil` — detuple only re-splits a tuple that is
   // read, so a write-only bundle would leave field stores tolg cannot lower.
-  std::unordered_set<std::string>                                      read_field_prefixes_;
+  std::unordered_set<std::string>                   read_field_prefixes_;
   // Mark/collect signals that are assigned but never read (and are not ports,
   // regs, the clock/reset cone, or instance temps) so their def statements are
   // dropped. firtool SSA+poison-init emits a dead base per versioned signal.
-  void compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid);
+  void                                              compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid);
 
   // ── mux collapse ──────────────────────────────────────────────────────────
   // An if/unique-if whose every arm is a single value-def to the SAME scalar `x`
   // is a mux: `x=D; if c {x=v}` (Verilog `x = c ? v : D`). Collapse it to one
   // conditional-expression assignment `x = if c0 {v0} elif c1 {v1} … else {D}`,
   // matching the RTL's size AND data-flow complexity. An n-way unique-if (Verilog
-  // parallel/`unique case` -> hotmux) becomes the if/elif chain.
+  // parallel/`unique case` -> hotmux) stays a `unique if` expression so a
+  // Pyrope re-read reconstructs a Hotmux rather than a priority Mux.
   struct Mux_arm {
     Lnast_nid cond;  // condition ref/const
     Lnast_nid def;   // the arm's single value-def stmt (render_def_rhs gives the value)
@@ -391,39 +405,36 @@ private:
     std::string          lhs;             // target scalar (stripped)
     bool                 unique = false;  // was a unique-if
     std::vector<Mux_arm> arms;
-    Lnast_nid            else_def;        // else value-def: the else arm, or the preceding default store
+    Lnast_nid            else_def;           // else value-def: the else arm, or the preceding default store
     bool                 fold_decl = false;  // emit `mut lhs[:T] = if…` (the poison `mut lhs = 0` declare was dropped)
     std::string          decl_type;          // type suffix for the folded declare (may be empty)
   };
-  std::unordered_map<int64_t, Mux_info> mux_info_;  // keyed by if-node class index
-  void                                  analyze_muxes(Lnast_nid stmts_nid);
+  std::unordered_map<int64_t, Mux_info>      mux_info_;  // keyed by if-node class index
+  void                                       analyze_muxes(Lnast_nid stmts_nid);
   // ── expression inlining on top of the mux collapse ────────────────────────
-  // Three single-use reader temps render inline at their read, and their def
+  // Two single-use reader temps render inline at their read, and their def
   // statements (and hoists) disappear:
   //  - `_b2i_N` (bool→int branch merge, arms 1/0) → `unsigned(<cond>)`
-  //  - `_mux_N` (hoisted ternary) whose single use is a bare scalar store RHS →
-  //    the conditional expression itself (`x = if c {a} else {b}`)
   //  - `<base>__wN` (reader SSA version) whose single def is a scalar store →
   //    its RHS value (kills the `const x__w1 = v` line; the poison/mux read it)
   std::unordered_map<std::string, Lnast_nid> bool_inline_;   // stripped name → cond nid
-  std::unordered_map<std::string, int64_t>   mux_inline_;    // stripped name → mux_info_ key
   std::unordered_map<std::string, Lnast_nid> value_inline_;  // stripped name → RHS value nid
-  void        analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_nid);
-  std::string render_mux_expr(const Mux_info& mi);  // `if c0 {v0} elif … else {D}`
+  void                                       analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_nid);
+  std::string                                render_mux_expr(const Mux_info& mi);  // `if c0 {v0} elif … else {D}`
   // The single value-def stmt of a stmts block that writes ONLY scalar `out_lhs`
   // (returns its node), or invalid. If `expect` is non-empty the target must equal
   // it; otherwise the target is reported in out_lhs.
-  Lnast_nid arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const;
-  std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;   // range-temp name -> "lo","hi"
-  std::vector<Lnast_nid> get_mask_nodes_;                                             // every get_mask, for range-mask resolution
-  std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index
-  std::vector<std::pair<Lnast_nid, int>> store_nodes_;                                // every store + its pre-order index
+  Lnast_nid                                  arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const;
+  std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;  // range-temp name -> "lo","hi"
+  std::vector<Lnast_nid>                 get_mask_nodes_;                            // every get_mask, for range-mask resolution
+  std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                           // every tuple_get + its pre-order index
+  std::vector<std::pair<Lnast_nid, int>> store_nodes_;                               // every store + its pre-order index
   // Module-instance results (`mut inst = Mod(args)`), stripped names: their output
   // ports may print with dot notation `inst.port` (instead of `inst["port"]`).
-  std::unordered_set<std::string> instance_results_;
+  std::unordered_set<std::string>        instance_results_;
   // Instance-output extraction temps (`_t = inst["port"]`) selected to be inlined
   // as `inst.port` at every use; their hoisted `wire`/`mut` declaration is dropped.
-  std::unordered_set<std::string> instance_output_inlined_;
+  std::unordered_set<std::string>        instance_output_inlined_;
 
   // Pre-pass: walk the whole tree, populate the maps above, and decide which
   // temps are foldable.  Called once at the start of write_all().
@@ -449,9 +460,9 @@ private:
   // the same window. See the definition for the miscompile this exists to stop.
   // `on_stack` detects a cycle, `done` memoizes an already-verified cone so a
   // re-converging DAG is not mistaken for one.
-  bool operands_stable_deep(Lnast_nid def_node, int d, int u, std::unordered_set<std::string>& on_stack,
-                            std::unordered_set<std::string>& done, int walk_depth) const;
-  bool operands_stable_deep(Lnast_nid def_node, int d, int u) const {
+  bool        operands_stable_deep(Lnast_nid def_node, int d, int u, std::unordered_set<std::string>& on_stack,
+                                   std::unordered_set<std::string>& done, int walk_depth) const;
+  bool        operands_stable_deep(Lnast_nid def_node, int d, int u) const {
     std::unordered_set<std::string> on_stack;
     std::unordered_set<std::string> done;
     return operands_stable_deep(def_node, d, u, on_stack, done, 0);
@@ -460,9 +471,9 @@ private:
   // definition. Used only by operands_stable_deep.
   bool may_inline_name(const std::string& nm) const;
   // True if `name` is a `___tmp` selected for inlining.
-  bool        is_foldable(std::string_view name) const { return foldable_.count(std::string(name)) != 0; }
+  bool is_foldable(std::string_view name) const { return foldable_.count(std::string(name)) != 0; }
   // True if a node's def-key is in folded_node_ (its statement is suppressed).
-  bool        is_folded_node(Lnast_nid nid) const { return folded_node_.count(nid.get_class_index().value) != 0; }
+  bool is_folded_node(Lnast_nid nid) const { return folded_node_.count(nid.get_class_index().value) != 0; }
 
   // Render a value node (ref/const, or a foldable temp's inlined expression) to
   // a Pyrope expression string.  operand_ctx => parenthesise a loose (infix /
@@ -496,13 +507,13 @@ private:
   // alias a user variable / port: on collision the suffix `_<M>` is appended
   // until free.  Stable (the `%` suffix derives from the content hash) and
   // consistent (def and use share the cached mapping).
-  std::string emit_name_for(std::string_view tmp) const;
+  std::string                                          emit_name_for(std::string_view tmp) const;
   // `<base>___ssa_<N>` -> a FREE `<base>__w<M>` (M >= N). `__wN` is the
   // writer's own output namespace, so a re-emitted body can already hold the
   // natural target; landing on it would merge two variables into one emitted
   // identifier. Memoized so the def and every use agree.
-  void        seed_emit_names() const;
-  std::string ssa_emit_name_for(std::string_view name, size_t pos) const;
+  void                                                 seed_emit_names() const;
+  std::string                                          ssa_emit_name_for(std::string_view name, size_t pos) const;
   mutable std::unordered_map<std::string, std::string> ssa_emit_names_;     // <base>___ssa_<N> -> <base>__w<M>
   mutable std::unordered_map<std::string, std::string> tmp_emit_names_;     // %head -> t<id>
   mutable std::unordered_set<std::string>              used_emit_names_;    // every output name taken

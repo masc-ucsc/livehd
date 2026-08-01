@@ -31,7 +31,7 @@
 // (0 = built-in default). The first built-in obligation is Hotmux selector
 // one-hotness; user assert/assert_always/assume materialized in tolg are handled
 // here too. The add_label_optional registry below IS the pass.formal.* option
-// set. See todo/livehd/2f-formal.
+// set. See todo/livehd/2f-verify.
 class Pass_formal : public Pass {
 public:
   explicit Pass_formal(const Eprp_var& var);

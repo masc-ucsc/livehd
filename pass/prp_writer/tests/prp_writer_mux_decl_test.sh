@@ -13,12 +13,13 @@
 # declared and did not recompile:
 #     read of undefined variable '_mux_1'
 #
-# analyze_expr_inlines now declines the inline when the consuming store is
-# itself already folded, so the temp keeps its own statement.
+# Mux temporaries now always keep their own conditional-expression statement.
+# Besides avoiding this correctness conflict, that removes the old search for
+# the sole consumer, which scanned every store once for every mux.
 #
 # The gate is the invariant, not the mechanism: RE-COMPILING the writer's own
-# output must succeed. The `_mux_` declaration check below is a corroborating
-# mechanism check, skipped if a future writer spells the shape without a temp.
+# output must succeed. The `_mux_` declaration check below corroborates that
+# every retained temporary has a definition.
 # Sibling coverage: //inou/prp:prp-v2prp2v-writer_undefined_mux proves both
 # round-trip equivalence checks (this test only
 # proves it re-parses, in 0.1s and with no yosys/solver); and

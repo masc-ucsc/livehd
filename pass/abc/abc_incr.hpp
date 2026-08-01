@@ -102,11 +102,10 @@ public:
   [[nodiscard]] const std::string& dir() const { return dir_; }
 
   // Salt for the whole cache: the global inputs the per-region compare does not
-  // see. Library CONTENT, sequential-mapping mode, DFF cell, assume feeding,
-  // plus a schema tag bumped when the mapper's read-back or the cache shape
-  // changes.
+  // see. Library CONTENT, sequential-mapping mode, DFF cell, plus a schema tag
+  // bumped when the mapper's read-back or the cache shape changes.
   [[nodiscard]] static uint64_t make_salt(std::string_view library_path, bool map_register, bool map_memory,
-                                          std::string_view dff_cell, bool use_proven_assume, bool use_all_assume);
+                                          std::string_view dff_cell);
 
 private:
   std::string dir_;

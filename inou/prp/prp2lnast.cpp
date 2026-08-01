@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "prp2lnast.hpp"
-#include "prp_builtins.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -21,6 +20,7 @@
 #include "diag.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "prp_builtins.hpp"
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
@@ -29,11 +29,11 @@
 #include "source_path.hpp"
 #include "str_tools.hpp"
 
-static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
+static constexpr std::string_view call_ref_arg_marker     = "__ref_arg";
 // Marks the receiver actual of a UFCS method call `obj.method(...)`
 // so the runner can reject UFCS onto a self-less callee (the direct call form
 // `method(obj, ...)` lowers without it). Positional, like __ref_arg.
-static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
+static constexpr std::string_view call_ufcs_arg_marker    = "__ufcs_arg";
 // Marks an explicit call-site generic binding (`f<int,string>(…)`): one
 // `store(__generic_arg, type_ref)` per type argument, in declaration order,
 // emitted BEFORE the normal actuals. The type_ref is either a named-type ref
@@ -44,13 +44,13 @@ static constexpr std::string_view call_generic_arg_marker = "__generic_arg";
 // referenced bundle's fields into named (`b=…`) / positional actuals at call
 // resolution, so `foo(a=1, ...rest)` binds rest's fields to the matching
 // params. The value child is the spread bundle's ref.
-static constexpr std::string_view call_spread_arg_marker = "__spread_arg";
+static constexpr std::string_view call_spread_arg_marker  = "__spread_arg";
 // Marks a call-site instance name (`alu::[name=pipeB_ex_mem](…)`): the value
 // child is a const string with the user-chosen instance name. Consumed (never
 // bound to a callee port) by the runner inliner — which uses it as the
 // hierarchical prefix for the inlined regs/mems — and by tolg, which uses it
 // as the Sub instance name when the callee is a non-inlined pipe/mod.
-static constexpr std::string_view call_inst_name_marker = "__inst_name";
+static constexpr std::string_view call_inst_name_marker   = "__inst_name";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -86,7 +86,7 @@ static constexpr int kMaxParseNesting = 4000;
 // skipped). *deepest_byte gets the offset where the peak occurred.
 static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
   int    bracket = 0, unary_run = 0, peak = 0;
-  size_t peak_byte = 0;
+  size_t peak_byte                                         = 0;
   enum { code, line_comment, block_comment, dq_string } st = code;
   for (size_t i = 0; i < src.size(); ++i) {
     const char c = src[i];
@@ -209,8 +209,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   try {
     // `from_file`-style buffer, but the bytes are already in `prp_file` (the ctor
     // read the file / took the LSP buffer). The locator path must be relative.
-    prp_buf    = std::make_unique<prpparse::Source_buffer>(src_relpath.empty() ? src_filename : src_relpath,
-                                                           prp_file);
+    prp_buf    = std::make_unique<prpparse::Source_buffer>(src_relpath.empty() ? src_filename : src_relpath, prp_file);
     prp_parser = std::make_unique<prpparse::Parser>(*prp_buf);
 
     // 2f-stream: process_description pulls one top-level construct at a time from
@@ -289,9 +288,9 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   stage_error(span_of_node(node), code, category, std::move(message), hint);
 }
 
-void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t start_line, uint32_t start_col,
-                                uint32_t end_line, uint32_t end_col, std::string_view code, std::string_view category,
-                                std::string message, std::string_view hint) const {
+void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t start_line, uint32_t start_col, uint32_t end_line,
+                                uint32_t end_col, std::string_view code, std::string_view category, std::string message,
+                                std::string_view hint) const {
   livehd::diag::Span span;
   span.file       = src_filename;
   span.start_byte = start_byte;
@@ -451,7 +450,6 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
                "(e.g. `signed(x)`/`unsigned(x)`, `x == false`)");
 }
 
-
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
   stage_error(livehd::diag::Span{}, code, category, std::move(message), hint);  // location-less (span = null)
 }
@@ -472,7 +470,10 @@ void Prp2lnast::report_prpparse_error(const prpparse::Diag& d) const {
   if (hint.empty() && !d.notes.empty()) {
     hint = d.notes.front().message;
   }
-  stage_error(std::move(span), d.code, d.category.empty() ? std::string_view("syntax") : std::string_view(d.category), d.message,
+  stage_error(std::move(span),
+              d.code,
+              d.category.empty() ? std::string_view("syntax") : std::string_view(d.category),
+              d.message,
               hint);
 }
 
@@ -614,8 +615,8 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
     // for(value, iterable, body, mode [, idx [, key]]).
     if (Lnast_ntype::is_for(ct)) {
       absl::flat_hash_set<std::string> binds;
-      Lnast_nid                       body_stmts;
-      int                             pos = 0;
+      Lnast_nid                        body_stmts;
+      int                              pos = 0;
       for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc), ++pos) {
         if (pos == 2) {
           body_stmts = cc;  // the loop body
@@ -710,7 +711,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
       }
     }
 
-    const bool                      is_func_body = Lnast_ntype::is_func_def(ct);
+    const bool                       is_func_body = Lnast_ntype::is_func_def(ct);
     absl::flat_hash_set<std::string> sig;
     if (is_func_body) {
       prp_collect_sig_targets(lnast.get(), c, sig);
@@ -777,8 +778,8 @@ namespace {
 // Names a statement-level child declares (mirror of read_is_visible's
 // stmt_declares lambda). Used to precompute read_scope_decls_.
 void prp_collect_stmt_decls(const Lnast& ln, const Lnast_nid& c, absl::flat_hash_set<std::string>& out) {
-  const auto ct = ln.get_type(c);
-  auto       c0 = ln.get_first_child(c);
+  const auto ct     = ln.get_type(c);
+  auto       c0     = ln.get_first_child(c);
   const bool c0_ref = !c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0));
   if (Lnast_ntype::is_declare(ct)) {
     if (c0_ref) {
@@ -806,8 +807,7 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
   auto for_binds_name = [&](const Lnast_nid& node) -> bool {
     int pos = 0;
     for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
-      if ((pos == 0 || pos == 4 || pos == 5) && Lnast_ntype::is_ref(lnast->get_type(c))
-          && (lnast->get_name(c) == rs.name)) {
+      if ((pos == 0 || pos == 4 || pos == 5) && Lnast_ntype::is_ref(lnast->get_type(c)) && (lnast->get_name(c) == rs.name)) {
         return true;
       }
     }
@@ -917,8 +917,8 @@ void Prp2lnast::check_undefined_reads() const {
   }
 
   for (const auto& rs : read_sites_) {
-    if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name)
-        || prp_name_is_placeholder_arg(rs.name) || hoisted.contains(rs.name)) {
+    if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name) || prp_name_is_placeholder_arg(rs.name)
+        || hoisted.contains(rs.name)) {
       continue;
     }
     if (read_is_visible(rs)) {
@@ -931,7 +931,12 @@ void Prp2lnast::check_undefined_reads() const {
         // `int(x)`/`uint(x)`/`integer(x)` were removed in favor of explicit
         // sign. Tailored guidance (mirrors the upass.tolg note) rather than a
         // generic "undefined function".
-        report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+        report_error_at(rs.start_byte,
+                        rs.end_byte,
+                        rs.start_line,
+                        rs.start_col,
+                        rs.end_line,
+                        rs.end_col,
                         "removed-int-cast",
                         "type",
                         std::format("the `{}(...)` cast was removed — use `signed(x)`/`unsigned(x)` to reinterpret a "
@@ -939,15 +944,25 @@ void Prp2lnast::check_undefined_reads() const {
                                     rs.name),
                         "Pyrope spells sign intent explicitly: `signed`/`unsigned` (or `sN`/`uN`)");
       } else {
-        report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
-                        "undefined-call",
-                        "name",
-                        std::format("call to undefined function '{}' (no such `comb`/`mod`/`pipe`, variable, or built-in)",
-                                    rs.name),
-                        "define it with `comb`/`mod`/`pipe`, import it, or check the spelling");
+        report_error_at(
+            rs.start_byte,
+            rs.end_byte,
+            rs.start_line,
+            rs.start_col,
+            rs.end_line,
+            rs.end_col,
+            "undefined-call",
+            "name",
+            std::format("call to undefined function '{}' (no such `comb`/`mod`/`pipe`, variable, or built-in)", rs.name),
+            "define it with `comb`/`mod`/`pipe`, import it, or check the spelling");
       }
     } else if (rs.is_type) {
-      report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+      report_error_at(rs.start_byte,
+                      rs.end_byte,
+                      rs.start_line,
+                      rs.start_col,
+                      rs.end_line,
+                      rs.end_col,
                       "unknown-type",
                       "type",
                       std::format("`{}` is not a type (no such `type`/`enum` is declared or in scope)", rs.name),
@@ -955,12 +970,18 @@ void Prp2lnast::check_undefined_reads() const {
                                   "like `u4`/`bool`/`string`",
                                   rs.name));
     } else {
-      report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
-                      "undefined-read",
-                      "name",
-                      std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
-                      "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
-                      "declaration to the end of its scope");
+      report_error_at(
+          rs.start_byte,
+          rs.end_byte,
+          rs.start_line,
+          rs.start_col,
+          rs.end_line,
+          rs.end_col,
+          "undefined-read",
+          "name",
+          std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
+          "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
+          "declaration to the end of its scope");
     }
   }
 }
@@ -1593,8 +1614,7 @@ static bool ts_subtree_has_loop_return(TSNode n, bool inside_loop) {
   if (ts_is_bare_return(n)) {
     return inside_loop;
   }
-  const bool now_loop
-      = inside_loop || t == "for_statement" || t == "while_statement" || t == "loop_statement";
+  const bool now_loop = inside_loop || t == "for_statement" || t == "while_statement" || t == "loop_statement";
   for (TSNode c : ts_node_named_children(n)) {
     if (ts_subtree_has_loop_return(c, now_loop)) {
       return true;
@@ -1678,24 +1698,31 @@ std::string_view Prp2lnast::scan_overflow_in_gap(uint32_t prev_end, uint32_t gap
   stripped.reserve(g.size());
   for (size_t k = 0; k < g.size();) {
     if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '/') {
-      while (k < g.size() && g[k] != '\n') ++k;  // line comment to EOL
+      while (k < g.size() && g[k] != '\n') {
+        ++k;  // line comment to EOL
+      }
     } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
       k += 2;
-      while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) ++k;
-      if (k + 1 < g.size()) k += 2;  // past the closing */
+      while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) {
+        ++k;
+      }
+      if (k + 1 < g.size()) {
+        k += 2;  // past the closing */
+      }
     } else {
       stripped.push_back(g[k]);
       ++k;
     }
   }
   size_t end = stripped.size();
-  while (end > 0 && (stripped[end - 1] == ' ' || stripped[end - 1] == '\t' || stripped[end - 1] == '\r'
-                     || stripped[end - 1] == '\n')) {
+  while (end > 0
+         && (stripped[end - 1] == ' ' || stripped[end - 1] == '\t' || stripped[end - 1] == '\r' || stripped[end - 1] == '\n')) {
     --end;
   }
   size_t begin = end;
-  while (begin > 0 && ((stripped[begin - 1] >= 'a' && stripped[begin - 1] <= 'z')
-                       || (stripped[begin - 1] >= 'A' && stripped[begin - 1] <= 'Z'))) {
+  while (begin > 0
+         && ((stripped[begin - 1] >= 'a' && stripped[begin - 1] <= 'z')
+             || (stripped[begin - 1] >= 'A' && stripped[begin - 1] <= 'Z'))) {
     --begin;
   }
   std::string_view last(stripped.data() + begin, end - begin);
@@ -1760,8 +1787,8 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
     TSNode gcond{}, gthen{};
     if (is_guarded_return_if(c, gcond, gthen)) {
       Pending_src pending_guard(*lnast, mint_src(c));
-      Lnast_node  cref    = ts_node_is_null(gcond) ? Lnast_node::create_const("true") : expr_to_node(gcond);
-      auto        if_idx  = builder.add_child(Lnast_ntype::create_if());
+      Lnast_node  cref   = ts_node_is_null(gcond) ? Lnast_node::create_const("true") : expr_to_node(gcond);
+      auto        if_idx = builder.add_child(Lnast_ntype::create_if());
       attach_loc(if_idx, c);
       lnast->add_child(if_idx, cref);
       auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
@@ -1792,7 +1819,7 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
         process_statement(c);
         in_return_loop_ = saved_in_loop;
         // Continuation guard.
-        auto if_idx = builder.add_child(Lnast_ntype::create_if());
+        auto if_idx     = builder.add_child(Lnast_ntype::create_if());
         attach_loc(if_idx, c);
         lnast->add_child(if_idx, Lnast_node::create_ref(return_flag_name_));
         auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
@@ -1836,21 +1863,21 @@ void Prp2lnast::process_statement(TSNode n) {
 
   using Handler                                                             = void (Prp2lnast::*)(TSNode);
   static const absl::flat_hash_map<std::string_view, Handler> stmt_dispatch = {
-      {  "declaration_statement",   &Prp2lnast::process_declaration_statement},
-      {             "assignment",              &Prp2lnast::process_assignment},
-      {        "while_statement",         &Prp2lnast::process_while_statement},
-      {          "for_statement",           &Prp2lnast::process_for_statement},
-      {         "loop_statement",          &Prp2lnast::process_loop_statement},
-      {         "tick_statement",          &Prp2lnast::process_tick_statement},
-      {         "step_statement",          &Prp2lnast::process_step_statement},
-      {      "control_statement",       &Prp2lnast::process_control_statement},
-      {                 "lambda",        &Prp2lnast::process_lambda_statement},
-      {        "enum_assignment",         &Prp2lnast::process_enum_assignment},
-      {         "type_statement",          &Prp2lnast::process_type_statement},
-      {       "import_statement",        &Prp2lnast::process_import_statement},
-      {         "test_statement",          &Prp2lnast::process_test_statement},
-      {        "spawn_statement",         &Prp2lnast::process_spawn_statement},
-      {         "impl_statement",          &Prp2lnast::process_impl_statement},
+      {"declaration_statement", &Prp2lnast::process_declaration_statement},
+      {           "assignment",            &Prp2lnast::process_assignment},
+      {      "while_statement",       &Prp2lnast::process_while_statement},
+      {        "for_statement",         &Prp2lnast::process_for_statement},
+      {       "loop_statement",        &Prp2lnast::process_loop_statement},
+      {       "tick_statement",        &Prp2lnast::process_tick_statement},
+      {       "step_statement",        &Prp2lnast::process_step_statement},
+      {    "control_statement",     &Prp2lnast::process_control_statement},
+      {               "lambda",      &Prp2lnast::process_lambda_statement},
+      {      "enum_assignment",       &Prp2lnast::process_enum_assignment},
+      {       "type_statement",        &Prp2lnast::process_type_statement},
+      {     "import_statement",      &Prp2lnast::process_import_statement},
+      {       "test_statement",        &Prp2lnast::process_test_statement},
+      {      "spawn_statement",       &Prp2lnast::process_spawn_statement},
+      {       "impl_statement",        &Prp2lnast::process_impl_statement},
   };
   // Expression-as-statement node kinds (lowered for side effects).
   static const absl::flat_hash_set<std::string_view> expr_stmt = {
@@ -1931,21 +1958,21 @@ void Prp2lnast::process_statement(TSNode n) {
           // (see uPass_verifier::classify_statement). The message is any
           // expression that resolves to a comptime string (a string literal or
           // an interpolated string), lowered the same way as the condition.
-          uint32_t   nnc       = ts_node_named_child_count(arg_tuple);
-          TSNode     cond_node = nnc >= 1 ? ts_node_named_child(arg_tuple, 0) : TSNode{};
+          uint32_t   nnc             = ts_node_named_child_count(arg_tuple);
+          TSNode     cond_node       = nnc >= 1 ? ts_node_named_child(arg_tuple, 0) : TSNode{};
           const bool saved_in_assert = in_assert_lowering_;
           in_assert_lowering_        = true;  // `.[bw_max]`/`.[bw_min]` legal here
-          Lnast_node cond_ref  = ts_node_is_null(cond_node) ? Lnast_node::create_const("true") : expr_to_node(cond_node);
+          Lnast_node cond_ref        = ts_node_is_null(cond_node) ? Lnast_node::create_const("true") : expr_to_node(cond_node);
           // Lower the message (if any) BEFORE creating the cassert node so the
           // helper statements an interpolated string emits land ahead of the
           // assertion in source order (otherwise the message ref would dangle).
-          bool       have_msg  = nnc >= 2;
+          bool       have_msg        = nnc >= 2;
           Lnast_node msg_ref;
           if (have_msg) {
             msg_ref = expr_to_node(ts_node_named_child(arg_tuple, 1));
           }
           in_assert_lowering_ = saved_in_assert;
-          auto idx = builder.add_child(Lnast_ntype::create_cassert());
+          auto idx            = builder.add_child(Lnast_ntype::create_cassert());
           attach_loc(idx, n);  // source span → verifier can point at this assertion
           lnast->add_child(idx, cond_ref);
           // The cassert NODE name does not survive upass re-emission, but its
@@ -2109,7 +2136,7 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
       abc_rv = rv;
     } else if (key == "color") {
       have_color = true;
-      auto txt = value_txt(rv);
+      auto txt   = value_txt(rv);
       if (is_quoted(txt)) {
         // strip the quotes; same label anywhere in this file => same region
         txt = txt.substr(1, txt.size() - 2);
@@ -2123,10 +2150,10 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
         }
         region_id = itr->second;
       } else {
-        int         v      = 0;
-        const auto* b      = txt.data();
-        const auto* e      = txt.data() + txt.size();
-        auto [p, ec]       = std::from_chars(b, e, v);
+        int         v = 0;
+        const auto* b = txt.data();
+        const auto* e = txt.data() + txt.size();
+        auto [p, ec]  = std::from_chars(b, e, v);
         if (ec != std::errc{} || p != e || v <= 0) {
           report_error(rv,
                        "scope-attr-value",
@@ -2355,8 +2382,8 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 }
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
-                                                bool rhs_is_fcall, std::string_view rhs_fcall_name,
-                                                std::string_view overflow_kind, bool rhs_name_bindable) {
+                                                bool rhs_is_fcall, std::string_view rhs_fcall_name, std::string_view overflow_kind,
+                                                bool rhs_name_bindable) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -2717,8 +2744,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // typecheck's "nil scalar cannot re-shape to a tuple" guard never fires)
     // instead of a nil scalar. Sized arrays (`:[N]T`) keep their prefill path;
     // reg arrays are left to the declare cluster. (2f-splice: array_nil_shape.)
-    if (has_decl && reg_decl_head.is_invalid() && !ts_node_is_null(tc) && rvalue.is_const()
-        && rvalue.get_name() == "nil") {
+    if (has_decl && reg_decl_head.is_invalid() && !ts_node_is_null(tc) && rvalue.is_const() && rvalue.get_name() == "nil") {
       TSNode ty = child_by_field(tc, "type");
       if (!ts_node_is_null(ty) && std::string_view(ts_node_type(ty)) == "array_type" && extract_array_dims(tc).empty()) {
         auto ta_idx = builder.add_child(Lnast_ntype::create_tuple_add());
@@ -2739,14 +2765,14 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // bit-pattern literal's unknown bits. `bool` stays explicit (boolean(...));
     // nil/array/reg/wrap-sat are also excluded.
     if (has_decl && reg_decl_head.is_invalid() && overflow_kind.empty() && !ts_node_is_null(tc)) {
-      const TSNode      ty = child_by_field(tc, "type");
-      const Scalar_kind dk = declared_scalar_kind(ty);
+      const TSNode      ty          = child_by_field(tc, "type");
+      const Scalar_kind dk          = declared_scalar_kind(ty);
       // An UNBOUNDED `string` declaration normalizes its literal initializer with
       // an idempotent `string(...)` wrap. (The old unbounded-`int` wrap is gone:
       // there is no value-preserving integer cast anymore — `signed`/`unsigned`
       // are sign reinterprets that need a fully-typed input — so a bare
       // `:signed`/`:unsigned`/`:uint` integer initializer is bound directly.)
-      const bool is_nil_init = store_value.is_const() && store_value.get_name() == "nil";
+      const bool        is_nil_init = store_value.is_const() && store_value.get_name() == "nil";
       if (dk == Scalar_kind::string && extract_array_dims(tc).empty() && !is_nil_init) {
         Lnast_node casted = builder.mint_tmp_ref();
         auto       fc     = builder.add_child(Lnast_ntype::create_func_call());
@@ -2990,7 +3016,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // this the qualifier was silently dropped and the field never wrapped.
       if (!overflow_kind.empty()) {
         Lnast_node type_ref = builder.mint_tmp_ref();
-        auto       tg        = builder.add_child(Lnast_ntype::create_tuple_get());
+        auto       tg       = builder.add_child(Lnast_ntype::create_tuple_get());
         lnast->add_child(tg, type_ref);
         lnast->add_child(tg, root);
         for (auto& p : path) {
@@ -3270,7 +3296,13 @@ void Prp2lnast::process_assignment(TSNode n) {
       }
     }
   }
-  (void)process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, overflow_kind,
+  (void)process_lvalue_for_assign(lv,
+                                  rvalue_node,
+                                  decl,
+                                  tc,
+                                  rhs_is_fcall,
+                                  rhs_fcall_name,
+                                  overflow_kind,
                                   /*rhs_name_bindable=*/!rhs_positional_literal);
 }
 
@@ -3834,7 +3866,7 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
                }()) {
       // `...rest` call-argument spread: capture the inner bundle ref and mark
       // it so the runner expands rest's fields into named/positional actuals.
-      TSNode arg_n = child_by_field(c, "argument");
+      TSNode arg_n  = child_by_field(c, "argument");
       arg.is_spread = true;
       arg.value     = expr_to_node(arg_n);
     } else {
@@ -3873,12 +3905,12 @@ std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode 
   auto lower_one = [&](TSNode ty) -> Lnast_node {
     std::string_view tt(ts_node_type(ty));
     if (tt == "expression_type" || tt == "dot_expression_type") {
-      auto txt = trim(get_text(ty));
+      auto       txt = trim(get_text(ty));
       // A CONSTANT-valued generic (`f<3>`, `f<true>`, `f<'s'>`) rides as a
       // const, not a ref — a ref named `3` is malformed (lnastfmt) and the
       // runner substitutes the literal for body reads of the generic (todo 3g
       // A/D). A named type / lambda stays a ref (resolved at bind time).
-      const char c0 = txt.empty() ? '\0' : txt.front();
+      const char c0  = txt.empty() ? '\0' : txt.front();
       const bool is_const_arg
           = std::isdigit(static_cast<unsigned char>(c0)) || c0 == '\'' || c0 == '"' || txt == "true" || txt == "false";
       return is_const_arg ? Lnast_node::create_const(std::string(txt)) : Lnast_node::create_ref(std::string(txt));
@@ -3892,8 +3924,8 @@ std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode 
   };
   for (TSNode item : ts_node_named_children(gen)) {
     if (std::string_view(ts_node_type(item)) == "arg_assignment") {
-      TSNode      lv = child_by_field(item, "lvalue");   // generic NAME
-      TSNode      rv = child_by_field(item, "rvalue");   // bound type/const/lambda
+      TSNode      lv = child_by_field(item, "lvalue");  // generic NAME
+      TSNode      rv = child_by_field(item, "rvalue");  // bound type/const/lambda
       std::string nm = ts_node_is_null(lv) ? std::string{} : std::string(trim(get_text(lv)));
       out.push_back({lower_one(rv), std::move(nm)});
     } else {
@@ -4056,7 +4088,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           if (val == "false" || val == "0") {
             has_hdl = true;
           } else if (!val.empty() && val != "true" && val != "1") {
-            report_error(item, "timecheck-bad-value", "type",
+            report_error(item,
+                         "timecheck-bad-value",
+                         "type",
                          "the `timecheck` attribute must be `false` (opt out of the timing/comb-loop checks) or `true`",
                          "write `timecheck=false`");
           }
@@ -4219,12 +4253,12 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       auto             add_one = [&](TSNode ti) {
         TSNode id = child_by_field(ti, "identifier");
         if (!ts_node_is_null(id)) {
-          auto gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+          auto   gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
           // A DECLARATION default (`<T, N=1>`, todo 3g B) rides as the default's
           // source text in a `const` child of the generic ref: func_extract
           // lifts it into Lnast::generic_defaults_, and the runner re-classifies
           // it (type / constant / lambda) exactly like an explicit `<…>` arg.
-          TSNode def = child_by_field(ti, "definition");
+          TSNode def  = child_by_field(ti, "definition");
           if (!ts_node_is_null(def)) {
             lnast->add_child(gref, Lnast_node::create_const(std::string(trim(get_text(def)))));
           }
@@ -4250,22 +4284,22 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // they bracket. The `ref` mod is encoded as the assign's RHS const text
   // ("ref") when no explicit default is present; downstream passes
   // (func_extract, constprop) detect it without inventing a new ntype.
-  auto                                   in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
-  std::vector<Param_attr>                input_attrs;
+  auto                                        in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  std::vector<Param_attr>                     input_attrs;
   // `-> (reg q:T[@N] [= init])` output registers: the q pin IS the
   // output (the counter idiom). Collected here; a matching `reg` declare is
   // synthesized at body entry below so tolg lowers the output as a Flop.
-  std::vector<std::pair<TSNode, TSNode>> output_regs;  // (typed_identifier, definition)
+  std::vector<std::pair<TSNode, TSNode>>      output_regs;  // (typed_identifier, definition)
   // Comb INPUT defaults (`comb f(in1:u4, in2=3)`, todo 3g E): (param name,
   // default expr node), in declaration order. Lowered as a body-prologue
   // `store(name, expr)` after the body stmts open (so the default evaluates in
   // param-tuple scope — an EARLIER param is readable — and is self-contained).
   std::vector<std::pair<std::string, TSNode>> input_defaults;
-  auto                                   collect_args = [&](TSNode                    container,
-                                                            const Lnast_nid&          parent_tup,
-                                                            std::vector<std::string>* names_out,
-                                                            std::vector<Param_attr>*  attrs_out,
-                                                            bool                      is_io_output) {
+  auto                                        collect_args = [&](TSNode                    container,
+                                                                 const Lnast_nid&          parent_tup,
+                                                                 std::vector<std::string>* names_out,
+                                                                 std::vector<Param_attr>*  attrs_out,
+                                                                 bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
     bool   pending_is_ref    = false;
@@ -4337,9 +4371,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // grammar arg_list `mod` field: choice('...', 'ref', 'reg'). The marker
         // is an anonymous token, so classify by its source text (not node type).
         std::string_view mod_txt = trim(get_text(ci));
-        next_is_ref    = (mod_txt == "ref");
-        next_is_reg    = (mod_txt == "reg");
-        next_is_vararg = (mod_txt == "...");  // var-args param
+        next_is_ref              = (mod_txt == "ref");
+        next_is_reg              = (mod_txt == "reg");
+        next_is_vararg           = (mod_txt == "...");  // var-args param
         continue;
       }
       if (ct == "typed_identifier") {
@@ -4498,8 +4532,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // Walk the input arg container looking for typed_identifier nodes whose
   // type carries a concrete uint_type/sint_type width. Each frame is a
   // lexical scope; outer scopes remain visible for nested lambdas.
-  absl::flat_hash_map<std::string, int64_t>         body_param_bits;
-  std::function<void(TSNode)> capture_param_bits = [&](TSNode node) {
+  absl::flat_hash_map<std::string, int64_t> body_param_bits;
+  std::function<void(TSNode)>               capture_param_bits = [&](TSNode node) {
     if (ts_node_is_null(node)) {
       return;
     }
@@ -4955,20 +4989,66 @@ void Prp2lnast::maybe_emit_timecheck(TSNode timing_slot, TSNode id_node) {
   attach_loc(tcix, timing_slot);
 }
 
-// A nested-enum entry value (`bird = enum(eagle, parrot)`): the rvalue node is
-// directly an `enum_definition`. Returns the node, or a null TSNode when the
-// value is anything else (ordinal literal, payload ctor, plain expression).
+// A nested-enum entry value can use either the explicit
+// `bird = enum(eagle, parrot)` spelling or the documented bare tuple
+// `bird = (,eagle, ,parrot)`. Returns the entry container, or a null TSNode
+// when the value is anything else (ordinal literal, payload ctor, expression).
 static TSNode enum_definition_node_of(TSNode rv) {
   if (ts_node_is_null(rv)) {
     return rv;
   }
-  if (std::string_view(ts_node_type(rv)) == "enum_definition") {
+  const std::string_view type(ts_node_type(rv));
+  if (type == "enum_definition" || type == "tuple") {
     return rv;
   }
   return TSNode{};
 }
 
 void Prp2lnast::parse_enum_definition_entries(TSNode enum_def_node, std::vector<Enum_entry>& entries) {
+  if (std::string_view(ts_node_type(enum_def_node)) == "tuple") {
+    for (TSNode item : ts_node_named_children(enum_def_node)) {
+      const std::string_view item_type(ts_node_type(item));
+      if (item_type == "comment") {
+        continue;
+      }
+      Enum_entry e;
+      if (item_type == "identifier") {
+        e.name = trim(get_text(item));
+      } else if (item_type == "typed_identifier") {
+        TSNode id = child_by_field(item, "identifier");
+        e.name    = trim(get_text(ts_node_is_null(id) ? item : id));
+        if (TSNode tc = child_by_field(item, "type"); !ts_node_is_null(tc)) {
+          e.type_node = tc;
+          e.has_type  = true;
+        }
+      } else if (item_type == "assignment") {
+        TSNode lv = child_by_field(item, "lvalue");
+        TSNode rv = child_by_field(item, "rvalue");
+        if (ts_node_is_null(lv)) {
+          continue;
+        }
+        if (std::string_view(ts_node_type(lv)) == "typed_identifier") {
+          TSNode id = child_by_field(lv, "identifier");
+          e.name    = trim(get_text(ts_node_is_null(id) ? lv : id));
+          if (TSNode tc = child_by_field(lv, "type"); !ts_node_is_null(tc)) {
+            e.type_node = tc;
+            e.has_type  = true;
+          }
+        } else {
+          e.name = trim(get_text(lv));
+        }
+        if (!ts_node_is_null(rv)) {
+          e.value_node = rv;
+          e.has_value  = true;
+        }
+      }
+      if (!e.name.empty()) {
+        entries.push_back(std::move(e));
+      }
+    }
+    return;
+  }
+
   TSNode args = child_by_field(enum_def_node, "input");
   if (ts_node_is_null(args)) {
     return;
@@ -5097,12 +5177,12 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     }
     return std::string(trim(get_text(tc)));
   };
-  const std::string level_pt = type_text_of(enum_level_type);
+  const std::string level_pt    = type_text_of(enum_level_type);
   // An INTEGER level type (`enum V:int`/`:i4`/`:u8` …) forces SEQUENTIAL ordinal
   // numbering (0,1,2,…), not the default one-hot, and makes an explicit entry
   // value an ORDINAL (not a payload construction) that resets the sequence.
   // (2f-enum group B.)
-  auto is_int_type = [](std::string_view s) {
+  auto              is_int_type = [](std::string_view s) {
     if (s == "int" || s == "integer" || s == "uint" || s == "unsigned" || s == "signed") {
       return true;
     }
@@ -5321,7 +5401,10 @@ void Prp2lnast::process_type_statement(TSNode n) {
   // rides pub_values as its `uN`/`sN` text — see harvest_pub_values).
   if (!ts_node_is_null(child_by_field(n, "pub"))) {
     if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
-      report_error(n, "pub-not-file-scope", "syntax", "`pub` is only valid on file-scope declarations",
+      report_error(n,
+                   "pub-not-file-scope",
+                   "syntax",
+                   "`pub` is only valid on file-scope declarations",
                    "move the type alias to the file's top level");
     }
     lnast->add_pub(trim(get_text(name)), "type", mint_src(name));
@@ -5334,12 +5417,11 @@ void Prp2lnast::process_type_statement(TSNode n) {
   // annotation borrows the width (a scalar type carries no field bundle, so
   // the store-the-tuple path below cannot preserve it). Named-identifier
   // aliases (`type Foo = Bar`) and tuple types keep `prim_type_none`.
-  TSNode alias = child_by_field(n, "alias");
-  const bool scalar_prim_alias =
-      !ts_node_is_null(alias)
-      && (std::string_view(ts_node_type(alias)) == "uint_type" || std::string_view(ts_node_type(alias)) == "sint_type"
-          || std::string_view(ts_node_type(alias)) == "bool_type"
-          || std::string_view(ts_node_type(alias)) == "string_type");
+  TSNode     alias = child_by_field(n, "alias");
+  const bool scalar_prim_alias
+      = !ts_node_is_null(alias)
+        && (std::string_view(ts_node_type(alias)) == "uint_type" || std::string_view(ts_node_type(alias)) == "sint_type"
+            || std::string_view(ts_node_type(alias)) == "bool_type" || std::string_view(ts_node_type(alias)) == "string_type");
 
   auto idx = builder.add_child(Lnast_ntype::create_declare());
   lnast->add_child(idx, Lnast_node::create_ref(get_text(name)));
@@ -5505,7 +5587,7 @@ void Prp2lnast::process_import_statement(TSNode n) {
 }
 
 void Prp2lnast::process_test_statement(TSNode n) {
-  TSNode code = child_by_field(n, "code");
+  TSNode      code = child_by_field(n, "code");
   // The grammar splits the dotted test selector (f_name: `test_name`, e.g.
   // `counter.held_high`) from the optional runtime parameter list (f_input: an
   // `arg_list`, typed-with-defaults exactly like a comb's inputs). The selector
@@ -5514,8 +5596,8 @@ void Prp2lnast::process_test_statement(TSNode n) {
   if (TSNode name = child_by_field(n, "name"); !ts_node_is_null(name)) {
     test_name = std::string(trim(get_text(name)));
   }
-  auto   fd_idx = builder.add_child(Lnast_ntype::create_func_def());
-  auto   tmp    = builder.mint_tmp_ref();
+  auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
+  auto tmp    = builder.mint_tmp_ref();
   lnast->add_child(fd_idx, tmp);
   lnast->add_child(fd_idx, Lnast_node::create_const("comb"));
   lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());                // generics
@@ -5702,10 +5784,10 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
       // 1-tuple would stamp Kind::tuple and a parent `+`/`&`/`==` would reject
       // it; see 2f-unary_type) — EXCEPT a spread `...x`, which is a genuine
       // 1-element bundle.
-      bool plain = itt != "assignment" && itt != "comment";
+      bool             plain = itt != "assignment" && itt != "comment";
       if (itt == "unary_expression") {
         TSNode op_n = child_by_field(it, "operator");
-        plain = !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) != "op_spread";
+        plain       = !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) != "op_spread";
       }
       const auto tail = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
       if (plain && tail.find(',') == std::string_view::npos) {
@@ -5780,7 +5862,7 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
         "impl_statement",
         "scope_statement",
     };
-    Conditional_scope guard(&conditional_depth_);
+    Conditional_scope   guard(&conditional_depth_);
     // Collected once: the block can be huge and both the reverse last-non-
     // comment scan and the forward walk need indexed access.
     std::vector<TSNode> kids;
@@ -6277,13 +6359,13 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
             // name. Named fields (`x:int` → typed_field, `x=nil` → assignment) are
             // fine — only the unnamed bare-type form is malformed.
             if (std::string_view(ts_node_type(item)) == "identifier") {
-              report_error(item,
-                           "unnamed-tuple-type-field",
-                           "type",
-                           std::format("a tuple-type field must be named (`name:T`): a bare `{}` has no field name",
-                                       trim(get_text(item))),
-                           "use an array type `[N]T` for N uniform elements, or name each field "
-                           "(`_:T` for an anonymous field)");
+              report_error(
+                  item,
+                  "unnamed-tuple-type-field",
+                  "type",
+                  std::format("a tuple-type field must be named (`name:T`): a bare `{}` has no field name", trim(get_text(item))),
+                  "use an array type `[N]T` for N uniform elements, or name each field "
+                  "(`_:T` for an anonymous field)");
             }
           }
           auto bundle_ref = tuple_to_node(inner, false);
@@ -6363,8 +6445,8 @@ void Prp2lnast::record_type_name_read(const TSNode& type_node) {
   // the symbol that must resolve — stripping any `.field` (dotted/import),
   // `(args)` (generic call), or trailing syntax, mirroring how a value read of
   // `a.b` only records the base `a`.
-  auto raw = trim(get_text(type_node));
-  size_t n = 0;
+  auto   raw = trim(get_text(type_node));
+  size_t n   = 0;
   while (n < raw.size()) {
     const unsigned char c = static_cast<unsigned char>(raw[n]);
     if (std::isalnum(c) || c == '_' || c == '$' || c == '%' || c == '#' || c == '`') {
@@ -6665,11 +6747,11 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   // with a dangling tmp — so the sentinel replaces it. Outputs / mod / pipe keep
   // the direct encoding.
   const bool defer_default = !is_io_output && lambda_kind == "comb" && !is_vararg_mod && !ts_node_is_null(definition_or_null);
-  Lnast_node arg_val = is_vararg_mod                          ? Lnast_node::create_const("...")
-                       : defer_default                        ? Lnast_node::create_const("__default")
-                       : !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
-                       : is_ref_mod                           ? Lnast_node::create_const("ref")
-                                                              : Lnast_node::create_const("nil");
+  Lnast_node arg_val       = is_vararg_mod                          ? Lnast_node::create_const("...")
+                             : defer_default                        ? Lnast_node::create_const("__default")
+                             : !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
+                             : is_ref_mod                           ? Lnast_node::create_const("ref")
+                                                                    : Lnast_node::create_const("nil");
   lnast->add_child(aidx, arg_val);
   // Optional type subtree (3rd child).
   TSNode type_cast = child_by_field(typed_ident, "type");
@@ -8657,15 +8739,14 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
                      "write `past[N](value)` — the result is `value` delayed by N clock cycles");
       }
       const std::string delay_txt(func_ref.get_name().substr(std::string_view("past[").size(),
-                                                              func_ref.get_name().size() - std::string_view("past[").size()
-                                                                  - 1));
+                                                             func_ref.get_name().size() - std::string_view("past[").size() - 1));
       // Cluster head: attr_set(%past, "type", "stage") + trailing stages(N,N).
       // Identical shape to a source-level `stage[N] %past = x` (see the
       // declaration_statement handler), so the decl-merge folds it into a
       // `declare(%past, none, "reg", stages(N,N))` and tolg lowers one depth-N
       // pipeline Flop.
-      auto past_ref = builder.mint_tmp_ref();
-      auto as_idx   = builder.add_child(Lnast_ntype::create_attr_set());
+      auto              past_ref = builder.mint_tmp_ref();
+      auto              as_idx   = builder.add_child(Lnast_ntype::create_attr_set());
       lnast->add_child(as_idx, past_ref);
       lnast->add_child(as_idx, Lnast_node::create_const("type"));
       lnast->add_child(as_idx, Lnast_node::create_const("stage"));

@@ -2571,8 +2571,58 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           collx = Dlop::from_pyrope(val);
         }
       }
-      auto     rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
-      auto     wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
+      auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
+
+      // ---- ONE edge per memory, enforced ------------------------------------
+      // The Memory cell carries a SINGLE global `posclk`; yosys keeps a bit per
+      // port. Taking WR_CLK_POLARITY whole (`as_int()`) collapsed a mixed set to
+      // "nonzero == posedge", and RD_CLK_POLARITY was dropped outright, so a
+      // negedge synchronous read imported as posedge with no diagnostic.
+      //
+      // User ruling 2026-08-01: a memory whose ports do not all commit on the
+      // SAME edge is NOT A VALID MEMORY, so this is a named refusal, not a
+      // modelling gap. (A latch may mix phases -- that is what the formal phase
+      // schedule is for -- a memory may not.) The polarity is now derived from
+      // every CLOCKED port, read ports included, which also fixes a clocked-read
+      // ROM: with no write ports WR_CLK_POLARITY is empty, so it used to import
+      // as posclk=0, i.e. negedge.
+      const auto param_bit = [&](const RTLIL::IdString& id, int i) {
+        if (!cell->hasParam(id)) {
+          return false;
+        }
+        const auto s = cell->getParam(id).as_string();  // MSB first
+        const int  n = static_cast<int>(s.size());
+        return i < n && s[n - 1 - i] == '1';
+      };
+      bool        have_edge = false;
+      bool        mem_pos   = false;
+      std::string edge_why;
+      const auto  note_edge = [&](const char* kind, int port, bool pos) {
+        if (!have_edge) {
+          have_edge = true;
+          mem_pos   = pos;
+          edge_why  = std::string(kind) + " port " + std::to_string(port) + " is " + (pos ? "posedge" : "negedge");
+          return;
+        }
+        if (pos != mem_pos) {
+          log_error(
+              "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s): the Memory cell has ONE "
+              "global posclk, and a memory whose ports commit on different edges is not a valid memory. Split it into "
+              "one memory per clock edge.\n",
+              cell->name.c_str(), edge_why.c_str(), kind, port, pos ? "posedge" : "negedge");
+        }
+      };
+      for (int i = 0; i < wrports; ++i) {
+        if (!cell->hasParam(ID::WR_CLK_ENABLE) || param_bit(ID::WR_CLK_ENABLE, i)) {
+          note_edge("write", i, param_bit(ID::WR_CLK_POLARITY, i));
+        }
+      }
+      for (int i = 0; i < rdports; ++i) {
+        if (param_bit(ID::RD_CLK_ENABLE, i)) {  // an async read has no edge
+          note_edge("read", i, param_bit(ID::RD_CLK_POLARITY, i));
+        }
+      }
+      const int wr_clkp = (have_edge && mem_pos) ? 1 : 0;
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd")

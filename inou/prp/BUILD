@@ -109,6 +109,40 @@ cc_test(
     ])
 ]
 
+# Fast multi-module prp_writer regression: emit sibling files, then compile
+# only the emitted top and require importer-directory-relative discovery to
+# pull in its emitted callee. This intentionally does not invoke LEC.
+sh_test(
+    name = "prp-p2p-sibling-recompile",
+    srcs = ["tests/p2p_recompile_test.py"],
+    args = [
+        "-i",
+        "$(location //inou/prp:tests/pyrope/sibling_recompile.prp)",
+    ],
+    data = [
+        "//inou/prp:tests/p2p_recompile_test.py",
+        "//inou/prp:tests/pyrope/sibling_recompile.prp",
+        "//lhd",
+    ],
+)
+
+# Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
+# failure; this companion checks that accepting the clock tuple did not merely
+# collapse it to one shared clock in emitted Verilog.
+sh_test(
+    name = "prp-memory-multiclock-verilog",
+    srcs = ["tests/memory_multiclock_test.py"],
+    args = [
+        "-i",
+        "$(location //inou/prp:tests/pyrope/memory_multiclock_ports.prp)",
+    ],
+    data = [
+        "//inou/prp:tests/memory_multiclock_test.py",
+        "//inou/prp:tests/pyrope/memory_multiclock_ports.prp",
+        "//lhd",
+    ],
+)
+
 # Expected-warning tests (`:type: warning`, in tests/warnings/): the program
 # must COMPILE CLEANLY but emit a warning diagnostic whose message/hint match
 # the header :warning:/:help: regexes (the lint counterpart of tests/errors/).
@@ -487,19 +521,17 @@ _SIM_FIXME = [
             "tests/equiv/reg_decl_init_dropped.prp",
             "tests/equiv/selfref_slice_assign.prp",
             "tests/equiv/selfref_concat_assign.prp",
-            # Pending hierarchy-aware formal phase scheduler (2f-lec / M10).
-            # These pairs intentionally compare normalized Pyrope state against
-            # Verilog that retains latch-close or Clock_cell timing. Today's
-            # bounded lgcheck finds the expected mismatch; keep them as fixme
-            # targets until the common phase model replaces that path.
-            "tests/equiv/phase_latch_flop_edges.prp",
-            "tests/equiv/phase_hier_latch_neg.prp",
-            "tests/equiv/phase_clock_gate_chain.prp",
-            # phase_two_clock_ports / phase_clock_gate_invert are NOT excluded:
-            # their FORWARD direction proves (lgcheck's bounded miter decides
-            # both), so marking them fixme here would hide a forward regression.
-            # They fail the native leg of prp-v2prp2v-* -- see
-            # _V2PRP2V_NATIVE_FIXME below.
+            # NOTE: the three phase_* pairs (phase_latch_flop_edges,
+            # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
+            # this exclude list (2f-lec / 2f-latch M10). They compare normalized
+            # Pyrope state against Verilog that RETAINS latch-close or
+            # Clock_cell timing, and lgcheck's bounded miter -- which steps one
+            # posedge per step -- cannot represent either, so it reported a
+            # mismatch between equivalent designs. Each now carries
+            # `:equiv_engine: cvc5` in its header and is discharged by the
+            # phase-aware `lhd lec` instead; the INDEPENDENT oracle for the pair
+            # is the v2prp2v original-Verilog leg (still lgcheck) plus
+            # lhd/tests/single_edge_four_classes_test.sh under Icarus.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -634,11 +666,12 @@ sh_test(
         "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
         "selfref_slice_assign",     # concurrent slice assigns solved in source order
         "selfref_concat_assign",    # self-referential whole-vector assign never driven
-        # Formal phase-scheduler trackers. Pyrope uses only structural
-        # clock_pin references; the Verilog side retains the timed cells.
-        "phase_latch_flop_edges",   # close-before-edge latch normalization
-        "phase_hier_latch_neg",     # phase contract through a child instance
-        "phase_clock_gate_chain",   # chained ICGs -> sampled root-clock enable
+        # The three formal phase-scheduler trackers (phase_latch_flop_edges,
+        # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
+        # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
+        # and negedge endpoints over four microsteps per source period, so all
+        # three PROVE. See the equiv-glob note above for why they run under
+        # `:equiv_engine: cvc5`.
     ]
 ]
 
@@ -661,25 +694,15 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp2v-mem_rom --test_tag_filters=
 _V2PRP2V_NATIVE_FIXME = [
-    # Pending hierarchy-aware formal phase scheduler (2f-lec / 2f-latch M10).
-    # phase_posneg_pipeline already proves through the landed flat P=2 path;
-    # these four hit the still-honest coincident-edge, hierarchy, and memory
-    # refusals. Their original-Verilog checks pass.
-    "phase_latch_flop_edges",
-    "phase_hier_latch_neg",
-    "phase_clock_gate_chain",
-    "phase_mem_write_read",
-    # Added 2026-07-31 from the 2f-lec plan review. Both FORWARD directions and
-    # both original-Verilog checks pass; only the native cvc5 leg refuses, with exactly
-    # the message the phase scheduler exists to retire:
-    #   phase_two_clock_ports   -> `def `phase_two_clock_ports_cell` holds
-    #                              1 negedge flop(s), 2 clock nets, and
-    #                              normalizing across a module boundary is not
-    #                              supported yet`
-    #   phase_clock_gate_invert -> `2 clock nets and no known integer ratio
-    #                              between them`
-    "phase_two_clock_ports",
-    "phase_clock_gate_invert",
+    # The SIX phase_* trackers and latch_always_transparent were PROMOTED out of
+    # this list (2f-lec / 2f-latch M10 landed). Every refusal they existed to
+    # record is gone: `pass.single_edge` is no longer MANDATORY (a decline hands
+    # the design to the encoder's read-only four-microstep schedule instead of
+    # ending the run), so a latch or negedge flop inside a def, two clock ports
+    # tied to one net at every instantiation site, a memory that a rise batch
+    # writes and a fall batch reads, a chained clock gate, an active-low
+    # (`clk | ~en`) gate whose enable must be sampled before the FALL, and a
+    # latch closing on the very edge its reader samples all prove now.
     # latch_enable_hold was PROMOTED out of this list (2026-07-20): the shipped
     # `reg NAME:TYPE:[latch=true]` spelling IS the Pyrope source equivalent of
     # an inferred latch, the fixture was rewritten to it, and the reverse
@@ -712,17 +735,12 @@ _V2PRP2V_NATIVE_FIXME = [
     # grounds the x" — was wrong: the golden's `2'bxx` is on the IMPL side, and
     # gold_x masks ref-x only, so nothing was ever excluded.) The reader's
     # "no forwarding, but DEFINED" state moved to the new ordering="old".
-    # latch_always_transparent (2026-07-29): an ALWAYS-transparent latch (every
-    # path writes it, so tolg wires no `enable`) stores nothing — it is plain
-    # combinational logic. cgen now emits it as such (that fix closed a real
-    # miscompile: the Q, a module output, had NO driver at all), but
-    # pass.single_edge still sees a Latch CELL whose enable cone is empty and
-    # declines with "unresolved-commit-class", so the native-LEC leg refuses the
-    # ref side. The forward and original-Verilog directions both PROVE.
-    # Flips green when the degenerate latch stops being a Latch cell at all —
-    # tolg should bypass it to a wire — or when commit_class_of admits an
-    # enable-less latch as combinational.
-    "latch_always_transparent",
+    # latch_always_transparent was PROMOTED out of this list (2f-lec M10): an
+    # ALWAYS-transparent latch (every path writes it, so tolg wires no `enable`)
+    # stores nothing, and the phase schedule now classifies it as exactly that —
+    # a COMBINATIONAL BUFFER, encoded as `q = din` rather than as a state cut.
+    # pass.single_edge still declines it ("unresolved-commit-class"), but a
+    # decline is no longer fatal: the schedule takes over and the pair proves.
     #
     # ── corpus-mined category trackers (2026-07-29) ──────────────────────────
     # One minimal repro per remaining hard-failure category from the
@@ -818,8 +836,8 @@ _V2PRP2V_VERILOG_FIXME = [
     # (v -> prp -> v), so the writer IS exercised and all three refuted --
     # exactly the point of the change, and all three are FIXED and PROMOTED out
     # (2026-07-29). writer_undefined_mux: the undeclared `_mux_N` read is fixed
-    # (analyze_expr_inlines declines the inline when the consuming store is
-    # already folded). tolg_field_read_zero: the nested-mut hoist rebuilt the
+    # (mux temporaries keep their own assignment; the writer no longer searches
+    # every store for an inline consumer). tolg_field_read_zero: the nested-mut hoist rebuilt the
     # declaration from the NAME alone, so a `mut mem:[2]u4 = (1, 2)` declared
     # inside an `if` came back as `mut mem = 0` -- type and contents both gone.
     # writer_bad_char: module names now go through the same backtick escaper
@@ -1070,6 +1088,11 @@ _V2PRP2V_VERILOG_FIXME = [
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
+        "mod_mul_add",         # top discovers its two emitted sibling pipes
+        "mod_twopaths",        # registered-output timing regression (R8 A)
+        "mod_varargs_add",     # monomorphized sibling uses a bare import alias
+        "mod_varargs_csa",     # nested monomorphized sibling callees
+        "pipe_varargs_add",    # pipe form of the monomorphized sibling path
         "mod_call_pipe",       # pipe inlined into a mod: stage[N] + @[N]
         "pipe1_pass",          # bare pipe passthrough
         "pipe2_two_out",       # multi-output pipe

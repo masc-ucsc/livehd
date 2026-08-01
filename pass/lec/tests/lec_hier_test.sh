@@ -51,23 +51,34 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'top' PROVEN (1 child collapse"; then
 elif ! echo "$OUT" | grep -q "3/3 def(s) proven"; then echo "FAIL: not all defs proven"; fail=1
 else echo "ok: hierarchical self-lec proves leaves-first, collapsing proven children"; fi
 
-# 2) A REFUTED leaf (a&b vs a|b) fails the run FAST (formal.lec.hier_refute=fail, the
-#    default): only a PROVEN child black-boxes, so proving mid/top over a refuted
-#    leaf would descend into logic already known to differ — a whole-design flat
-#    miter for a verdict the leaf settled in milliseconds. mid and top are SKIPPED
-#    and the leaf's counterexample is the run verdict, naming the block.
-#    (This is the REFUTED child only. A child that is merely UNPROVABLE — UNKNOWN —
-#    still flattens into its parent: the CEGAR fallback keys off proven, not refuted.)
+# 2) A REFUTED leaf (a&b vs a|b) ESCALATES by default: a module boundary is not
+#    part of the specification — functionality can legitimately move across it
+#    between the two front-ends — so a block-boundary counterexample is NOT a
+#    disproof of the design. The refuting leaf is inlined into `mid` (its proven
+#    siblings, if any, stay boxed) and `mid` is proven in context. Here the
+#    difference is real, so mid/top still refute; what is pinned is that the
+#    parents were ATTEMPTED rather than skipped on the child's say-so.
 H cegar --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or"
 if [ "$RC" -eq 0 ]; then echo "FAIL: hier refuted-leaf rc=0 (want a REFUTED run)"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' REFUTED"; then echo "FAIL: leaf-diff not refuted"; fail=1
+elif echo "$OUT" | grep -q "SKIPPED (child"; then
+  echo "FAIL: default must ESCALATE, not skip a parent over its refuted child"; fail=1
+elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; then
+  echo "FAIL: default did not inline the refuted leaf into mid"; fail=1
+else echo "ok: a REFUTED child is inlined into its caller (escalate is the default)"; fi
+
+# 2a) formal.lec.hier_refute=fail is the DEBUG mode: it stops at the first
+#     differing block and reports that block-boundary CEX as the run verdict.
+#     It must still work, and it must say loudly that it is a debug aid.
+H ff --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or" --set formal.lec.hier_refute=fail
+if [ "$RC" -eq 0 ]; then echo "FAIL: hier_refute=fail rc=0 (want a REFUTED run)"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' SKIPPED (child 'leaf' REFUTED"; then
-  echo "FAIL: mid not skipped over its REFUTED leaf (fail-fast)"; fail=1
-elif ! echo "$OUT" | grep -q "lec\[hier\]: 'top' SKIPPED (child 'mid' REFUTED"; then
-  echo "FAIL: top not skipped (refuted taint must reach the transitive parent)"; fail=1
+  echo "FAIL: hier_refute=fail did not skip mid over its REFUTED leaf"; fail=1
 elif ! echo "$OUT" | grep -q "hierarchical: block 'leaf' REFUTED"; then
   echo "FAIL: run verdict does not name the refuted block"; fail=1
-else echo "ok: a REFUTED child fails the run fast, skipping its parents"; fi
+elif ! echo "$OUT" | grep -qi "hier-refute-fail-mode"; then
+  echo "FAIL: the debug mode did not announce itself"; fail=1
+else echo "ok: hier_refute=fail still fails fast, and warns that it is a debug mode"; fi
 
 # 2b) formal.lec.hier_refute=escalate restores the CEGAR flatten: the refuted leaf is not
 #     collapsed but FLATTENED into mid, so mid/top refute IN CONTEXT (the mode that

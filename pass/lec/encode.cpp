@@ -746,10 +746,55 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return v;
   };
+  // A LATCH is a state endpoint exactly like a flop once a phase schedule
+  // exists: the schedule says WHICH microstep it closes in, and tolg already
+  // baked `din = gate ? d : q`, so the transition is an ordinary
+  // flop-with-enable. Without a schedule it stays REFUSED below (there is no
+  // sub-period resolution to close it in, and encoding it as committing every
+  // step is the false-PROVEN class this whole task exists to remove).
+  const bool phased = phase_plan_ != nullptr;
+  // An ALWAYS-TRANSPARENT latch is not state: its window never closes, so it is
+  // a wire. Encoding it as a flop-with-enable would add a full period of delay
+  // the hardware does not have (cgen already emits it as `always_comb` with a
+  // blocking assign, so the emitted Verilog and the encoding would disagree).
+  auto is_transparent_latch = [&](const hhds::Node_class& n) {
+    if (!phased || gu::type_op_of(n) != Ntype_op::Latch) {
+      return false;
+    }
+    auto it = phase_plan_->ep.find(box_node_key(n));
+    return it != phase_plan_->ep.end() && it->second.transparent;
+  };
+  // Combinational AND of a guard's canonicalized enable cones, for the P == 1
+  // path (no sub-period resolution: one step IS the reference edge).
+  auto guard_term = [&](const std::string& gkey, bool& gok) -> Term {
+    Term acc;
+    auto it = phase_plan_->guard_cones.find(gkey);
+    if (it == phase_plan_->guard_cones.end()) {
+      gok = false;
+      return acc;
+    }
+    for (const auto& cone : it->second) {
+      bool ok2 = true;
+      Val  gv  = driver_val(cone, ok2);
+      if (!ok2 || gv.term.isNull()) {
+        gok = false;
+        return Term{};
+      }
+      Term hot = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)});
+      acc      = acc.isNull() ? hot : tm_.mkTerm(Kind::AND, {acc, hot});
+    }
+    if (acc.isNull()) {
+      gok = false;
+    }
+    return acc;
+  };
   for (auto node : g->forward_hier(true, false, opaque)) {
     auto op = gu::type_op_of(node);
-    if (op != Ntype_op::Flop) {
+    if (op != Ntype_op::Flop && !(phased && op == Ntype_op::Latch)) {
       continue;
+    }
+    if (is_transparent_latch(node)) {
+      continue;  // a wire, not a state cut -- see is_transparent_latch
     }
     auto qpin = node.get_driver_pin(0);
     if (qpin.is_invalid()) {
@@ -1127,6 +1172,40 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       // Flops were cut above (Q seeded; next-state emitted below) — skip the cell.
       if (op == Ntype_op::Flop) {
+        continue;
+      }
+      if (phased && op == Ntype_op::Latch) {
+        if (!is_transparent_latch(node)) {
+          continue;  // scheduled state endpoint, cut with the flops above
+        }
+        if (done.contains(nodekey(node))) {
+          continue;
+        }
+        hhds::Pin_class dd;
+        for (const auto& e : node.inp_edges()) {
+          if (e.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Latch, "din")) {
+            dd = e.driver;
+            break;
+          }
+        }
+        if (dd.is_invalid()) {
+          return fail("always-transparent latch '" + gu::debug_name(node) + "' has no din");
+        }
+        bool bok = true;
+        Val  dv  = driver_val(dd, bok);
+        if (!bok) {
+          continue;  // operand not ready yet; the fixpoint comes back to it
+        }
+        auto qp = node.get_driver_pin(0);
+        int  qw = real_width(qp);
+        if (qw == 0) {
+          qw = 1;
+        }
+        Val qv{fit(dv, qw), qw, !gu::is_unsign(qp)};
+        qv.x_mask         = fit_x_mask_to(tm_, dv, qw);
+        pin2val[pinkey(qp)] = qv;
+        done.insert(nodekey(node));
+        progress = true;
         continue;
       }
       // Memory is cut in two phases (read douts seeded before this loop, writes +
@@ -2122,6 +2201,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (!node.has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
       continue;
     }
+    if (phased && op == Ntype_op::Latch) {
+      continue;  // scheduled state endpoint, cut like a Flop (Q seeded, next-state emitted)
+    }
     if (op == Ntype_op::Sub && node.get_subnode_graph() != nullptr) {
       continue;  // descended
     }
@@ -2176,7 +2258,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           diagnosed = true;
         }
       }
-      return fail("operand of '" + gu::debug_name(node) + "' has no encodable driver (combinational cycle?); root: " + diag);
+      // A REFUSAL, not a give-up: the encoder cannot ORDER this cone (a real
+      // word-level combinational cycle, or a driver it cannot build), and no
+      // amount of extra budget changes that. It must therefore ride
+      // `unsupported`, which hard-fails by NAME regardless of formal.strict
+      // (exit 7, "could not decide"). It must NOT ride `nothing_compared`:
+      // the driver maps that to `equiv_fail` (exit 10, "here is a
+      // counterexample"), so flagging it there would report a structural
+      // refusal — and, worse, a plain `formal.timeout` budget-out — as a
+      // DISPROOF, with a headline claiming the module is empty. rc 7 and rc 10
+      // must never be conflated (pass/lec/tests/lec_verdict_policy_test.sh).
+      return fail_unsupported("operand of '" + gu::debug_name(node)
+                              + "' has no encodable driver (combinational cycle?); root: " + diag);
     }
   }
 
@@ -2422,12 +2515,62 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     const Val& qv  = pin2val[pinkey(qpin)];  // Q (output stage) current-state, seeded above
     bool       ok  = true;
 
+    // ---- PHASE SCHEDULE (2f-lec / 2f-latch M10) -------------------------------
+    // Which microstep does this endpoint commit in, and is it THIS one? An
+    // endpoint outside its batch simply HOLDS, which is how a later batch in the
+    // same source period observes what an earlier one committed.
+    const Phase_endpoint* pe         = nullptr;
+    bool                  commit_now = true;
+    if (phased) {
+      if (auto pit = phase_plan_->ep.find(box_node_key(node)); pit != phase_plan_->ep.end()) {
+        pe = &pit->second;
+      }
+      const int my_ms = pe != nullptr ? static_cast<int>(pe->phase) : static_cast<int>(Phase::Rise);
+      commit_now      = single_step() || my_ms == microstep_;
+    }
+    // A CLOCK-ROLE latch's gate is TIMING, not data: the schedule already placed
+    // it in the microstep where its window closes, so the gate must be ABSORBED
+    // (commit unconditionally there, din = the transparent arm of tolg's hold
+    // mux) and never AND-ed into the enable. AND-ing it evaluates the clock as a
+    // free data input once per microstep -- measured as latch outputs stuck at
+    // `x` under iverilog, and as a retyped flop with no clock at all.
+    const bool absorb_gate = pe != nullptr && pe->clock_role_latch;
+    // Hier-safe transparent arm: latch_contract's version resolves class-local
+    // pins, which carry no hier position and so would miss pin2val for a latch
+    // inside an instance.
+    auto transparent_arm = [&](const hhds::Node_class& n) -> hhds::Pin_class {
+      auto q  = n.get_driver_pin(0);
+      auto dd = hier_sink_driver(n, "din");
+      if (dd.is_invalid() || gu::is_const_pin(dd) || gu::is_graph_input_pin(dd)) {
+        return {};
+      }
+      auto mux = dd.get_master_node();
+      if (gu::type_op_of(mux) != Ntype_op::Mux) {
+        return {};  // raw yosys D/EN shape: `din` IS already the transparent value
+      }
+      for (const auto& e : mux.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          continue;  // the selector is the gate, not an arm
+        }
+        if (!e.driver.is_invalid() && e.driver.get_class_index() != q.get_class_index()) {
+          return e.driver;
+        }
+      }
+      return {};
+    };
+
     // din: the value the FIRST stage latches each cycle (no enable/reset yet).
     bool has_din = false;
     Term din;
     Term din_xm;  // undef plane of din, fitted to w (null = fully known)
-    if (auto din_d = hier_sink_driver(node, "din"); !din_d.is_invalid()) {
-      Val dv = driver_val(din_d, ok);
+    hhds::Pin_class din_pin = hier_sink_driver(node, "din");
+    if (absorb_gate) {
+      if (auto arm = transparent_arm(node); !arm.is_invalid()) {
+        din_pin = arm;
+      }
+    }
+    if (!din_pin.is_invalid()) {
+      Val dv = driver_val(din_pin, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' din not encodable");
       }
@@ -2441,7 +2584,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool enable_const_false = false;
     bool has_enable         = false;
     Term en_hot;
-    if (auto en_d = hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
+    if (auto en_d = absorb_gate ? hhds::Pin_class{} : hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
       if (gu::is_const_pin(en_d)) {
         enable_const_false = gu::hydrate_const(en_d).is_known_false();
       } else {
@@ -2456,6 +2599,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
     // reset: a non-const reset overrides every stage with the initial value when
     // asserted (cgen resets all stages identically).
+    //
+    // ASYNC vs SYNC matters ONLY under the phase schedule. At P == 1 one step is
+    // one commit, so applying the reset outside the commit gate is exact for
+    // both. At P == 4 it is not: a SYNC reset lands on the endpoint's own clock
+    // edge, so applying it on all four microsteps resets a negedge flop three
+    // microsteps early -- and against a front-end that spells the same reset
+    // inside `din` (`if reset { r = init }`) that is a real, and spurious,
+    // divergence. Measured on tests/equiv/flop_reset_matrix, whose six flops
+    // cover the async/sync x posedge/negedge matrix.
+    bool async_reset = false;
+    if (auto a_d = hier_sink_driver(node, "async"); !a_d.is_invalid() && gu::is_const_pin(a_d)) {
+      async_reset = !gu::hydrate_const(a_d).is_known_false();
+    }
     bool has_reset = false;
     Term rst_hot;
     Term initv;
@@ -2511,7 +2667,42 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // fail-closed guard below could not tell "modelled, commits always" from
     // "could not model at all".
     bool clock_modelled = false;
-    if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
+    // With two or more unrelated clock roots the schedule owns LATCHES only (the
+    // legacy path refuses the cell); every flop and memory keeps the encoder's
+    // detected-edge model, which is the only thing that distinguishes their
+    // clocks. See Phase_plan::multi_root.
+    const bool plan_owns = phased && (!phase_plan_->multi_root() || gu::type_op_of(node) == Ntype_op::Latch);
+    if (plan_owns) {
+      // The SCHEDULE is the clock model. Everything the legacy branches below
+      // derive per node -- gate folding, edge detection, the derived-clock
+      // refusal -- was decided once, design-wide and hierarchy-aware, by
+      // plan_phases(). Here it reduces to two facts: is this my microstep, and
+      // is my clock gated.
+      clock_modelled = true;
+      if (!commit_now) {
+        commits = tm_.mkBoolean(false);
+      } else if (pe != nullptr && !pe->guard_key.empty()) {
+        if (single_step()) {
+          // P == 1: one encoder step IS the reference edge, so the guard is the
+          // enable held at that edge -- exactly M9's fold, but built from the
+          // schedule's CANONICALIZED chain, so a gate of a gate contributes
+          // `en0 & en1` instead of refusing as "clk_ref is itself derived".
+          commits = guard_term(pe->guard_key, ok);
+          if (!ok) {
+            return fail_unsupported("flop '" + gu::debug_name(node)
+                                    + "' is clocked by a gate whose enable cone has no encodable driver");
+          }
+        } else {
+          // The gate's guard was SAMPLED (see the guard-state emission after this
+          // loop) on the inactive phase before the cell's own active edge; the
+          // consumer reads that sample, never the live cone. Pinning the sample to
+          // the consumer's own microstep reads an inverted cell's guard half a
+          // period early -- a wrong verdict, not an UNKNOWN.
+          const Val gv = seed_state(pe->guard_key, 1, false);
+          commits      = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, 1, 0)});
+        }
+      }
+    } else if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
       auto        cn      = clk_d.get_master_node();
       const auto  cop     = gu::type_op_of(cn);
       const auto  clk_in  = resolve_clk_input(clk_d);
@@ -2675,12 +2866,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       } else if (has_enable) {
         nval = tm_.mkTerm(Kind::ITE, {en_hot, source, self});
       }
-      // No commit this step => HOLD. Placed INSIDE the reset ITE below so a
-      // reset still overrides, matching the shape this encoder already had.
+      // A SYNC reset is part of the transition and belongs INSIDE the commit
+      // gate; an ASYNC one overrides regardless of the clock and stays outside.
+      // (Without a phase schedule the two are indistinguishable -- one step is
+      // one commit -- so the legacy shape is preserved bit-for-bit.)
+      const bool sync_inside = has_reset && !async_reset && phased && !single_step();
+      if (sync_inside) {
+        nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
+      }
+      // No commit this step => HOLD. Placed INSIDE the async reset ITE below so
+      // an async reset still overrides, matching the shape this encoder had.
       if (!commits.isNull()) {
         nval = tm_.mkTerm(Kind::ITE, {commits, nval, self});
       }
-      if (has_reset) {
+      if (has_reset && !sync_inside) {
         nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
       }
       std::string key = (k + 1 < depth) ? (nm + "\x02p" + std::to_string(k)) : nm;
@@ -2722,6 +2921,54 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
   }
 
+  // ---- SAMPLED CLOCK GUARDS (2f-lec M10) ------------------------------------
+  // A recognized clock gate is timing metadata, never an SMT data value and
+  // never a scheduled endpoint. Its only effect is to gate the endpoints that
+  // consume its output, through ONE guard sampled per source period on the
+  // inactive phase immediately before the CELL's own active edge -- parity of
+  // the cell, not of the consumer. A chain of gates canonicalizes to one guard
+  // (`gate(gate(clk,en0),en1)` -> `en0 & en1`), which is why the plan carries a
+  // cone LIST per key.
+  //
+  // The cut is always WRITTEN before it is READ inside a period (an ordinary
+  // gate samples at microstep 0 and its consumers fire at 1 or 3; an inverted
+  // one samples at 2 and its consumers fire at 3), so the power-on value is
+  // unobservable and the two sides need not agree on it.
+  if (phased && !single_step()) {
+    for (const auto& [gkey, cones] : phase_plan_->guard_cones) {
+      const Val cur = seed_state(gkey, 1, false);
+      // Every consumer of one cell shares the sample microstep, so read it off
+      // the first endpoint that names this key.
+      int sample_ms = static_cast<int>(Phase::Close_low);
+      for (const auto& [nk, pep] : phase_plan_->ep) {
+        if (pep.guard_key == gkey) {
+          sample_ms = static_cast<int>(pep.guard_sample);
+          break;
+        }
+      }
+      Term nxt = cur.term;
+      if (sample_ms == microstep_) {
+        Term acc;
+        bool gok = true;
+        for (const auto& cone : cones) {
+          bool ok2 = true;
+          Val  gv  = driver_val(cone, ok2);
+          if (!ok2 || gv.term.isNull()) {
+            gok = false;
+            break;
+          }
+          Term hot = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)});
+          acc      = acc.isNull() ? hot : tm_.mkTerm(Kind::AND, {acc, hot});
+        }
+        if (!gok || acc.isNull()) {
+          return fail_unsupported("clock gate guard '" + gkey + "' has no encodable enable cone");
+        }
+        nxt = tm_.mkTerm(Kind::ITE, {acc, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)});
+      }
+      out.outputs[std::string("\x01nxt:") + gkey] = Val{nxt, 1, false};
+    }
+  }
+
   // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,
   // build the next-state array and tie each fresh read dout to its real value.
   for (auto& mc : mem_cuts) {
@@ -2757,6 +3004,32 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // deliberately NOT refused here, for consistency with the And-ICG fold
       // and with `formal.lec.gold_x`.
       mem_commit = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
+    }
+    // PHASE SCHEDULE (M10): a memory is scheduled like any other endpoint. On a
+    // microstep that is not its own it commits NOTHING -- the same three points
+    // (whole-array update, per-port write mask, sync-read register) all hold --
+    // which is what lets a rise-written array be READ by a fall-registered port
+    // in the same source period.
+    if (phased && !phase_plan_->multi_root()) {
+      const Phase_endpoint* mpe = nullptr;
+      if (auto pit = phase_plan_->ep.find(box_node_key(mc.node)); pit != phase_plan_->ep.end()) {
+        mpe = &pit->second;
+      }
+      const int my_ms = mpe != nullptr ? static_cast<int>(mpe->phase) : static_cast<int>(Phase::Rise);
+      if (!single_step() && my_ms != microstep_) {
+        mem_commit = tm_.mkBoolean(false);
+      } else if (mpe != nullptr && !mpe->guard_key.empty()) {
+        if (single_step()) {
+          mem_commit = guard_term(mpe->guard_key, ok);
+          if (!ok) {
+            return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                                    + "' is clocked by a gate whose enable cone has no encodable driver");
+          }
+        } else {
+          const Val gv = seed_state(mpe->guard_key, 1, false);
+          mem_commit   = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, 1, 0)});
+        }
+      }
     }
 
     // Whole-array bulk `update` is the BASE next-state (lowest priority); per-port

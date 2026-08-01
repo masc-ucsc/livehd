@@ -622,6 +622,37 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Gate for the FORMAL PHASE SCHEDULE (2f-lec "phase-schedule" / 2f-latch M10):
+# one source period encoded as ordered microsteps, so a latch closes and a
+# negedge endpoint commits INSIDE the period the old encoding collapsed. Every
+# proof is paired with a REFUTATION that must still fire -- a symmetric
+# before/after check cannot see a transformation that is wrong but applied to
+# both sides, so each mutant is built to be indistinguishable from the positive
+# case unless the schedule is real (swapped latch windows; a clock guard sampled
+# before the rise instead of before the fall). Case 3 pins that turning the
+# schedule OFF still fails closed, by name.
+sh_test(
+    name = "phase_schedule_test",
+    size = "large",
+    srcs = ["phase_schedule_test.sh"],
+    data = ["//lhd"],
+)
+
+# ONE EDGE PER MEMORY (user ruling 2026-08-01). The Memory cell has a SINGLE
+# global `posclk` while yosys keeps a bit per port, and the reader took the
+# WRITE vector whole and dropped RD_CLK_POLARITY — so a negedge synchronous read
+# imported as posedge, and a clocked ROM (no write ports ⇒ empty write vector)
+# imported as negedge. Both were silent. A memory whose ports commit on
+# different edges is not a valid memory, so it is a NAMED refusal; the ROM cases
+# pin that the surviving edge now comes from every clocked port, not just the
+# write side.
+sh_test(
+    name = "mem_clock_edge_test",
+    size = "medium",
+    srcs = ["mem_clock_edge_test.sh"],
+    data = ["//lhd"],
+)
+
 # REGRESSION: a packed-struct field must lower to a LEAF net at every nesting
 # depth. `struct_port_bundle_ok` used to disqualify a whole port as soon as one
 # field was itself a struct, keeping it a packed WORD — so writing field X while

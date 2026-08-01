@@ -107,12 +107,14 @@ void Pass_lec::setup() {
                        "their parents (a child unprovable in isolation stays flattened). false = flat single LEC",
                        "true");
   m.add_label_optional("hier_refute",
-                       "bottom-up driver: what a REFUTED block means for the run. fail (default) = the block's "
-                       "counterexample IS the run verdict; its parents are skipped, since only a proven child "
-                       "black-boxes and a parent over a refuted child would grind out a whole-design flat miter "
-                       "for a verdict the block already settled | escalate = prove the parents anyway, so a top "
-                       "PROVEN over a differing block (a block-boundary CEX unreachable in context) still passes",
-                       "fail");
+                       "bottom-up driver: what a REFUTED block means for the run. escalate (default) = inline that "
+                       "block into its caller (its PROVEN siblings stay boxed) and prove the caller anyway — a "
+                       "module boundary is not part of the specification, functionality moves across it between "
+                       "front-ends, so a block-boundary counterexample is not a disproof of the design and only the "
+                       "requested top's boundary is contractual | fail = DEBUG: stop at the first differing block, "
+                       "taint its ancestors and report that counterexample as the run verdict (fast localization, "
+                       "but it calls a boundary mismatch a design bug)",
+                       "escalate");
   m.add_label_optional("semdiff",
                        "structural def-diff reduction (M3): structural (default; true/on = alias) | none. Run "
                        "pass.semdiff per module first; a def whose ref/impl are structurally identical "
@@ -197,6 +199,20 @@ void Pass_lec::setup() {
                        "true (also report each cone's outcome) | false (off)",
                        "auto");
   m.add_label_optional("conelimit", "per-cone abc SAT backtrack budget; 0 = abc's own default", "10000");
+  m.add_label_optional("box_model",
+                       "how a PROVEN collapsed child is modelled in its parent: seq (default) = a sequence "
+                       "transducer — prove its inputs equal (bbin obligations) and share one free symbol per "
+                       "(instance, port, cycle) for its outputs, with no state cut and no uninterpreted function, "
+                       "so comb and stateful children are the same object; uf = the legacy Comb_box/State_box "
+                       "encoding (UF(inputs), or UF_out(state)+UF_next(inputs,state) with a threaded state cut), "
+                       "which forces QF_AUFBV and disables cvc5's eager bit-blaster",
+                       "seq");
+  m.add_label_optional("phase_sched",
+                       "encode a latch / negedge / gated-clock design over FOUR ordered microsteps per source "
+                       "period (close-low, rise, close-high, fall) instead of rewriting it with pass.single_edge "
+                       "first. Read-only analysis, so it composes across hierarchy; default true. false falls "
+                       "back to the M8 graph rewrite, which refuses a latch or negedge flop inside a def",
+                       "true");
   m.add_label_optional("strict",
                        "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard failure; "
                        "default TRUE -- an inconclusive run proved nothing, so exiting 0 would make it "
@@ -240,6 +256,8 @@ void Pass_lec::lec(Eprp_var& var) {
   o.decompose    = std::string{var.get("decompose", "auto")};
   o.cones        = std::string{var.get("cones", "auto")};
   o.conelimit    = str_tools::to_i(var.get("conelimit", "10000"));
+  o.phase_sched  = parse_bool(var.get("phase_sched", "true"));
+  o.box_seq      = std::string_view{var.get("box_model", "seq")} != "uf";
   o.strict       = parse_bool(var.get("strict", "true"));
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions   = str_tools::to_i(var.get("partitions", "4"));

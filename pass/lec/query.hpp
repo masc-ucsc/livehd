@@ -10,6 +10,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
+#include "phase_sched.hpp"
 #include "solve_stats.hpp"
 
 namespace livehd::lec {
@@ -390,6 +391,50 @@ struct Lec_options {
   // prove_equal itself ignores this flag — it only enforces the uncertain
   // discipline on whatever pairs it is handed.
   bool state_pairing = true;
+
+  // FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10). When true (the default), a
+  // design holding a latch, a negedge endpoint or a recognized clock gate is
+  // encoded over FOUR ordered microsteps per source period instead of being
+  // rewritten by `pass.single_edge` first. Read-only: no coloring, no graph
+  // rewrite, no synthesized phase counter, no timing state threaded through
+  // module ports — so it composes across hierarchy, which the M8 rewrite never
+  // could (it refuses a latch or a negedge flop inside a def outright).
+  //
+  // Set false to fall back to the M8 preflight. That path stays a landed
+  // standalone transform and the independent Icarus oracle either way; this flag
+  // only decides which one FORMAL depends on.
+  bool phase_sched = true;
+
+  // BOX MODEL for a PROVEN collapsed child (formal.lec.box_model).
+  //
+  //   true  (seq, the default) — the child is a SEQUENCE TRANSDUCER and nothing
+  //     more. Its proof says: from reset, identical input sequences produce
+  //     identical output sequences. So the parent proves the INPUTS equal
+  //     (`bbin:` obligations) and shares ONE free symbol per (instance, port,
+  //     cycle) for the outputs. No state cut, no uninterpreted function, no
+  //     congruence rule — comb and stateful children are the same object here,
+  //     because from the caller's side they are.
+  //   false (uf) — the legacy `Comb_box` / `State_box` encoding: UF(inputs) for
+  //     a stateless child, UF_out(state)/UF_next(inputs,state) plus a threaded
+  //     state cut for a stateful one. Kept as an escape hatch and for A/B.
+  //
+  // Why seq is better and not just simpler: the UF boxes force the query into
+  // QF_AUFBV, which DISABLES cvc5's eager bit-blaster (the driver's flat retry
+  // exists to work around exactly that); they need `boxcong` to recover
+  // "equal inputs => equal next state"; the stateless variant emits NO `bbin:`
+  // obligations at all, so a comb box's inputs were never checked; and the
+  // stateful variant threads a per-instance state cut whose correspondence can
+  // cross two interchangeable instances and refute two equivalent designs.
+  // None of that is needed to justify "assume the outputs are equal".
+  bool box_seq = true;
+
+  // DESIGN-WIDE CLOCK FOREST (2f-lec "Clock-graph propagation"), resolved
+  // TOP-DOWN once per design and carried BY VALUE so it survives the isolated
+  // worker fork. See Clock_forest for what it fixes and why per-endpoint
+  // bottom-up resolution cannot: an implicit clock has no cone to walk, and a
+  // cone that stops at an opaque boundary names the CHILD's port. Empty means
+  // every port is its own root — the pre-propagation behaviour.
+  Clock_forest clock_forest;
 
   // Input-space case-split (lec.partitions / lec.split): prove the combinational
   // miter one CONTROL-cofactor at a time, in parallel. `partitions` caps the

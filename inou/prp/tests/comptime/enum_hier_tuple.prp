@@ -1,0 +1,18 @@
+/*
+:name: enum_hier_tuple
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+// The documented hierarchical-enum spelling uses bare tuple values rather
+// than requiring a nested `enum(...)` expression.
+enum Animal = (
+  bird   = (,eagle, ,parrot),
+  mammal = (,rat, ,human)
+)
+cassert(u8(Animal.bird)         == 0ub000001)
+cassert(u8(Animal.bird.eagle)   == 0ub000011)
+cassert(u8(Animal.bird.parrot)  == 0ub000101)
+cassert(u8(Animal.mammal)       == 0ub001000)
+cassert(u8(Animal.mammal.rat)   == 0ub011000)
+cassert(u8(Animal.mammal.human) == 0ub101000)

@@ -2546,7 +2546,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const auto& insts          = boxes_by_def[defname];
       const bool  collapsed      = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
       const bool  body_resolved  = def_has_body.count(defname) > 0;
-      if (collapsed && body_resolved && !def_stateful[defname]) {
+      if (opts.box_seq && collapsed && body_resolved) {
+        // SEQUENCE-TRANSDUCER box (formal.lec.box_model=seq, the default): fall
+        // through to the shared-output path below, exactly like a true
+        // blackbox. The child's own proof already says "same input sequence
+        // from reset => same output sequence", so proving its inputs equal
+        // (`bbin:`) and sharing its outputs IS the whole contract. Whether it
+        // holds state is invisible from here.
+        //
+        // Falling through also means the query stays in QF_ABV: no UF, so
+        // cvc5's eager bit-blaster remains available.
+      } else if (collapsed && body_resolved && !def_stateful[defname]) {
         // STATELESS collapsed leaf -> pairing-free per-def UF box (Comb_box).
         Comb_box box;
         for (const auto& bi : insts) {
@@ -2591,7 +2601,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         comb_boxes[defname] = std::move(box);
         continue;
       }
-      if (collapsed && body_resolved && def_stateful[defname]) {
+      if (!opts.box_seq && collapsed && body_resolved && def_stateful[defname]) {
         // STATEFUL collapsed leaf -> shared state-aware box per instance pair.
         // Outputs are MOORE — UF_out(state) ONLY, not (inputs, state). A Mealy box
         // (output depends on the current input) adds a combinational input->output
@@ -3028,6 +3038,80 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     enc.set_comb_boxes(comb_boxes_ptr);
     enc.set_shared_bbox(&shared_bbox);
 
+    // ---- FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10) -----------------------
+    // One source period becomes FOUR microsteps whenever either design holds a
+    // latch, a negedge endpoint or a recognized clock gate. Both sides then run
+    // on the SAME time base -- encoding one side phase-scheduled and the other
+    // not compares two designs in different time bases, which is the failure the
+    // M8 preflight's "declined rather than half-transform" rule exists to stop.
+    const auto* clk_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
+    const Phase_plan ref_plan  = plan_phases(ref, collapse_ptr, clk_forest);
+    const Phase_plan impl_plan = plan_phases(impl, collapse_ptr, clk_forest);
+    // A design with only a recognized GATE (no latch, no negedge endpoint) does
+    // not need sub-period resolution, but it does need the schedule's chain
+    // CANONICALIZATION -- a gate of a gate is what the per-node encoder refuses
+    // as "clk_ref is itself derived". Give it the plan at P == 1.
+    //
+    // `use_phase` MUST imply `use_plan`: running microsteps without handing the
+    // encoder the plan leaves it on the legacy path, where a Latch is refused
+    // outright -- the schedule gets printed and then silently decides nothing.
+    const bool use_plan  = opts.phase_sched && (ref_plan.needs_plan() || impl_plan.needs_plan());
+    const bool use_phase = use_plan && (ref_plan.multi || impl_plan.multi);
+    if (use_plan && (!ref_plan.ok || !impl_plan.ok)) {
+      // A schedule REFUSAL decides nothing: it is not a budget problem and a
+      // bigger timeout cannot change it, so it must hard-fail like an encoder
+      // refusal rather than degrade to an exit-0 "could not decide".
+      res.verdict     = Verdict::Unknown;
+      res.unsupported = true;
+      res.detail += "; phase schedule refused: " + (ref_plan.ok ? impl_plan.error : ref_plan.error);
+      return res;
+    }
+    // ACTIVE MICROSTEPS. The two latch-close microsteps exist only for
+    // CLOCK-ROLE latches; with none, microstep 0 has the same state and the same
+    // input snapshot as the rise batch (and 2 the same as the fall), so encoding
+    // it separately doubles the unroll to compute values that are equal by
+    // construction. Dropping them keeps a plain posedge/negedge design at TWO
+    // encodes per period -- the same count `pass.single_edge`'s P=2 slot
+    // lowering used -- instead of four.
+    std::vector<int> steps;
+    if (use_phase) {
+      // A microstep is ACTIVE when something happens in it: a clock-role latch
+      // closes, or a clock guard is SAMPLED there. The guard half matters and is
+      // not hypothetical -- the active-low gate flavour samples before the FALL,
+      // and dropping that microstep leaves the guard at its power-on value for
+      // the whole run (`phase_clock_gate_invert`).
+      const bool need_cl = ref_plan.n_latch_low > 0 || impl_plan.n_latch_low > 0 || ref_plan.n_guard_low > 0
+                           || impl_plan.n_guard_low > 0;
+      const bool need_ch = ref_plan.n_latch_high > 0 || impl_plan.n_latch_high > 0 || ref_plan.n_guard_high > 0
+                           || impl_plan.n_guard_high > 0;
+      if (need_cl) {
+        steps.push_back(static_cast<int>(Phase::Close_low));
+      }
+      steps.push_back(static_cast<int>(Phase::Rise));
+      if (need_ch) {
+        steps.push_back(static_cast<int>(Phase::Close_high));
+      }
+      steps.push_back(static_cast<int>(Phase::Fall));
+    } else {
+      steps.push_back(-1);  // legacy: one step is one period, no schedule
+    }
+    // The two OBSERVATION points: the first active microstep of the period (it
+    // sees the previous period's fall batch committed) and the first active one
+    // after the rise batch.
+    const size_t obs_a = 0;
+    size_t       obs_b = 0;
+    for (size_t k = 0; k < steps.size(); ++k) {
+      if (steps[k] > static_cast<int>(Phase::Rise)) {
+        obs_b = k;
+        break;
+      }
+    }
+    const int P = static_cast<int>(steps.size());
+    if (use_phase) {
+      res.detail += "; phase schedule P=" + std::to_string(P) + " ref[" + ref_plan.describe() + "] impl["
+                  + impl_plan.describe() + "]";
+    }
+
     struct In {
       int  w;
       bool sgn;
@@ -3233,7 +3317,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // without first making the collision explicit (detect + drop, like the
         // uncertain-pair path does).
         for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
-          if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+          const auto nop = graph_util::type_op_of(node);
+          // A LATCH is a state cut exactly like a flop under a phase schedule
+          // (the encoder seeds and threads it the same way), so its power-on
+          // symbol must be SHARED across the two designs here too -- otherwise
+          // the two sides start it at different free values and refute.
+          if (nop != Ntype_op::Flop && !(use_plan && nop == Ntype_op::Latch)) {
             continue;
           }
           auto q = node.get_driver_pin(0);
@@ -3535,18 +3624,36 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // Unknown below whenever these are non-empty (the inductive engine's rule).
     std::set<std::string> bmc_unmatched_ref, bmc_unmatched_impl;  // ordered: deterministic detail text
 
-    for (int cyc = 0; cyc < total_cyc; ++cyc) {
+    // Input snapshot for the current HALF period, shared between REF and IMPL.
+    // Hoisted out of the loop because a latch-close microstep and the edge batch
+    // it precedes share ONE snapshot (rise and fall get independent ones, which
+    // is what lets the two batches legitimately sample different `d`).
+    Io_name_map<Val> snap_ins;
+    for (int step = 0; step < total_cyc * P; ++step) {
+      const int    cyc = step / P;   // SOURCE period: bounds, reset counts and witness indices stay in these
+      const size_t si  = static_cast<size_t>(step % P);  // index into the ACTIVE microstep list
+      const int    ms  = steps[si];                      // the Phase this encode commits (-1 = legacy)
       // `run` phase: the first `reset_hold` cycles hold reset asserted and are
       // NOT mitered (prologue); the rest are the checked window. `reset` phase:
       // reset asserted on every cycle and every cycle is checked.
       const bool checking = phase_run ? (cyc >= reset_hold) : true;
-      // Current state for cycle i>0 is a FRESH symbol per flop, pinned to the
-      // previous cycle's next-state by a flat equality assertion. Substituting
+      // A new symbolic input snapshot at each EDGE HALF: the close-low microstep
+      // and the rise batch share one, the close-high microstep and the fall
+      // batch share the next. With P == 1 that is every step, unchanged.
+      const bool new_snapshot = si == obs_a || si == obs_b;
+      // OBSERVATION POINTS: the first active microstep sees the previous
+      // period's fall batch committed, and the first active microstep after the
+      // rise sees this period's rise batch — exactly "after rise and after
+      // fall". Anything later in a batch reads state that batch's edge has not
+      // committed yet.
+      const bool observe = si == obs_a || si == obs_b;
+      // Current state for step i>0 is a FRESH symbol per flop, pinned to the
+      // previous step's next-state by a flat equality assertion. Substituting
       // the next-state term directly instead would re-nest the whole transition
       // every cycle (a counter's state becomes (((q+1)+1)...) — cvc5's recursive
       // term walk then stack-overflows past ~13 steps). Fresh-var + assert keeps
       // every cycle's terms shallow; the unrolling lives in the assertion set.
-      if (cyc > 0) {
+      if (step > 0) {
         Io_name_map<Val> ns_ref, ns_impl;
         auto             pin_state = [&](const Io_name_map<Val>& prev_next, Io_name_map<Val>& cur) {
           for (const auto& [key, pv] : prev_next) {
@@ -3578,55 +3685,61 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         impl_mem = std::move(nm_impl);
       }
 
-      Io_name_map<Val> sh_ref, sh_impl;
-      for (const auto& [name, info] : ins) {
-        if (bundle_in_leaves.count(name) > 0) {
-          continue;  // bound to extracts of its flat base's symbol below, never an independent free
+      const std::string in_tag
+          = P == 1 ? ("c" + std::to_string(cyc) + "_")
+                   : ("c" + std::to_string(cyc) + "h" + std::to_string(si == obs_a ? 0 : 1) + "_");
+      if (new_snapshot) {
+        snap_ins.clear();
+        for (const auto& [name, info] : ins) {
+          if (bundle_in_leaves.count(name) > 0) {
+            continue;  // bound to extracts of its flat base's symbol below, never an independent free
+          }
+          cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), in_tag + name);
+          // Phase control: pin a primary reset input to its asserted level during
+          // the reset phase / run-prologue, and to its deasserted level in the
+          // run-checked window. (active-low reset -> asserted=0, deasserted=all-1.)
+          if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+            const bool assert_reset = phase_reset || (phase_run && cyc < reset_hold);
+            const bool negreset     = rit->second;
+            // asserted level: 0 if active-low else all-ones; deasserted is the dual.
+            const bool drive_zero = assert_reset ? negreset : !negreset;
+            cvc5::Term lvl        = drive_zero
+                                        ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
+                                        : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+            solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
+          }
+          snap_ins[name] = Val{t, info.w, info.sgn};
+          if (opts.witness) {
+            // Label the HALF under a phase schedule: rise and fall get
+            // independent snapshots, so two entries share one source period and
+            // an unlabelled witness renders the same input name twice with
+            // different values, which reads as a bug in the witness itself.
+            wit_ins.push_back({cyc, P == 1 ? name : (name + (si == obs_a ? "@rise" : "@fall")), t});
+          }
         }
-        cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "c" + std::to_string(cyc) + "_" + name);
-        // Phase control: pin a primary reset input to its asserted level during
-        // the reset phase / run-prologue, and to its deasserted level in the
-        // run-checked window. (active-low reset -> asserted=0, deasserted=all-1.)
-        if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
-          const bool assert_reset = phase_reset || (phase_run && cyc < reset_hold);
-          const bool negreset     = rit->second;
-          // asserted level: 0 if active-low else all-ones; deasserted is the dual.
-          const bool drive_zero = assert_reset ? negreset : !negreset;
-          cvc5::Term lvl        = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
-                                      : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
-          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
-        }
-        Val v{t, info.w, info.sgn};
-        sh_ref[name]  = v;
-        sh_impl[name] = v;
-        if (opts.witness) {
-          wit_ins.push_back({cyc, name, t});
+        // Input bundles: bind each leaf to its slice of the flat base's per-cycle
+        // symbol (minted just above — the base IS a decl on the flat side, so it
+        // is always in `ins` at width W). Written into BOTH share maps; only the
+        // leaf side declares the names, the other entries are inert.
+        for (const auto* b : in_bundles) {
+          auto       bit = snap_ins.find(b->base);
+          cvc5::Term flat;
+          if (bit != snap_ins.end() && bit->second.width == b->width) {
+            flat = bit->second.term;
+          } else {
+            // Defensive (unreachable today: the base is a flat-side decl, so
+            // collect_ins carries it at exactly W): mint the W-bit symbol here
+            // rather than leave the leaves as per-side frees (a per-side free
+            // input could produce a spurious SAT -> false REFUTED).
+            flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), in_tag + b->base);
+            snap_ins[b->base] = Val{flat, b->width, b->flat_signed};
+          }
+          for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
+            snap_ins[ln] = lv;
+          }
         }
       }
-      // Input bundles: bind each leaf to its slice of the flat base's per-cycle
-      // symbol (minted just above — the base IS a decl on the flat side, so it
-      // is always in `ins` at width W). Written into BOTH share maps; only the
-      // leaf side declares the names, the other entries are inert.
-      for (const auto* b : in_bundles) {
-        auto       bit = sh_ref.find(b->base);
-        cvc5::Term flat;
-        if (bit != sh_ref.end() && bit->second.width == b->width) {
-          flat = bit->second.term;
-        } else {
-          // Defensive (unreachable today: the base is a flat-side decl, so
-          // collect_ins carries it at exactly W): mint the W-bit symbol here
-          // rather than leave the leaves as per-side frees (a per-side free
-          // input could produce a spurious SAT -> false REFUTED).
-          flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), "c" + std::to_string(cyc) + "_" + b->base);
-          Val fv{flat, b->width, b->flat_signed};
-          sh_ref[b->base]  = fv;
-          sh_impl[b->base] = fv;
-        }
-        for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
-          sh_ref[ln]  = lv;
-          sh_impl[ln] = lv;
-        }
-      }
+      Io_name_map<Val> sh_ref = snap_ins, sh_impl = snap_ins;
       for (const auto& [k, v] : ref_state) {
         sh_ref[k] = v;
       }
@@ -3634,10 +3747,28 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         sh_impl[k] = v;
       }
 
+      // PER-CYCLE box outputs. A box's outputs are SHARED between the two
+      // designs (that is C), but they must be FREE across cycles: one symbol
+      // reused for the whole unroll would pin the child's output to a constant,
+      // which false-proves a design whose only difference is WHEN that output
+      // changes. The `bbin:` obligations are re-checked at every step, so the
+      // sharing stays justified step by step.
+      //
+      // This is also what makes a STATEFUL child need no state cut here: its
+      // output is simply a fresh equal-on-both-sides value each cycle,
+      // constrained by nothing except that its inputs matched.
+      Io_name_map<Val> step_bbox;
+      for (const auto& [bk, bv] : shared_bbox) {
+        step_bbox[bk] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)),
+                                       "bb" + std::to_string(step) + ":" + bk),
+                            bv.width, bv.is_signed};
+      }
+      enc.set_shared_bbox(&step_bbox);
       enc.set_emit_props(false);                   // helper encoding below enables it temporarily
       enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
       enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
-      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
+      enc.set_phase_plan(use_plan ? &ref_plan : nullptr, ms);
+      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
       if (!re.ok) {
         res.verdict     = Verdict::Unknown;
@@ -3646,7 +3777,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return res;
       }
       enc.set_box_keys(&impl_box_keys);
-      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem, &impl_reads);
+      enc.set_phase_plan(use_plan ? &impl_plan : nullptr, ms);
+      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict     = Verdict::Unknown;
         res.unsupported = ie.unsupported;
@@ -3675,7 +3807,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                                         sh_impl,
                                         impl_state,
                                         ie,
-                                        "c" + std::to_string(cyc) + "_",
+                                        in_tag,
                                         helper_error)) {
           res.verdict  = Verdict::Unknown;
           res.detail  += "; " + helper_error;
@@ -3683,10 +3815,28 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
 
+      // Cut LABELS must stay unique: with P == 4 there are TWO observation
+      // points per source period, and the cone pass keys its verdict cache by
+      // this name. `12` and `12.f` read as "after rise" and "after fall".
+      const std::string cyc_tag = P == 1 ? std::to_string(cyc) : (std::to_string(cyc) + (si == obs_a ? ".f" : ".r"));
+      // A collapsed box's `bbin:` compare points are OBLIGATIONS -- they justify
+      // the shared output symbols the box hands the surrounding logic -- and the
+      // box is read on EVERY microstep, so they must be checked on every
+      // microstep. Ordinary outputs are OBSERVATIONS and are compared only at an
+      // observation point: comparing them mid-batch reads state the edge they
+      // belong to has not committed yet, which is a difference between two
+      // CORRECT designs whenever they place a latch differently -- a false
+      // REFUTED, not extra rigour.
+      auto obligation_only = [&](const std::string& nm) {
+        return !observe && !(nm.rfind("\x02", 0) == 0);
+      };
       if (checking) {
         for (const auto& [name, rv] : re.outputs) {
           if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
             continue;  // next-state / env-gated debug tap, not a primary output
+          }
+          if (obligation_only(name)) {
+            continue;
           }
           if (bundle_out_ref.count(name) > 0) {
             continue;  // compared via its leaf<->bus bundle point below (MATCHED)
@@ -3713,13 +3863,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
-          decomp_diffs.push_back({name + "@" + std::to_string(cyc), diff});
+          decomp_diffs.push_back({name + "@" + cyc_tag, diff});
           if (opts.witness) {
             wit_outs.push_back({cyc, name, rfit, ifit});
           }
         }
         for (const auto& [name, iv] : ie.outputs) {
           if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
+            continue;
+          }
+          if (obligation_only(name)) {
             continue;
           }
           if (bundle_out_impl.count(name) > 0) {
@@ -3741,7 +3894,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rt, it2});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
-          decomp_diffs.push_back({b->base + "@" + std::to_string(cyc), diff});
+          decomp_diffs.push_back({b->base + "@" + cyc_tag, diff});
           if (opts.witness) {
             wit_outs.push_back({cyc, b->base, rt, it2});
           }
@@ -4179,6 +4332,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   add_inputs(ref);
   add_inputs(impl);
 
+  Phase_plan ind_ref_plan, ind_impl_plan;
+  bool       ind_use_plan = false;
+  if (opts.phase_sched) {
+    const auto* ind_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
+    ind_ref_plan  = plan_phases(ref, collapse_ptr, ind_forest);
+    ind_impl_plan = plan_phases(impl, collapse_ptr, ind_forest);
+    // `multi` designs take the PHASE-COMPOSED inductive step further down (one
+    // assumed-equal state, four chained microsteps); everything else uses the
+    // plan only for its canonicalized gate chains at P == 1 (microstep < 0).
+    ind_use_plan = ind_ref_plan.needs_plan() || ind_impl_plan.needs_plan();
+    if (ind_use_plan && (!ind_ref_plan.ok || !ind_impl_plan.ok)) {
+      res.verdict     = Verdict::Unknown;
+      res.unsupported = true;
+      res.detail += "; phase schedule refused: " + (ind_ref_plan.ok ? ind_impl_plan.error : ind_ref_plan.error);
+      return res;
+    }
+  }
+
   // Shared current-state symbols: one symbolic BV per corresponding flop, keyed
   // by its cross-design state key (source span preferred). Both encodings reuse
   // these, so the miter assumes equal current state and proves equal next state
@@ -4187,7 +4358,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // fast_hier: a key->width map build (min-width wins by explicit compare, not by
     // visit order). Honors the ambient opaque scope its caller installs.
     for (auto node : g->fast_hier()) {  // descend hierarchy: cut flops at every level
-      if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+      const auto nop = graph_util::type_op_of(node);
+      // Under a phase schedule a LATCH is a state cut exactly like a flop, so it
+      // needs its shared current-state symbol here too. Without it each side
+      // mints its own free symbol and the inductive miter refutes two identical
+      // designs the instant the latch holds (`en == 0` -> q_ref != q_impl).
+      if (nop != Ntype_op::Flop && !(ind_use_plan && nop == Ntype_op::Latch)) {
         continue;
       }
       auto q = node.get_driver_pin(0);
@@ -4409,6 +4585,290 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
 
+  // ── PHASE-SCHEDULED INDUCTIVE STEP (2f-lec / 2f-latch M10) ─────────────────
+  // The ordinary single-step miter below assumes one step = one source period,
+  // which is exactly what a phase schedule denies: a latch closes, and a negedge
+  // endpoint commits, INSIDE the step it would collapse.
+  //
+  // So compose the period instead of collapsing it: from one assumed-equal
+  // current state, chain the FOUR microsteps on each side and compare (a) the
+  // externally observable outputs at the two observation microsteps and (b) the
+  // state and memory contents at the end of the period. UNSAT is a genuine
+  // unbounded inductive proof of the period transition.
+  //
+  // Why this must exist rather than deferring to BMC: a bounded BMC pass is
+  // SUPPRESSED whenever the state correspondence rests on a speculative tier-2
+  // pair (a shared s0 could mask a bounded CEX), and a latch that the two
+  // front-ends name differently -- `reg l` vs the writer's `reg q` -- is exactly
+  // that case. Only an unbounded, self-certifying inductive relation is accepted
+  // there, so without this every such pair degrades to UNKNOWN.
+  //
+  // SAT is NOT a disproof (the assumed-equal state may be unreachable), so it
+  // reports Unknown and leaves the refutation to BMC-from-reset.
+  if (ind_use_plan && (ind_ref_plan.multi || ind_impl_plan.multi)) {
+    Encoder penc(tm);
+    penc.set_encode_budget(encode_budget_s());
+    penc.set_sub_lib(sub_lib);
+    penc.set_name_alias(&name_alias);
+    penc.set_collapse_defs(collapse_ptr);
+    penc.set_state_boxes(state_boxes_ptr);
+    penc.set_comb_boxes(comb_boxes_ptr);
+    penc.set_shared_bbox(&shared_bbox);
+
+    // Two independent input snapshots per period (microsteps 0-1 share the
+    // first, 2-3 the second), shared between REF and IMPL so the miter never
+    // gets to pick different stimulus for the two designs.
+    // Same ACTIVE-MICROSTEP list as the BMC unroll: a latch-close microstep only
+    // exists when a CLOCK-ROLE latch closes there.
+    std::vector<int> psteps;
+    {
+      const bool need_cl = ind_ref_plan.n_latch_low > 0 || ind_impl_plan.n_latch_low > 0
+                           || ind_ref_plan.n_guard_low > 0 || ind_impl_plan.n_guard_low > 0;
+      const bool need_ch = ind_ref_plan.n_latch_high > 0 || ind_impl_plan.n_latch_high > 0
+                           || ind_ref_plan.n_guard_high > 0 || ind_impl_plan.n_guard_high > 0;
+      if (need_cl) {
+        psteps.push_back(static_cast<int>(Phase::Close_low));
+      }
+      psteps.push_back(static_cast<int>(Phase::Rise));
+      if (need_ch) {
+        psteps.push_back(static_cast<int>(Phase::Close_high));
+      }
+      psteps.push_back(static_cast<int>(Phase::Fall));
+    }
+    size_t pobs_b = 0;
+    for (size_t k = 0; k < psteps.size(); ++k) {
+      if (psteps[k] > static_cast<int>(Phase::Rise)) {
+        pobs_b = k;
+        break;
+      }
+    }
+    std::array<Io_name_map<Val>, 2> half_ins;
+    half_ins[0] = shared;  // inputs + the assumed-equal current state
+    half_ins[1] = shared;
+    for (auto& [nm, v] : half_ins[1]) {
+      if (nm.empty() || (nm[0] != '\x01' && shared.count(nm) > 0)) {
+        // Only PRIMARY INPUTS get a second snapshot; state entries stay the
+        // assumed-equal symbols (they are threaded, not re-drawn).
+      }
+    }
+    {
+      // Rebuild half 1's primary-input symbols (state keys are left alone).
+      absl::flat_hash_set<std::string> state_keys;
+      for (auto* g : {ref, impl}) {
+        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+        for (auto node : g->fast_hier()) {
+          const auto nop = graph_util::type_op_of(node);
+          if (nop != Ntype_op::Flop && nop != Ntype_op::Latch) {
+            continue;
+          }
+          state_keys.insert(eff(node.get_hier_name()));
+        }
+      }
+      for (auto& [nm, v] : half_ins[1]) {
+        if (state_keys.count(nm) > 0 || (!nm.empty() && nm[0] == '\x01')) {
+          continue;
+        }
+        v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "h1_" + nm), v.width, v.is_signed};
+      }
+    }
+
+    int puid = 0;  // unique suffix for the per-microstep fresh state vars
+    struct Side {
+      Io_name_map<Val>        state;
+      Io_name_map<cvc5::Term> mem;
+      Io_name_map<Val>        reads;
+      Io_name_map<Val>        obs;  // "<ms>\x1f<port>" -> value at an observation microstep
+      // Keys this side actually EMITTED a next-state for. `state` is seeded from
+      // the union `shared` map (both designs' keys), so a key only the OTHER side
+      // owns sits there untouched at its power-on symbol -- comparing that
+      // against the owner's computed next-state is a guaranteed spurious diff.
+      // The two sets' symmetric difference is the real correspondence gap.
+      absl::flat_hash_set<std::string> emitted;
+    };
+    auto run_side = [&](hhds::Graph* g, const Phase_plan& plan, const Io_name_map<std::string>* bkeys,
+                        bool x_dc, std::string_view pfx, Side& out, std::string& err) -> bool {
+      out.state = shared;
+      out.mem   = shared_mems;
+      for (size_t si = 0; si < psteps.size(); ++si) {
+        const int        ms = psteps[si];
+        Io_name_map<Val> sh = half_ins[si < pobs_b ? 0 : 1];
+        for (const auto& [k, v] : out.state) {
+          sh[k] = v;  // state committed by the earlier microsteps of THIS period
+        }
+        penc.set_x_dontcare(x_dc);
+        penc.set_box_keys(bkeys);
+        penc.set_phase_plan(&plan, ms);
+        Encoded e = penc.encode(g, &sh, std::string(pfx) + "m" + std::to_string(si) + "_", &out.mem, &out.reads);
+        penc.set_x_dontcare(false);
+        if (!e.ok) {
+          err = e.error;
+          return false;
+        }
+        for (const auto& [l, r] : e.equalities) {
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+        Io_name_map<Val> nxt;
+        for (const auto& [nm, v] : e.outputs) {
+          if (nm.rfind("\x01nxt:", 0) == 0) {
+            nxt[nm.substr(5)] = v;
+            continue;
+          }
+          if (!nm.empty() && nm[0] == '\x03') {
+            continue;  // env-gated debug tap
+          }
+          if (si == 0 || si == pobs_b) {
+            out.obs[std::to_string(si) + "\x1f" + nm] = v;
+          }
+        }
+        // Keep each microstep's terms SHALLOW: pin the next state to a fresh
+        // symbol, exactly as the BMC unroll does (substituting the term instead
+        // re-nests the whole transition and overflows cvc5's recursive walk).
+        for (auto& [k, v] : nxt) {
+          cvc5::Term sv = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "ps" + std::to_string(puid++));
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {sv, v.term}));
+          Val nv{sv, v.width, v.is_signed};
+          nv.x_mask     = v.x_mask;
+          out.state[k]  = nv;
+          out.emitted.insert(k);
+        }
+        out.mem   = e.next_mem;
+        out.reads = e.next_read;
+      }
+      return true;
+    };
+
+    Side rs, is;
+    std::string perr;
+    if (!run_side(ref, ind_ref_plan, &ref_box_keys, opts.gold_x != "zero", "pr_", rs, perr)) {
+      res.verdict = Verdict::Unknown;
+      res.detail += "; phase-inductive ref encode failed: " + perr;
+      return res;
+    }
+    if (!run_side(impl, ind_impl_plan, &impl_box_keys, false, "pi_", is, perr)) {
+      res.verdict = Verdict::Unknown;
+      res.detail += "; phase-inductive impl encode failed: " + perr;
+      return res;
+    }
+
+    // Correspondence completeness gates the verdict exactly as everywhere else:
+    // a compare point present on one side only means the two designs did not
+    // expose the same obligation set.
+    std::set<std::string> only_ref, only_impl;
+    cvc5::Term            pbad;
+    int                   pchecks = 0;
+    std::vector<std::pair<std::string, cvc5::Term>> pdiffs;  // labelled, for LEC_PHASE_LOG
+    std::string           plabel;
+    auto add_diff = [&](const Val& a, const Val& b) {
+      const int  w  = std::max(a.width, b.width);
+      cvc5::Term ra = fit_to(tm, a, w);
+      cvc5::Term ib = fit_to(tm, b, w);
+      if (cvc5::Term u = fit_x_mask_to(tm, a, w); !u.isNull()) {
+        cvc5::Term keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+        ra              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {ra, keep});
+        ib              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {ib, keep});
+      }
+      cvc5::Term d = tm.mkTerm(cvc5::Kind::DISTINCT, {ra, ib});
+      pbad         = pbad.isNull() ? d : tm.mkTerm(cvc5::Kind::OR, {pbad, d});
+      pdiffs.emplace_back(plabel, d);
+      ++pchecks;
+    };
+    for (const auto& [k, v] : rs.obs) {
+      auto it = is.obs.find(k);
+      if (it == is.obs.end()) {
+        only_ref.insert(display_name(k.substr(k.find('\x1f') + 1)));
+        continue;
+      }
+      if (k.find("\x02" "bbox:") != std::string::npos) {
+        continue;  // two-sided presence marker: a constant on both sides
+      }
+      plabel = "out@ms" + k.substr(0, k.find('\x1f')) + ":" + display_name(k.substr(k.find('\x1f') + 1));
+      add_diff(v, it->second);
+    }
+    for (const auto& [k, v] : is.obs) {
+      if (rs.obs.count(k) == 0) {
+        only_impl.insert(display_name(k.substr(k.find('\x1f') + 1)));
+      }
+    }
+    for (const auto& k : rs.emitted) {
+      if (is.emitted.count(k) == 0) {
+        only_ref.insert("nxt:" + display_name(k));
+        continue;
+      }
+      plabel = "nxt:" + display_name(k);
+      add_diff(rs.state.at(k), is.state.at(k));
+    }
+    for (const auto& k : is.emitted) {
+      if (rs.emitted.count(k) == 0) {
+        only_impl.insert("nxt:" + display_name(k));
+      }
+    }
+    for (const auto& [k, m] : rs.mem) {
+      auto it = is.mem.find(k);
+      if (it == is.mem.end()) {
+        only_ref.insert("mem:" + display_name(k));
+        continue;
+      }
+      cvc5::Term d = tm.mkTerm(cvc5::Kind::DISTINCT, {m, it->second});
+      pbad         = pbad.isNull() ? d : tm.mkTerm(cvc5::Kind::OR, {pbad, d});
+      pdiffs.emplace_back("mem:" + display_name(k), d);
+      ++pchecks;
+    }
+    for (const auto& [k, m] : is.mem) {
+      if (rs.mem.count(k) == 0) {
+        only_impl.insert("mem:" + display_name(k));
+      }
+    }
+    res.unmatched_ref.assign(only_ref.begin(), only_ref.end());
+    res.unmatched_impl.assign(only_impl.begin(), only_impl.end());
+    res.engine  = "ind";
+    res.detail  = "solver=cvc5 (phase-inductive: one composed source period, " + std::to_string(psteps.size())
+                 + " microsteps; " + std::to_string(pchecks) + " compare points); ref["
+                 + ind_ref_plan.describe() + "]";
+    // `checked_steps` / `output_checks` stay 0 exactly as the ordinary inductive
+    // engine leaves them: they are the BOUNDED-BMC accounting, and a nonzero
+    // `output_checks` on a Proven verdict is what the tier-2 discipline reads as
+    // "this proof is only bounded" and suppresses. This proof is UNBOUNDED --
+    // one composed period from an arbitrary equal state -- so it must not carry
+    // that marker. Vacuity is caught by `nothing_compared` below instead.
+    if (pchecks == 0) {
+      // Nothing was compared: an empty miter is VACUOUS, never a pass.
+      res.verdict         = Verdict::Unknown;
+      res.nothing_compared = true;
+      res.detail          += "; no compare points";
+      return res;
+    }
+    if (!only_ref.empty() || !only_impl.empty()) {
+      res.verdict = Verdict::Unknown;
+      res.detail += "; incomplete correspondence";
+      return res;
+    }
+    // LEC_PHASE_LOG=1: report which compare point survives, one query each. The
+    // composed period has no cone pass behind it, so without this a SAT verdict
+    // names nothing.
+    if (std::getenv("LEC_PHASE_LOG") != nullptr) {
+      for (const auto& [lbl, d] : pdiffs) {
+        solver.push();
+        solver.assertFormula(d);
+        const auto one = solver.checkSat();
+        std::fprintf(stderr, "[LEC_PHASE] %-52s %s\n", lbl.c_str(),
+                     one.isUnsat() ? "equal" : (one.isSat() ? "DIFF" : "unknown"));
+        solver.pop();
+      }
+    }
+    solver.assertFormula(pbad);
+    const auto pr = solver.checkSat();
+    if (pr.isUnsat()) {
+      res.verdict = Verdict::Proven;
+      return res;
+    }
+    // SAT here is NOT a disproof: the assumed-equal current state may be
+    // unreachable. BMC-from-reset owns refutations.
+    res.verdict = Verdict::Unknown;
+    res.detail += pr.isSat() ? "; inductive step SAT (not a disproof: the assumed state may be unreachable)"
+                             : "; solver returned unknown";
+    return res;
+  }
+
   Encoder enc(tm);
   enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
   enc.set_sub_lib(sub_lib);
@@ -4419,6 +4879,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_shared_bbox(&shared_bbox);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
+  enc.set_phase_plan(ind_use_plan ? &ind_ref_plan : nullptr, -1);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
@@ -4428,6 +4889,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return res;
   }
   enc.set_box_keys(&impl_box_keys);
+  enc.set_phase_plan(ind_use_plan ? &ind_impl_plan : nullptr, -1);
   Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
     res.verdict     = Verdict::Unknown;

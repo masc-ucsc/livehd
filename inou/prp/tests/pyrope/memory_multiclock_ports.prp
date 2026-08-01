@@ -1,0 +1,28 @@
+/*
+:name: memory_multiclock_ports
+:type: lgraph
+*/
+
+// One synchronous write port and two synchronous read ports, each on its own
+// clock. `clock_pin` follows the same port order as addr/rdport. Before R5,
+// tolg treated the tuple as one scalar clock and failed on the unresolved
+// tuple reference; accepting it as a single shared clock would be a silent
+// miscompile, so memory_multiclock_test.py also inspects the emitted bindings.
+mod memory_multiclock_ports(wclk:bool, r0clk:bool, r1clk:bool, we:bool, wa:u2, ra0:u2, ra1:u2, wd:u2)
+    -> (q0:u2@[], q1:u2@[]) {
+  mut cfg = (
+    const addr      = (wa, ra0, ra1),
+    const bits      = 2,
+    const size      = 4,
+    const clock_pin = (wclk, r0clk, r1clk),
+    const din       = (wd, 0, 0),
+    const enable    = (we, 1, 1),
+    const fwd       = false,
+    const type      = 1,
+    const wensize   = 1,
+    const rdport    = (0, 1, 1),
+  )
+  mut res = __memory(cfg)
+  q0 = res[0]
+  q1 = res[1]
+}

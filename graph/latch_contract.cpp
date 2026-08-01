@@ -52,7 +52,13 @@ bool const_is(const hhds::Pin_class& p, int64_t want) {
   return c.is_just_i64() && c.to_just_i64() == want;
 }
 
-Phase resolve_phase(hhds::Pin_class p) {
+// `stop_at_clock_cell` keeps the walk on the OUTSIDE of a gate. The default
+// (false) canonicalizes a gated net to its reference clock, which is what every
+// commit-class consumer wants. The formal phase scheduler needs the opposite:
+// it must step a CHAIN of gates one cell at a time so that every cell's enable
+// lands in the combined guard (`gate(gate(clk,en0),en1)` -> `en0 & en1`);
+// hopping straight to the root would silently drop the inner enable.
+Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
   Phase ph;
   ph.net = p;
   for (int hops = 0; hops < 64 && !ph.net.is_invalid(); ++hops) {
@@ -184,6 +190,9 @@ Phase resolve_phase(hhds::Pin_class p) {
     }
 
     if (op == Ntype_op::Clock_cell) {
+      if (stop_at_clock_cell) {
+        break;  // the cell IS the root for this caller (see the parameter note)
+      }
       // 2f-latch M9. A gated clock's ROOT is its REFERENCE clock: the cell is an
       // enable, not a new clock domain, so a gated flop and an ungated one on
       // the same reference share ONE commit class and therefore one slot.
@@ -195,13 +204,15 @@ Phase resolve_phase(hhds::Pin_class p) {
       // edge would land in different slots. That is the pollution the header
       // warns about for the And case, in a new costume.
       //
-      // `invert` XORs into the SAME single parity bit the wrapper inversions
-      // use -- a third independent inversion source tracked separately is how a
-      // double negation survives.
-      auto inv = gu::get_driver_of_sink_name(ph.net.get_master_node(), "invert");
-      if (!inv.is_invalid() && gu::is_const_pin(inv) && !gu::hydrate_const(inv).is_known_false()) {
-        ph.inverted = !ph.inverted;
-      }
+      // `invert` is the ACTIVE-LOW GATE FLAVOUR (`clk | ~en_latch`, minion's
+      // prim_clk_gate_n), NOT an inverted output. Both flavours transition on
+      // exactly the same reference edges -- `clk & en` idles LOW and `clk | ~en`
+      // idles HIGH, but neither moves while the enable is deasserted -- so the
+      // consumer's edge is UNCHANGED and the parity bit must not flip here.
+      // What the flavour does change is WHEN THE ENABLE IS SAMPLED: an ordinary
+      // gate latches it while the clock is LOW (pre-rise), the active-low one
+      // while it is HIGH (pre-fall). That is a scheduling fact, carried by the
+      // phase schedule's guard sample point, not a parity.
       auto ref = gu::get_driver_of_sink_name(ph.net.get_master_node(), "clk_ref");
       if (ref.is_invalid()) {
         break;
@@ -339,27 +350,54 @@ bool Design_clocks::name_looks_like_clock(std::string_view name) {
   return saw_clock;
 }
 
-Design_clocks::Design_clocks(hhds::Graph* g) {
+Control_root control_root(hhds::Pin_class p, bool stop_at_clock_cell) {
+  const Phase ph = resolve_phase(p, stop_at_clock_cell);
+  return Control_root{ph.net, ph.inverted};
+}
+
+hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name) {
+  const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), sink_name);
+  for (const auto& e : n.inp_edges()) {
+    if (e.sink.get_port_id() == pid) {
+      return e.driver;
+    }
+  }
+  return {};
+}
+
+Design_clocks::Design_clocks(hhds::Graph* g, bool hier) {
   if (g == nullptr) {
     return;
   }
-  for (auto n : g->fast_class()) {
+  auto scan = [&](const hhds::Node_class& n) {
     const auto op = gu::type_op_of(n);
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop) {
-      continue;
+      return;
     }
-    auto clk = gu::get_driver_of_sink_name(n, "clock_pin");
+    // Hierarchical scan MUST resolve across the instance boundary, or a leaf's
+    // own clock port becomes a "root" and a design with one clock looks like as
+    // many domains as it has instances.
+    auto clk = hier ? sink_driver_hier(n, "clock_pin") : gu::get_driver_of_sink_name(n, "clock_pin");
     if (clk.is_invalid()) {
       implicit_clock_ = true;  // `reg x = 0`: the module's own clock
-      continue;
+      return;
     }
     const auto root = resolve_phase(clk).net;
     if (root.is_invalid()) {
-      continue;
+      return;
     }
     roots_.insert(root.get_class_index());
     if (gu::is_graph_input_pin(root)) {
       input_names_.insert(std::string(gu::pin_name_of(root)));
+    }
+  };
+  if (hier) {
+    for (auto n : g->fast_hier()) {
+      scan(n);
+    }
+  } else {
+    for (auto n : g->fast_class()) {
+      scan(n);
     }
   }
 }
@@ -577,10 +615,10 @@ std::optional<Icg_cone> clock_cell_cone(const hhds::Node_class& n, const Design_
   // carrying invert=true are the SAME operation and canonicalize together.
   const Phase ph  = resolve_phase(ref);
   c.clock         = ph.net.is_invalid() ? ref : ph.net;
+  // `invert` (the active-low gate flavour) does NOT change the reference edge a
+  // consumer commits on -- see the note in resolve_phase. It only moves the
+  // enable's sample point, which this cone type does not carry.
   c.clock_inverted = ph.inverted;
-  if (const auto inv = gu::get_driver_of_sink_name(n, "invert"); const_is(inv, 1)) {
-    c.clock_inverted = !c.clock_inverted;
-  }
   if (const auto d = gu::get_driver_of_sink_name(n, "div"); !d.is_invalid() && gu::is_const_pin(d)) {
     const auto dv = gu::hydrate_const(d);
     c.div         = (dv.is_just_i64() && dv.to_just_i64() > 0) ? static_cast<int>(dv.to_just_i64()) : 0;
@@ -637,8 +675,21 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     }
     auto       gate    = op_ph.net.get_master_node();
     const auto gate_op = gu::type_op_of(gate);
-    if (gate_op != Ntype_op::And) {
-      continue;  // `clk | ~en_latch` (the active-low dual) is not implemented -- see the escape hatches
+    // TWO flavours, and the design corpus has both. `clk & en_latch` (enable
+    // latched while the clock is LOW, output idles low) is the ordinary ICG;
+    // `clk | ~en_latch` (enable latched while the clock is HIGH, output idles
+    // high) is minion's prim_clk_gate_n. They gate the SAME reference edges --
+    // neither output moves while the enable is deasserted -- so the only
+    // difference is the enable's sample point, recorded as `invert`.
+    if (gate_op != Ntype_op::And && gate_op != Ntype_op::Or) {
+      continue;
+    }
+    if (op_ph.inverted) {
+      // An inversion between the gate and the output (`~(clk & en)`) is a
+      // genuinely inverted CLOCK, not a flavour: its consumers commit on the
+      // opposite reference edge. Not modelled -- leave it to the derived-clock
+      // refusal rather than fold it into `invert`, whose meaning is the flavour.
+      continue;
     }
     // Split the And's operands into "the one holding a latch below it" (the
     // enable) and "the bare input port" (the clock). This is the STRUCTURAL
@@ -687,7 +738,7 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     m.clk_in      = clk_port;
     m.out         = opin;
     m.enable_cone = arm;
-    m.invert      = op_ph.inverted;
+    m.invert      = gate_op == Ntype_op::Or;
     return m;
   }
   return std::nullopt;
@@ -828,6 +879,16 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
   absl::flat_hash_set<std::string> out;
   if (def == nullptr || depth > 8) {
     return out;
+  }
+  // A GATE CELL's own clock port. Its only state element is the enable latch,
+  // whose gate is its ENABLE (a latch has no clock_pin -- user ruling
+  // 2026-07-20), so the scan below finds nothing and the cell looks like it has
+  // no clock port at all. That breaks a GATE CHAIN: the outer gate's clk port is
+  // fed by the inner gate's output, and without this the inner one is never seen
+  // as driving a clock, never materializes, and stays an opaque Sub -- which
+  // then makes the outer cell's reference clock a derived net.
+  if (auto m = match_icg_def(def); m.has_value() && !m->clk_in.is_invalid()) {
+    out.insert(std::string(gu::pin_name_of(m->clk_in)));
   }
   for (auto n : def->fast_class()) {
     const auto op = gu::type_op_of(n);

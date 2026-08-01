@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: phase_clock_gate_chain
 :pyrope_top: phase_clock_gate_chain
+:equiv_engine: cvc5
 */
 
 // Normalized Pyrope side of the golden's two hierarchical glitch-free clock

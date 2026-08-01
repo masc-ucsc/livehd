@@ -539,12 +539,19 @@ void uPass_runner::stamp_scratch_srcid(const std::shared_ptr<Lnast>& scratch, co
   if (id == hhds::SourceId_invalid) {
     return;
   }
-  // Re-mint into the scratch tree's own locator: carry_srcid resolves the id
-  // through the SOURCE tree's locator when the scratch walk emits.
-  id = scratch->source_locator().import_from(src_ln->source_locator(), id);
-  if (id != hhds::SourceId_invalid) {
-    scratch->set_srcid(root, id);
-  }
+  // A scratch LNAST is consumed synchronously while `src_ln` remains on the
+  // Lnast_manager source stack, so borrow its immutable provenance table
+  // instead of importing it.  import_from() makes a locator self-contained;
+  // for a fresh scratch locator that also re-derives the full source file's
+  // content hash and line-offset table.  Cast lowering creates multiple
+  // scratch LNASTs per operation, turning that O(source-bytes) metadata work
+  // into a generated-code-scale quadratic cost.
+  //
+  // carry_srcid() resolves this id through the scratch locator while the base
+  // is alive and imports it into the durable root only when the root does not
+  // already own it (the ordinary same-source case is an O(1) has(id) hit).
+  scratch->source_locator().set_base(&src_ln->source_locator());
+  scratch->set_srcid(root, id);
 }
 
 void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {

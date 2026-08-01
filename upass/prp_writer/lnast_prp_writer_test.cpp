@@ -493,3 +493,30 @@ if true {
   // The key invariant is that constprop prunes the dead else-branch — no "if".
   EXPECT_EQ(output.find("if "), std::string::npos) << "if should be pruned but still present:\n" << output;
 }
+
+// A timecheck can be grouped well before its store.  The writer indexes the
+// immutable statement sequence once; unrelated intervening stores must neither
+// lose the annotation nor require a per-store scan from the block's beginning.
+TEST(LnastPrpWriter, GroupedTimecheckReattachesToStore) {
+  auto ln = std::make_shared<Lnast>("grouped_timecheck");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto check = ln->add_child(stmts, Lnast_ntype::create_timecheck());
+  ln->add_child(check, Lnast_node::create_ref("src"));
+  ln->add_child(check, Lnast_node::create_const("2"));
+  ln->add_child(check, Lnast_node::create_const("2"));
+
+  for (int i = 0; i < 64; ++i) {
+    auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+    ln->add_child(store, Lnast_node::create_ref("unrelated_" + std::to_string(i)));
+    ln->add_child(store, Lnast_node::create_const(std::to_string(i)));
+  }
+
+  auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(store, Lnast_node::create_ref("out"));
+  ln->add_child(store, Lnast_node::create_ref("src"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("out = src@[2]"), std::string::npos) << output;
+}

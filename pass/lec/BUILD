@@ -12,12 +12,14 @@ cc_library(
     srcs = [
         "cone_abc.cpp",
         "encode.cpp",
+        "phase_sched.cpp",
         "query.cpp",
         "solve_stats.cpp",
     ],
     hdrs = [
         "cone_abc.hpp",
         "encode.hpp",
+        "phase_sched.hpp",
         "query.hpp",
         "solve_stats.hpp",
     ],
@@ -116,19 +118,18 @@ sh_test(
     tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
 )
 
-# A collapsed STATELESS child must not blind the ABC cone pass. EXPECTED TO FAIL
-# until Comb_box emits `bbin:` obligations + a comb analogue of boxcong
-# (todo/livehd/2f-lec.html, "Hierarchy and collapse"), so it is tagged `fixme`
-# (.bazelrc filters -fixme) to keep `bazel test //...` green. Run it with:
-#   bazel test //pass/lec:lec_comb_box_cone_test --test_tag_filters=
+# A collapsed STATELESS child must not blind the ABC cone pass. It used to: the
+# `Comb_box` branch emitted NO `bbin:` obligations and modelled the child's
+# outputs as APPLY_UF, which ABC abstracts to unrelated free inputs, so every cut
+# downstream of a comb box was undecidable. PROMOTED out of `fixme` by the
+# sequence-transducer box model (formal.lec.box_model=seq, the default): a proven
+# child is now inputs-proven + outputs-shared with no UF at all, so the query
+# stays in QF_BV and the cone pass discharges the cut.
 sh_test(
     name = "lec_comb_box_cone_test",
     srcs = ["tests/lec_comb_box_cone_test.sh"],
     data = ["//lhd"],
-    tags = [
-        "fixme",
-        "no-sandbox",  # compiles RTL + runs the in-process cvc5/ABC cone pass
-    ],
+    tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5/ABC cone pass
 )
 
 sh_test(

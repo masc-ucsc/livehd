@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: phase_latch_flop_edges
 :pyrope_top: phase_latch_flop_edges
+:equiv_engine: cvc5
 */
 
 // Normalized Pyrope side of both clock-role latch boundaries. Clock signals are

@@ -1,6 +1,9 @@
 # LiveHD Relational Equivalence Engine (`pass/lec`)
 
-> **Reference — how and why `pass/lec` works today.** Current work and the
+> **Reference — how and why `pass/lec` works today.** The **hierarchical
+> decomposition** — what a proven submodule means, what is proven where, and the
+> refute-escalation policy — is [`README.md`](README.md) in this directory.
+> Current work and the
 > longer roadmap live in [`todo/livehd/2f-lec.html`](../../todo/livehd/2f-lec.html)
 > (LEC remainder) and [`todo/livehd/2f-fcore.html`](../../todo/livehd/2f-fcore.html)
 > (the shared formal core: proof-DAG runner, verdict cache, case-split, hints). The

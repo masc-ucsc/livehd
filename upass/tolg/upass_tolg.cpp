@@ -8,9 +8,9 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdlib>
-#include <map>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,7 +26,7 @@
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
-#include "perf_tracing.hpp" // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 
 namespace {
 
@@ -37,15 +37,13 @@ using livehd::graph_util::set_sign;
 using livehd::graph_util::set_unsign;
 using livehd::graph_util::setup_sink_by_name;
 
-using Pin = hhds::Pin_class;
+using Pin      = hhds::Pin_class;
 using WriteMap = absl::flat_hash_map<std::string, Pin>;
 
 // Reserved clock/reset port-name recognition. Pyrope matches names
 // case-sensitively, so these conventional signal names must match exactly (clk,
 // RESET_N, … are all recognized). The `_n` suffix (active-low) folds too.
-[[nodiscard]] inline bool is_clock_port_name(std::string_view n) {
-  return (n == "clock") || (n == "clk");
-}
+[[nodiscard]] inline bool is_clock_port_name(std::string_view n) { return (n == "clock") || (n == "clk"); }
 [[nodiscard]] inline bool is_reset_port_name(std::string_view n) {
   return (n == "reset") || (n == "rst") || (n == "reset_n") || (n == "rst_n");
 }
@@ -55,7 +53,7 @@ using WriteMap = absl::flat_hash_map<std::string, Pin>;
 // (a leading 0 sign bit), which is what cgen's add_to_pin2var expects (it does
 // `--bits` for unsigned dpins). We track `mw` (the N) and stamp `mw+1` bits.
 struct Val {
-  Pin pin;
+  Pin     pin;
   int32_t mw{0};
 };
 
@@ -81,7 +79,7 @@ struct Val {
 // (which carries no bits stamp) — the bits needed for its value. Used to size
 // a merged mux/hotmux to the WIDEST arm so a narrow (e.g. const) arm does not
 // truncate the wider ones. Returns 0 for an unstamped non-const pin.
-[[nodiscard]] int32_t pin_mw_of(const Pin &p) {
+[[nodiscard]] int32_t pin_mw_of(const Pin& p) {
   if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
     return bb;
   }
@@ -98,7 +96,7 @@ struct Val {
 // Does this LNAST subtree hold an assert/assume/assert_always/cassert? (All four
 // share the `cassert` node type.) Used to warn when a callee carrying properties
 // is INSTANTIATED under a guard those properties will never see.
-[[nodiscard]] bool lnast_subtree_has_cassert(const Lnast &ln, const Lnast_nid &root) {
+[[nodiscard]] bool lnast_subtree_has_cassert(const Lnast& ln, const Lnast_nid& root) {
   for (auto c = ln.get_first_child(root); !c.is_invalid(); c = ln.get_sibling_next(c)) {
     if (Lnast_ntype::is_cassert(ln.get_type(c)) || lnast_subtree_has_cassert(ln, c)) {
       return true;
@@ -110,14 +108,13 @@ struct Val {
 // Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
-[[nodiscard]] std::shared_ptr<Lnast>
-resolve_callee_lnast(std::string_view name,
-                     const std::vector<std::shared_ptr<Lnast>> &registry) {
+[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
+                                                          const std::vector<std::shared_ptr<Lnast>>& registry) {
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
-  int suffix_matches = 0;
-  const std::string suffix = "." + std::string(name);
-  for (const auto &ln : registry) {
+  int                    suffix_matches = 0;
+  const std::string      suffix         = "." + std::string(name);
+  for (const auto& ln : registry) {
     if (!ln) {
       continue;
     }
@@ -145,10 +142,10 @@ resolve_callee_lnast(std::string_view name,
 // the paired pending_time attr; leftovers are compile errors.
 struct Pending_rec {
   hhds::Pin_class pin;
-  std::string name;
-  int64_t min = 0;
-  int64_t max = 0;
-  bool is_sink = false;
+  std::string     name;
+  int64_t         min     = 0;
+  int64_t         max     = 0;
+  bool            is_sink = false;
 };
 
 // 2f-latch M9 — name the operation if this clock cone contains one that can
@@ -186,14 +183,14 @@ std::string_view illegal_clock_op(hhds::Pin_class d) {
       case Ntype_op::LT:
       case Ntype_op::GT:
       case Ntype_op::LUT:
-      case Ntype_op::Hotmux: return Ntype::get_name(op);
+      case Ntype_op::Hotmux  : return Ntype::get_name(op);
       // Identity / shaping wrappers a typed 1-bit read picks up: keep walking.
       case Ntype_op::Get_mask:
-      case Ntype_op::Sext:
-      case Ntype_op::Not: break;
+      case Ntype_op::Sext    :
+      case Ntype_op::Not     : break;
       // And (the gate), Clock_cell, Sub (an opaque cell), Mux/EQ (boolean
       // shaping), a state element (a divider): all legal or handled later.
-      default: return {};
+      default                : return {};
     }
     hhds::Pin_class a;
     for (const auto& e : n.inp_edges()) {
@@ -214,10 +211,10 @@ std::string_view illegal_clock_op(hhds::Pin_class d) {
 // `reset_neg` marks an active-low (…_n) module reset input.
 struct Io_setup {
   std::string clock_name;
-  bool clock_minted = false;
+  bool        clock_minted = false;
   std::string reset_name;
-  bool reset_minted = false;
-  bool reset_neg = false;
+  bool        reset_minted = false;
+  bool        reset_neg    = false;
 };
 
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
@@ -226,15 +223,18 @@ public:
   // `registry`/`lib` resolve pipe/mod call sites to Sub instances.
   // `async_default` is the upass.reset_style=async elaboration flag;
   // a per-reg `:[sync=…]` attr beats it.
-  Tolg(const std::shared_ptr<Lnast> &lnast, hhds::Graph *g, Io_setup io_setup,
-       const uPass_tolg::Registry *registry, hhds::GraphLibrary *lib,
-       bool async_default)
-      : lnast_(lnast), g_(g), registry_(registry), lib_(lib),
-        clock_name_(std::move(io_setup.clock_name)),
-        clock_minted_(io_setup.clock_minted),
-        reset_name_(std::move(io_setup.reset_name)),
-        reset_minted_(io_setup.reset_minted), reset_neg_(io_setup.reset_neg),
-        reset_async_default_(async_default) {}
+  Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, Io_setup io_setup, const uPass_tolg::Registry* registry,
+       hhds::GraphLibrary* lib, bool async_default)
+      : lnast_(lnast)
+      , g_(g)
+      , registry_(registry)
+      , lib_(lib)
+      , clock_name_(std::move(io_setup.clock_name))
+      , clock_minted_(io_setup.clock_minted)
+      , reset_name_(std::move(io_setup.reset_name))
+      , reset_minted_(io_setup.reset_minted)
+      , reset_neg_(io_setup.reset_neg)
+      , reset_async_default_(async_default) {}
 
 private:
   // Deferred stage-reg creation: a declare(reg)+stages does NOT
@@ -245,39 +245,37 @@ private:
   struct Pending_stage {
     std::string min_txt;
     std::string max_txt;
-    Lnast_nid decl_nid;      // for located diagnostics
-    int32_t decl_color = 0;  // block region at the declare (2opt-freq B)
+    Lnast_nid   decl_nid;        // for located diagnostics
+    int32_t     decl_color = 0;  // block region at the declare (2opt-freq B)
   };
 
   // Per call-result name: the callee output's declared stages
   // interval + kind, recorded when the Sub is created and consumed by the
   // following stage-reg din store for the range check + deficit narrowing.
   struct Sub_out {
-    int64_t cmin = 0;
-    int64_t cmax = 0; // pipe convention: 0 with cmin>=1 = unconstrained
-    bool is_pipe = false;
-    hhds::Node_class node; // to re-stamp time_range when stage[N] pins the pick
+    int64_t          cmin    = 0;
+    int64_t          cmax    = 0;  // pipe convention: 0 with cmin>=1 = unconstrained
+    bool             is_pipe = false;
+    hhds::Node_class node;  // to re-stamp time_range when stage[N] pins the pick
   };
 
 public:
   void build() {
+    index_mem_write_sites();
     // Module anchor: io-time cells (the to-positive port masks below)
     // are minted outside any statement — anchor them, and the graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
     // (stamped on the LNAST root by func_extract / the specialize clone).
-    if (const auto id = lnast_->get_srcid(lnast_->get_root());
-        id != hhds::SourceId_invalid) {
-      cur_srcid_ =
-          g_->source_locator().import_from(lnast_->source_locator(), id);
+    if (const auto id = lnast_->get_srcid(lnast_->get_root()); id != hhds::SourceId_invalid) {
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
 
     // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
     // Get_mask so signed-declared ports read with their unsigned value (e.g.
     // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
-    for (const auto &e : lnast_->io_meta().inputs) {
-      const std::string ename{
-          canon_io_name(e.name)};          // strip slang's `` `ar.x` `` marker
-      auto raw = g_->get_input_pin(ename); // body driver pin for the port
+    for (const auto& e : lnast_->io_meta().inputs) {
+      const std::string ename{canon_io_name(e.name)};    // strip slang's `` `ar.x` `` marker
+      auto              raw = g_->get_input_pin(ename);  // body driver pin for the port
       if (cur_srcid_ != hhds::SourceId_invalid && !raw.is_invalid()) {
         raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
       }
@@ -311,13 +309,12 @@ public:
         // sign-sensitive folds (cprop get_mask rule 4) away from it.
         set_bits(raw, mw);
         set_sign(raw);
-        record(e.name, to_positive(raw, mw), mw); // unsigned -> positive
+        record(e.name, to_positive(raw, mw), mw);  // unsigned -> positive
       }
     }
-    for (const auto &e : lnast_->io_meta().outputs) {
+    for (const auto& e : lnast_->io_meta().outputs) {
       if (cur_srcid_ != hhds::SourceId_invalid) {
-        if (auto sink = g_->get_output_pin(canon_io_name(e.name));
-            !sink.is_invalid()) {
+        if (auto sink = g_->get_output_pin(canon_io_name(e.name)); !sink.is_invalid()) {
           sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
         }
       }
@@ -325,8 +322,7 @@ public:
 
     // Body: lower the `stmts` child of `top`.
     auto top = lnast_->get_root();
-    for (auto c = lnast_->get_first_child(top); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_first_child(top); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(lnast_->get_type(c))) {
         lower_stmts(c);
       }
@@ -340,7 +336,7 @@ public:
     // Wire every declared reg's din/enable/reset/initial now that
     // all stores and per-reg attr overrides have been seen.
     finalize_regs();
-    cur_color_ = 0; // the last reg's region must not leak into mem/output glue
+    cur_color_ = 0;  // the last reg's region must not leak into mem/output glue
     // Sanity-check the per-memory port allocation.
     finalize_mems();
     // Bind any deferred field reads (forward references to a call result
@@ -353,18 +349,15 @@ public:
     // pin, and after resolve_pending_tgets so a driver that reads a forward
     // call result is bound first.
     finalize_wires();
-    cur_color_ = 0; // the last wire's region must not leak into output glue
+    cur_color_ = 0;  // the last wire's region must not leak into output glue
 
     // Outputs: connect each output's bound driver to its graph output sink. The
     // GraphIO carries the port widths cgen emits; fetch it so an unbounded
     // output can be sized from its (now-lowered) driver below.
-    auto out_gio = lib_ != nullptr
-                       ? lib_->find_io(std::string(lnast_->get_graph_name()))
-                       : nullptr;
-    for (const auto &e : lnast_->io_meta().outputs) {
-      const std::string ename{
-          canon_io_name(e.name)}; // strip slang's `` `p.q` `` marker
-      auto sink = g_->get_output_pin(ename);
+    auto out_gio = lib_ != nullptr ? lib_->find_io(std::string(lnast_->get_graph_name())) : nullptr;
+    for (const auto& e : lnast_->io_meta().outputs) {
+      const std::string ename{canon_io_name(e.name)};  // strip slang's `` `p.q` `` marker
+      auto              sink = g_->get_output_pin(ename);
       if (sink.is_invalid()) {
         continue;
       }
@@ -374,10 +367,12 @@ public:
         // legally-undriven output (defaults to X) is already poison-inited to
         // `0sb?` at body top by inou.slang, so it never reaches here — reaching
         // here now genuinely means a Pyrope output the body forgot to drive.
-        error_at(Lnast_nid{}, {"undriven-output", "type"},
+        error_at(Lnast_nid{},
+                 {"undriven-output", "type"},
                  "output '{}' is never driven by the body of '{}' — every "
                  "declared output must be assigned",
-                 e.name, lnast_->get_top_module_name());
+                 e.name,
+                 lnast_->get_top_module_name());
         continue;
       }
       sink.connect_driver(it->second);
@@ -392,8 +387,8 @@ public:
       // width (uN/sN, or a bounded `int(max=…)`) keeps e.bits>0 and is left
       // untouched — the constraint is the contract.
       if (e.kind != Io_kind::boolean && e.bits == 0 && out_gio != nullptr) {
-        const bool uns = livehd::graph_util::is_unsign(it->second);
-        int32_t dbits = livehd::graph_util::bits_of(it->second);
+        const bool uns   = livehd::graph_util::is_unsign(it->second);
+        int32_t    dbits = livehd::graph_util::bits_of(it->second);
         if (dbits <= 0) {
           // A const driver carries no `bits` attr; size from the constant's own
           // width (the width cgen emits for the literal) so `out:int = 300` is
@@ -425,7 +420,8 @@ public:
       error_at(pending_stage_.begin()->second.decl_nid,
                "upass.tolg: stage reg '{}' in '{}' was declared but never "
                "stored — its delay would be silently lost",
-               pending_stage_.begin()->first, lnast_->get_top_module_name());
+               pending_stage_.begin()->first,
+               lnast_->get_top_module_name());
     }
 
     // Persist the block-attribute regions (2opt-freq B): the coloring_info
@@ -438,25 +434,22 @@ private:
   // ── width / value helpers
   // ───────────────────────────────────────────────────
 
-  [[nodiscard]] static int32_t io_mw(const Lnast_io_entry &e) {
+  [[nodiscard]] static int32_t io_mw(const Lnast_io_entry& e) {
     if (e.kind == Io_kind::boolean) {
       return 1;
     }
     return e.bits > 0 ? static_cast<int32_t>(e.bits) : int32_t{1};
   }
 
-  [[nodiscard]] Pin nil_pin() {
-    return create_const(*g_, *Dlop::from_pyrope("0sb?"));
-  }
+  [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Dlop::from_pyrope("0sb?")); }
 
   // To-positive-signed: Get_mask(x, -1) -> same bits, guaranteed non-negative,
   // marked unsigned with one extra (sign) bit. Lets unsigned values flow
   // through signed LGraph arithmetic correctly.
-  [[nodiscard]] Pin to_positive(const Pin &src, int32_t mw) {
+  [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(src);
-    setup_sink_by_name(node, "mask")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
     auto drv = node.create_driver_pin(0);
     set_bits(drv, mw + 1);
     set_unsign(drv);
@@ -483,7 +476,7 @@ private:
       auto inner = name.substr(1, name.size() - 2);
       for (const char c : inner) {
         if (std::isspace(static_cast<unsigned char>(c))) {
-          return name; // genuinely needs quoting (whitespace) — leave as-is
+          return name;  // genuinely needs quoting (whitespace) — leave as-is
         }
       }
       return inner;
@@ -491,34 +484,30 @@ private:
     return name;
   }
 
-  void record(std::string_view name_in, const Pin &pin, int32_t mw) {
+  void record(std::string_view name_in, const Pin& pin, int32_t mw) {
     std::string_view name = canon_io_name(name_in);
-    std::string key{name};
+    std::string      key{name};
     if (!branch_writes_.empty()) {
       // First write to `key` in this branch: remember how to undo it on branch
       // exit -- restore the pre-branch value, or erase if the name was absent.
       // Capturing lazily here is O(writes); lower_branch used to snapshot the
       // whole pin_map_ per branch, which is O(pin_map_) and turns quadratic on
       // if/elif-heavy designs (e.g. firtool mux chains) -- a deep hang.
-      if (auto [it, inserted] = branch_writes_.back().try_emplace(key, pin);
-          inserted) {
+      if (auto [it, inserted] = branch_writes_.back().try_emplace(key, pin); inserted) {
         auto pit = pin_map_.find(key);
-        branch_restore_.back().emplace(
-            key, pit != pin_map_.end() ? std::optional<Pin>{pit->second}
-                                       : std::nullopt);
+        branch_restore_.back().emplace(key, pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt);
       } else {
-        it->second = pin; // keep the branch's latest value for the merge
+        it->second = pin;  // keep the branch's latest value for the merge
       }
     }
     pin_map_[key] = pin;
-    mw_map_[key] = mw;
+    mw_map_[key]  = mw;
     // Track the LOGICAL variable's most-recent driver (SSA versions collapse to
     // the root) for derived reset_pin/clock_pin resolution and the wire buffer.
     // Shadow keys (\x01din:/\x01en:) are not user names, so skip them.
     if (!key.empty() && key.front() != '\x01') {
-      const auto pos = key.find("___ssa_");
-      logical_last_[pos == std::string::npos ? key : key.substr(0, pos)] = {pin,
-                                                                            mw};
+      const auto pos                                                     = key.find("___ssa_");
+      logical_last_[pos == std::string::npos ? key : key.substr(0, pos)] = {pin, mw};
     }
   }
 
@@ -529,8 +518,8 @@ private:
 
   [[nodiscard]] Pin resolve(std::string_view name_in) {
     std::string_view name = canon_io_name(name_in);
-    std::string key{name};
-    auto it = pin_map_.find(key);
+    std::string      key{name};
+    auto             it = pin_map_.find(key);
     if (it != pin_map_.end()) {
       return it->second;
     }
@@ -545,27 +534,24 @@ private:
     // legally read an undriven wire (it defaults to X), so keep the warn + nil.
     const bool strict = !lnast_->is_verilog_origin();
     if (strict) {
-      error_here("upass.tolg: unresolved reference '{}' — it has no driver "
-                 "(often an unassigned variable or a value that "
-                 "resolved to nil)",
-                 name);
+      error_here(
+          "upass.tolg: unresolved reference '{}' — it has no driver "
+          "(often an unassigned variable or a value that "
+          "resolved to nil)",
+          name);
     } else {
-      warn_at(Lnast_nid{}, {"unresolved-ref", "name"},
-              "unresolved ref '{}' — wiring nil (0sb?)", name);
+      warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", name);
     }
-    auto p = nil_pin();
+    auto p        = nil_pin();
     pin_map_[key] = p;
-    mw_map_[key] = 1;
+    mw_map_[key]  = 1;
     return p;
   }
 
-  [[nodiscard]] Val leaf(const Lnast_nid &nid) {
+  [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
-      int32_t mw =
-          c->is_just_i64()
-              ? mw_of_val(c->to_just_i64())
-              : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
+      auto    c  = Dlop::from_pyrope(lnast_->get_name(nid));
+      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
@@ -573,7 +559,7 @@ private:
   }
 
   // Bind a computed result: stamp mw+1 unsigned bits and record name->(pin,mw).
-  void bind_result(std::string_view name, const Pin &drv, int32_t mw) {
+  void bind_result(std::string_view name, const Pin& drv, int32_t mw) {
     int32_t m = mw > 0 ? mw : int32_t{1};
     set_bits(drv, m + 1);
     set_unsign(drv);
@@ -583,16 +569,15 @@ private:
   // ── statement / node dispatch
   // ───────────────────────────────────────────────
 
-  void lower_stmts(const Lnast_nid &stmts) {
+  void lower_stmts(const Lnast_nid& stmts) {
     // A `__region` marker inside this stmts sets cur_color_ for the REST of
     // the block; restoring here bounds the region to its block (nested blocks
     // override and restore, if/match arms inherit the enclosing color).
     const auto saved_color = cur_color_;
-    for (auto c = lnast_->get_first_child(stmts); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_first_child(stmts); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (lnast_->is_dce_dead(c)) {
-        continue; // dce:mark (lg-only flows): a dead statement is skipped here
-                  // instead of the runner rebuilding the whole staging tree
+        continue;  // dce:mark (lg-only flows): a dead statement is skipped here
+                   // instead of the runner rebuilding the whole staging tree
       }
       lower_node(c);
     }
@@ -610,36 +595,34 @@ private:
   // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
-  int32_t                          cur_color_ = 0;
-  std::map<int32_t, std::string>   region_abc_;
-  absl::flat_hash_set<int32_t>     region_colors_marked_;
-  absl::flat_hash_set<int32_t>     region_colors_stamped_;
+  int32_t                        cur_color_ = 0;
+  std::map<int32_t, std::string> region_abc_;
+  absl::flat_hash_set<int32_t>   region_colors_marked_;
+  absl::flat_hash_set<int32_t>   region_colors_stamped_;
 
   // Anchor priority shared by error_at/warn_at: the given nid's SourceId,
   // falling back to the current statement's (re-minted into the graph).
-  [[nodiscard]] livehd::diag::Diagnostic
-  locate_record(const Lnast_nid &nid, livehd::diag::Severity sev,
-                std::string_view code, std::string_view category,
-                std::string msg) const {
-    livehd::diag::Span span;
+  [[nodiscard]] livehd::diag::Diagnostic locate_record(const Lnast_nid& nid, livehd::diag::Severity sev, std::string_view code,
+                                                       std::string_view category, std::string msg) const {
+    livehd::diag::Span              span;
     std::vector<livehd::diag::Note> notes;
     if (!nid.is_invalid() && lnast_) {
-      span = lnast_->span_of(nid);
+      span  = lnast_->span_of(nid);
       notes = lnast_->notes_of(nid, "reached via this site");
     }
     if (span.is_null() && g_ != nullptr) {
       const auto rs = g_->source_locator().resolve_spans(cur_srcid_);
-      span = rs.primary;
-      notes = livehd::diag::notes_from(rs, "reached via this site");
+      span          = rs.primary;
+      notes         = livehd::diag::notes_from(rs, "reached via this site");
     }
     return livehd::diag::Diagnostic{
         .severity = sev,
-        .code = std::string(code),
+        .code     = std::string(code),
         .category = std::string(category),
-        .pass = "upass.tolg",
-        .message = std::move(msg),
-        .span = std::move(span),
-        .notes = std::move(notes),
+        .pass     = "upass.tolg",
+        .message  = std::move(msg),
+        .span     = std::move(span),
+        .notes    = std::move(notes),
     };
   }
 
@@ -647,40 +630,32 @@ private:
   // downstream flush seam emits the staged record exactly once, so the error
   // carries a resolved span instead of no location).
   template <typename... Args>
-  [[noreturn]] void error_at(const Lnast_nid &nid, livehd::diag::Id id,
-                             std::format_string<Args...> fmt, Args &&...args) {
+  [[noreturn]] void error_at(const Lnast_nid& nid, livehd::diag::Id id, std::format_string<Args...> fmt, Args&&... args) {
     auto msg = std::format(fmt, std::forward<Args>(args)...);
-    livehd::diag::sink().stage(locate_record(nid, livehd::diag::Severity::error,
-                                             id.code, id.category, msg));
+    livehd::diag::sink().stage(locate_record(nid, livehd::diag::Severity::error, id.code, id.category, msg));
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 
   template <typename... Args>
-  [[noreturn]] void error_at(const Lnast_nid &nid,
-                             std::format_string<Args...> fmt, Args &&...args) {
-    error_at(nid, livehd::diag::Id{"tolg-error", "type"}, "{}",
-             std::format(fmt, std::forward<Args>(args)...));
+  [[noreturn]] void error_at(const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
+    error_at(nid, livehd::diag::Id{"tolg-error", "type"}, "{}", std::format(fmt, std::forward<Args>(args)...));
   }
 
   template <typename... Args>
-  [[noreturn]] void error_here(std::format_string<Args...> fmt,
-                               Args &&...args) {
+  [[noreturn]] void error_here(std::format_string<Args...> fmt, Args&&... args) {
     error_at(Lnast_nid{}, "{}", std::format(fmt, std::forward<Args>(args)...));
   }
 
   // Non-fatal sibling: emit a located warning and continue lowering.
   template <typename... Args>
-  void warn_at(const Lnast_nid &nid, livehd::diag::Id id,
-               std::format_string<Args...> fmt, Args &&...args) {
+  void warn_at(const Lnast_nid& nid, livehd::diag::Id id, std::format_string<Args...> fmt, Args&&... args) {
     auto msg = std::format(fmt, std::forward<Args>(args)...);
-    livehd::diag::sink().emit(
-        locate_record(nid, livehd::diag::Severity::warning, id.code,
-                      id.category, std::move(msg)));
+    livehd::diag::sink().emit(locate_record(nid, livehd::diag::Severity::warning, id.code, id.category, std::move(msg)));
   }
 
-  template <typename... Args> hhds::Node_class make_node(Args &&...args) {
-    auto n =
-        livehd::graph_util::create_typed_node(*g_, std::forward<Args>(args)...);
+  template <typename... Args>
+  hhds::Node_class make_node(Args&&... args) {
+    auto n = livehd::graph_util::create_typed_node(*g_, std::forward<Args>(args)...);
     if (cur_srcid_ != hhds::SourceId_invalid) {
       n.attr(hhds::attrs::srcid).set(cur_srcid_);
     }
@@ -691,21 +666,19 @@ private:
     return n;
   }
 
-  void lower_node(const Lnast_nid &nid) {
-    const auto t = lnast_->get_type(nid);
+  void lower_node(const Lnast_nid& nid) {
+    const auto t           = lnast_->get_type(nid);
     // Anchor the statement: nested lower_* calls (and the cells they mint)
     // inherit it; statements without an id keep the enclosing one.
     const auto saved_srcid = cur_srcid_;
     if (const auto id = lnast_->get_srcid(nid); id != hhds::SourceId_invalid) {
-      cur_srcid_ =
-          g_->source_locator().import_from(lnast_->source_locator(), id);
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
     lower_node_dispatch(nid, t);
     cur_srcid_ = saved_srcid;
   }
 
-  void lower_node_dispatch(const Lnast_nid &nid,
-                           Lnast_ntype::Lnast_ntype_int t) {
+  void lower_node_dispatch(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) {
     using N = Lnast_ntype;
     if (N::is_stmts(t)) {
       lower_stmts(nid);
@@ -809,11 +782,12 @@ private:
       // nor a known tuple shape. Pyrope `for` is comptime-only (must fully
       // unroll), so this is a user error (a runtime/unknown iterable), not a
       // silent miscompile. HARD error rather than the unhandled warn below.
-      error_here("upass.tolg: non-comptime `for` loop in '{}' — the iterable "
-                 "did not resolve to a comptime range "
-                 "or tuple, so the loop could not unroll (Pyrope for-loops are "
-                 "comptime-only and must fully unroll)",
-                 lnast_->get_top_module_name());
+      error_here(
+          "upass.tolg: non-comptime `for` loop in '{}' — the iterable "
+          "did not resolve to a comptime range "
+          "or tuple, so the loop could not unroll (Pyrope for-loops are "
+          "comptime-only and must fully unroll)",
+          lnast_->get_top_module_name());
     } else if (N::is_type_spec(t)) {
       // Pure annotation, no datapath (the comb inliner's emit_inline_typespec,
       // or a folded type check). No hardware — skip silently.
@@ -826,7 +800,8 @@ private:
       // Any other node type reaching tolg has no LGraph lowering and would be
       // silently dropped (→ undriven wires / nil). That is a miscompile, so it
       // is a hard error, never a warning on an otherwise-"passing" run.
-      error_at(nid, {"unhandled-node", "unsupported"},
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
                "upass.tolg: node type '{}' has no hardware lowering — it "
                "survived elaboration but cannot be turned "
                "into a netlist (this is usually an unresolved value or an "
@@ -837,13 +812,13 @@ private:
 
   // Every attribute read folds during elaboration (upass.attributes); one that
   // survives to tolg has no hardware lowering, so it is a hard error.
-  void lower_attr_get(const Lnast_nid &nid) {
-    auto dst = lnast_->get_first_child(nid);
-    auto base = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
-    auto attr = base.is_invalid() ? base : lnast_->get_sibling_next(base);
-    const std::string attr_name =
-        attr.is_invalid() ? std::string{} : std::string(lnast_->get_name(attr));
-    error_at(nid, {"unhandled-node", "unsupported"},
+  void lower_attr_get(const Lnast_nid& nid) {
+    auto              dst       = lnast_->get_first_child(nid);
+    auto              base      = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
+    auto              attr      = base.is_invalid() ? base : lnast_->get_sibling_next(base);
+    const std::string attr_name = attr.is_invalid() ? std::string{} : std::string(lnast_->get_name(attr));
+    error_at(nid,
+             {"unhandled-node", "unsupported"},
              "upass.tolg: attribute read '.[{}]' has no hardware lowering — it "
              "should have folded during elaboration",
              attr_name);
@@ -855,7 +830,7 @@ private:
   // unresolvable one warn rather than defer again.
   void resolve_pending_tgets() {
     tget_final_ = true;
-    for (const auto &nid : pending_tgets_) {
+    for (const auto& nid : pending_tgets_) {
       lower_tuple_get(nid);
     }
     pending_tgets_.clear();
@@ -883,37 +858,37 @@ private:
   // Pyrope wire the frontend skipped — wire it to nil rather than miscompile.
   void finalize_wires() {
     const bool verilog = lnast_->is_verilog_origin();
-    for (const auto &name : wire_order_) {
-      auto &info = wire_info_.at(name);
+    for (const auto& name : wire_order_) {
+      auto& info = wire_info_.at(name);
 
       // Anchor this wire's diagnostics at its declaration.
       cur_srcid_ = hhds::SourceId_invalid;
-      if (const auto id = lnast_->get_srcid(info.decl_nid);
-          id != hhds::SourceId_invalid) {
-        cur_srcid_ =
-            g_->source_locator().import_from(lnast_->source_locator(), id);
+      if (const auto id = lnast_->get_srcid(info.decl_nid); id != hhds::SourceId_invalid) {
+        cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
       }
-      cur_color_ = info.decl_color; // finalize glue lands in the wire's region
+      cur_color_ = info.decl_color;  // finalize glue lands in the wire's region
 
       // Wire the buffer input to the accumulated single driver, restamping the
       // buffer output width from the driver when the wire was untyped.
-      Pin din;
-      int32_t mw = info.decl_mw;
-      bool driven = false;
+      Pin     din;
+      int32_t mw     = info.decl_mw;
+      bool    driven = false;
       if (auto dit = pin_map_.find(din_key(name)); dit != pin_map_.end()) {
-        din = dit->second;
+        din    = dit->second;
         driven = true;
         if (mw <= 0) {
           mw = mw_lookup(din_key(name));
         }
       } else {
         if (!verilog) {
-          error_here("upass.tolg: wire '{}' is never driven in '{}' — a `wire` "
-                     "must have exactly one driver",
-                     name, lnast_->get_top_module_name());
+          error_here(
+              "upass.tolg: wire '{}' is never driven in '{}' — a `wire` "
+              "must have exactly one driver",
+              name,
+              lnast_->get_top_module_name());
         }
-        din = nil_pin(); // Verilog net defaults to X; a loop-built undriven
-                         // wire falls here too
+        din = nil_pin();  // Verilog net defaults to X; a loop-built undriven
+                          // wire falls here too
         if (mw <= 0) {
           mw = 1;
         }
@@ -927,9 +902,7 @@ private:
       if (driven && info.decl_mw > 0) {
         auto gm = make_node(Ntype_op::Get_mask);
         setup_sink_by_name(gm, "a").connect_driver(din);
-        setup_sink_by_name(gm, "mask")
-            .connect_driver(
-                create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
         auto gm_out = gm.create_driver_pin(0);
         if (info.is_signed) {
           set_bits(gm_out, info.decl_mw);
@@ -967,7 +940,7 @@ private:
   // negreset, initial=N]` (04b-attributes.md); a per-reg `sync` beats the
   // upass.reset_style flag; `reset_pin=false` opts out of reset (only valid
   // with a nil init).
-  void lower_attr_set(const Lnast_nid &nid) {
+  void lower_attr_set(const Lnast_nid& nid) {
     auto tgt = lnast_->get_first_child(nid);
     if (tgt.is_invalid()) {
       return;
@@ -990,20 +963,19 @@ private:
         std::from_chars(ds.data(), ds.data() + ds.size(), id);
       }
       if (id <= 0) {
-        warn_at(tgt, {"region-marker-malformed", "internal"},
-                "malformed __region marker target '{}' (compiler bug?)", tname);
+        warn_at(tgt, {"region-marker-malformed", "internal"}, "malformed __region marker target '{}' (compiler bug?)", tname);
         return;
       }
       cur_color_ = id;
       region_colors_marked_.insert(id);
       if (auto val_n = lnast_->get_sibling_next(key_n); !val_n.is_invalid()) {
         std::string_view val = lnast_->get_name(val_n);
-        if (val.size() >= 2 && ((val.front() == '\'' && val.back() == '\'') ||
-                                (val.front() == '"' && val.back() == '"'))) {
-          val = val.substr(1, val.size() - 2);
+        if (val.size() >= 2 && ((val.front() == '\'' && val.back() == '\'') || (val.front() == '"' && val.back() == '"'))) {
+          val                  = val.substr(1, val.size() - 2);
           auto [ait, inserted] = region_abc_.try_emplace(id, std::string(val));
           if (!inserted && ait->second != val) {
-            warn_at(tgt, {"region-abc-conflict", "unsupported"},
+            warn_at(tgt,
+                    {"region-abc-conflict", "unsupported"},
                     "region color {} carries conflicting abc= options; keeping "
                     "the first",
                     id);
@@ -1018,18 +990,14 @@ private:
       // importer emits the attr_set before the declare it qualifies).
       auto key_sv = lnast_->get_name(key_n);
       auto val_n0 = lnast_->get_sibling_next(key_n);
-      auto val_sv = val_n0.is_invalid()
-                        ? std::string_view{"true"}
-                        : std::string_view(lnast_->get_name(val_n0));
-      pending_attrs_[std::string(lnast_->get_name(tgt))][std::string(key_sv)] =
-          std::string(val_sv);
+      auto val_sv = val_n0.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n0));
+      pending_attrs_[std::string(lnast_->get_name(tgt))][std::string(key_sv)] = std::string(val_sv);
       return;
     }
-    auto &info = it->second;
-    auto key = lnast_->get_name(key_n);
-    auto val_n = lnast_->get_sibling_next(key_n);
-    auto val = val_n.is_invalid() ? std::string_view{"true"}
-                                  : std::string_view(lnast_->get_name(val_n));
+    auto& info  = it->second;
+    auto  key   = lnast_->get_name(key_n);
+    auto  val_n = lnast_->get_sibling_next(key_n);
+    auto  val   = val_n.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n));
     if ((key == "reset_pin")) {
       info.reset_pin_name = std::string(val);
     } else if ((key == "clock_pin")) {
@@ -1062,8 +1030,7 @@ private:
       // declared variable name; finalize_regs combines it with any hier prefix.
       // The value is a Pyrope string literal, so strip the surrounding quotes.
       std::string_view nm = val;
-      if (nm.size() >= 2 && ((nm.front() == '\'' && nm.back() == '\'') ||
-                             (nm.front() == '"' && nm.back() == '"'))) {
+      if (nm.size() >= 2 && ((nm.front() == '\'' && nm.back() == '\'') || (nm.front() == '"' && nm.back() == '"'))) {
         nm = nm.substr(1, nm.size() - 2);
       }
       info.name_override = std::string(nm);
@@ -1074,10 +1041,12 @@ private:
     } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
     } else {
-      warn_at(tgt, {"reg-attr-not-lowered", "unsupported"},
+      warn_at(tgt,
+              {"reg-attr-not-lowered", "unsupported"},
               "reg '{}' attribute '{}' not lowered (attribute not in the "
               "lowered set)",
-              lnast_->get_name(tgt), key);
+              lnast_->get_name(tgt),
+              key);
     }
   }
 
@@ -1112,20 +1081,20 @@ private:
         if (livehd::graph_util::node_color_of(n) != 0) {
           continue;
         }
-        int32_t c = 0;
-        bool ok = false;
-        for (const auto &e : n.out_edges()) {
+        int32_t c  = 0;
+        bool    ok = false;
+        for (const auto& e : n.out_edges()) {
           auto sn = e.sink.get_master_node();
           if (sn.is_invalid() || livehd::graph_util::is_builtin_node(sn)) {
-            ok = false; // drives an output/builtin: boundary glue, keep it out
+            ok = false;  // drives an output/builtin: boundary glue, keep it out
             break;
           }
           auto sc = livehd::graph_util::node_color_of(sn);
           if (sc == 0 || (c != 0 && sc != c)) {
-            ok = false; // uncolored or multi-region fanout: stays background
+            ok = false;  // uncolored or multi-region fanout: stays background
             break;
           }
-          c = sc;
+          c  = sc;
           ok = true;
         }
         if (ok && c != 0) {
@@ -1136,10 +1105,12 @@ private:
     }
     for (auto c : region_colors_marked_) {
       if (!region_colors_stamped_.contains(c)) {
-        warn_at(Lnast_nid{}, {"block-attr-region-empty", "unsupported"},
+        warn_at(Lnast_nid{},
+                {"block-attr-region-empty", "unsupported"},
                 "block region color {} in '{}' produced no hardware (its "
                 "statements folded away?) — the annotation has no effect",
-                c, lnast_->get_top_module_name());
+                c,
+                lnast_->get_top_module_name());
       }
     }
     auto jesc = [](std::string_view sv) {
@@ -1147,35 +1118,26 @@ private:
       out.reserve(sv.size());
       for (char ch : sv) {
         switch (ch) {
-        case '"':
-          out += "\\\"";
-          break;
-        case '\\':
-          out += "\\\\";
-          break;
-        case '\n':
-          out += "\\n";
-          break;
-        case '\t':
-          out += "\\t";
-          break;
-        default:
-          out.push_back(ch);
+          case '"' : out += "\\\""; break;
+          case '\\': out += "\\\\"; break;
+          case '\n': out += "\\n"; break;
+          case '\t': out += "\\t"; break;
+          default  : out.push_back(ch);
         }
       }
       return out;
     };
-    std::string j = "{\"schema_version\":1,";
-    j += std::format("\"top\":\"{}\",", jesc(lnast_->get_graph_name()));
-    j += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
-         "\"region_opts\":{";
-    bool first = true;
-    for (const auto &[color, abc] : region_abc_) {
+    std::string j  = "{\"schema_version\":1,";
+    j             += std::format("\"top\":\"{}\",", jesc(lnast_->get_graph_name()));
+    j             += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
+                     "\"region_opts\":{";
+    bool first     = true;
+    for (const auto& [color, abc] : region_abc_) {
       if (!first) {
         j += ",";
       }
-      first = false;
-      j += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, jesc(abc));
+      first  = false;
+      j     += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, jesc(abc));
     }
     j += "}}";
     g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);
@@ -1185,9 +1147,9 @@ private:
   // async / negreset after the whole body has been lowered (stores and attr
   // overrides arrive in any order relative to the declare).
   void finalize_regs() {
-    for (const auto &name : reg_order_) {
-      auto &info = reg_info_.at(name);
-      auto &flop = info.flop;
+    for (const auto& name : reg_order_) {
+      auto& info = reg_info_.at(name);
+      auto& flop = info.flop;
 
       // Hierarchical / overridden flop name. `name_override` (`reg
       // x::[name=…]`) replaces the local name; `hier_prefix` (runner `__hier`,
@@ -1218,8 +1180,7 @@ private:
             local.resize(p);
           }
         }
-        const std::string final_name =
-            info.hier_prefix.empty() ? local : (info.hier_prefix + "." + local);
+        const std::string final_name = info.hier_prefix.empty() ? local : (info.hier_prefix + "." + local);
         if (!final_name.empty()) {
           auto qn = flop.create_driver_pin(0);
           livehd::graph_util::set_pin_name(qn, final_name);
@@ -1230,17 +1191,15 @@ private:
       // Runs after the walk: anchor this reg's diagnostics at its declaration
       // instead of whatever statement the walk ended on.
       cur_srcid_ = hhds::SourceId_invalid;
-      if (const auto id = lnast_->get_srcid(info.decl_nid);
-          id != hhds::SourceId_invalid) {
-        cur_srcid_ =
-            g_->source_locator().import_from(lnast_->source_locator(), id);
+      if (const auto id = lnast_->get_srcid(info.decl_nid); id != hhds::SourceId_invalid) {
+        cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
       }
-      cur_color_ = info.decl_color; // finalize glue lands in the reg's region
+      cur_color_ = info.decl_color;  // finalize glue lands in the reg's region
 
       // din: the final shadow value (last-write-wins; branch writes arrive
       // pre-muxed). A never-written reg holds its value forever: din <- q.
       auto q = flop.create_driver_pin(0);
-      Pin din;
+      Pin  din;
       if (auto dit = pin_map_.find(din_key(name)); dit != pin_map_.end()) {
         din = dit->second;
       } else {
@@ -1269,8 +1228,9 @@ private:
           std::string_view why = "todo/livehd/2f-latch M7 wires the reset family";
           if (!info.clock_pin_name.empty()) {
             dropped = "clock_pin";
-            why     = "a latch's gate IS its `enable` signal — write the "
-                      "transparency condition in the `if`, not as a clock";
+            why
+                = "a latch's gate IS its `enable` signal — write the "
+                  "transparency condition in the `if`, not as a clock";
           } else if (info.has_posclk && !info.posclk_val) {
             // ACTIVE-LOW ENABLE IS NOT EXPRESSIBLE IN THE PYROPE SHAPE, and
             // wiring it as a bare pin flip is a SILENT MISCOMPILE (measured
@@ -1294,20 +1254,24 @@ private:
             // (pid 6) for the YOSYS importer, whose raw-D + EN shape has no
             // hold mux and for which the flip IS sound.
             dropped = "enable_high=false (active-low enable)";
-            why     = "the Pyrope lowering builds `din = cond ? d : q` from the "
-                      "SAME condition, so the enable is active-high by "
-                      "construction and flipping only the polarity would make "
-                      "the latch write itself and never capture din — write the "
-                      "inverted condition instead: `if !g { ... }`";
+            why
+                = "the Pyrope lowering builds `din = cond ? d : q` from the "
+                  "SAME condition, so the enable is active-high by "
+                  "construction and flipping only the polarity would make "
+                  "the latch write itself and never capture din — write the "
+                  "inverted condition instead: `if !g { ... }`";
           }
           // The RESET FAMILY (reset_pin / sync / async / negreset / init) is no
           // longer refused: M7 wires it through the SHARED flop path below, so
           // a latch gets the same reset semantics a flop does and cgen emits it.
           if (!dropped.empty()) {
-            error_here("upass.tolg: latch '{}' carries '{}', which the Latch "
-                       "cell cannot honor — the attribute would be SILENTLY "
-                       "DROPPED. {}",
-                       name, dropped, why);
+            error_here(
+                "upass.tolg: latch '{}' carries '{}', which the Latch "
+                "cell cannot honor — the attribute would be SILENTLY "
+                "DROPPED. {}",
+                name,
+                dropped,
+                why);
             continue;
           }
         }
@@ -1332,26 +1296,24 @@ private:
         // only consumer is a flop control pin).
         std::string cn = info.clock_pin_name;
         if (g_->get_io()->has_input(cn)) {
-          setup_sink_by_name(flop, "clock_pin")
-              .connect_driver(g_->get_input_pin(cn));
-        } else if (auto dit = wire_names_.contains(cn)
-                                  ? pin_map_.find(din_key(cn))
-                                  : pin_map_.end();
-                   dit != pin_map_.end()) {
+          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(cn));
+        } else if (auto dit = wire_names_.contains(cn) ? pin_map_.find(din_key(cn)) : pin_map_.end(); dit != pin_map_.end()) {
           setup_sink_by_name(flop, "clock_pin").connect_driver(dit->second);
         } else if (pin_map_.contains(cn)) {
           setup_sink_by_name(flop, "clock_pin").connect_driver(pin_map_.at(cn));
         } else {
-          error_here("upass.tolg: reg '{}' names clock_pin '{}' but '{}' has "
-                     "no such input/wire",
-                     name, info.clock_pin_name, lnast_->get_top_module_name());
+          error_here(
+              "upass.tolg: reg '{}' names clock_pin '{}' but '{}' has "
+              "no such input/wire",
+              name,
+              info.clock_pin_name,
+              lnast_->get_top_module_name());
           continue;
         }
       } else if (!clock_name_.empty()) {
         setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
       } else {
-        warn_at(info.decl_nid, {"no-clock", "time"},
-                "reg '{}' has no clock input to bind", name);
+        warn_at(info.decl_nid, {"no-clock", "time"}, "reg '{}' has no clock input to bind", name);
       }
       // 2f-latch M9 -- NOTHING MAY BE DONE TO A CLOCK except a recognized clock
       // operation. A clock may be GATED (`clk and en`) or INVERTED (`not clk`);
@@ -1363,20 +1325,21 @@ private:
       // lec_clock_blindness_test). Refuse at COMPILE time, where the source span
       // still exists to point at.
       if (const auto bad = illegal_clock_op(livehd::graph_util::get_driver_of_sink_name(flop, "clock_pin")); !bad.empty()) {
-        error_at(info.decl_nid, {"clock-op-unsupported", "time"},
+        error_at(info.decl_nid,
+                 {"clock-op-unsupported", "time"},
                  "reg '{}' takes its clock from a `{}` operation, which is not a clock operation -- a clock may only "
                  "be gated (`clk and en`) or inverted (`not clk`)",
-                 name, bad);
+                 name,
+                 bad);
       }
       if (info.has_posclk && !info.posclk_val) {
-        setup_sink_by_name(flop, "posclk")
-            .connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+        setup_sink_by_name(flop, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
       }
 
       // q width: untyped regs take the final din width (mw+1 unsigned).
       if (info.decl_mw == 0) {
-        auto dit = mw_map_.find(din_key(name));
-        int32_t mw = dit != mw_map_.end() ? dit->second : int32_t{1};
+        auto    dit = mw_map_.find(din_key(name));
+        int32_t mw  = dit != mw_map_.end() ? dit->second : int32_t{1};
         set_bits(q, mw + 1);
         set_unsign(q);
         mw_map_[name] = mw;
@@ -1386,14 +1349,10 @@ private:
       // the true const => unconditionally written (no enable needed); any
       // other pin is the OR-of-conditions mux chain.
       if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
-        const auto en = eit->second;
-        const auto en_nid = en.get_master_node().get_debug_nid();
-        const bool is_true =
-            en_true_valid_ &&
-            en_nid == en_true_pin_.get_master_node().get_debug_nid();
-        const bool is_false =
-            en_false_valid_ &&
-            en_nid == en_false_pin_.get_master_node().get_debug_nid();
+        const auto en       = eit->second;
+        const auto en_nid   = en.get_master_node().get_debug_nid();
+        const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
+        const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
         if (!is_true && !is_false) {
           setup_sink_by_name(flop, "enable").connect_driver(en);
         }
@@ -1402,24 +1361,22 @@ private:
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
       // the declare's [value]; "nil" (or absent) = NO reset (confirmed
       // 2026-06-07 ruling).
-      const std::string init =
-          !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
-      const bool has_init = !init.empty() && init != "nil";
-      const bool rp_false = info.reset_pin_name == "false";
+      const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
+      const bool        has_init = !init.empty() && init != "nil";
+      const bool        rp_false = info.reset_pin_name == "false";
       if (rp_false && has_init) {
-        error_here("upass.tolg: reg '{}' has a non-nil initializer but "
-                   "`reset_pin=false` — drop the init or the override",
-                   name);
+        error_here(
+            "upass.tolg: reg '{}' has a non-nil initializer but "
+            "`reset_pin=false` — drop the init or the override",
+            name);
         return;
       }
-      const bool wants_reset =
-          (has_init || (!info.reset_pin_name.empty() && !rp_false)) &&
-          !rp_false;
+      const bool wants_reset = (has_init || (!info.reset_pin_name.empty() && !rp_false)) && !rp_false;
       if (!wants_reset) {
         continue;
       }
 
-      Pin rpin;
+      Pin  rpin;
       bool neg = info.negreset;
       if (!info.reset_pin_name.empty()) {
         // Usually a graph input, but a reset synchronizer drives it from a
@@ -1439,13 +1396,9 @@ private:
           // the passthrough buffer output. A buffer whose only consumer is a
           // flop control pin is dropped by cgen (the reset would reference an
           // undriven net); the din is the real combinational value.
-          if (auto dit = wire_names_.contains(base)
-                             ? pin_map_.find(din_key(base))
-                             : pin_map_.end();
-              dit != pin_map_.end()) {
+          if (auto dit = wire_names_.contains(base) ? pin_map_.find(din_key(base)) : pin_map_.end(); dit != pin_map_.end()) {
             rpin = dit->second;
-          } else if (auto lit = logical_last_.find(base);
-                     lit != logical_last_.end()) {
+          } else if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
             rpin = lit->second.first;
           } else {
             rpin = resolve(info.reset_pin_name);
@@ -1460,9 +1413,11 @@ private:
           neg = true;
         }
       } else {
-        error_here("upass.tolg: reg '{}' has a reset value but '{}' has no "
-                   "reset input (setup_io bug)",
-                   name, lnast_->get_top_module_name());
+        error_here(
+            "upass.tolg: reg '{}' has a reset value but '{}' has no "
+            "reset input (setup_io bug)",
+            name,
+            lnast_->get_top_module_name());
         return;
       }
       setup_sink_by_name(flop, "reset_pin").connect_driver(rpin);
@@ -1474,23 +1429,22 @@ private:
         // rather than deref a null Dlop.
         auto iv = Dlop::from_pyrope(init);
         if (!iv) {
-          error_here("upass.tolg: reg '{}' reset/initial value '{}' is not a "
-                     "compile-time constant",
-                     name, init);
+          error_here(
+              "upass.tolg: reg '{}' reset/initial value '{}' is not a "
+              "compile-time constant",
+              name,
+              init);
           return;
         }
-        setup_sink_by_name(flop, "initial")
-            .connect_driver(create_const(*g_, *iv));
+        setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
       }
       if (neg) {
-        setup_sink_by_name(flop, "negreset")
-            .connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+        setup_sink_by_name(flop, "negreset").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
       }
       // sync-vs-async: per-reg `sync` attr beats the elaboration flag.
       const bool async = info.has_sync ? !info.sync_val : reset_async_default_;
       if (async) {
-        setup_sink_by_name(flop, "async")
-            .connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+        setup_sink_by_name(flop, "async").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
       }
     }
   }
@@ -1498,7 +1452,7 @@ private:
   // store(ref(lhs), value) — scalar assignment / alias. A store whose lhs is
   // a declared reg connects the value to the Flop's din instead of rebinding
   // the name (reads keep seeing the q pin — Verilog `<=` semantics).
-  void lower_store(const Lnast_nid &nid) {
+  void lower_store(const Lnast_nid& nid) {
     auto lhs = lnast_->get_first_child(nid);
     if (lhs.is_invalid()) {
       return;
@@ -1509,8 +1463,7 @@ private:
     }
     // 1a-mem — an indexed store to a declared memory becomes a write port;
     // the 2-child whole-array form is the mut/const array initializer.
-    if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs)));
-        mit != mem_map_.end()) {
+    if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs))); mit != mem_map_.end()) {
       if (lnast_->get_sibling_next(rhs).is_invalid()) {
         lower_mem_init_store(rhs, lnast_->get_name(lhs), mit->second);
       } else {
@@ -1519,7 +1472,8 @@ private:
       return;
     }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
-      error_at(lhs, {"tuple-store-unsupported", "unsupported"},
+      error_at(lhs,
+               {"tuple-store-unsupported", "unsupported"},
                "upass.tolg: tuple/field store to '{}' has no hardware lowering "
                "— the elaboration left a multi-element "
                "store that cannot be turned into wires",
@@ -1543,8 +1497,7 @@ private:
       if (!reg_info_.contains(std::string(lhs_name))) {
         // A stage reg (created by its one din store) has no finalize record —
         // a second store would be silently lost.
-        error_here("upass.tolg: stage reg '{}' stored more than once in '{}'",
-                   lhs_name, lnast_->get_top_module_name());
+        error_here("upass.tolg: stage reg '{}' stored more than once in '{}'", lhs_name, lnast_->get_top_module_name());
         return;
       }
       auto v = leaf(rhs);
@@ -1558,8 +1511,7 @@ private:
       // output, so they stay position-independent). The branch-mux machinery
       // merges conditional writes; finalize_wires() wires the buffer input. A
       // `= nil` forward-declare is not a driver — skip it.
-      if (Lnast_ntype::is_const(lnast_->get_type(rhs)) &&
-          lnast_->get_name(rhs) == "nil") {
+      if (Lnast_ntype::is_const(lnast_->get_type(rhs)) && lnast_->get_name(rhs) == "nil") {
         return;
       }
       auto v = leaf(rhs);
@@ -1571,16 +1523,27 @@ private:
     // literal/result has no pin; its consumers resolve through the record).
     if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
       const std::string rhs_name(lnast_->get_name(rhs));
+      // prp_writer names a call result before feeding it to a stage:
+      //   const t = pipe(...); stage[N] x = t
+      // Preserve the callee's latency rider across that scalar alias so
+      // create_stage_flop narrows N by the pipe's realized minimum instead of
+      // charging N fresh flops on top of the callee.
+      if (auto sit = sub_out_stages_.find(rhs_name); sit != sub_out_stages_.end()) {
+        // Copy before inserting: operator[] may rehash the flat_hash_map and
+        // invalidate sit before the RHS is read.
+        const auto sub_out_copy                = sit->second;
+        sub_out_stages_[std::string(lhs_name)] = sub_out_copy;
+      }
       // Copy BEFORE inserting: operator[] may rehash and invalidate the
       // found iterator (the type_info_map rehash-invalidation UAF all over
       // again).
       if (auto tit = tuple_recs_.find(rhs_name); tit != tuple_recs_.end()) {
-        auto rec_copy = tit->second;
+        auto rec_copy                      = tit->second;
         tuple_recs_[std::string(lhs_name)] = std::move(rec_copy);
         return;
       }
       if (auto mrt = mem_results_.find(rhs_name); mrt != mem_results_.end()) {
-        auto rec_copy = mrt->second;
+        auto rec_copy                       = mrt->second;
         mem_results_[std::string(lhs_name)] = rec_copy;
         return;
       }
@@ -1593,8 +1556,8 @@ private:
       // alias it AND fall through to bind the scalar — otherwise a plain read
       // of the named var (`s1 + s2`, no `.field`) would find no driver.
       if (auto srt = sub_results_.find(rhs_name); srt != sub_results_.end()) {
-        const bool multi = srt->second.outputs.size() > 1;
-        auto rec_copy = srt->second;
+        const bool multi                    = srt->second.outputs.size() > 1;
+        auto       rec_copy                 = srt->second;
         sub_results_[std::string(lhs_name)] = std::move(rec_copy);
         if (multi) {
           return;
@@ -1613,19 +1576,17 @@ private:
   // finalize_wires() wires the buffer input to the single accumulated driver
   // and enforces the single-driver / undriven / incomplete-driver rules. No
   // flop.
-  void lower_wire_declare(const Lnast_nid &name_nid, const Lnast_nid &type_nid,
-                          const Lnast_nid &decl_nid) {
+  void lower_wire_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& decl_nid) {
     auto name = lnast_->get_name(name_nid);
-    if (!type_nid.is_invalid() &&
-        Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))) {
-      error_here("upass.tolg: array `wire` is not supported — declare an array "
-                 "as `mut`/`reg`; a `wire` is a scalar net");
+    if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))) {
+      error_here(
+          "upass.tolg: array `wire` is not supported — declare an array "
+          "as `mut`/`reg`; a `wire` is a scalar net");
       return;
     }
     Wire_info info;
-    info.buf = make_node(
-        Ntype_op::Or); // single-input Or = pure passthrough (cgen `out = a`)
-    info.out = info.buf.create_driver_pin(0);
+    info.buf      = make_node(Ntype_op::Or);  // single-input Or = pure passthrough (cgen `out = a`)
+    info.out      = info.buf.create_driver_pin(0);
     info.decl_nid = decl_nid;
     if (!type_nid.is_invalid()) {
       std::tie(info.decl_mw, info.is_signed) = declared_width(type_nid);
@@ -1641,7 +1602,7 @@ private:
       record(name, info.out, info.decl_mw);
     } else {
       set_bits(info.out,
-               1); // provisional; finalize_wires restamps from the driver
+               1);  // provisional; finalize_wires restamps from the driver
       set_unsign(info.out);
       record(name, info.out, 1);
     }
@@ -1677,18 +1638,16 @@ private:
   // the pipe_min/pipe_max comptime pins (LG pass1 narrows them by sigma
   // later). A pure-comb partition's flop is the no-reset shape — reset_pin/
   // initial/async/enable stay unconnected; posclk unset reads as posedge.
-  void lower_declare(const Lnast_nid &nid) {
+  void lower_declare(const Lnast_nid& nid) {
     auto name_nid = lnast_->get_first_child(nid);
     if (name_nid.is_invalid()) {
       return;
     }
     auto type_nid = lnast_->get_sibling_next(name_nid);
-    auto mode_nid =
-        type_nid.is_invalid() ? type_nid : lnast_->get_sibling_next(type_nid);
-    auto mode = mode_nid.is_invalid() ||
-                        !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
-                    ? std::string_view{}
-                    : std::string_view(lnast_->get_name(mode_nid));
+    auto mode_nid = type_nid.is_invalid() ? type_nid : lnast_->get_sibling_next(type_nid);
+    auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
+                        ? std::string_view{}
+                        : std::string_view(lnast_->get_name(mode_nid));
     // 2c-wire — a single-driver combinational net: declare its passthrough
     // buffer now so position-independent reads (a read before the driver) bind
     // to it; finalize_wires() wires the buffer input to the single driver.
@@ -1699,13 +1658,10 @@ private:
     // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
     // memory; a mut/const array that survived to tolg (runtime-indexed) → a
     // comb type=2 array / ROM. Never a Flop, never a plain binding.
-    const bool is_reg = mode == "reg" || mode.starts_with("reg ");
-    const bool is_latch =
-        mode == "latch"; // level-sensitive latch (din+enable, no clock)
-    if (!type_nid.is_invalid() &&
-        Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid)) &&
-        (is_reg || mode == "mut" || mode == "const" ||
-         mode.starts_with("mut ") || mode.starts_with("const "))) {
+    const bool is_reg   = mode == "reg" || mode.starts_with("reg ");
+    const bool is_latch = mode == "latch";  // level-sensitive latch (din+enable, no clock)
+    if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
+        && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
       lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
       return;
     }
@@ -1715,8 +1671,7 @@ private:
       // via their stores); nothing to lower. Remember the scalar name so a
       // later `b#[lo..=hi] = …` whose base is a still-undriven `mut b = nil`
       // can use a 0sb? base instead of erroring (see lower_set_mask).
-      if (mode == "mut" || mode == "const" || mode.starts_with("mut ") ||
-          mode.starts_with("const ")) {
+      if (mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const ")) {
         // CANONICAL key: set_mask_base tests it against pin_map_, which
         // record()/resolve() key on the backtick-stripped name.
         scalar_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
@@ -1730,8 +1685,7 @@ private:
     // Safe because every emitted shape stores immediately after the declare
     // (prp2lnast enforces stage-needs-value; the pipe upass always emits the
     // din store) — no read can occur in between.
-    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (!Lnast_ntype::is_stages(lnast_->get_type(c))) {
         continue;
       }
@@ -1739,13 +1693,12 @@ private:
       if (mn.is_invalid()) {
         break;
       }
-      auto mx = lnast_->get_sibling_next(mn);
+      auto          mx = lnast_->get_sibling_next(mn);
       Pending_stage p;
-      p.min_txt = std::string(lnast_->get_name(mn));
-      p.max_txt =
-          mx.is_invalid() ? p.min_txt : std::string(lnast_->get_name(mx));
-      p.decl_nid = nid;
-      p.decl_color                                             = cur_color_;
+      p.min_txt                                               = std::string(lnast_->get_name(mn));
+      p.max_txt                                               = mx.is_invalid() ? p.min_txt : std::string(lnast_->get_name(mx));
+      p.decl_nid                                              = nid;
+      p.decl_color                                            = cur_color_;
       pending_stage_[std::string(lnast_->get_name(name_nid))] = std::move(p);
       return;
     }
@@ -1760,7 +1713,7 @@ private:
     // arrive after the declare). A latch has no clock/reset — finalize_regs
     // wires only its din + enable.
     auto name = lnast_->get_name(name_nid);
-    auto q = flop.create_driver_pin(0);
+    auto q    = flop.create_driver_pin(0);
     // Keep the register's RTL name on q. The lnast path otherwise leaves the
     // flop unnamed (cgen then synthesizes `flop_<nid>`), losing the identity
     // that yosys-slang preserves — pass/lec needs it to put corresponding flops
@@ -1782,7 +1735,7 @@ private:
     }
 
     Reg_info info;
-    info.flop = flop;
+    info.flop     = flop;
     info.is_latch = is_latch;
     info.decl_nid = nid;
     if (!type_nid.is_invalid()) {
@@ -1791,17 +1744,17 @@ private:
     // The declare's optional trailing [value] child is the
     // power-on/reset value (a const after declare-folding; an unresolved ref
     // means a runtime initializer, which a reset value cannot be).
-    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       const auto ct = lnast_->get_type(c);
       if (Lnast_ntype::is_const(ct)) {
         info.init_txt = std::string(lnast_->get_name(c));
         break;
       }
       if (Lnast_ntype::is_ref(ct)) {
-        error_here("upass.tolg: reg '{}' initializer is not a compile-time "
-                   "constant — a reset value must be comptime",
-                   name);
+        error_here(
+            "upass.tolg: reg '{}' initializer is not a compile-time "
+            "constant — a reset value must be comptime",
+            name);
         return;
       }
     }
@@ -1816,7 +1769,7 @@ private:
       }
       record(name, q, info.decl_mw);
     } else {
-      record(name, q, 1); // provisional width; finalize_regs restamps from din
+      record(name, q, 1);  // provisional width; finalize_regs restamps from din
     }
     reg_map_.emplace(std::string(name), flop);
     reg_order_.emplace_back(name);
@@ -1832,43 +1785,41 @@ private:
   // finalize_regs() after every store/attr_set has been seen.
   struct Reg_info {
     hhds::Node_class flop;
-    Lnast_nid decl_nid;
-    int32_t decl_color = 0; // block region at the declare (finalize glue inherits it)
-    std::string
-        init_txt; // declare [value] child; "" = none, "nil" = explicit no-reset
-    int32_t decl_mw = 0; // declared type width; 0 = untyped
-    bool is_signed = false;
+    Lnast_nid        decl_nid;
+    int32_t          decl_color = 0;  // block region at the declare (finalize glue inherits it)
+    std::string      init_txt;        // declare [value] child; "" = none, "nil" = explicit no-reset
+    int32_t          decl_mw   = 0;   // declared type width; 0 = untyped
+    bool             is_signed = false;
     // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
     // the upass.reset_style flag; `reset_pin=false` opts out of reset.
-    std::string reset_pin_name; // explicit reset_pin=NAME / "false"
-    std::string
-        clock_pin_name; // explicit clock_pin=NAME (beats implicit clock)
-    bool has_posclk = false;
-    bool posclk_val = true; // false = negedge clock
-    bool has_sync = false;
-    bool sync_val = true;
-    bool negreset = false;
-    std::string initial_txt; // explicit initial=N (overrides init_txt)
-    bool is_latch =
-        false; // mode "latch": Ntype_op::Latch, wire din+enable only
+    std::string      reset_pin_name;  // explicit reset_pin=NAME / "false"
+    std::string      clock_pin_name;  // explicit clock_pin=NAME (beats implicit clock)
+    bool             has_posclk = false;
+    bool             posclk_val = true;  // false = negedge clock
+    bool             has_sync   = false;
+    bool             sync_val   = true;
+    bool             negreset   = false;
+    std::string      initial_txt;       // explicit initial=N (overrides init_txt)
+    bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
     // Hierarchical naming (call-site `name=` on an inlined comb / `reg
     // x::[name=]`):
-    std::string
-        name_override; // explicit `name=` — replaces the local flop name
-    std::string hier_prefix; // runner-stamped `__hier` instance path (e.g.
-                             // "pipeB_ex_mem")
+    std::string      name_override;  // explicit `name=` — replaces the local flop name
+    std::string      hier_prefix;    // runner-stamped `__hier` instance path (e.g.
+                                     // "pipeB_ex_mem")
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
   // \x01 prefix cannot collide with user identifiers or `___N` temps.
   [[nodiscard]] static std::string din_key(std::string_view n) {
-    return std::string("\x01"
-                       "din:")
+    return std::string(
+               "\x01"
+               "din:")
         .append(n);
   }
   [[nodiscard]] static std::string en_key(std::string_view n) {
-    return std::string("\x01"
-                       "en:")
+    return std::string(
+               "\x01"
+               "en:")
         .append(n);
   }
 
@@ -1882,15 +1833,15 @@ private:
   // don't-care none-of slot. `var` is a din shadow key iff it carries the
   // din_key() `\x01din:` prefix.
   [[nodiscard]] std::optional<Pin> reg_hold_pin(std::string_view var) {
-    constexpr std::string_view din_prefix{"\x01"
-                                          "din:"};
+    constexpr std::string_view din_prefix{
+        "\x01"
+        "din:"};
     if (!var.starts_with(din_prefix)) {
       return std::nullopt;
     }
     std::string name(var.substr(din_prefix.size()));
     if (auto it = reg_map_.find(name); it != reg_map_.end()) {
-      return it->second.create_driver_pin(
-          0); // flop q = current registered value
+      return it->second.create_driver_pin(0);  // flop q = current registered value
     }
     return std::nullopt;
   }
@@ -1898,10 +1849,10 @@ private:
   // Cached 1/0 const pins for the enable shadow (node identity doubles as the
   // "still unconditionally true/false" test in finalize_regs).
   [[nodiscard]] Pin en_const(bool v) {
-    auto &pin = v ? en_true_pin_ : en_false_pin_;
-    auto &valid = v ? en_true_valid_ : en_false_valid_;
+    auto& pin   = v ? en_true_pin_ : en_false_pin_;
+    auto& valid = v ? en_true_valid_ : en_false_valid_;
     if (!valid) {
-      pin = create_const(*g_, *Dlop::create_integer(v ? 1 : 0));
+      pin   = create_const(*g_, *Dlop::create_integer(v ? 1 : 0));
       valid = true;
     }
     return pin;
@@ -1915,19 +1866,18 @@ private:
   // driver pid (n_wr_total + r), so the write-site count is pre-scanned at the
   // declare.
   struct Mem_info {
-    hhds::Node_class node;
-    int64_t size = 0;          // total entries (∏dims)
-    std::vector<int64_t> dims; // outer dim first; size 1 for a flat array
-    int32_t elem_mw = 0;       // element max-value width
-    bool elem_signed = false;
-    bool is_array = false; // type=2: mut/const array (no clock, no persistence)
-    bool is_pub =
-        false; // pub reg: a remote regref may attach accesses — no diagnostics
-    bool init_wired = false;
-    int n_wr_total = 0; // user sites + restore ports (fixes dout pids)
-    int n_user_wr = 0;  // pre-scanned program write sites
-    int wr_next = 0;
-    int rd_next = 0;
+    hhds::Node_class     node;
+    int64_t              size = 0;         // total entries (∏dims)
+    std::vector<int64_t> dims;             // outer dim first; size 1 for a flat array
+    int32_t              elem_mw     = 0;  // element max-value width
+    bool                 elem_signed = false;
+    bool                 is_array    = false;  // type=2: mut/const array (no clock, no persistence)
+    bool                 is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
+    bool                 init_wired  = false;
+    int                  n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
+    int                  n_user_wr   = 0;  // pre-scanned program write sites
+    int                  wr_next     = 0;
+    int                  rd_next     = 0;
     // Same-cycle ordering (Pyrope `ordering` attr): "program" (default) needs
     // each read port's POSITION in program order, so record `wr_next` as each
     // read port is minted — the number of program writes that textually
@@ -1939,9 +1889,9 @@ private:
     // single `fwd` bit cannot make; the Verilog readers need "old" because a
     // nonblocking write is never visible to a same-timestep read.
     enum class Mem_order { program, fwd, old, none };
-    int64_t legacy_fwd_mask = 0; // set when the deprecated `fwd=` attr is used
-    bool has_legacy_fwd = false;
-    std::vector<int> rd_wr_before; // per read port: writes minted before it
+    int64_t                      legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
+    bool                         has_legacy_fwd  = false;
+    std::vector<int>             rd_wr_before;  // per read port: writes minted before it
     // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
     // array coexists with a bound reset, finalize_mems() adds one restore
     // write port per entry (addr=k, din=init[k], enable=reset) and gates the
@@ -1954,8 +1904,8 @@ private:
     // pin (cached so repeated reads share one output). For a registered array
     // the reset value bus rides the (now runtime-capable) `init` sink + the
     // `reset` cond pin.
-    bool has_update = false; // an update bus is wired (whole-array memory)
-    Pin read_all_pin{};      // cached async read_all driver pin
+    bool                         has_update = false;  // an update bus is wired (whole-array memory)
+    Pin                          read_all_pin{};      // cached async read_all driver pin
     // Accumulator for MULTIPLE conditional whole-array stores (e.g. a reset arm
     // and a flush arm). Each later store folds into one
     // `update`/`update_enable` pair via a priority mux: `update_val = en ? this
@@ -1963,28 +1913,26 @@ private:
     // = update_en | en`. The if/else-if path conditions already encode source
     // priority (later arms negate earlier conditions), so "later wins" matches
     // Verilog nonblocking semantics.
-    Pin update_val{}; // current accumulated update bus value
-    Pin update_en{}; // current accumulated update enable (invalid => always-on)
+    Pin                          update_val{};  // current accumulated update bus value
+    Pin                          update_en{};   // current accumulated update enable (invalid => always-on)
   };
 
-  static constexpr int kMemPortStride =
-      static_cast<int>(Ntype::Memory_port_stride);
+  static constexpr int kMemPortStride = static_cast<int>(Ntype::Memory_port_stride);
 
   // Get-or-create the cell's async `read_all` driver pin (the whole-array read,
   // size*elem_mw bits wide, entry 0 in the low elem_mw). Cached on the Mem_info
   // so repeated whole reads share one output. Sits at the reserved driver pid
   // Memory_readall_pid (never collides with the sequential read douts).
-  [[nodiscard]] Pin get_or_make_read_all(Mem_info &mi) {
+  [[nodiscard]] Pin get_or_make_read_all(Mem_info& mi) {
     if (!mi.read_all_pin.is_invalid()) {
       return mi.read_all_pin;
     }
-    auto d = mi.node.create_driver_pin(
-        static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+    auto d = mi.node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
     set_bits(d, static_cast<int>(mi.size * mi.elem_mw));
     set_unsign(d);
     mi.read_all_pin = d;
     return d;
-  } // Memory per-port sink stride, graph/cell.hpp
+  }  // Memory per-port sink stride, graph/cell.hpp
 
   // Branch path condition for memory write enables AND for property guards.
   //
@@ -2029,7 +1977,7 @@ private:
   }
 
   // Push one term (a branch condition, or its negation for a later arm/else).
-  void push_path_term(const Pin &cond, bool negated) {
+  void push_path_term(const Pin& cond, bool negated) {
     path_terms_.push_back({cond, negated});
     path_folded_.emplace_back();  // lazily materialized by current_path_cond()
   }
@@ -2039,7 +1987,7 @@ private:
   }
 
   // a AND b as a 1-bit unsigned pin; an invalid operand means "true".
-  [[nodiscard]] Pin and2(const Pin &a, const Pin &b) {
+  [[nodiscard]] Pin and2(const Pin& a, const Pin& b) {
     if (a.is_invalid()) {
       return b;
     }
@@ -2057,7 +2005,7 @@ private:
 
   // a OR b as a 1-bit unsigned pin; an invalid operand is the identity (returns
   // the other), so an unguarded caller mints no cell at all.
-  [[nodiscard]] Pin or2(const Pin &a, const Pin &b) {
+  [[nodiscard]] Pin or2(const Pin& a, const Pin& b) {
     if (a.is_invalid()) {
       return b;
     }
@@ -2083,7 +2031,7 @@ private:
   // only its LSB. That is harmless for a comparison result (already 1 bit) and a
   // silent miscompile for anything wider, so a wide operand must be reduced
   // BEFORE it reaches them. A 1-bit input makes this a no-op the folder removes.
-  [[nodiscard]] Pin nonzero1(const Pin &a) {
+  [[nodiscard]] Pin nonzero1(const Pin& a) {
     if (a.is_invalid()) {
       return a;
     }
@@ -2110,7 +2058,7 @@ private:
   }
 
   // Bitwise NOT of a 1-bit condition (LSB carries the logical value).
-  [[nodiscard]] Pin not1(const Pin &a) {
+  [[nodiscard]] Pin not1(const Pin& a) {
     auto node = make_node(Ntype_op::Not);
     setup_sink_by_name(node, "a").connect_driver(a);
     auto d = node.create_driver_pin(0);
@@ -2122,14 +2070,13 @@ private:
   // A 1-bit condition shifted to one-hot position `amount` (unique-if
   // selector packing). The value reaches 1<<amount (amount+1 magnitude
   // bits); LiveHD `bits` includes the sign bit, hence amount+2.
-  [[nodiscard]] Pin shl1_by(const Pin &a, int amount) {
+  [[nodiscard]] Pin shl1_by(const Pin& a, int amount) {
     if (amount == 0) {
       return a;
     }
     auto node = make_node(Ntype_op::SHL);
     setup_sink_by_name(node, "a").connect_driver(a);
-    setup_sink_by_name(node, "b").connect_driver(
-        create_const(*g_, *Dlop::create_integer(amount)));
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(amount)));
     auto d = node.create_driver_pin(0);
     set_bits(d, amount + 2);
     set_unsign(d);
@@ -2142,27 +2089,29 @@ private:
   // cells (widths mirror lower_op: mul = sum of operand mws, add = max+1).
   // Returns an invalid Pin after reporting (index-arity mismatch, non-integer
   // index, field access).
-  [[nodiscard]] Pin flatten_mem_addr(const Mem_info &mi,
-                                     const std::vector<Lnast_nid> &idxs,
-                                     std::string_view name) {
+  [[nodiscard]] Pin flatten_mem_addr(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, std::string_view name) {
     if (idxs.size() != mi.dims.size()) {
-      error_here("upass.tolg: memory '{}' has {} dimension(s) but the access "
-                 "supplies {} index(es)",
-                 name, mi.dims.size(), idxs.size());
+      error_here(
+          "upass.tolg: memory '{}' has {} dimension(s) but the access "
+          "supplies {} index(es)",
+          name,
+          mi.dims.size(),
+          idxs.size());
       return {};
     }
     // A const index must be an integer — a string key would be a field
     // access, which memories don't have.
-    auto const_index_of = [&](const Lnast_nid &nid,
-                              std::optional<int64_t> &out) -> bool {
+    auto const_index_of = [&](const Lnast_nid& nid, std::optional<int64_t>& out) -> bool {
       if (!Lnast_ntype::is_const(lnast_->get_type(nid))) {
-        return true; // runtime ref — resolved through leaf()
+        return true;  // runtime ref — resolved through leaf()
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(nid));
       if (!v || !v->is_just_i64()) {
-        error_here("upass.tolg: memory '{}' index '{}' is not an integer — "
-                   "field access on a memory is not supported",
-                   name, lnast_->get_name(nid));
+        error_here(
+            "upass.tolg: memory '{}' index '{}' is not an integer — "
+            "field access on a memory is not supported",
+            name,
+            lnast_->get_name(nid));
         return false;
       }
       out = v->to_just_i64();
@@ -2170,18 +2119,18 @@ private:
     };
 
     std::optional<int64_t> acc_c;
-    Pin acc_p{};
-    int32_t acc_mw = 0;
+    Pin                    acc_p{};
+    int32_t                acc_mw = 0;
     if (!const_index_of(idxs[0], acc_c)) {
       return {};
     }
     if (!acc_c) {
       auto v = leaf(idxs[0]);
-      acc_p = v.pin;
+      acc_p  = v.pin;
       acc_mw = v.mw;
     }
     for (size_t k = 1; k < idxs.size(); ++k) {
-      const int64_t d = mi.dims[k];
+      const int64_t          d = mi.dims[k];
       std::optional<int64_t> ic;
       if (!const_index_of(idxs[k], ic)) {
         return {};
@@ -2190,40 +2139,39 @@ private:
         acc_c = *acc_c * d + *ic;
         continue;
       }
-      if (acc_c) { // runtime index joins a const accumulator
-        acc_p = create_const(*g_, *Dlop::create_integer(*acc_c));
+      if (acc_c) {  // runtime index joins a const accumulator
+        acc_p  = create_const(*g_, *Dlop::create_integer(*acc_c));
         acc_mw = mw_of_val(*acc_c);
         acc_c.reset();
       }
       if (d != 1) {
         auto mul = make_node(Ntype_op::Mult);
         setup_sink_by_name(mul, "as").connect_driver(acc_p);
-        setup_sink_by_name(mul, "as").connect_driver(
-            create_const(*g_, *Dlop::create_integer(d)));
-        auto md = mul.create_driver_pin(0);
-        acc_mw += mw_of_val(d);
+        setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(d)));
+        auto md  = mul.create_driver_pin(0);
+        acc_mw  += mw_of_val(d);
         set_bits(md, acc_mw + 1);
         set_unsign(md);
         acc_p = md;
       }
-      Pin ip{};
+      Pin     ip{};
       int32_t imw = 0;
       if (ic) {
         if (*ic == 0) {
-          continue; // + 0 — skip the Sum
+          continue;  // + 0 — skip the Sum
         }
-        ip = create_const(*g_, *Dlop::create_integer(*ic));
+        ip  = create_const(*g_, *Dlop::create_integer(*ic));
         imw = mw_of_val(*ic);
       } else {
         auto v = leaf(idxs[k]);
-        ip = v.pin;
-        imw = v.mw;
+        ip     = v.pin;
+        imw    = v.mw;
       }
       auto add = make_node(Ntype_op::Sum);
       setup_sink_by_name(add, "as").connect_driver(acc_p);
       setup_sink_by_name(add, "as").connect_driver(ip);
       auto ad = add.create_driver_pin(0);
-      acc_mw = std::max(acc_mw, imw) + 1;
+      acc_mw  = std::max(acc_mw, imw) + 1;
       set_bits(ad, acc_mw + 1);
       set_unsign(ad);
       acc_p = ad;
@@ -2234,17 +2182,18 @@ private:
     return acc_p;
   }
 
-  // Pre-scan: indexed stores (store(ref name, idx, val)) anywhere in the tree.
-  [[nodiscard]] int count_mem_write_sites(std::string_view name) const {
-    int n = 0;
-    std::function<void(const Lnast_nid &)> walk = [&](const Lnast_nid &nid) {
+  // One immutable-tree pre-scan for indexed stores.  The former implementation
+  // repeated this full recursive walk once per memory declaration.
+  void index_mem_write_sites() {
+    mem_write_site_counts_.clear();
+    std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
       if (lnast_->is_dce_dead(nid)) {
-        return; // dce:mark — the lowering skips dead stores; counting them
-                // here would desync the pre-scan exactly like the decl-store
+        return;  // dce:mark — the lowering skips dead stores; counting them
+                 // here would desync the pre-scan exactly like the decl-store
       }
       if (Lnast_ntype::is_store(lnast_->get_type(nid))) {
         auto c0 = lnast_->get_first_child(nid);
-        if (!c0.is_invalid() && lnast_->get_name(c0) == name) {
+        if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(c0))) {
           auto c1 = lnast_->get_sibling_next(c0);
           if (!c1.is_invalid()) {
             auto c2 = lnast_->get_sibling_next(c1);
@@ -2254,20 +2203,24 @@ private:
             // `= nil : int` decl-store AND its comp_type_array memory declare).
             // Counting the decl-store as a write desyncs the pre-scan from the
             // lowering (which ignores it) — skip type-tailed stores.
-            if (!c2.is_invalid() &&
-                !Lnast_ntype::is_type(lnast_->get_type(c2))) {
-              ++n;
+            if (!c2.is_invalid() && !Lnast_ntype::is_type(lnast_->get_type(c2))) {
+              ++mem_write_site_counts_[lnast_->get_name_id(c0)];
             }
           }
         }
       }
-      for (auto c = lnast_->get_first_child(nid); !c.is_invalid();
-           c = lnast_->get_sibling_next(c)) {
+      for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
         walk(c);
       }
     };
     walk(lnast_->get_root());
-    return n;
+  }
+
+  [[nodiscard]] int count_mem_write_sites(const Lnast_nid& name_nid) const {
+    if (auto it = mem_write_site_counts_.find(lnast_->get_name_id(name_nid)); it != mem_write_site_counts_.end()) {
+      return it->second;
+    }
+    return 0;
   }
 
   // declare(ref name, comp_type_array(elem_type, const '[N]'), const mode
@@ -2280,16 +2233,15 @@ private:
   //    persistence): the per-cycle default is the init contents (the
   //    whole-array store wires the `init` pin); a const array with runtime
   //    reads is a ROM (init + read ports only).
-  void lower_mem_declare(const Lnast_nid &name_nid, const Lnast_nid &type_nid,
-                         const Lnast_nid &mode_nid, bool is_array) {
-    auto name = lnast_->get_name(name_nid);
+  void lower_mem_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& mode_nid, bool is_array) {
+    auto name     = lnast_->get_name(name_nid);
     auto elem_nid = lnast_->get_first_child(type_nid);
-    auto len_nid =
-        elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
+    auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
     if (elem_nid.is_invalid() || len_nid.is_invalid()) {
-      error_here("upass.tolg: memory '{}' array type is missing its element "
-                 "type or size",
-                 name);
+      error_here(
+          "upass.tolg: memory '{}' array type is missing its element "
+          "type or size",
+          name);
       return;
     }
     // Collect the dimension chain — each comp_type_array level is
@@ -2301,8 +2253,7 @@ private:
     while (true) {
       // The size const's text is the raw '[N]' annotation — strip the brackets.
       auto len_txt = std::string(lnast_->get_name(len_nid));
-      if (len_txt.size() >= 2 && len_txt.front() == '[' &&
-          len_txt.back() == ']') {
+      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
         len_txt = len_txt.substr(1, len_txt.size() - 2);
       }
       int64_t d = 0;
@@ -2310,9 +2261,11 @@ private:
         d = c->to_just_i64();
       }
       if (d <= 0) {
-        error_here("upass.tolg: memory '{}' size '{}' is not a positive "
-                   "comptime constant",
-                   name, lnast_->get_name(len_nid));
+        error_here(
+            "upass.tolg: memory '{}' size '{}' is not a positive "
+            "comptime constant",
+            name,
+            lnast_->get_name(len_nid));
         return;
       }
       dims.emplace_back(d);
@@ -2320,23 +2273,23 @@ private:
         break;
       }
       auto inner_elem = lnast_->get_first_child(elem_nid);
-      auto inner_len = inner_elem.is_invalid()
-                           ? inner_elem
-                           : lnast_->get_sibling_next(inner_elem);
+      auto inner_len  = inner_elem.is_invalid() ? inner_elem : lnast_->get_sibling_next(inner_elem);
       if (inner_elem.is_invalid() || inner_len.is_invalid()) {
-        error_here("upass.tolg: memory '{}' array type is missing its element "
-                   "type or size",
-                   name);
+        error_here(
+            "upass.tolg: memory '{}' array type is missing its element "
+            "type or size",
+            name);
         return;
       }
       elem_nid = inner_elem;
-      len_nid = inner_len;
+      len_nid  = inner_len;
     }
     auto [elem_mw, elem_signed] = declared_width(elem_nid);
     if (elem_mw == 0) {
-      error_here("upass.tolg: memory '{}' element type must be a sized integer "
-                 "or bool",
-                 name);
+      error_here(
+          "upass.tolg: memory '{}' element type must be a sized integer "
+          "or bool",
+          name);
       return;
     }
     int64_t size = 1;
@@ -2351,8 +2304,8 @@ private:
     // re-loads the init in one cycle — finalize_mems()); with no reset the
     // init stays power-on-only. mut/const arrays get theirs via the
     // whole-array store instead.
-    spool_ptr<Dlop> reg_init;
-    std::vector<spool_ptr<Dlop>> init_entries;
+    spool_ptr<Dlop>                       reg_init;
+    std::vector<spool_ptr<Dlop>>          init_entries;
     // Read an INLINE init child on the declare. The Pyrope frontend gives
     // mut/const arrays their init via a separate whole-array store (so an array
     // declare has no child after `mode`, and this loop is a no-op for it); the
@@ -2363,10 +2316,8 @@ private:
     // i.e. pure power-on init — a memory carries no ASIC-unimplementable reset
     // value. Flatten an inline tuple literal's constant leaves row-major into
     // entries.
-    std::function<bool(const Lnast_nid &)> flatten_lit =
-        [&](const Lnast_nid &tnid) -> bool {
-      for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid();
-           ch = lnast_->get_sibling_next(ch)) {
+    std::function<bool(const Lnast_nid&)> flatten_lit = [&](const Lnast_nid& tnid) -> bool {
+      for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid(); ch = lnast_->get_sibling_next(ch)) {
         const auto cht = lnast_->get_type(ch);
         if (Lnast_ntype::is_tuple_add(cht)) {
           if (!flatten_lit(ch)) {
@@ -2375,28 +2326,28 @@ private:
         } else if (Lnast_ntype::is_const(cht)) {
           auto v = Dlop::from_pyrope(lnast_->get_name(ch));
           if (!v || !v->is_just_i64()) {
-            error_here("upass.tolg: memory '{}' initializer '{}' is not an "
-                       "integer constant",
-                       name, lnast_->get_name(ch));
+            error_here(
+                "upass.tolg: memory '{}' initializer '{}' is not an "
+                "integer constant",
+                name,
+                lnast_->get_name(ch));
             return false;
           }
           init_entries.emplace_back(v->and_op(*Dlop::get_mask_value(elem_mw)));
-        } else if (!Lnast_ntype::is_ref(
-                       cht)) { // a leading self-ref (tuple target) is skipped
-          error_here("upass.tolg: memory '{}' initializer must be a comptime "
-                     "constant or tuple literal",
-                     name);
+        } else if (!Lnast_ntype::is_ref(cht)) {  // a leading self-ref (tuple target) is skipped
+          error_here(
+              "upass.tolg: memory '{}' initializer must be a comptime "
+              "constant or tuple literal",
+              name);
           return false;
         }
       }
       return true;
     };
-    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       const auto ct = lnast_->get_type(c);
       if (Lnast_ntype::is_stages(ct)) {
-        error_here("upass.tolg: memory '{}' cannot carry a stage[] qualifier",
-                   name);
+        error_here("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
         return;
       }
       if (Lnast_ntype::is_const(ct)) {
@@ -2406,18 +2357,19 @@ private:
         }
         auto v = Dlop::from_pyrope(txt);
         if (!v || !v->is_just_i64()) {
-          error_here("upass.tolg: memory '{}' initializer '{}' is not an "
-                     "integer constant",
-                     name, txt);
+          error_here(
+              "upass.tolg: memory '{}' initializer '{}' is not an "
+              "integer constant",
+              name,
+              txt);
           return;
         }
         // Scalar broadcast: every entry = value (masked to the element).
-        auto mask = Dlop::get_mask_value(elem_mw);
+        auto mask  = Dlop::get_mask_value(elem_mw);
         auto entry = v->and_op(*mask);
-        reg_init = Dlop::create_integer(0);
+        reg_init   = Dlop::create_integer(0);
         for (int64_t i = 0; i < size; ++i) {
-          reg_init = reg_init->or_op(
-              *entry->shl_op(*Dlop::create_integer(i * elem_mw)));
+          reg_init = reg_init->or_op(*entry->shl_op(*Dlop::create_integer(i * elem_mw)));
           init_entries.emplace_back(entry);
         }
         break;
@@ -2425,35 +2377,35 @@ private:
       if (Lnast_ntype::is_ref(ct)) {
         auto tit = tuple_recs_.find(std::string(lnast_->get_name(c)));
         if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-          error_here("upass.tolg: memory '{}' initializer must be a comptime "
-                     "constant or tuple literal",
-                     name);
+          error_here(
+              "upass.tolg: memory '{}' initializer must be a comptime "
+              "constant or tuple literal",
+              name);
           return;
         }
         // Row-major flatten; nested literals must match the dims chain.
-        if (!flatten_init_values(tit->second, dims, 0, name, elem_mw,
-                                 init_entries)) {
-          return; // flatten_init_values reported
+        if (!flatten_init_values(tit->second, dims, 0, name, elem_mw, init_entries)) {
+          return;  // flatten_init_values reported
         }
         reg_init = pack_entries(init_entries, elem_mw);
         break;
       }
-      if (Lnast_ntype::is_tuple_add(
-              ct)) { // slang's INLINE per-entry init literal
+      if (Lnast_ntype::is_tuple_add(ct)) {  // slang's INLINE per-entry init literal
         if (!flatten_lit(c)) {
-          return; // flatten_lit reported
+          return;  // flatten_lit reported
         }
         reg_init = pack_entries(init_entries, elem_mw);
         break;
       }
-      error_here("upass.tolg: memory '{}' initializer must be a comptime "
-                 "constant or tuple literal",
-                 name);
+      error_here(
+          "upass.tolg: memory '{}' initializer must be a comptime "
+          "constant or tuple literal",
+          name);
       return;
     }
 
-    const int user_sites = count_mem_write_sites(name);
-    const bool wants_restore = !is_array && reg_init && !reset_name_.empty();
+    const int  user_sites      = count_mem_write_sites(name_nid);
+    const bool wants_restore   = !is_array && reg_init && !reset_name_.empty();
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -2462,17 +2414,16 @@ private:
     // same reason the clock wiring is deferred). The value driven below is
     // provisional, and is the final one only for the two cases finalize_mems
     // leaves alone: a `mut`/`const` array and a legacy `fwd=` escape hatch.
-    int64_t legacy_fwd_mask = 0;
-    bool has_legacy_fwd = false;
-    if (auto pit = pending_attrs_.find(std::string(name));
-        pit != pending_attrs_.end()) {
+    int64_t    legacy_fwd_mask = 0;
+    bool       has_legacy_fwd  = false;
+    if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
       // Deprecated numeric `fwd=`: an explicit matrix, taken verbatim (a
       // per-WRITE-port mask still reads correctly on a 1-read memory, which is
       // every historical user).
       if (auto fit = pit->second.find("fwd"); fit != pit->second.end()) {
         if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
           legacy_fwd_mask = fv->to_just_i64();
-          has_legacy_fwd = true;
+          has_legacy_fwd  = true;
         }
       }
     }
@@ -2503,20 +2454,13 @@ private:
         mem.set_name(std::string(canon_io_name(mem_base)));
       }
     }
-    setup_sink_by_name(mem, "bits")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
-    setup_sink_by_name(mem, "size")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(size)));
-    setup_sink_by_name(mem, "type")
-        .connect_driver(
-            create_const(*g_, *Dlop::create_integer(is_array ? 2 : 0)));
-    setup_sink_by_name(mem, "fwd")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
-    setup_sink_by_name(mem, "wensize")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(is_array ? 2 : 0)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     if (reg_init) {
-      setup_sink_by_name(mem, "init")
-          .connect_driver(create_const(*g_, *reg_init));
+      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
     }
     // Clock wiring (posclk + clock_pin) for a clocked (non-array) memory is
     // deferred to finalize_mems: the slang reader emits the clock_pin/posclk
@@ -2524,21 +2468,20 @@ private:
     // populated here (unlike fwd, which the reader emits before the declare).
 
     Mem_info info;
-    info.node = mem;
-    info.size = size;
-    info.dims = std::move(dims);
-    info.elem_mw = elem_mw;
-    info.elem_signed = elem_signed;
-    info.is_array = is_array;
+    info.node            = mem;
+    info.size            = size;
+    info.dims            = std::move(dims);
+    info.elem_mw         = elem_mw;
+    info.elem_signed     = elem_signed;
+    info.is_array        = is_array;
     // `pub` on a reg means a remote regref may attach reads/writes later —
     // suppress access diagnostics. Dormant today (prp2lnast restricts `pub`
     // to file scope), but the gate is mode-keyed so it activates with regref.
-    info.is_pub = std::string_view(lnast_->get_name(mode_nid)).find("pub") !=
-                  std::string_view::npos;
-    info.n_user_wr = user_sites;
-    info.n_wr_total = user_sites + (wants_restore ? static_cast<int>(size) : 0);
+    info.is_pub          = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
+    info.n_user_wr       = user_sites;
+    info.n_wr_total      = user_sites + (wants_restore ? static_cast<int>(size) : 0);
     info.legacy_fwd_mask = legacy_fwd_mask;
-    info.has_legacy_fwd = has_legacy_fwd;
+    info.has_legacy_fwd  = has_legacy_fwd;
     if (wants_restore) {
       info.restore_vals = std::move(init_entries);
     }
@@ -2552,20 +2495,19 @@ private:
   // mut/const array initializer (all-const elems → `init` packing) and the
   // __memory(cfg) builtin (named fields + per-port positional lists).
   struct Tuple_rec {
-    std::vector<Lnast_nid> elems;
+    std::vector<Lnast_nid>                      elems;
     absl::flat_hash_map<std::string, Lnast_nid> named;
   };
 
   // tuple_add(ref dst, e0 | store(name, v), …) — record the literal. Any
   // other child shape keeps the unhandled warn (nothing can consume it).
-  void lower_tuple_add(const Lnast_nid &nid) {
+  void lower_tuple_add(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
     }
     Tuple_rec rec;
-    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       const auto ct = lnast_->get_type(c);
       if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
         rec.elems.emplace_back(c);
@@ -2579,7 +2521,8 @@ private:
           continue;
         }
       }
-      error_at(nid, {"unhandled-node", "unsupported"},
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
                "upass.tolg: tuple '{}' has an element that did not fold to a "
                "constant or wire — it has no hardware "
                "lowering (tuples must be fully resolved at compile time)",
@@ -2596,31 +2539,28 @@ private:
   // lower_tuple_add — instead of warning + dropping the spliced field wires.
   // No hardware is created here (tuple ops never lower to a cell); a downstream
   // whole-tuple read resolves through the record like any other tuple literal.
-  void lower_tuple_concat(const Lnast_nid &nid) {
+  void lower_tuple_concat(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
     }
     Tuple_rec rec;
-    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       const auto ct = lnast_->get_type(c);
       if (Lnast_ntype::is_ref(ct)) {
         // Splice an operand tuple: merge its recorded fields in order
         // (positional appended, named keyed). Constprop already reported any
         // field overlap.
-        if (auto it = tuple_recs_.find(std::string(lnast_->get_name(c)));
-            it != tuple_recs_.end()) {
+        if (auto it = tuple_recs_.find(std::string(lnast_->get_name(c))); it != tuple_recs_.end()) {
           for (auto e : it->second.elems) {
             rec.elems.emplace_back(e);
           }
-          for (const auto &[k, v] : it->second.named) {
+          for (const auto& [k, v] : it->second.named) {
             rec.named[k] = v;
           }
           continue;
         }
-        rec.elems.emplace_back(
-            c); // a bare ref operand — append as one positional field
+        rec.elems.emplace_back(c);  // a bare ref operand — append as one positional field
         continue;
       }
       if (Lnast_ntype::is_const(ct)) {
@@ -2635,7 +2575,8 @@ private:
           continue;
         }
       }
-      error_at(nid, {"unhandled-node", "unsupported"},
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
                "upass.tolg: concatenated tuple '{}' has an operand that did "
                "not fold to a constant or wire — it has no "
                "hardware lowering (tuple `++`/`...` must be fully resolved at "
@@ -2650,64 +2591,59 @@ private:
   // entry (each masked to the element, row-major); a comptime tuple literal
   // packs row-major; `nil`/`0sb?` is zero-filled. Returns an invalid Pin after
   // reporting (an unsupported value shape).
-  [[nodiscard]] Pin mem_whole_value_pin(const Lnast_nid &rhs,
-                                        std::string_view name, Mem_info &mi) {
-    const auto rt = lnast_->get_type(rhs);
-    const bool is_tuple_lit =
-        Lnast_ntype::is_ref(rt) &&
-        tuple_recs_.find(std::string(lnast_->get_name(rhs))) !=
-            tuple_recs_.end();
+  [[nodiscard]] Pin mem_whole_value_pin(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    const auto rt           = lnast_->get_type(rhs);
+    const bool is_tuple_lit = Lnast_ntype::is_ref(rt) && tuple_recs_.find(std::string(lnast_->get_name(rhs))) != tuple_recs_.end();
     if (!Lnast_ntype::is_const(rt) && !is_tuple_lit) {
-      return leaf(rhs).pin; // runtime whole-array bus
+      return leaf(rhs).pin;  // runtime whole-array bus
     }
     if (Lnast_ntype::is_const(rt)) {
       auto txt = lnast_->get_name(rhs);
       if (txt == "nil" || txt == "0sb?") {
-        return create_const(*g_, *Dlop::create_integer(0)); // zero-filled
+        return create_const(*g_, *Dlop::create_integer(0));  // zero-filled
       }
       auto v = Dlop::from_pyrope(txt);
       if (!v || !v->is_just_i64()) {
-        error_here("upass.tolg: whole-array value '{}' for memory '{}' is not "
-                   "supported — use an integer, a tuple literal or nil",
-                   txt, name);
+        error_here(
+            "upass.tolg: whole-array value '{}' for memory '{}' is not "
+            "supported — use an integer, a tuple literal or nil",
+            txt,
+            name);
         return {};
       }
-      auto entry = v->and_op(*Dlop::get_mask_value(mi.elem_mw));
+      auto entry  = v->and_op(*Dlop::get_mask_value(mi.elem_mw));
       auto packed = Dlop::create_integer(0);
       for (int64_t i = 0; i < mi.size; ++i) {
-        packed = packed->or_op(
-            *entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
+        packed = packed->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
       }
       return create_const(*g_, *packed);
     }
     auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
     if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-      error_here("upass.tolg: whole-array value for memory '{}' must be a "
-                 "comptime tuple literal",
-                 name);
+      error_here(
+          "upass.tolg: whole-array value for memory '{}' must be a "
+          "comptime tuple literal",
+          name);
       return {};
     }
     std::vector<spool_ptr<Dlop>> entries;
-    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw,
-                             entries)) {
-      return {}; // flatten_init_values reported
+    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
+      return {};  // flatten_init_values reported
     }
     return create_const(*g_, *pack_entries(entries, mi.elem_mw));
   }
 
   // Delete the single existing edge to the memory cell's sink `pid` (if any),
   // then drive it with `d` when `d` is valid (invalid => leave it unconnected).
-  void redrive_mem_sink(Mem_info &mi, int pid, const Pin &d) {
-    for (const auto &e : mi.node.inp_edges()) {
-      if (!e.sink.is_invalid() &&
-          static_cast<int>(e.sink.get_port_id()) == pid) {
+  void redrive_mem_sink(Mem_info& mi, int pid, const Pin& d) {
+    for (const auto& e : mi.node.inp_edges()) {
+      if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == pid) {
         e.del_edge();
         break;
       }
     }
     if (!d.is_invalid()) {
-      mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid))
-          .connect_driver(d);
+      mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(d);
     }
   }
 
@@ -2726,13 +2662,12 @@ private:
   // the if/else-if path conditions already encode source priority. The ladder
   // reset > per-port write > (update_enable? update : hold) is realized by
   // cgen/cgen_sim/lec.
-  void lower_mem_update_store(const Lnast_nid &rhs, std::string_view name,
-                              Mem_info &mi) {
+  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
     auto v = mem_whole_value_pin(rhs, name, mi);
     if (v.is_invalid()) {
-      return; // reported, or an empty driver
+      return;  // reported, or an empty driver
     }
-    auto en = current_path_cond(); // invalid => unconditional
+    auto en = current_path_cond();  // invalid => unconditional
     if (!mi.has_update) {
       setup_sink_by_name(mi.node, "update").connect_driver(v);
       if (!en.is_invalid()) {
@@ -2740,21 +2675,19 @@ private:
       }
       mi.has_update = true;
       mi.update_val = v;
-      mi.update_en = en;
+      mi.update_en  = en;
       // A whole-array read sees COMMITTED state: the clocked bulk update is the
       // next-state, never forwarded to a same-cycle read, and a per-entry write
       // to a registered array is likewise not forwarded (cgen emits `assign
       // dout = data[addr]`). Force fwd=0 so the cvc5 encoder reads a_cur,
       // matching cgen.
-      for (const auto &e2 : mi.node.inp_edges()) {
-        if (!e2.sink.is_invalid() &&
-            static_cast<int>(e2.sink.get_port_id()) == 5) { // fwd (pid 5)
+      for (const auto& e2 : mi.node.inp_edges()) {
+        if (!e2.sink.is_invalid() && static_cast<int>(e2.sink.get_port_id()) == 5) {  // fwd (pid 5)
           e2.del_edge();
           break;
         }
       }
-      setup_sink_by_name(mi.node, "fwd")
-          .connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+      setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
       return;
     }
     // A subsequent conditional whole-array write: later store wins where `en`,
@@ -2766,27 +2699,23 @@ private:
       merged_val = v;
     } else {
       auto mux = make_node(Ntype_op::Mux);
-      mux.create_sink_pin(0).connect_driver(en); // selector
-      mux.create_sink_pin(1).connect_driver(
-          mi.update_val);                       // false / else = previous value
-      mux.create_sink_pin(2).connect_driver(v); // true / then = this store
+      mux.create_sink_pin(0).connect_driver(en);             // selector
+      mux.create_sink_pin(1).connect_driver(mi.update_val);  // false / else = previous value
+      mux.create_sink_pin(2).connect_driver(v);              // true / then = this store
       merged_val = mux.create_driver_pin(0);
       set_bits(merged_val, static_cast<int>(mi.size * mi.elem_mw));
       set_unsign(merged_val);
     }
     // Combined enable: always-on (invalid) if either contributor is always-on.
-    Pin merged_en = (mi.update_en.is_invalid() || en.is_invalid())
-                        ? Pin{}
-                        : or2(mi.update_en, en);
-    redrive_mem_sink(mi, 12, merged_val); // update (pid 12)
-    redrive_mem_sink(mi, 13, merged_en);  // update_enable (pid 13); invalid =>
-                                          // leave unconnected (always-on)
+    Pin merged_en = (mi.update_en.is_invalid() || en.is_invalid()) ? Pin{} : or2(mi.update_en, en);
+    redrive_mem_sink(mi, 12, merged_val);  // update (pid 12)
+    redrive_mem_sink(mi, 13, merged_en);   // update_enable (pid 13); invalid =>
+                                           // leave unconnected (always-on)
     mi.update_val = merged_val;
-    mi.update_en = merged_en;
+    mi.update_en  = merged_en;
   }
 
-  void lower_mem_init_store(const Lnast_nid &rhs, std::string_view name,
-                            Mem_info &mi) {
+  void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
     const auto rt = lnast_->get_type(rhs);
     // A registered (`reg`) memory has NO declaration initializer through this
     // path — its declared init rides lower_mem_declare. Every whole-array store
@@ -2804,61 +2733,55 @@ private:
     // cell's `update` bus: the whole array is (re)written each cycle
     // combinationally
     // (`mut`/`const` array), instead of minting per-entry ports.
-    const bool is_tuple_lit =
-        Lnast_ntype::is_ref(rt) &&
-        tuple_recs_.find(std::string(lnast_->get_name(rhs))) !=
-            tuple_recs_.end();
+    const bool is_tuple_lit = Lnast_ntype::is_ref(rt) && tuple_recs_.find(std::string(lnast_->get_name(rhs))) != tuple_recs_.end();
     if (!Lnast_ntype::is_const(rt) && !is_tuple_lit) {
       lower_mem_update_store(rhs, name, mi);
       return;
     }
     // ---- declaration initializer (comptime const / tuple literal) ----
     if (mi.init_wired) {
-      error_here("upass.tolg: array '{}' is re-initialized — only the "
-                 "declaration initializer is supported",
-                 name);
+      error_here(
+          "upass.tolg: array '{}' is re-initialized — only the "
+          "declaration initializer is supported",
+          name);
       return;
     }
     if (Lnast_ntype::is_const(rt)) {
       auto txt = lnast_->get_name(rhs);
       if (txt == "nil" || txt == "0sb?") {
-        mi.init_wired = true; // zero-filled default
+        mi.init_wired = true;  // zero-filled default
         return;
       }
       // Scalar broadcast: every entry = value (masked to the element) — the
       // same treatment the reg declare-initializer path applies.
       auto v = Dlop::from_pyrope(txt);
       if (!v || !v->is_just_i64()) {
-        error_here("upass.tolg: array '{}' initializer '{}' is not supported — "
-                   "use an integer, a tuple literal or nil",
-                   name, txt);
+        error_here(
+            "upass.tolg: array '{}' initializer '{}' is not supported — "
+            "use an integer, a tuple literal or nil",
+            name,
+            txt);
         return;
       }
       auto entry = v->and_op(*Dlop::get_mask_value(mi.elem_mw));
-      auto init = Dlop::create_integer(0);
+      auto init  = Dlop::create_integer(0);
       for (int64_t i = 0; i < mi.size; ++i) {
-        init =
-            init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
+        init = init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
       }
-      setup_sink_by_name(mi.node, "init")
-          .connect_driver(create_const(*g_, *init));
+      setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
       mi.init_wired = true;
       return;
     }
     auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
     if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-      error_here(
-          "upass.tolg: array '{}' initializer must be a comptime tuple literal",
-          name);
+      error_here("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
       return;
     }
     std::vector<spool_ptr<Dlop>> entries;
-    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw,
-                             entries)) {
-      return; // flatten_init_values reported
+    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
+      return;  // flatten_init_values reported
     }
-    setup_sink_by_name(mi.node, "init")
-        .connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
+    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
     mi.init_wired = true;
   }
 
@@ -2867,51 +2790,56 @@ private:
   // dimension's literal arrives as a `ref` to its own recorded tuple_add
   // (`((1,2),(3,4))` → outer elems are refs into tuple_recs_). Returns false
   // after reporting.
-  [[nodiscard]] bool flatten_init_values(const Tuple_rec &rec,
-                                         const std::vector<int64_t> &dims,
-                                         size_t level, std::string_view name,
-                                         int32_t bits,
-                                         std::vector<spool_ptr<Dlop>> &out) {
+  [[nodiscard]] bool flatten_init_values(const Tuple_rec& rec, const std::vector<int64_t>& dims, size_t level,
+                                         std::string_view name, int32_t bits, std::vector<spool_ptr<Dlop>>& out) {
     if (static_cast<int64_t>(rec.elems.size()) != dims[level]) {
-      error_here("upass.tolg: '{}' initializer has {} entries where dimension "
-                 "{} holds {}",
-                 name, rec.elems.size(), level, dims[level]);
+      error_here(
+          "upass.tolg: '{}' initializer has {} entries where dimension "
+          "{} holds {}",
+          name,
+          rec.elems.size(),
+          level,
+          dims[level]);
       return false;
     }
     auto mask = Dlop::get_mask_value(bits);
     for (size_t i = 0; i < rec.elems.size(); ++i) {
-      const auto &e = rec.elems[i];
+      const auto& e = rec.elems[i];
       if (level + 1 < dims.size()) {
         if (!Lnast_ntype::is_ref(lnast_->get_type(e))) {
-          error_here("upass.tolg: '{}' initializer entry {} must be a nested "
-                     "tuple literal (the memory has {} dimensions)",
-                     name, i, dims.size());
+          error_here(
+              "upass.tolg: '{}' initializer entry {} must be a nested "
+              "tuple literal (the memory has {} dimensions)",
+              name,
+              i,
+              dims.size());
           return false;
         }
         auto tit = tuple_recs_.find(std::string(lnast_->get_name(e)));
         if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-          error_here("upass.tolg: '{}' initializer entry {} must be a comptime "
-                     "tuple literal",
-                     name, i);
+          error_here(
+              "upass.tolg: '{}' initializer entry {} must be a comptime "
+              "tuple literal",
+              name,
+              i);
           return false;
         }
-        if (!flatten_init_values(tit->second, dims, level + 1, name, bits,
-                                 out)) {
+        if (!flatten_init_values(tit->second, dims, level + 1, name, bits, out)) {
           return false;
         }
         continue;
       }
       if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
-        error_here("upass.tolg: '{}' initializer entry {} is not a "
-                   "compile-time constant",
-                   name, i);
+        error_here(
+            "upass.tolg: '{}' initializer entry {} is not a "
+            "compile-time constant",
+            name,
+            i);
         return false;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(e));
       if (!v || !v->is_just_i64()) {
-        error_here(
-            "upass.tolg: '{}' initializer entry {} is not an integer constant",
-            name, i);
+        error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
         return false;
       }
       out.emplace_back(v->and_op(*mask));
@@ -2921,12 +2849,10 @@ private:
 
   // Pack flat per-entry constants into the wide `init` value: entry 0 in the
   // low `bits`.
-  [[nodiscard]] static spool_ptr<Dlop>
-  pack_entries(const std::vector<spool_ptr<Dlop>> &entries, int32_t bits) {
+  [[nodiscard]] static spool_ptr<Dlop> pack_entries(const std::vector<spool_ptr<Dlop>>& entries, int32_t bits) {
     auto init = Dlop::create_integer(0);
     for (size_t i = 0; i < entries.size(); ++i) {
-      init = init->or_op(*entries[i]->shl_op(
-          *Dlop::create_integer(static_cast<int64_t>(i) * bits)));
+      init = init->or_op(*entries[i]->shl_op(*Dlop::create_integer(static_cast<int64_t>(i) * bits)));
     }
     return init;
   }
@@ -2935,9 +2861,9 @@ private:
   // N-th READ port's data (driver pid n_wr + N, port order).
   struct Mem_result {
     hhds::Node_class node;
-    int n_wr = 0;
-    int n_rd = 0;
-    int32_t bits = 0;
+    int              n_wr = 0;
+    int              n_rd = 0;
+    int32_t          bits = 0;
   };
 
   // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
@@ -2946,129 +2872,120 @@ private:
   // wensize/size/rdport + init — no `latency`, type picks 0 async / 1 sync /
   // 2 array, rdport entries are strictly 0/1, dout comes back as a tuple
   // indexed by read-port order. Returns false when the call is not __memory.
-  bool try_lower_memory_builtin(const Lnast_nid &nid,
-                                std::string_view callee_name) {
+  bool try_lower_memory_builtin(const Lnast_nid& nid, std::string_view callee_name) {
     if (callee_name != "__memory") {
       return false;
     }
-    auto dst = lnast_->get_first_child(nid);
+    auto dst      = lnast_->get_first_child(nid);
     auto callee_n = lnast_->get_sibling_next(dst);
-    auto arg = lnast_->get_sibling_next(callee_n);
+    auto arg      = lnast_->get_sibling_next(callee_n);
     if (arg.is_invalid() || !lnast_->get_sibling_next(arg).is_invalid()) {
-      error_here("upass.tolg: __memory takes exactly one config tuple in '{}'",
-                 lnast_->get_top_module_name());
+      error_here("upass.tolg: __memory takes exactly one config tuple in '{}'", lnast_->get_top_module_name());
       return true;
     }
     auto rit = tuple_recs_.find(std::string(lnast_->get_name(arg)));
     if (rit == tuple_recs_.end()) {
-      error_here("upass.tolg: __memory config '{}' must be a single tuple "
-                 "literal (build it as `mut cfg = (addr=…, "
-                 "bits=…, …)`)",
-                 lnast_->get_name(arg));
+      error_here(
+          "upass.tolg: __memory config '{}' must be a single tuple "
+          "literal (build it as `mut cfg = (addr=…, "
+          "bits=…, …)`)",
+          lnast_->get_name(arg));
       return true;
     }
-    const auto &cfg = rit->second;
+    const auto& cfg = rit->second;
 
     // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
-    static constexpr std::string_view known[] = {
-        "addr",   "bits", "clock_pin", "din",  "enable", "fwd",   "undef",
-        "posclk", "type", "wensize",   "size", "rdport", "init"};
-    for (const auto &[k, v] : cfg.named) {
+    static constexpr std::string_view known[]
+        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "undef", "posclk", "type", "wensize", "size", "rdport", "init"};
+    for (const auto& [k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
-        error_here("upass.tolg: unknown __memory config field '{}' — the "
-                   "vocabulary is the Memory cell pins verbatim "
-                   "(addr/bits/clock_pin/din/enable/fwd/undef/posclk/type/"
-                   "wensize/size/rdport/init; no `latency`, no `clock`)",
-                   k);
+        error_here(
+            "upass.tolg: unknown __memory config field '{}' — the "
+            "vocabulary is the Memory cell pins verbatim "
+            "(addr/bits/clock_pin/din/enable/fwd/undef/posclk/type/"
+            "wensize/size/rdport/init; no `latency`, no `clock`)",
+            k);
         return true;
       }
     }
 
-    auto cfg_const = [&](std::string_view key, int64_t def, bool required,
-                         int64_t &out) -> bool {
+    auto cfg_const = [&](std::string_view key, int64_t def, bool required, int64_t& out) -> bool {
       auto it = cfg.named.find(std::string(key));
       if (it == cfg.named.end()) {
         if (required) {
-          error_here(
-              "upass.tolg: __memory config is missing the required '{}' field",
-              key);
+          error_here("upass.tolg: __memory config is missing the required '{}' field", key);
           return false;
         }
         out = def;
         return true;
       }
       if (!Lnast_ntype::is_const(lnast_->get_type(it->second))) {
-        error_here("upass.tolg: __memory config field '{}' must be a "
-                   "compile-time constant",
-                   key);
+        error_here(
+            "upass.tolg: __memory config field '{}' must be a "
+            "compile-time constant",
+            key);
         return false;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(it->second));
       if (!v || !v->is_just_i64()) {
         // bool consts ("false"/"true") are integers in from_pyrope; anything
         // else is a config error.
-        error_here(
-            "upass.tolg: __memory config field '{}' is not an integer constant",
-            key);
+        error_here("upass.tolg: __memory config field '{}' is not an integer constant", key);
         return false;
       }
       out = v->to_just_i64();
       return true;
     };
 
-    int64_t bits = 0, size = 0, type = 0, fwd = 0, undef = 0, wensize = 1,
-            posclk = 1;
-    if (!cfg_const("bits", 0, true, bits) ||
-        !cfg_const("size", 0, true, size) ||
-        !cfg_const("type", 0, false, type) ||
-        !cfg_const("fwd", 0, false, fwd) ||
-        !cfg_const("undef", 0, false, undef) ||
-        !cfg_const("wensize", 1, false, wensize) ||
-        !cfg_const("posclk", 1, false, posclk)) {
+    int64_t bits = 0, size = 0, type = 0, fwd = 0, undef = 0, wensize = 1, posclk = 1;
+    if (!cfg_const("bits", 0, true, bits) || !cfg_const("size", 0, true, size) || !cfg_const("type", 0, false, type)
+        || !cfg_const("fwd", 0, false, fwd) || !cfg_const("undef", 0, false, undef) || !cfg_const("wensize", 1, false, wensize)
+        || !cfg_const("posclk", 1, false, posclk)) {
       return true;
     }
     if (bits <= 0 || size <= 0) {
-      error_here("upass.tolg: __memory needs positive bits/size (got bits={}, "
-                 "size={})",
-                 bits, size);
+      error_here(
+          "upass.tolg: __memory needs positive bits/size (got bits={}, "
+          "size={})",
+          bits,
+          size);
       return true;
     }
     if (type < 0 || type > 2) {
-      error_here("upass.tolg: __memory type must be 0 (async), 1 (sync) or 2 "
-                 "(array) — got {}",
-                 type);
+      error_here(
+          "upass.tolg: __memory type must be 0 (async), 1 (sync) or 2 "
+          "(array) — got {}",
+          type);
       return true;
     }
 
     // Per-port lists: a field is a positional tuple ref or a single scalar.
-    auto cfg_list = [&](std::string_view key,
-                        std::vector<Lnast_nid> &out) -> bool {
+    auto cfg_list = [&](std::string_view key, std::vector<Lnast_nid>& out) -> bool {
       auto it = cfg.named.find(std::string(key));
       if (it == cfg.named.end()) {
-        return true; // empty
+        return true;  // empty
       }
       const auto vt = lnast_->get_type(it->second);
       if (Lnast_ntype::is_ref(vt)) {
-        if (auto lit =
-                tuple_recs_.find(std::string(lnast_->get_name(it->second)));
-            lit != tuple_recs_.end()) {
+        if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
           if (!lit->second.named.empty()) {
-            error_here("upass.tolg: __memory config field '{}' must be a "
-                       "positional tuple",
-                       key);
+            error_here(
+                "upass.tolg: __memory config field '{}' must be a "
+                "positional tuple",
+                key);
             return false;
           }
           out = lit->second.elems;
           return true;
         }
       }
-      out = {it->second}; // single scalar = one port
+      out = {it->second};  // single scalar = one port
       return true;
     };
 
-    std::vector<Lnast_nid> addrs, dins, ens, rdports;
-    if (!cfg_list("addr", addrs) || !cfg_list("din", dins) ||
-        !cfg_list("enable", ens) || !cfg_list("rdport", rdports)) {
+    std::vector<Lnast_nid> addrs, clocks, dins, ens, rdports;
+    if (!cfg_list("addr", addrs) || !cfg_list("din", dins) || !cfg_list("clock_pin", clocks) || !cfg_list("enable", ens)
+        || !cfg_list("rdport", rdports)) {
       return true;
     }
     if (addrs.empty()) {
@@ -3077,16 +2994,20 @@ private:
     }
     const int n_ports = static_cast<int>(addrs.size());
     if (static_cast<int>(rdports.size()) != n_ports) {
-      error_here(
-          "upass.tolg: __memory 'rdport' has {} entries but 'addr' has {}",
-          rdports.size(), n_ports);
+      error_here("upass.tolg: __memory 'rdport' has {} entries but 'addr' has {}", rdports.size(), n_ports);
+      return true;
+    }
+    if (clocks.size() > 1 && static_cast<int>(clocks.size()) != n_ports) {
+      error_here("upass.tolg: __memory 'clock_pin' has {} entries but 'addr' has {} — pass one shared clock or one clock per port",
+                 clocks.size(),
+                 n_ports);
       return true;
     }
 
     int n_wr_cfg = 0;
-    for (const auto &rp : rdports) {
+    for (const auto& rp : rdports) {
       if (!Lnast_ntype::is_const(lnast_->get_type(rp))) {
-        continue; // diagnosed in the port loop below
+        continue;  // diagnosed in the port loop below
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(rp));
       if (!v || v->is_known_false()) {
@@ -3097,37 +3018,41 @@ private:
     // is a per-(read,write) MATRIX (graph/cell.cpp), so the all-ones value
     // spans n_rd*n_wr bits, not n_wr. A value > 1 passes through as an explicit
     // matrix (the RTL escape hatch: __memory's vocabulary is the cell verbatim).
-    const int n_rd_cfg = n_ports - n_wr_cfg;
-    const int fwd_bits = n_rd_cfg * n_wr_cfg;
+    const int n_rd_cfg            = n_ports - n_wr_cfg;
+    const int fwd_bits            = n_rd_cfg * n_wr_cfg;
     // The all-ones expansion is keyed on the BOOLEAN literal, not on the value
     // 1. from_pyrope collapses `true` and `1` to the same integer, so testing
     // the value made the one-bit matrix `undef=1` (= read 0 / write 0 only)
     // unreachable: it silently became all-ones, and the lec X plane then masked
     // away EVERY read port's collision window — a genuinely wrong read port
     // proved equivalent. A numeric value is always an explicit matrix now.
-    auto cfg_is_true_literal = [&](std::string_view key) {
+    auto      cfg_is_true_literal = [&](std::string_view key) {
       auto it = cfg.named.find(std::string(key));
       return it != cfg.named.end() && lnast_->get_name(it->second) == "true";
     };
     const bool fwd_all   = cfg_is_true_literal("fwd");
     const bool undef_all = cfg_is_true_literal("undef");
     if ((fwd_all || undef_all) && fwd_bits > 62) {
-      error_here("upass.tolg: __memory has {} read x {} write ports — "
-                 "fwd=true/undef=true exceeds the 62-bit matrix this path "
-                 "builds; pass an explicit matrix instead",
-                 n_rd_cfg, n_wr_cfg);
+      error_here(
+          "upass.tolg: __memory has {} read x {} write ports — "
+          "fwd=true/undef=true exceeds the 62-bit matrix this path "
+          "builds; pass an explicit matrix instead",
+          n_rd_cfg,
+          n_wr_cfg);
       return true;
     }
-    const int64_t fwd_mask = fwd_all ? (int64_t{1} << fwd_bits) - 1 : fwd;
+    const int64_t fwd_mask   = fwd_all ? (int64_t{1} << fwd_bits) - 1 : fwd;
     // `undef` is the same shape (graph/cell.cpp pid 15) and takes the same
     // 0/true/explicit-matrix spellings. It is mutually exclusive with `fwd`
     // per (read,write) pair: forwarded data is defined by construction.
     const int64_t undef_mask = undef_all ? (int64_t{1} << fwd_bits) - 1 : undef;
     if ((fwd_mask & undef_mask) != 0) {
-      error_here("upass.tolg: __memory has fwd and undef both set for the same "
-                 "(read,write) pair (fwd={:#x}, undef={:#x}) — a forwarded "
-                 "read returns the new data, so it cannot also be undefined",
-                 fwd_mask, undef_mask);
+      error_here(
+          "upass.tolg: __memory has fwd and undef both set for the same "
+          "(read,write) pair (fwd={:#x}, undef={:#x}) — a forwarded "
+          "read returns the new data, so it cannot also be undefined",
+          fwd_mask,
+          undef_mask);
       return true;
     }
 
@@ -3145,51 +3070,42 @@ private:
         mem.set_name(std::string(canon_io_name(mem_base)));
       }
     }
-    setup_sink_by_name(mem, "bits")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(bits)));
-    setup_sink_by_name(mem, "size")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(size)));
-    setup_sink_by_name(mem, "type")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(type)));
-    setup_sink_by_name(mem, "fwd")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
+    setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(bits)));
+    setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Dlop::create_integer(type)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
     if (undef_mask != 0) {
-      setup_sink_by_name(mem, "undef")
-          .connect_driver(create_const(*g_, *Dlop::create_integer(undef_mask)));
+      setup_sink_by_name(mem, "undef").connect_driver(create_const(*g_, *Dlop::create_integer(undef_mask)));
     }
-    setup_sink_by_name(mem, "wensize")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
+    setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
     if (type != 2) {
-      setup_sink_by_name(mem, "posclk")
-          .connect_driver(create_const(*g_, *Dlop::create_integer(posclk)));
-      if (auto it = cfg.named.find("clock_pin"); it != cfg.named.end()) {
-        setup_sink_by_name(mem, "clock_pin")
-            .connect_driver(leaf(it->second).pin);
-      } else if (!clock_name_.empty()) {
+      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk)));
+      if (clocks.size() == 1) {
+        setup_sink_by_name(mem, "clock_pin").connect_driver(leaf(clocks.front()).pin);
+      } else if (clocks.empty() && !clock_name_.empty()) {
         setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
-      } else {
-        warn_at(Lnast_nid{}, {"no-clock", "time"},
-                "__memory has no clock to bind in '{}'",
-                lnast_->get_top_module_name());
+      } else if (clocks.empty()) {
+        warn_at(Lnast_nid{}, {"no-clock", "time"}, "__memory has no clock to bind in '{}'", lnast_->get_top_module_name());
       }
+      // A per-port list is connected below at base+2 once the port ordering is
+      // known. Materializing every sink (rather than one shared pid 2) lets
+      // cgen select the multiclock wrapper and retain each read/write clock.
     }
     if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
       spool_ptr<Dlop> init;
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
         init = Dlop::from_pyrope(lnast_->get_name(it->second));
-      } else if (auto lit = tuple_recs_.find(
-                     std::string(lnast_->get_name(it->second)));
-                 lit != tuple_recs_.end()) {
-        const std::vector<int64_t> flat_dims{size}; // __memory is always flat
+      } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
+        const std::vector<int64_t>   flat_dims{size};  // __memory is always flat
         std::vector<spool_ptr<Dlop>> entries;
-        if (flatten_init_values(lit->second, flat_dims, 0, "__memory init",
-                                static_cast<int32_t>(bits), entries)) {
+        if (flatten_init_values(lit->second, flat_dims, 0, "__memory init", static_cast<int32_t>(bits), entries)) {
           init = pack_entries(entries, static_cast<int32_t>(bits));
         }
       }
       if (!init) {
-        error_here("upass.tolg: __memory 'init' must be a comptime constant or "
-                   "tuple literal");
+        error_here(
+            "upass.tolg: __memory 'init' must be a comptime constant or "
+            "tuple literal");
         return true;
       }
       setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *init));
@@ -3198,12 +3114,13 @@ private:
     int n_wr = 0;
     for (int i = 0; i < n_ports; ++i) {
       if (!Lnast_ntype::is_const(lnast_->get_type(rdports[i]))) {
-        error_here("upass.tolg: __memory 'rdport' entry {} must be a comptime "
-                   "0/1 constant",
-                   i);
+        error_here(
+            "upass.tolg: __memory 'rdport' entry {} must be a comptime "
+            "0/1 constant",
+            i);
         return true;
       }
-      auto v = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
+      auto       v     = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = v && !v->is_known_false();
       if (!is_rd) {
         ++n_wr;
@@ -3211,44 +3128,38 @@ private:
     }
 
     for (int i = 0; i < n_ports; ++i) {
-      const auto base = i * kMemPortStride;
-      auto rdv = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
+      const auto base  = i * kMemPortStride;
+      auto       rdv   = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = rdv && !rdv->is_known_false();
-      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-          .connect_driver(leaf(addrs[i]).pin);
+      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
       mem.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-          .connect_driver(
-              create_const(*g_, *Dlop::create_integer(is_rd ? 1 : 0)));
-      Pin en =
-          i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
-      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4))
-          .connect_driver(en);
+          .connect_driver(create_const(*g_, *Dlop::create_integer(is_rd ? 1 : 0)));
+      if (type != 2 && clocks.size() > 1) {
+        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 2)).connect_driver(leaf(clocks[static_cast<size_t>(i)]).pin);
+      }
+      Pin en = i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
+      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
       if (!is_rd) {
         if (i >= static_cast<int>(dins.size())) {
-          error_here("upass.tolg: __memory write port {} has no 'din' entry",
-                     i);
+          error_here("upass.tolg: __memory write port {} has no 'din' entry", i);
           return true;
         }
-        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
-            .connect_driver(leaf(dins[i]).pin);
+        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(dins[i]).pin);
       }
     }
 
-    mem_results_[std::string(lnast_->get_name(dst))] =
-        Mem_result{mem, n_wr, n_ports - n_wr, static_cast<int32_t>(bits)};
+    mem_results_[std::string(lnast_->get_name(dst))] = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<int32_t>(bits)};
     return true;
   }
 
   // store(ref mem, idx, val) — one write port per site. The enable is the
   // site's full branch-path condition (true when unconditional); same-cycle
   // conflicts between ports are defined by the memory config (fwd), not here.
-  void lower_mem_store(const Lnast_nid &lhs, std::string_view lhs_name,
-                       Mem_info &mi) {
+  void lower_mem_store(const Lnast_nid& lhs, std::string_view lhs_name, Mem_info& mi) {
     // Gather the index chain; the LAST sibling is the stored value
     // (store(mem, i, j, …, val) is FLAT — one node, N index operands).
     std::vector<Lnast_nid> idxs;
-    for (auto c = lnast_->get_sibling_next(lhs); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(lhs); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       idxs.emplace_back(c);
     }
     // Chunked masked write: store(mem, <idx…>, din, chunk_k) has dims+2
@@ -3257,80 +3168,73 @@ private:
     // memory's wensize is set from the reader's pending attr in finalize_mems).
     int chunk = -1;
     if (idxs.size() == mi.dims.size() + 2) {
-      if (auto cv = Dlop::from_pyrope(lnast_->get_name(idxs.back()));
-          cv && cv->is_just_i64()) {
+      if (auto cv = Dlop::from_pyrope(lnast_->get_name(idxs.back())); cv && cv->is_just_i64()) {
         chunk = static_cast<int>(cv->to_just_i64());
         idxs.pop_back();
       }
     }
     if (idxs.size() < 2) {
-      error_here("upass.tolg: whole-array assignment to memory '{}' is not "
-                 "supported — write one entry at a time",
-                 lhs_name);
+      error_here(
+          "upass.tolg: whole-array assignment to memory '{}' is not "
+          "supported — write one entry at a time",
+          lhs_name);
       return;
     }
     auto val = idxs.back();
     idxs.pop_back();
     auto addr = flatten_mem_addr(mi, idxs, lhs_name);
     if (addr.is_invalid()) {
-      return; // flatten_mem_addr reported
+      return;  // flatten_mem_addr reported
     }
     if (mi.wr_next >= mi.n_user_wr) {
-      error_here(
-          "upass.tolg: internal — memory '{}' write-site pre-scan undercounted",
-          lhs_name);
+      error_here("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
       return;
     }
     if (mi.is_array && mi.rd_next > 0) {
       // A type=2 array is lowered writes-before-reads (forwarding), so a
       // source-order read placed BEFORE this write would wrongly see it.
       // reg memories are exempt: fwd semantics are order-free by contract.
-      error_here("upass.tolg: array '{}' is written after being read — "
-                 "same-cycle order is not preserved for "
-                 "mut/const arrays; reorder the accesses or use a `reg` memory",
-                 lhs_name);
+      error_here(
+          "upass.tolg: array '{}' is written after being read — "
+          "same-cycle order is not preserved for "
+          "mut/const arrays; reorder the accesses or use a `reg` memory",
+          lhs_name);
       return;
     }
     const auto base = mi.wr_next * kMemPortStride;
     ++mi.wr_next;
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-        .connect_driver(addr); // addr
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
-        .connect_driver(leaf(val).pin); // din
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
     auto en = current_path_cond();
     if (en.is_invalid()) {
       en = en_const(true);
     }
     if (chunk >= 0) {
-      en =
-          shl1_by(en, chunk); // per-chunk write enable: bit `chunk` = path_cond
+      en = shl1_by(en, chunk);  // per-chunk write enable: bit `chunk` = path_cond
     }
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4))
-        .connect_driver(en); // enable
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-        .connect_driver(
-            create_const(*g_, *Dlop::create_integer(0))); // rdport = 0 (write)
+        .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
   }
 
   // tuple_get(ref dst, ref mem, idx) — one read port per site, always
   // enabled; dst binds to the port's dout driver (pid n_wr_total + r).
-  void lower_tuple_get(const Lnast_nid &nid) {
+  void lower_tuple_get(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
     auto idx = src.is_invalid() ? src : lnast_->get_sibling_next(src);
     if (idx.is_invalid()) {
-      error_at(nid, {"unhandled-node", "unsupported"},
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
                "upass.tolg: tuple/field read of '{}' has no index — it cannot "
                "be lowered to a netlist",
-               src.is_invalid() ? std::string_view{"?"}
-                                : lnast_->get_name(src));
+               src.is_invalid() ? std::string_view{"?"} : lnast_->get_name(src));
     }
     auto it = mem_map_.find(std::string(lnast_->get_name(src)));
     if (it == mem_map_.end()) {
       // Multi-output Sub result: tuple_get(dst, result, 'port') binds that
       // output port's driver pin with the io-entry width/sign contract.
-      if (auto srt = sub_results_.find(std::string(lnast_->get_name(src)));
-          srt != sub_results_.end()) {
+      if (auto srt = sub_results_.find(std::string(lnast_->get_name(src))); srt != sub_results_.end()) {
         // The read may carry MULTIPLE indices: a tuple-typed output port
         // flattens to a dotted leaf name (`rsp.sum`), and the dot-form read
         // `inst.rsp.sum` arrives as a flat all-const index chain
@@ -3342,17 +3246,15 @@ private:
         // while the dot form (`inst.port`) is bare — unquote each component
         // before matching (same trap as the quoted mod-import callee).
         std::string joined;
-        for (auto ix = idx; !ix.is_invalid();
-             ix = lnast_->get_sibling_next(ix)) {
+        for (auto ix = idx; !ix.is_invalid(); ix = lnast_->get_sibling_next(ix)) {
           if (!Lnast_ntype::is_const(lnast_->get_type(ix))) {
-            error_here("upass.tolg: a multi-output instance result is read by "
-                       "a single output-port name");
+            error_here(
+                "upass.tolg: a multi-output instance result is read by "
+                "a single output-port name");
             return;
           }
           std::string_view comp = lnast_->get_name(ix);
-          if (comp.size() >= 2 &&
-              ((comp.front() == '\'' && comp.back() == '\'') ||
-               (comp.front() == '"' && comp.back() == '"'))) {
+          if (comp.size() >= 2 && ((comp.front() == '\'' && comp.back() == '\'') || (comp.front() == '"' && comp.back() == '"'))) {
             comp = comp.substr(1, comp.size() - 2);
           }
           if (!joined.empty()) {
@@ -3360,21 +3262,20 @@ private:
           }
           joined += comp;
         }
-        std::string_view pname = joined;
-        const Lnast_io_entry *oe = nullptr;
-        for (const auto &e : srt->second.outputs) {
+        std::string_view      pname = joined;
+        const Lnast_io_entry* oe    = nullptr;
+        for (const auto& e : srt->second.outputs) {
           if ((e.name == pname)) {
             oe = &e;
             break;
           }
         }
         if (oe == nullptr) {
-          error_here("upass.tolg: instance result has no output named '{}'",
-                     pname);
+          error_here("upass.tolg: instance result has no output named '{}'", pname);
           return;
         }
-        auto out_dpin = srt->second.sub.create_driver_pin(oe->name);
-        int32_t mw = io_mw(*oe);
+        auto    out_dpin = srt->second.sub.create_driver_pin(oe->name);
+        int32_t mw       = io_mw(*oe);
         if (oe->kind == Io_kind::boolean || mw <= 1) {
           set_bits(out_dpin, 1);
           if (oe->is_signed) {
@@ -3395,27 +3296,27 @@ private:
         return;
       }
       // 1a-mem — res[N] on a __memory result: bind the N-th read port's dout.
-      if (auto mrt = mem_results_.find(std::string(lnast_->get_name(src)));
-          mrt != mem_results_.end()) {
-        const auto &mr = mrt->second;
-        if (!Lnast_ntype::is_const(lnast_->get_type(idx)) ||
-            !lnast_->get_sibling_next(idx).is_invalid()) {
-          error_here("upass.tolg: a __memory result is indexed by a single "
-                     "comptime read-port number");
+      if (auto mrt = mem_results_.find(std::string(lnast_->get_name(src))); mrt != mem_results_.end()) {
+        const auto& mr = mrt->second;
+        if (!Lnast_ntype::is_const(lnast_->get_type(idx)) || !lnast_->get_sibling_next(idx).is_invalid()) {
+          error_here(
+              "upass.tolg: a __memory result is indexed by a single "
+              "comptime read-port number");
           return;
         }
-        auto v = Dlop::from_pyrope(lnast_->get_name(idx));
+        auto          v = Dlop::from_pyrope(lnast_->get_name(idx));
         const int64_t k = (v && v->is_just_i64()) ? v->to_just_i64() : -1;
         if (k < 0 || k >= mr.n_rd) {
-          error_here("upass.tolg: __memory result index {} out of range — the "
-                     "config has {} read port(s)",
-                     lnast_->get_name(idx), mr.n_rd);
+          error_here(
+              "upass.tolg: __memory result index {} out of range — the "
+              "config has {} read port(s)",
+              lnast_->get_name(idx),
+              mr.n_rd);
           return;
         }
-        auto dout =
-            mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
+        auto dout = mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
         set_bits(dout, mr.bits);
-        set_unsign(dout); // __memory data is raw bits — unsigned
+        set_unsign(dout);  // __memory data is raw bits — unsigned
         record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
         return;
       }
@@ -3424,20 +3325,21 @@ private:
       // lowered later in the body (`c = tmp.add` reads tmp.add before
       // `tmp = add_sub(…)` runs). Defer the bind to end-of-pass; re-resolved
       // with tget_final_, a still-unresolved one warns.
-      if (!tget_final_ && Lnast_ntype::is_const(lnast_->get_type(idx)) &&
-          lnast_->get_sibling_next(idx).is_invalid()) {
+      if (!tget_final_ && Lnast_ntype::is_const(lnast_->get_type(idx)) && lnast_->get_sibling_next(idx).is_invalid()) {
         pending_tgets_.emplace_back(nid);
         return;
       }
-      error_at(nid, {"unhandled-node", "unsupported"},
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
                "upass.tolg: field/index read of '{}' could not be resolved — "
                "'{}' is not a memory, a multi-output "
                "instance result, or a resolved value (often an unassigned "
                "value/nil, or an unsupported runtime tuple "
                "index)",
-               lnast_->get_name(src), lnast_->get_name(src));
+               lnast_->get_name(src),
+               lnast_->get_name(src));
     }
-    auto &mi = it->second;
+    auto&                  mi = it->second;
     // Gather the full index chain (tuple_get(dst, mem, i, j, …) is FLAT).
     std::vector<Lnast_nid> idxs;
     for (auto c = idx; !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
@@ -3445,22 +3347,18 @@ private:
     }
     auto addr = flatten_mem_addr(mi, idxs, lnast_->get_name(src));
     if (addr.is_invalid()) {
-      return; // flatten_mem_addr reported
+      return;  // flatten_mem_addr reported
     }
-    const int slot = mi.n_wr_total + mi.rd_next;
+    const int  slot = mi.n_wr_total + mi.rd_next;
     const auto base = slot * kMemPortStride;
     // Program-order position: the writes minted so far are exactly those that
     // textually precede this read, i.e. the ones it may forward from.
     mi.rd_wr_before.emplace_back(mi.wr_next);
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-        .connect_driver(addr); // addr
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4))
-        .connect_driver(en_const(true));
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);  // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-        .connect_driver(
-            create_const(*g_, *Dlop::create_integer(1))); // rdport = 1 (read)
-    auto dout = mi.node.create_driver_pin(
-        static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
+        .connect_driver(create_const(*g_, *Dlop::create_integer(1)));  // rdport = 1 (read)
+    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
     ++mi.rd_next;
     auto dst_name = lnast_->get_name(dst);
     if (mi.elem_signed) {
@@ -3471,21 +3369,24 @@ private:
       set_bits(dout, mi.elem_mw);
       set_unsign(dout);
       record(dst_name, to_positive(dout, mi.elem_mw),
-             mi.elem_mw); // unsigned -> positive
+             mi.elem_mw);  // unsigned -> positive
     }
   }
 
   void finalize_mems() {
-    for (const auto &name : mem_order_) {
+    for (const auto& name : mem_order_) {
       auto it = mem_map_.find(name);
       if (it == mem_map_.end()) {
         continue;
       }
-      const auto &mi = it->second;
+      const auto& mi = it->second;
       if (mi.wr_next != mi.n_user_wr) {
-        error_here("upass.tolg: internal — memory '{}' lowered {} write sites "
-                   "but the pre-scan counted {}",
-                   name, mi.wr_next, mi.n_user_wr);
+        error_here(
+            "upass.tolg: internal — memory '{}' lowered {} write sites "
+            "but the pre-scan counted {}",
+            name,
+            mi.wr_next,
+            mi.n_user_wr);
       }
       // 1a-mem reset-restore — a concrete-init reg array with a bound reset
       // restores its init on reset: one write port per entry (addr=k,
@@ -3500,34 +3401,26 @@ private:
           rst = not1(rst);
         }
         const auto en_pid_off = 4;
-        Pin not_rst = not1(rst);
+        Pin        not_rst    = not1(rst);
         for (int u = 0; u < mi.n_user_wr; ++u) {
-          const auto pid =
-              static_cast<uint64_t>(u * kMemPortStride + en_pid_off);
-          for (const auto &e : mi.node.inp_edges()) {
-            if (!e.sink.is_invalid() &&
-                static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
+          const auto pid = static_cast<uint64_t>(u * kMemPortStride + en_pid_off);
+          for (const auto& e : mi.node.inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
               auto old_en = e.driver;
               e.del_edge();
-              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid))
-                  .connect_driver(and2(old_en, not_rst));
+              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
               break;
             }
           }
         }
-        for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size());
-             ++k) {
+        for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
           const auto base = (mi.n_user_wr + k) * kMemPortStride;
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-              .connect_driver(create_const(*g_, *Dlop::create_integer(k)));
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(create_const(*g_, *Dlop::create_integer(k)));
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
-              .connect_driver(
-                  create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4))
-              .connect_driver(rst);
+              .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-              .connect_driver(create_const(
-                  *g_, *Dlop::create_integer(0))); // rdport = 0 (write)
+              .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
         }
       }
       // Same-cycle ordering: build the per-(read,write) `fwd` matrix now that
@@ -3550,15 +3443,13 @@ private:
       // array unconditionally and the matrix is unused.
       // (A whole-array cell has already forced fwd=0 — a bulk update is a
       // next-state that no same-cycle read observes — so leave it alone.)
-      auto ordering = Mem_info::Mem_order::program; // Pyrope default
-      if (auto pit = pending_attrs_.find(std::string(name));
-          pit != pending_attrs_.end()) {
+      auto ordering = Mem_info::Mem_order::program;  // Pyrope default
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
         if (auto oit = pit->second.find("ordering"); oit != pit->second.end()) {
           std::string_view ov{oit->second};
           // Attr values arrive as Pyrope source text: a string literal keeps
           // its quotes.
-          while (ov.size() >= 2 && (ov.front() == '"' || ov.front() == '\'') &&
-                 ov.back() == ov.front()) {
+          while (ov.size() >= 2 && (ov.front() == '"' || ov.front() == '\'') && ov.back() == ov.front()) {
             ov = ov.substr(1, ov.size() - 2);
           }
           if (ov == "program") {
@@ -3570,21 +3461,22 @@ private:
           } else if (ov == "none") {
             ordering = Mem_info::Mem_order::none;
           } else {
-            error_here("upass.tolg: memory '{}' has ordering=\"{}\" — the legal "
-                       "values are \"program\" (default), \"fwd\", \"old\" and "
-                       "\"none\"",
-                       name, ov);
+            error_here(
+                "upass.tolg: memory '{}' has ordering=\"{}\" — the legal "
+                "values are \"program\" (default), \"fwd\", \"old\" and "
+                "\"none\"",
+                name,
+                ov);
           }
         }
       }
       const int n_rd = static_cast<int>(mi.rd_wr_before.size());
-      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update &&
-          mi.n_wr_total > 0 && n_rd > 0) {
+      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_wr_total > 0 && n_rd > 0) {
         // Row-major bit string, MSB first: bit (r*n_wr + w) sits at index
         // n_bits-1-(r*n_wr+w). Built as TEXT so a wide matrix stays exact — a
         // whole-array expansion easily reaches 9rd x 8wr = 72 bits, and every
         // consumer reads it with Dlop::bit_test (arbitrary precision).
-        const int n_bits = n_rd * mi.n_wr_total;
+        const int   n_bits = n_rd * mi.n_wr_total;
         std::string bits(static_cast<size_t>(n_bits), '0');
         // ordering="none": the SAME layout, but the bits mean "undefined on a
         // collision" rather than "forward". A zero `fwd` row alone cannot say
@@ -3596,25 +3488,21 @@ private:
           int fwd_upto   = 0;
           int undef_upto = 0;
           switch (ordering) {
-          case Mem_info::Mem_order::program:
-            fwd_upto = mi.rd_wr_before[static_cast<size_t>(r)];
-            break;
-          case Mem_info::Mem_order::fwd: fwd_upto = mi.n_user_wr; break;
-          case Mem_info::Mem_order::old: fwd_upto = 0; break;
-          case Mem_info::Mem_order::none: undef_upto = mi.n_user_wr; break;
+            case Mem_info::Mem_order::program: fwd_upto = mi.rd_wr_before[static_cast<size_t>(r)]; break;
+            case Mem_info::Mem_order::fwd    : fwd_upto = mi.n_user_wr; break;
+            case Mem_info::Mem_order::old    : fwd_upto = 0; break;
+            case Mem_info::Mem_order::none   : undef_upto = mi.n_user_wr; break;
           }
           for (int w = 0; w < fwd_upto; ++w) {
-            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] =
-                '1';
+            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
           }
           for (int w = 0; w < undef_upto; ++w) {
-            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] =
-                '1';
+            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
           }
         }
         // Same encoding for both: compact int64 while it fits (so the emitted
         // Verilog stays a plain decimal), exact `0ub…` text beyond that.
-        auto pack = [&](const std::string &b) -> spool_ptr<Dlop> {
+        auto pack = [&](const std::string& b) -> spool_ptr<Dlop> {
           if (n_bits <= 62) {
             int64_t v = 0;
             for (int i = 0; i < n_bits; ++i) {
@@ -3626,20 +3514,17 @@ private:
           }
           return Dlop::from_pyrope("0ub" + b);
         };
-        auto redrive = [&](int pid, std::string_view pin_name,
-                           const spool_ptr<Dlop> &matrix) {
+        auto redrive = [&](int pid, std::string_view pin_name, const spool_ptr<Dlop>& matrix) {
           if (!matrix) {
             return;
           }
-          for (const auto &e : mi.node.inp_edges()) {
-            if (!e.sink.is_invalid() &&
-                static_cast<int>(e.sink.get_port_id()) == pid) {
+          for (const auto& e : mi.node.inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == pid) {
               e.del_edge();
               break;
             }
           }
-          setup_sink_by_name(mi.node, pin_name)
-              .connect_driver(create_const(*g_, *matrix));
+          setup_sink_by_name(mi.node, pin_name).connect_driver(create_const(*g_, *matrix));
         };
         redrive(5, "fwd", pack(bits));  // fwd (pid 5)
         if (ubits.find('1') != std::string::npos) {
@@ -3651,21 +3536,16 @@ private:
       // wensize=1, so re-drive it here (after every write port is in place).
       // wensize is the single config pin at port_id 8 (see graph/cell.cpp
       // Memory pin names).
-      if (auto pit = pending_attrs_.find(std::string(name));
-          pit != pending_attrs_.end()) {
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
         if (auto wit = pit->second.find("wensize"); wit != pit->second.end()) {
-          if (auto wv = Dlop::from_pyrope(wit->second);
-              wv && wv->is_just_i64() && wv->to_just_i64() > 1) {
-            for (const auto &e : mi.node.inp_edges()) {
-              if (!e.sink.is_invalid() &&
-                  static_cast<int>(e.sink.get_port_id()) == 8) {
+          if (auto wv = Dlop::from_pyrope(wit->second); wv && wv->is_just_i64() && wv->to_just_i64() > 1) {
+            for (const auto& e : mi.node.inp_edges()) {
+              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 8) {
                 e.del_edge();
                 break;
               }
             }
-            setup_sink_by_name(mi.node, "wensize")
-                .connect_driver(create_const(
-                    *g_, *Dlop::create_integer(wv->to_just_i64())));
+            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
           }
         }
         // Re-drive the forwarding mask (fwd, port 5).  lower_mem_declare reads
@@ -3677,20 +3557,15 @@ private:
         // A whole-array cell keeps the fwd=0 that lower_mem_update_store
         // forced: a clocked bulk update is a next-state no same-cycle read
         // observes, and cgen emits `dout = data[addr]` for it regardless.
-        if (auto fit = pit->second.find("fwd");
-            fit != pit->second.end() && !mi.has_update) {
-          if (auto fv = Dlop::from_pyrope(fit->second);
-              fv && fv->is_just_i64()) {
-            for (const auto &e : mi.node.inp_edges()) {
-              if (!e.sink.is_invalid() &&
-                  static_cast<int>(e.sink.get_port_id()) == 5) {
+        if (auto fit = pit->second.find("fwd"); fit != pit->second.end() && !mi.has_update) {
+          if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
+            for (const auto& e : mi.node.inp_edges()) {
+              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 5) {
                 e.del_edge();
                 break;
               }
             }
-            setup_sink_by_name(mi.node, "fwd")
-                .connect_driver(create_const(
-                    *g_, *Dlop::create_integer(fv->to_just_i64())));
+            setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fv->to_just_i64())));
           }
         }
       }
@@ -3702,48 +3577,41 @@ private:
       // write clock) beats the implicit shared clock; posclk=false marks a
       // negedge write clock.
       if (!mi.is_array) {
-        bool posclk_val = true;
+        bool        posclk_val = true;
         std::string clock_pin_name;
-        if (auto pit = pending_attrs_.find(std::string(name));
-            pit != pending_attrs_.end()) {
-          if (auto cit = pit->second.find("clock_pin");
-              cit != pit->second.end()) {
+        if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+          if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
             clock_pin_name = cit->second;
           }
-          if (auto pcit = pit->second.find("posclk");
-              pcit != pit->second.end()) {
+          if (auto pcit = pit->second.find("posclk"); pcit != pit->second.end()) {
             posclk_val = pcit->second != "false" && pcit->second != "0";
           }
         }
-        setup_sink_by_name(mi.node, "posclk")
-            .connect_driver(
-                create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
         if (!clock_pin_name.empty()) {
           // Same resolution as the per-reg wiring above: a module input first,
           // then an internal/derived wire (a gated clock — clock-gate cell
           // output — clocking a reg array; use its DRIVER, not the
           // passthrough buffer), then any plain named pin.
           if (g_->get_io()->has_input(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin")
-                .connect_driver(g_->get_input_pin(clock_pin_name));
-          } else if (auto dit = wire_names_.contains(clock_pin_name)
-                                    ? pin_map_.find(din_key(clock_pin_name))
-                                    : pin_map_.end();
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(g_->get_input_pin(clock_pin_name));
+          } else if (auto dit = wire_names_.contains(clock_pin_name) ? pin_map_.find(din_key(clock_pin_name)) : pin_map_.end();
                      dit != pin_map_.end()) {
             setup_sink_by_name(mi.node, "clock_pin").connect_driver(dit->second);
           } else if (pin_map_.contains(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin")
-                .connect_driver(pin_map_.at(clock_pin_name));
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(pin_map_.at(clock_pin_name));
           } else {
-            error_here("upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
-                       "has no such input/wire",
-                       name, clock_pin_name, lnast_->get_top_module_name());
+            error_here(
+                "upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
+                "has no such input/wire",
+                name,
+                clock_pin_name,
+                lnast_->get_top_module_name());
           }
         } else if (!clock_name_.empty()) {
           setup_sink_by_name(mi.node, "clock_pin").connect_driver(clock_pin());
         } else {
-          warn_at(Lnast_nid{}, {"no-clock", "time"},
-                  "memory '{}' has no clock input to bind", name);
+          warn_at(Lnast_nid{}, {"no-clock", "time"}, "memory '{}' has no clock input to bind", name);
         }
       }
 
@@ -3755,9 +3623,8 @@ private:
       // (+ `negreset`) attrs; consume them here (the per-entry restore-port
       // path is for non-whole-array regs only).
       if (mi.has_update) {
-        if (auto pit = pending_attrs_.find(std::string(name));
-            pit != pending_attrs_.end()) {
-          auto &attrs = pit->second;
+        if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+          auto&            attrs = pit->second;
           std::string_view rpn;
           if (auto rit = attrs.find("reset_pin"); rit != attrs.end()) {
             rpn = rit->second;
@@ -3765,29 +3632,21 @@ private:
           if (!rpn.empty() && rpn != "false") {
             // Reset value bus -> init sink (overrides any declare-time const
             // init).
-            if (auto iit = attrs.find("initial");
-                iit != attrs.end() && iit->second != "false") {
+            if (auto iit = attrs.find("initial"); iit != attrs.end() && iit->second != "false") {
               if (auto iv = Dlop::from_pyrope(iit->second)) {
-                for (const auto &e : mi.node.inp_edges()) {
-                  if (!e.sink.is_invalid() &&
-                      static_cast<int>(e.sink.get_port_id()) ==
-                          11) { // init (pid 11)
+                for (const auto& e : mi.node.inp_edges()) {
+                  if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
                     e.del_edge();
                     break;
                   }
                 }
-                setup_sink_by_name(mi.node, "init")
-                    .connect_driver(create_const(*g_, *iv));
+                setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *iv));
               }
             }
             // Reset condition -> reset sink (active-high; pre-invert negreset).
-            Pin rp = g_->get_io()->has_input(std::string(rpn))
-                         ? g_->get_input_pin(std::string(rpn))
-                         : reset_pin();
+            Pin rp = g_->get_io()->has_input(std::string(rpn)) ? g_->get_input_pin(std::string(rpn)) : reset_pin();
             if (!rp.is_invalid()) {
-              const bool neg = (attrs.count("negreset") &&
-                                attrs.at("negreset") != "false") ||
-                               reset_neg_;
+              const bool neg = (attrs.count("negreset") && attrs.at("negreset") != "false") || reset_neg_;
               if (neg) {
                 rp = not1(rp);
               }
@@ -3801,17 +3660,20 @@ private:
       // the same cell is well-defined (per-port writes OVERRIDE the bulk
       // update), but surface it so an accidental mix is visible.
       if (mi.has_update && mi.n_user_wr > 0) {
-        warn_at(Lnast_nid{}, {"memory-update-and-write", "time"},
+        warn_at(Lnast_nid{},
+                {"memory-update-and-write", "time"},
                 "memory '{}' mixes a whole-array `update` with {} per-entry "
                 "write port(s); per-entry writes take priority",
-                name, mi.n_user_wr);
+                name,
+                mi.n_user_wr);
       }
 
       // A read-less (or access-less) memory is a WARNING at most — its state
       // can be observed by a scan chain, and a future remote regref may
       // attach reads/writes. `pub` (regref potential) silences it entirely.
       if (!mi.is_pub && mi.rd_next == 0) {
-        warn_at(Lnast_nid{}, {"memory-never-read", "type"},
+        warn_at(Lnast_nid{},
+                {"memory-never-read", "type"},
                 "memory '{}' is never read — contents are only observable via "
                 "scan/regref",
                 name);
@@ -3822,9 +3684,8 @@ private:
   // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
   // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_bits()-1
   // drops the sign bit when unsigned). prim_type_bool → 1. Unknown → (0,_).
-  [[nodiscard]] std::pair<int32_t, bool>
-  declared_width(const Lnast_nid &type_nid) {
-    using N = Lnast_ntype;
+  [[nodiscard]] std::pair<int32_t, bool> declared_width(const Lnast_nid& type_nid) {
+    using N      = Lnast_ntype;
     const auto t = lnast_->get_type(type_nid);
     if (N::is_prim_type_bool(t)) {
       return {1, false};
@@ -3836,27 +3697,24 @@ private:
     if (mx.is_invalid()) {
       return {0, false};
     }
-    auto mn = lnast_->get_sibling_next(mx);
+    auto mn    = lnast_->get_sibling_next(mx);
     auto max_v = Dlop::from_pyrope(lnast_->get_name(mx));
     if (!max_v || !max_v->is_integer()) {
       return {0, false};
     }
-    bool min_known = false;
-    bool min_neg = false;
-    int32_t min_bits = 0;
+    bool    min_known = false;
+    bool    min_neg   = false;
+    int32_t min_bits  = 0;
     if (!mn.is_invalid()) {
-      if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn));
-          mn_v && mn_v->is_integer()) {
+      if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
-        min_neg = mn_v->is_negative();
-        min_bits = static_cast<int32_t>(mn_v->get_bits());
+        min_neg   = mn_v->is_negative();
+        min_bits  = static_cast<int32_t>(mn_v->get_bits());
       }
     }
     const bool is_signed = !(min_known && !min_neg);
     if (!is_signed) {
-      auto bits = max_v->is_known_zero()
-                      ? int32_t{1}
-                      : static_cast<int32_t>(max_v->get_bits() - 1);
+      auto bits = max_v->is_known_zero() ? int32_t{1} : static_cast<int32_t>(max_v->get_bits() - 1);
       return {bits, false};
     }
     // Signed: the WIDER of the two bounds' signed widths (mirrors the ssa io
@@ -3874,28 +3732,25 @@ private:
   // declared min, so deficit = stage_N − callee_min; for a mod callee the
   // output cycle is fixed and stage_N must match it exactly → deficit 0).
   // Depth (0,0) is a plain wire — no Flop is created at all.
-  void create_stage_flop(std::string_view name, const Pending_stage &p,
-                         const Lnast_nid &rhs) {
+  void create_stage_flop(std::string_view name, const Pending_stage& p, const Lnast_nid& rhs) {
     // Runs from finalize (no statement walk active): anchor the flop at the
     // stage declaration.
     cur_srcid_ = hhds::SourceId_invalid;
-    if (const auto id = lnast_->get_srcid(p.decl_nid);
-        id != hhds::SourceId_invalid) {
-      cur_srcid_ =
-          g_->source_locator().import_from(lnast_->source_locator(), id);
+    if (const auto id = lnast_->get_srcid(p.decl_nid); id != hhds::SourceId_invalid) {
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
-    cur_color_ = p.decl_color; // stage flop lands in its declare's region
+    cur_color_         = p.decl_color;  // stage flop lands in its declare's region
     const bool min_nil = p.min_txt == "nil";
     const bool max_nil = p.max_txt == "nil";
-    int64_t smin = 0;
-    int64_t smax = 0;
+    int64_t    smin    = 0;
+    int64_t    smax    = 0;
     if (!min_nil) {
       auto c = Dlop::from_pyrope(p.min_txt);
-      smin = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
+      smin   = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
     }
     if (!max_nil) {
       auto c = Dlop::from_pyrope(p.max_txt);
-      smax = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
+      smax   = (c && c->is_just_i64()) ? c->to_just_i64() : 0;
     }
 
     int64_t emin = smin;
@@ -3905,14 +3760,14 @@ private:
     if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
       rhs_name = std::string(lnast_->get_name(rhs));
     }
-    if (auto sit = sub_out_stages_.find(rhs_name);
-        sit != sub_out_stages_.end()) {
-      const auto &so = sit->second;
+    if (auto sit = sub_out_stages_.find(rhs_name); sit != sub_out_stages_.end()) {
+      const auto& so = sit->second;
       if (min_nil || max_nil || smin != smax) {
-        error_here("upass.tolg: `stage[]` / ranged stage counts on a pipe/mod "
-                   "call are not supported yet — "
-                   "write a fixed `stage[N]` for '{}'",
-                   name);
+        error_here(
+            "upass.tolg: `stage[]` / ranged stage counts on a pipe/mod "
+            "call are not supported yet — "
+            "write a fixed `stage[N]` for '{}'",
+            name);
         return;
       }
       const int64_t n = smin;
@@ -3920,24 +3775,34 @@ private:
         // pipe convention: cmax < cmin (e.g. bare pipe (1,0)) = no upper bound.
         if (n < so.cmin || (so.cmax >= so.cmin && n > so.cmax)) {
           if (so.cmax >= so.cmin) {
-            error_here("upass.tolg: stage[{}] on '{}' is outside the callee's "
-                       "declared latency range [{}, {}]",
-                       n, name, so.cmin, so.cmax);
+            error_here(
+                "upass.tolg: stage[{}] on '{}' is outside the callee's "
+                "declared latency range [{}, {}]",
+                n,
+                name,
+                so.cmin,
+                so.cmax);
           } else {
-            error_here("upass.tolg: stage[{}] on '{}' is below the callee's "
-                       "declared minimum latency {}",
-                       n, name, so.cmin);
+            error_here(
+                "upass.tolg: stage[{}] on '{}' is below the callee's "
+                "declared minimum latency {}",
+                n,
+                name,
+                so.cmin);
           }
           return;
         }
-        emin = emax = n - so.cmin; // callee realized at its declared min
+        emin = emax = n - so.cmin;  // callee realized at its declared min
       } else {
         // mod callee: the output's landing cycle is fixed by its interface.
         if (so.cmin != so.cmax || n != so.cmin) {
-          error_here("upass.tolg: mod call result '{}' lands at its declared "
-                     "cycle {} — `stage[{}]` must match it "
-                     "(add a separate `stage[N] x = value` for extra delay)",
-                     name, so.cmin, n);
+          error_here(
+              "upass.tolg: mod call result '{}' lands at its declared "
+              "cycle {} — `stage[{}]` must match it "
+              "(add a separate `stage[N] x = value` for extra delay)",
+              name,
+              so.cmin,
+              n);
           return;
         }
         emin = emax = 0;
@@ -3952,35 +3817,33 @@ private:
         sub_time_[so.node.get_debug_nid()] = {realized, realized};
       }
     } else if (min_nil || max_nil) {
-      error_here("upass.tolg: `stage[]` on '{}' has no chosen count at "
-                 "realization — write `stage[N]` (the toolchain-picked "
-                 "default lands in a later phase)",
-                 name);
+      error_here(
+          "upass.tolg: `stage[]` on '{}' has no chosen count at "
+          "realization — write `stage[N]` (the toolchain-picked "
+          "default lands in a later phase)",
+          name);
       return;
     }
 
     auto v = leaf(rhs);
     if (emin == 0 && emax == 0) {
-      record(name, v.pin, v.mw); // zero-depth stage = wire
+      record(name, v.pin, v.mw);  // zero-depth stage = wire
       return;
     }
 
-    auto flop = make_node(Ntype_op::Flop);
+    auto flop                         = make_node(Ntype_op::Flop);
     flop_depth_[flop.get_debug_nid()] = {emin, emax};
     // The LN-inserted pipe output flop (vs a user `stage[N]` reg) is
     // the narrowing target: LG pass1 rewrites its depth to (min−σ, max−σ).
     if (name.starts_with("%pipe_")) {
       inserted_flops_.insert(flop.get_debug_nid());
     }
-    setup_sink_by_name(flop, "pipe_min")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(emin)));
-    setup_sink_by_name(flop, "pipe_max")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(emax)));
+    setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Dlop::create_integer(emin)));
+    setup_sink_by_name(flop, "pipe_max").connect_driver(create_const(*g_, *Dlop::create_integer(emax)));
     if (!clock_name_.empty()) {
       setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
     } else {
-      warn_at(Lnast_nid{}, {"no-clock", "time"},
-              "reg '{}' has no clock input to bind", name);
+      warn_at(Lnast_nid{}, {"no-clock", "time"}, "reg '{}' has no clock input to bind", name);
     }
     setup_sink_by_name(flop, "din").connect_driver(v.pin);
     auto q = flop.create_driver_pin(0);
@@ -3997,7 +3860,7 @@ private:
   // bits/sign/to-positive treatment a graph INPUT gets (the value enters
   // this graph from outside). The callee output's declared stages interval
   // is recorded for the following stage-reg store (deficit narrowing).
-  void lower_func_call(const Lnast_nid &nid) {
+  void lower_func_call(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -4017,18 +3880,16 @@ private:
     // bound its namespace bundle / lambda ref and every consumer folded (an
     // UNRESOLVED live import never reaches tolg — pass.upass errors or the
     // kernel defers). Nothing lowers to hardware here.
-    if (Lnast_ntype::is_const(lnast_->get_type(callee_n)) &&
-        callee_name == "import") {
+    if (Lnast_ntype::is_const(lnast_->get_type(callee_n)) && callee_name == "import") {
       return;
     }
 
-    std::string callee_full;
+    std::string                    callee_full;
     std::shared_ptr<hhds::GraphIO> gio;
-    const Lnast_tree_io *cio_ptr = nullptr;
-    Lnast_tree_io cio_lg;  // synthesized for an lg: black box
-    std::string_view kind; // callee lambda kind ("" for an lg: black box)
-    std::shared_ptr<Lnast>
-        callee; // kept alive: cio_ptr may point into its io_meta()
+    const Lnast_tree_io*           cio_ptr = nullptr;
+    Lnast_tree_io                  cio_lg;  // synthesized for an lg: black box
+    std::string_view               kind;    // callee lambda kind ("" for an lg: black box)
+    std::shared_ptr<Lnast>         callee;  // kept alive: cio_ptr may point into its io_meta()
 
     // An import-bound pipe/mod callee arrives as a string Dlop, so constprop
     // renders it QUOTED (`'unit.entity'` / `'lg:foo'`) when it folds the call's
@@ -4038,8 +3899,7 @@ private:
     // the folded const, so strip the surrounding quotes once so the registry
     // lookup, lg: detection, Sub instance name, and diagnostics all see the
     // bare callee name (mirrors the comb inliner's lambda-ref unquoting).
-    if (callee_name.size() >= 2 && callee_name.front() == '\'' &&
-        callee_name.back() == '\'') {
+    if (callee_name.size() >= 2 && callee_name.front() == '\'' && callee_name.back() == '\'') {
       callee_name = callee_name.substr(1, callee_name.size() - 2);
     }
 
@@ -4056,35 +3916,32 @@ private:
     if (!lg_name.empty()) {
       gio = lib_ != nullptr ? lib_->find_io(lg_name) : nullptr;
       if (!gio) {
-        error_here("upass.tolg: imported lg: graph '{}' not found in any input "
-                   "library — pass it as an `lg:` "
-                   "input (or it failed to load)",
-                   lg_name);
+        error_here(
+            "upass.tolg: imported lg: graph '{}' not found in any input "
+            "library — pass it as an `lg:` "
+            "input (or it failed to load)",
+            lg_name);
         return;
       }
-      auto kind_of_bits = [](uint32_t b) {
-        return b == 1 ? Io_kind::boolean : Io_kind::integer;
-      };
-      for (const auto &d : gio->get_input_pin_decls()) {
+      auto kind_of_bits = [](uint32_t b) { return b == 1 ? Io_kind::boolean : Io_kind::integer; };
+      for (const auto& d : gio->get_input_pin_decls()) {
         if ((d.name == "clock") || (d.name == "reset")) {
-          continue; // implicit; wired from the parent below, not an argument
+          continue;  // implicit; wired from the parent below, not an argument
         }
-        cio_lg.inputs.push_back(
-            Lnast_io_entry{.name = d.name,
-                           .bits = static_cast<int32_t>(d.bits),
-                           .is_signed = !d.unsign,
-                           .kind = kind_of_bits(d.bits)});
+        cio_lg.inputs.push_back(Lnast_io_entry{.name      = d.name,
+                                               .bits      = static_cast<int32_t>(d.bits),
+                                               .is_signed = !d.unsign,
+                                               .kind      = kind_of_bits(d.bits)});
       }
-      for (const auto &d : gio->get_output_pin_decls()) {
-        cio_lg.outputs.push_back(
-            Lnast_io_entry{.name = d.name,
-                           .bits = static_cast<int32_t>(d.bits),
-                           .is_signed = !d.unsign,
-                           .kind = kind_of_bits(d.bits)});
+      for (const auto& d : gio->get_output_pin_decls()) {
+        cio_lg.outputs.push_back(Lnast_io_entry{.name      = d.name,
+                                                .bits      = static_cast<int32_t>(d.bits),
+                                                .is_signed = !d.unsign,
+                                                .kind      = kind_of_bits(d.bits)});
       }
-      cio_ptr = &cio_lg;
+      cio_ptr     = &cio_lg;
       callee_full = lg_name;
-      callee_name = lg_name; // Sub instance name + diagnostics
+      callee_name = lg_name;  // Sub instance name + diagnostics
     } else {
       if (registry_ != nullptr) {
         callee = resolve_callee_lnast(callee_name, *registry_);
@@ -4104,14 +3961,16 @@ private:
         const std::string_view cn = callee_name;
         if (cn == "int" || cn == "uint" || cn == "integer") {
           // Tailored guidance for the removed `int`/`uint` cast.
-          error_here("the `{}(...)` cast was removed — use "
-                     "`signed(x)`/`unsigned(x)` to reinterpret a value's sign, "
-                     "or a sized cast `uN(x)`/`sN(x)`",
-                     callee_name);
+          error_here(
+              "the `{}(...)` cast was removed — use "
+              "`signed(x)`/`unsigned(x)` to reinterpret a value's sign, "
+              "or a sized cast `uN(x)`/`sN(x)`",
+              callee_name);
         } else {
-          error_here("call to undefined function '{}' — no such pipe/mod/comb "
-                     "or built-in cast",
-                     callee_name);
+          error_here(
+              "call to undefined function '{}' — no such pipe/mod/comb "
+              "or built-in cast",
+              callee_name);
         }
         return;
       }
@@ -4123,13 +3982,13 @@ private:
       // combinational (latency-0, stateless), so any body — comb, mod, or a top
       // — may instantiate it (compile.upass.inline=false path).
       if (kind != "comb" && lnast_->get_lambda_kind() != "mod") {
-        error_here("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` "
-                   "bodies may instantiate pipe/mod",
-                   lnast_->get_top_module_name(),
-                   lnast_->get_lambda_kind().empty()
-                       ? std::string_view{"comb"}
-                       : lnast_->get_lambda_kind(),
-                   kind, callee_name);
+        error_here(
+            "upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` "
+            "bodies may instantiate pipe/mod",
+            lnast_->get_top_module_name(),
+            lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
+            kind,
+            callee_name);
         return;
       }
 
@@ -4138,16 +3997,17 @@ private:
       // used. resolve_callee_lnast above still matched by top_module_name (the
       // import/call identity), so the rename never affects call resolution.
       callee_full = std::string(callee->get_graph_name());
-      gio = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
+      gio         = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
       if (!gio) {
-        error_here("upass.tolg: callee '{}' has no registered GraphIO — "
-                   "register_io() phase missing",
-                   callee_full);
+        error_here(
+            "upass.tolg: callee '{}' has no registered GraphIO — "
+            "register_io() phase missing",
+            callee_full);
         return;
       }
       cio_ptr = &callee->io_meta();
     }
-    const auto &cio = *cio_ptr;
+    const auto& cio = *cio_ptr;
     // A zero-output callee is a legitimate SINK instance (e.g. a verification /
     // DPI observer module — XiangShan `DiffExt*` / `DummyDPICWrapper` — which
     // under -DSYNTHESIS carries inputs but no outputs). It binds its inputs and
@@ -4183,8 +4043,7 @@ private:
       // A call-site `name=` (reserved `__inst_name` actual) takes precedence
       // over the dst-derived name — the explicit instance/hierarchy name.
       std::string callsite_inst;
-      for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid();
-           a = lnast_->get_sibling_next(a)) {
+      for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
         if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
           continue;
         }
@@ -4201,7 +4060,7 @@ private:
       // A `%`-prefixed compiler temp (1-char prefix); strip the `%` when
       // building the fallback instance name. The `___ssa_` infix below is the
       // unrelated user-var SSA convention — keep it.
-      const bool is_tmp = !dst_txt.empty() && dst_txt[0] == '%';
+      const bool  is_tmp    = !dst_txt.empty() && dst_txt[0] == '%';
       std::string inst_name = dst_txt;
       if (auto p = inst_name.find("___ssa_"); p != std::string::npos) {
         inst_name = inst_name.substr(0, p);
@@ -4221,12 +4080,11 @@ private:
     // in order. Track bound ports per-port so a duplicate bind or an omitted
     // input is caught individually — a bare count of provided-vs-declared could
     // net out equal when one port was bound twice and another left undriven.
-    std::size_t pos = 0;
+    std::size_t                      pos = 0;
     absl::flat_hash_set<std::string> bound_ports;
-    for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid();
-         a = lnast_->get_sibling_next(a)) {
+    for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
       std::string pname;
-      Lnast_nid val;
+      Lnast_nid   val;
       if (Lnast_ntype::is_store(lnast_->get_type(a))) {
         auto an = lnast_->get_first_child(a);
         if (an.is_invalid()) {
@@ -4236,7 +4094,7 @@ private:
         // a dotted flattened tuple-port leaf the prp_writer quoted); the
         // GraphIO port names are BARE — canonicalize like every other io name.
         pname = std::string(canon_io_name(lnast_->get_name(an)));
-        val = lnast_->get_sibling_next(an);
+        val   = lnast_->get_sibling_next(an);
         if (val.is_invalid()) {
           continue;
         }
@@ -4245,8 +4103,7 @@ private:
         // receiver names the NAMESPACE — it is not an argument of a no-self
         // callee. (A true `ref self` mod method splices in the runner and
         // never reaches the Sub path.)
-        if (pname == "__ufcs_arg" &&
-            (cio.inputs.empty() || cio.inputs[0].name != "self")) {
+        if (pname == "__ufcs_arg" && (cio.inputs.empty() || cio.inputs[0].name != "self")) {
           continue;
         }
         // Reserved call-site instance name — already consumed for sub.set_name
@@ -4256,9 +4113,11 @@ private:
         }
       } else {
         if (pos >= cio.inputs.size()) {
-          error_here("upass.tolg: call to '{}' passes more arguments than its "
-                     "{} declared inputs",
-                     callee_full, cio.inputs.size());
+          error_here(
+              "upass.tolg: call to '{}' passes more arguments than its "
+              "{} declared inputs",
+              callee_full,
+              cio.inputs.size());
           return;
         }
         pname = cio.inputs[pos].name;
@@ -4271,20 +4130,20 @@ private:
       // asserts inside resolve_sink_port (graph.cpp). The compiler must never
       // abort on user input — emit a clean port-mismatch diagnostic instead.
       if (!gio->has_input(pname)) {
-        error_here("upass.tolg: call to '{}' names input '{}' which the "
-                   "imported module does not have",
-                   callee_full, pname);
+        error_here(
+            "upass.tolg: call to '{}' names input '{}' which the "
+            "imported module does not have",
+            callee_full,
+            pname);
         return;
       }
       if (!bound_ports.insert(pname).second) {
-        error_here("upass.tolg: call to '{}' binds input '{}' more than once",
-                   callee_full, pname);
+        error_here("upass.tolg: call to '{}' binds input '{}' more than once", callee_full, pname);
         return;
       }
       auto spin = sub.create_sink_pin(pname);
       if (spin.is_invalid()) {
-        error_here("upass.tolg: callee '{}' has no input named '{}'",
-                   callee_full, pname);
+        error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
         return;
       }
       spin.connect_driver(v.pin);
@@ -4292,10 +4151,9 @@ private:
     // Every declared input must be driven — checked per-port so an omitted input
     // is caught even when another was bound twice (a bare provided==declared
     // count would miss that).
-    for (const auto &ie : cio.inputs) {
+    for (const auto& ie : cio.inputs) {
       if (bound_ports.count(ie.name) == 0) {
-        error_here("upass.tolg: call to '{}' does not bind declared input '{}'",
-                   callee_full, ie.name);
+        error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, ie.name);
         return;
       }
     }
@@ -4304,7 +4162,7 @@ private:
     // GraphIO (register_io pre-declared it) but not in its io_meta — wire it
     // to this graph's clock (needs_clock made sure we have one).
     bool callee_declares_clock = false;
-    for (const auto &e : cio.inputs) {
+    for (const auto& e : cio.inputs) {
       if (is_clock_port_name(e.name)) {
         callee_declares_clock = true;
         break;
@@ -4312,9 +4170,11 @@ private:
     }
     if (!callee_declares_clock && gio->has_input("clock")) {
       if (clock_name_.empty()) {
-        error_here("upass.tolg: instance of clocked '{}' but '{}' has no clock "
-                   "to forward (needs_clock bug)",
-                   callee_full, lnast_->get_top_module_name());
+        error_here(
+            "upass.tolg: instance of clocked '{}' but '{}' has no clock "
+            "to forward (needs_clock bug)",
+            callee_full,
+            lnast_->get_top_module_name());
         return;
       }
       sub.create_sink_pin("clock").connect_driver(clock_pin());
@@ -4325,7 +4185,7 @@ private:
     // not in its io_meta. An active-low caller reset is inverted on the way
     // in so the callee's polarity contract holds.
     bool callee_declares_reset = false;
-    for (const auto &e : cio.inputs) {
+    for (const auto& e : cio.inputs) {
       if (is_reset_port_name(e.name)) {
         callee_declares_reset = true;
         break;
@@ -4333,9 +4193,11 @@ private:
     }
     if (!callee_declares_reset && gio->has_input("reset")) {
       if (reset_name_.empty()) {
-        error_here("upass.tolg: instance of reset-carrying '{}' but '{}' has "
-                   "no reset to forward (needs_reset bug)",
-                   callee_full, lnast_->get_top_module_name());
+        error_here(
+            "upass.tolg: instance of reset-carrying '{}' but '{}' has "
+            "no reset to forward (needs_reset bug)",
+            callee_full,
+            lnast_->get_top_module_name());
         return;
       }
       Pin r = reset_pin();
@@ -4364,18 +4226,20 @@ private:
       // Create EVERY output pin now: downstream passes/cgen walk the
       // callee GraphIO and expect the pins to exist even when a port is
       // left unread (`.e()` unconnected-output style).
-      for (const auto &oe2 : cio.outputs) {
+      for (const auto& oe2 : cio.outputs) {
         (void)sub.create_driver_pin(oe2.name);
       }
-      sub_results_[dst_name] =
-          Sub_result{sub, {cio.outputs.begin(), cio.outputs.end()}};
+      sub_results_[dst_name] = Sub_result{
+          sub,
+          {cio.outputs.begin(), cio.outputs.end()}
+      };
       return;
     }
 
     // Single output: bind dst like a graph input (external value entering).
-    const auto &oe = cio.outputs.front();
-    auto out_dpin = sub.create_driver_pin(oe.name);
-    int32_t mw = io_mw(oe);
+    const auto& oe       = cio.outputs.front();
+    auto        out_dpin = sub.create_driver_pin(oe.name);
+    int32_t     mw       = io_mw(oe);
     if (oe.kind == Io_kind::boolean || mw <= 1) {
       set_bits(out_dpin, 1);
       if (oe.is_signed) {
@@ -4414,18 +4278,16 @@ private:
     // the unannotated default 0, which must not pin the result to cycle 0).
     if (kind != "comb" && oe.stages_min >= 0) {
       const int64_t cmin = oe.stages_min;
-      const int64_t cmax =
-          oe.stages_max < oe.stages_min ? oe.stages_min : oe.stages_max;
+      const int64_t cmax = oe.stages_max < oe.stages_min ? oe.stages_min : oe.stages_max;
       sub.attr(livehd::attrs::time_range).set({cmin, cmax});
       sub_time_[sub.get_debug_nid()] = {cmin, cmax};
-      sub_out_stages_[dst_name] = {oe.stages_min, oe.stages_max, kind == "pipe",
-                                   sub};
+      sub_out_stages_[dst_name]      = {oe.stages_min, oe.stages_max, kind == "pipe", sub};
     }
   }
 
   // Lower an undischarged timecheck statement to a pending
   // attr + record for the checker.
-  void lower_timecheck(const Lnast_nid &nid) {
+  void lower_timecheck(const Lnast_nid& nid) {
     auto ref = lnast_->get_first_child(nid);
     if (ref.is_invalid()) {
       return;
@@ -4437,18 +4299,17 @@ private:
     auto mx = mn.is_invalid() ? mn : lnast_->get_sibling_next(mn);
     if (!mx.is_invalid()) {
       auto extra = lnast_->get_sibling_next(mx);
-      if (!extra.is_invalid() &&
-          Lnast_ntype::is_const(lnast_->get_type(extra)) &&
-          lnast_->get_name(extra) == "checked") {
-        return; // discharged at LNAST
+      if (!extra.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(extra)) && lnast_->get_name(extra) == "checked") {
+        return;  // discharged at LNAST
       }
     }
     const std::string name(canon_io_name(lnast_->get_name(ref)));  // pin_map_ is keyed canonically
-    auto it = pin_map_.find(name);
+    auto              it = pin_map_.find(name);
     if (it == pin_map_.end()) {
-      error_here("upass.tolg: `@[N]` check on '{}' — the value never "
-                 "materialized in the graph",
-                 name);
+      error_here(
+          "upass.tolg: `@[N]` check on '{}' — the value never "
+          "materialized in the graph",
+          name);
       return;
     }
     const int64_t a_min = const_val(mn);
@@ -4467,7 +4328,7 @@ private:
         set_bits(p, 1);
         set_unsign(p);
       }
-      clock_pin_ = p;
+      clock_pin_       = p;
       clock_pin_valid_ = true;
     }
     return clock_pin_;
@@ -4482,7 +4343,7 @@ private:
         set_bits(p, 1);
         set_unsign(p);
       }
-      reset_pin_ = p;
+      reset_pin_       = p;
       reset_pin_valid_ = true;
     }
     return reset_pin_;
@@ -4498,7 +4359,7 @@ private:
   // the range, not which value indexes it), so the consuming get_mask/set_mask
   // closes it to `lo..=(value bits-1)`. (A runtime-lo open range stays in
   // range_dyn_map_, where lower_dynamic_range_select handles the nil hi.)
-  void lower_range(const Lnast_nid &nid) {
+  void lower_range(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -4512,13 +4373,10 @@ private:
       return;
     }
     std::string name{lnast_->get_name(dst)};
-    const bool open = Lnast_ntype::is_const(lnast_->get_type(hi)) &&
-                      lnast_->get_name(hi) == "nil";
-    if (Lnast_ntype::is_const(lnast_->get_type(lo)) &&
-        Lnast_ntype::is_const(lnast_->get_type(hi))) {
+    const bool  open = Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil";
+    if (Lnast_ntype::is_const(lnast_->get_type(lo)) && Lnast_ntype::is_const(lnast_->get_type(hi))) {
       if (open) {
-        range_open_map_[name] =
-            lo; // close to lo..=(MSB) where the value's width is known
+        range_open_map_[name] = lo;  // close to lo..=(MSB) where the value's width is known
       } else {
         range_map_[name] = {const_val(lo), const_val(hi)};
       }
@@ -4527,7 +4385,7 @@ private:
     }
   }
 
-  [[nodiscard]] int64_t const_val(const Lnast_nid &nid) {
+  [[nodiscard]] int64_t const_val(const Lnast_nid& nid) {
     auto c = Dlop::from_pyrope(lnast_->get_name(nid));
     return c->is_just_i64() ? c->to_just_i64() : 0;
   }
@@ -4536,7 +4394,7 @@ private:
   // ref, OR (the runtime-index exception) a non-const single-bit mask `1<<i` or
   // a runtime `range` ref. The runtime forms have no static bitmask, so they
   // lower to an explicit shift+mask select instead of a Get_mask cell.
-  void lower_get_mask(const Lnast_nid &nid) {
+  void lower_get_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -4564,17 +4422,14 @@ private:
     // lower_range stashed the live lo/hi nids; build `(a>>n) &
     // ((1<<(m-n+1))-1)`.
     if (auto it = range_dyn_map_.find(mname); it != range_dyn_map_.end()) {
-      lower_dynamic_range_select(dst, val, it->second.first, it->second.second,
-                                 nid);
+      lower_dynamic_range_select(dst, val, it->second.first, it->second.second, nid);
       return;
     }
     // Runtime single-bit index — `a#[i]`. prp2lnast emits the mask as `1<<i`
     // (a one-hot SHL tmp), so it is neither a const nor a recorded range.
     // Select bit i with `(a & (1<<i)) != 0` (== the `(a>>i)&1` workaround,
     // reusing the already-built one-hot mask). Result is a 1-bit unsigned.
-    const bool runtime_mask =
-        !Lnast_ntype::is_const(lnast_->get_type(mask_op)) &&
-        !range_map_.contains(mname);
+    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mname);
     if (runtime_mask) {
       lower_dynamic_bit_select(dst, val, mask_op);
       return;
@@ -4583,19 +4438,17 @@ private:
     auto mask = mask_from_operand(mask_op);
 
     auto a_val = leaf(val);
-    auto node = make_node(Ntype_op::Get_mask);
+    auto node  = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(a_val.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
-    auto drv = node.create_driver_pin(0);
+    auto    drv = node.create_driver_pin(0);
     // An all-ones mask (-1) is the open `#[..]` form: it selects EVERY bit of
     // `a`, so the result width is `a`'s width. popcount(-1) is NOT a finite bit
     // count (the spec mask is infinite ones); using it collapsed the result to
     // ~1 bit, which OpW::firstw then propagated into a following shift and the
     // SMT LEC truncated the shift operand (a false "not equivalent"). A finite
     // (non-negative) mask packs popcount(mask) selected bits, LSB-first.
-    int32_t mw = (mask->is_just_i64() && mask->to_just_i64() == -1)
-                     ? a_val.mw
-                     : mask_popcount(*mask);
+    int32_t mw  = (mask->is_just_i64() && mask->to_just_i64() == -1) ? a_val.mw : mask_popcount(*mask);
     bind_result(lnast_->get_name(dst), drv, mw);
   }
 
@@ -4604,21 +4457,19 @@ private:
   // one-hot AND isolates bit i of `a`; OR-reducing it yields that bit as a
   // 1-bit unsigned. This equals the documented `(a>>i)&1` workaround while
   // reusing the mask that was already built (no second variable shifter).
-  void lower_dynamic_bit_select(const Lnast_nid &dst, const Lnast_nid &val,
-                                const Lnast_nid &mask_op) {
+  void lower_dynamic_bit_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op) {
     auto a_val = leaf(val);
-    auto m = leaf(mask_op);
+    auto m     = leaf(mask_op);
 
-    auto andn =
-        make_node(Ntype_op::And); // commutative: both operands feed sink "a"
+    auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
     setup_sink_by_name(andn, "as").connect_driver(a_val.pin);
     setup_sink_by_name(andn, "as").connect_driver(m.pin);
     const int32_t and_mw = std::max(a_val.mw, m.mw);
-    auto and_dp = andn.create_driver_pin(0);
+    auto          and_dp = andn.create_driver_pin(0);
     set_bits(and_dp, and_mw + 1);
     set_unsign(and_dp);
 
-    auto ror = make_node(Ntype_op::Ror); // |(a & (1<<i)) -> the selected bit
+    auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
     setup_sink_by_name(ror, "as").connect_driver(and_dp);
     bind_result(lnast_->get_name(dst), ror.create_driver_pin(0), 1);
   }
@@ -4631,8 +4482,7 @@ private:
     if (lo < 0 || lo > msb) {
       return Dlop::create_integer(0);
     }
-    return Dlop::get_mask_value(
-        msb, static_cast<int>(lo)); // h==l (single bit) handled inside
+    return Dlop::get_mask_value(msb, static_cast<int>(lo));  // h==l (single bit) handled inside
   }
 
   // `a#[lo..]` with a COMPTIME offset — the open-ended slice. The upper bound
@@ -4642,20 +4492,18 @@ private:
   // (`#[]` zero-extends), with the tight `msb-lo+1` width. This is identical to
   // what the explicit `a#[lo..=msb]` workaround lowers to. (A runtime offset
   // `a#[k..]` keeps its `a>>k` lowering via range_dyn_map_.)
-  void lower_open_range_select(const Lnast_nid &dst, const Lnast_nid &val,
-                               const Lnast_nid &lo) {
-    auto a_val = leaf(val);
-    const int32_t msb = a_val.mw > 0 ? a_val.mw - 1 : 0;
+  void lower_open_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo) {
+    auto          a_val = leaf(val);
+    const int32_t msb   = a_val.mw > 0 ? a_val.mw - 1 : 0;
 
-    auto lo_c = Dlop::from_pyrope(lnast_->get_name(lo));
+    auto    lo_c = Dlop::from_pyrope(lnast_->get_name(lo));
     int64_t lo_i = lo_c->is_just_i64() ? lo_c->to_just_i64() : 0;
-    auto mask = closed_open_mask(lo_i, msb);
+    auto    mask = closed_open_mask(lo_i, msb);
 
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(a_val.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0),
-                mask_popcount(*mask));
+    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mask_popcount(*mask));
   }
 
   // `a#[n..=m]` with a RUNTIME range — lower to `(a>>n) & ((1<<(m-n+1))-1)`,
@@ -4663,11 +4511,10 @@ private:
   // by lower_range. The open form `a#[n..]` (hi == const "nil") selects every
   // bit from n upward, i.e. just `a>>n`. A descending range (m<n) violates the
   // select precondition; lower_get_mask's caller emits the lgassert(m>=n).
-  void lower_dynamic_range_select(const Lnast_nid &dst, const Lnast_nid &val,
-                                  const Lnast_nid &lo, const Lnast_nid &hi,
-                                  const Lnast_nid &loc_nid) {
+  void lower_dynamic_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo, const Lnast_nid& hi,
+                                  const Lnast_nid& loc_nid) {
     auto a_val = leaf(val);
-    auto n = leaf(lo);
+    auto n     = leaf(lo);
 
     // shifted = a >> n   (arithmetic right shift; the only right shift cell —
     // for an unsigned `a` cgen's `>>>` fills zeros, matching the workaround).
@@ -4678,8 +4525,7 @@ private:
     set_bits(sra_dp, a_val.mw + 1);
     set_unsign(sra_dp);
 
-    if (Lnast_ntype::is_const(lnast_->get_type(hi)) &&
-        lnast_->get_name(hi) == "nil") {
+    if (Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil") {
       // Open range `a#[n..]`: bits n..msb are exactly `a>>n`; no mask, no
       // m>=n precondition (there is no `m`).
       bind_result(lnast_->get_name(dst), sra_dp, a_val.mw);
@@ -4691,36 +4537,32 @@ private:
     // width = m - n + 1   (Sum sums sink "a", subtracts sink "b").
     auto width = make_node(Ntype_op::Sum);
     setup_sink_by_name(width, "as").connect_driver(m.pin);
-    setup_sink_by_name(width, "as")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     setup_sink_by_name(width, "bs").connect_driver(n.pin);
     const int32_t w_mw = std::max(n.mw, m.mw) + 1;
-    auto w_dp = width.create_driver_pin(0);
+    auto          w_dp = width.create_driver_pin(0);
     set_bits(w_dp, w_mw + 1);
     set_unsign(w_dp);
 
     // pow = 1 << width  (sized to cover every bit of `a` plus the +1 of `-1`).
     auto pow = make_node(Ntype_op::SHL);
-    setup_sink_by_name(pow, "a").connect_driver(
-        create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     setup_sink_by_name(pow, "b").connect_driver(w_dp);
     const int32_t pow_mw = a_val.mw + 2;
-    auto pow_dp = pow.create_driver_pin(0);
+    auto          pow_dp = pow.create_driver_pin(0);
     set_bits(pow_dp, pow_mw + 1);
     set_unsign(pow_dp);
 
     // mask = pow - 1   (the low (m-n+1) bits set).
     auto maskn = make_node(Ntype_op::Sum);
     setup_sink_by_name(maskn, "as").connect_driver(pow_dp);
-    setup_sink_by_name(maskn, "bs")
-        .connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(maskn, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     auto mask_dp = maskn.create_driver_pin(0);
     set_bits(mask_dp, pow_mw + 1);
     set_unsign(mask_dp);
 
     // result = shifted & mask
-    auto andn =
-        make_node(Ntype_op::And); // commutative: both operands feed sink "a"
+    auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
     setup_sink_by_name(andn, "as").connect_driver(sra_dp);
     setup_sink_by_name(andn, "as").connect_driver(mask_dp);
     bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw + 1);
@@ -4735,13 +4577,12 @@ private:
   // carries the `a#[lo..=hi]` source span for the assert message. Skipped when
   // there is no GraphLibrary to register the primitive in (the data-path
   // lowering is already complete and correct without the guard).
-  void lower_range_assert(const Val &lo, const Val &hi,
-                          const Lnast_nid &loc_nid) {
+  void lower_range_assert(const Val& lo, const Val& hi, const Lnast_nid& loc_nid) {
     if (lib_ == nullptr) {
       return;
     }
     // cond = (hi >= lo) = Not(LT(hi, lo))   [LT computes hi < lo].
-    auto lt = make_node(Ntype_op::LT); // positional: "a" < "b"
+    auto lt = make_node(Ntype_op::LT);  // positional: "a" < "b"
     setup_sink_by_name(lt, "as").connect_driver(hi.pin);
     setup_sink_by_name(lt, "bs").connect_driver(lo.pin);
     auto lt_dp = lt.create_driver_pin(0);
@@ -4765,7 +4606,7 @@ private:
     sub.create_sink_pin("cond").connect_driver(cond);
     // Carry the "line of code info" (file:line of the `a#[lo..=hi]`) on the
     // instance-name attr so cgen can fold it into the assertion message.
-    const auto sp = lnast_->span_of(loc_nid);
+    const auto  sp  = lnast_->span_of(loc_nid);
     std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
@@ -4777,7 +4618,7 @@ private:
   // an `fproperty` Sub: a recognized primitive carrying the 1-bit cond, with
   // "<kind>\x1f<loc>\x1f<msg>" packed in the instance-name attr. pass.formal
   // proves/defers it; cgen emits a runtime check for what it could not prove.
-  void lower_cassert(const Lnast_nid &nid) {
+  void lower_cassert(const Lnast_nid& nid) {
     if (lib_ == nullptr) {
       return;
     }
@@ -4794,7 +4635,7 @@ private:
     // survive upass re-emission, unlike the cassert node name).
     std::string kind = "assert";
     std::string msg;
-    auto nxt = lnast_->get_sibling_next(cond_nid);
+    auto        nxt = lnast_->get_sibling_next(cond_nid);
     if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
       std::string s{lnast_->get_name(nxt)};
       // EXACT match, never a substring search: when the user wrote a plain
@@ -4805,13 +4646,13 @@ private:
       // so it cannot collide with any string message.
       if (s == "__fkind__assert_always") {
         kind = "assert_always";
-        nxt = lnast_->get_sibling_next(nxt);
+        nxt  = lnast_->get_sibling_next(nxt);
       } else if (s == "__fkind__assume") {
         kind = "assume";
-        nxt = lnast_->get_sibling_next(nxt);
+        nxt  = lnast_->get_sibling_next(nxt);
       } else if (s == "__fkind__cassert") {
         kind = "cassert";
-        nxt = lnast_->get_sibling_next(nxt);
+        nxt  = lnast_->get_sibling_next(nxt);
       }
     }
     // `cassert` is an ELABORATION check (user ruling, 2026-07-25): the upass
@@ -4820,7 +4661,8 @@ private:
     // runtime check — that is exactly what distinguishes it from `assert`.
     if (kind == "cassert") {
       if (!livehd::graph_util::is_const_pin(cond.pin)) {
-        error_at(nid, {"cassert-not-comptime", "unsupported"},
+        error_at(nid,
+                 {"cassert-not-comptime", "unsupported"},
                  "upass.tolg: cassert condition did not fold to a compile-time "
                  "value — cassert is an elaboration check; use `assert` for a "
                  "condition that must hold of the hardware");
@@ -4831,8 +4673,7 @@ private:
       // so it would slip through as "proven" and emit a full netlist. A cassert
       // the compiler cannot decide is exactly the case that must fail.
       if (!livehd::graph_util::hydrate_const(cond.pin).is_known_true()) {
-        error_at(nid, {"cassert-false", "unsupported"},
-                 "upass.tolg: cassert condition is not true at compile time");
+        error_at(nid, {"cassert-false", "unsupported"}, "upass.tolg: cassert condition is not true at compile time");
       }
       return;  // folded true: discharged here, nothing to materialize
     }
@@ -4894,16 +4735,15 @@ private:
     // operands go through it: `cond` because the user may assert any integer,
     // and `guard` because it is only 1-bit by convention (prp2lnast gives an
     // if-condition a synthetic `:bool`), not by construction.
-    const auto guard = current_path_cond();
-    const auto eff_cond =
-        guard.is_invalid() ? cond.pin : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
-    auto sub = make_node(Ntype_op::Sub);
+    const auto guard    = current_path_cond();
+    const auto eff_cond = guard.is_invalid() ? cond.pin : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
+    auto       sub      = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
     sub.create_sink_pin("cond").connect_driver(eff_cond);
     if (!guard.is_invalid() && gio->has_input("guard")) {
       sub.create_sink_pin("guard").connect_driver(guard);
     }
-    const auto sp = lnast_->span_of(nid);
+    const auto  sp  = lnast_->span_of(nid);
     std::string loc = sp.file.empty() ? std::string{} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
@@ -4915,7 +4755,7 @@ private:
   // (or wider) mask like 2^64-1 (`0x0ffffffffffffffff`, a full-width truncate)
   // overflows int64 and would silently collapse to 0 — the value `from_pyrope`
   // parses correctly is kept as-is.
-  [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid &mask_op) {
+  [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid& mask_op) {
     if (Lnast_ntype::is_const(lnast_->get_type(mask_op))) {
       return Dlop::from_pyrope(lnast_->get_name(mask_op));
     }
@@ -4928,11 +4768,11 @@ private:
       if (lo < 0 || hi < lo) {
         return Dlop::create_integer(0);
       }
-      return Dlop::get_mask_value(
-          static_cast<int>(hi),
-          static_cast<int>(lo)); // multi-word capable, no 63-bit cap
+      return Dlop::get_mask_value(static_cast<int>(hi),
+                                  static_cast<int>(lo));  // multi-word capable, no 63-bit cap
     }
-    error_at(mask_op, {"mask-not-const", "unsupported"},
+    error_at(mask_op,
+             {"mask-not-const", "unsupported"},
              "upass.tolg: get_mask mask operand '{}' is not a constant or "
              "range — a runtime mask has no lowering here "
              "(the mask must be comptime)",
@@ -4940,15 +4780,14 @@ private:
   }
 
   // Number of set bits in a (non-negative) mask = the get_mask result width.
-  static int32_t mask_popcount(const Dlop &m) {
+  static int32_t mask_popcount(const Dlop& m) {
     auto pc = m.popcount_op();
     return pc->is_just_i64() ? static_cast<int32_t>(pc->to_just_i64()) : 0;
   }
 
   // Highest set bit + 1 of a (non-negative) mask = the set_mask reach.
-  static int32_t mask_high_bit(const Dlop &m) {
-    int gb = m.is_positive() ? m.get_bits()
-                             : 0; // get_bits() counts the sign bit too
+  static int32_t mask_high_bit(const Dlop& m) {
+    int gb = m.is_positive() ? m.get_bits() : 0;  // get_bits() counts the sign bit too
     return gb > 0 ? static_cast<int32_t>(gb - 1) : int32_t{0};
   }
 
@@ -4970,7 +4809,7 @@ private:
   // the branch. It refuted `minion_dcache_replay_queue`; the shape is a
   // conditional partial write, which is why the unconditional form and a plain
   // identifier both looked fine.
-  [[nodiscard]] Val set_mask_base(const Lnast_nid &val) {
+  [[nodiscard]] Val set_mask_base(const Lnast_nid& val) {
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
       const std::string name{canon_io_name(lnast_->get_name(val))};
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
@@ -4981,7 +4820,7 @@ private:
   }
 
   // set_mask(ref(dst), value, mask, ins).
-  void lower_set_mask(const Lnast_nid &nid) {
+  void lower_set_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5005,13 +4844,14 @@ private:
     // upper bound instead. The READ form `a#[lo..]` IS supported
     // (lower_open_range_select). (range_open_map_ holds only comptime-lo
     // opens.)
-    if (auto it = range_open_map_.find(std::string{lnast_->get_name(mask_op)});
-        it != range_open_map_.end()) {
-      error_at(nid, {"open-range-write", "unsupported"},
+    if (auto it = range_open_map_.find(std::string{lnast_->get_name(mask_op)}); it != range_open_map_.end()) {
+      error_at(nid,
+               {"open-range-write", "unsupported"},
                "upass.tolg: open-ended bit-range write `dst#[{}..] = …` is not "
                "supported — give the upper bound "
                "explicitly, e.g. `dst#[{}..=<msb>]`",
-               lnast_->get_name(it->second), lnast_->get_name(it->second));
+               lnast_->get_name(it->second),
+               lnast_->get_name(it->second));
     }
     auto mask = mask_from_operand(mask_op);
 
@@ -5027,9 +4867,8 @@ private:
     // result, not q — so when the base operand is the destination itself, read
     // the current din accumulator (if any) instead of resolving the name to q.
     const std::string dst_name{lnast_->get_name(dst)};
-    const bool is_reg =
-        reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
-    const bool is_wire = !is_reg && wire_names_.contains(dst_name);
+    const bool        is_reg  = reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
+    const bool        is_wire = !is_reg && wire_names_.contains(dst_name);
     // RMW base = current din accumulator if a prior partial write set it, else
     // the committed value (q / buffer output) via the name. This must key off
     // the BASE OPERAND's name, not just dst: prp2lnast lowers `r#[lo..=hi] = x`
@@ -5039,17 +4878,15 @@ private:
     // image from stale q and silently drop the first write when both enables
     // fired (the DataModule__64entry per-entry register file: entry 63's write
     // vanished under a same-cycle entry-62 write).
-    Val vv;
-    bool base_from_accum = false;
+    Val               vv;
+    bool              base_from_accum = false;
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
       const std::string val_name{lnast_->get_name(val)};
-      const bool vreg =
-          reg_map_.contains(val_name) && reg_info_.contains(val_name);
-      const bool vwire = !vreg && wire_names_.contains(val_name);
+      const bool        vreg  = reg_map_.contains(val_name) && reg_info_.contains(val_name);
+      const bool        vwire = !vreg && wire_names_.contains(val_name);
       if (vreg || vwire) {
-        if (auto dit = pin_map_.find(din_key(val_name));
-            dit != pin_map_.end()) {
-          vv = Val{dit->second, mw_lookup(din_key(val_name))};
+        if (auto dit = pin_map_.find(din_key(val_name)); dit != pin_map_.end()) {
+          vv              = Val{dit->second, mw_lookup(din_key(val_name))};
           base_from_accum = true;
         }
       }
@@ -5063,8 +4900,8 @@ private:
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
     int32_t mask_mw = mask_high_bit(*mask);
-    auto drv = node.create_driver_pin(0);
-    int32_t res_mw = std::max(vv.mw, mask_mw);
+    auto    drv     = node.create_driver_pin(0);
+    int32_t res_mw  = std::max(vv.mw, mask_mw);
     set_bits(drv, res_mw + 1);
     set_unsign(drv);
     if (is_reg) {
@@ -5083,25 +4920,22 @@ private:
 
   // n-ary op: child0 = dst, children 1..N = operands. Commutative ops feed all
   // operands into sink "a"; positional binary ops use "a" then "b".
-  void lower_op(const Lnast_nid &nid, Ntype_op op, bool commutative,
-                OpW wmode) {
+  void lower_op(const Lnast_nid& nid, Ntype_op op, bool commutative, OpW wmode) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
     }
-    auto node = make_node(op);
-    int32_t max_mw = 0;
-    int32_t sum_mw = 0;
-    int32_t first_mw = 0;
-    int32_t second_mw = 0; // shift-amount magnitude width (shlw)
-    int64_t shl_amt =
-        -1; // shift-amount value when constant (shlw); <0 = dynamic
-    bool first = true;
-    int opnd_idx = 0;
-    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
-      auto v = leaf(c);
-      max_mw = std::max(max_mw, v.mw);
+    auto    node      = make_node(op);
+    int32_t max_mw    = 0;
+    int32_t sum_mw    = 0;
+    int32_t first_mw  = 0;
+    int32_t second_mw = 0;   // shift-amount magnitude width (shlw)
+    int64_t shl_amt   = -1;  // shift-amount value when constant (shlw); <0 = dynamic
+    bool    first     = true;
+    int     opnd_idx  = 0;
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      auto v  = leaf(c);
+      max_mw  = std::max(max_mw, v.mw);
       sum_mw += v.mw;
       if (first) {
         first_mw = v.mw;
@@ -5119,47 +4953,34 @@ private:
       // A 3rd+ operand would build a multi-driver b, so reject it cleanly.
       if (op == Ntype_op::SHL && opnd_idx >= 2) {
         livehd::diag::err("upass.tolg", "shl-onehot-removed", "unsupported")
-            .msg("runtime one-hot shift 'a << (b0, b1, ...)' is no longer "
-                 "supported; shift by a single amount")
+            .msg(
+                "runtime one-hot shift 'a << (b0, b1, ...)' is no longer "
+                "supported; shift by a single amount")
             .emit();
         break;
       }
       // op varies (Sum/Mult/And/.../Div/SHL/SRA): address by pid so the right
       // sink name resolves per op (pid 0 = a/as, pid 1 = b) without hardcoding.
-      node.create_sink_pin((commutative || first) ? 0 : 1)
-          .connect_driver(v.pin);
+      node.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(v.pin);
       first = false;
       ++opnd_idx;
     }
     int32_t mw = 1;
     switch (wmode) {
-    case OpW::add:
-      mw = static_cast<int32_t>(max_mw + 1);
-      break;
-    case OpW::mul:
-      mw = sum_mw > 0 ? sum_mw : int32_t{1};
-      break;
-    case OpW::maxw:
-      mw = max_mw;
-      break;
-    case OpW::firstw:
-      mw = first_mw;
-      break;
-    case OpW::boolw:
-      mw = 1;
-      break;
-    case OpW::shlw: {
-      // A left shift GROWS: out = a_width + shift_amount. A constant amount is
-      // exact; a dynamic amount uses the 2^amount_width-1 upper bound (capped
-      // to avoid pathological blow-up). Without this the result kept the input
-      // width (old OpW::maxw) and `b<<N` silently truncated in intermediates.
-      int64_t grow = shl_amt >= 0
-                         ? shl_amt
-                         : (second_mw >= 12 ? int64_t{4096}
-                                            : ((int64_t{1} << second_mw) - 1));
-      mw = static_cast<int32_t>(first_mw + grow);
-      break;
-    }
+      case OpW::add   : mw = static_cast<int32_t>(max_mw + 1); break;
+      case OpW::mul   : mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
+      case OpW::maxw  : mw = max_mw; break;
+      case OpW::firstw: mw = first_mw; break;
+      case OpW::boolw : mw = 1; break;
+      case OpW::shlw  : {
+        // A left shift GROWS: out = a_width + shift_amount. A constant amount is
+        // exact; a dynamic amount uses the 2^amount_width-1 upper bound (capped
+        // to avoid pathological blow-up). Without this the result kept the input
+        // width (old OpW::maxw) and `b<<N` silently truncated in intermediates.
+        int64_t grow = shl_amt >= 0 ? shl_amt : (second_mw >= 12 ? int64_t{4096} : ((int64_t{1} << second_mw) - 1));
+        mw           = static_cast<int32_t>(first_mw + grow);
+        break;
+      }
     }
     auto out = node.create_driver_pin(0);
     bind_result(lnast_->get_name(dst), out, mw);
@@ -5189,7 +5010,7 @@ private:
   // cell's b operand is the kept bit COUNT instead (cgen slices [b-1:0],
   // bitwidth ranges sbits=b, lgyosys Pick passes the width) - convert here.
   // The result is SIGNED with meaningful width b+1.
-  void lower_sext(const Lnast_nid &nid) {
+  void lower_sext(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5203,19 +5024,19 @@ private:
       return;
     }
     if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
-      error_at(b, {"sext-runtime-pos", "unsupported"},
+      error_at(b,
+               {"sext-runtime-pos", "unsupported"},
                "upass.tolg: sign-extend with a runtime sign position has no "
                "lowering — the sign-bit position must be a "
                "compile-time constant");
     }
-    const auto pos = const_val(b);
-    auto av = leaf(a);
-    auto node = make_node(Ntype_op::Sext);
+    const auto pos  = const_val(b);
+    auto       av   = leaf(a);
+    auto       node = make_node(Ntype_op::Sext);
     setup_sink_by_name(node, "a").connect_driver(av.pin);
-    setup_sink_by_name(node, "b").connect_driver(
-        create_const(*g_, *Dlop::create_integer(pos + 1)));
-    const auto mw = static_cast<int32_t>(pos) + 1;
-    auto drv = node.create_driver_pin(0);
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(pos + 1)));
+    const auto mw  = static_cast<int32_t>(pos) + 1;
+    auto       drv = node.create_driver_pin(0);
     set_bits(drv, mw > 0 ? mw : 1);
     set_sign(drv);
     record(lnast_->get_name(dst), drv, mw > 0 ? mw : 1);
@@ -5236,7 +5057,7 @@ private:
   // 511 where the RTL says 1023, i.e. a genuinely wrong netlist. (cgen emits an
   // explicitly signed net and so stayed correct, which is what made this look
   // like an abc-only bug.)
-  void lower_unary(const Lnast_nid &nid, Ntype_op op) {
+  void lower_unary(const Lnast_nid& nid, Ntype_op op) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5245,11 +5066,11 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto v = leaf(a);
+    auto v    = leaf(a);
     auto node = make_node(op);
     setup_sink_by_name(node, "a").connect_driver(v.pin);
-    const int32_t m = v.mw > 0 ? v.mw : 1;
-    auto drv = node.create_driver_pin(0);
+    const int32_t m   = v.mw > 0 ? v.mw : 1;
+    auto          drv = node.create_driver_pin(0);
     set_bits(drv, m + 1);
     set_sign(drv);
     record(lnast_->get_name(dst), drv, m + 1);
@@ -5264,7 +5085,7 @@ private:
   // lower_negated. (The
   // `!x`-on-a-non-boolean type error is a front-end/typecheck concern; by tolg
   // only a legal boolean operand reaches here.)
-  void lower_log_not(const Lnast_nid &nid) {
+  void lower_log_not(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5273,30 +5094,25 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto v = leaf(a);
-    auto neg =
-        make_node(Ntype_op::EQ); // commutative: both operands feed sink "a"
+    auto v   = leaf(a);
+    auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
     setup_sink_by_name(neg, "as").connect_driver(v.pin);
-    setup_sink_by_name(neg, "as").connect_driver(
-        create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
   // ne/le/ge = Not(eq/gt/lt(...)). Result is 1-bit boolean.
-  void lower_negated(const Lnast_nid &nid, Ntype_op inner_op,
-                     bool commutative) {
+  void lower_negated(const Lnast_nid& nid, Ntype_op inner_op, bool commutative) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
     }
     auto inner = make_node(inner_op);
     bool first = true;
-    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       // inner_op is EQ/GT/LT; address by pid (0 = a/as, 1 = bs) so the right
       // multi-driver sink name resolves per op without hardcoding.
-      inner.create_sink_pin((commutative || first) ? 0 : 1)
-          .connect_driver(leaf(c).pin);
+      inner.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(leaf(c).pin);
       first = false;
     }
     // The inner comparator (EQ/GT/LT) is a 1-bit boolean. Stamp it the same way
@@ -5314,11 +5130,9 @@ private:
     // select, e.g. `if a != b`) then reads it as always-true. EQ against 0
     // yields a clean 1-bit boolean, stamped like any comparator (matches
     // lower_none_eq).
-    auto neg =
-        make_node(Ntype_op::EQ); // commutative: both operands feed sink "a"
+    auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
     setup_sink_by_name(neg, "as").connect_driver(inner_dp);
-    setup_sink_by_name(neg, "as").connect_driver(
-        create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
@@ -5338,18 +5152,16 @@ private:
   // Explode the low `mw` bits of `src` into individual 1-bit driver pins (bit i
   // packed to position 0 via Get_mask). Shared by the parity (XOR) and popcount
   // (adder) trees.
-  [[nodiscard]] std::vector<Pin> explode_bits(const Pin &src, int32_t mw) {
-    const int32_t n = mw > 0 ? mw : 1;
+  [[nodiscard]] std::vector<Pin> explode_bits(const Pin& src, int32_t mw) {
+    const int32_t    n = mw > 0 ? mw : 1;
     std::vector<Pin> bits;
     bits.reserve(static_cast<size_t>(n));
     for (int32_t i = 0; i < n; ++i) {
       auto gm = make_node(Ntype_op::Get_mask);
       setup_sink_by_name(gm, "a").connect_driver(src);
-      setup_sink_by_name(gm, "mask")
-          .connect_driver(
-              create_const(*g_, *Dlop::get_mask_value(i, i))); // bit i only
+      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(i, i)));  // bit i only
       auto b = gm.create_driver_pin(0);
-      set_bits(b, 2); // 1 magnitude bit + sign bit
+      set_bits(b, 2);  // 1 magnitude bit + sign bit
       set_unsign(b);
       bits.push_back(b);
     }
@@ -5358,7 +5170,7 @@ private:
 
   // `foo#|[range]`: OR-reduce the selected bits → int 0/1. The graph Ror cell
   // reduces every bit of its operand (cgen emits `|expr`).
-  void lower_red_or(const Lnast_nid &nid) {
+  void lower_red_or(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5367,7 +5179,7 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto av = leaf(a);
+    auto av   = leaf(a);
     auto node = make_node(Ntype_op::Ror);
     setup_sink_by_name(node, "as").connect_driver(av.pin);
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), 1);
@@ -5376,7 +5188,7 @@ private:
   // `foo#&[range]`: AND-reduce → int 0/1. Sign-extend the packed slice from its
   // top bit so an all-ones slice reads as the signed -1, then compare `== -1`
   // (a width-independent all-ones test; 1 iff every selected bit is set).
-  void lower_red_and(const Lnast_nid &nid) {
+  void lower_red_and(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5385,30 +5197,27 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto av = leaf(a);
-    const int32_t k = av.mw > 0 ? av.mw : 1; // selected-bit count
+    auto          av = leaf(a);
+    const int32_t k  = av.mw > 0 ? av.mw : 1;  // selected-bit count
     // Sext cell `b` operand is the kept bit COUNT (cgen slices [b-1:0]); the
     // result is signed with width k, == -1 exactly when bits 0..k-1 are all
     // set.
-    auto sx = make_node(Ntype_op::Sext);
+    auto          sx = make_node(Ntype_op::Sext);
     setup_sink_by_name(sx, "a").connect_driver(av.pin);
-    setup_sink_by_name(sx, "b").connect_driver(
-        create_const(*g_, *Dlop::create_integer(k)));
+    setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(k)));
     auto srr = sx.create_driver_pin(0);
     set_bits(srr, k);
     set_sign(srr);
-    auto eq =
-        make_node(Ntype_op::EQ); // commutative: both operands feed sink "a"
+    auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
     setup_sink_by_name(eq, "as").connect_driver(srr);
-    setup_sink_by_name(eq, "as").connect_driver(
-        create_const(*g_, *Dlop::create_integer(-1)));
+    setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
     bind_result(lnast_->get_name(dst), eq.create_driver_pin(0), 1);
   }
 
   // `foo#^[range]`: XOR-reduce (parity) → int 0/1, via a balanced binary tree
   // of 2-input Xor cells over the exploded bits (an odd leaf carries up a
   // level).
-  void lower_red_xor(const Lnast_nid &nid) {
+  void lower_red_xor(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5417,13 +5226,13 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto av = leaf(a);
+    auto av   = leaf(a);
     auto bits = explode_bits(av.pin, av.mw);
     while (bits.size() > 1) {
       std::vector<Pin> next;
       next.reserve((bits.size() + 1) / 2);
       for (size_t i = 0; i + 1 < bits.size(); i += 2) {
-        auto x = make_node(Ntype_op::Xor); // commutative: both into "a"
+        auto x = make_node(Ntype_op::Xor);  // commutative: both into "a"
         setup_sink_by_name(x, "as").connect_driver(bits[i]);
         setup_sink_by_name(x, "as").connect_driver(bits[i + 1]);
         auto d = x.create_driver_pin(0);
@@ -5432,7 +5241,7 @@ private:
         next.push_back(d);
       }
       if (bits.size() & 1) {
-        next.push_back(bits.back()); // odd leaf rides to the next level
+        next.push_back(bits.back());  // odd leaf rides to the next level
       }
       bits = std::move(next);
     }
@@ -5442,7 +5251,7 @@ private:
   // `foo#+[range]`: popcount (number of set bits) → integer, via a balanced
   // binary adder tree over the exploded bits. Each Sum grows the width by one;
   // the final result holds 0..k.
-  void lower_popcount(const Lnast_nid &nid) {
+  void lower_popcount(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5451,22 +5260,22 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto av = leaf(a);
-    auto bits = explode_bits(av.pin, av.mw);
+    auto             av   = leaf(a);
+    auto             bits = explode_bits(av.pin, av.mw);
     std::vector<Val> terms;
     terms.reserve(bits.size());
-    for (const auto &b : bits) {
+    for (const auto& b : bits) {
       terms.push_back({b, 1});
     }
     while (terms.size() > 1) {
       std::vector<Val> next;
       next.reserve((terms.size() + 1) / 2);
       for (size_t i = 0; i + 1 < terms.size(); i += 2) {
-        auto s = make_node(Ntype_op::Sum); // both operands ADD on sink "a"
+        auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
         setup_sink_by_name(s, "as").connect_driver(terms[i].pin);
         setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
         const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
-        auto d = s.create_driver_pin(0);
+        auto          d  = s.create_driver_pin(0);
         set_bits(d, mw + 1);
         set_unsign(d);
         next.push_back({d, mw});
@@ -5489,7 +5298,7 @@ private:
   //   remainder) (1) b a comptime power-of-two, a non-negative   → a & (|b|-1)
   //   (low bits) (3) |b| == 3 (comptime),       a non-negative   → base-4
   //   digit-sum reduce
-  void lower_mod(const Lnast_nid &nid) {
+  void lower_mod(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5500,15 +5309,14 @@ private:
     }
     auto b = lnast_->get_sibling_next(a);
     if (b.is_invalid()) {
-      error_here("upass.tolg: modulo in '{}' is missing its divisor operand",
-                 lnast_->get_top_module_name());
+      error_here("upass.tolg: modulo in '{}' is missing its divisor operand", lnast_->get_top_module_name());
       return;
     }
 
     const std::string dst_name{lnast_->get_name(dst)};
-    auto av = leaf(a);
-    const auto a_range = range_of_operand(a);
-    const auto b_range = range_of_operand(b);
+    auto              av      = leaf(a);
+    const auto        a_range = range_of_operand(a);
+    const auto        b_range = range_of_operand(b);
 
     // `a` is non-negative when its pin is unsigned (the common case — every
     // typed unsigned port and every computed result reads unsigned) or its
@@ -5517,29 +5325,27 @@ private:
 
     // (2) Range fit. If |a| < |b| for every (a,b) pair then `a % b == a` under
     // truncated semantics (the quotient truncates to 0), regardless of sign.
-    if (a_range && b_range &&
-        a_range->first != std::numeric_limits<int64_t>::min() &&
-        a_range->second != std::numeric_limits<int64_t>::min()) {
-      const int64_t a_absmax =
-          std::max(iabs64(a_range->first), iabs64(a_range->second));
+    if (a_range && b_range && a_range->first != std::numeric_limits<int64_t>::min()
+        && a_range->second != std::numeric_limits<int64_t>::min()) {
+      const int64_t a_absmax = std::max(iabs64(a_range->first), iabs64(a_range->second));
       // Smallest |b| over b's range. 0 when the range straddles 0 (a possible
       // divisor of 0/±1 is not a guaranteed no-op), which fails the test below.
-      int64_t b_absmin = 0;
+      int64_t       b_absmin = 0;
       if (b_range->first >= 1) {
         b_absmin = b_range->first;
-      } else if (b_range->second <= -1 &&
-                 b_range->second != std::numeric_limits<int64_t>::min()) {
+      } else if (b_range->second <= -1 && b_range->second != std::numeric_limits<int64_t>::min()) {
         b_absmin = -b_range->second;
       }
       if (b_absmin >= 2 && a_absmax < b_absmin) {
-        record(dst_name, av.pin, av.mw); // `a % b == a` — alias the dividend
+        record(dst_name, av.pin, av.mw);  // `a % b == a` — alias the dividend
         return;
       }
     }
 
     // The remaining lowerings all need a comptime-constant divisor.
     if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
-      error_at(b, {"mod-runtime-divisor", "unsupported"},
+      error_at(b,
+               {"mod-runtime-divisor", "unsupported"},
                "upass.tolg: `a % b` with a runtime divisor has no hardware "
                "lowering — only a comptime power-of-two "
                "divisor, `% 3`, or a divisor provably larger than `a` lowers "
@@ -5547,20 +5353,19 @@ private:
       return;
     }
     const int64_t bval = const_val(b);
-    if (bval ==
-        0) { // constprop already errors comptime mod-by-zero; guard anyway.
-      error_at(b, {"mod-by-zero", "type"},
-               "upass.tolg: modulo by zero is an illegal operation");
+    if (bval == 0) {  // constprop already errors comptime mod-by-zero; guard anyway.
+      error_at(b, {"mod-by-zero", "type"}, "upass.tolg: modulo by zero is an illegal operation");
       return;
     }
     const int64_t babs = iabs64(bval);
-    if (babs == 1) { // `a % ±1 == 0` for any sign of `a`.
+    if (babs == 1) {  // `a % ±1 == 0` for any sign of `a`.
       record(dst_name, create_const(*g_, *Dlop::create_integer(0)), 1);
       return;
     }
 
     if (!a_nonneg) {
-      error_at(a, {"mod-signed-dividend", "unsupported"},
+      error_at(a,
+               {"mod-signed-dividend", "unsupported"},
                "upass.tolg: `a % {}` with a possibly-negative `a` has no "
                "hardware lowering — signed modulo semantics "
                "are language-dependent (constrain `a` to a non-negative range)",
@@ -5570,15 +5375,13 @@ private:
 
     // (1) Power-of-two divisor → mask off the low log2(|b|) bits.
     if ((babs & (babs - 1)) == 0) {
-      int32_t k = 0; // |b| == 2^k
+      int32_t k = 0;  // |b| == 2^k
       while ((int64_t{1} << k) < babs) {
         ++k;
       }
-      auto andn =
-          make_node(Ntype_op::And); // commutative: both operands feed sink "a"
+      auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
       setup_sink_by_name(andn, "as").connect_driver(av.pin);
-      setup_sink_by_name(andn, "as")
-          .connect_driver(create_const(*g_, *Dlop::create_integer(babs - 1)));
+      setup_sink_by_name(andn, "as").connect_driver(create_const(*g_, *Dlop::create_integer(babs - 1)));
       bind_result(dst_name, andn.create_driver_pin(0), k > 0 ? k : 1);
       return;
     }
@@ -5591,21 +5394,23 @@ private:
     if (babs == 3) {
       int64_t init_max = 0;
       if (a_range && a_range->first >= 0) {
-        init_max = a_range->second; // exact, sound
+        init_max = a_range->second;  // exact, sound
       } else if (av.mw > 0 && av.mw <= 62) {
-        init_max = (int64_t{1} << av.mw) - 1; // sound for ≤ 62 bits
+        init_max = (int64_t{1} << av.mw) - 1;  // sound for ≤ 62 bits
       } else {
-        error_at(a, {"mod-three-too-wide", "unsupported"},
+        error_at(a,
+                 {"mod-three-too-wide", "unsupported"},
                  "upass.tolg: `a % 3` on a dividend wider than 62 bits has no "
                  "hardware lowering — constrain `a` to a "
                  "non-negative range that fits 62 bits");
         return;
       }
-      bind_result(dst_name, lower_mod3(av, init_max), 2); // result in [0, 2]
+      bind_result(dst_name, lower_mod3(av, init_max), 2);  // result in [0, 2]
       return;
     }
 
-    error_at(b, {"mod-unsupported-divisor", "unsupported"},
+    error_at(b,
+             {"mod-unsupported-divisor", "unsupported"},
              "upass.tolg: `a % {}` has no hardware lowering — only a "
              "power-of-two divisor, `% 3`, or a divisor "
              "provably larger than `a` lowers to shift/mask",
@@ -5618,49 +5423,45 @@ private:
   // the running max strictly shrinks while it is ≥ 4 (max_base4_digit_sum(M) <
   // M for M ≥ 4), so the generation loop terminates. Once the value is in [0,
   // 3] a single correction maps the one non-reduced point 3 → 0.
-  [[nodiscard]] Pin lower_mod3(const Val &av, int64_t init_max) {
-    Pin cur = av.pin;
+  [[nodiscard]] Pin lower_mod3(const Val& av, int64_t init_max) {
+    Pin     cur     = av.pin;
     int64_t cur_max = init_max < 0 ? 0 : init_max;
-    int32_t cur_mw = mw_of_val(cur_max);
+    int32_t cur_mw  = mw_of_val(cur_max);
     if (cur_mw > av.mw && av.mw > 0) {
-      cur_mw = av.mw; // never read past the dividend's stored bits
+      cur_mw = av.mw;  // never read past the dividend's stored bits
     }
     while (cur_max >= 4) {
       std::vector<Val> digits;
       digits.reserve(static_cast<size_t>((cur_mw + 1) / 2));
       for (int32_t lo = 0; lo < cur_mw; lo += 2) {
         const int32_t hi = std::min(lo + 1, cur_mw - 1);
-        auto gm = make_node(Ntype_op::Get_mask);
+        auto          gm = make_node(Ntype_op::Get_mask);
         setup_sink_by_name(gm, "a").connect_driver(cur);
-        setup_sink_by_name(gm, "mask")
-            .connect_driver(create_const(*g_, *Dlop::get_mask_value(hi, lo)));
-        auto d = gm.create_driver_pin(0);
-        const int32_t dmw = hi - lo + 1; // 1 or 2 bits per base-4 digit
+        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(hi, lo)));
+        auto          d   = gm.create_driver_pin(0);
+        const int32_t dmw = hi - lo + 1;  // 1 or 2 bits per base-4 digit
         set_bits(d, dmw + 1);
         set_unsign(d);
         digits.push_back({d, dmw});
       }
-      cur = adder_tree(std::move(digits)).pin;
+      cur     = adder_tree(std::move(digits)).pin;
       cur_max = max_base4_digit_sum(cur_max);
-      cur_mw = mw_of_val(cur_max);
+      cur_mw  = mw_of_val(cur_max);
     }
     // `cur` ∈ [0, 3]: result = (cur == 3) ? 0 : cur  ==  cur - 3*(cur == 3).
-    auto eq =
-        make_node(Ntype_op::EQ); // commutative: both operands feed sink "a"
+    auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
     setup_sink_by_name(eq, "as").connect_driver(cur);
-    setup_sink_by_name(eq, "as").connect_driver(
-        create_const(*g_, *Dlop::create_integer(3)));
+    setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto eqp = eq.create_driver_pin(0);
     set_bits(eqp, 2);
     set_unsign(eqp);
-    auto mul = make_node(Ntype_op::Mult); // 3 * (cur == 3) ∈ {0, 3}
+    auto mul = make_node(Ntype_op::Mult);  // 3 * (cur == 3) ∈ {0, 3}
     setup_sink_by_name(mul, "as").connect_driver(eqp);
-    setup_sink_by_name(mul, "as").connect_driver(
-        create_const(*g_, *Dlop::create_integer(3)));
+    setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto mulp = mul.create_driver_pin(0);
     set_bits(mulp, 3);
     set_unsign(mulp);
-    auto sub = make_node(Ntype_op::Sum); // cur - 3*(cur == 3)
+    auto sub = make_node(Ntype_op::Sum);  // cur - 3*(cur == 3)
     setup_sink_by_name(sub, "as").connect_driver(cur);
     setup_sink_by_name(sub, "bs").connect_driver(mulp);
     auto subp = sub.create_driver_pin(0);
@@ -5677,17 +5478,17 @@ private:
       std::vector<Val> next;
       next.reserve((terms.size() + 1) / 2);
       for (size_t i = 0; i + 1 < terms.size(); i += 2) {
-        auto s = make_node(Ntype_op::Sum); // both operands ADD on sink "a"
+        auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
         setup_sink_by_name(s, "as").connect_driver(terms[i].pin);
         setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
         const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
-        auto d = s.create_driver_pin(0);
+        auto          d  = s.create_driver_pin(0);
         set_bits(d, mw + 1);
         set_unsign(d);
         next.push_back({d, mw});
       }
       if (terms.size() & 1) {
-        next.push_back(terms.back()); // odd leaf rides to the next level
+        next.push_back(terms.back());  // odd leaf rides to the next level
       }
       terms = std::move(next);
     }
@@ -5701,19 +5502,19 @@ private:
     if (M < 0) {
       return 0;
     }
-    int top = 0; // highest base-4 digit position
+    int top = 0;  // highest base-4 digit position
     while (top < 31 && (int64_t{1} << (2 * (top + 1))) <= M) {
       ++top;
     }
     int64_t best = 0, prefix = 0;
     for (int pos = top; pos >= 0; --pos) {
       const int64_t d = (M >> (2 * pos)) & 3;
-      if (d > 0) { // drop this digit to d-1 and fill the rest with 3s
+      if (d > 0) {  // drop this digit to d-1 and fill the rest with 3s
         best = std::max(best, prefix + (d - 1) + int64_t{3} * pos);
       }
-      prefix += d; // keep this digit tight
+      prefix += d;  // keep this digit tight
     }
-    return std::max(best, prefix); // ...or M itself
+    return std::max(best, prefix);  // ...or M itself
   }
 
   // |v| with INT64_MIN guarded (callers exclude it before reaching here).
@@ -5727,8 +5528,7 @@ private:
   // Published value range of an operand: exact for a comptime const, else the
   // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
   // input port — its declared envelope from io_meta. nullopt = unbounded.
-  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>>
-  range_of_operand(const Lnast_nid &nid) {
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
       auto c = Dlop::from_pyrope(lnast_->get_name(nid));
       if (c->is_just_i64()) {
@@ -5738,11 +5538,10 @@ private:
       return std::nullopt;
     }
     const std::string nm{lnast_->get_name(nid)};
-    const auto &meta = lnast_->bw_meta();
-    auto it = meta.ranges.find(nm);
+    const auto&       meta = lnast_->bw_meta();
+    auto              it   = meta.ranges.find(nm);
     if (it == meta.ranges.end()) {
-      it = meta.ranges.find(
-          std::string{canon_io_name(nm)}); // unquoted slang `` `x` `` form
+      it = meta.ranges.find(std::string{canon_io_name(nm)});  // unquoted slang `` `x` `` form
     }
     if (it != meta.ranges.end() && !it->second.unbounded) {
       return std::make_pair(it->second.min, it->second.max);
@@ -5754,18 +5553,17 @@ private:
     if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
       base = base.substr(0, pos);
     }
-    for (const auto &in : lnast_->io_meta().inputs) {
+    for (const auto& in : lnast_->io_meta().inputs) {
       if (in.name != base || in.kind != Io_kind::integer) {
         continue;
       }
       if (in.has_range) {
         return std::make_pair(in.range_min,
-                              in.range_max); // exact `int(min,max)`
+                              in.range_max);  // exact `int(min,max)`
       }
       if (in.bits > 0 && in.bits <= 62) {
         if (in.is_signed) {
-          return std::make_pair(-(int64_t{1} << (in.bits - 1)),
-                                (int64_t{1} << (in.bits - 1)) - 1);
+          return std::make_pair(-(int64_t{1} << (in.bits - 1)), (int64_t{1} << (in.bits - 1)) - 1);
         }
         return std::make_pair(int64_t{0}, (int64_t{1} << in.bits) - 1);
       }
@@ -5778,7 +5576,7 @@ private:
   // branch-local writes don't leak. Returns the names the branch bound. The
   // rollback restores only the names this branch wrote (recorded lazily in
   // record()), so it is O(writes) -- no per-branch copy of the whole pin_map_.
-  WriteMap lower_branch(const Lnast_nid &stmts) {
+  WriteMap lower_branch(const Lnast_nid& stmts) {
     branch_writes_.emplace_back();
     branch_restore_.emplace_back();
     if (Lnast_ntype::is_stmts(lnast_->get_type(stmts))) {
@@ -5790,7 +5588,7 @@ private:
     branch_writes_.pop_back();
     auto restore = std::move(branch_restore_.back());
     branch_restore_.pop_back();
-    for (const auto &[name, old_val] : restore) {
+    for (const auto& [name, old_val] : restore) {
       if (old_val.has_value()) {
         pin_map_[name] = *old_val;
       } else {
@@ -5811,12 +5609,12 @@ private:
   // uniqueness assume holds; a violation makes it multi-hot, which the
   // Hotmux contract flags at runtime (cgen's case default).
   struct Branch {
-    bool is_else{false};
-    Pin cond;
+    bool     is_else{false};
+    Pin      cond;
     WriteMap writes;
   };
 
-  void lower_if(const Lnast_nid &nid, bool unique = false) {
+  void lower_if(const Lnast_nid& nid, bool unique = false) {
     std::vector<Branch> branches;
 
     auto child = lnast_->get_first_child(nid);
@@ -5835,12 +5633,12 @@ private:
     // with its own established semantics; only the path copy is reduced.
     // `match` rides this too: it lowers to a unique_if whose arms are
     // branch-lowered here before lower_unique_merge runs.
-    const size_t path_base = path_terms_.size();
+    const size_t     path_base = path_terms_.size();
     // Arm k is taken when every earlier condition is false and c_k is true, so
     // its terms are ¬c_0 … ¬c_{k-1}, c_k; the bare else drops the final c_k.
     std::vector<Pin> prior_conds;
-    auto lower_arm = [&](const Lnast_nid &stmts, const Pin &cond, bool is_else) {
-      for (const auto &pc : prior_conds) {
+    auto             lower_arm = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
+      for (const auto& pc : prior_conds) {
         push_path_term(pc, /*negated=*/true);
       }
       if (!is_else) {
@@ -5851,8 +5649,8 @@ private:
       return w;
     };
 
-    Pin first_cond = leaf(child).pin; // child0 = condition
-    child = lnast_->get_sibling_next(child);
+    Pin first_cond = leaf(child).pin;  // child0 = condition
+    child          = lnast_->get_sibling_next(child);
     if (child.is_invalid()) {
       return;
     }
@@ -5867,7 +5665,7 @@ private:
         break;
       }
       Pin elif_cond = leaf(child).pin;
-      child = lnast_->get_sibling_next(child);
+      child         = lnast_->get_sibling_next(child);
       if (child.is_invalid()) {
         break;
       }
@@ -5877,8 +5675,8 @@ private:
     }
 
     absl::flat_hash_set<std::string> all_vars_set;
-    for (auto &br : branches) {
-      for (auto &[name, _] : br.writes) {
+    for (auto& br : branches) {
+      for (auto& [name, _] : br.writes) {
         all_vars_set.insert(name);
       }
     }
@@ -5890,16 +5688,15 @@ private:
     std::vector<std::string> all_vars(all_vars_set.begin(), all_vars_set.end());
     std::sort(all_vars.begin(), all_vars.end());
 
-    const bool has_else = !branches.empty() && branches.back().is_else;
-    const WriteMap &else_writes =
-        has_else ? branches.back().writes : empty_writes_;
+    const bool      has_else    = !branches.empty() && branches.back().is_else;
+    const WriteMap& else_writes = has_else ? branches.back().writes : empty_writes_;
 
     if (unique && !all_vars.empty()) {
       lower_unique_merge(branches, all_vars, has_else, else_writes);
       return;
     }
 
-    for (const auto &var : all_vars) {
+    for (const auto& var : all_vars) {
       // `pre` is the var's value ENTERING this if (it already encodes every
       // prior statement's writes — e.g. an earlier separate `if(inr) ov<=0`).
       // A branch that does not write `var` must fall back to `pre`, NOT to the
@@ -5913,7 +5710,7 @@ private:
       // A non-writing branch falls back to `pre`. For a reg's din shadow with
       // no recorded pre-value (a pure conditional write, no prior write and no
       // read), `pre` is the reg's q (hold) — NOT a don't-care.
-      Pin pre;
+      Pin  pre;
       if (base != pin_map_.end()) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
@@ -5921,8 +5718,8 @@ private:
       } else {
         pre = nil_pin();
       }
-      auto ew = else_writes.find(var);
-      Pin cur = (ew != else_writes.end()) ? ew->second : pre;
+      auto ew  = else_writes.find(var);
+      Pin  cur = (ew != else_writes.end()) ? ew->second : pre;
 
       // The merged value's width is the widest among the branch sources;
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
@@ -5930,9 +5727,9 @@ private:
       // wider arms. Take the max over every contributing pin's stamped bits
       // (bits >= mw by construction, so this only ever widens). pin_mw_of
       // shares this with the Hotmux path (lower_unique_merge).
-      int32_t mw = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
-      int n = static_cast<int>(branches.size());
-      int last_cond = has_else ? n - 2 : n - 1;
+      int32_t mw        = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
+      int     n         = static_cast<int>(branches.size());
+      int     last_cond = has_else ? n - 2 : n - 1;
       // Finalize the merged width BEFORE building the chain so every mux in it
       // (not only the outermost one bind_result stamps) carries it. An if/elif
       // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
@@ -5946,17 +5743,16 @@ private:
         }
       }
       for (int i = last_cond; i >= 0; --i) {
-        auto &br = branches[i];
-        auto wr = br.writes.find(var);
-        Pin true_val = (wr != br.writes.end()) ? wr->second : pre;
+        auto& br       = branches[i];
+        auto  wr       = br.writes.find(var);
+        Pin   true_val = (wr != br.writes.end()) ? wr->second : pre;
 
         auto mux = make_node(Ntype_op::Mux);
-        mux.create_sink_pin(0).connect_driver(br.cond);  // selector
-        mux.create_sink_pin(1).connect_driver(cur);      // false / else
-        mux.create_sink_pin(2).connect_driver(true_val); // true / then
+        mux.create_sink_pin(0).connect_driver(br.cond);   // selector
+        mux.create_sink_pin(1).connect_driver(cur);       // false / else
+        mux.create_sink_pin(2).connect_driver(true_val);  // true / then
         cur = mux.create_driver_pin(0);
-        if (i !=
-            0) { // inner mux; bind_result stamps the outermost (i==0) below
+        if (i != 0) {  // inner mux; bind_result stamps the outermost (i==0) below
           set_bits(cur, mw + 1);
           set_unsign(cur);
         }
@@ -5970,9 +5766,8 @@ private:
   // "none of the conds" — the else / fall-through slot. Hotmux pins:
   // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
   // (the variable's pre-if value when the arm / else doesn't write it).
-  void lower_unique_merge(const std::vector<Branch> &branches,
-                          const std::vector<std::string> &all_vars,
-                          bool has_else, const WriteMap &else_writes) {
+  void lower_unique_merge(const std::vector<Branch>& branches, const std::vector<std::string>& all_vars, bool has_else,
+                          const WriteMap& else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
 
@@ -5992,8 +5787,7 @@ private:
     }
     auto none_node = make_node(Ntype_op::EQ);
     none_node.create_sink_pin(0).connect_driver(or_all);
-    none_node.create_sink_pin(0).connect_driver(
-        create_const(*g_, *Dlop::create_integer(0)));
+    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     const Pin none = none_node.create_driver_pin(0);
     set_bits(none, 1);
     set_unsign(none);
@@ -6009,8 +5803,8 @@ private:
     set_bits(sel, n_conds + 2);
     set_unsign(sel);
 
-    for (const auto &var : all_vars) {
-      auto base = pin_map_.find(var);
+    for (const auto& var : all_vars) {
+      auto base    = pin_map_.find(var);
       bool has_pre = base != pin_map_.end();
       // A reg's din shadow with no recorded pre-value still HOLDS on an
       // unwritten / none-of arm: fall back to the reg's q (current value), not
@@ -6018,18 +5812,18 @@ private:
       // below drives the hold instead of `Dlop::unknown`. A non-reg var
       // (combinational match-expression result) keeps has_pre=false →
       // don't-care none-of slot.
-      Pin pre;
+      Pin  pre;
       if (has_pre) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
-        pre = *hold;
+        pre     = *hold;
         has_pre = true;
       } else {
         pre = nil_pin();
       }
-      auto ew = else_writes.find(var);
-      const bool has_ev = ew != else_writes.end();
-      Pin else_val = has_ev ? ew->second : pre;
+      auto       ew       = else_writes.find(var);
+      const bool has_ev   = ew != else_writes.end();
+      Pin        else_val = has_ev ? ew->second : pre;
 
       // The Hotmux result width is the WIDEST among its REAL arm sources,
       // exactly as the Mux chain above sizes itself. mw_lookup alone holds
@@ -6056,78 +5850,72 @@ private:
       auto hot = make_node(Ntype_op::Hotmux);
       hot.create_sink_pin(0).connect_driver(sel);
       for (int i = 0; i < n_conds; ++i) {
-        auto wr = branches[i].writes.find(var);
+        auto wr  = branches[i].writes.find(var);
         // A non-writing arm keeps the pre-match value; only real writes size.
-        Pin val = wr != branches[i].writes.end() ? wr->second : pre;
+        Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
         if (wr != branches[i].writes.end()) {
           mw = std::max(mw, pin_mw_of(val));
         }
-        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1))
-            .connect_driver(val);
+        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
       }
       // none-of slot: explicit else / pre value when present; otherwise an
       // exhaustive else-less match — drive the unreachable slot with a
       // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
-      const Pin none_val = (has_ev || has_pre)
-                               ? else_val
-                               : create_const(*g_, *Dlop::unknown(mw));
-      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1))
-          .connect_driver(none_val);
+      const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
+      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(none_val);
       bind_result(var, hot.create_driver_pin(0), mw);
     }
   }
 
-  std::shared_ptr<Lnast> lnast_;
-  hhds::Graph *g_;
-  const uPass_tolg::Registry *registry_ = nullptr;
-  hhds::GraphLibrary *lib_ = nullptr;
+  std::shared_ptr<Lnast>      lnast_;
+  hhds::Graph*                g_;
+  const uPass_tolg::Registry* registry_ = nullptr;
+  hhds::GraphLibrary*         lib_      = nullptr;
 
-  absl::flat_hash_map<std::string, Pin> pin_map_;
-  absl::flat_hash_map<std::string, int32_t> mw_map_;
+  absl::flat_hash_map<std::string, Pin>                             pin_map_;
+  absl::flat_hash_map<std::string, int32_t>                         mw_map_;
   // The last driver written to each LOGICAL variable (SSA versions x /
   // x___ssa_1 / … collapsed to "x"): the value after ALL in-cycle writes, used
   // for a derived `reset_pin = <signal>` / `clock_pin = <signal>` resolution
   // and for a `wire`'s buffer pin.
-  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>> logical_last_;
+  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>>         logical_last_;
   // A field read whose source is a Sub result created by a call lowered LATER
   // in the body. Deferred to end-of-pass, then re-resolved with tget_final_ so
   // a still-unresolved one warns instead of looping.
-  std::vector<Lnast_nid> pending_tgets_;
-  bool tget_final_ = false;
-  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
+  std::vector<Lnast_nid>                                            pending_tgets_;
+  bool                                                              tget_final_ = false;
+  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>>     range_map_;
   // A `range` whose endpoints are NOT comptime constants (`a#[n..=m]` with
   // runtime n/m). Keyed by the range tmp name; carries the lo/hi LNAST nids so
   // lower_get_mask can build the shift+mask select. An open `lo..` form stores
   // a const "nil" hi nid. (Comptime ranges stay in range_map_ as folded ints.)
-  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>>
-      range_dyn_map_;
+  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
   // An open-ended `lo..` range with a COMPTIME lo (`a#[3..]`): only the lo nid
   // is stashed (keyed by the range tmp name). The upper bound is the sliced
   // value's MSB, known only at the consuming get_mask/set_mask, which closes
   // the range to `lo..=(value bits-1)`. (A runtime-lo open range lives in
   // range_dyn_map_ with a const "nil" hi.)
-  absl::flat_hash_map<std::string, Lnast_nid> range_open_map_;
-  std::vector<WriteMap> branch_writes_;
+  absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
+  std::vector<WriteMap>                                             branch_writes_;
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
   // name it wrote (nullopt = absent before the branch). lower_branch replays
   // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
-  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>>
-      branch_restore_;
-  WriteMap empty_writes_;
+  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
+  WriteMap                                                          empty_writes_;
 
   // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
   // wires the buffer input to the single accumulated driver (din shadow) and
   // restamps the buffer output from the driver width when untyped.
   struct Wire_info {
-    hhds::Node_class buf; // the passthrough Or (cgen `out = a`)
-    Pin out;              // the buffer output (what reads bind to)
-    Lnast_nid decl_nid;      // diag anchor (the `wire x` site)
-    int32_t decl_color = 0;  // block region at the declare (2opt-freq B)
-    int32_t decl_mw = 0;     // declared width; 0 = untyped (restamp from driver)
-    bool is_signed = false;
+    hhds::Node_class buf;             // the passthrough Or (cgen `out = a`)
+    Pin              out;             // the buffer output (what reads bind to)
+    Lnast_nid        decl_nid;        // diag anchor (the `wire x` site)
+    int32_t          decl_color = 0;  // block region at the declare (2opt-freq B)
+    int32_t          decl_mw    = 0;  // declared width; 0 = untyped (restamp from driver)
+    bool             is_signed  = false;
   };
-  absl::flat_hash_set<std::string> wire_names_; // gates lower_store
-  std::vector<std::string> wire_order_;         // declaration order
+  absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
+  std::vector<std::string>                    wire_order_;  // declaration order
   absl::flat_hash_map<std::string, Wire_info> wire_info_;
 
   // Reg lowering state. reg_map_ holds each declared reg's Flop
@@ -6136,21 +5924,22 @@ private:
   // inputs. reg_info_/reg_order_ carry the finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
-  absl::flat_hash_map<std::string, Reg_info> reg_info_;
-  std::vector<std::string> reg_order_;
+  absl::flat_hash_map<std::string, Reg_info>         reg_info_;
+  std::vector<std::string>                           reg_order_;
   // Scalar `mut`/`const` declares (NOT reg/latch/array). A `mut b:uN = nil`
   // emits no init store, so its name never gets a driver — but using it as a
   // `b#[lo..=hi] = …` bit-assembly base is legal (the covered bits are
   // overwritten). lower_set_mask substitutes a 0sb? base for such a name; the
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
-  absl::flat_hash_set<std::string> scalar_decl_;
+  absl::flat_hash_set<std::string>                   scalar_decl_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
-  absl::flat_hash_map<std::string, Mem_info> mem_map_;
-  std::vector<std::string> mem_order_;
+  absl::flat_hash_map<std::string, Mem_info>         mem_map_;
+  absl::flat_hash_map<int32_t, int>                  mem_write_site_counts_;
+  std::vector<std::string>                           mem_order_;
   // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED
   // (see current_path_cond). `path_folded_[i]` caches the fold of terms[0..i]
   // once some consumer asks for it; an invalid entry is "not built yet".
@@ -6158,35 +5947,33 @@ private:
     Pin  cond;
     bool negated = false;
   };
-  std::vector<Path_term> path_terms_;
-  std::vector<Pin>       path_folded_;
-  absl::flat_hash_map<std::string, Tuple_rec> tuple_recs_;
-  absl::flat_hash_map<std::string, Mem_result> mem_results_;
+  std::vector<Path_term>                                                          path_terms_;
+  std::vector<Pin>                                                                path_folded_;
+  absl::flat_hash_map<std::string, Tuple_rec>                                     tuple_recs_;
+  absl::flat_hash_map<std::string, Mem_result>                                    mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).
-  absl::flat_hash_map<std::string,
-                      absl::flat_hash_map<std::string, std::string>>
-      pending_attrs_;
-  std::string clock_name_;
-  bool clock_minted_ = false;
-  Pin clock_pin_;
-  bool clock_pin_valid_ = false;
-  std::string reset_name_;
-  bool reset_minted_ = false;
-  bool reset_neg_ = false;
-  bool reset_async_default_ = false;
-  Pin reset_pin_;
-  bool reset_pin_valid_ = false;
-  Pin en_true_pin_;
-  Pin en_false_pin_;
-  bool en_true_valid_ = false;
-  bool en_false_valid_ = false;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> pending_attrs_;
+  std::string                                                                     clock_name_;
+  bool                                                                            clock_minted_ = false;
+  Pin                                                                             clock_pin_;
+  bool                                                                            clock_pin_valid_ = false;
+  std::string                                                                     reset_name_;
+  bool                                                                            reset_minted_        = false;
+  bool                                                                            reset_neg_           = false;
+  bool                                                                            reset_async_default_ = false;
+  Pin                                                                             reset_pin_;
+  bool                                                                            reset_pin_valid_ = false;
+  Pin                                                                             en_true_pin_;
+  Pin                                                                             en_false_pin_;
+  bool                                                                            en_true_valid_  = false;
+  bool                                                                            en_false_valid_ = false;
 
   absl::flat_hash_map<std::string, Pending_stage> pending_stage_;
-  absl::flat_hash_map<std::string, Sub_out> sub_out_stages_;
+  absl::flat_hash_map<std::string, Sub_out>       sub_out_stages_;
   // Multi-output instance results: fcall dst name -> (Sub node, callee
   // outputs); consumed by tuple_get field reads.
   struct Sub_result {
-    hhds::Node_class sub;
+    hhds::Node_class            sub;
     std::vector<Lnast_io_entry> outputs;
   };
   absl::flat_hash_map<std::string, Sub_result> sub_results_;
@@ -6195,18 +5982,18 @@ private:
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
   // Also adds plain_reg_flops_ (state/stage classification candidates) and
   // inserted_flops_ (the LN-inserted pipe output flops — narrowing targets).
-  std::vector<Pending_rec> pending_checks_;
+  std::vector<Pending_rec>                                   pending_checks_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> flop_depth_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
-  absl::flat_hash_map<uint64_t, std::string> plain_reg_flops_;
-  absl::flat_hash_set<uint64_t> inserted_flops_;
+  absl::flat_hash_map<uint64_t, std::string>                 plain_reg_flops_;
+  absl::flat_hash_set<uint64_t>                              inserted_flops_;
   // 2c-wire — Verilog-origin comb-cycle wire buffers (a net that may legally
   // close a same-cycle ring through a submodule instance; a later lgraph pass
   // detects/handles real ones). The time-checker cuts these nodes' in-edges
   // instead of flagging the loop, preserving the pre-2c-wire leniency. PYROPE
   // wire buffers are NEVER added here, so a real comb loop through a Pyrope
   // wire is flagged as an error.
-  absl::flat_hash_set<uint64_t> wire_cut_nids_;
+  absl::flat_hash_set<uint64_t>                              wire_cut_nids_;
 
 public:
   // Lower the partition's declared per-output intervals as
@@ -6219,10 +6006,9 @@ public:
     if (kind != "pipe" && kind != "mod") {
       return;
     }
-    auto root = lnast_->get_root();
+    auto      root = lnast_->get_root();
     Lnast_nid io_nid;
-    for (auto c = lnast_->get_first_child(root); !c.is_invalid();
-         c = lnast_->get_sibling_next(c)) {
+    for (auto c = lnast_->get_first_child(root); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_io(lnast_->get_type(c))) {
         io_nid = c;
         break;
@@ -6239,8 +6025,7 @@ public:
     if (out_tup.is_invalid()) {
       return;
     }
-    for (auto st = lnast_->get_first_child(out_tup); !st.is_invalid();
-         st = lnast_->get_sibling_next(st)) {
+    for (auto st = lnast_->get_first_child(out_tup); !st.is_invalid(); st = lnast_->get_sibling_next(st)) {
       if (!Lnast_ntype::is_store(lnast_->get_type(st))) {
         continue;
       }
@@ -6249,8 +6034,7 @@ public:
         continue;
       }
       Lnast_nid stages_nid;
-      for (auto c = lnast_->get_sibling_next(name_nid); !c.is_invalid();
-           c = lnast_->get_sibling_next(c)) {
+      for (auto c = lnast_->get_sibling_next(name_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
         if (Lnast_ntype::is_stages(lnast_->get_type(c))) {
           stages_nid = c;
           break;
@@ -6264,17 +6048,16 @@ public:
         continue;
       }
       auto mx = lnast_->get_sibling_next(mn);
-      if (lnast_->get_name(mn) == "nil" ||
-          (!mx.is_invalid() && lnast_->get_name(mx) == "nil")) {
-        continue; // @[] opt-out — unconstrained
+      if (lnast_->get_name(mn) == "nil" || (!mx.is_invalid() && lnast_->get_name(mx) == "nil")) {
+        continue;  // @[] opt-out — unconstrained
       }
       int64_t a_min = const_val(mn);
       int64_t a_max = mx.is_invalid() ? a_min : const_val(mx);
       if (a_max < a_min) {
-        a_max = a_min; // bare-pipe (1,0) sentinel realizes at min
+        a_max = a_min;  // bare-pipe (1,0) sentinel realizes at min
       }
       const std::string name(lnast_->get_name(name_nid));
-      auto sink = g_->get_output_pin(name);
+      auto              sink = g_->get_output_pin(name);
       if (sink.is_invalid()) {
         continue;
       }
@@ -6283,27 +6066,12 @@ public:
     }
   }
 
-  [[nodiscard]] std::vector<Pending_rec> &&take_pending_checks() {
-    return std::move(pending_checks_);
-  }
-  [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> &&
-  take_flop_depths() {
-    return std::move(flop_depth_);
-  }
-  [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> &&
-  take_sub_times() {
-    return std::move(sub_time_);
-  }
-  [[nodiscard]] absl::flat_hash_map<uint64_t, std::string> &&
-  take_plain_reg_flops() {
-    return std::move(plain_reg_flops_);
-  }
-  [[nodiscard]] absl::flat_hash_set<uint64_t> &&take_inserted_flops() {
-    return std::move(inserted_flops_);
-  }
-  [[nodiscard]] absl::flat_hash_set<uint64_t> &&take_wire_cuts() {
-    return std::move(wire_cut_nids_);
-  }
+  [[nodiscard]] std::vector<Pending_rec>&& take_pending_checks() { return std::move(pending_checks_); }
+  [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_flop_depths() { return std::move(flop_depth_); }
+  [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_sub_times() { return std::move(sub_time_); }
+  [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&& take_plain_reg_flops() { return std::move(plain_reg_flops_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_inserted_flops() { return std::move(inserted_flops_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_wire_cuts() { return std::move(wire_cut_nids_); }
 };
 
 // The combined pipe/mod LG time checker (written once for both kinds).
@@ -6329,30 +6097,30 @@ public:
 //      bypassed and deleted). sigma > min is the latency-exceeded error.
 //   4. Discharge every pending record: computed == asserted -> REMOVE the
 //      pending_time attr; mismatch (or an undischargeable record) -> error.
-//      A declared-reg output (`-> (reg q@[N])`) discharges against home+1:
-//      state home stage must equal N−1 (and the reg must be state — a
-//      feedforward stage reg in the output list is an error).
+//      A declared state output (`-> (reg q@[N])`) pins q and din to the same
+//      home stage, so its interface cycle discharges directly against home.
 class Time_checker {
 public:
   struct TR {
     int64_t min = 0;
     int64_t max = 0;
-    bool any = false; // constants — unify with any cycle
+    bool    any = false;  // constants — unify with any cycle
   };
 
-  Time_checker(
-      hhds::Graph *g, const std::shared_ptr<Lnast> &ln,
-      std::vector<Pending_rec> &&pendings,
-      absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> &&flop_depth,
-      absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> &&sub_time,
-      absl::flat_hash_map<uint64_t, std::string> &&plain_regs,
-      absl::flat_hash_set<uint64_t> &&inserted,
-      absl::flat_hash_set<uint64_t> &&wire_cuts)
-      : g_(g), ln_(ln), pendings_(std::move(pendings)),
-        flop_depth_(std::move(flop_depth)), sub_time_(std::move(sub_time)),
-        plain_regs_(std::move(plain_regs)), inserted_(std::move(inserted)),
-        wire_cuts_(std::move(wire_cuts)) {
-    for (const auto &[nid, name] : plain_regs_) {
+  Time_checker(hhds::Graph* g, const std::shared_ptr<Lnast>& ln, std::vector<Pending_rec>&& pendings,
+               absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& flop_depth,
+               absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time,
+               absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted,
+               absl::flat_hash_set<uint64_t>&& wire_cuts)
+      : g_(g)
+      , ln_(ln)
+      , pendings_(std::move(pendings))
+      , flop_depth_(std::move(flop_depth))
+      , sub_time_(std::move(sub_time))
+      , plain_regs_(std::move(plain_regs))
+      , inserted_(std::move(inserted))
+      , wire_cuts_(std::move(wire_cuts)) {
+    for (const auto& [nid, name] : plain_regs_) {
       reg_flop_by_name_.emplace(name, nid);
     }
     // Regs with an explicit declared cycle (`reg q@[N]` output, or an `@[N]`
@@ -6360,13 +6128,13 @@ public:
     // the contract. They must NOT be force-classified as cycle-0 state (the mod
     // default below), or a `q@[1]` delay reg would collapse to a pass-through.
     // Collect them.
-    for (const auto &rec : pendings_) {
+    for (const auto& rec : pendings_) {
       // Map the declared-cycle record to its flop. A `@[N]` assertion pins a
       // value pin (its master node); a `reg q@[N]` output pin is DRIVEN by the
       // reg flop (the output port name need not equal the internal reg name, so
       // match by the driver node, not the name). Mark the flop iff it is a
       // plain reg.
-      auto consider = [&](const hhds::Node_class &mn) {
+      auto consider = [&](const hhds::Node_class& mn) {
         if (!mn.is_invalid() && plain_regs_.contains(mn.get_debug_nid())) {
           decl_cycle_regs_.insert(mn.get_debug_nid());
         }
@@ -6378,9 +6146,8 @@ public:
       } else if (!rec.pin.is_invalid()) {
         consider(rec.pin.get_master_node());
       }
-      if (auto it = reg_flop_by_name_.find(rec.name);
-          it != reg_flop_by_name_.end()) {
-        decl_cycle_regs_.insert(it->second); // name match too (defensive)
+      if (auto it = reg_flop_by_name_.find(rec.name); it != reg_flop_by_name_.end()) {
+        decl_cycle_regs_.insert(it->second);  // name match too (defensive)
       }
     }
   }
@@ -6390,46 +6157,41 @@ public:
   // Pass::error-style throw. An id-less or invalid node degrades to an
   // unlocated record.
   template <typename... Args>
-  [[noreturn]] void
-  error_at_node(const hhds::Node_class &node, livehd::diag::Id id,
-                std::format_string<Args...> fmt, Args &&...args) {
-    auto msg = std::format(fmt, std::forward<Args>(args)...);
-    livehd::diag::Span span;
+  [[noreturn]] void error_at_node(const hhds::Node_class& node, livehd::diag::Id id, std::format_string<Args...> fmt,
+                                  Args&&... args) {
+    auto                            msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::Span              span;
     std::vector<livehd::diag::Note> notes;
     if (g_ != nullptr && !node.is_invalid()) {
       if (auto ref = node.attr(hhds::attrs::srcid); ref.has()) {
         const auto rs = g_->source_locator().resolve_spans(ref.get());
-        span = rs.primary;
-        notes = livehd::diag::notes_from(rs, "reached via this site");
+        span          = rs.primary;
+        notes         = livehd::diag::notes_from(rs, "reached via this site");
       }
     }
     livehd::diag::sink().stage(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
-        .code = std::string(id.code),
+        .code     = std::string(id.code),
         .category = std::string(id.category),
-        .pass = "upass.tolg",
-        .message = msg,
-        .span = std::move(span),
-        .notes = std::move(notes),
+        .pass     = "upass.tolg",
+        .message  = msg,
+        .span     = std::move(span),
+        .notes    = std::move(notes),
     });
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 
   template <typename... Args>
-  [[noreturn]] void error_at_node(const hhds::Node_class &node,
-                                  std::format_string<Args...> fmt,
-                                  Args &&...args) {
-    error_at_node(node, livehd::diag::Id{"tolg-time-error", "time"}, "{}",
-                  std::format(fmt, std::forward<Args>(args)...));
+  [[noreturn]] void error_at_node(const hhds::Node_class& node, std::format_string<Args...> fmt, Args&&... args) {
+    error_at_node(node, livehd::diag::Id{"tolg-time-error", "time"}, "{}", std::format(fmt, std::forward<Args>(args)...));
   }
 
   // The pending record's value driver, as the diag anchor (invalid when
   // undriven -- error_at_node degrades to an unlocated record).
-  [[nodiscard]] static hhds::Node_class pending_anchor(const auto &rec) {
+  [[nodiscard]] static hhds::Node_class pending_anchor(const auto& rec) {
     if (rec.is_sink) {
       auto edges = rec.pin.inp_edges();
-      return edges.empty() ? hhds::Node_class{}
-                           : edges.front().driver.get_master_node();
+      return edges.empty() ? hhds::Node_class{} : edges.front().driver.get_master_node();
     }
     return rec.pin.get_master_node();
   }
@@ -6441,7 +6203,7 @@ public:
     using livehd::graph_util::type_op_of;
 
     // 1. Collect nodes + node-level digraph (consts/graph-inputs excluded).
-    std::vector<hhds::Node_class> nodes;
+    std::vector<hhds::Node_class>         nodes;
     absl::flat_hash_map<uint64_t, size_t> idx;
     for (auto n : g_->fast_class()) {
       if (is_type_const(n)) {
@@ -6450,16 +6212,15 @@ public:
       idx.emplace(n.get_debug_nid(), nodes.size());
       nodes.push_back(n);
     }
-    const size_t nn = nodes.size();
+    const size_t                  nn = nodes.size();
     std::vector<std::vector<int>> succ(nn);
     std::vector<std::vector<int>> pred(nn);
-    auto node_idx_of_pin = [&](const hhds::Pin_class &dpin) -> int {
+    auto                          node_idx_of_pin = [&](const hhds::Pin_class& dpin) -> int {
       if (dpin.is_invalid() || is_graph_input_pin(dpin)) {
         return -1;
       }
       auto mn = dpin.get_master_node();
-      if (mn.is_invalid() || is_type_const(mn) ||
-          type_op_of(mn) == Ntype_op::Nconst) {
+      if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
         return -1;
       }
       auto it = idx.find(mn.get_debug_nid());
@@ -6474,7 +6235,7 @@ public:
       if (wire_cuts_.contains(nodes[i].get_debug_nid())) {
         continue;
       }
-      for (const auto &e : nodes[i].inp_edges()) {
+      for (const auto& e : nodes[i].inp_edges()) {
         const int p = node_idx_of_pin(e.driver);
         if (p >= 0) {
           pred[i].push_back(p);
@@ -6486,11 +6247,11 @@ public:
     // 2. Tarjan SCC (iterative). Non-trivial SCCs classify their flops.
     std::vector<int> scc_id(nn, -1);
     {
-      std::vector<int> low(nn, -1), num(nn, -1);
-      std::vector<bool> on_stack(nn, false);
-      std::vector<int> stk;
-      int counter = 0;
-      int next_scc = 0;
+      std::vector<int>    low(nn, -1), num(nn, -1);
+      std::vector<bool>   on_stack(nn, false);
+      std::vector<int>    stk;
+      int                 counter  = 0;
+      int                 next_scc = 0;
       std::vector<size_t> scc_size;
       for (size_t root = 0; root < nn; ++root) {
         if (num[root] >= 0) {
@@ -6503,7 +6264,7 @@ public:
         stk.push_back(static_cast<int>(root));
         on_stack[root] = true;
         while (!dfs.empty()) {
-          auto &[v, cur] = dfs.back();
+          auto& [v, cur] = dfs.back();
           if (cur < succ[static_cast<size_t>(v)].size()) {
             const int w = succ[static_cast<size_t>(v)][cur++];
             if (num[w] < 0) {
@@ -6518,12 +6279,12 @@ public:
           }
           if (low[v] == num[v]) {
             size_t members = 0;
-            int w;
+            int    w;
             do {
               w = stk.back();
               stk.pop_back();
               on_stack[w] = false;
-              scc_id[w] = next_scc;
+              scc_id[w]   = next_scc;
               ++members;
             } while (w != v);
             scc_size.push_back(members);
@@ -6537,7 +6298,7 @@ public:
         }
       }
       // self-loops count as non-trivial too
-      std::vector<bool> nontrivial(static_cast<size_t>(next_scc), false);
+      std::vector<bool>             nontrivial(static_cast<size_t>(next_scc), false);
       // Bucket each node by its SCC id in this same O(nn) pass (ascending i, so
       // members[s][0] is the lowest-index member == the diag-anchor rep). The
       // offending-SCC scan below then iterates only the members of each
@@ -6545,8 +6306,7 @@ public:
       // O(nontrivial_scc * nn); XSCore has many register-feedback rings).
       std::vector<std::vector<int>> scc_members(static_cast<size_t>(next_scc));
       for (size_t i = 0; i < nn; ++i) {
-        scc_members[static_cast<size_t>(scc_id[i])].push_back(
-            static_cast<int>(i));
+        scc_members[static_cast<size_t>(scc_id[i])].push_back(static_cast<int>(i));
         if (scc_size[static_cast<size_t>(scc_id[i])] > 1) {
           nontrivial[static_cast<size_t>(scc_id[i])] = true;
         }
@@ -6575,21 +6335,18 @@ public:
       // mis-classified as a +1-cycle stage, forcing a spurious runtime enable
       // that diverged from the Verilog it mirrors (issues.txt A3).
       const bool verilog_origin = ln_->is_verilog_origin();
-      const bool mod_default = ln_->get_lambda_kind() == "mod";
-      const auto en_pid =
-          static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
+      const bool mod_default    = ln_->get_lambda_kind() == "mod";
+      const auto en_pid         = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
       for (size_t i = 0; i < nn; ++i) {
         if (!is_type_flop(nodes[i])) {
           continue;
         }
-        const auto nid = nodes[i].get_debug_nid();
+        const auto nid      = nodes[i].get_debug_nid();
         const bool eligible = plain_regs_.contains(nid);
         if (eligible) {
           bool en_driven = false;
-          for (const auto &e : nodes[i].inp_edges()) {
-            if (!e.sink.is_invalid() &&
-                static_cast<uint64_t>(e.sink.get_port_id()) == en_pid &&
-                !e.driver.is_invalid()) {
+          for (const auto& e : nodes[i].inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == en_pid && !e.driver.is_invalid()) {
               en_driven = true;
               break;
             }
@@ -6597,11 +6354,8 @@ public:
           // A mod's plain regs default to cycle-0 state — UNLESS the reg
           // carries an explicit @[N]/interface cycle (then it is a declared
           // feedforward stage).
-          const bool state_default =
-              verilog_origin ||
-              (mod_default && !decl_cycle_regs_.contains(nid));
-          if (state_default || en_driven ||
-              nontrivial[static_cast<size_t>(scc_id[i])]) {
+          const bool state_default = verilog_origin || (mod_default && !decl_cycle_regs_.contains(nid));
+          if (state_default || en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
             state_.insert(nid);
           }
         }
@@ -6624,10 +6378,9 @@ public:
         if (!nontrivial[static_cast<size_t>(s)]) {
           continue;
         }
-        bool has_state = false;
-        bool has_flop = false;
-        hhds::Node_class
-            rep; // a member of the offending SCC, for the diag anchor
+        bool             has_state = false;
+        bool             has_flop  = false;
+        hhds::Node_class rep;  // a member of the offending SCC, for the diag anchor
         for (const int mi : scc_members[static_cast<size_t>(s)]) {
           const size_t i = static_cast<size_t>(mi);
           if (rep.is_invalid()) {
@@ -6655,8 +6408,7 @@ public:
                           "`reg` (state)",
                           ln_->get_top_module_name());
           } else {
-            error_at_node(rep, "upass.tolg: combinational loop in '{}'",
-                          ln_->get_top_module_name());
+            error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
           }
         }
       }
@@ -6668,7 +6420,7 @@ public:
     std::vector<int> indeg(nn, 0);
     for (size_t i = 0; i < nn; ++i) {
       if (state_.contains(nodes[i].get_debug_nid())) {
-        continue; // source: q decoupled from din
+        continue;  // source: q decoupled from din
       }
       indeg[i] = static_cast<int>(pred[i].size());
     }
@@ -6699,12 +6451,11 @@ public:
       hhds::Node_class rep;
       for (size_t i = 0; i < nn; ++i) {
         if (indeg[i] > 0) {
-          rep = nodes[i]; // a node still on the cycle — the diag anchor
+          rep = nodes[i];  // a node still on the cycle — the diag anchor
           break;
         }
       }
-      error_at_node(rep, "upass.tolg: combinational loop in '{}'",
-                    ln_->get_top_module_name());
+      error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
     }
 
     // 2c-wire — a `comb` runs steps 1-3 ONLY (acyclicity), to catch a comb loop
@@ -6720,12 +6471,10 @@ public:
     // flop's din may transit through ANOTHER state flop's q, so iterate to a
     // fixpoint (bounded by the state count) — otherwise a chained state reg
     // would home at `any` and silently pass its `@[N]` check.
-    const auto din_pid =
-        static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
-    auto din_driver = [&](const hhds::Node_class &flop) -> hhds::Pin_class {
-      for (const auto &e : flop.inp_edges()) {
-        if (!e.sink.is_invalid() &&
-            static_cast<uint64_t>(e.sink.get_port_id()) == din_pid) {
+    const auto din_pid    = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
+    auto       din_driver = [&](const hhds::Node_class& flop) -> hhds::Pin_class {
+      for (const auto& e : flop.inp_edges()) {
+        if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == din_pid) {
           return e.driver;
         }
       }
@@ -6748,8 +6497,7 @@ public:
     // lambda (a `mod`/Verilog reg is cycle-0 state) — every σ is 0, so the
     // single eval pass above already ran an exhaustive mix check and the
     // fixpoint is pure dead work.
-    if (pendings_.empty() && inserted_.empty() && flop_depth_.empty() &&
-        ln_->get_lambda_kind() != "pipe") {
+    if (pendings_.empty() && inserted_.empty() && flop_depth_.empty() && ln_->get_lambda_kind() != "pipe") {
       return;
     }
     const size_t state_count = state_.size();
@@ -6760,17 +6508,16 @@ public:
         if (!state_.contains(nid)) {
           continue;
         }
-        const TR pinned = pin_tr(din_driver(nodes[i])); // σ(q) = σ(din)
-        auto it = tr_.find(nid);
-        if (it == tr_.end() || it->second.any != pinned.any ||
-            it->second.min != pinned.min || it->second.max != pinned.max) {
+        const TR pinned = pin_tr(din_driver(nodes[i]));  // σ(q) = σ(din)
+        auto     it     = tr_.find(nid);
+        if (it == tr_.end() || it->second.any != pinned.any || it->second.min != pinned.min || it->second.max != pinned.max) {
           tr_[nid] = pinned;
-          changed = true;
+          changed  = true;
         }
       }
       for (const size_t i : order) {
         if (state_.contains(nodes[i].get_debug_nid())) {
-          continue; // pinned above
+          continue;  // pinned above
         }
         eval_node(nodes[i]);
       }
@@ -6780,7 +6527,7 @@ public:
     }
 
     // 5. Narrow LN-inserted pipe output flops to the body deficit.
-    for (const auto &rec : pendings_) {
+    for (const auto& rec : pendings_) {
       if (!rec.is_sink) {
         continue;
       }
@@ -6794,14 +6541,17 @@ public:
       }
       const TR sb = pin_tr(din_driver(mn));
       if (sb.any || sb.min != sb.max) {
-        continue; // const-driven or ranged body sigma — declared depth stands
+        continue;  // const-driven or ranged body sigma — declared depth stands
       }
       const int64_t sigma = sb.min;
       if (sigma > rec.min) {
         error_at_node(mn,
                       "upass.tolg: output '{}' of '{}' lands at stage {}, pipe "
                       "declares {}",
-                      rec.name, ln_->get_top_module_name(), sigma, rec.min);
+                      rec.name,
+                      ln_->get_top_module_name(),
+                      sigma,
+                      rec.min);
       }
       const int64_t nmin = rec.min - sigma;
       const int64_t nmax = rec.max - sigma;
@@ -6820,77 +6570,87 @@ public:
     }
 
     // 6. Discharge pendings.
-    for (const auto &rec : pendings_) {
-      // Declared-reg output (`-> (reg q@[N])`). A STATE reg's flop crossing
-      // IS the interface cycle: home stage sigma(din) must be N−1. A
-      // feedforward (stage) reg as output is rejected for a PIPE (06c — the
-      // output is already registered by the contract); for a MOD it is just
-      // a registered output and sigma(q)=sigma(din)+1 discharges through
-      // the normal path below.
+    for (const auto& rec : pendings_) {
+      // Declared-reg output (`-> (reg q@[N])`). A STATE reg's crossing is
+      // already represented by the state cell: sigma(q)=sigma(din), so its
+      // home equals the declared landing cycle. A feedforward (stage) reg as
+      // output is rejected for a PIPE; for a MOD it discharges through the
+      // normal path.
       if (rec.is_sink) {
-        if (auto rit = reg_flop_by_name_.find(rec.name);
-            rit != reg_flop_by_name_.end()) {
-          const auto fnid = rit->second;
+        if (auto rit = reg_flop_by_name_.find(rec.name); rit != reg_flop_by_name_.end()) {
+          const auto fnid     = rit->second;
           const bool is_state = state_.contains(fnid);
           if (!is_state && ln_->get_lambda_kind() == "pipe") {
-            error_at_node(pending_anchor(rec), {"pipe-output-reg", "time"},
+            error_at_node(pending_anchor(rec),
+                          {"pipe-output-reg", "time"},
                           "feedforward register '{}' in the output list of "
                           "'{}' — the output is already "
                           "registered by the pipe contract",
-                          rec.name, ln_->get_top_module_name());
+                          rec.name,
+                          ln_->get_top_module_name());
           }
           if (is_state) {
             if (rec.min != rec.max) {
-              error_at_node(pending_anchor(rec), {"reg-output-cycle", "time"},
+              error_at_node(pending_anchor(rec),
+                            {"reg-output-cycle", "time"},
                             "register output '{}' of '{}' needs a fixed "
                             "declared cycle (got [{}, {}])",
-                            rec.name, ln_->get_top_module_name(), rec.min,
+                            rec.name,
+                            ln_->get_top_module_name(),
+                            rec.min,
                             rec.max);
             }
-            const TR home = tr_.contains(fnid) ? tr_.at(fnid) : TR{0, 0, true};
-            if (!home.any && home.min + 1 != rec.min) {
-              error_at_node(pending_anchor(rec), {"reg-output-cycle", "time"},
+            const TR      home          = tr_.contains(fnid) ? tr_.at(fnid) : TR{0, 0, true};
+            const int64_t required_home = rec.min;
+            if (!home.any && home.min != required_home) {
+              error_at_node(pending_anchor(rec),
+                            {"reg-output-cycle", "time"},
                             "state register '{}' of '{}' homes at stage {} but "
                             "its declared landing cycle {} "
                             "requires home {}",
-                            rec.name, ln_->get_top_module_name(), home.min,
-                            rec.min, rec.min - 1);
+                            rec.name,
+                            ln_->get_top_module_name(),
+                            home.min,
+                            rec.min,
+                            required_home);
             }
             rec.pin.attr(livehd::attrs::pending_time).del();
             continue;
           }
         }
       }
-      TR cur;
-      hhds::Node_class
-          anchor_node; // the value's driver cell, for the diag span
+      TR               cur;
+      hhds::Node_class anchor_node;  // the value's driver cell, for the diag span
       if (rec.is_sink) {
         auto edges = rec.pin.inp_edges();
         if (edges.empty()) {
-          continue; // undriven output already warned/nil-wired
+          continue;  // undriven output already warned/nil-wired
         }
-        cur = pin_tr(edges.front().driver);
+        cur         = pin_tr(edges.front().driver);
         anchor_node = edges.front().driver.get_master_node();
       } else {
-        cur = pin_tr(rec.pin);
+        cur         = pin_tr(rec.pin);
         anchor_node = rec.pin.get_master_node();
       }
       if (cur.any || (cur.min == rec.min && cur.max == rec.max)) {
-        rec.pin.attr(livehd::attrs::pending_time).del(); // removed once checked
+        rec.pin.attr(livehd::attrs::pending_time).del();  // removed once checked
         continue;
       }
       error_at_node(anchor_node,
                     "upass.tolg: '{}' in '{}' lands at cycle(s) ({},{}) but "
                     "({},{}) is {}",
-                    rec.name, ln_->get_top_module_name(), cur.min, cur.max,
-                    rec.min, rec.max,
-                    rec.is_sink ? "declared at the interface"
-                                : "asserted by `@[N]`");
+                    rec.name,
+                    ln_->get_top_module_name(),
+                    cur.min,
+                    cur.max,
+                    rec.min,
+                    rec.max,
+                    rec.is_sink ? "declared at the interface" : "asserted by `@[N]`");
     }
   }
 
 private:
-  [[nodiscard]] TR pin_tr(const hhds::Pin_class &dpin) {
+  [[nodiscard]] TR pin_tr(const hhds::Pin_class& dpin) {
     using livehd::graph_util::is_graph_input_pin;
     using livehd::graph_util::is_type_const;
     using livehd::graph_util::type_op_of;
@@ -6901,8 +6661,7 @@ private:
       return {0, 0, false};
     }
     auto mn = dpin.get_master_node();
-    if (mn.is_invalid() || is_type_const(mn) ||
-        type_op_of(mn) == Ntype_op::Nconst) {
+    if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
       return {0, 0, true};
     }
     auto it = tr_.find(mn.get_debug_nid());
@@ -6913,22 +6672,19 @@ private:
   }
 
   // Replace a comptime const sink (pipe_min/pipe_max) with a new value.
-  void replace_const_sink(const hhds::Node_class &node,
-                          std::string_view pin_name, int64_t value) {
-    const auto pid =
-        static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, pin_name));
-    for (const auto &e : node.inp_edges()) {
-      if (!e.sink.is_invalid() &&
-          static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
+  void replace_const_sink(const hhds::Node_class& node, std::string_view pin_name, int64_t value) {
+    const auto pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, pin_name));
+    for (const auto& e : node.inp_edges()) {
+      if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
         e.del_edge();
         break;
       }
     }
-    setup_sink_by_name(const_cast<hhds::Node_class &>(node), pin_name)
+    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name)
         .connect_driver(create_const(*g_, *Dlop::create_integer(value)));
   }
 
-  void eval_node(const hhds::Node_class &node) {
+  void eval_node(const hhds::Node_class& node) {
     using livehd::graph_util::is_type_flop;
     using livehd::graph_util::is_type_sub;
     using livehd::graph_util::type_op_of;
@@ -6954,15 +6710,14 @@ private:
     // chain muxes true/false), the select's σ times the value instead.
     // Everything else meets all inputs (consts unify).
     absl::flat_hash_set<uint64_t> skip_pids;
-    bool din_only = false;
-    const bool is_mem = type_op_of(node) == Ntype_op::Memory;
-    bool mem_clocked = false;
-    const bool is_mux = type_op_of(node) == Ntype_op::Mux ||
-                        type_op_of(node) == Ntype_op::Hotmux;
-    TR mux_sel{0, 0, true};
+    bool                          din_only    = false;
+    const bool                    is_mem      = type_op_of(node) == Ntype_op::Memory;
+    bool                          mem_clocked = false;
+    const bool                    is_mux      = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
+    TR                            mux_sel{0, 0, true};
     if (is_mux) {
-      skip_pids.insert(0); // pid 0 = "s" — the select never adds path depth
-      for (const auto &e : node.inp_edges()) {
+      skip_pids.insert(0);  // pid 0 = "s" — the select never adds path depth
+      for (const auto& e : node.inp_edges()) {
         if (!e.sink.is_invalid() && e.sink.get_port_id() == 0) {
           mux_sel = pin_tr(e.driver);
           break;
@@ -6977,40 +6732,36 @@ private:
       // exactly like a scalar reg read — @[0] from the read address. Only a
       // SYNC read (type=1, registered dout) charges the +1 crossing. The
       // clock sinks are excluded from the meet either way.
-      constexpr int kStride =
-          static_cast<int>(Ntype::Memory_port_stride); // Memory per-port sink
-                                                       // stride, graph/cell.hpp
-      for (const auto &e : node.inp_edges()) {
+      constexpr int kStride = static_cast<int>(Ntype::Memory_port_stride);  // Memory per-port sink
+                                                                            // stride, graph/cell.hpp
+      for (const auto& e : node.inp_edges()) {
         if (e.sink.is_invalid()) {
           continue;
         }
-        const auto raw_pid = static_cast<int>(e.sink.get_port_id());
-        const auto sink_name =
-            Ntype::get_sink_name(Ntype_op::Memory, raw_pid % kStride);
-        if (sink_name == "clock_pin" && raw_pid < kStride) {
+        const auto raw_pid   = static_cast<int>(e.sink.get_port_id());
+        const auto sink_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % kStride);
+        if (sink_name == "clock_pin") {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
         } else if (sink_name == "type" && raw_pid < kStride) {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
-          if (auto v = livehd::graph_util::hydrate_const(e.driver);
-              v.is_just_i64() && v.to_just_i64() == 1) {
-            mem_clocked = true; // sync read: dout is registered
+          if (auto v = livehd::graph_util::hydrate_const(e.driver); v.is_just_i64() && v.to_just_i64() == 1) {
+            mem_clocked = true;  // sync read: dout is registered
           }
         }
       }
     } else if (is_type_sub(node)) {
       auto gio = node.get_subnode_io();
       if (gio) {
-        for (const auto &d : gio->get_input_pin_decls()) {
+        for (const auto& d : gio->get_input_pin_decls()) {
           if (is_clock_port_name(d.name) || is_reset_port_name(d.name)) {
             skip_pids.insert(static_cast<uint64_t>(d.port_id));
           }
         }
       }
     }
-    const auto din_pid =
-        static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
+    const auto din_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
 
-    for (const auto &e : node.inp_edges()) {
+    for (const auto& e : node.inp_edges()) {
       if (e.sink.is_invalid()) {
         continue;
       }
@@ -7038,13 +6789,18 @@ private:
                       "upass.tolg: '{}' mixes values at different cycles "
                       "(({},{}) vs ({},{})) at a {} cell (sink pid {}) "
                       "— align them with `stage[N]` first",
-                      ln_->get_top_module_name(), meet.min, meet.max, t.min,
-                      t.max, Ntype::get_name(type_op_of(node)), spid);
+                      ln_->get_top_module_name(),
+                      meet.min,
+                      meet.max,
+                      t.min,
+                      t.max,
+                      Ntype::get_name(type_op_of(node)),
+                      spid);
       }
     }
 
     if (is_mux && meet.any) {
-      meet = mux_sel; // const-armed mux: the select times the value
+      meet = mux_sel;  // const-armed mux: the select times the value
     }
 
     TR out = meet.any ? TR{0, 0, true} : meet;
@@ -7056,20 +6812,19 @@ private:
         out = {out.min + 1, out.max + 1, false};
       }
     } else if (is_type_flop(node)) {
-      auto it = flop_depth_.find(nid);
+      auto    it   = flop_depth_.find(nid);
       int64_t dmin = 1;
       int64_t dmax = 1;
       if (it != flop_depth_.end()) {
         dmin = it->second.first;
-        dmax = it->second.second < it->second.first ? it->second.first
-                                                    : it->second.second;
+        dmax = it->second.second < it->second.first ? it->second.first : it->second.second;
       }
       if (out.any) {
         out = {0, 0, false};
       }
       out = {out.min + dmin, out.max + dmax, false};
     } else if (is_type_sub(node)) {
-      auto it = sub_time_.find(nid);
+      auto    it   = sub_time_.find(nid);
       int64_t dmin = it != sub_time_.end() ? it->second.first : 0;
       int64_t dmax = it != sub_time_.end() ? it->second.second : 0;
       if (out.any) {
@@ -7080,21 +6835,19 @@ private:
     tr_[nid] = out;
   }
 
-  hhds::Graph *g_;
-  std::shared_ptr<Lnast> ln_;
-  std::vector<Pending_rec> pendings_;
+  hhds::Graph*                                               g_;
+  std::shared_ptr<Lnast>                                     ln_;
+  std::vector<Pending_rec>                                   pendings_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> flop_depth_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
-  absl::flat_hash_map<uint64_t, std::string> plain_regs_;
-  absl::flat_hash_set<uint64_t> inserted_;
-  absl::flat_hash_set<uint64_t>
-      wire_cuts_; // 2c-wire: cut Verilog comb-cycle wire in-edges
-  absl::flat_hash_map<std::string, uint64_t> reg_flop_by_name_;
-  absl::flat_hash_set<uint64_t>
-      decl_cycle_regs_; // regs with an explicit @[N]/interface cycle
-                        // (feedforward)
-  absl::flat_hash_set<uint64_t> state_;
-  absl::flat_hash_map<uint64_t, TR> tr_;
+  absl::flat_hash_map<uint64_t, std::string>                 plain_regs_;
+  absl::flat_hash_set<uint64_t>                              inserted_;
+  absl::flat_hash_set<uint64_t>                              wire_cuts_;  // 2c-wire: cut Verilog comb-cycle wire in-edges
+  absl::flat_hash_map<std::string, uint64_t>                 reg_flop_by_name_;
+  absl::flat_hash_set<uint64_t>                              decl_cycle_regs_;  // regs with an explicit @[N]/interface cycle
+                                                                                // (feedforward)
+  absl::flat_hash_set<uint64_t>                              state_;
+  absl::flat_hash_map<uint64_t, TR>                          tr_;
 };
 
 // Transitive clock need. A module needs a clock when its own
@@ -7103,33 +6856,30 @@ private:
 // must be forwarded). Memoized over the registry; an instantiation cycle
 // (illegal mutual hierarchy) breaks false so we never hang — the real
 // recursion diagnostic belongs to a later phase.
-[[nodiscard]] bool tree_declares_reg(const std::shared_ptr<Lnast> &lnast) {
-  auto &cache_slot = lnast->tolg_scan_cache().declares_reg;
+[[nodiscard]] bool tree_declares_reg(const std::shared_ptr<Lnast>& lnast) {
+  auto& cache_slot = lnast->tolg_scan_cache().declares_reg;
   if (cache_slot.has_value()) {
     return *cache_slot;
   }
   // A reg whose `clock_pin=NAME` attr names its clock explicitly does not
   // need the implicit `clock` input (the slang reader stamps these for
   // non-clk/clock Verilog clock names); collect the covered names first.
-  absl::flat_hash_set<std::string> clocked_elsewhere;
-  std::function<void(const Lnast_nid &)> scan_attrs =
-      [&](const Lnast_nid &nid) {
-        if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
-          auto tgt = lnast->get_first_child(nid);
-          auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
-          if (!key.is_invalid() && lnast->get_name(key) == "clock_pin") {
-            clocked_elsewhere.emplace(lnast->get_name(tgt));
-          }
-        }
-        for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-             c = lnast->get_sibling_next(c)) {
-          scan_attrs(c);
-        }
-      };
+  absl::flat_hash_set<std::string>      clocked_elsewhere;
+  std::function<void(const Lnast_nid&)> scan_attrs = [&](const Lnast_nid& nid) {
+    if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
+      auto tgt = lnast->get_first_child(nid);
+      auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
+      if (!key.is_invalid() && lnast->get_name(key) == "clock_pin") {
+        clocked_elsewhere.emplace(lnast->get_name(tgt));
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      scan_attrs(c);
+    }
+  };
   scan_attrs(lnast->get_root());
 
-  std::function<bool(const Lnast_nid &)> has_reg =
-      [&](const Lnast_nid &nid) -> bool {
+  std::function<bool(const Lnast_nid&)> has_reg = [&](const Lnast_nid& nid) -> bool {
     // 1a-mem — a __memory(cfg) instantiation needs the clock too (a type=2
     // array config leaves the minted input unused; acceptable, documented).
     if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
@@ -7147,16 +6897,14 @@ private:
           auto c2 = lnast->get_sibling_next(c1);
           if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
             auto mode = lnast->get_name(c2);
-            if ((mode == "reg" || mode.starts_with("reg ")) &&
-                !clocked_elsewhere.contains(lnast->get_name(c0))) {
+            if ((mode == "reg" || mode.starts_with("reg ")) && !clocked_elsewhere.contains(lnast->get_name(c0))) {
               return true;
             }
           }
         }
       }
     }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-         c = lnast->get_sibling_next(c)) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (has_reg(c)) {
         return true;
       }
@@ -7164,16 +6912,15 @@ private:
     return false;
   };
   const bool result = has_reg(lnast->get_root());
-  cache_slot = result;
+  cache_slot        = result;
   return result;
 }
 
-void collect_callee_names_impl(const std::shared_ptr<Lnast> &lnast,
-                               std::vector<std::string> &out) {
-  std::function<void(const Lnast_nid &)> walk = [&](const Lnast_nid &nid) {
+void collect_callee_names_impl(const std::shared_ptr<Lnast>& lnast, std::vector<std::string>& out) {
+  std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
     if (lnast->is_dce_dead(nid)) {
-      return; // dce:mark — a dead instance call must not pull clock/reset
-              // onto the parent (the rebuilt-tree path would have dropped it)
+      return;  // dce:mark — a dead instance call must not pull clock/reset
+               // onto the parent (the rebuilt-tree path would have dropped it)
     }
     if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
@@ -7185,8 +6932,7 @@ void collect_callee_names_impl(const std::shared_ptr<Lnast> &lnast,
         // imported stateful children too (else the parent skips registering the
         // clock/reset it must forward — the "needs_reset bug" at
         // instantiation).
-        if (!c1.is_invalid() && (Lnast_ntype::is_ref(lnast->get_type(c1)) ||
-                                 Lnast_ntype::is_const(lnast->get_type(c1)))) {
+        if (!c1.is_invalid() && (Lnast_ntype::is_ref(lnast->get_type(c1)) || Lnast_ntype::is_const(lnast->get_type(c1)))) {
           std::string nm(lnast->get_name(c1));
           if (nm.size() >= 2 && nm.front() == '\'' && nm.back() == '\'') {
             nm = nm.substr(1, nm.size() - 2);
@@ -7195,8 +6941,7 @@ void collect_callee_names_impl(const std::shared_ptr<Lnast> &lnast,
         }
       }
     }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-         c = lnast->get_sibling_next(c)) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       walk(c);
     }
   };
@@ -7206,9 +6951,8 @@ void collect_callee_names_impl(const std::shared_ptr<Lnast> &lnast,
 // Cached callee-name list. The unquoted by-name/import callees are a pure
 // function of this immutable-during-tolg tree, queried by needs_clock_rec /
 // needs_reset_rec once per ancestor and phase — compute once.
-const std::vector<std::string> &
-collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
-  auto &cache_slot = lnast->tolg_scan_cache().callee_names;
+const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast>& lnast) {
+  auto& cache_slot = lnast->tolg_scan_cache().callee_names;
   if (!cache_slot.has_value()) {
     std::vector<std::string> names;
     collect_callee_names_impl(lnast, names);
@@ -7220,21 +6964,19 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
 // Memoized, cycle-guarded transitive "does this module (or any pipe/mod callee)
 // satisfy `declares`" walk. `declares` is the per-tree leaf predicate — a plain
 // reg declare (needs a clock) or a reset-carrying reg declare (needs a reset).
-[[nodiscard]] bool needs_transitive(const std::shared_ptr<Lnast> &lnast,
-                                    const uPass_tolg::Registry &registry,
-                                    absl::flat_hash_map<std::string, bool> &memo,
-                                    absl::flat_hash_set<std::string> &visiting,
-                                    bool (*declares)(const std::shared_ptr<Lnast> &)) {
+[[nodiscard]] bool needs_transitive(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
+                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting,
+                                    bool (*declares)(const std::shared_ptr<Lnast>&)) {
   const std::string key(lnast->get_top_module_name());
   if (auto it = memo.find(key); it != memo.end()) {
     return it->second;
   }
   if (!visiting.insert(key).second) {
-    return false; // cycle guard
+    return false;  // cycle guard
   }
   bool needs = declares(lnast);
   if (!needs) {
-    for (const auto &cn : collect_callee_names(lnast)) {
+    for (const auto& cn : collect_callee_names(lnast)) {
       auto callee = resolve_callee_lnast(cn, registry);
       if (!callee) {
         continue;
@@ -7254,10 +6996,8 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
   return needs;
 }
 
-[[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast> &lnast,
-                                   const uPass_tolg::Registry &registry,
-                                   absl::flat_hash_map<std::string, bool> &memo,
-                                   absl::flat_hash_set<std::string> &visiting) {
+[[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
+                                   absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reg);
 }
 
@@ -7265,61 +7005,50 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
 // declare's trailing const [value] child) without an explicit per-reg
 // `reset_pin` attr override (those bind their own reset input). A ref init is
 // counted (tolg later requires it const; the reset NEED is already real).
-[[nodiscard]] bool
-tree_declares_reset_reg_impl(const std::shared_ptr<Lnast> &lnast) {
-  absl::flat_hash_set<std::string> explicit_rp;
-  std::function<void(const Lnast_nid &)> collect_rp =
-      [&](const Lnast_nid &nid) {
-        if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
-          auto c0 = lnast->get_first_child(nid);
-          if (!c0.is_invalid()) {
-            auto c1 = lnast->get_sibling_next(c0);
-            if (!c1.is_invalid() &&
-                Lnast_ntype::is_const(lnast->get_type(c1)) &&
-                lnast->get_name(c1) == "reset_pin") {
-              explicit_rp.emplace(lnast->get_name(c0));
-            }
-          }
+[[nodiscard]] bool tree_declares_reset_reg_impl(const std::shared_ptr<Lnast>& lnast) {
+  absl::flat_hash_set<std::string>      explicit_rp;
+  std::function<void(const Lnast_nid&)> collect_rp = [&](const Lnast_nid& nid) {
+    if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
+      auto c0 = lnast->get_first_child(nid);
+      if (!c0.is_invalid()) {
+        auto c1 = lnast->get_sibling_next(c0);
+        if (!c1.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c1)) && lnast->get_name(c1) == "reset_pin") {
+          explicit_rp.emplace(lnast->get_name(c0));
         }
-        for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-             c = lnast->get_sibling_next(c)) {
-          collect_rp(c);
-        }
-      };
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      collect_rp(c);
+    }
+  };
   collect_rp(lnast->get_root());
 
-  std::function<bool(const Lnast_nid &)> walk =
-      [&](const Lnast_nid &nid) -> bool {
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
     if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
       if (!c0.is_invalid()) {
         auto c1 = lnast->get_sibling_next(c0);
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-          auto mode = lnast->get_name(c2);
+          auto       mode     = lnast->get_name(c2);
           // 1a-mem — array regs are memories: no reset hardware in this
           // slice (only nil/0sb? init is accepted), so they never need the
           // implicit reset input.
-          const bool is_array =
-              !c1.is_invalid() &&
-              Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
+          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
           // "latch" counts too (2f-latch M7): a latch with a reset value needs
           // the module's reset input created just as a flop does. Keying this
           // on "reg" alone is why `reg l:u8:[latch=true] = 3` used to die with
           // "has a reset value but <mod> has no reset input (setup_io bug)" —
           // the reg was real, the PORT was never made.
           if (!is_array && (mode == "reg" || mode.starts_with("reg ") || mode == "latch")) {
-            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid();
-                 c = lnast->get_sibling_next(c)) {
+            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);
               if (Lnast_ntype::is_stages(ct)) {
-                break; // stage reg — no init slot
+                break;  // stage reg — no init slot
               }
               if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
-                const bool nil_init =
-                    Lnast_ntype::is_const(ct) && lnast->get_name(c) == "nil";
-                if (!nil_init &&
-                    !explicit_rp.contains(std::string(lnast->get_name(c0)))) {
+                const bool nil_init = Lnast_ntype::is_const(ct) && lnast->get_name(c) == "nil";
+                if (!nil_init && !explicit_rp.contains(std::string(lnast->get_name(c0)))) {
                   return true;
                 }
                 break;
@@ -7329,8 +7058,7 @@ tree_declares_reset_reg_impl(const std::shared_ptr<Lnast> &lnast) {
         }
       }
     }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-         c = lnast->get_sibling_next(c)) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (walk(c)) {
         return true;
       }
@@ -7345,32 +7073,26 @@ tree_declares_reset_reg_impl(const std::shared_ptr<Lnast> &lnast) {
 // reset, but if the module already has a reset-candidate input it binds it:
 // the memory lowering adds per-entry restore write ports (reset re-loads the
 // init contents in one cycle).
-[[nodiscard]] bool
-tree_declares_reset_reg(const std::shared_ptr<Lnast> &lnast) {
-  auto &slot = lnast->tolg_scan_cache().declares_reset_reg;
+[[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
+  auto& slot = lnast->tolg_scan_cache().declares_reset_reg;
   if (!slot.has_value()) {
     slot = tree_declares_reset_reg_impl(lnast);
   }
   return *slot;
 }
 
-[[nodiscard]] bool
-tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast> &lnast) {
-  std::function<bool(const Lnast_nid &)> walk =
-      [&](const Lnast_nid &nid) -> bool {
+[[nodiscard]] bool tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast>& lnast) {
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
     if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
       if (!c0.is_invalid()) {
         auto c1 = lnast->get_sibling_next(c0);
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-          auto mode = lnast->get_name(c2);
-          const bool is_array =
-              !c1.is_invalid() &&
-              Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
+          auto       mode     = lnast->get_name(c2);
+          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
           if (is_array && (mode == "reg" || mode.starts_with("reg "))) {
-            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid();
-                 c = lnast->get_sibling_next(c)) {
+            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);
               if (Lnast_ntype::is_const(ct)) {
                 auto txt = lnast->get_name(c);
@@ -7380,15 +7102,14 @@ tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast> &lnast) {
                 break;
               }
               if (Lnast_ntype::is_ref(ct)) {
-                return true; // tuple-literal init
+                return true;  // tuple-literal init
               }
             }
           }
         }
       }
     }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-         c = lnast->get_sibling_next(c)) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (walk(c)) {
         return true;
       }
@@ -7398,30 +7119,26 @@ tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast> &lnast) {
   return walk(lnast->get_root());
 }
 
-[[nodiscard]] bool
-tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
-  auto &slot = lnast->tolg_scan_cache().declares_init_reg_array;
+[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
+  auto& slot = lnast->tolg_scan_cache().declares_init_reg_array;
   if (!slot.has_value()) {
     slot = tree_declares_init_reg_array_impl(lnast);
   }
   return *slot;
 }
 
-[[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast> &lnast,
-                                   const uPass_tolg::Registry &registry,
-                                   absl::flat_hash_map<std::string, bool> &memo,
-                                   absl::flat_hash_set<std::string> &visiting) {
+[[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
+                                   absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reset_reg);
 }
 
 // Shared phase-1 io+clock+reset GraphIO registration. Idempotent (the GraphIO
 // add calls are has_-guarded). Returns the clock/reset binding for the body
 // build; empty names = the module needs none.
-[[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast> &lnast,
-                                     std::string_view lib_path,
-                                     const uPass_tolg::Registry &registry) {
-  auto &lib = livehd::Hhds_graph_library::instance(lib_path);
-  auto mod_name = std::string(lnast->get_graph_name());
+[[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
+                                     const uPass_tolg::Registry& registry) {
+  auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
+  auto  mod_name = std::string(lnast->get_graph_name());
 
   auto gio = lib.find_io(mod_name);
   if (!gio) {
@@ -7431,8 +7148,8 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
   // Declare I/O on the GraphIO: positional pin ids + meaningful bits + sign.
   // Port widths cgen emits come from these decls (meaningful width, not the +1
   // internal convention).
-  hhds::Port_id pid = 1;
-  auto declare = [&](const Lnast_io_entry &e, bool is_input) {
+  hhds::Port_id pid     = 1;
+  auto          declare = [&](const Lnast_io_entry& e, bool is_input) {
     // Canonical external port name: unquote a slang-read escaped id's backtick
     // form (`` `ar.x` `` -> `ar.x`) so the GraphIO port the LEC matches on is
     // identical to the yosys / Pyrope readers' name. (Mirrors canon_io_name in
@@ -7445,9 +7162,7 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
         nm = inner;
       }
     }
-    uint32_t bits = e.kind == Io_kind::boolean
-                        ? 1u
-                        : (e.bits > 0 ? static_cast<uint32_t>(e.bits) : 1u);
+    uint32_t bits = e.kind == Io_kind::boolean ? 1u : (e.bits > 0 ? static_cast<uint32_t>(e.bits) : 1u);
     if (is_input) {
       if (!gio->has_input(nm) && !gio->has_output(nm)) {
         gio->add_input(nm, pid);
@@ -7461,10 +7176,10 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
     gio->set_unsign(nm, !e.is_signed);
     ++pid;
   };
-  for (const auto &e : lnast->io_meta().inputs) {
+  for (const auto& e : lnast->io_meta().inputs) {
     declare(e, /*is_input=*/true);
   }
-  for (const auto &e : lnast->io_meta().outputs) {
+  for (const auto& e : lnast->io_meta().outputs) {
     declare(e, /*is_input=*/false);
   }
 
@@ -7473,18 +7188,17 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
   // forwarded) and the partition has no clk/clock input, mint a 1-bit
   // unsigned "clock" graph input for the flops'/instances' clock_pin.
   std::string clock_name;
-  bool clock_minted = false;
+  bool        clock_minted = false;
   {
     absl::flat_hash_map<std::string, bool> memo;
-    absl::flat_hash_set<std::string> visiting;
+    absl::flat_hash_set<std::string>       visiting;
     if (needs_clock_rec(lnast, registry, memo, visiting)) {
       // Reuse a declared clk/clock input only when it can actually be a
       // clock (bool or <=1-bit; untyped bits==0 included) — a multi-bit
       // DATA port that happens to be named clk/clock must not be hijacked
       // as the flop clock.
-      for (const auto &e : lnast->io_meta().inputs) {
-        if (is_clock_port_name(e.name) &&
-            (e.kind == Io_kind::boolean || e.bits <= 1)) {
+      for (const auto& e : lnast->io_meta().inputs) {
+        if (is_clock_port_name(e.name) && (e.kind == Io_kind::boolean || e.bits <= 1)) {
           clock_name = e.name;
           break;
         }
@@ -7492,23 +7206,25 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
       if (clock_name.empty()) {
         // Minting the implicit "clock" input collides with any existing
         // multi-bit clock-named port — diagnose instead of double-driving.
-        for (const auto &e : lnast->io_meta().inputs) {
+        for (const auto& e : lnast->io_meta().inputs) {
           if ((e.name == "clock")) {
             livehd::diag::err("upass.tolg", "clock-collision", "time")
-                .msg("input 'clock' of '{}' is not usable as the pipeline "
-                     "clock (multi-bit data port) "
-                     "and collides with the implicit clock — rename it or "
-                     "declare it 1-bit",
-                     mod_name)
+                .msg(
+                    "input 'clock' of '{}' is not usable as the pipeline "
+                    "clock (multi-bit data port) "
+                    "and collides with the implicit clock — rename it or "
+                    "declare it 1-bit",
+                    mod_name)
                 .fatal();
           }
         }
-        for (const auto &e : lnast->io_meta().outputs) {
+        for (const auto& e : lnast->io_meta().outputs) {
           if ((e.name == "clock")) {
             livehd::diag::err("upass.tolg", "clock-collision", "time")
-                .msg("output 'clock' of '{}' collides with the implicit "
-                     "pipeline clock — rename it",
-                     mod_name)
+                .msg(
+                    "output 'clock' of '{}' collides with the implicit "
+                    "pipeline clock — rename it",
+                    mod_name)
                 .fatal();
           }
         }
@@ -7530,55 +7246,58 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
   // are active-low) or mint a 1-bit unsigned "reset" graph input — the same
   // bind-before-mint pattern as the implicit clock.
   std::string reset_name;
-  bool reset_minted = false;
-  bool reset_neg = false;
+  bool        reset_minted = false;
+  bool        reset_neg    = false;
   {
     auto bind_reset_candidate = [&]() {
       int candidates = 0;
-      for (const auto &e : lnast->io_meta().inputs) {
-        const bool is_cand = (is_reset_port_name(e.name)) &&
-                             (e.kind == Io_kind::boolean || e.bits <= 1);
+      for (const auto& e : lnast->io_meta().inputs) {
+        const bool is_cand = (is_reset_port_name(e.name)) && (e.kind == Io_kind::boolean || e.bits <= 1);
         if (!is_cand) {
           continue;
         }
         ++candidates;
         if (reset_name.empty()) {
           reset_name = e.name;
-          reset_neg = e.name.size() > 2 && str_tools::ends_with(e.name, "_n");
+          reset_neg  = e.name.size() > 2 && str_tools::ends_with(e.name, "_n");
         }
       }
       if (candidates > 1) {
         livehd::diag::err("upass.tolg", "reset-ambiguous", "time")
-            .msg("'{}' has multiple reset-candidate inputs — give each reg an "
-                 "explicit `:[reset_pin=…]`",
-                 mod_name)
-            .hint("name exactly one of reset/rst/reset_n/rst_n, or bind "
-                  "per-reg with `:[reset_pin=…]`")
+            .msg(
+                "'{}' has multiple reset-candidate inputs — give each reg an "
+                "explicit `:[reset_pin=…]`",
+                mod_name)
+            .hint(
+                "name exactly one of reset/rst/reset_n/rst_n, or bind "
+                "per-reg with `:[reset_pin=…]`")
             .fatal();
       }
     };
     absl::flat_hash_map<std::string, bool> memo;
-    absl::flat_hash_set<std::string> visiting;
+    absl::flat_hash_set<std::string>       visiting;
     if (needs_reset_rec(lnast, registry, memo, visiting)) {
       bind_reset_candidate();
       if (reset_name.empty()) {
-        for (const auto &e : lnast->io_meta().inputs) {
+        for (const auto& e : lnast->io_meta().inputs) {
           if ((e.name == "reset")) {
             livehd::diag::err("upass.tolg", "reset-collision", "time")
-                .msg("input 'reset' of '{}' is not usable as the register "
-                     "reset (multi-bit data port) "
-                     "and collides with the implicit reset — rename it or "
-                     "declare it 1-bit",
-                     mod_name)
+                .msg(
+                    "input 'reset' of '{}' is not usable as the register "
+                    "reset (multi-bit data port) "
+                    "and collides with the implicit reset — rename it or "
+                    "declare it 1-bit",
+                    mod_name)
                 .fatal();
           }
         }
-        for (const auto &e : lnast->io_meta().outputs) {
+        for (const auto& e : lnast->io_meta().outputs) {
           if ((e.name == "reset")) {
             livehd::diag::err("upass.tolg", "reset-collision", "time")
-                .msg("output 'reset' of '{}' collides with the implicit "
-                     "register reset — rename it",
-                     mod_name)
+                .msg(
+                    "output 'reset' of '{}' collides with the implicit "
+                    "register reset — rename it",
+                    mod_name)
                 .fatal();
           }
         }
@@ -7603,24 +7322,26 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
   return {clock_name, clock_minted, reset_name, reset_minted, reset_neg};
 }
 
-} // namespace
+}  // namespace
 
-void uPass_tolg::detect_lg_collisions(const Registry &registry) {
-  std::vector<std::pair<std::string, std::string>>
-      seen; // (graph name, owning unit)
-  for (const auto &ln : registry) {
+void uPass_tolg::detect_lg_collisions(const Registry& registry) {
+  std::vector<std::pair<std::string, std::string>> seen;  // (graph name, owning unit)
+  for (const auto& ln : registry) {
     if (!ln || ln->is_template() || ln->io_meta().empty()) {
-      continue; // same filter as register_io/run: only units that mint a
-                // GraphIO
+      continue;  // same filter as register_io/run: only units that mint a
+                 // GraphIO
     }
     std::string gname(ln->get_graph_name());
     std::string unit(ln->get_top_module_name());
-    for (const auto &[g, u] : seen) {
+    for (const auto& [g, u] : seen) {
       if (g == gname && u != unit) {
         livehd::diag::err("upass.tolg", "lg-name-collision", "type")
-            .msg("two units map to the same lgraph/module name '{}' (units "
-                 "'{}' and '{}')",
-                 gname, u, unit)
+            .msg(
+                "two units map to the same lgraph/module name '{}' (units "
+                "'{}' and '{}')",
+                gname,
+                u,
+                unit)
             .hint("give each `pub` definition a distinct name and/or filename")
             .fatal();
       }
@@ -7640,16 +7361,15 @@ void uPass_tolg::detect_lg_collisions(const Registry &registry) {
 // (`test t(cycles:u20=20)`) it gains io_meta, defeating that guard, and the
 // sim-only body would otherwise be lowered and fail with a dangling `cassert`
 // reference.
-static bool is_sim_only_unit(const std::shared_ptr<Lnast> &lnast) {
-  const auto name = lnast->get_graph_name();
+static bool is_sim_only_unit(const std::shared_ptr<Lnast>& lnast) {
+  const auto name   = lnast->get_graph_name();
   const auto entity = name.substr(name.rfind('.') + 1);
   return !entity.empty() && entity.front() == '%';
 }
 
 // Decide ONE surviving `cassert` node on the post-upass tree, with exactly the
 // predicate lower_cassert applies to the folded driver pin.
-static void decide_unlowered_cassert(const std::shared_ptr<Lnast> &lnast,
-                                     const Lnast_nid &nid) {
+static void decide_unlowered_cassert(const std::shared_ptr<Lnast>& lnast, const Lnast_nid& nid) {
   auto cond = lnast->get_first_child(nid);
   if (cond.is_invalid()) {
     return;
@@ -7662,17 +7382,15 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast> &lnast,
   // search, or a message merely CONTAINING the text would retype the
   // obligation (the false-PROVEN bug lower_cassert documents).
   auto kind_nid = lnast->get_sibling_next(cond);
-  if (kind_nid.is_invalid()
-      || !Lnast_ntype::is_const(lnast->get_type(kind_nid))
+  if (kind_nid.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(kind_nid))
       || lnast->get_name(kind_nid) != "__fkind__cassert") {
     return;
   }
   std::string msg;
-  if (auto m = lnast->get_sibling_next(kind_nid);
-      !m.is_invalid() && Lnast_ntype::is_const(lnast->get_type(m))) {
+  if (auto m = lnast->get_sibling_next(kind_nid); !m.is_invalid() && Lnast_ntype::is_const(lnast->get_type(m))) {
     msg = std::string{lnast->get_name(m)};
     if (msg.size() >= 2 && msg.front() == '\'' && msg.back() == '\'') {
-      msg = msg.substr(1, msg.size() - 2); // strip Lconst::to_pyrope quoting
+      msg = msg.substr(1, msg.size() - 2);  // strip Lconst::to_pyrope quoting
     }
   }
   const bool const_cond = Lnast_ntype::is_const(lnast->get_type(cond));
@@ -7688,20 +7406,18 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast> &lnast,
       return;
     }
   }
-  std::string text
-      = const_cond ? "upass.tolg: cassert condition is not true at compile time"
-                   : "upass.tolg: cassert condition did not fold to a "
-                     "compile-time value";
+  std::string text = const_cond ? "upass.tolg: cassert condition is not true at compile time"
+                                : "upass.tolg: cassert condition did not fold to a "
+                                  "compile-time value";
   if (!msg.empty()) {
     text += ": " + msg;
   }
-  livehd::diag::err("upass.tolg",
-                    const_cond ? "cassert-false" : "cassert-not-comptime",
-                    "unsupported")
+  livehd::diag::err("upass.tolg", const_cond ? "cassert-false" : "cassert-not-comptime", "unsupported")
       .at(lnast->span_of(nid))
       .msg("{}", text)
-      .hint("cassert is an elaboration check: it must fold to true at compile "
-            "time; use `assert` for a condition that must hold of the hardware")
+      .hint(
+          "cassert is an elaboration check: it must fold to true at compile "
+          "time; use `assert` for a condition that must hold of the hardware")
       .fatal();
 }
 
@@ -7730,9 +7446,8 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast> &lnast,
 // compilation is producing hardware". An LNAST-only flow (lnast-dump, the LSP,
 // the `comptime`/`upass` test tiers, which all pass upass.tolg=false) may still
 // carry an unresolved cassert, exactly as the ruling allows.
-static void check_unlowered_casserts(const std::shared_ptr<Lnast> &lnast) {
-  if (!lnast || lnast->is_template() || lnast->is_pre_elaborated()
-      || lnast->get_top_module_name().ends_with(".__pub")) {
+static void check_unlowered_casserts(const std::shared_ptr<Lnast>& lnast) {
+  if (!lnast || lnast->is_template() || lnast->is_pre_elaborated() || lnast->get_top_module_name().ends_with(".__pub")) {
     return;
   }
   // Whole-subtree walk: a cassert can sit inside a `tick` body, an `if`/`uif`
@@ -7741,9 +7456,8 @@ static void check_unlowered_casserts(const std::shared_ptr<Lnast> &lnast) {
   // never sees one. A `match` lowers to a `uif` that KEEPS its untaken arms;
   // deciding the casserts in them is the same behavior lower_cassert already
   // has for lambda bodies.)
-  std::function<void(const Lnast_nid &)> walk = [&](const Lnast_nid &nid) {
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid();
-         c = lnast->get_sibling_next(c)) {
+  std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (Lnast_ntype::is_cassert(lnast->get_type(c))) {
         decide_unlowered_cassert(lnast, c);
       }
@@ -7753,14 +7467,12 @@ static void check_unlowered_casserts(const std::shared_ptr<Lnast> &lnast) {
   walk(lnast->get_root());
 }
 
-void uPass_tolg::register_io(const std::shared_ptr<Lnast> &lnast,
-                             std::string_view lib_path,
-                             const Registry &registry) {
+void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry) {
   if (!lnast || lnast->io_meta().empty()) {
-    return; // not a lowerable module (e.g. the empty file-root tree)
+    return;  // not a lowerable module (e.g. the empty file-root tree)
   }
   if (is_sim_only_unit(lnast)) {
-    return; // testbench / spawn comb — never reserve a GraphIO for it
+    return;  // testbench / spawn comb — never reserve a GraphIO for it
   }
   // A deferred template (untyped/var-args/generic signature) emits no
   // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
@@ -7772,9 +7484,8 @@ void uPass_tolg::register_io(const std::shared_ptr<Lnast> &lnast,
   (void)setup_io_impl(lnast, lib_path, registry);
 }
 
-std::shared_ptr<hhds::Graph>
-uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
-                const Registry &registry, std::string_view reset_style) {
+std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
+                                             const Registry& registry, std::string_view reset_style) {
   if (!lnast || lnast->io_meta().empty()) {
     // Not a lowerable module (the file-root tree, or a parameterless `test`
     // block). No lower_cassert will run on it, so discharge-or-fail its
@@ -7785,8 +7496,7 @@ uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
   // One perfetto slice per lowered unit (profiling builds only) — tolg is
   // invoked directly by the kernel (not via run_step), so without this the
   // whole LNAST->LGraph phase was a blank stretch in the trace.
-  TRACE_EVENT("pass", "lnast.tolg", "unit",
-              std::string(lnast->get_top_module_name()));
+  TRACE_EVENT("pass", "lnast.tolg", "unit", std::string(lnast->get_top_module_name()));
   if (is_sim_only_unit(lnast)) {
     // Testbench / spawn comb — checked by `lhd sim`, not lowered to hardware.
     // Its `assert`s stay for prp_sim; its `cassert`s are elaboration checks
@@ -7803,9 +7513,8 @@ uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
 
   auto io_setup = setup_io_impl(lnast, lib_path, registry);
 
-  auto &lib = livehd::Hhds_graph_library::instance(lib_path);
-  auto gio = lib.find_io(std::string(
-      lnast->get_graph_name())); // 2f-lg: lg override or mangled name
+  auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+  auto  gio = lib.find_io(std::string(lnast->get_graph_name()));  // 2f-lg: lg override or mangled name
   // Re-emitting into a --emit-dir that already holds a prior build: instance()
   // deserializes the persisted bodies from disk (GraphLibrary::load
   // materializes every graph_<gid>/body.bin), so gio->has_graph() is true here
@@ -7821,8 +7530,7 @@ uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
   }
   auto g_shared = gio->create_graph();
 
-  Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib,
-               reset_style == "async");
+  Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
   builder.build();
 
   // The combined pipe/mod time checker at the tolg seam. A `comb` runs it too
@@ -7831,8 +7539,11 @@ uPass_tolg::run(const std::shared_ptr<Lnast> &lnast, std::string_view lib_path,
   {
     const auto kind = lnast->get_lambda_kind();
     if (kind == "pipe" || kind == "mod" || kind == "comb") {
-      Time_checker checker(g_shared.get(), lnast, builder.take_pending_checks(),
-                           builder.take_flop_depths(), builder.take_sub_times(),
+      Time_checker checker(g_shared.get(),
+                           lnast,
+                           builder.take_pending_checks(),
+                           builder.take_flop_depths(),
+                           builder.take_sub_times(),
                            builder.take_plain_reg_flops(),
                            builder.take_inserted_flops(),
                            builder.take_wire_cuts());

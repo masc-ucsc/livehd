@@ -78,7 +78,13 @@ struct Commit_class {
 // as DATA and both halves would land in the same slot.
 class Design_clocks {
 public:
-  explicit Design_clocks(hhds::Graph* g);
+  // `hier == true` scans the whole INSTANCE TREE and resolves each clock cone
+  // through the instance bindings (`inp_edges()` threads a boundary), so a
+  // leaf's clock PORT is not mistaken for a clock net of its own. That is what
+  // the formal phase schedule needs: the leaves-first driver proves a def with
+  // its clock ports unbound, and minion's prim_rf_*_preview family declares two
+  // clock ports that every instantiation site ties to ONE net.
+  explicit Design_clocks(hhds::Graph* g, bool hier = false);
 
   [[nodiscard]] bool   is_clock(const hhds::Pin_class& root) const;
   [[nodiscard]] size_t n_clock_inputs() const { return input_names_.size(); }
@@ -93,6 +99,33 @@ private:
   absl::flat_hash_set<std::string>       input_names_;
   bool                                   implicit_clock_ = false;
 };
+
+// Root of a CONTROL cone (a `clock_pin` driver, or a latch's `enable`) plus the
+// accumulated inversion parity, walking back through the identity and
+// boolean-shaping nodes tolg and the readers emit (Mux(s,0,1), EQ(x,0/1), Not,
+// the `x & 1` width mask, Get_mask/Sext, and a Clock_cell -> its clk_ref).
+//
+// This is THE one cone walker; every consumer must use it rather than keep a
+// private copy, because a parity bit counted in two places is how a double
+// negation survives (measured: `wire nclk = ~clk` was invisible to the encoder
+// while the `posclk` pin form was handled, so the same machine came back PROVEN
+// against posedge AND REFUTED against negedge).
+//
+// Hierarchy-aware by construction: it walks `inp_edges()`, which threads
+// instance boundaries under a hierarchical walk.
+struct Control_root {
+  hhds::Pin_class net;
+  bool            inverted = false;
+};
+// `stop_at_clock_cell` leaves a `Clock_cell` as the root instead of
+// canonicalizing through it to the reference clock -- what a caller that must
+// visit every cell of a GATE CHAIN needs (each cell carries its own enable).
+[[nodiscard]] Control_root control_root(hhds::Pin_class p, bool stop_at_clock_cell = false);
+
+// Hierarchy-aware driver of a named sink. `get_driver_of_sink_name` is
+// class-local and stops at a sub's GraphIO pin; `inp_edges()` resolves across
+// the instance boundary, which is what a flop deep in an instance needs.
+[[nodiscard]] hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name);
 
 // A recognized INTEGRATED CLOCK GATE cone: `<clock> & <enables...>` driving a
 // state element's clock_pin.
@@ -166,7 +199,15 @@ struct Icg_def_match {
   hhds::Pin_class clk_in;         // the def's clock INPUT pin
   hhds::Pin_class out;            // the def's clock OUTPUT pin
   hhds::Pin_class enable_cone;    // root of the latched enable cone, inside the def
-  bool            invert = false; // body is `clk | ~en_latch` (active-low gate) rather than `clk & en_latch`
+  // The ACTIVE-LOW GATE FLAVOUR: `clk | ~en_latch` (enable latched while the
+  // clock is HIGH) rather than `clk & en_latch` (latched while it is LOW). Both
+  // gate the SAME reference edges -- neither output moves while the enable is
+  // deasserted -- so this is NOT an inverted clock and must not flip any
+  // consumer's edge. It moves the enable's SAMPLE POINT to the phase before the
+  // reference FALL, which is observable: `phase_clock_gate_invert`'s enable is a
+  // register that commits at the rise, so sampling it pre-rise reads the
+  // previous period's value -- a wrong verdict, not an UNKNOWN.
+  bool            invert = false;
 };
 [[nodiscard]] std::optional<Icg_def_match> match_icg_def(hhds::Graph* def);
 

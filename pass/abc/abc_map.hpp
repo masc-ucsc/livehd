@@ -42,10 +42,6 @@ struct Map_options {
   // `adder`/`block_size` above). Only `array` today; the enum is the extension
   // point for Booth/Wallace-tree variants.
   arith::Mult_kind  multiplier = arith::Mult_kind::array;
-  // Formal-assume don't-cares (pass.formal -> ABC, task 2f-formal). Feed assume
-  // conditions to ABC so violating minterms become don't-cares (smaller logic).
-  bool              use_proven_assume = true;   // feed assumes pass.formal PROVED (sound)
-  bool              use_all_assume    = false;  // also feed declared (unproven) assumes (aggressive)
   // Memory admission (2opt-incr subtask 0). A region is bit-blasted into ABC,
   // which for a whole-design region means millions of gates and several network
   // forms held at once; an XSCore flat run reached 221 GB on a 64 GiB host and

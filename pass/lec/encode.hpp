@@ -11,6 +11,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
+#include "phase_sched.hpp"
 
 namespace livehd::lec {
 
@@ -388,6 +389,29 @@ public:
   // output, and a one-sided \x04 output would gate lec to Unknown).
   void set_emit_props(bool on) { emit_props_ = on; }
 
+  // The 4-microstep FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10). `plan` is
+  // read-only metadata built once per design by plan_phases(); `microstep`
+  // selects which batch COMMITS in this encode (0 close_low, 1 rise,
+  // 2 close_high, 3 fall). Every other state endpoint HOLDS, so one source
+  // period is four encodes and a later batch observes what an earlier one
+  // committed.
+  //
+  // nullptr (the default) keeps the legacy one-step-is-one-period encoding
+  // byte-for-byte, including its detected-edge multi-clock branch and its
+  // refusal of Latch cells. That is the blast-radius argument: a plain posedge
+  // single-clock design never enters this path.
+  // `microstep < 0` means the schedule is used WITHOUT sub-period resolution:
+  // one encode step is one source period, every endpoint commits, and a clock
+  // guard folds combinationally (M9's P=1 semantics -- "en is sampled at the
+  // reference active edge, and one step IS that edge"). That mode exists so a
+  // plain posedge design with a GATE CHAIN still benefits from the schedule's
+  // canonicalization (`gate(gate(clk,en0),en1)` -> `en0 & en1`) without paying
+  // four encodes per period for a sub-period distinction it does not have.
+  void set_phase_plan(const Phase_plan* plan, int microstep) {
+    phase_plan_ = plan;
+    microstep_  = microstep;
+  }
+
   // 2f-verify submodule port taps: for every Sub instance whose HIER name is in
   // `insts`, emit each resolvable input/output port value as a synthetic output
   //   "\x05tap:<inst_hier>.<port>"
@@ -448,6 +472,9 @@ private:
   bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                emit_props_  = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
   const absl::flat_hash_set<std::string>*             port_taps_   = nullptr;  // sub instances whose ports get \x05tap: outputs
+  const Phase_plan*                                   phase_plan_  = nullptr;  // 4-microstep schedule (M10); null = legacy
+  int                                                 microstep_   = -1;       // which batch commits; <0 = single-step (see set_phase_plan)
+  [[nodiscard]] bool single_step() const { return microstep_ < 0; }
   int                                                 budget_seconds_ = 0;  // per-encode wall-clock budget in s (2f-lec); 0 = none
   std::optional<std::chrono::steady_clock::time_point> deadline_{};  // set at each top-level encode() entry from budget_seconds_
 };

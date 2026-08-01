@@ -1,0 +1,11 @@
+/*
+:name: sibling_recompile
+:type: compile
+*/
+mod inc(a:u4) -> (r:u5@[0]) {
+  r = a + 1
+}
+
+pub mod top(a:u4) -> (r:u5@[0]) {
+  r = inc(a)
+}

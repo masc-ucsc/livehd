@@ -501,6 +501,424 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   };
   dfs(top_key);
 
+  // ── DESIGN-WIDE CLOCK FOREST (2f-lec, "Clock-graph propagation") ───────────
+  // Resolve clocks ONCE, TOP-DOWN, before any def is proven. Per-endpoint
+  // bottom-up resolution cannot do this: a Pyrope `reg x = 0` has NO clock cone
+  // at all (it commits on its module's own clock), and a cone that stops at an
+  // opaque boundary names the CHILD's port rather than the net the parent
+  // drives -- so one physical clock acquires as many "roots" as it has port
+  // spellings. minion calls the same net `clk_i` in 85 defs and `clock` in 6,
+  // and `core_top` -- which declares exactly ONE clock port in both front-ends
+  // -- was reported as having THREE roots, with the two sides disagreeing.
+  //
+  // Downward instead: the selected TOP's clock inputs are the roots; a child's
+  // clock port takes the root of the net its parent drives into it; a module's
+  // implicit clock is the root reaching that module. A `Clock_cell` (or an
+  // inline gate) is a DERIVATION of a root, never a new one -- gating,
+  // inversion and division split the SCHEDULE, not the forest.
+  //
+  // Built per side (each design has its own graphs and port names) and consumed
+  // by plan_phases via Lec_options::clock_forest.
+  auto build_forest = [&](const absl::flat_hash_map<std::string, hhds::Graph*>& by_name,
+                          const std::function<std::string(std::string_view)>&   canon,
+                          hhds::Graph*                                          top_g) {
+    livehd::lec::Clock_forest forest;
+    const std::string         top_name = canon(top_g->get_name());
+
+    // Resolve one driver INSIDE parent `pname` to a root name, following the
+    // derivations. Returns "" when it does not reach a known root.
+    std::function<std::string(const hhds::Pin_class&, const std::string&, int)> root_of
+        = [&](const hhds::Pin_class& d, const std::string& pname, int depth) -> std::string {
+      if (d.is_invalid() || depth > 12) {
+        return "";
+      }
+      const auto cr = livehd::latch_contract::control_root(d, /*stop_at_clock_cell=*/true);
+      if (cr.net.is_invalid()) {
+        return "";
+      }
+      if (gu::is_graph_input_pin(cr.net)) {
+        const std::string port{gu::pin_name_of(cr.net)};
+        if (auto* r = forest.find(canon(cr.net.get_graph()->get_name()), port)) {
+          return *r;
+        }
+        return pname == top_name ? port : std::string{};  // a top port IS a root
+      }
+      if (gu::is_const_pin(cr.net)) {
+        return "";
+      }
+      auto       n  = cr.net.get_master_node();
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Clock_cell) {  // a gate DERIVES its reference clock
+        return root_of(livehd::latch_contract::sink_driver_hier(n, "clk_ref"), pname, depth + 1);
+      }
+      if (op == Ntype_op::And || op == Ntype_op::Or) {  // an inline gate, likewise
+        for (const auto& e : n.inp_edges()) {
+          if (gu::is_const_pin(e.driver)) {
+            continue;
+          }
+          if (std::string r = root_of(e.driver, pname, depth + 1); !r.empty()) {
+            return r;
+          }
+        }
+      }
+      return "";
+    };
+
+    // SEED: the top's own clock input ports.
+    //
+    // "The top" here is the DEF BEING PROVEN, not the design's top — the
+    // leaves-first driver proves each def as its own top, where its ports are
+    // unbound. So before calling them roots, union the ports that EVERY
+    // instantiation site of this def, ANYWHERE in the loaded library (not just
+    // inside `order`), drives from one net. minion's `intpipe_csr_file` declares
+    // both `clk_i` and `clock` and its sites tie them together; without this it
+    // is two roots and the schedule refuses a single-clock module. Same
+    // mechanism that pairs the prim_rf_*_preview family's `preview_clk_i` +
+    // `rf_clk_i`.
+    absl::flat_hash_map<std::string, std::string> port_uf;  // port -> representative
+    {
+      std::function<std::string(const std::string&)> find = [&](const std::string& x) -> std::string {
+        auto it = port_uf.find(x);
+        if (it == port_uf.end() || it->second == x) {
+          port_uf[x] = x;
+          return x;
+        }
+        std::string r = find(it->second);
+        port_uf[x]    = r;
+        return r;
+      };
+      bool seen_site = false;
+      for (const auto& [pname, pg] : by_name) {
+        (void)pname;
+        for (auto node : pg->forward_class()) {
+          if (gu::type_op_of(node) != Ntype_op::Sub) {
+            continue;
+          }
+          auto sio = node.get_subnode_io();
+          if (sio == nullptr || canon(sio->get_name()) != top_name) {
+            continue;
+          }
+          absl::flat_hash_map<std::string, std::vector<std::string>> by_net;
+          for (const auto& e : node.inp_edges()) {
+            std::string port;
+            for (const auto& d : sio->get_input_pin_decls()) {
+              if (sio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+                port = d.name;
+                break;
+              }
+            }
+            const auto cr = livehd::latch_contract::control_root(e.driver);
+            if (port.empty() || cr.net.is_invalid()) {
+              continue;
+            }
+            by_net[std::to_string(static_cast<uint64_t>(cr.net.get_class_index().value))].push_back(port);
+          }
+          if (!seen_site) {
+            for (auto& [net, ports] : by_net) {
+              (void)net;
+              for (size_t i = 1; i < ports.size(); ++i) {
+                port_uf[find(ports[i])] = find(ports[0]);
+              }
+            }
+            seen_site = true;
+            continue;
+          }
+          // A later site may only NARROW: keep a merge only if this site agrees.
+          absl::flat_hash_map<std::string, std::string> here;
+          std::function<std::string(const std::string&)> hfind = [&](const std::string& x) -> std::string {
+            auto it = here.find(x);
+            if (it == here.end() || it->second == x) {
+              here[x] = x;
+              return x;
+            }
+            std::string r = hfind(it->second);
+            here[x]       = r;
+            return r;
+          };
+          for (auto& [net, ports] : by_net) {
+            (void)net;
+            for (size_t i = 1; i < ports.size(); ++i) {
+              here[hfind(ports[i])] = hfind(ports[0]);
+            }
+          }
+          absl::flat_hash_map<std::string, std::string> merged;
+          std::function<std::string(const std::string&)> mfind = [&](const std::string& x) -> std::string {
+            auto it = merged.find(x);
+            if (it == merged.end() || it->second == x) {
+              merged[x] = x;
+              return x;
+            }
+            std::string r = mfind(it->second);
+            merged[x]     = r;
+            return r;
+          };
+          for (auto& [a, _] : port_uf) {
+            (void)_;
+            for (auto& [b, __] : port_uf) {
+              (void)__;
+              if (a < b && find(a) == find(b) && hfind(a) == hfind(b)) {
+                merged[mfind(b)] = mfind(a);
+              }
+            }
+          }
+          port_uf = std::move(merged);
+        }
+      }
+    }
+    auto rep = [&](const std::string& p) -> std::string {
+      auto it = port_uf.find(p);
+      if (it == port_uf.end()) {
+        return p;
+      }
+      std::string x = p;
+      for (int i = 0; i < 8; ++i) {
+        auto j = port_uf.find(x);
+        if (j == port_uf.end() || j->second == x) {
+          break;
+        }
+        x = j->second;
+      }
+      return x;
+    };
+    {
+      auto& row = forest.port_root[top_name];
+      hhds::Hier_opaque_scope sc(nullptr);
+      for (auto node : top_g->fast_hier()) {
+        const auto op = gu::type_op_of(node);
+        if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Latch) {
+          continue;
+        }
+        auto ctrl = livehd::latch_contract::sink_driver_hier(node, op == Ntype_op::Latch ? "enable" : "clock_pin");
+        const auto cr = livehd::latch_contract::control_root(ctrl);
+        if (cr.net.is_invalid() || !gu::is_graph_input_pin(cr.net) || cr.net.get_graph() != top_g) {
+          continue;
+        }
+        const std::string port{gu::pin_name_of(cr.net)};
+        row[port] = rep(port);
+      }
+      // THE IMPLICIT-CLOCK PORT. tolg gives a module whose body holds a
+      // `reg x = 0` an input port named `clock` — the module's own clock — and
+      // NO instantiation site drives it explicitly, so no site union can ever
+      // tie it to the module's named clock port. Left alone it is a second
+      // "root" on a single-clock module, which is what refused minion's
+      // `intpipe_csr_file` (declares `clk_i`; its parent wires `clk_i = clock`)
+      // and, through it, `intpipe_top` and `core_top`.
+      //
+      // A module's own clock IS its clock: when exactly one OTHER clock root is
+      // present, `clock` is that root. Deliberately narrow — with two other
+      // roots there is nothing unique to attach it to and it stays its own,
+      // which keeps a genuinely multi-clock module an honest refusal.
+      {
+        std::string other;
+        bool        unique = true;
+        for (const auto& [pn, r] : row) {
+          if (pn.empty() || pn == "clock") {
+            continue;
+          }
+          if (other.empty()) {
+            other = r;
+          } else if (other != r) {
+            unique = false;
+            break;
+          }
+        }
+        if (unique && !other.empty() && row.count("clock") != 0) {
+          row["clock"] = other;
+        }
+      }
+      // The top's implicit clock is its single clock ROOT when it has exactly one.
+      std::string only;
+      bool        one = true;
+      for (const auto& [pn, r] : row) {
+        if (only.empty()) {
+          only = r;
+        } else if (only != r) {
+          one = false;
+          break;
+        }
+      }
+      if (one && !only.empty()) {
+        row[""] = only;
+      }
+    }
+
+    // PROPAGATE downward. `order` is leaves-first, so its reverse visits every
+    // parent before its children -- exactly what a top-down binding walk needs.
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+      const std::string& pname = *it;
+      auto               pit   = by_name.find(pname);
+      if (pit == by_name.end()) {
+        continue;
+      }
+      for (auto node : pit->second->forward_class()) {
+        if (gu::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = node.get_subnode_io();
+        if (sio == nullptr) {
+          continue;
+        }
+        const std::string cn = canon(sio->get_name());
+        if (by_name.find(cn) == by_name.end()) {
+          continue;
+        }
+        for (const auto& e : node.inp_edges()) {
+          std::string port;
+          for (const auto& d : sio->get_input_pin_decls()) {
+            if (sio->get_input_port_id(d.name) == e.sink.get_port_id()) {
+              port = d.name;
+              break;
+            }
+          }
+          if (port.empty()) {
+            continue;
+          }
+          const std::string r = root_of(e.driver, pname, 0);
+          if (r.empty()) {
+            continue;  // not a clock (or not resolvable): leave it unmapped
+          }
+          auto& row = forest.port_root[cn];
+          if (auto ex = row.find(port); ex != row.end() && ex->second != r) {
+            ex->second = "\x03ambiguous";  // sites disagree: assert nothing
+          } else {
+            row[port] = r;
+          }
+        }
+      }
+      // Same implicit-clock rule for every def, once its bound ports are known.
+      for (auto& [dname, row] : forest.port_root) {
+        std::string other;
+        bool        unique = true;
+        for (const auto& [pn, r] : row) {
+          if (pn.empty() || pn == "clock" || r == "\x03ambiguous") {
+            continue;
+          }
+          if (other.empty()) {
+            other = r;
+          } else if (other != r) {
+            unique = false;
+            break;
+          }
+        }
+        if (unique && !other.empty() && row.count("clock") != 0) {
+          row["clock"] = other;
+        }
+      }
+      // A def's IMPLICIT clock is the root reaching it -- well defined when its
+      // clock ports all carry ONE root.
+      for (auto& [dname, row] : forest.port_root) {
+        if (row.count("") != 0) {
+          continue;
+        }
+        std::string one;
+        bool        uniq = true;
+        for (const auto& [pn, r] : row) {
+          if (pn.empty() || r == "\x03ambiguous") {
+            continue;
+          }
+          if (one.empty()) {
+            one = r;
+          } else if (one != r) {
+            uniq = false;
+            break;
+          }
+        }
+        if (uniq && !one.empty()) {
+          row[""] = one;
+        }
+      }
+    }
+    // SINGLE-ROOT CLOSURE. "The normal case is a single root that propagates and
+    // splits": when the selected top has exactly ONE clock input, every
+    // clock-spelled port anywhere in its subtree carries that root, including a
+    // port no site drives explicitly. Pyrope's implicit clock becomes exactly
+    // such a port -- `reg x = 0` lowers to a def port named `clock` that the
+    // caller may never wire -- so without this the same net keeps as many roots
+    // as it has spellings (minion: `clk_i` in 85 defs, `clock` in 6).
+    //
+    // Gated on ONE top root: with two independent top clocks there is nothing to
+    // close over and an unbound port stays its own root, which is the honest
+    // refusal.
+    {
+      std::string only_root;
+      bool        one = true;
+      if (auto tit = forest.port_root.find(top_name); tit != forest.port_root.end()) {
+        for (const auto& [pn, r] : tit->second) {
+          if (pn.empty()) {
+            continue;
+          }
+          if (only_root.empty()) {
+            only_root = r;
+          } else if (only_root != r) {
+            one = false;
+            break;
+          }
+        }
+      }
+      if (one && !only_root.empty()) {
+        for (const auto& dname : order) {
+          auto dit = by_name.find(dname);
+          if (dit == by_name.end() || dit->second == nullptr) {
+            continue;
+          }
+          auto gio = dit->second->get_io();
+          if (!gio) {
+            continue;
+          }
+          auto& row = forest.port_root[dname];
+          for (const auto& d : gio->get_input_pin_decls()) {
+            if (livehd::latch_contract::Design_clocks::name_looks_like_clock(d.name)) {
+              row.emplace(d.name, only_root);
+            }
+          }
+          row.emplace("", only_root);  // and its implicit clock
+        }
+      }
+    }
+
+    // Drop the ambiguous entries: no mapping is better than a wrong one.
+    for (auto& [dname, row] : forest.port_root) {
+      absl::erase_if(row, [](const auto& kv) { return kv.second == "\x03ambiguous"; });
+    }
+    absl::erase_if(forest.port_root, [](const auto& kv) { return kv.second.empty(); });
+    // The forest is built under CANONICAL def keys (the post-'.' entity tail, so
+    // the two front-ends' spellings pair), but plan_phases looks a row up by the
+    // graph's FULL name -- it only has the graph in hand. Publish both, or every
+    // lookup misses and the propagation is silently inert.
+    std::vector<std::pair<std::string, absl::flat_hash_map<std::string, std::string>>> full_rows;
+    for (const auto& [cn, g] : by_name) {
+      if (g == nullptr) {
+        continue;
+      }
+      const std::string full{g->get_name()};
+      if (full == cn) {
+        continue;
+      }
+      if (auto it = forest.port_root.find(cn); it != forest.port_root.end()) {
+        full_rows.emplace_back(full, it->second);
+      }
+    }
+    for (auto& [full, row] : full_rows) {
+      forest.port_root[full] = std::move(row);
+    }
+    return forest;
+  };
+  auto dump_forest = [](const char* tag, const livehd::lec::Clock_forest& f) {
+    if (std::getenv("LEC_PHASE_PLAN") == nullptr) {
+      return;
+    }
+    for (const auto& [d, row] : f.port_root) {
+      for (const auto& [p, r] : row) {
+        std::print(stderr, "[LEC_FOREST {}] {} port '{}' -> root '{}'\n", tag, d, p, r);
+      }
+    }
+  };
+  const livehd::lec::Clock_forest ref_forest  = build_forest(ref_by_name, canon_ref, ref_top_g);
+  const livehd::lec::Clock_forest impl_forest = build_forest(impl_by_name, canon_impl, impl_top_g);
+  dump_forest("ref", ref_forest);
+  dump_forest("impl", impl_forest);
+
+
   // Per-side digest resolvers for the hierarchical (Merkle) canonical digest: a
   // Sub's body resolves within its OWN side first (gids are name-hash stable,
   // and the two sides may hold different bodies under one name), then the
@@ -925,6 +1343,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
 
+    // The design-wide clock forest. Carried by VALUE so it survives the isolated
+    // worker fork; both sides' rows go in, since plan_phases runs over each
+    // design's own graphs and looks each up by that design's def name.
+    o.clock_forest = ref_forest;
+    for (const auto& [dname, row] : impl_forest.port_root) {
+      auto& dst = o.clock_forest.port_root[dname];
+      for (const auto& [pn, r] : row) {
+        dst.emplace(pn, r);
+      }
+    }
     auto t0 = std::chrono::steady_clock::now();
     auto r  = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
                                 : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
@@ -1445,6 +1873,45 @@ std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
   return mods;
 }
 
+// pass.prp_writer emits each module into its own file, so an emitted sibling
+// dependency is imported as `<unit>.<entity>.<entity>`. The simfail fallback
+// below concatenates both re-emitted hierarchies into one self-contained file;
+// those per-file imports must therefore be removed, or they both duplicate the
+// now-local definitions and point at side scratch directories that are not
+// inputs to the replay. Package/external imports have no duplicated final path
+// component and remain untouched.
+std::string lecfail_strip_sibling_imports(std::string_view text) {
+  std::string out;
+  for (size_t pos = 0; pos < text.size();) {
+    const size_t nl   = text.find('\n', pos);
+    const size_t end  = nl == std::string_view::npos ? text.size() : nl;
+    const auto   line = text.substr(pos, end - pos);
+    bool         drop = false;
+    if (line.starts_with("const ")) {
+      const size_t imp = line.find(" = import(\"");
+      const size_t q2  = imp == std::string_view::npos ? std::string_view::npos : line.find("\")", imp + 11);
+      if (q2 != std::string_view::npos) {
+        const auto   path = line.substr(imp + 11, q2 - (imp + 11));
+        const size_t last = path.rfind('.');
+        const size_t prev = last == std::string_view::npos || last == 0 ? std::string_view::npos : path.rfind('.', last - 1);
+        drop              = last != std::string_view::npos && prev != std::string_view::npos
+                            && path.substr(prev + 1, last - prev - 1) == path.substr(last + 1);
+      }
+    }
+    if (!drop) {
+      out.append(line);
+      if (nl != std::string_view::npos) {
+        out += '\n';
+      }
+    }
+    if (nl == std::string_view::npos) {
+      break;
+    }
+    pos = nl + 1;
+  }
+  return out;
+}
+
 // True when the name starting at `i` is preceded by a lambda keyword — i.e. it
 // is a DEFINITION site (`mod from`, `comb from`, `pipe[2] from`, ...) rather
 // than a use. Walks back over the separating whitespace, an optional `pipe`
@@ -1961,14 +2428,14 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   } else {
     // Inline both re-emitted hierarchies (ref-side clashes already renamed).
     for (const auto& m : impl_mods) {
-      out += lecfail_type_params(m.text, width_of);
+      out += lecfail_type_params(lecfail_strip_sibling_imports(m.text), width_of);
       if (!out.empty() && out.back() != '\n') {
         out += '\n';
       }
       out += '\n';
     }
     for (const auto& m : ref_mods) {
-      out += lecfail_type_params(m.text, width_of);
+      out += lecfail_type_params(lecfail_strip_sibling_imports(m.text), width_of);
       if (!out.empty() && out.back() != '\n') {
         out += '\n';
       }
@@ -2254,6 +2721,8 @@ void lec_command(Options& opts, Result& res) {
   o.decompose    = label("decompose", "auto");
   o.cones        = label("cones", "auto");
   o.conelimit    = std::atoi(label("conelimit", "10000").c_str());
+  o.phase_sched  = label("phase_sched", "true") != "false" && label("phase_sched", "true") != "0";
+  o.box_seq      = label("box_model", "seq") != "uf";
   o.strict       = label("strict", "true") != "false" && label("strict", "true") != "0";
   o.allow_oversize = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
@@ -2462,23 +2931,51 @@ void lec_command(Options& opts, Result& res) {
       drop(ref_defs);
       drop(impl_defs);
     }
-    auto probe = [&](hhds::Graph* side, const std::vector<hhds::Graph*>& defs, const char* which) {
+    // ── M10: pass.single_edge stops being MANDATORY ───────────────────────────
+    // A DECLINE used to be a hard failure ("lec refused the <side>"), which is
+    // why a latch or a negedge flop inside a def, two clock ports tied to one
+    // net, a memory under the divider, or a latch that closes on the very edge
+    // its reader samples all ended the run with nothing compared. Under
+    // `formal.phase_sched` (the default) a decline instead hands the design to
+    // the encoder's READ-ONLY four-microstep schedule, which composes across
+    // hierarchy because it rewrites nothing.
+    //
+    // The rewrite is still PREFERRED when it applies. It is not a fallback for
+    // its own sake: it also normalizes a SYNC reset into the enable/din shape on
+    // BOTH sides, and that is what lets semdiff's state pairing match a flop
+    // whose reset the other front-end spells in the body (tests/equiv/
+    // flop_reset_matrix). Until the pairing learns that fold, skipping the
+    // rewrite where it WOULD have worked costs real verdicts.
+    //
+    // BOTH sides or NEITHER: a one-sided lowering compares two designs in
+    // different time bases, which is the failure the decline exists to prevent.
+    auto probe_side = [&](hhds::Graph* side, const std::vector<hhds::Graph*>& defs) {
       livehd::single_edge::Options po;
       po.dry_run = true;
-      auto sn    = livehd::single_edge::normalize(side, defs, po);
-      if (sn.error) {
-        // Re-run loudly so the user gets the specific diagnostic, then fail.
-        livehd::single_edge::normalize(side, defs, {});
-        throw Lhd_error{"unsupported",
-                        std::format("lec refused the {} side '{}': edge normalization declined ({})", which,
-                                    side->get_name(), sn.reason),
-                        "a partial or one-sided lowering compares the two designs in different time bases"};
-      }
-      return sn;
+      // QUIET: a decline is no longer a failure (the phase schedule takes over),
+      // so the probe must not emit error-severity diagnostics -- the CLI counts
+      // those and would fail an otherwise clean, PROVEN run.
+      po.quiet = o.phase_sched;
+      return livehd::single_edge::normalize(side, defs, po);
     };
-    const auto pr = probe(ref_g.get(), ref_defs, "ref");
-    const auto pi = probe(impl_g.get(), impl_defs, "impl");
-    if (pr.applied || pi.applied) {
+    const auto pr = probe_side(ref_g.get(), ref_defs);
+    const auto pi = probe_side(impl_g.get(), impl_defs);
+    const bool declined = pr.error || pi.error;
+    if (declined && !o.phase_sched) {
+      // Re-run loudly so the user gets the specific diagnostic, then fail.
+      const char* which = pr.error ? "ref" : "impl";
+      auto*       g_bad = pr.error ? ref_g.get() : impl_g.get();
+      livehd::single_edge::normalize(g_bad, pr.error ? ref_defs : impl_defs, {});
+      throw Lhd_error{"unsupported",
+                      std::format("lec refused the {} side '{}': edge normalization declined ({})", which,
+                                  g_bad->get_name(), pr.error ? pr.reason : pi.reason),
+                      "a partial or one-sided lowering compares the two designs in different time bases"};
+    }
+    if (declined) {
+      res.recipe_steps.emplace_back(
+          std::format("pass.lec phase_sched: 4-microstep schedule (edge normalization declined: {})",
+                      pr.error ? pr.reason : pi.reason));
+    } else if (pr.applied || pi.applied) {
       // ONE time base for both sides: the max P either side needs. A side with
       // nothing of its own to lower still gets the divider and slot 0 — that is
       // its P=1 behaviour embedded in the P-slot time base, and it is what keeps
@@ -2575,7 +3072,24 @@ void lec_command(Options& opts, Result& res) {
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
     const bool        retry_all   = label("retry", "changed") == "all";
-    const std::string hier_refute = label("hier_refute", "fail");
+    // DEFAULT: escalate. A module boundary is NOT part of the specification --
+    // functionality legitimately moves ACROSS it between the two front-ends --
+    // so an intermediate def that refutes is not a disproof of the design. The
+    // driver inlines just that def into its caller (its PROVEN siblings stay
+    // boxed) and re-proves there; only the requested TOP's boundary is
+    // contractual. `fail` is the old fail-fast behaviour and is a DEBUG aid:
+    // it stops at the first differing block, which localizes fast but reports a
+    // block-boundary counterexample as the run's verdict.
+    const std::string hier_refute = label("hier_refute", "escalate");
+    if (hier_refute == "fail") {
+      livehd::diag::warn("pass.lec", "hier-refute-fail-mode", "unsupported")
+          .msg("formal.lec.hier_refute=fail is a DEBUG mode: a REFUTED intermediate def taints its ancestors and its "
+               "block-boundary counterexample becomes the run verdict")
+          .hint("a module boundary is not part of the specification — functionality can move across it, so an "
+                "intermediate refutation is not a disproof of the design. Use the default (escalate), which inlines "
+                "the refuting def into its caller and keeps every proven sibling boxed")
+          .emit();
+    }
     if (hier_refute != "fail" && hier_refute != "escalate") {
       throw Lhd_error{"usage",
                       std::format("--set formal.lec.hier_refute expects fail|escalate, got '{}'", hier_refute),

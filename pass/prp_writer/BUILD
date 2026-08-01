@@ -74,6 +74,18 @@ sh_test(
     ],
 )
 
+# A collapsed unique-if is a Hotmux, not a priority mux. The Pyrope writer must
+# retain that distinction as either a match or a unique-if expression, and its
+# own output must recompile.
+sh_test(
+    name = "prp_writer_hotmux_test.sh",
+    srcs = ["tests/prp_writer_hotmux_test.sh"],
+    data = [
+        "tests/hotmux_emit.sv",
+        "//lhd",
+    ],
+)
+
 # REGRESSION: the writer must not LOSE information when it rebuilds a nested
 # `mut` declaration at the function top (it used to record the NAME only, so an
 # array declared inside an `if` came back as `mut mem = 0` — type and `initial`

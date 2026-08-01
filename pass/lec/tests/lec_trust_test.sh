@@ -2,12 +2,20 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # Contract for `lhd lec --trust <def>` / formal.lec.trust: a def ASSUMED equal
-# WITHOUT a proof — the escape hatch for a cell the encoder cannot model yet (a
-# latch). The bottom-up driver SKIPS proving the trusted def and force-blackboxes
-# its instances, so the latch-free rest still proves; the trust is DISCLOSED
-# ("PROVEN under N trusted def(s)"), a real divergence OUTSIDE the trusted cone
-# still REFUTES (trust hides only the leaf, never out-of-leaf logic), and trusting
-# the top itself is refused (that would assume the whole design — a vacuous pass).
+# WITHOUT a proof. The bottom-up driver SKIPS proving the trusted def and
+# force-blackboxes its instances, so the rest still proves; the trust is
+# DISCLOSED ("PROVEN under N trusted def(s)"), a real divergence OUTSIDE the
+# trusted cone still REFUTES (trust hides only the leaf, never out-of-leaf
+# logic), and trusting the top itself is refused (that would assume the whole
+# design — a vacuous pass).
+#
+# The leaf here holds a LATCH, and case 1 pins what changed with the formal
+# phase schedule (todo/livehd/2f-lec, 2f-latch M10): a latch leaf used to be the
+# canonical thing trust existed to hide, because the encoder REFUSED the cell
+# ("sequential op 'latch' not supported yet"). It no longer does — the leaf
+# proves on its own — so trust is no longer a workaround for a latch. It stays
+# what its name says: an explicit, disclosed assumption about a def the user
+# chooses not to compare.
 
 set -u
 LHD=./bazel-bin/lhd/lhd
@@ -61,13 +69,16 @@ run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT (default hier driver)
   OUT=$("$LHD" lec "${@:2}" --top top --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
-# 1) NO trust: the latch leaf is scheduled for proof and the encoder REFUSES it.
+# 1) NO trust: the latch leaf is scheduled for proof and now PROVES on its own
+#    (2f-latch M10 — the phase schedule encodes the cell instead of refusing it).
 #    semdiff=none forces the solver — else the identical ref/impl are dropped as
-#    structurally-equal with NO encoding, so the latch is never reached.
+#    structurally-equal with NO encoding, so the latch is never reached and the
+#    check would be vacuous.
 run refuse --impl "lg:$WORK/lg_base" --ref "lg:$WORK/lg_base" --set formal.lec.semdiff=none
-if [ "$RC" -eq 0 ]; then echo "FAIL: untrusted latch leaf not refused (rc=0)"; fail=1
-elif ! echo "$OUT" | grep -qi "latch"; then echo "FAIL: refusal is not about a latch"; echo "$OUT" | tail -3; fail=1
-else echo "ok: untrusted latch leaf -> encoder REFUSES"; fi
+if [ "$RC" -ne 0 ]; then echo "FAIL: untrusted latch leaf rc=$RC (want PROVEN without trust)"; echo "$OUT" | tail -4; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: untrusted latch leaf not PROVEN"; echo "$OUT" | tail -3; fail=1
+elif echo "$OUT" | grep -qi "trusted def"; then echo "FAIL: no --trust was given, yet a def was trusted"; fail=1
+else echo "ok: untrusted latch leaf -> PROVEN by the phase schedule (no trust needed)"; fi
 
 # 2) --trust leaf: the latch is assumed equal (skipped + boxed) -> top PROVEN,
 #    and the assumption is DISCLOSED (never a silent unconditional pass).

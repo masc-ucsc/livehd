@@ -23,7 +23,7 @@ namespace livehd::formal {
 // one fresh QF_BV solver per query under a deterministic, cone-scaled resource
 // budget. Unsupported nodes OUTSIDE a property's cone are never visited, so they
 // cannot poison its verdict; an unsupported node INSIDE the cone yields Unknown
-// (sound: defer to runtime, never a wrong answer). See todo/livehd/2f-formal.
+// (sound: defer to runtime, never a wrong answer). See todo/livehd/2f-verify.
 
 using Verdict = livehd::lec::Verdict;  // Proven | Refuted | Unknown
 

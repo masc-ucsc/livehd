@@ -154,6 +154,26 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
       continue;
     }
+    // A recognized CLOCK GATE (`Clock_cell`) in the control cone is NOT modelled
+    // here. This pass folds an INLINE `<clock> & <enables>` cone into the flop's
+    // enable (resolve_icg below), but a materialized cell carries the
+    // glitch-free SAMPLING CONTRACT -- the enable is sampled on the inactive
+    // phase before the cell's own active edge, which for the active-low flavour
+    // (`clk | ~en`) is the phase before the FALL. There is no sub-period in this
+    // lowering to sample in, so slotting the endpoint would silently drop the
+    // gate (commit every slot, ungated) or read it half a period early. Decline
+    // and let the formal phase schedule own it -- it models the sample point
+    // explicitly (todo/livehd/2f-lec, 2f-latch M10).
+    if (auto cr = lc::control_root(sink_driver(n, op == Ntype_op::Latch ? "enable" : "clock_pin"),
+                                   /*stop_at_clock_cell=*/true);
+        !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !gu::is_const_pin(cr.net)
+        && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell) {
+      plan.code = "clock-cell-unsupported";
+      plan.why  = "state element `" + label_of(n)
+                + "` is clocked through a recognized clock gate (Clock_cell), whose enable sample point has no "
+                  "representation in a slot lowering";
+      return plan;
+    }
     auto cc = lc::commit_class_of(n, &clocks);
     if (!cc) {
       plan.code = "unresolved-commit-class";
@@ -338,6 +358,13 @@ bool check_rule4(const Plan& plan, bool quiet) {
         continue;
       }
       ok = false;
+      if (quiet) {
+        // A PROBE (dry run) must stay silent: under `formal.phase_sched` a
+        // decline is not a failure -- the caller hands the design to the formal
+        // phase schedule instead -- and an error-severity diagnostic here would
+        // fail an otherwise clean, PROVEN run through the CLI's error count.
+        return false;
+      }
       livehd::diag::err(kPass, "coincident-commit-edge", "unsupported")
           .msg("latch `{}` and state element `{}` commit at the SAME edge, and `{}` reads the latch combinationally",
                label_of(l.node), label_of(s.node), label_of(s.node))
@@ -345,9 +372,6 @@ bool check_rule4(const Plan& plan, bool quiet) {
                 "commit-at-closing-edge model samples its held Q — a persistent full-cycle error. Move the two onto "
                 "opposite phases (a master/slave pair), or replace the latch with a buffer if it is meant to be one")
           .emit();
-      if (quiet) {
-        return false;
-      }
       break;
     }
   }
