@@ -72,9 +72,9 @@
   clean-compiling Verilog — partial bit-range hold, <code>always_latch</code>
   under a for-loop, latch-on-an-unpacked-array, and a blocking write to an
   internal signal in an edge process — plus a latch-inference OVER-fire on a
-  fully covered <code>case</code> with no <code>default</code>. The Yosys reader
-  still drops <code>RD_CLK_POLARITY</code>, which is the memory half of the
-  per-port polarity item on <a href="2f-lec.html#phase-open">2f-lec</a>.</p>
+  fully covered <code>case</code> with no <code>default</code>. (The Yosys
+  reader's dropped <code>RD_CLK_POLARITY</code> is FIXED — see
+  <a href="#m10">M10</a>.)</p>
 
 <p><strong>ORACLE GAPS.</strong> The 8 <code>prp-v2prp2v</code> latch targets
   CANNOT FAIL: the harness returns 0 for INCONCLUSIVE and UNKNOWN. And the
@@ -410,12 +410,15 @@
   three things that made M8 stop at a module boundary. That is why hierarchy
   stopped being the blocker on minion's trust list: it went 32 &rarr; 1.</p>
 
-<p><strong>Memories are scheduled per synchronous port</strong> — but the Memory
-  IR still carries ONE global <code>posclk</code>, so today a memory is scheduled
-  whole. Per-port polarity (plus the Yosys reader's dropped
-  <code>RD_CLK_POLARITY</code>) is the open half, tracked on
-  <a href="2f-lec.html#phase-open">2f-lec</a> along with the cache-key signature,
-  edge-labelled witnesses and multi-root scheduling.</p>
+<p><strong>A memory is scheduled WHOLE, on ONE edge — by ruling</strong> (user,
+  2026-08-01): a memory whose ports do not all commit on the same edge is not a
+  valid memory, so the Memory cell's single global <code>posclk</code> is the
+  right model and a mixed-edge memory is a NAMED REFUSAL. A latch may mix phases;
+  a memory may not. The Yosys reader enforces it
+  (<code>lhd/tests/mem_clock_edge_test.sh</code>) — see
+  <a href="2f-lec.html#phase-open">2f-lec</a> for what that closed. Still open
+  there: the cache-key signature, edge-labelled witnesses and multi-root
+  scheduling.</p>
 
 <p><strong>Hierarchy composes through the sequence-transducer box</strong>, not
   through phase-aware state contracts: a proven child's outputs are one shared

@@ -277,15 +277,26 @@
   encode (now a NAMED <code>unsupported</code>, exit 7 — see Verdict discipline),
   and <code>intpipe_csr_file</code> needs <code>needs_array</code> forwarding.</p>
 
-<p>STILL OPEN. Per-PORT memory polarity (the Memory cell still carries ONE
-  global <code>posclk</code>, so a memory is scheduled whole; the Yosys reader
-  still drops <code>RD_CLK_POLARITY</code>); the schedule signature in the
+<p>STILL OPEN. The schedule signature in the
   verdict-cache key; edge-labelled witnesses (a counterexample still names a
   source period, not <code>(period, rise|fall)</code>) and the explicit
   witness-replay refusal; multi-ROOT scheduling (two unrelated roots keep the
   encoder's detected-edge path, and a multi-root design that also needs
   microsteps is refused by name); and <code>div != 1</code>, which stays a named
   refusal.</p>
+
+<p><strong>Per-PORT memory polarity is CLOSED by ruling, not by implementation</strong>
+  (user, 2026-08-01): a memory whose ports do not all commit on the SAME edge is
+  NOT A VALID MEMORY, so ONE global <code>posclk</code> is the right model and a
+  mixed-edge memory is a NAMED REFUSAL. (A latch may mix phases — that is what
+  the schedule is for; a memory may not.) The Yosys reader enforces it now: it
+  used to take <code>WR_CLK_POLARITY</code> whole
+  (<code>as_int()</code> &rArr; &ldquo;nonzero == posedge&rdquo;) and drop
+  <code>RD_CLK_POLARITY</code> outright, so a negedge synchronous READ imported
+  as posedge — and a clocked ROM, having NO write ports and therefore an EMPTY
+  write vector, imported as NEGEDGE. Both silent. The polarity is now derived
+  from every clocked port, read ports included, and a disagreement is an error
+  naming the ports. Gate: <code>lhd/tests/mem_clock_edge_test.sh</code>.</p>
 
 <p>The "phase-aware sequential/comb BOX contract" that used to be listed here is
   GONE, not deferred: the sequence-transducer box has no transition to be phased.
@@ -298,7 +309,8 @@
 <ol>
 <li><span class="status">DONE</span> read-only hierarchy schedule analysis and deterministic per-phase diagnostics;</li>
 <li><span class="status">DONE</span> flop/latch encoding with edge-specific inputs and two output observations;</li>
-<li>per-port memory polarity and phase scheduling, including registered reads;</li>
+<li><span class="status">CLOSED BY RULING</span> per-port memory polarity — one
+  edge per memory, mixed edges refused by name (see above);</li>
 <li>remove mandatory <code>pass.single_edge</code> preprocessing from verify
   (<span class="status">DONE for LEC</span>) — the verify half is also the
   preflight <code>minion_synth_lec_synth</code> dies in, so it unblocks a third
@@ -353,7 +365,7 @@
 <li>A clock-input-only propagation pass fixes clock relationships design-wide before scheduling; a def whose clock ports are unbound as a top is still scheduled from that pass, and two roots warn and assume synchronous unless a ratio is given.</li>
 <li>A chained <code>Clock_cell</code> feeds every consumer in the period from ONE guard sampled on the inactive phase before the cell's own active edge; inversion moves both the consumer edge and the sample point, and division refuses.</li>
 <li>Collapse yields the same verdict as expansion, for a stateless child as well as a stateful one — the box model makes no distinction between them.</li>
-<li>Mixed-edge read/write memory ports preserve polarity, registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
+<li>A memory whose ports disagree on the clock edge is REFUSED BY NAME (it is not a valid memory); a single-edge memory preserves registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
 <li>Reset lengths, source-period bounds, output comparisons, assertions, cache keys, and edge-labelled witnesses follow the new schedule.</li>
 <li>A STRUCTURAL encode abort rides <code>unsupported</code>, so it hard-fails by
   name regardless of <code>formal.strict</code>, at exit 7 — and never
