@@ -41,13 +41,13 @@ const top = import("alu.alu")
 
 formal alu.sum {
   mut acc = top
-  assume(acc.mode == true)
+  assume_nocheck(acc.mode == true)
   assert(acc.a <= 255, "inputs are bytes")
 }
 
 formal alu.diff {
   mut acc = top
-  assume(acc.mode == false)
+  assume_nocheck(acc.mode == false)
   assert(acc.b <= 255)
 }
 EOF

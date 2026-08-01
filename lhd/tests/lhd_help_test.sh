@@ -38,7 +38,8 @@ json_ok() {  # $1 = candidate JSON text
 #     are `lhd describe` items (JSON records by design, no pretty page); reaching
 #     them via `lhd help X` is a describe courtesy, not a command help page.
 CMDS=("" compile lec formal scan tool pyrope pass sim list describe version \
-      "pass color" "pass partition" "pass abc" "pass liberty" "pass semdiff" \
+      "tool cat" "tool grep" "tool diff" "tool tree" \
+      "pass color" "pass partition" "pass single_edge" "pass abc" "pass opentimer" "pass liberty" "pass semdiff" \
       "pyrope fmt" "pyrope lsp" "formal verify" "formal lec")
 
 # ---------------------------------------------------------------------------
@@ -84,7 +85,8 @@ done
 # 3. Sub-command help is SPECIFIC: `lhd pass abc --help` is the abc page, not
 #    the generic `lhd pass` overview.
 # ---------------------------------------------------------------------------
-for pair in "pass color" "pass partition" "pass abc" "pass liberty" "pass semdiff" \
+for pair in "tool cat" "tool grep" "tool diff" "tool tree" \
+            "pass color" "pass partition" "pass single_edge" "pass abc" "pass opentimer" "pass liberty" "pass semdiff" \
             "pyrope fmt" "pyrope lsp" "formal verify"; do
   # jsonl: the record's "name" is the two-word sub-command.
   "$LHD" $pair --help --diag-fmt jsonl 2>&1 | grep -qF "\"name\":\"$pair\"" \
@@ -99,6 +101,55 @@ done
 # The abc pretty page names abc, not just the pass overview.
 "$LHD" pass abc --help --diag-fmt pretty 2>&1 | grep -q 'lhd pass abc' \
   || fail "pass abc --help pretty is not the abc page"
+
+# Every runnable leaf has usage/flags/examples. A leaf with registered --set
+# options also has an options section, capped at five inline entries; leaves
+# with no --set namespace do not print an empty options section.
+OPTION_LEAVES=(compile lec "formal verify" "formal lec" sim \
+               "pass color" "pass partition" "pass single_edge" "pass abc" \
+               "pass opentimer" "pass liberty" "pass semdiff")
+NO_OPTION_LEAVES=(scan "tool cat" "tool grep" "tool diff" "tool tree" \
+                  "pyrope fmt" "pyrope lsp" list describe version)
+for X in "${OPTION_LEAVES[@]}"; do
+  page=$("$LHD" help $X --diag-fmt pretty 2>&1)
+  for sec in 'usage:' 'flags:' 'examples:' 'options ('; do
+    echo "$page" | grep -qF "$sec" || fail "help '$X' is missing the '$sec' section"
+  done
+  shown=$(echo "$page" | grep -cE '^  [[:alnum:]_.-]+=[^ ]* +# ')
+  [ "$shown" -ge 1 ] || fail "help '$X' options section lists no options"
+  [ "$shown" -le 5 ] || fail "help '$X' options section lists $shown options (maximum 5)"
+done
+for X in "${NO_OPTION_LEAVES[@]}"; do
+  page=$("$LHD" help $X --diag-fmt pretty 2>&1)
+  for sec in 'usage:' 'flags:' 'examples:'; do
+    echo "$page" | grep -qF "$sec" || fail "help '$X' is missing the '$sec' section"
+  done
+  echo "$page" | grep -qF 'options (' && fail "help '$X' has an options section but no --set options"
+done
+
+# `tool` is a dispatcher like `formal`; each verb has a focused page and JSON
+# record, with no flags leaking from sibling verbs.
+TOOLS=$({ "$LHD" tool --help --diag-fmt pretty; } 2>&1)
+echo "$TOOLS" | grep -q '^subcommands:' || fail "tool family page must list its subcommands"
+for verb in cat grep diff tree; do
+  echo "$TOOLS" | grep -qE "^  $verb " || fail "tool family page omits '$verb'"
+done
+CAT=$({ "$LHD" tool cat --help --diag-fmt pretty; } 2>&1)
+GREP=$({ "$LHD" tool grep --help --diag-fmt pretty; } 2>&1)
+DIFF=$({ "$LHD" tool diff --help --diag-fmt pretty; } 2>&1)
+TREE=$({ "$LHD" tool tree --help --diag-fmt pretty; } 2>&1)
+echo "$CAT"  | grep -q -- '--invert-match' && fail "tool cat help leaked grep's --invert-match"
+echo "$CAT"  | grep -q -- '--match'        && fail "tool cat help leaked diff's --match"
+echo "$GREP" | grep -q -- '--invert-match' || fail "tool grep help omits --invert-match"
+echo "$DIFF" | grep -q -- '--match'        || fail "tool diff help omits --match"
+echo "$TREE" | grep -q -- 'kind:<X>'       || fail "tool tree help omits kind selectors"
+GREPJ=$({ "$LHD" tool grep --help --diag-fmt jsonl; } 2>&1)
+DIFFJ=$({ "$LHD" tool diff --help --diag-fmt jsonl; } 2>&1)
+TREEJ=$({ "$LHD" tool tree --help --diag-fmt jsonl; } 2>&1)
+echo "$GREPJ" | grep -q '"name":"invert-match"' || fail "tool grep JSON omits the pretty page's --invert-match"
+echo "$DIFFJ" | grep -q '"name":"match"'        || fail "tool diff JSON omits the pretty page's --match"
+echo "$TREEJ" | grep -q '"name":"target".*"repeatable":true' \
+  || fail "tool tree JSON omits the pretty page's repeatable kind selector"
 
 # ---------------------------------------------------------------------------
 # 4. `formal lec` is a behavior-preserving alias of `lec`: its help IS lec help.

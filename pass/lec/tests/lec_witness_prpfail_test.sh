@@ -184,6 +184,34 @@ SP="$WORK/sp"
 $LHD sim "$WORK/pimpl.prp" "$WORK/pref.prp" "$WP/lecfail.prp" --setup-only --set sim.vcd=true --workdir "$SP" >/dev/null 2>&1
 ck "import: testbench sim-valid" '[ -f "$SP/sim/drv.cpp" ]'
 
+# ---- a COMBINATIONAL side. prp_writer picks the lambda keyword from the body
+# (`pub mod` with state, `pub comb` without), so a stateless side re-emits with
+# NO `mod` keyword at all — the header parser must still find it, and the
+# wrapper must give that side's outputs an explicit `@[]`, because every `mod`
+# output declares a landing cycle and a re-emitted comb header carries none.
+# Every other pair in this file is mod/mod, which is why neither showed up. ----
+cat > "$WORK/qimpl.prp" <<'EOF'
+pub mod dut(a:u8) -> (r:u8@[1]) {
+  reg q:u8 = 0
+  r = q
+  q = a
+}
+EOF
+cat > "$WORK/qref.prp" <<'EOF'
+pub comb dut(a:u8) -> (r:u8) {
+  r = a
+}
+EOF
+WQ="$WORK/wq"
+$LHD lec --impl "$WORK/qimpl.prp" --ref "$WORK/qref.prp" --workdir "$WQ" --set formal.lec.prpfail_run=false >"$WORK/wq.out" 2>&1
+ck "comb: prp generated"        '[ -f "$WQ/lecfail.prp" ]'
+ck "comb: side was parsed"      '! grep -q "no Pyrope modules were re-emitted" "$WORK/wq.out"'
+ck "comb: mod side keeps cycle" 'grep -q "impl_r:u8@\[1\]" "$WQ/lecfail.prp"'
+ck "comb: comb side gets @[]"   'grep -q "ref_r:u8@\[\]" "$WQ/lecfail.prp"'
+SQ="$WORK/sq"
+$LHD sim "$WORK/qimpl.prp" "$WORK/qref.prp" "$WQ/lecfail.prp" --setup-only --set sim.vcd=true --workdir "$SQ" >/dev/null 2>&1
+ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.cpp" ]'
+
 if [ $fail -ne 0 ]; then echo "lec_witness_prpfail_test: FAILED"; exit 1; fi
 echo "lec_witness_prpfail_test: PASSED"
 exit 0

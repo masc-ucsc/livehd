@@ -138,7 +138,7 @@ id_b=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9b.json")
 help=$("$LHD" pass abc --help --diag-fmt pretty 2>&1)
 echo "$help" | grep -qF 'options (--set pass.abc.flag=value; `lhd describe pass.abc.flag` for each listed flag option in `lhd list options pass.abc`):' \
   || fail "pass abc --help: namespaced options header missing -> $help"
-echo "$help" | grep -q 'pass.abc.flow=' || fail "pass abc --help: the flow flag must be listed (empty options block?) -> $help"
+echo "$help" | grep -q 'pass.abc.adder=' || fail "pass abc --help: the options block must list a registered flag -> $help"
 echo "$help" | grep -q 'more; `lhd list options pass.abc`' || fail "pass abc --help: >5 flags must show a '... more' pointer -> $help"
 "$LHD" lec --help --diag-fmt pretty 2>&1 | grep -q 'options (--set formal.flag=value;' || fail "lec --help: formal-namespaced options header missing"
 
@@ -185,7 +185,7 @@ grep -q "use --set formal.spec_mining_timeout=9 instead" "$W/r11f.json" || fail 
 simhelp=$("$LHD" sim --help --diag-fmt pretty 2>&1)
 echo "$simhelp" | grep -qF 'options (--set sim.flag=value; `lhd describe sim.flag` for each listed flag option in `lhd list options sim`):' \
   || fail "sim --help: standardized options header missing -> $simhelp"
-echo "$simhelp" | grep -q '^  sim.checkpoint_min_secs=10 ' || fail "sim --help: sim.checkpoint_min_secs not listed -> $simhelp"
+echo "$simhelp" | grep -q '^  sim.checkpoint=true ' || fail "sim --help: a registered sim option is not listed -> $simhelp"
 # Validation drives off the same table: an unknown sim flag is a usage error.
 "$LHD" sim "$PRP" --set sim.bogus=1 --workdir "$W/w11" -q >"$W/r11.json" 2>/dev/null && fail "--set sim.bogus must fail"
 grep -q "unknown sim flag 'sim.bogus'" "$W/r11.json" || fail "unknown sim-flag message missing: $(cat "$W/r11.json")"

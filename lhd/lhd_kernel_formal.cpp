@@ -1304,17 +1304,79 @@ void lecfail_parse_io(std::string_view list, std::vector<std::pair<std::string, 
   }
 }
 
-// Parse `... mod NAME[::[..]](in..) -> (out..) {` from a module's source. The
-// attribute block and types carry no parens, so the first '(' after the name is
-// the input list. Returns false if no `mod` header is present (e.g. an empty
-// file-level unit).
+// The Pyrope lambda keywords a re-emitted module header can open with. The
+// writer emits exactly `pub mod ` (stateful body) or `pub comb ` (stateless) —
+// upass/prp_writer/lnast_prp_writer.cpp picks between them with
+// body_has_state() — so a COMBINATIONAL design re-emits with NO `mod` keyword
+// anywhere. Matching only `mod` silently lost the whole combinational class
+// (the witness generator then reported "no Pyrope modules were re-emitted").
+// The other two keywords cannot come out of the writer today; they are accepted
+// so a hand-written or future-writer file parses too.
+constexpr std::string_view lecfail_lambda_kws[] = {"mod", "comb", "pipe", "fluid"};
+
+// Offset of the module NAME in a lambda header, or npos. The keyword must OPEN
+// a line (leading whitespace and an optional `pub ` are skipped) and be followed
+// by whitespace then an identifier — so a signal named `mod_x`, the word "comb"
+// in a comment, and a `lg="a.mod"` string never match. `pipe`'s optional
+// `[latency]` is stepped over.
+size_t lecfail_header_name_pos(std::string_view text) {
+  auto is_blank = [](char c) { return c == ' ' || c == '\t'; };
+  for (size_t ls = 0; ls <= text.size();) {
+    const size_t nl  = text.find('\n', ls);
+    const size_t end = nl == std::string_view::npos ? text.size() : nl;
+    size_t       p   = ls;
+    while (p < end && is_blank(text[p])) {
+      ++p;
+    }
+    if (text.compare(p, 4, "pub ") == 0) {
+      p += 4;
+      while (p < end && is_blank(text[p])) {
+        ++p;
+      }
+    }
+    for (const auto kw : lecfail_lambda_kws) {
+      if (text.compare(p, kw.size(), kw) != 0) {
+        continue;
+      }
+      size_t q = p + kw.size();
+      if (q < end && text[q] == '[') {  // pipe[3] / pipe[1..=2]
+        const size_t rb = text.find(']', q);
+        if (rb == std::string_view::npos || rb >= end) {
+          continue;
+        }
+        q = rb + 1;
+      }
+      size_t r = q;
+      while (r < end && is_blank(text[r])) {
+        ++r;
+      }
+      if (r == q || r >= end) {
+        continue;  // the keyword must be followed by whitespace, then the name
+      }
+      const char c = text[r];
+      if ((std::isalpha(static_cast<unsigned char>(c)) == 0) && c != '_' && c != '`') {
+        continue;
+      }
+      return r;
+    }
+    if (nl == std::string_view::npos) {
+      break;
+    }
+    ls = nl + 1;
+  }
+  return std::string_view::npos;
+}
+
+// Parse `... mod NAME[::[..]](in..) -> (out..) {` (or `comb`/`pipe`/`fluid`)
+// from a module's source. The attribute block and types carry no parens, so the
+// first '(' after the name is the input list. Returns false if no lambda header
+// is present (e.g. an empty file-level unit).
 bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
-  size_t mp = text.find("mod ");
-  if (mp == std::string_view::npos) {
+  size_t ns = lecfail_header_name_pos(text);
+  if (ns == std::string_view::npos) {
     return false;
   }
-  size_t p  = mp + 4;
-  size_t ns = p;
+  size_t p = ns;
   while (p < text.size() && text[p] != ':' && text[p] != '(' && text[p] != ' ' && text[p] != '\t' && text[p] != '\n') {
     ++p;
   }
@@ -1365,9 +1427,42 @@ std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
   return mods;
 }
 
-// Rename module `from` -> `to` ONLY at a definition (`mod from`) or an
-// instantiation (`from(`) site — never inside a string/type/signal (so a stale
-// `lg="side.from"` reference and any signal named like a module are untouched).
+// True when the name starting at `i` is preceded by a lambda keyword — i.e. it
+// is a DEFINITION site (`mod from`, `comb from`, `pipe[2] from`, ...) rather
+// than a use. Walks back over the separating whitespace, an optional `pipe`
+// latency bracket, and then the keyword token.
+bool lecfail_is_def_site(const std::string& s, size_t i) {
+  size_t k = i;
+  while (k > 0 && (s[k - 1] == ' ' || s[k - 1] == '\t')) {
+    --k;
+  }
+  if (k == i) {
+    return false;  // a keyword is always separated from the name by whitespace
+  }
+  if (k > 0 && s[k - 1] == ']') {
+    const size_t lb = s.rfind('[', k - 1);
+    if (lb == std::string::npos) {
+      return false;
+    }
+    k = lb;
+  }
+  const size_t e = k;
+  while (k > 0 && ((std::isalnum(static_cast<unsigned char>(s[k - 1])) != 0) || s[k - 1] == '_')) {
+    --k;
+  }
+  const std::string_view tok(s.data() + k, e - k);
+  for (const auto kw : lecfail_lambda_kws) {
+    if (tok == kw) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Rename module `from` -> `to` ONLY at a definition (`mod from` / `comb from`)
+// or an instantiation (`from(`) site — never inside a string/type/signal (so a
+// stale `lg="side.from"` reference and any signal named like a module are
+// untouched).
 std::string lecfail_rename(const std::string& s, const std::string& from, const std::string& to) {
   auto is_ident = [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; };
   std::string out;
@@ -1379,7 +1474,7 @@ std::string lecfail_rename(const std::string& s, const std::string& from, const 
       size_t j  = i + from.size();
       bool   rb = j >= s.size() || !is_ident(s[j]);
       if (lb && rb) {
-        bool def  = i >= 4 && s.compare(i - 4, 4, "mod ") == 0;
+        bool def  = lecfail_is_def_site(s, i);
         bool inst = j < s.size() && s[j] == '(';
         if (def || inst) {
           out += to;
@@ -1401,7 +1496,7 @@ std::string lecfail_rename(const std::string& s, const std::string& from, const 
 // takes a threaded top input) otherwise fails to re-compile. The top's own
 // inputs are typed by the wrapper regardless; this fixes the internal boundaries.
 std::string lecfail_type_params(const std::string& text, const absl::flat_hash_map<std::string, int>& width_of) {
-  size_t mp = text.find("mod ");
+  size_t mp = lecfail_header_name_pos(text);
   if (mp == std::string::npos) {
     return text;
   }
@@ -1713,12 +1808,18 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   for (const auto& n : win) {
     sig_in += (sig_in.empty() ? "" : ", ") + n + wtype(n);
   }
+  // Every `mod` output MUST declare a landing cycle, and a re-emitted `comb`
+  // side carries only a type (`:u64`) — so a wrapper over a combinational DUT
+  // needs an explicit `@[]` (the unconstrained opt-out) or it does not compile.
+  auto ocycle = [](std::string_view suf) {
+    return suf.find("@[") == std::string_view::npos ? std::string{suf} + "@[]" : std::string{suf};
+  };
   std::string sig_out;
   for (const auto& [n, suf] : impl_m->outputs) {
-    sig_out += (sig_out.empty() ? "" : ", ") + std::format("impl_{}{}", n, suf);
+    sig_out += (sig_out.empty() ? "" : ", ") + std::format("impl_{}{}", n, ocycle(suf));
   }
   for (const auto& [n, suf] : ref_m->outputs) {
-    sig_out += (sig_out.empty() ? "" : ", ") + std::format("ref_{}{}", n, suf);
+    sig_out += (sig_out.empty() ? "" : ", ") + std::format("ref_{}{}", n, ocycle(suf));
   }
   auto call_args = [](const Lecfail_mod* m) {
     std::string a;
@@ -3029,14 +3130,17 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
                    + (prop.msg.empty() ? "" : " \"" + prop.msg + "\"");
   const std::string rerun = can_import ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, prpfail_path)
                                 : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+  // Only an obligation that was pinned to one statement is re-checked in the
+  // body; the header must say which of the two files this is, because "the
+  // replay FAILS on it" printed over a check-less testbench reads as "the
+  // counterexample was spurious".
   std::string out = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
       "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
       "// design='{}'  violated: {}\n"
       "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
-      "// the violation lands at cycle {}. A formal-block obligation is re-checked in\n"
-      "// the test body below (the replay FAILS on it); a design-body assert is not yet\n"
-      "// executed by sim — read those off the VCD.\n"
+      "// the violation lands at cycle {}.\n"
+      "{}"
       "// Re-run:  {}   (dumps {}.vcd)\n\n",
       test_name,
       design_path,
@@ -3044,6 +3148,12 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       ncyc,
       tr.reset_cycles,
       tr.diverge_cycle,
+      embed_assert.empty()
+          ? "// NO runtime check is embedded (a design-body assert is not executed by sim, and a\n"
+            "// formal-block obligation could not be pinned to one statement) — read the violation\n"
+            "// off the VCD against formalfail.json.\n"
+          : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
+            "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
       rerun,
       test_name);
   if (can_import) {
@@ -3114,16 +3224,27 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
                vcd,
                fired ? " (the replay reproduced the violation: the runtime assert fired)" : "");
     if (!fired) {
-      // Silence here would read as "reproduced". The usual cause: the witness
-      // depends on FREE INITIAL STATE (an init-less register / memory, or a
-      // reset-less design) which the BMC may choose but a sim replay cannot
-      // set (sim powers up at the declared init / zero).
-      livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
-          .msg("the formalfail replay ran but did NOT re-fire the assert ({}): the witness likely depends on free "
-               "initial state (init-less registers/memories or no reset input) that the sim cannot reproduce; "
-               "inspect the VCD against formalfail.json",
-               vcd)
-          .emit();
+      // Silence here would read as "reproduced". With NO embedded check there
+      // is nothing that could have fired — do not blame free initial state for
+      // that. Otherwise the usual cause is exactly that: the witness depends on
+      // FREE INITIAL STATE (an init-less register / memory, or a reset-less
+      // design) which the BMC may choose but a sim replay cannot set (sim
+      // powers up at the declared init / zero).
+      if (embed_assert.empty()) {
+        livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
+            .msg("the formalfail replay ran clean ({}): NO runtime check is embedded (the obligation is a "
+                 "design-body assert, which sim does not execute, or it could not be pinned to one statement) — "
+                 "read the violation off the VCD against formalfail.json",
+                 vcd)
+            .emit();
+      } else {
+        livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
+            .msg("the formalfail replay ran but did NOT re-fire the assert ({}): the witness likely depends on "
+                 "free initial state (init-less registers/memories or no reset input) that the sim cannot "
+                 "reproduce; inspect the VCD against formalfail.json",
+                 vcd)
+            .emit();
+      }
     }
   } else {
     livehd::diag::warn("pass.formal", "formalfail-sim", "io")
@@ -3168,7 +3289,7 @@ struct Formal_test_info {
   std::string target;  // module the alias chain binds to ("" = the verified top)
   int         line    = 0;
   int         asserts = 0;  // assert / assert_always statements
-  int         assumes = 0;  // assume / assume_nocheck_* statements
+  int         assumes = 0;  // assume / assume_nocheck* statements
 };
 
 static Formal_test_info formal_test_info(const std::string& file, const livehd::formal_blocks::Block& blk) {
@@ -3234,23 +3355,19 @@ static void emit_formal_report(const std::string& path, const std::string& desig
       in_core.insert(static_cast<size_t>(ix));
     }
   }
-  int n_in = 0, n_unch = 0, n_ip = 0, n_iu = 0, n_ir = 0;
+  int n_unch = 0, n_cp = 0, n_cu = 0, n_cr = 0;
   for (const auto& p : r.props) {
     if (p.kind != "assume") {
       continue;
     }
     if (p.aclass == "unchecked") {
       ++n_unch;
-    } else if (p.aclass == "internal") {
-      if (p.verdict == livehd::lec::Verdict::Proven) {
-        ++n_ip;
-      } else if (p.verdict == livehd::lec::Verdict::Refuted) {
-        ++n_ir;
-      } else {
-        ++n_iu;
-      }
+    } else if (p.verdict == livehd::lec::Verdict::Proven) {
+      ++n_cp;
+    } else if (p.verdict == livehd::lec::Verdict::Refuted) {
+      ++n_cr;
     } else {
-      ++n_in;
+      ++n_cu;
     }
   }
   const char* agg = r.verdict == livehd::lec::Verdict::Proven    ? "proven"
@@ -3287,10 +3404,13 @@ static void emit_formal_report(const std::string& path, const std::string& desig
   if (o.stats) {
     j += std::format("    \"cvc5\": {},\n", livehd::lec::cvc5_stats_json(r.cvc5));
   }
+  // Every assume except "unchecked" is a checked obligation (prove-then-use),
+  // so the ledger is by-verdict; the input/internal class split stays visible
+  // per obligation in its "aclass" field.
   j += std::format(
-      "    \"assume_counts\": {{\"input\": {}, \"unchecked\": {}, \"internal_proven\": {}, \"internal_unproven\": {}, "
-      "\"internal_refuted\": {}}}\n",
-      n_in, n_unch, n_ip, n_iu, n_ir);
+      "    \"assume_counts\": {{\"unchecked\": {}, \"checked_proven\": {}, \"checked_unproven\": {}, "
+      "\"checked_refuted\": {}}}\n",
+      n_unch, n_cp, n_cu, n_cr);
   j += "  },\n  \"obligations\": [\n";
   for (size_t i = 0; i < r.props.size(); ++i) {
     const auto& p        = r.props[i];
@@ -3300,7 +3420,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
       file = p.loc.substr(0, colon);
       line = p.loc.substr(colon + 1);
     }
-    const bool  env_assume = p.kind == "assume" && p.aclass != "internal";
+    const bool  env_assume = p.kind == "assume" && p.aclass == "unchecked";
     const char* verdict    = env_assume                                       ? "in_force"
                              : p.verdict == livehd::lec::Verdict::Proven      ? "proven"
                              : p.verdict == livehd::lec::Verdict::Refuted     ? "refuted"
@@ -3315,7 +3435,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
                                                     : std::format("assume set of block '{}' contradictory", p.scope))
                                  : std::string{"not checked"};
       if (p.kind == "assume") {
-        why += "; unproven internal assume — NOT used";
+        why += "; unproven assume — NOT used";
       }
     }
     // R1 Phase 2: `guarded` says the obligation is `guard implies cond` (written
@@ -3787,7 +3907,7 @@ void formal_verify_command(Options& opts, Result& res) {
         if (!blk.error.empty()) {
           throw Lhd_error{"usage",
                           std::format("formal block error: {}", blk.error),
-                          "formal blocks: alias bindings + assert/assume/assert_always/assume_nocheck_* over dotted signal paths"};
+                          "formal blocks: alias bindings + assert/assume/assert_always/assume_nocheck over dotted signal paths"};
         }
         all_names += (all_names.empty() ? "" : ", ") + blk.name;
         if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
@@ -3908,11 +4028,16 @@ void formal_verify_command(Options& opts, Result& res) {
         }
         // Generated monitor: one statement per line; line 1 is the header, so
         // emitted statement j sits on generated line 2+j (the loc-remap key).
-        // P1 assume forms: `assume_nocheck_synth` is INVISIBLE to verify (a
-        // synthesis-only don't-care by fcore contract); `assume_nocheck_formal`
-        // compiles as a plain `assume` (the nocheck spelling is not a builtin)
-        // with its generated line recorded so the engine classifies it
-        // "unchecked" — a free constraint by user fiat, warned per encounter.
+        // Assume forms: `assume_nocheck_synth` is INVISIBLE to verify (a
+        // synthesis-only don't-care by fcore contract); `assume_nocheck` (and
+        // the fcore spelling `assume_nocheck_formal`) compiles as a plain
+        // `assume` (the nocheck spelling is not a builtin) with its generated
+        // line recorded so the engine classifies it "unchecked" — a free
+        // constraint by user fiat, disclosed in every verdict row. The fcore
+        // spelling additionally warns per encounter (its contract); the plain
+        // spelling is the SANCTIONED way to state an environment constraint,
+        // so it is disclosed but not warned. A plain `assume` is a proof
+        // obligation — checked as an assert before it is ever used.
         std::string src      = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
         int         gen_line = 2;
         for (const auto& st : blk.stmts) {
@@ -3929,15 +4054,17 @@ void formal_verify_command(Options& opts, Result& res) {
           if (callee == "assume_nocheck_synth") {
             continue;
           }
-          if (callee == "assume_nocheck_formal") {
+          if (callee == "assume_nocheck" || callee == "assume_nocheck_formal") {
+            if (callee == "assume_nocheck_formal") {
+              livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
+                  .msg("formal block '{}' uses assume_nocheck_formal ({}:{}); verify verdicts are conditional and UNCHECKED",
+                       blk.name,
+                       bf,
+                       st.line)
+                  .emit();
+            }
             one.replace(0, callee.size(), "assume");
             mon.nocheck_lines.insert(gen_line);
-            livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
-                .msg("formal block '{}' uses assume_nocheck_formal ({}:{}); verify verdicts are conditional and UNCHECKED",
-                     blk.name,
-                     bf,
-                     st.line)
-                .emit();
           }
           src += one + "\n";
           mon.line2loc[gen_line] = std::format("{}:{}", bf, st.line);
@@ -3990,21 +4117,58 @@ void formal_verify_command(Options& opts, Result& res) {
         for (const auto& prefix : inst_prefixes) {
           livehd::lec::Monitor im = mon;  // graph + line2loc shared; binds rebuilt
           {
-            // Embeddable form of each assert/assert_always statement for THIS
-            // instance context (assumes hold on the trace by construction).
+            // Embeddable form of each obligation statement for THIS instance
+            // context. A plain `assume` IS an obligation (checked as an assert
+            // before it is used), so a refuted one is exactly what the replay
+            // must re-fire — embed it AS an assert. The `assume_nocheck*`
+            // spellings are free constraints by user fiat: never refuted, and
+            // re-checking one in the replay would fail by design.
             for (const auto& st : blk.stmts) {
-              if (st.text.rfind("assume", 0) == 0) {
+              std::string callee;
+              for (char ch : st.text) {
+                if ((std::isalnum(static_cast<unsigned char>(ch)) == 0) && ch != '_') {
+                  break;
+                }
+                callee += ch;
+              }
+              if (callee.rfind("assume_nocheck", 0) == 0) {
                 continue;
               }
               std::string t = st.text;
+              if (callee == "assume") {
+                t.replace(0, callee.size(), "assert");
+              }
+              // LONGEST ident first: `sanitize` maps '.' to '_', so the binds of
+              // `io` and `io.result` are `__p_io` and `__p_io_result` — and
+              // blk.inputs arrives sorted ASCENDING by ident. Substituting the
+              // short one first rewrites the head of the long one and silently
+              // yields `_dut.io_result` where the design has `_dut.io.result`.
+              std::vector<const decltype(blk.inputs)::value_type*> bins;
+              bins.reserve(blk.inputs.size());
               for (const auto& bin : blk.inputs) {
-                const std::string dut = "_dut." + (prefix.empty() ? bin.path : prefix + "." + bin.path);
-                for (size_t pos = 0; (pos = t.find(bin.ident, pos)) != std::string::npos; pos += dut.size()) {
-                  t.replace(pos, bin.ident.size(), dut);
+                bins.push_back(&bin);
+              }
+              std::sort(bins.begin(), bins.end(), [](const auto* a, const auto* b) {
+                return a->ident.size() != b->ident.size() ? a->ident.size() > b->ident.size() : a->ident < b->ident;
+              });
+              for (const auto* bin : bins) {
+                const std::string dut = "_dut." + (prefix.empty() ? bin->path : prefix + "." + bin->path);
+                for (size_t pos = 0; (pos = t.find(bin->ident, pos)) != std::string::npos; pos += dut.size()) {
+                  t.replace(pos, bin->ident.size(), dut);
                 }
               }
               const std::string blabel = prefix.empty() ? blk.name : blk.name + "@" + prefix;
-              fb_embed[blabel + "\x1f" + std::format("{}:{}", bf, st.line)] = t;
+              // A Prop_result identifies its statement by `block` + `file:line`
+              // only, so two statements sharing ONE source line (Pyrope's `;`
+              // separator) are indistinguishable at lookup time. Embedding
+              // whichever won the race would attach the WRONG check to the
+              // refuted obligation — a replay that silently tests something else
+              // is worse than one that tests nothing. Mark the key ambiguous
+              // (empty text) so the generator falls back to no embedded check.
+              auto [it, fresh] = fb_embed.try_emplace(blabel + "\x1f" + std::format("{}:{}", bf, st.line), t);
+              if (!fresh && it->second != t) {
+                it->second.clear();
+              }
             }
           }
           if (!prefix.empty()) {
@@ -4081,7 +4245,8 @@ void formal_verify_command(Options& opts, Result& res) {
                         : r.verdict == livehd::lec::Verdict::Refuted ? "REFUTED"
                                                                      : "UNKNOWN";
   std::print("formal verify: '{}' {} ({}; {} ms)\n", g->get_name(), verdict, r.detail, r.elapsed_ms);
-  std::string first_fail;  // the exit policy's headline: the first refuted obligation
+  std::string first_fail;         // the exit policy's headline: the first refuted obligation
+  bool        first_fail_assume = false;  // headline is a refuted assume-check, not a design violation
   for (const auto& p : r.props) {
     std::string where = p.loc.empty() ? std::string{} : " at " + p.loc;
     std::string msg   = p.msg.empty() ? std::string{} : " \"" + p.msg + "\"";
@@ -4100,18 +4265,12 @@ void formal_verify_command(Options& opts, Result& res) {
                    "branch is dead (fix the guard condition, or drop the branch)\n");
       }
     };
-    if (p.kind == "assume" && p.aclass != "internal") {
-      if (p.aclass == "unchecked") {
-        std::print("  assume{}{}: in force (UNCHECKED assume_nocheck_formal; verdicts are conditional and unchecked)\n",
-                   where,
-                   msg);
-      } else {
-        std::print("  assume{}{}: in force (input environment constraint; verdicts are conditional on it)\n", where, msg);
-      }
+    if (p.kind == "assume" && p.aclass == "unchecked") {
+      std::print("  assume{}{}: in force (UNCHECKED assume_nocheck; verdicts are conditional and unchecked)\n", where, msg);
       vacuity_note();  // an env assume whose guard never holds constrains nothing
       continue;
     }
-    // Asserts AND internal assumes (P1 prove-then-use): the same verdict rows.
+    // Asserts AND checked assumes (prove-then-use): the same verdict rows.
     switch (p.verdict) {
       case livehd::lec::Verdict::Proven:
         if (p.unbounded) {
@@ -4125,8 +4284,23 @@ void formal_verify_command(Options& opts, Result& res) {
         if (!p.witness.empty()) {
           std::print("    counterexample inputs: {}\n", p.witness);
         }
+        if (p.kind == "assume") {
+          // The actionable line: an assume is a proof obligation, and the fix
+          // differs by WHY it failed — an input-cone constraint can never hold
+          // over free inputs (the env-constraint spelling is assume_nocheck),
+          // while an internal claim is genuinely broken by the design.
+          if (p.aclass == "input") {
+            std::print("    an assume is CHECKED as an assert before it is used, and this one constrains only free "
+                       "primary inputs — nothing forces it to hold. If it is an intended environment constraint, "
+                       "spell it assume_nocheck(...)\n");
+          } else {
+            std::print("    an assume is CHECKED as an assert before it is used, and the design refutes this claim — "
+                       "fix the design or the assume (assume_nocheck(...) would impose it UNCHECKED)\n");
+          }
+        }
         if (first_fail.empty()) {
-          first_fail = p.kind + where + msg;
+          first_fail        = p.kind + where + msg;
+          first_fail_assume = p.kind == "assume";
         }
         break;
       default: {
@@ -4141,7 +4315,7 @@ void formal_verify_command(Options& opts, Result& res) {
                                                  : std::format("assume set of block '{}' is contradictory", p.scope))
                           : std::string{"not checked"};
         if (p.kind == "assume") {
-          why += "; unproven internal assume — NOT used (prove it, restrict it to inputs, or spell assume_nocheck_formal)";
+          why += "; unproven assume — NOT used (make it provable, or spell assume_nocheck to impose it UNCHECKED)";
         }
         std::print("  {}{}{}: UNKNOWN ({})\n", p.kind, where, msg, why);
         if (!p.witness.empty()) {
@@ -4208,6 +4382,18 @@ void formal_verify_command(Options& opts, Result& res) {
       std::string embed;
       if (auto it = fb_embed.find(fp->block + "\x1f" + fp->loc); it != fb_embed.end()) {
         embed = it->second;
+        if (embed.empty()) {
+          // Marked ambiguous above: the source line holds more than one
+          // statement, so the refuted obligation cannot be told from its
+          // neighbours. Say so — a testbench with no embedded check otherwise
+          // reads as "the counterexample was spurious".
+          livehd::diag::info("pass.formal", "formalfail-embed-ambiguous", "io")
+              .msg("formal.prpfail testbench carries no embedded check: {} holds more than one statement of block "
+                   "'{}', so the refuted one cannot be identified; put one statement per line to get it back",
+                   fp->loc,
+                   fp->block)
+              .emit();
+        }
       }
       emit_formalfail_witness(opts, res, *fp, kind, path, std::string(g->get_name()), prpfail, prpfailrun, embed);
     }
@@ -4291,11 +4477,12 @@ void formal_verify_command(Options& opts, Result& res) {
       if (!p.vacuous_guard) {
         continue;
       }
-      // An env-class assume whose guard is dead constrains nothing — worth the
-      // row and the warning, but it is not a broken PROOF, and the compile tier
-      // skips assumes outright. Counting it here made the same source pass
-      // `lhd compile` and hard-fail `lhd formal verify --set formal.strict=true`
-      // on the identical diagnostic. Align: only obligations gate the exit.
+      // A non-internal assume whose guard is dead constrains nothing — worth
+      // the row and the warning, but it must NOT gate `formal.strict`: the
+      // compile tier does not count assumes in its vacuity accounting, and the
+      // two tiers must agree on whether the same source is clean (an
+      // input-class assume is checked as an obligation now, but its dead-guard
+      // severity keeps this ruling). Only internal-class assumes gate the exit.
       if (p.kind == "assume" && p.aclass != "internal") {
         continue;
       }
@@ -4325,6 +4512,17 @@ void formal_verify_command(Options& opts, Result& res) {
   }
 
   if (r.verdict == livehd::lec::Verdict::Refuted) {
+    if (first_fail_assume) {
+      // The headline failure is an assume whose CHECK refuted — the design
+      // violated nothing; the verification collateral asks for a constraint it
+      // cannot justify. Name that, or the user reads "property violation" and
+      // hunts a design bug that does not exist.
+      throw Lhd_error{"equiv_fail",
+                      std::format("'{}' has an assume that fails its check ({})", g->get_name(), first_fail),
+                      "every assume is CHECKED as an assert before it is used; if this one is an intended free "
+                      "environment constraint, spell it assume_nocheck(...) — it is then assumed WITHOUT check and "
+                      "disclosed"};
+    }
     throw Lhd_error{"equiv_fail",
                     std::format("'{}' has a reachable property violation ({})", g->get_name(), first_fail),
                     "the per-cycle input trace above reproduces it from reset"};

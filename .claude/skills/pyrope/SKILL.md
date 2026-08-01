@@ -300,10 +300,15 @@ Three statements, distinguished by **who discharges the obligation**
   lambda's free inputs it cannot be proven: at the **top** module that fails
   the build (`assume-refuted`; downgrade with
   `--set compile.formal.on_refute=warn`); in an **instantiated** module it is
-  deferred with a warning (the parent's drivers discharge it).
-  `assume_nocheck_formal(expr)` forces a free constraint by user fiat (warned,
-  disclosed); `assume_nocheck_synth(expr)` is a synthesis-only don't-care,
-  invisible to verification.
+  deferred with a warning (the parent's drivers discharge it). `lhd formal
+  verify` applies the same discipline: EVERY assume (formal-block or design)
+  is checked as an assert before it is used, and a refuted check fails the
+  run with a hint to spell `assume_nocheck`.
+  `assume_nocheck(expr)` (formal blocks) is the explicit free environment
+  constraint — assumed WITHOUT check, disclosed in the verdict table;
+  `assume_nocheck_formal(expr)` is the fcore spelling of the same (it also
+  warns per encounter); `assume_nocheck_synth(expr)` is a synthesis-only
+  don't-care, invisible to verification.
 
 **TRAP — guards are NOT inherited**: `if c { assert(x) }` lowers as an
 *unconditional* `assert(x)` (known compiler bug, verified 2026-07-31). Always

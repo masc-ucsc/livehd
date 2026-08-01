@@ -451,7 +451,8 @@ struct Lec_options {
   // never prune an assert's proof (only proven assumes are hypotheses — that
   // discipline lives in the pass.formal driver, which proves assumes separately
   // and recovers assume-dependent elisions with the single-frame Prover). The
-  // verify CLI leaves this false: there, an assume is a disclosed env constraint.
+  // verify CLI leaves this false: there, an assume is a proof obligation
+  // (prove-then-use), and only assume_nocheck is a free env constraint.
   bool ignore_assumes = false;
 
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
@@ -598,20 +599,21 @@ struct Prop_result {
   // block's. See prove_properties' per-scope activation literals.
   std::string scope;
   // kind==assume classification (P1 assume discipline; "" for asserts and under
-  // ignore_assumes):
+  // ignore_assumes). EVERY assume except "unchecked" is a PROOF OBLIGATION,
+  // prove-then-use: checked per cycle like a plain assert; only a just-PROVEN
+  // cycle's fact constrains later obligations (rule A), and only an inductive
+  // survivor constrains the step frame (rule E). REFUTED = a hard error;
+  // Unknown = NOT used, disclosed as unproven. The input/internal split is
+  // DIAGNOSTIC only (same discipline, different hint on failure):
   //   "input"     — the cond's cone reaches primary inputs (or free blackbox
-  //                 outputs) only: an environment constraint by nature (inputs
-  //                 are free, nothing to prove). Asserted at EVERY cycle,
-  //                 prologue included; verdict stays Unknown / cycles -1;
-  //                 disclosed ("under N input assume(s)").
-  //   "internal"  — the cond depends on design state / memory: a PROOF
-  //                 OBLIGATION, prove-then-use. Checked per cycle like a plain
-  //                 assert; only a just-PROVEN cycle's fact constrains later
-  //                 obligations (rule A), and only an inductive survivor
-  //                 constrains the step frame (rule E). REFUTED = a hard error;
-  //                 Unknown = NOT used, disclosed as unproven.
-  //   "unchecked" — assume_nocheck_formal: a free constraint by explicit user
-  //                 fiat; warned per encounter, disclosed distinctly.
+  //                 outputs) only. Over free inputs such a constraint can
+  //                 never be proven unless it is a tautology, so a refute
+  //                 earns the "spell it assume_nocheck" hint.
+  //   "internal"  — the cond depends on design state / memory: a real claim
+  //                 about the design; a refute means the design breaks it.
+  //   "unchecked" — assume_nocheck (and the fcore spelling
+  //                 assume_nocheck_formal): a free constraint by explicit user
+  //                 fiat; never checked, disclosed distinctly.
   std::string aclass;
   Verdict verdict = Verdict::Unknown;
   // V3 verdict ladder: a bounded-proven assert that also survives the
@@ -742,10 +744,11 @@ struct Monitor {
   // Generated-source line -> original "file:line" (fproperty locs point into
   // the generated monitor file; the report shows the user's formal block).
   absl::flat_hash_map<int, std::string> line2loc;
-  // Generated-source lines holding an `assume_nocheck_formal` statement (the
-  // CLI rewrote the callee to `assume` so the monitor compiles): the engine
-  // classifies these props "unchecked" — a free constraint by user fiat, never
-  // a proof obligation, disclosed distinctly.
+  // Generated-source lines holding an `assume_nocheck` (or the fcore spelling
+  // `assume_nocheck_formal`) statement (the CLI rewrote the callee to `assume`
+  // so the monitor compiles): the engine classifies these props "unchecked" —
+  // a free constraint by user fiat, never a proof obligation, disclosed
+  // distinctly. Every other `assume` is a proof obligation (prove-then-use).
   absl::flat_hash_set<int> nocheck_lines;
 };
 

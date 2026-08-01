@@ -228,12 +228,13 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
         break;
       }
     }
-    const bool nocheck = callee == "assume_nocheck_formal" || callee == "assume_nocheck_synth";
+    const bool nocheck
+        = callee == "assume_nocheck" || callee == "assume_nocheck_formal" || callee == "assume_nocheck_synth";
     if (callee != "assert" && callee != "assume" && callee != "assert_always" && !(allow_nocheck && nocheck)) {
       // Only advertise the forms THIS caller accepts (a nocheck rejection that
-      // lists assume_nocheck_* as supported is self-contradictory guidance).
+      // lists assume_nocheck* as supported is self-contradictory guidance).
       err(allow_nocheck ? "unsupported statement in formal block (alias bindings and "
-                          "assert/assume/assert_always/assume_nocheck_* only; got '"
+                          "assert/assume/assert_always/assume_nocheck only; got '"
                               + callee + "')"
                         : "unsupported statement in formal block (alias bindings and assert/assume/assert_always only; got '"
                               + callee + "')");

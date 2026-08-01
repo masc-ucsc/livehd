@@ -21,9 +21,11 @@
 //   mut   X = <alias-or-module>    // secondary alias (test-block style)
 //   assert(expr[, "msg"]) / assume(...) / assert_always(...)
 // where `expr` uses dotted paths rooted at an alias, literals, and operators —
-// but no nested function calls (V2). LEC opts into the two additional fcore
-// forms `assume_nocheck_formal` and `assume_nocheck_synth`; verify keeps the V2
-// subset until its assume-form milestone lands.
+// but no nested function calls (V2). `allow_nocheck` additionally admits
+// `assume_nocheck(...)` — a FREE environment constraint, assumed without check
+// (a plain `assume` is a proof obligation: checked as an assert before it is
+// used) — plus the fcore spellings `assume_nocheck_formal` /
+// `assume_nocheck_synth`.
 
 #include <string>
 #include <vector>

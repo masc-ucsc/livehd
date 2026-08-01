@@ -260,12 +260,294 @@ int list_command(const Options& opts) {
   return 1;
 }
 
+struct Help_arg {
+  std::string              name;
+  std::string              syntax;
+  std::string              type;
+  std::string              help;
+  bool                     required   = false;
+  bool                     positional = false;
+  bool                     repeatable = false;
+  std::vector<std::string> aliases;
+};
+
+struct Help_doc {
+  std::string                                      name;
+  std::string                                      summary;
+  std::string                                      usage;
+  std::vector<std::string>                         details;
+  std::vector<Help_arg>                            args;
+  std::vector<std::pair<std::string, std::string>> subcommands;
+  std::vector<std::string>                         examples;
+  std::vector<std::string>                         inputs;
+  std::vector<std::string>                         outputs;
+  bool                                             leaf = true;
+};
+
+Help_arg help_positional(std::string name, std::string type, std::string help, bool required = true, bool repeatable = false) {
+  return Help_arg{std::move(name), "", std::move(type), std::move(help), required, true, repeatable, {}};
+}
+
+Help_arg help_flag(std::string name, std::string syntax, std::string type, std::string help,
+                   std::vector<std::string> aliases = {}) {
+  return Help_arg{std::move(name), std::move(syntax), std::move(type), std::move(help), false, false, false, std::move(aliases)};
+}
+
+Help_arg help_repeatable_flag(std::string name, std::string syntax, std::string type, std::string help) {
+  auto arg       = help_flag(std::move(name), std::move(syntax), std::move(type), std::move(help));
+  arg.repeatable = true;
+  return arg;
+}
+
+std::string json_string_array(const std::vector<std::string>& values) {
+  std::string out = "[";
+  for (const auto& value : values) {
+    if (out.size() > 1) {
+      out += ',';
+    }
+    out += std::format("\"{}\"", json_escape(value));
+  }
+  out += ']';
+  return out;
+}
+
+std::string render_help_json(const Help_doc& doc) {
+  std::string description = doc.summary;
+  for (const auto& detail : doc.details) {
+    description += description.empty() ? detail : ". " + detail;
+  }
+  std::string out = std::format(R"json({{"schema_version":1,"name":"{}","description":"{}","usage":"lhd {}")json",
+                                json_escape(doc.name),
+                                json_escape(description),
+                                json_escape(doc.usage));
+  if (!doc.subcommands.empty()) {
+    out += R"json(,"subcommands":[)json";
+    for (size_t i = 0; i < doc.subcommands.size(); ++i) {
+      if (i != 0) {
+        out += ',';
+      }
+      out += std::format(R"json({{"name":"{}","summary":"{}"}})json",
+                         json_escape(doc.subcommands[i].first),
+                         json_escape(doc.subcommands[i].second));
+    }
+    out += ']';
+  }
+  if (!doc.args.empty()) {
+    out             += R"json(,"args":{"required":[)json";
+    bool first       = true;
+    auto append_arg  = [&](const Help_arg& arg) {
+      if (!first) {
+        out += ',';
+      }
+      first  = false;
+      out   += std::format(R"json({{"name":"{}","type":"{}","help":"{}")json",
+                           json_escape(arg.name),
+                           json_escape(arg.type),
+                           json_escape(arg.help));
+      if (arg.positional) {
+        out += R"json(,"positional":true)json";
+      }
+      if (arg.repeatable) {
+        out += R"json(,"repeatable":true)json";
+      }
+      if (!arg.aliases.empty()) {
+        out += std::format(R"json(,"aliases":{})json", json_string_array(arg.aliases));
+      }
+      out += '}';
+    };
+    for (const auto& arg : doc.args) {
+      if (arg.required) {
+        append_arg(arg);
+      }
+    }
+    out   += R"json(],"optional":[)json";
+    first  = true;
+    for (const auto& arg : doc.args) {
+      if (!arg.required) {
+        append_arg(arg);
+      }
+    }
+    out += "]}";
+  }
+  if (!doc.inputs.empty()) {
+    out += std::format(R"json(,"inputs":{})json", json_string_array(doc.inputs));
+  }
+  if (!doc.outputs.empty()) {
+    out += std::format(R"json(,"outputs":{})json", json_string_array(doc.outputs));
+  }
+  out += std::format(R"json(,"examples":{})json", json_string_array(doc.examples));
+  out += '}';
+  return out;
+}
+
+void render_help_pretty(const Help_doc& doc) {
+  std::print("lhd {} — {}\n\nusage: lhd {}\n", doc.name, doc.summary, doc.usage);
+  for (const auto& detail : doc.details) {
+    std::print("\n");
+    print_wrapped(detail, 92, "  ");
+  }
+  if (!doc.subcommands.empty()) {
+    std::print("\nsubcommands:\n");
+    size_t width = 0;
+    for (const auto& [name, summary] : doc.subcommands) {
+      (void)summary;
+      width = std::max(width, name.size());
+    }
+    for (const auto& [name, summary] : doc.subcommands) {
+      std::print("  {:<{}}  {}\n", name, width, summary);
+    }
+  }
+  if (doc.leaf) {
+    std::print("\nflags:\n");
+    size_t width = 0;
+    for (const auto& arg : doc.args) {
+      if (!arg.positional) {
+        width = std::max(width, arg.syntax.size());
+      }
+    }
+    if (width == 0) {
+      std::print("  none\n");
+    } else {
+      for (const auto& arg : doc.args) {
+        if (!arg.positional) {
+          std::print("  {:<{}}  {}\n", arg.syntax, width, arg.help);
+        }
+      }
+    }
+  }
+  std::print("\nexamples:\n");
+  for (const auto& example : doc.examples) {
+    std::print("  {}\n", example);
+  }
+}
+
+const Help_doc* tool_help_doc(std::string_view name) {
+  static const Help_doc parent{
+      "tool",
+      "inspect ln:/lg: artifacts",
+      "tool <subcommand> [args] [flags]",
+      {},
+      {},
+      {{"cat", "structured dump of one ln:/lg:/source input"},
+        {"grep", "filtered search over one or more lg: libraries"},
+        {"diff", "unified or semdiff-aware comparison of two inputs"},
+        {"tree", "lg: instance hierarchy or LNAST structural skeleton"}},
+      {"lhd tool cat lg:dir --top m", "lhd tool grep color=nil lg:dir", "lhd tool diff lg:before lg:after", "lhd tool tree ln:dir"},
+      {},
+      {},
+      false
+  };
+  static const Help_doc cat{
+      "tool cat",
+      "structured dump of one ln:/lg:/source input",
+      "tool cat [filters…] <input> [flags]",
+      {"<input> is one lg:DIR, ln:DIR, verilog:FILE, pyrope:FILE, or bare .prp/.v/.sv source. lg: accepts optional "
+       "AND-combined filters; ln:/source dumps whole LNAST units and does not accept filters."},
+      {help_positional("input", "lg:DIR|ln:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv", "artifact to dump"),
+        help_positional("filters", "field=value|term", "AND-combined lg: filters", false, true),
+        help_flag("top", "--top M", "string", "select one module/unit"),
+        help_flag("target", "--target node|pin|edge|all", "enum", "lg: records to show (default all)"),
+        help_flag("attr", "--attr CSV", "csv", "lg: display columns"),
+        help_flag("max", "--max N", "int", "output row cap (0 = unlimited)"),
+        help_flag("diag-fmt", "--diag-fmt auto|jsonl|pretty", "enum", "lg: human or machine records")},
+      {},
+      {"lhd tool cat lg:dir --top m", "lhd tool cat color=nil lg:dir", "lhd tool cat x.prp"},
+      {"ln", "lg", "pyrope", "verilog"},
+      {"stdout"}
+  };
+  static const Help_doc grep{
+      "tool grep",
+      "filtered search over one or more lg: libraries",
+      "tool grep <filter…> <lg:DIR…> [flags]",
+      {"At least one filter is required. Filters are AND-combined: a bare term matches any column plus identity, or use "
+       "field=value (name, kind, id, color, match, bits, from, to). Strings support ==exact and ~regex; numbers support "
+       ">, <, >=, <=, and a..b; =nil matches an absent value."},
+      {help_positional("filters", "field=value|term", "AND-combined record filters", true, true),
+        help_positional("inputs", "lg:DIR", "libraries to search", true, true),
+        help_flag("top", "--top M", "string", "select one module"),
+        help_flag("target", "--target node|pin|edge|all", "enum", "records to search (default all)"),
+        help_flag("attr", "--attr CSV", "csv", "display columns"),
+        help_flag("max", "--max N", "int", "output row cap (0 = unlimited)"),
+        help_flag("invert-match", "-v, --invert-match", "flag", "keep records that do not match", {"-v"}),
+        help_flag("diag-fmt", "--diag-fmt auto|jsonl|pretty", "enum", "human or machine records")},
+      {},
+      {"lhd tool grep get_mask lg:dir", "lhd tool grep color=nil lg:dir", "lhd tool grep -v match=0 lg:dir"},
+      {"lg"},
+      {"stdout"}
+  };
+  static const Help_doc diff{
+      "tool diff",
+      "compare two ln:/lg:/source inputs",
+      "tool diff [filters…] <input-a> <input-b> [flags]",
+      {"Inputs must be exactly two lg: libraries or two ln:/source inputs. lg: accepts optional AND-combined filters; "
+       "ln:/source compares whole LNAST units."},
+      {help_positional("inputs", "two lg:DIR values or two ln:DIR/source values", "artifacts to compare"),
+        help_positional("filters", "field=value|term", "AND-combined lg: filters", false, true),
+        help_flag("top", "--top M", "string", "select one module/unit"),
+        help_flag("target", "--target node|pin|edge|all", "enum", "lg: records to compare (default all)"),
+        help_flag("attr", "--attr CSV", "csv", "lg: display columns"),
+        help_flag("context", "-C N, --context N", "int", "unified-diff context lines", {"-C"}),
+        help_flag("match", "--match", "flag", "visualize pass.semdiff match attributes")},
+      {},
+      {"lhd tool diff lg:before lg:after --attr color", "lhd tool diff lg:gold lg:opt --match", "lhd tool diff old.prp new.prp"},
+      {"ln", "lg", "pyrope", "verilog"},
+      {"stdout"}
+  };
+  static const Help_doc tree{
+      "tool tree",
+      "lg: instance hierarchy or LNAST structural skeleton",
+      "tool tree <input> [flags]",
+      {"<input> is one lg:DIR, ln:DIR, verilog:FILE, pyrope:FILE, or bare .prp/.v/.sv source. lg: shows the instance "
+       "hierarchy; ln:/source shows scope/control/call/definition nodes with per-subtree node counts."},
+      {help_positional("input", "lg:DIR|ln:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv", "artifact to summarize"),
+        help_flag("top", "--top M", "string", "select the root module/unit"),
+        help_repeatable_flag("target", "--target kind:<X>", "kind:<X>", "also show nodes of kind X"),
+        help_flag("hier", "--hier [N]", "int?", "descend all levels, or at most N levels"),
+        help_flag("max", "--max N", "int", "output row cap (0 = unlimited)")},
+      {},
+      {"lhd tool tree lg:dir --top m",
+        "lhd tool tree lg:dir --target kind:register --target kind:memory", "lhd tool tree ln:dir --hier 3"},
+      {"ln", "lg", "pyrope", "verilog"},
+      {"stdout"}
+  };
+
+  if (name == "tool") {
+    return &parent;
+  }
+  if (name == "tool cat") {
+    return &cat;
+  }
+  if (name == "tool grep") {
+    return &grep;
+  }
+  if (name == "tool diff") {
+    return &diff;
+  }
+  if (name == "tool tree") {
+    return &tree;
+  }
+  return nullptr;
+}
+
+int describe_tool(std::string_view name) {
+  const auto* doc = tool_help_doc(name);
+  if (doc == nullptr) {
+    return -1;
+  }
+  print_json_line(render_help_json(*doc));
+  return 0;
+}
+
 int describe_command(const Options& opts) {
   if (opts.files.empty()) {
     std::print(stderr, "lhd describe: requires a name (a command, recipe:NAME, or an emit kind)\n");
     return 1;
   }
   const std::string& name = opts.files.front();
+
+  if (int rc = describe_tool(name); rc >= 0) {
+    return rc;
+  }
 
   if (name == "pyrope") {
     print_json_line(
@@ -358,11 +640,6 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the Lnast::dump text form), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. The dumped tree is post-upass","direction":"out"})json");
     return 0;
   }
-  if (name == "tool") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector: `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv source is the verilog:/pyrope: shortcut; the ln path takes sources). cat = structured dump; grep = filtered search (>=1 filter, may span libraries; -v inverts the match); diff = unified-diff of two inputs (--match: visualize the semdiff `match` attribute — matched regions summarized, unmatched nodes shown -/+ ); tree = for lg: the instance hierarchy (add --target kind:register / --target kind:memory, repeatable, to also list those nodes inside each module — registers/memories on the same hierarchy; any Ntype name also matches); for ln:/source the LNAST structural skeleton — the scope / control / call / def nodes (stmts, if, for, while, fcall, fdef, io) with per-subtree node counts, drawn with box connectors (cat dumps every node, tree is the summary; --target kind:<lnast-verbal> additively spotlights a collapsed kind like store/declare). Both honor --hier (depth) and --max (rows). lg options: --target node|pin|edge|all (default all) or tree's kind:<X>, --attr CSV, --max N, --hier [N], --top M; filters are field=value terms (name=/kind=/id=/color=/match=/bits=/from=/to=; ':' also accepted but Pyrope reads it as a type; strings substring|==exact|~regex; numeric >,<,>=,<=,a..b; =nil; a bare term like 'get_mask' has no field and matches any column plus the node/pin identity). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv|field=value|term","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all|kind:<X>"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"},{"name":"v","type":"flag (grep: invert match)"},{"name":"match","type":"flag (diff: visualize the semdiff match attribute)"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep get_mask lg:dir","lhd tool grep color=nil lg:dir","lhd tool grep -v match=0 lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool diff lg:gold lg:opt --match","lhd tool tree lg:dir --top m","lhd tool tree ln:dir","lhd tool cat x.prp"]})json");
-    return 0;
-  }
   if (name == "dump") {
     print_json_line(
         R"json({"schema_version":1,"name":"dump","description":"--dump parse|lnast|lg (repeatable, comma-separable): print a debug observable to stderr. parse = the LNAST right after the front-end parse (inou.prp/inou.slang + lnastfmt; needs sources), lnast = the LNAST right after pass.upass, lg = a textual node/edge dump of the LGraphs (post-recipe). A dump forces the pipeline stage that produces it (e.g. `--dump lnast` runs pass.upass). The screen twin of --emit-dir lnast-dump:DIR/; stdout stays protocol-clean","examples":["lhd compile x.prp --dump parse,lnast","lhd compile x.prp --recipe O0 --dump lg"]})json");
@@ -400,7 +677,7 @@ int describe_command(const Options& opts) {
 // NOTHING is a stale/typo'd prefix, not a real empty set — that is reported as an
 // error (returns non-zero) instead of silently rendering an empty list.
 int print_options_section(std::initializer_list<std::string_view> prefixes) {
-  constexpr size_t kShown = 10;
+  constexpr size_t kShown = 5;
   const auto       all    = list_set_options();
 
   std::vector<const Set_option*> sel;
@@ -555,7 +832,13 @@ int help_pyrope(const std::string& sub) {
         "\n"
         "usage: lhd pyrope lsp\n"
         "  JSON-RPC over stdio (Content-Length framed; .prp only). Drives prp2lnast +\n"
-        "  pass.upass + core/diag per buffer; ephemeral, no lgdb.\n");
+        "  pass.upass + core/diag per buffer; ephemeral, no lgdb.\n"
+        "\n"
+        "flags:\n"
+        "  none (stdin/stdout belong to the LSP protocol)\n"
+        "\n"
+        "examples:\n"
+        "  lhd pyrope lsp\n");
     return 0;
   }
   if (!sub.empty()) {
@@ -578,6 +861,19 @@ int help_pyrope(const std::string& sub) {
   return 0;
 }
 
+// Both renderings consume the same structured record: adding or renaming a
+// tool flag updates pretty and jsonl help together.
+int help_tool(const std::string& sub) {
+  const std::string name = sub.empty() ? "tool" : "tool " + sub;
+  const auto*       doc  = tool_help_doc(name);
+  if (doc == nullptr) {
+    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree)\n", sub);
+    return 1;
+  }
+  render_help_pretty(*doc);
+  return 0;
+}
+
 // `lhd pass [SUB] --help` — the graph-pass subcommands, each with its own
 // --set options. `sub` is the subcommand word ("color"/"partition"/...), empty
 // for the `pass` overview.
@@ -590,6 +886,11 @@ int help_pass(const std::string& sub) {
         "  alg defaults to acyclic. The coloring is written back into the input lg:. With\n"
         "  --top the whole instance hierarchy is colored (each unique def once); set\n"
         "  pass.color.hier=false to limit it to the top def.\n"
+        "\n"
+        "flags:\n"
+        "  --top M                    select the root module\n"
+        "  --stats                    print the coloring report\n"
+        "  --set pass.color.flag=value  pass options (listed below)\n"
         "\n"
         "algorithms:\n"
         "  acyclic  DAG cone partitions: every primary-output driver, fan-out>1, and dead\n"
@@ -644,7 +945,12 @@ int help_pass(const std::string& sub) {
         "usage: lhd pass partition --top M lg:DIR --emit-dir lg:OUT/\n"
         "  --emit-dir lg: (must differ from the input) receives the partitioned library.\n"
         "\n"
-        "example:\n"
+        "flags:\n"
+        "  --top M                        select the root module\n"
+        "  --emit-dir lg:OUT/             output library (must differ from the input)\n"
+        "  --set pass.partition.flag=value  pass options (listed below)\n"
+        "\n"
+        "examples:\n"
         "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n");
     return print_options_section({"pass.partition."});
   }
@@ -670,7 +976,12 @@ int help_pass(const std::string& sub) {
         "  design with a named diagnostic. A partial lowering is a silent full-cycle\n"
         "  error, so half-transforming is never an option.\n"
         "\n"
-        "example:\n"
+        "flags:\n"
+        "  --top M                         select the root module\n"
+        "  --emit-dir lg:OUT/              output library (must differ from the input)\n"
+        "  --set pass.single_edge.flag=value  pass options (listed below)\n"
+        "\n"
+        "examples:\n"
         "  lhd pass single_edge --top m lg:dir --emit-dir lg:norm\n");
     return print_options_section({"pass.single_edge."});
   }
@@ -693,7 +1004,12 @@ int help_pass(const std::string& sub) {
         "  --set pass.abc.allow_oversize=true disables the guard.\n"
         "  Refused? `lhd pass color <alg> --top M lg:DIR --stats` sizes the regions first.\n"
         "\n"
-        "example:\n"
+        "flags:\n"
+        "  --top M                  select the module to map\n"
+        "  --emit-dir lg:OUT/       output library (must differ from the input)\n"
+        "  --set pass.abc.flag=value  pass options (listed below)\n"
+        "\n"
+        "examples:\n"
         "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");
     return print_options_section({"pass.abc."});
   }
@@ -715,17 +1031,15 @@ int help_pass(const std::string& sub) {
         "  cells.\n"
         "\n"
         "flags:\n"
-        "  --set pass.opentimer.hier=false       one tech-mapped module per run: a --top whose body\n"
-        "                                        instantiates a sub-MODULE (a Sub that is not a Liberty\n"
-        "                                        cell) is rejected instead of flattened\n"
-        "  --set pass.opentimer.margin=<0-100>   criticality-coloring threshold (report is independent)\n"
-        "  --set pass.opentimer.qor=FILE         timing JSON path (defaults to <workdir>/timing.json)\n"
+        "  --top M                        select the tech-mapped module\n"
+        "  --workdir DIR                  report/build workspace\n"
+        "  --set pass.opentimer.flag=value  pass options (listed below)\n"
         "\n"
         "the report (timing.json / result envelope \"qor\" member):\n"
         "  max_delay (worst MAX-corner gate arrival, library time units), the critical pin,\n"
         "  the 10 worst endpoints, each `src`-attributed back to the pre-synth RTL line.\n"
         "\n"
-        "example:\n"
+        "examples:\n"
         "  lhd pass abc --top m lg:g --emit-dir lg:net\n"
         "  lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W\n");
     return print_options_section({"pass.opentimer."});
@@ -737,7 +1051,11 @@ int help_pass(const std::string& sub) {
         "usage: lhd pass liberty gensim <file.lib> --emit-dir lg:OUT/\n"
         "  Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library.\n"
         "\n"
-        "example:\n"
+        "flags:\n"
+        "  --emit-dir lg:OUT/              output model library\n"
+        "  --set pass.liberty.flag=value  pass options (listed below)\n"
+        "\n"
+        "examples:\n"
         "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n");
     return print_options_section({"pass.liberty."});
   }
@@ -757,12 +1075,8 @@ int help_pass(const std::string& sub) {
         "  --ref lg:DIR   --impl lg:DIR\n"
         "  --top T        --ref-top T   --impl-top T   (T = full `file.entity` name, or the\n"
         "                 bare entity when unique — resolves with a top-entity-fallback warning)\n"
-        "  --set pass.semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
-        "  --set pass.semdiff.state_pairing=true    tier-2: full-match (SRP/ERP signature) pairing of renamed state\n"
-        "  --set pass.semdiff.hier=0                compare ONE top pair (default 1: sweep every def pair, --top scopes to its subtree)\n"
-        "  --set pass.semdiff.dump_state=1          per-state-cell pairing outcome (matcher iteration aid)\n"
-        "  --set pass.semdiff.save=0                skip the save-back (default 1; --stats sweeps default to 0)\n"
-        "  --set pass.semdiff.id_granularity=region one id per connected matched region (else pair)\n"
+        "  --stats        aggregate node/register/memory match report\n"
+        "  --set pass.semdiff.flag=value  pass options (listed below)\n"
         "\n"
         "inspect the result:\n"
         "  lhd tool grep match=0 lg:impl       # what in impl has no counterpart (the diff)\n"
@@ -905,6 +1219,16 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp)\n", sub);
     return 1;
   }
+  if (topic == "tool") {
+    if (sub.empty()) {
+      return describe_as("tool");
+    }
+    if (sub == "cat" || sub == "grep" || sub == "diff" || sub == "tree") {
+      return describe_as("tool " + sub);
+    }
+    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree)\n", sub);
+    return 1;
+  }
   if (topic == "pass") {
     if (sub.empty()) {
       return describe_as("pass");
@@ -952,7 +1276,7 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     std::print(stderr, "lhd help: unknown formal subcommand '{}' (verify | lec)\n", sub);
     return 1;
   }
-  // compile / lec / scan / tool, plus every non-command describe topic
+  // compile / lec / scan, plus every non-command describe topic
   // (recipe:NAME, emit-kind, pass.flag, dump, config): describe renders the JSON.
   return describe_as(topic);
 }
@@ -1056,7 +1380,8 @@ int help_command(const Options& opts) {
         "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"
-        "  assume_nocheck_formal warns and is disclosed; assume_nocheck_synth is ignored.\n"
+        "  assume_nocheck/assume_nocheck_formal is disclosed (the _formal spelling also\n"
+        "  warns); assume_nocheck_synth is ignored.\n"
         "\n"
         "  --stats reports what the cvc5 solve actually did: problem size (atoms, clause\n"
         "  literals), conflicts (= learned clauses), decisions, propagations, restarts,\n"
@@ -1135,12 +1460,15 @@ int help_command(const Options& opts) {
         "                        (FAILS the run: an undecided check proved nothing, so it\n"
         "                        must not exit 0. --set formal.strict=false = warning)\n"
         "\n"
-        "  `assume` over PRIMARY INPUTS only is an environment constraint (free, in force\n"
-        "  at every cycle, disclosed — verdicts are conditional on it); an assume touching\n"
-        "  design STATE is a PROOF OBLIGATION (prove-then-use): proven cycles constrain\n"
-        "  later obligations, a refuted one fails the run, an unproven one is NOT used.\n"
-        "  assume_nocheck_formal (formal blocks) is a free UNCHECKED constraint by user\n"
-        "  fiat (warned + disclosed); assume_nocheck_synth is invisible to verify.\n"
+        "  every `assume` is a PROOF OBLIGATION (prove-then-use): CHECKED as an assert\n"
+        "  first, and only a proven cycle's fact constrains later obligations. A refuted\n"
+        "  assume fails the run (over free primary inputs a constraint like\n"
+        "  `assume(op == 7)` can never be proven — that refute is the honest verdict);\n"
+        "  an unproven one is NOT used. With --workdir a proven assume-check is cached\n"
+        "  and skipped on warm re-runs. `assume_nocheck` (formal blocks) is the explicit\n"
+        "  spelling for a free environment constraint: assumed WITHOUT check, in force\n"
+        "  at every cycle, disclosed — verdicts are conditional on it.\n"
+        "  assume_nocheck_synth is invisible to verify (a synthesis-only don't-care).\n"
         "\n"
         "  formal BLOCKS: a sidecar's `formal name.dotted {{ ... }}` blocks are the design's\n"
         "  test units — the Pyrope design file is a block source too, so one file may hold\n"
@@ -1203,47 +1531,15 @@ int help_command(const Options& opts) {
         "usage: lhd scan <files.prp>… [--result-json PATH]\n"
         "  Parses each .prp and reports its import strings (raw, as written).\n"
         "\n"
-        "example:\n"
+        "flags:\n"
+        "  --result-json PATH  write the result envelope to PATH\n"
+        "\n"
+        "examples:\n"
         "  lhd scan f1.prp f2.prp\n");
     return 0;
   }
   if (topic == "tool") {
-    std::print(
-        "lhd tool — unified ln/lg inspector: cat | grep | diff | tree\n"
-        "\n"
-        "usage: lhd tool <verb> [options] <inputs…>\n"
-        "  inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv\n"
-        "  source is the verilog:/pyrope: shortcut; the ln path takes sources).\n"
-        "  cat   structured dump of one input (attributes shown by default)\n"
-        "  grep  filtered search (>=1 filter; may span multiple lg: libraries; -v inverts)\n"
-        "  diff  unified-diff of two inputs (-C n text-line context; --match: semdiff view)\n"
-        "  tree  instance hierarchy rooted at --top\n"
-        "\n"
-        "lg options:\n"
-        "  --target node|pin|edge|all   what to show (default all; node=color/src,\n"
-        "                               pin=bits/signed, edge=wiring)\n"
-        "  --top M    pick a module     --attr CSV   choose columns\n"
-        "  --hier [N] descend instances --max N      row cap (0 = unlimited)\n"
-        "\n"
-        "tree --target kind:<X> (repeatable): also list the nodes of kind X inside each\n"
-        "  module, so registers/memories show where they sit in the hierarchy. kind:register\n"
-        "  = flop/fflop/latch, kind:memory = memory; any Ntype name (flop, mux, sub, …) also\n"
-        "  matches exactly. Default (no kind) = the bare instance tree.\n"
-        "\n"
-        "filters (AND-combined): a bare term matches any column + identity (grep get_mask),\n"
-        "  or field=value: name=Mult  kind=mux  id=12  color=nil  match=0  bits>8  bits=8..16  from=A\n"
-        "  ('=' preferred — Pyrope reads ':' as a type; ':' still works; strings ==exact, ~regex).\n"
-        "  grep -v inverts (keep records that do NOT match — `grep -v match=0` = the matched part).\n"
-        "\n"
-        "examples:\n"
-        "  lhd tool cat lg:dir --top m\n"
-        "  lhd tool grep color=nil lg:dir            # nodes pass.color left uncolored\n"
-        "  lhd tool grep match=0 lg:dir              # nodes semdiff found no counterpart for\n"
-        "  lhd tool diff lg:before lg:after --attr color\n"
-        "  lhd tool diff lg:gold lg:opt --match      # visualize the semdiff structural diff\n"
-        "  lhd tool tree lg:dir --top m --target kind:register --target kind:memory\n"
-        "  lhd tool cat x.prp          lhd tool diff old.prp new.prp   # the former ln.cat/ln.diff\n");
-    return 0;
+    return help_tool(sub);
   }
   if (topic == "lsp") {
     // The LSP server now lives under `pyrope`; keep `lhd help lsp` as a
@@ -1314,6 +1610,9 @@ int help_command(const Options& opts) {
         "  `options` lists every --set/--config pass.flag (filter with a REGEX over the names).\n"
         "  `log-channels` lists the developer-logging channels (`--set <channel>.log=<level>`).\n"
         "\n"
+        "flags:\n"
+        "  --diag-fmt auto|jsonl|pretty  output rendering (pretty affects options/log-channels)\n"
+        "\n"
         "examples:\n"
         "  lhd list options 'cgen\\..*'\n"
         "  lhd list log-channels\n"
@@ -1327,13 +1626,26 @@ int help_command(const Options& opts) {
         "usage: lhd describe <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"
         "  For readable per-command help use `lhd help <command>` / `lhd <command> --help`.\n"
         "\n"
+        "flags:\n"
+        "  --diag-fmt auto|jsonl|pretty  machine record or readable option prose\n"
+        "\n"
         "examples:\n"
         "  lhd describe compile.cgen.srcmap\n"
         "  lhd describe lec\n");
     return 0;
   }
   if (topic == "version") {
-    std::print("lhd version — print the tool version (also `lhd --version`)\n");
+    std::print(
+        "lhd version — print the tool version\n"
+        "\n"
+        "usage: lhd version\n"
+        "\n"
+        "flags:\n"
+        "  none (`lhd --version` is the top-level alias)\n"
+        "\n"
+        "examples:\n"
+        "  lhd version\n"
+        "  lhd --version\n");
     return 0;
   }
 

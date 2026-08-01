@@ -16,7 +16,7 @@
 #     `--set formal.strict=false` opts back into exit 0 + a loud INCONCLUSIVE
 #     warning; both directions are pinned below.
 #   * ROUND-TRIP: re-running with the mined block as a sidecar re-proves each
-#     mined assume (P1 prove-then-use: "internal assume(s): ... proven (used)");
+#     mined assume (prove-then-use: "checked assume(s): ... proven (used)");
 #   * STALENESS: after a design edit that falsifies the mined fact (wrap at 7),
 #     the stale assume REFUTES the run loudly — it can never corrupt a proof;
 #   * mine=speculative also reports base-proven candidates the step dropped.
@@ -120,7 +120,7 @@ RC=$?
 [ "$RC" -eq "$RC_INCONCLUSIVE" ] \
   || fail "the round-trip must stay merely inconclusive (rc=$RC_INCONCLUSIVE), not break the run; got rc=$RC: $(cat "$OUT")"
 grep -q '\[miner.mined\].*PROVEN' "$OUT" || fail "the mined assume must re-prove on use: $(cat "$OUT")"
-grep -qE 'internal assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the ledger must show the mined assumes as used: $(cat "$OUT")"
+grep -qE 'checked assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the ledger must show the mined assumes as used: $(cat "$OUT")"
 
 # Staleness: edit the design so the mined fact is FALSE (wrap at 7): the stale
 # assume REFUTES loudly instead of silently corrupting a proof (P1 discipline).

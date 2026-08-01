@@ -5903,8 +5903,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     for (const auto& pr : m.props) {
       if (pr.kind == "assume") {
         ++m.n_assumes;
-        if (pr.aclass == "internal" && pr.verdict == Verdict::Refuted) {
-          any_refuted = true;  // a refuted internal assume is a hard error (P1)
+        if (pr.aclass != "unchecked" && pr.verdict == Verdict::Refuted) {
+          any_refuted = true;  // a refuted checked assume is a hard error (P1)
         }
         continue;
       }
@@ -5960,7 +5960,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (b.verdict == Verdict::Refuted && a.verdict != Verdict::Refuted) {
           a = b;  // a during-reset violation dominates
         } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven
-                   && (a.kind != "assume" || a.aclass == "internal")) {
+                   && (a.kind != "assume" || a.aclass != "unchecked")) {
           a.verdict    = Verdict::Unknown;
           a.unknown_at = b.unknown_at;
         }
@@ -6446,12 +6446,18 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // One PROBE encode against FRESH state/memory symbols classifies every
   // assume-kind obligation STRUCTURALLY before any cycle is asserted: a cond
   // whose transitive support (expanded through the probe's defining equalities)
-  // reaches a state or memory symbol is INTERNAL — a proof obligation under the
-  // prove-then-use discipline, because asserting an unproven claim about design
-  // state prunes reachable behaviors and can fake a PROVEN. A cond over primary
-  // inputs only (free blackbox outputs count as inputs — nothing to prove
-  // either way) stays a free, disclosed environment constraint. A monitor
-  // statement listed in Monitor::nocheck_lines is UNCHECKED by user fiat.
+  // reaches a state or memory symbol is INTERNAL; a cond over primary inputs
+  // only (free blackbox outputs count as inputs) is INPUT. BOTH are proof
+  // obligations under the prove-then-use discipline — every `assume` is checked
+  // as an assert before it may constrain anything, because asserting an
+  // unproven claim prunes reachable behaviors and can fake a PROVEN (an
+  // input-cone constraint like `assume(op == 7)` can never hold over free
+  // inputs, so it REFUTES — the honest verdict; `assume_nocheck` is the
+  // explicit spelling for a free environment constraint). The class label is
+  // kept for diagnostics only: a refuted INPUT assume earns the "spell it
+  // assume_nocheck" hint, an INTERNAL one is a real design claim gone wrong.
+  // Only a monitor statement listed in Monitor::nocheck_lines is exempt —
+  // UNCHECKED by explicit user fiat.
   // Nothing from the probe is asserted into the solver; the extra encode is
   // skipped when no assume exists and for the compile tier (ignore_assumes).
   absl::flat_hash_map<int, std::string> occ_aclass;  // occ_key -> input|internal|unchecked
@@ -6795,23 +6801,25 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (opts.ignore_assumes) {
             continue;
           }
-          if (pr.aclass != "internal") {
-            // input / unchecked: environment constraint in force at EVERY cycle,
-            // reset prologue included (SVA semantics — otherwise an assert_always
-            // checked during the prologue would run unconstrained and
-            // false-refute). A contradiction with the driven reset behavior is
-            // caught by the vacuity check below. Disclosed by class.
+          if (pr.aclass == "unchecked") {
+            // assume_nocheck: a free environment constraint by explicit user
+            // fiat, in force at EVERY cycle, reset prologue included (SVA
+            // semantics — otherwise an assert_always checked during the
+            // prologue would run unconstrained and false-refute). A
+            // contradiction with the driven reset behavior is caught by the
+            // vacuity check below. Disclosed distinctly.
             // SCOPED: a formal block's env assume constrains only that block's
             // own obligations, so two blocks with mutually-exclusive assumes no
             // longer poison each other into a global "assume set contradictory".
             assert_scoped(pr.scope, holds);
             continue;
           }
-          // internal (P1 prove-then-use): fall through to the obligation path —
-          // checked per cycle like a plain assert, and the UNSAT branch's
-          // frontier fact IS the "use": the assume only ever constrains cycles
-          // where it was just PROVEN (rule A). A refute is a hard error; an
-          // unknown assume stops being checked and never constrains anything.
+          // input / internal (prove-then-use): fall through to the obligation
+          // path — checked per cycle like a plain assert, and the UNSAT
+          // branch's frontier fact IS the "use": the assume only ever
+          // constrains cycles where it was just PROVEN (rule A). A refute is a
+          // hard error; an unknown assume stops being checked and never
+          // constrains anything.
         }
         const bool check_now = pr.kind == "assert_always" ? true : checking;
         if (!check_now || pr.refuted_at >= 0 || pr.unknown_at >= 0) {
@@ -7307,10 +7315,10 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     std::vector<size_t> cand;
     for (size_t i = 0; ind_budget_left && i < res.props.size(); ++i) {
       const auto& pr = res.props[i];
-      // Clean bounded-proven asserts AND clean internal assumes are candidates:
-      // an internal assume earns step-frame use only by surviving the same
-      // Houdini fixpoint (rule E) — never by fiat.
-      if ((pr.kind != "assume" || pr.aclass == "internal") && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
+      // Clean bounded-proven asserts AND clean checked assumes (input or
+      // internal class) are candidates: a checked assume earns step-frame use
+      // only by surviving the same Houdini fixpoint (rule E) — never by fiat.
+      if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
         cand.push_back(i);
       }
     }
@@ -7437,13 +7445,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         return tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, v, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
       };
       if (ind_ok) {
-        // Env assumes (input / unchecked) constrain BOTH frames (they hold on
-        // every real cycle). INTERNAL assumes are excluded here — they are
-        // Houdini candidates above, never free step hypotheses. Skipped entirely
-        // under ignore_assumes (the compile tier does not use design assumes as
-        // hypotheses — see the process_props note above).
+        // UNCHECKED assumes (assume_nocheck) constrain BOTH frames (they hold
+        // on every real cycle by fiat). CHECKED assumes (input / internal
+        // class) are excluded here — they are Houdini candidates above, never
+        // free step hypotheses. Skipped entirely under ignore_assumes (the
+        // compile tier does not use design assumes as hypotheses — see the
+        // process_props note above).
         for (const auto& [occ_key, ix] : prop_ix) {
-          if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass == "internal") {
+          if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass != "unchecked") {
             continue;
           }
           // Scoped exactly as in the BMC frame: a block's env assume constrains
@@ -7560,12 +7569,13 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
   }
 
-  // Finalize per-property verdicts. Env-class assumes (input/unchecked) have no
-  // verdict of their own; INTERNAL assumes ride the same ladder as asserts.
+  // Finalize per-property verdicts. UNCHECKED assumes (assume_nocheck) have no
+  // verdict of their own; CHECKED assumes (input/internal class) ride the same
+  // ladder as asserts.
   for (auto& pr : res.props) {
     if (pr.kind == "assume") {
       ++res.n_assumes;
-      if (pr.aclass != "internal") {
+      if (pr.aclass == "unchecked") {
         continue;
       }
     }
@@ -7578,12 +7588,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
   }
 
-  // Vacuity: contradictory FREE assumes (input/unchecked) make every proof
+  // Vacuity: contradictory FREE assumes (assume_nocheck) make every proof
   // vacuous. One plain checkSat over the frame + assumes (+ entailed frontier
-  // facts — internal-assume facts included — which cannot flip it: they were
-  // each proven UNSAT-of-negation under the assertions in force). Skipped under
-  // ignore_assumes — no design assume was asserted, so there is no assume set
-  // to be contradictory (the compile tier owns assume consistency).
+  // facts — checked-assume facts included — which cannot flip it: they were
+  // each proven UNSAT-of-negation under the assertions in force, so only the
+  // by-fiat UNCHECKED constraints can ever manufacture a contradiction).
+  // Skipped under ignore_assumes — no design assume was asserted, so there is
+  // no assume set to be contradictory (the compile tier owns assume
+  // consistency).
   // PER SCOPE, because assumes are now per scope: a contradictory formal block
   // voids only its OWN obligations. The design tier is checked with every act
   // free (so no block's assumes bind); if IT is contradictory everything is
@@ -7591,7 +7603,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   absl::flat_hash_map<std::string, int> env_assumes_by_scope;
   if (!opts.ignore_assumes) {
     for (const auto& pr : res.props) {
-      if (pr.kind == "assume" && pr.aclass != "internal") {
+      if (pr.kind == "assume" && pr.aclass == "unchecked") {
         ++env_assumes_by_scope[pr.scope];
       }
     }
@@ -7645,7 +7657,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!design_tier_vacuous && pr.scope != scope) {
           continue;
         }
-        if ((pr.kind != "assume" || pr.aclass == "internal") && pr.verdict == Verdict::Proven) {
+        if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.verdict == Verdict::Proven) {
           pr.verdict  = Verdict::Unknown;
           pr.unbounded = false;
         }
@@ -7786,41 +7798,34 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   if (split_checks > 0) {
     res.detail += "; case-split " + verify_split.name + " on " + std::to_string(split_checks) + " obligation check(s)";
   }
-  // P1 assume disclosure: verdicts are conditional on env-class assumes; the
-  // internal-assume ledger says which claims were actually usable.
+  // P1 assume disclosure: verdicts are conditional on UNCHECKED assumes; the
+  // checked-assume ledger says which claims were actually usable.
   if (!opts.ignore_assumes) {
-    int n_in = 0, n_unch = 0, n_ip = 0, n_iu = 0, n_ir = 0;
+    int n_unch = 0, n_cp = 0, n_cu = 0, n_cr = 0;
     for (const auto& pr : res.props) {
       if (pr.kind != "assume") {
         continue;
       }
       if (pr.aclass == "unchecked") {
         ++n_unch;
-      } else if (pr.aclass == "internal") {
-        if (pr.verdict == Verdict::Proven) {
-          ++n_ip;
-        } else if (pr.verdict == Verdict::Refuted) {
-          ++n_ir;
-        } else {
-          ++n_iu;
-        }
+      } else if (pr.verdict == Verdict::Proven) {
+        ++n_cp;
+      } else if (pr.verdict == Verdict::Refuted) {
+        ++n_cr;
       } else {
-        ++n_in;
+        ++n_cu;
       }
-    }
-    if (n_in > 0) {
-      res.detail += "; under " + std::to_string(n_in) + " input assume(s)";
     }
     if (n_unch > 0) {
       res.detail += "; under " + std::to_string(n_unch) + " UNCHECKED assume(s)";
     }
-    if (n_ip + n_iu + n_ir > 0) {
-      res.detail += "; internal assume(s): " + std::to_string(n_ip) + " proven (used)";
-      if (n_iu > 0) {
-        res.detail += ", " + std::to_string(n_iu) + " unproven (NOT used)";
+    if (n_cp + n_cu + n_cr > 0) {
+      res.detail += "; checked assume(s): " + std::to_string(n_cp) + " proven (used)";
+      if (n_cu > 0) {
+        res.detail += ", " + std::to_string(n_cu) + " unproven (NOT used)";
       }
-      if (n_ir > 0) {
-        res.detail += ", " + std::to_string(n_ir) + " REFUTED";
+      if (n_cr > 0) {
+        res.detail += ", " + std::to_string(n_cr) + " REFUTED";
       }
     }
   }
@@ -7936,7 +7941,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   if (solve_budget_on) {
     int n_units = 0;
     for (const auto& pr : res.props) {
-      n_units += (pr.kind == "assume" && pr.aclass != "internal") ? 0 : 1;
+      n_units += (pr.kind == "assume" && pr.aclass == "unchecked") ? 0 : 1;
     }
     res.budget_target_s = opts.timeout;
     res.budget_spent_ms = solve_spent_ms;
