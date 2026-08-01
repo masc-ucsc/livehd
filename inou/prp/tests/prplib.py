@@ -672,9 +672,9 @@ class PrpRunner:
         #   :verify_bound: N           formal.bound (default 6)
         #   :verify_proven: N          exact PROVEN count in formal_report.json
         #   :verify_refuted: N         exact REFUTED count; N>0 also demands a
-        #                              non-zero exit and workdir/formalfail.prp
+        #                              non-zero exit and workdir/simfail_<test>.prp
         #                              (the counterexample testbench)
-        #   :verify_replay: fired      the formalfail replay re-fired the assert
+        #   :verify_replay: fired      the simfail replay re-fired the assert
         #   :verify_replay: no-refire  the replay ran but warned it could not
         #                              reproduce (free initial state)
         wd = self._scratch(test, 'verify')
@@ -684,9 +684,9 @@ class PrpRunner:
         cmd += ['--top', test.params['top_module'], '--workdir', wd]
         cmd += ['--set', 'formal.bound={}'.format(test.params.get('verify_bound', '6'))]
         # The replay is run by the HARNESS below, VCD-less: the built-in
-        # prpfail_run compiles the VCD writer source, which bazel runfiles do
+        # simfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
-        cmd += ['--set', 'formal.prpfail_run=false']
+        cmd += ['--set', 'formal.simfail_run=false']
 
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -718,20 +718,23 @@ class PrpRunner:
             if want_refuted >= 0 and got_refuted != want_refuted:
                 problems.append('refuted count: want {}, got {}'.format(want_refuted, got_refuted))
 
+        simfail_tests = []
         if want_refuted > 0:
-            tb = os.path.join(tmp_dir, wd, 'formalfail.prp')
-            if not os.path.exists(tb):
-                problems.append('missing {} (counterexample testbench)'.format(tb))
+            simfail_tests = [os.path.join(tmp_dir, wd, name)
+                             for name in os.listdir(os.path.join(tmp_dir, wd))
+                             if name.startswith('simfail_') and name.endswith('.prp')]
+            if len(simfail_tests) != 1:
+                problems.append('expected one simfail_<test>.prp, found {}'.format(simfail_tests))
 
         # Replay oracle: re-simulate the generated counterexample testbench
         # (VCD-less — the embedded assert alone decides). `fired` = the driven
         # trace re-fires the assert (sim exits non-zero); `no-refire` = the
         # replay completes clean, i.e. the witness is NOT reproducible by input
         # driving alone (free initial state — interactively, `lhd formal
-        # verify` warns formalfail-replay-no-refire on its own VCD replay).
+        # verify` warns simfail-replay-no-refire on its own VCD replay).
         replay = test.params.get('verify_replay', '')
         if replay:
-            tb = os.path.join(wd, 'formalfail.prp')
+            tb = simfail_tests[0] if simfail_tests else os.path.join(tmp_dir, wd, 'simfail_missing.prp')
             rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim']
             rproc = subprocess.Popen(rcmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:

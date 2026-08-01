@@ -449,7 +449,7 @@ const Help_doc* tool_help_doc(std::string_view name) {
         help_flag("target", "--target node|pin|edge|all", "enum", "lg: records to show (default all)"),
         help_flag("attr", "--attr CSV", "csv", "lg: display columns"),
         help_flag("max", "--max N", "int", "output row cap (0 = unlimited)"),
-        help_flag("diag-fmt", "--diag-fmt auto|jsonl|pretty", "enum", "lg: human or machine records")},
+        help_flag("diag-fmt", "--diag-fmt auto|json|pretty", "enum", "lg: human or machine records")},
       {},
       {"lhd tool cat lg:dir --top m", "lhd tool cat color=nil lg:dir", "lhd tool cat x.prp"},
       {"ln", "lg", "pyrope", "verilog"},
@@ -469,7 +469,7 @@ const Help_doc* tool_help_doc(std::string_view name) {
         help_flag("attr", "--attr CSV", "csv", "display columns"),
         help_flag("max", "--max N", "int", "output row cap (0 = unlimited)"),
         help_flag("invert-match", "-v, --invert-match", "flag", "keep records that do not match", {"-v"}),
-        help_flag("diag-fmt", "--diag-fmt auto|jsonl|pretty", "enum", "human or machine records")},
+        help_flag("diag-fmt", "--diag-fmt auto|json|pretty", "enum", "human or machine records")},
       {},
       {"lhd tool grep get_mask lg:dir", "lhd tool grep color=nil lg:dir", "lhd tool grep -v match=0 lg:dir"},
       {"lg"},
@@ -573,7 +573,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "formal verify") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds formalfail.prp/.json. Knobs: --set formal.* (bound/timeout/phase/reset/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/"]})json");
+        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -760,7 +760,7 @@ void print_general_help() {
       "               lhd formal verify foo.prp --top foo --set formal.bound=12\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
-      "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
+      "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt json)\n"
       "               lhd tool cat lg:dir --top m       # structured dump + attributes\n"
       "               lhd tool grep get_mask lg:dir     # filtered search (bare term -> any field)\n"
       "               lhd tool diff lg:before lg:after --attr color\n"
@@ -780,7 +780,7 @@ void print_general_help() {
       "\n"
       "per-command help:  lhd <command> --help   (== `lhd help <command>`; lists that command's\n"
       "  --set options too) — e.g. `lhd lec --help`, `lhd pass --help`, `lhd pass partition --help`\n"
-      "  (`--diag-fmt jsonl` renders any help page as a machine record; pretty is the tty default)\n"
+      "  (`--diag-fmt json` renders any help page as a machine record; pretty is the tty default)\n"
       "\n"
       "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
       "  ln:/lg:/lnast-dump:/isabelle:/lean:/sim: are directory containers (--emit-dir only;\n"
@@ -792,8 +792,8 @@ void print_general_help() {
       "  --top T   --reader slang|yosys-slang|yosys-verilog   --recipe O0|O1|O2\n"
       "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
       "  --workdir DIR   --result-json PATH\n"
-      "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
-      "                                 terminal, jsonl when piped/captured)\n"
+      "  --diag-fmt auto|json|pretty    result + diagnostic rendering (auto: pretty on a\n"
+      "                                 terminal, json when piped/captured)\n"
       "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
       "\n"
       "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
@@ -1116,7 +1116,7 @@ int help_pass(const std::string& sub) {
   return 0;
 }
 
-// ---- `--diag-fmt jsonl` help: the machine record for a help page ------------
+// ---- `--diag-fmt json` help: the machine record for a help page -------------
 // `lhd help X` / `lhd X --help` honor --diag-fmt just like `list`/`describe`:
 // pretty prints the human page (the functions above), jsonl prints a JSON
 // record. For a topic that `lhd describe` already covers (compile/lec/formal/
@@ -1171,7 +1171,7 @@ constexpr std::string_view kJsonList =
 constexpr std::string_view kJsonDescribe =
     R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, recipe:NAME, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | recipe:NAME | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
 
-// Route a `--diag-fmt jsonl` help page to its JSON record. `topic`/`sub` are the
+// Route a `--diag-fmt json` help page to its JSON record. `topic`/`sub` are the
 // normalized help words (formal lec already folded to lec by the caller).
 int help_json_dispatch(const std::string& topic, const std::string& sub, const Options& opts) {
   // Reuse the describe record for a topic describe already knows (no drift):
@@ -1264,7 +1264,7 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     return 1;
   }
   // `formal` is a family: the record follows the SUBCOMMAND, so
-  // `lhd formal verify --help --diag-fmt jsonl` describes verify, not the family
+  // `lhd formal verify --help --diag-fmt json` describes verify, not the family
   // (`formal lec` was already folded to the `lec` topic above).
   if (topic == "formal") {
     if (sub.empty()) {
@@ -1299,7 +1299,7 @@ int help_command(const Options& opts) {
     topic = "tool";
   }
 
-  // --diag-fmt jsonl -> the machine record (mirrors `list`/`describe`); pretty
+  // --diag-fmt json -> the machine record (mirrors `list`/`describe`); pretty
   // falls through to the human pages below.
   if (opts.diag_fmt == Diag_fmt::jsonl) {
     return help_json_dispatch(topic, sub, opts);
@@ -1495,7 +1495,8 @@ int help_command(const Options& opts) {
         "  machine-readable feedback (agents): EVERY run writes formal_report.json into the\n"
         "  workdir (per-obligation verdicts/cycles/solve_ms, assume classes, the structured\n"
         "  spec_mining_timeout core, witness artifact paths) — pass --workdir to keep it; a\n"
-        "  REFUTED run adds formalfail.prp/.json (+ VCD replay). Knob formal.report. With\n"
+        "  REFUTED run adds simfail_<formal-test>.prp/.json (+ VCD replay). Knobs\n"
+        "  formal.simfail, formal.simfail_run, and formal.report. With\n"
         "  formal.spec_mining_timeout set, a stuck run also MINES invariants (base-proven +\n"
         "  induction-surviving) into a paste-ready formal_mined.prp + the report's mined[];\n"
         "  formal.mine=speculative adds step-dropped bounded candidates.\n"
@@ -1516,7 +1517,7 @@ int help_command(const Options& opts) {
         "  lhd formal verify foo.prp --top foo --set formal.bound=12     # unroll deeper\n"
         "  lhd formal verify net.v --set formal.timeout=60               # per-query budget\n"
         "  lhd formal verify design.prp --set formal.phase=full          # reset window too\n"
-        "  lhd formal verify foo.prp --workdir w/    # keep w/formal_report.json (+ formalfail)\n");
+        "  lhd formal verify foo.prp --workdir w/    # keep report + simfail_<test> artifacts\n");
     return print_options_section({"formal."});
   }
   if (topic == "semdiff") {
@@ -1611,7 +1612,7 @@ int help_command(const Options& opts) {
         "  `log-channels` lists the developer-logging channels (`--set <channel>.log=<level>`).\n"
         "\n"
         "flags:\n"
-        "  --diag-fmt auto|jsonl|pretty  output rendering (pretty affects options/log-channels)\n"
+        "  --diag-fmt auto|json|pretty   output rendering (pretty affects options/log-channels)\n"
         "\n"
         "examples:\n"
         "  lhd list options 'cgen\\..*'\n"
@@ -1627,7 +1628,7 @@ int help_command(const Options& opts) {
         "  For readable per-command help use `lhd help <command>` / `lhd <command> --help`.\n"
         "\n"
         "flags:\n"
-        "  --diag-fmt auto|jsonl|pretty  machine record or readable option prose\n"
+        "  --diag-fmt auto|json|pretty   machine record or readable option prose\n"
         "\n"
         "examples:\n"
         "  lhd describe compile.cgen.srcmap\n"

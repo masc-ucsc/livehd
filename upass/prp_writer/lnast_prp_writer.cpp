@@ -489,7 +489,7 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     // ALREADY be quoted, so the front-AND-back test above misses it and the
     // fall-through re-wraps it into `` ``ar.x`__w1` `` -- which the lexer rejects, so
     // the emitted file does not re-parse AT ALL. (That silently broke `lhd lec`'s
-    // lecfail.prp witness testbench -- 217 such names in one re-emitted module -- and
+    // simfail witness testbench -- 217 such names in one re-emitted module -- and
     // every other prp->prp round-trip carrying an escaped-id SSA version.)
     // Fold the quotes OUTSIDE the whole name: `` `ar.x__w1` `` lexes to the single
     // identifier `ar.x__w1` -- still one name, still distinct per version, and both

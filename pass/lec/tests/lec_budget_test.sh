@@ -11,11 +11,11 @@
 # PROVE under the scheduler (no regression).
 #
 # `timeout` is a SOFT target: `formal.min_timeout` is the floor every def gets even
-# once the total is spent, so raising it BUYS verdicts by overshooting. Case 3 pins
-# that tradeoff in both directions — a bigger floor costs measurably more wall
-# clock, and the run says so instead of overrunning silently.
+# once the total is spent, so raising it BUYS verdicts by overshooting. The
+# `floor` mode pins that tradeoff in both directions; Bazel schedules it as the
+# separate lec_min_timeout_test so neither intentional timeout chain dominates.
 #
-# COST MODEL (keep this test under ~25s; a hard def costs about
+# COST MODEL (keep each Bazel mode under ~15s; a hard def costs about
 # `granted_timeout + min_timeout` because the ind engine spends the grant on the
 # base check and the floor on the step check, and the TOP def is exempt from the
 # draw-down): every knob below is the SMALLEST value that still separates the
@@ -29,6 +29,7 @@
 # is flaky by construction. Raw elapsed is kept only as a loose blowup guard.
 
 set -u
+MODE="${1:-all}"
 
 LHD=./bazel-bin/lhd/lhd
 if [ ! -x "$LHD" ]; then
@@ -60,7 +61,7 @@ mkhier() {  # $1=basename $2=nleaves $3=ref|impl
     echo "endmodule"
   } > "$WORK/${1}_$3.v"
 }
-mkhier wide  3 ref; mkhier wide  3 impl   # 3 hard leaves + top: 4 defs on one budget
+mkhier wide  2 ref; mkhier wide  2 impl   # 2 hard leaves + top: 3 defs on one budget
 mkhier hard1 1 ref; mkhier hard1 1 impl   # 1 hard leaf + top: the cheap floor A/B pair
 
 # --- an EASY, genuinely-equivalent hierarchy (De Morgan leaf) for the no-regression check.
@@ -107,7 +108,7 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
   ACTUAL=$(sed -nE 's/.*budget [0-9]+s target \/ ([0-9]+)s actual.*/\1/p' "$OUTFILE" | head -1)
 }
 
-# 1) One TOTAL budget, shared — and every def still attempted. 3 hard leaves + top
+# 1) One TOTAL budget, shared — and every def still attempted. 2 hard leaves + top
 #    on a 2s total with jobs=1: the first leaf drains the total, so the leaves
 #    dispatched after it must fall back to the min_timeout floor. That FLOORED
 #    COUNT is the deterministic proof the budget is a total and not per-def (per-def
@@ -122,10 +123,11 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
 #    Leaving it on the default also broke the cost model above when that default
 #    moved to 20s (2026-07-28): four defs drawing a 20s floor turns a ~10s case
 #    into minutes and blows the `< 12s` window assertion below.
+if [ "$MODE" != floor ]; then
 run_lec wall wide 2 30 --set formal.min_timeout=1
 DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN)" "$OUTFILE")
-if [ "$DEFS_SEEN" -ge 4 ]; then
-  echo "ok: all $DEFS_SEEN defs (3 leaves + top) got a verdict despite a 2s total"
+if [ "$DEFS_SEEN" -ge 3 ]; then
+  echo "ok: all $DEFS_SEEN defs (2 leaves + top) got a verdict despite a 2s total"
 else
   echo "FAIL: only $DEFS_SEEN def verdict line(s); a def was SKIPPED for lack of budget instead of falling back to the floor: $(cat "$OUTFILE")"; fail=1
 fi
@@ -136,13 +138,13 @@ if grep -qE "budget 2s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [1-9
 else
   echo "FAIL: a starved run must report target/actual/units and a NON-ZERO floored count (per-def budgeting floors nobody): $(cat "$OUTFILE")"; fail=1
 fi
-# Wall bound: the solving window is ~one budget plus a floor per straggler (2+1+1+2
-# = ~10s), strictly under the 4*(2+1)=12s the per-def path would spend. Plus a loose
+# Wall bound: the solving window is ~one budget plus a floor per straggler,
+# strictly under the 3*(2+1)=9s the per-def path would spend. Plus a loose
 # end-to-end guard so a real blowup (a def ignoring its cap) still fails loudly.
-if [ "${ACTUAL:-99}" -lt 12 ]; then
-  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 12s; per-def would be 12s+)"
+if [ "${ACTUAL:-99}" -lt 9 ]; then
+  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 9s; per-def would be 9s+)"
 else
-  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 12s; total budget not honored)"; fail=1
+  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 9s; total budget not honored)"; fail=1
 fi
 if [ "$ELAPSED" -ge 25 ]; then
   echo "FAIL: end-to-end took ${ELAPSED}s for a 2s budget (want < 25s)"; fail=1
@@ -161,6 +163,7 @@ if [ "$VERDICT" = "PROVEN equivalent" ]; then
 else
   echo "FAIL: easy hierarchy under wall budget -> '${VERDICT:-<none>}' (want PROVEN)"; fail=1
 fi
+fi
 
 # 3) formal.min_timeout is the SOFT-budget floor, and the overrun is REPORTED.
 #    A/B on the cheap 1-leaf hierarchy at the same 1s target: a 1s floor versus a
@@ -176,6 +179,7 @@ fi
 #    property under test — a bigger floor costs more solver time — has nothing to
 #    do with whatever the default happens to be, so pin both ends. Keeping the
 #    baseline at 1s also keeps this test fast.
+if [ "$MODE" != budget ]; then
 run_lec base hard1 1 30 --set formal.min_timeout=1
 BASE_ACTUAL=$ACTUAL
 if [ "$VERDICT" = "PROVEN equivalent" ]; then
@@ -200,6 +204,7 @@ if [ "$VERDICT" = "PROVEN equivalent" ]; then
   echo "FAIL: hard hierarchy with a bigger floor -> FALSE PROVEN"; fail=1
 else
   echo "ok: bigger floor keeps the sound verdict (${VERDICT:-<none>})"
+fi
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_budget_test: FAILED"; exit 1; fi

@@ -311,7 +311,7 @@ pub mod asm_tb(sel:bool) -> (ok:bool@[0]) {
 }
 EOF
 out="$("$LHD" formal verify "$W/asm.prp" --top asm_tb --workdir "$W/aw" \
-        --set formal.bound=12 --set formal.prpfail_run=false \
+        --set formal.bound=12 --set formal.simfail_run=false \
         --set compile.formal.on_refute=warn 2>&1)"
 rc=$?
 [ "$rc" -ne 0 ] || { echo "$out" | tail -6; fail "an unprovable input assume must refute its check at P=2 too (got rc=0)"; }
@@ -327,7 +327,7 @@ echo "ok: the checked-assume discipline is period-independent (refutes with the 
 # assume the design still REFUTES (now for the assert, not the assume check).
 grep -v 'assume(!sel' "$W/asm.prp" > "$W/asm_novac.prp"
 out="$("$LHD" formal verify "$W/asm_novac.prp" --top asm_tb --workdir "$W/awv" \
-        --set formal.bound=12 --set formal.prpfail_run=false 2>&1)"
+        --set formal.bound=12 --set formal.simfail_run=false 2>&1)"
 grep -q "REFUTED" <<<"$out" \
   || { echo "$out" | tail -5; fail "the same design WITHOUT the assume still passed: the fixture's asserts hold on their own, so the case above pins nothing"; }
 echo "ok: the fixture's asserts are load-bearing (removing the assume still REFUTES)"

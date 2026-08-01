@@ -328,8 +328,8 @@ Options parse_args(int argc, char** argv) {
   }
 
   // One pass over argv: the first bare word is the command, so shared flags
-  // may come before or after it (`lhd --diag-fmt jsonl list options` ==
-  // `lhd list options --diag-fmt jsonl`). Value-taking flags consume their
+  // may come before or after it (`lhd --diag-fmt json list options` ==
+  // `lhd list options --diag-fmt json`). Value-taking flags consume their
   // value wherever they sit (`lhd --top foo synth ...` keeps foo with --top).
   bool raw_mode  = false;
   bool want_help = false;
@@ -537,14 +537,14 @@ Options parse_args(int argc, char** argv) {
       opts.result_json = need_value(a, i, argc, argv);
     } else if (a == "--diag-fmt") {
       auto v = need_value(a, i, argc, argv);
-      if (v == "jsonl") {
+      if (v == "json" || v == "jsonl") {
         opts.diag_fmt = Diag_fmt::jsonl;
       } else if (v == "pretty") {
         opts.diag_fmt = Diag_fmt::pretty;
       } else if (v != "auto") {  // auto = keep the isatty-resolved default
         throw Lhd_error{"usage",
-                        std::format("--diag-fmt expects auto|jsonl|pretty, got '{}'", v),
-                        "auto = pretty on a terminal, jsonl when piped/captured"};
+                        std::format("--diag-fmt expects auto|json|pretty, got '{}'", v),
+                        "auto = pretty on a terminal, json when piped/captured"};
       }
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
@@ -675,8 +675,8 @@ Options parse_args(int argc, char** argv) {
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
-    } else if (opts.command == "compile" && opts.language.empty() && opts.files.empty() && opts.ins.empty()
-               && opts.in_dirs.empty() && (a == "verilog" || a == "pyrope")) {
+    } else if (opts.command == "compile" && opts.language.empty() && opts.files.empty() && opts.ins.empty() && opts.in_dirs.empty()
+               && (a == "verilog" || a == "pyrope")) {
       // The optional language word: the first positional after compile (flags
       // may intervene); inferred from the source-file extensions (.prp ->
       // pyrope, .v/.sv -> verilog) when omitted.

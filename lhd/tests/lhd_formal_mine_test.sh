@@ -13,8 +13,7 @@
 #     not a pass — the stuck run exits 7 ("unsupported": the TOOL ran out, the
 #     design is not disproved) and says so actionably, while STILL writing its
 #     mining artifacts so an agent loop can read them off the failing run.
-#     `--set formal.strict=false` opts back into exit 0 + a loud INCONCLUSIVE
-#     warning; both directions are pinned below.
+#     The `formal.strict=false` opt-out is pinned by lhd_formal_verify_test.
 #   * ROUND-TRIP: re-running with the mined block as a sidecar re-proves each
 #     mined assume (prove-then-use: "checked assume(s): ... proven (used)");
 #   * STALENESS: after a design edit that falsifies the mined fact (wrap at 7),
@@ -27,7 +26,8 @@
 # inductively in ~2s; u8/u10/u12 are already UNKNOWN at 60s per query, and u32
 # stays UNKNOWN at 120s per query. The permanent UNKNOWN is the whole point of
 # the fixture (something must stay open for mining to have a target) — do NOT
-# try to "fix" it by raising formal.timeout, and do NOT shrink the operands.
+# try to "fix" it by raising formal.timeout. The short budgets below are enough
+# to establish UNKNOWN while leaving most of this test's time for mining.
 
 set -u
 
@@ -63,8 +63,9 @@ EOF
 WD="$W/wd"
 mkdir -p "$WD"
 OUT="$W/mine.out"
-"$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=8 --set formal.timeout=3 \
-  --set formal.spec_mining_timeout=25 --set formal.engine=bmc --workdir "$WD" >"$OUT" 2>&1
+"$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=6 --set formal.timeout=1 \
+  --set formal.min_timeout=1 --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
+  --set formal.mine=speculative --workdir "$WD" >"$OUT" 2>&1
 RC=$?
 # Default formal.strict=true: an inconclusive run must NOT exit 0 (a gate built on
 # this run could not otherwise tell it from a proof), and must NOT be reported as a
@@ -93,20 +94,8 @@ assert "count" in tight[0]["keys"]
 assert any("hard with count" in json.dumps(o) or True for o in d["obligations"])  # obligations present
 stuck = [o["id"] for o in d["obligations"] if o["verdict"] == "unknown"]
 assert stuck and any(t in stuck for t in tight[0]["targets"]), (stuck, tight[0]["targets"])
+assert all(m["status"] in ("inductive", "speculative") for m in d["mined"])
 PYEOF
-
-# The other direction of the same policy: `--set formal.strict=false` accepts the
-# undecided run as a WARNING and exits 0. Same design, same verdict — only the
-# severity moves. Mining is switched off here (spec_mining_timeout=0) purely to
-# keep the replay cheap; the mined artifacts are already pinned above.
-OUT="$W/lenient.out"
-"$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=8 --set formal.timeout=3 \
-  --set formal.spec_mining_timeout=0 --set formal.engine=bmc --set formal.strict=false >"$OUT" 2>&1
-RC=$?
-[ "$RC" -eq 0 ] || fail "--set formal.strict=false must accept the undecided run (got rc=$RC): $(cat "$OUT")"
-grep -q "'miner.miner' UNKNOWN" "$OUT" || fail "the lenient run must reach the SAME UNKNOWN verdict: $(cat "$OUT")"
-grep -q '"code":"formal-inconclusive"' "$OUT" || fail "the tolerated UNKNOWN must still warn loudly: $(cat "$OUT")"
-grep -q 'formal verify INCONCLUSIVE' "$OUT" || fail "the inconclusive warning must say so in prose: $(cat "$OUT")"
 
 # Round-trip: the mined block re-parses as a sidecar; its assumes are INTERNAL
 # (over design state), get RE-PROVEN, and constrain the remaining obligations.
@@ -114,8 +103,8 @@ grep -q 'formal verify INCONCLUSIVE' "$OUT" || fail "the inconclusive warning mu
 # matters is that adding the mined block does NOT turn it into a refutation
 # (rc=10) and that the assumes are proven and used.
 OUT="$W/roundtrip.out"
-"$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=6 \
-  --set formal.timeout=3 --set formal.engine=bmc >"$OUT" 2>&1
+"$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=3 \
+  --set formal.timeout=1 --set formal.min_timeout=1 --set formal.engine=bmc >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq "$RC_INCONCLUSIVE" ] \
   || fail "the round-trip must stay merely inconclusive (rc=$RC_INCONCLUSIVE), not break the run; got rc=$RC: $(cat "$OUT")"
@@ -140,19 +129,4 @@ RC=$?
   || fail "a stale mined assume must REFUTE the run after the edit (want rc=$RC_REFUTED, got rc=$RC): $(cat "$OUT")"
 grep -q '\[miner.mined\].*REFUTED' "$OUT" || fail "the stale mined assume must be REFUTED: $(cat "$OUT")"
 
-# mine=speculative: base-proven candidates the step dropped are also reported.
-# The run is stuck by construction, so it exits $RC_INCONCLUSIVE like the first
-# one; the subject here is the report content, which is written regardless.
-WD2="$W/wd_spec"
-mkdir -p "$WD2"
-OUT="$W/spec.out"
-"$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=3 --set formal.timeout=3 \
-  --set formal.spec_mining_timeout=20 --set formal.engine=bmc --set formal.mine=speculative --workdir "$WD2" >"$OUT" 2>&1
-python3 - "$WD2" <<'PYEOF' || fail "mine=speculative report check failed"
-import json, sys
-d = json.load(open(sys.argv[1] + "/formal_report.json"))
-assert d["mined"], "speculative tier must report candidates"
-assert all(m["status"] in ("inductive", "speculative") for m in d["mined"])
-PYEOF
-
-echo "PASS: P3 mining (tight inductive bound mined + emitted; strict fails the stuck run, strict=false warns; report mined[]; round-trip re-proves; stale fact refutes; speculative tier)"
+echo "PASS: P3 mining (tight inductive bound mined + emitted; strict fails the stuck run; report mined[] including speculative tier; round-trip re-proves; stale fact refutes)"

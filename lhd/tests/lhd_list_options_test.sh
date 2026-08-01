@@ -51,6 +51,10 @@ echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
 echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
+echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
+echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"
+echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be shared as formal.simfail, not formal.lec.simfail: $out"
+echo "$out" | grep -q 'prpfail' && fail "removed prpfail vocabulary must not be listed: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
 echo "$out" | grep -q '"name":"compile.isabelle.' && fail "compile.isabelle.* must not exist (canonical is formal.isabelle.*): $out"
@@ -100,6 +104,14 @@ grep -q "unknown pass 'foo'" "$W/r6a.json" || fail "unknown-pass message missing
 grep -q "unknown flag 'bogus' of pass 'compile.cgen'" "$W/r6b.json" || fail "unknown-flag message missing: $(cat "$W/r6b.json")"
 "$LHD" compile "$PRP" --set cgen.odir=/tmp/zz --workdir "$W/w6c" -q >"$W/r6c.json" 2>/dev/null && fail "--set cgen.odir must fail"
 grep -q 'kernel-managed' "$W/r6c.json" || fail "kernel-managed message missing: $(cat "$W/r6c.json")"
+# The old replay names fail closed with a directed shared-namespace hint; the
+# replacement is boolean and derives its filename from the test/top.
+"$LHD" formal verify "$PRP" --set formal.prpfail_run=false -q >"$W/r6d.json" 2>/dev/null \
+  && fail "formal.prpfail_run must fail (renamed)"
+grep -q 'use --set formal.simfail_run=false instead' "$W/r6d.json" || fail "prpfail_run rename hint missing: $(cat "$W/r6d.json")"
+"$LHD" formal verify "$PRP" --set formal.simfail=custom.prp -q >"$W/r6e.json" 2>/dev/null \
+  && fail "formal.simfail must reject a filename"
+grep -q 'expects true|false' "$W/r6e.json" || fail "simfail boolean diagnostic missing: $(cat "$W/r6e.json")"
 
 # 7. The same validation covers --config tables (one funnel: opts.sets).
 cat >"$W/bad.toml" <<'EOF'

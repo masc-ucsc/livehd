@@ -392,7 +392,7 @@ _SIM_FIXME = [
 # `:type: verify` fixtures (tests/verify/): the harness drives `lhd formal
 # verify` on a single self-contained .prp (design + `formal` blocks) with a
 # --workdir, then checks the header expectations against the machine artifacts:
-# formal_report.json verdict counts, the formalfail.prp counterexample
+# formal_report.json verdict counts, the simfail_<test>.prp counterexample
 # testbench on an expected REFUTE, and the replay outcome (:verify_replay:
 # fired = the driven trace re-fires the assert; no-refire = the loud
 # free-initial-state warning). The replay compiles a sim driver, hence the

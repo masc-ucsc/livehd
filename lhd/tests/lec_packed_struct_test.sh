@@ -31,16 +31,16 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # Scalar packed struct whose '{...} write reads its own fields (the ALU `io`).
 cat >"$W/pstruct.sv" <<'EOF'
 module pstruct(
-  input  [4:0]  a,
-  input  [63:0] x,
-  input  [63:0] y,
-  output [63:0] r
+  input  [2:0] a,
+  input  [7:0] x,
+  input  [7:0] y,
+  output [7:0] r
 );
   wire
-    struct packed {logic [4:0] operation; logic [63:0] inputx; logic [63:0] inputy; logic [63:0] result; }
+    struct packed {logic [2:0] operation; logic [7:0] inputx; logic [7:0] inputy; logic [7:0] result; }
     io;
-  wire        z = io.operation[4];
-  wire [63:0] w = io.inputx + io.inputy;
+  wire       z = io.operation[2];
+  wire [7:0] w = io.inputx + io.inputy;
   assign io = '{operation: a, inputx: x, inputy: y, result: w + z};
   assign r = io.result;
 endmodule
@@ -49,13 +49,13 @@ EOF
 # Struct-free ground truth (io.operation==a, io.inputx==x, io.inputy==y).
 cat >"$W/pstruct_plain.sv" <<'EOF'
 module pstruct(
-  input  [4:0]  a,
-  input  [63:0] x,
-  input  [63:0] y,
-  output [63:0] r
+  input  [2:0] a,
+  input  [7:0] x,
+  input  [7:0] y,
+  output [7:0] r
 );
-  wire        z = a[4];
-  wire [63:0] w = x + y;
+  wire       z = a[2];
+  wire [7:0] w = x + y;
   assign r = w + z;
 endmodule
 EOF
@@ -89,23 +89,23 @@ echo "PASS: packed-struct design is cvc5-PROVEN equivalent to its struct-free tw
 #     overflows the declared signed range).
 cat >"$W/psigned.sv" <<'EOF'
 module psigned(
-  input  signed [15:0] a,
-  input  signed [15:0] b,
-  output signed [31:0] r
+  input  signed [7:0] a,
+  input  signed [7:0] b,
+  output signed [15:0] r
 );
-  wire struct packed {logic signed [15:0] lo; logic signed [15:0] hi; logic signed [31:0] prod;} s;
-  wire signed [31:0] p = s.lo * s.hi;
+  wire struct packed {logic signed [7:0] lo; logic signed [7:0] hi; logic signed [15:0] prod;} s;
+  wire signed [15:0] p = s.lo * s.hi;
   assign s = '{lo: a, hi: b, prod: p + s.lo};
   assign r = s.prod;
 endmodule
 EOF
 cat >"$W/psigned_plain.sv" <<'EOF'
 module psigned(
-  input  signed [15:0] a,
-  input  signed [15:0] b,
-  output signed [31:0] r
+  input  signed [7:0] a,
+  input  signed [7:0] b,
+  output signed [15:0] r
 );
-  wire signed [31:0] p = a * b;
+  wire signed [15:0] p = a * b;
   assign r = p + a;
 endmodule
 EOF

@@ -381,7 +381,7 @@ std::string serialize_result(const Query_result& r) {
   }
   put_u32(b, static_cast<uint32_t>(r.checked_steps));
   put_u32(b, static_cast<uint32_t>(r.output_checks));
-  put_trace(b, r.trace);     // structured witness (the lecfail.prp reproduction sequence)
+  put_trace(b, r.trace);     // structured witness (the simfail reproduction sequence)
   put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
   put_u32(b, static_cast<uint32_t>(r.uncertain_pairs_used.size()));
   for (const auto& [rn, in] : r.uncertain_pairs_used) {
@@ -4081,7 +4081,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               std::string loc = src_for(s.key);
               rtoks.push_back(display_name(s.key) + (loc.empty() ? "" : " (" + loc + ")") + "(ref=" + rs + " impl=" + is + ")");
               // Record the FIRST diverging state cut as the machine-readable root cut
-              // (lecfail.json) — the state the diverging output inherits.
+              // (simfail JSON) — the state the diverging output inherits.
               if (res.trace.root_cycle < 0) {
                 res.trace.root_key   = display_name(s.key);
                 res.trace.root_cycle = state_bad;
@@ -4105,7 +4105,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // Structured, UNCAPPED reproduction trace (the display witness above caps
         // its input tokens): every primary input's value for each cycle up to the
         // first divergence, grouped by cycle, so `lhd lec` can regenerate the exact
-        // driving sequence into a Pyrope testbench (lecfail.prp). Same getValue
+        // driving sequence into a Pyrope testbench (simfail_<top>.prp). Same getValue
         // reads as the display witness — read-only on already-solved terms.
         res.trace.reset_cycles   = reset_hold;
         res.trace.diverge_cycle  = first_bad;

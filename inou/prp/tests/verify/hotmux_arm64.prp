@@ -2,7 +2,7 @@
 :name: hotmux_arm64
 :type: verify
 :top_module: hotmux_arm64
-:verify_bound: 4
+:verify_bound: 1
 :verify_proven: 1
 :verify_refuted: 1
 */
@@ -20,12 +20,14 @@
 // ROM or instruction decoder -- is enough to hit it. Found via minion's
 // trans_rcp_rom_case_* / vpu_decoder blocks (lhdsuite).
 //
-// The value 0xbad is produced by arm 64 and by NO other arm, so the first
+// The value 0x7f is produced by arm 64 and by NO other arm, so the first
 // assert is refutable ONLY if arm 64 is modelled. If the arm is dropped it
 // reads as PROVEN and this test fails on the count. Fixed in pass/lec/encode.cpp
 // (mux_arm_cond) and pass/formal/prove.cpp: test the selector bit with EXTRACT
 // instead of materialising a wide one-hot constant.
-pub mod hotmux_arm64(clock:u1, reset:u1, idx:u8) -> (o:u16@[1]) {
+// This is deliberately combinational: the regression is the 65-bit Hotmux arm
+// selector, so registers and four identical BMC frames only add solver work.
+pub comb hotmux_arm64(idx:u7) -> (o:u7) {
   mut v = 0
   match idx#[0..=6] {
     == 0 {
@@ -221,19 +223,17 @@ pub mod hotmux_arm64(clock:u1, reset:u1, idx:u8) -> (o:u16@[1]) {
       v = 64
     }
     == 64 {
-      v = 0xbad
+      v = 0x7f
     }
     else {
       v = 0
     }
   }
-  reg r:u16 = 0
-  r = v#[0..=15]
-  o = r
+  o = v#[0..=6]
 }
 
 formal hm.props {
   mut acc = hotmux_arm64
-  assert(acc.r != 0xbad, "arm 64 is REACHABLE and must refute")  // REFUTED at idx=64
-  assert(acc.r <= 0xbad, "every arm value is in range")          // PROVEN
+  assert(acc.o != 0x7f, "arm 64 is REACHABLE and must refute")  // REFUTED at idx=64
+  assert(acc.o != 126, "unused arm value stays unreachable")    // PROVEN
 }

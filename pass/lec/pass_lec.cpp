@@ -65,18 +65,16 @@ void Pass_lec::setup() {
                        "Accounting is on iff timeout>0 and formal.rlimit==0. NB engine=auto races ind+bmc as two "
                        "processes, each self-bounded to timeout",
                        "120");
-  m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate prpfail/prpfail_run)", "true");
-  m.add_label_optional("prpfail",
-                       "`lhd lec` + --workdir only: on a REFUTED verdict, write a self-contained Pyrope testbench "
-                       "that instantiates BOTH designs, drives the counterexample input sequence, and (with "
-                       "prpfailrun) dumps a VCD. Value: a filename created under --workdir — default 'lecfail.prp' "
-                       "when --workdir is set (else empty=off); 'true'='lecfail.prp'; ''/'false'=off. Gated by formal.witness",
-                       "");
-  m.add_label_optional("prpfail_run",
-                       "run the generated prpfail testbench through `lhd sim --set sim.vcd=true` to produce the "
-                       "counterexample waveform (same basename, .vcd, in --workdir). Default true when --workdir is "
-                       "set (else false); gated by prpfail actually being written",
-                       "");
+  m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate simfail/simfail_run)", "true");
+  m.add_label_optional("simfail",
+                       "true|false — with --workdir, write Pyrope simulation tests for REFUTED formal results. "
+                       "`formal verify` writes one simfail_<formal-test>.prp per refuted test; `formal lec` writes "
+                       "simfail_<resolved-top>.prp. Default true; gated by formal.witness",
+                       "true");
+  m.add_label_optional("simfail_run",
+                       "true|false — run the generated simfail test through `lhd sim --set sim.vcd=true` and write "
+                       "the same-basename VCD under --workdir. Default true; gated by formal.simfail",
+                       "true");
   m.add_label_optional("phase",
                        "bmc reset phase: after_reset (default; hold reset N cycles, deassert, check "
                        "free-running) | just_reset (hold reset asserted, check during reset) | "

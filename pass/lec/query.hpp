@@ -22,7 +22,7 @@ enum class Verdict { Proven, Refuted, Unknown };
 // Machine-readable counterexample trace: the reproducible input sequence a
 // REFUTED BMC run found, uncapped and grouped by cycle (the display `witness`
 // string caps its input tokens for readability). `lhd lec` turns this into a
-// self-contained Pyrope testbench (lecfail.prp) that drives BOTH designs with
+// self-contained Pyrope testbench (simfail_<top>.prp) that drives BOTH designs with
 // the sequence and dumps a VCD, so the divergence is visualized / re-run.
 // Only the BMC engine fills it — its CEX is reachable from reset; the inductive
 // engine's single-step CEX may be an unreachable step-case, so `ind` leaves it
@@ -43,7 +43,7 @@ struct Witness_trace {
   std::vector<std::string>   diverge_outputs;     // "name(ref=X impl=Y)" tokens at diverge_cycle
   std::vector<Witness_cycle> cycles;              // driven sequence (reset prologue first)
   // F7 root cut — the FIRST diverging STATE cut (the state the diverging output
-  // inherits), for the machine-readable lecfail.json and the source-mapped root
+  // inherits), for the machine-readable simfail JSON and the source-mapped root
   // clause. `root_src` is "file:line" of the flop's declaration (empty if the
   // node carried no source id). All empty when the trace has no state cut.
   std::string                root_key;            // canonical flop key (display-stripped in the clause)
@@ -645,7 +645,7 @@ struct Prop_result {
   std::string witness;  // per-cycle input assignment reaching the violation (Refuted)
   // Structured, uncapped input trace for witness reproduction (Refuted only):
   // the same shape the lec engine fills, so `lhd formal verify --workdir` can
-  // emit a formalfail.prp testbench + VCD exactly like lec's lecfail.prp.
+  // emit a simfail_<formal-test>.prp testbench + VCD exactly like LEC.
   Witness_trace trace;
 };
 

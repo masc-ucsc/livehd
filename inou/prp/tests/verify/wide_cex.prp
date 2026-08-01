@@ -10,7 +10,7 @@
 // Fuzz regression (2026-07-12, distilled from the xs_core_prp CSR-write
 // modules): a REFUTED witness that must drive a >64-bit value (u65 bus; the
 // input assume_nocheck forces bit 64) has to survive the WHOLE failure loop —
-// formalfail.prp generation, the sim driver COMPILE (its `long` value plane
+// simfail_<test>.prp generation, the sim driver COMPILE (its `long` value plane
 // used to emit `long _drv_w[] = {18446744073709551712, ...}` and fail to
 // build), and the replay must RE-FIRE the assert (wide drives ride the
 // string/from_pyrope plane, exact at any width).

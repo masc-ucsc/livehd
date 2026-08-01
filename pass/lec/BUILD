@@ -154,10 +154,20 @@ sh_test(
 
 sh_test(
     name = "lec_budget_test",
+    args = ["budget"],
     srcs = ["tests/lec_budget_test.sh"],
     size = "medium",  # runs a few short freezing miters under a wall-clock budget
     data = ["//lhd"],
     tags = ["no-sandbox"],  # 2f-fcore §6 global budget scheduler: formal.timeout is a TOTAL, not per-def
+)
+
+sh_test(
+    name = "lec_min_timeout_test",
+    args = ["floor"],
+    srcs = ["tests/lec_budget_test.sh"],
+    size = "medium",
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # floor A/B is intentionally solver-time based
 )
 
 sh_test(
@@ -235,8 +245,8 @@ sh_test(
 )
 
 # lecfail witness reproduction (`lhd lec` + --workdir): a REFUTED verdict writes a
-# self-contained Pyrope testbench (lec.prpfail) driving BOTH designs and runs
-# `lhd sim` to dump one VCD (lec.prpfailrun). Covers the default-on behavior, the
+# self-contained Pyrope testbench (formal.simfail) driving BOTH designs and runs
+# `lhd sim` to dump one VCD (formal.simfail_run). Covers the default-on behavior, the
 # three knobs, and the no-workdir / PROVEN gating.
 sh_test(
     name = "lec_witness_prpfail_test",

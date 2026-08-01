@@ -25,6 +25,10 @@ cc_library(
 
 cc_test(
     name = "lnast_bench",
+    # A regression smoke benchmark needs stable coverage, not Google's default
+    # ~0.5s calibration for every size/thread combination. 50ms still runs each
+    # case repeatedly while keeping //... test latency small.
+    args = ["--benchmark_min_time=0.05s"],
     srcs = ["tests/lnast_bench.cpp"],
     deps = [
         ":lnast",
@@ -38,4 +42,3 @@ cc_test(
     copts = COPTS,
     deps = [":lnast"],
 )
-

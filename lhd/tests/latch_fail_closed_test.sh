@@ -104,7 +104,7 @@ EOF
 # : q`, so the update `q_next = en ? din : q` IS transparency observed at the
 # end of the cycle — and the ordinary Flop encoding proves the obligation.
 out="$("$LHD" formal verify "$W/lverify.prp" --top lhold_tb --workdir "$W/vwd" \
-  --set formal.bound=8 --set formal.prpfail_run=false 2>&1)"
+  --set formal.bound=8 --set formal.simfail_run=false 2>&1)"
 rc=$?
 if [ $rc -ne 0 ]; then
   echo "$out" | tail -5
@@ -120,7 +120,7 @@ echo "ok: formal verify PROVES a latch design (M8 lifted the encoder refusal)"
 # verbatim (a degradation to UNKNOWN is NOT a fix -- verdict discipline).
 sed 's/(lq == 5)/(lq == 6)/' "$W/lverify.prp" > "$W/lverify_mutant.prp"
 out="$("$LHD" formal verify "$W/lverify_mutant.prp" --top lhold_tb --workdir "$W/vwdm" \
-  --set formal.bound=8 --set formal.prpfail_run=false 2>&1)"
+  --set formal.bound=8 --set formal.simfail_run=false 2>&1)"
 [ $? -ne 0 ] || fail "the MUTATED latch property still passed: the obligation is not actually being checked (vacuous)"
 grep -q "REFUTED" <<<"$out" \
   || { echo "$out" | tail -5; fail "the mutated latch property must be REFUTED verbatim, not merely inconclusive"; }
@@ -148,7 +148,7 @@ verdict_rc() { # <extra args...>  -> prints the exit code
   local wd
   wd="$(mktemp -d "$W/shape.XXXXXX")"
   "$LHD" formal verify "$W/lverify.prp" --top lhold_tb --set formal.bound=8 \
-    --set formal.prpfail_run=false "$@" >"$wd/log" 2>&1
+    --set formal.simfail_run=false "$@" >"$wd/log" 2>&1
   echo $?
 }
 rc_nowd=$(verdict_rc)

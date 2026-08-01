@@ -145,7 +145,7 @@ struct Encoded {
   // Source_locator. Populated only when the node carries a source id (a Verilog
   // node resolves back through the cgen ECMA-426 sourcemap). Lets the BMC witness
   // render the first diverging state cut as `s (cpu.prp:554)` and stamp the same
-  // location into the generated lecfail.prp testbench. Empty entry = unknown.
+  // location into the generated simfail testbench. Empty entry = unknown.
   Io_name_map<std::string> src_of_key;
 };
 

@@ -38,6 +38,10 @@
 
 namespace lhd {
 
+namespace {
+bool setting_enabled(std::string_view value) { return value != "false" && value != "0" && value != "off"; }
+}  // namespace
+
 // ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
 
 // Load one --impl/--ref side into `var.graphs` WITHOUT cgen. lg: libraries load
@@ -1253,11 +1257,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   return top_result;
 }
 
-// ===== lecfail witness reproduction (`lhd lec` + --workdir) ==================
+// ===== simfail witness reproduction (`lhd lec` + --workdir) ==================
 // On a REFUTED verdict with a reproducible BMC trace, write a self-contained
-// Pyrope testbench (formal.lec.prpfail, default lecfail.prp) that instantiates BOTH
+// Pyrope testbench (formal.simfail, default simfail_<top>.prp) that instantiates BOTH
 // designs inside one wrapper module, drives the counterexample input sequence,
-// and (with formal.lec.prpfail_run) runs `lhd sim` to dump ONE VCD (lecfail.vcd) so the
+// and (with formal.simfail_run) runs `lhd sim` to dump ONE same-basename VCD so the
 // impl-vs-ref divergence is visualized / re-runnable. Every step is best-effort:
 // a side that cannot re-emit as Pyrope (lg:/yosys netlists have no LNAST), a
 // name clash, or a sim build error is a WARNING, never a hard failure — the LEC
@@ -1278,6 +1282,20 @@ struct Lecfail_mod {
 std::string lecfail_simple_name(std::string_view n) {
   auto dot = n.rfind('.');
   return std::string(dot == std::string_view::npos ? n : n.substr(dot + 1));
+}
+
+// One stable filesystem/Pyrope identifier shared by the LEC and verify replay
+// paths. Formal blocks retain their full dotted name; graph tops use the simple
+// entity name selected by the driver.
+std::string simfail_filename(std::string_view subject) {
+  std::string safe;
+  for (char c : subject) {
+    safe += (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_') ? c : '_';
+  }
+  if (safe.empty()) {
+    safe = "top";
+  }
+  return "simfail_" + safe + ".prp";
 }
 
 // Split a comma-separated IO list ("en, din:u8") into {name, ":type" suffix}.
@@ -1647,38 +1665,38 @@ static void emit_witness_json(const std::string& path, std::string_view kind, st
 // The generator proper. `impl_top`/`ref_top` are the two designs' TOP graph names
 // (unqualified names are matched against the re-emitted modules).
 void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_result& r, const std::string& impl_top_full,
-                          const std::string& ref_top_full, const std::string& prpfail, bool run_sim) {
+                          const std::string& ref_top_full, const std::string& simfail, bool run_sim) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.lec", "lecfail-skip", "io").msg("formal.lec.prpfail witness testbench not generated: {}", why).emit();
+    livehd::diag::info("pass.lec", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
   };
   if (r.trace.empty()) {
     skip("the verdict carries no reproducible input trace (inductive single-step CEX, or witnesses disabled)");
     return;
   }
 
-  const std::string prpfail_path = prpfail.find('/') != std::string::npos ? prpfail : opts.workdir + "/" + prpfail;
+  const std::string simfail_path = opts.workdir + "/" + simfail;
   // Test name = the .prp basename stem, sanitized to a Pyrope identifier; it is
   // also the sole sim instance's VCD stem (`<workdir>/<stem>.vcd`).
-  std::string stem = fs::path(prpfail_path).stem().string();
+  std::string stem = fs::path(simfail_path).stem().string();
   std::string test_name;
   for (char c : stem) {
     test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
   }
   if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
-    test_name = "lecfail_" + test_name;
+    test_name = "simfail_" + test_name;
   }
 
   // Phase 2/3 of the lec-on-failure flow: re-emitting both sides as Pyrope shells
   // out to `lhd` twice, so announce the target up front (the write itself is quick;
   // the side re-emit is the slow part).
-  livehd::diag::info("pass.lec", "lecfail-creating-prp", "progress")
-      .msg("lec: creating counterexample testbench {}", prpfail_path)
+  livehd::diag::info("pass.lec", "simfail-creating-prp", "progress")
+      .msg("lec: creating counterexample simulation test {}", simfail_path)
       .emit();
 
   const std::string lhd_bin  = file_utils::get_exe_path() + "/lhd";
   const std::string impl_dir = opts.workdir + "/lecfail_impl_prp";
   const std::string ref_dir  = opts.workdir + "/lecfail_ref_prp";
-  const std::string log      = next_log_path(opts, "formal.lec.prpfail");
+  const std::string log      = next_log_path(opts, "formal.simfail");
   if (!lecfail_emit_side(lhd_bin, opts, opts.impl_kind, opts.impl_path, impl_dir, opts.workdir + "/lecfail_impl_w", log)
       || !lecfail_emit_side(lhd_bin, opts, opts.ref_kind, opts.ref_path, ref_dir, opts.workdir + "/lecfail_ref_w", log)) {
     skip(std::format("a side could not be re-emitted as Pyrope (lg:/yosys-verilog sides have no LNAST); see {}", log));
@@ -1694,11 +1712,11 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
 
   std::string      impl_top = lecfail_simple_name(impl_top_full);
   std::string      ref_top  = lecfail_simple_name(ref_top_full);
-  const std::string wrapper = "__lecfail_dut_pair";
+  const std::string wrapper = "__simfail_dut_pair";
 
   // Prefer IMPORTING the original sources: the testbench then references the two
   // designs by `import("<file>.<top>")` instead of inlining renamed copies, so
-  // fixing a bug in the original .prp and re-running the SAME lecfail.prp picks
+  // fixing a bug in the original .prp and re-running the SAME simfail test picks
   // up the fix. Requires both sides to be Pyrope files (an lg:/verilog side has
   // no editable .prp to iterate on) with DISTINCT file stems — the stem is the
   // import unit name, and two same-named units would collide. Otherwise fall
@@ -1722,9 +1740,9 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
     if (!ref_pub) {
       which += (which.empty() ? "" : " and ") + std::format("the ref top `{}` in {}", ref_top, opts.ref_path);
     }
-    livehd::diag::warn("pass.lec", "lecfail-top-not-pub", "io")
+    livehd::diag::warn("pass.lec", "simfail-top-not-pub", "io")
         .msg(
-            "lecfail.prp inlines a COPY of each design because a LEC top is not `pub` ({}) — mark the LEC top `pub` "
+            "the simfail test inlines a COPY of each design because a LEC top is not `pub` ({}) — mark the LEC top `pub` "
              "and the testbench will `import` the original instead, so a fix to the .prp flows into a re-run",
              which)
         .hint(std::format("e.g. `pub mod {}(...)` / `pub comb {}(...)`", impl_top, ref_top))
@@ -1896,7 +1914,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   test_text += "    step\n  }\n}\n";
 
-  // ---- assemble lecfail.prp -----------------------------------------------
+  // ---- assemble the simfail test ------------------------------------------
   std::string divtxt;
   for (const auto& d : r.trace.diverge_outputs) {
     divtxt += (divtxt.empty() ? "" : ", ") + d;
@@ -1906,8 +1924,8 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // (edit either .prp, re-run, the fix flows through); the inline form is a single
   // self-contained file.
   const std::string rerun
-      = can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path, prpfail_path)
-                 : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+      = can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path, simfail_path)
+                   : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", simfail_path);
   // F7: the source-mapped root cut — the first diverging STATE cut the output
   // inherits, stamped with the impl-side `file:line` of the flop's declaration.
   std::string rootcut;
@@ -1959,22 +1977,21 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   out += wrap_text + "\n" + test_text;
 
-  std::ofstream ofs(prpfail_path);
+  std::ofstream ofs(simfail_path);
   if (!ofs.is_open()) {
-    skip(std::format("could not write {}", prpfail_path));
+    skip(std::format("could not write {}", simfail_path));
     return;
   }
   ofs << out;
   ofs.close();
-  res.outputs.push_back(prpfail_path);
-  res.recipe_steps.push_back(std::format("formal.lec.prpfail witness testbench -> {}", prpfail_path));
-  std::print("lec: wrote counterexample testbench {}\n", prpfail_path);
+  res.outputs.push_back(simfail_path);
+  res.recipe_steps.push_back(std::format("formal.simfail simulation test -> {}", simfail_path));
+  std::print("lec: wrote counterexample simulation test {}\n", simfail_path);
 
   // F7: machine-readable sibling artifact, keyed off the same trace (so its input
   // sequence matches the .prp `_drv_*` arrays by construction).
-  std::string json_path = prpfail_path.ends_with(".prp") ? prpfail_path.substr(0, prpfail_path.size() - 4) + ".json"
-                                                         : prpfail_path + ".json";
-  emit_witness_json(json_path, "lecfail", opts.impl_path, opts.ref_path, r.trace);
+  std::string json_path = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
+  emit_witness_json(json_path, "simfail", opts.impl_path, opts.ref_path, r.trace);
   res.outputs.push_back(json_path);
 
   if (!run_sim) {
@@ -1982,18 +1999,18 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   // Phase 3/3 of the lec-on-failure flow: `lhd sim` on the testbench dumps the
   // waveform; announce the target up front (the sim run is the slow part).
-  livehd::diag::info("pass.lec", "lecfail-creating-vcd", "progress")
+  livehd::diag::info("pass.lec", "simfail-creating-vcd", "progress")
       .msg("lec: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
   // Run it: one instance -> one VCD at <workdir>/<test_name>.vcd.
-  const std::string sim_log = next_log_path(opts, "formal.lec.prpfail_run");
+  const std::string sim_log = next_log_path(opts, "formal.simfail_run");
   std::string       cmd     = shell_quote(lhd_bin) + " sim ";
   // Import form: pass both original sources positionally so the testbench's
   // `import("<stem>.<top>")` resolve to the co-loaded units.
   if (can_import) {
     cmd += shell_quote(opts.impl_path) + " " + shell_quote(opts.ref_path) + " ";
   }
-  cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   // Forward any explicit sim-runtime header locations (sim.hlop_dir /
   // sim.iassert_dir) to the child sim host-compile — needed when `../hlop`
   // isn't beside the cwd (e.g. under `bazel test`, where the caller passes
@@ -2009,11 +2026,11 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   std::string vcd = std::format("{}/{}.vcd", opts.workdir, test_name);
   if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && fs::exists(vcd)) {
     res.outputs.push_back(vcd);
-    res.recipe_steps.push_back(std::format("formal.lec.prpfail_run VCD -> {}", vcd));
+    res.recipe_steps.push_back(std::format("formal.simfail_run VCD -> {}", vcd));
     std::print("lec: wrote counterexample waveform {}\n", vcd);
   } else {
-    livehd::diag::warn("pass.lec", "lecfail-sim", "io")
-        .msg("formal.lec.prpfail_run: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+    livehd::diag::warn("pass.lec", "simfail-sim", "io")
+        .msg("formal.simfail_run: `lhd sim {}` did not produce {} (see {})", simfail_path, vcd, sim_log)
         .emit();
   }
 }
@@ -2836,50 +2853,32 @@ void lec_command(Options& opts, Result& res) {
   if (!r.witness.empty()) {
     std::print("  counterexample: {}\n", r.witness);
   }
-  // lecfail witness testbench + VCD (`lhd lec` + --workdir). On a REFUTED verdict,
-  // write a self-contained Pyrope reproduction (formal.lec.prpfail) and optionally run it
-  // to dump a VCD (formal.lec.prpfail_run). Resolved with workdir-aware defaults: without
-  // a user --workdir both are off; with one they default on. Gated by formal.witness.
+  // simfail simulation test + VCD (`lhd lec` + --workdir). On a REFUTED
+  // verdict, write simfail_<resolved-top>.prp and optionally run it. Without a
+  // user --workdir both actions are off; formal.witness gates the feature.
   if (r.verdict == livehd::lec::Verdict::Refuted) {
-    auto get_set = [&](std::string_view k, std::string& v) {
-      auto it = labels.find(std::string{k});
-      if (it == labels.end()) {
-        return false;
-      }
-      v = it->second;
-      return true;
-    };
-    std::string prpfail;  // "" = off; else the .prp basename under --workdir
-    std::string pv;
-    if (o.witness && workdir_set) {
-      if (get_set("prpfail", pv)) {
-        prpfail = (pv.empty() || pv == "false" || pv == "0") ? std::string{}
-                  : (pv == "true" || pv == "1")              ? std::string{"lecfail.prp"}
-                                                             : pv;
-      } else {
-        prpfail = "lecfail.prp";  // default when --workdir is set
-      }
-    } else if (get_set("prpfail", pv) && !workdir_set && !pv.empty() && pv != "false" && pv != "0") {
-      livehd::diag::info("pass.lec", "lecfail-needs-workdir", "io")
-          .msg("formal.lec.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
-          .emit();
-    }
-    bool prpfailrun = workdir_set;  // default: run iff --workdir
-    if (std::string rv; get_set("prpfail_run", rv)) {
-      prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
-    }
-    if (!prpfail.empty() && lec_single_edge_slots > 1) {
+    const bool simfail = o.witness && workdir_set && setting_enabled(labels.contains("simfail") ? labels.at("simfail") : "true");
+    const bool simfail_run = setting_enabled(labels.contains("simfail_run") ? labels.at("simfail_run") : "true");
+    if (simfail && lec_single_edge_slots > 1) {
       // 2f-latch M8 step 2d, same reason as the verify half: the generator
       // re-emits the un-normalized sides and drives the trace at the reported
       // index, which after normalization counts SUB-steps. A replay that runs
       // clean would read as "the counterexample was spurious", so skip honestly.
-      livehd::diag::info("pass.lec", "lecfail-skip", "io")
-          .msg("formal.lec.prpfail witness testbench not generated: the designs were edge-normalized into {} sub-steps "
-               "per clock period, so the witness cycle indices do not line up with the un-normalized sources",
-               lec_single_edge_slots)
+      livehd::diag::info("pass.lec", "simfail-skip", "io")
+          .msg(
+              "formal.simfail testbench not generated: the designs were edge-normalized into {} sub-steps "
+              "per clock period, so the witness cycle indices do not line up with the un-normalized sources",
+              lec_single_edge_slots)
           .emit();
-    } else if (!prpfail.empty()) {
-      emit_lecfail_witness(opts, res, r, std::string(impl_g->get_name()), std::string(ref_g->get_name()), prpfail, prpfailrun);
+    } else if (simfail) {
+      const std::string top = lecfail_simple_name(impl_g->get_name());
+      emit_lecfail_witness(opts,
+                           res,
+                           r,
+                           std::string(impl_g->get_name()),
+                           std::string(ref_g->get_name()),
+                           simfail_filename(top),
+                           simfail_run);
     }
   }
 
@@ -3004,20 +3003,18 @@ void lec_command(Options& opts, Result& res) {
   }
 }
 
-// formalfail.prp: the `lhd formal verify` analogue of lec's lecfail.prp — on a
-// REFUTED obligation with --workdir, write a self-contained Pyrope testbench
+// simfail_<formal-test>.prp: on a REFUTED obligation with --workdir, write a
+// self-contained Pyrope testbench
 // that instantiates the DESIGN, drives the violating per-cycle input trace,
-// and (prpfail_run) replays it under `lhd sim --set sim.vcd=true`. A design
+// and (formal.simfail_run) replays it under `lhd sim --set sim.vcd=true`. A design
 // assert then FIRES during the replay (sim exiting non-zero is the expected
 // reproduction, not a failure); a formal-block obligation has no runtime
 // check, but the VCD still shows every signal the block reads.
 void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop_result& prop, const std::string& design_kind,
-                             const std::string& design_path, const std::string& top_full, const std::string& prpfail, bool run_sim,
+                             const std::string& design_path, const std::string& top_full, const std::string& simfail, bool run_sim,
                              const std::string& embed_assert) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.formal", "formalfail-skip", "io")
-        .msg("formal.prpfail witness testbench not generated: {}", why)
-        .emit();
+    livehd::diag::info("pass.formal", "simfail-skip", "io").msg("formal.simfail testbench not generated: {}", why).emit();
   };
   if (prop.trace.empty()) {
     skip("the refuted obligation carries no reproducible input trace (witnesses disabled?)");
@@ -3025,23 +3022,23 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   const auto& tr = prop.trace;
 
-  const std::string prpfail_path = prpfail.find('/') != std::string::npos ? prpfail : opts.workdir + "/" + prpfail;
-  std::string       stem         = fs::path(prpfail_path).stem().string();
+  const std::string simfail_path = opts.workdir + "/" + simfail;
+  std::string       stem         = fs::path(simfail_path).stem().string();
   std::string       test_name;
   for (char c : stem) {
     test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
   }
   if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
-    test_name = "formalfail_" + test_name;
+    test_name = "simfail_" + test_name;
   }
 
-  livehd::diag::info("pass.formal", "formalfail-creating-prp", "progress")
-      .msg("formal verify: creating counterexample testbench {}", prpfail_path)
+  livehd::diag::info("pass.formal", "simfail-creating-prp", "progress")
+      .msg("formal verify: creating counterexample simulation test {}", simfail_path)
       .emit();
 
   const std::string lhd_bin    = file_utils::get_exe_path() + "/lhd";
   const std::string design_dir = opts.workdir + "/formalfail_prp";
-  const std::string log        = next_log_path(opts, "formal.prpfail");
+  const std::string log        = next_log_path(opts, "formal.simfail");
   if (!lecfail_emit_side(lhd_bin, opts, design_kind, design_path, design_dir, opts.workdir + "/formalfail_w", log)) {
     skip(std::format("the design could not be re-emitted as Pyrope (lg:/yosys-verilog has no LNAST); see {}", log));
     return;
@@ -3064,7 +3061,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
 
   // Import the ORIGINAL source when it is a Pyrope file with a `pub` top (a fix
-  // to the .prp then flows into a re-run of the SAME formalfail.prp); else
+  // to the .prp then flows into a re-run of the SAME simfail test); else
   // inline the re-emitted copy (self-contained).
   const std::string design_stem = fs::path(design_path).stem().string();
   const bool        can_import  = design_kind == "pyrope" && !design_stem.empty() && lecfail_prp_top_is_pub(design_path, top);
@@ -3128,8 +3125,8 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
 
   std::string what = prop.kind + (prop.loc.empty() ? "" : " at " + prop.loc) + (prop.block.empty() ? "" : " [" + prop.block + "]")
                    + (prop.msg.empty() ? "" : " \"" + prop.msg + "\"");
-  const std::string rerun = can_import ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, prpfail_path)
-                                : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+  const std::string rerun = can_import ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, simfail_path)
+                                       : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", simfail_path);
   // Only an obligation that was pinned to one statement is re-checked in the
   // body; the header must say which of the two files this is, because "the
   // replay FAILS on it" printed over a check-less testbench reads as "the
@@ -3151,7 +3148,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       embed_assert.empty()
           ? "// NO runtime check is embedded (a design-body assert is not executed by sim, and a\n"
             "// formal-block obligation could not be pinned to one statement) — read the violation\n"
-            "// off the VCD against formalfail.json.\n"
+            "// off the VCD against the sibling simfail JSON.\n"
           : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
             "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
       rerun,
@@ -3169,43 +3166,42 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   out += test_text;
 
-  std::ofstream ofs(prpfail_path);
+  std::ofstream ofs(simfail_path);
   if (!ofs.is_open()) {
-    skip(std::format("could not write {}", prpfail_path));
+    skip(std::format("could not write {}", simfail_path));
     return;
   }
   ofs << out;
   ofs.close();
-  res.outputs.push_back(prpfail_path);
-  res.recipe_steps.push_back(std::format("formal.prpfail witness testbench -> {}", prpfail_path));
-  std::print("formal verify: wrote counterexample testbench {}\n", prpfail_path);
+  res.outputs.push_back(simfail_path);
+  res.recipe_steps.push_back(std::format("formal.simfail simulation test -> {}", simfail_path));
+  std::print("formal verify: wrote counterexample simulation test {}\n", simfail_path);
 
   // F7: machine-readable sibling artifact. For a verify obligation the "root" is the
   // failing assert itself, so stamp its kind/loc/violation-cycle into the trace copy
-  // — formalfail.json then carries the same signal shape as lecfail.json.
+  // — the simfail JSON then carries the same signal shape on both formal paths.
   livehd::lec::Witness_trace jtr = prop.trace;
   if (jtr.root_cycle < 0) {
     jtr.root_key   = prop.kind;
     jtr.root_cycle = prop.refuted_at;
     jtr.root_src   = prop.loc;
   }
-  std::string json_path = prpfail_path.ends_with(".prp") ? prpfail_path.substr(0, prpfail_path.size() - 4) + ".json"
-                                                         : prpfail_path + ".json";
-  emit_witness_json(json_path, "formalfail", design_path, design_path, jtr);
+  std::string json_path = simfail_path.substr(0, simfail_path.size() - 4) + ".json";
+  emit_witness_json(json_path, "simfail", design_path, design_path, jtr);
   res.outputs.push_back(json_path);
 
   if (!run_sim) {
     return;
   }
-  livehd::diag::info("pass.formal", "formalfail-creating-vcd", "progress")
+  livehd::diag::info("pass.formal", "simfail-creating-vcd", "progress")
       .msg("formal verify: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
-  const std::string sim_log = next_log_path(opts, "formal.prpfail_run");
+  const std::string sim_log = next_log_path(opts, "formal.simfail_run");
   std::string       cmd     = shell_quote(lhd_bin) + " sim ";
   if (can_import) {
     cmd += shell_quote(design_path) + " ";
   }
-  cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
     if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
@@ -3218,7 +3214,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // reproduction; the artifact that matters is the waveform.
   if (fs::exists(vcd)) {
     res.outputs.push_back(vcd);
-    res.recipe_steps.push_back(std::format("formal.prpfail_run VCD -> {}", vcd));
+    res.recipe_steps.push_back(std::format("formal.simfail_run VCD -> {}", vcd));
     const bool fired = !(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     std::print("formal verify: wrote counterexample waveform {}{}\n",
                vcd,
@@ -3231,24 +3227,24 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       // design) which the BMC may choose but a sim replay cannot set (sim
       // powers up at the declared init / zero).
       if (embed_assert.empty()) {
-        livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
-            .msg("the formalfail replay ran clean ({}): NO runtime check is embedded (the obligation is a "
+        livehd::diag::warn("pass.formal", "simfail-replay-no-refire", "io")
+            .msg("the simfail replay ran clean ({}): NO runtime check is embedded (the obligation is a "
                  "design-body assert, which sim does not execute, or it could not be pinned to one statement) — "
-                 "read the violation off the VCD against formalfail.json",
+                 "read the violation off the VCD against the sibling simfail JSON",
                  vcd)
             .emit();
       } else {
-        livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
-            .msg("the formalfail replay ran but did NOT re-fire the assert ({}): the witness likely depends on "
+        livehd::diag::warn("pass.formal", "simfail-replay-no-refire", "io")
+            .msg("the simfail replay ran but did NOT re-fire the assert ({}): the witness likely depends on "
                  "free initial state (init-less registers/memories or no reset input) that the sim cannot "
-                 "reproduce; inspect the VCD against formalfail.json",
+                 "reproduce; inspect the VCD against the sibling simfail JSON",
                  vcd)
             .emit();
       }
     }
   } else {
-    livehd::diag::warn("pass.formal", "formalfail-sim", "io")
-        .msg("formal.prpfail_run: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+    livehd::diag::warn("pass.formal", "simfail-sim", "io")
+        .msg("formal.simfail_run: `lhd sim {}` did not produce {} (see {})", simfail_path, vcd, sim_log)
         .emit();
   }
 }
@@ -3550,7 +3546,7 @@ static void emit_mined_block(const std::string& path, const std::string& design_
 // warning unless formal.strict. Knobs: formal.* (shared engine), formal.lec.*
 // (lec-only), formal.verify.* (verify-only), with lec.* accepted as aliases.
 void formal_verify_command(Options& opts, Result& res) {
-  // Captured before any workdir() call fabricates a scratch dir: the formalfail
+  // Captured before any workdir() call fabricates a scratch dir: the simfail
   // testbench + VCD default ON only for a persistent, user-named --workdir.
   const bool workdir_set = !opts.workdir.empty();
   setup_diag(opts, "formal");
@@ -3856,7 +3852,7 @@ void formal_verify_command(Options& opts, Result& res) {
   std::vector<livehd::lec::Monitor> mons;
   std::vector<Eprp_var>             mon_keep;  // owns the monitor graphs' lifetime
   // "block\x1floc" -> the block statement re-targeted at `_dut.<path>` reads,
-  // so a refuted obligation can be re-checked inside the formalfail testbench.
+  // so a refuted obligation can be re-checked inside the simfail testbench.
   absl::flat_hash_map<std::string, std::string> fb_embed;
   {
     // Design signal tables (setup-time mirror of the engine's own collection).
@@ -4333,39 +4329,17 @@ void formal_verify_command(Options& opts, Result& res) {
     livehd::lec::report_cvc5_stats("formal", r.cvc5);
   }
 
-  // formalfail witness testbench + VCD (`--workdir`, mirroring lec's lecfail):
-  // emitted for the FIRST refuted obligation that carries a trace. Same knobs,
-  // shared with lec: formal.prpfail (default 'formalfail.prp' when --workdir is
-  // set) and formal.prpfailrun (default: run iff --workdir); gated by witness.
+  // simfail simulation tests + VCDs (`--workdir`, shared with LEC): emit one
+  // per refuted formal test that carries a trace (the first failed obligation
+  // within each test supplies it). A design-body assertion is one implicit test
+  // named after the resolved top.
+  std::vector<std::string> simfail_artifact_paths;
   if (r.verdict == livehd::lec::Verdict::Refuted) {
-    const livehd::lec::Prop_result* fp = nullptr;
-    for (const auto& p : r.props) {
-      if (p.refuted_at >= 0 && !p.trace.empty()) {
-        fp = &p;
-        break;
-      }
-    }
-    std::string prpfail;
-    std::string pv;
-    if (auto it = labels.find("prpfail"); it != labels.end()) {
-      pv = it->second;
-    }
-    if (o.witness && workdir_set) {
-      prpfail = pv.empty()          ? std::string{"formalfail.prp"}
-                : (pv == "false" || pv == "0") ? std::string{}
-                : (pv == "true" || pv == "1")  ? std::string{"formalfail.prp"}
-                                               : pv;
-    } else if (!pv.empty() && pv != "false" && pv != "0" && !workdir_set) {
-      livehd::diag::info("pass.formal", "formalfail-needs-workdir", "io")
-          .msg("formal.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
-          .emit();
-    }
-    bool prpfailrun = workdir_set;
-    auto pfr = labels.find("prpfail_run");
-    if (pfr != labels.end() && !pfr->second.empty()) {
-      prpfailrun = !(pfr->second == "false" || pfr->second == "0");
-    }
-    if (fp != nullptr && !prpfail.empty() && single_edge_slots > 1) {
+    const bool simfail = o.witness && workdir_set && setting_enabled(labels.contains("simfail") ? labels.at("simfail") : "true");
+    const bool simfail_run = setting_enabled(labels.contains("simfail_run") ? labels.at("simfail_run") : "true");
+    const bool has_trace
+        = std::any_of(r.props.begin(), r.props.end(), [](const auto& p) { return p.refuted_at >= 0 && !p.trace.empty(); });
+    if (has_trace && simfail && single_edge_slots > 1) {
       // 2f-latch M8 step 2d. The replay generator re-emits the UN-NORMALIZED
       // source and embeds the assert at the raw cycle index the engine reported
       // — but after edge normalization that index counts SUB-STEPS, so the
@@ -4373,29 +4347,43 @@ void formal_verify_command(Options& opts, Result& res) {
       // it anyway is worse than emitting nothing: a replay that runs clean reads
       // as "the counterexample was spurious". Honest skip until the trace is
       // decimated back into periods.
-      livehd::diag::info("pass.formal", "formalfail-skip", "io")
-          .msg("formal.prpfail witness testbench not generated: the design was edge-normalized into {} sub-steps per "
-               "clock period, so the witness cycle indices do not line up with the un-normalized source",
-               single_edge_slots)
+      livehd::diag::info("pass.formal", "simfail-skip", "io")
+          .msg(
+              "formal.simfail testbench not generated: the design was edge-normalized into {} sub-steps per "
+              "clock period, so the witness cycle indices do not line up with the un-normalized source",
+              single_edge_slots)
           .emit();
-    } else if (fp != nullptr && !prpfail.empty()) {
-      std::string embed;
-      if (auto it = fb_embed.find(fp->block + "\x1f" + fp->loc); it != fb_embed.end()) {
-        embed = it->second;
-        if (embed.empty()) {
-          // Marked ambiguous above: the source line holds more than one
-          // statement, so the refuted obligation cannot be told from its
-          // neighbours. Say so — a testbench with no embedded check otherwise
-          // reads as "the counterexample was spurious".
-          livehd::diag::info("pass.formal", "formalfail-embed-ambiguous", "io")
-              .msg("formal.prpfail testbench carries no embedded check: {} holds more than one statement of block "
-                   "'{}', so the refuted one cannot be identified; put one statement per line to get it back",
-                   fp->loc,
-                   fp->block)
-              .emit();
+    } else if (simfail) {
+      absl::flat_hash_set<std::string> emitted_tests;
+      for (const auto& fp : r.props) {
+        if (fp.refuted_at < 0 || fp.trace.empty()) {
+          continue;
         }
+        const std::string subject = fp.scope.empty() ? lecfail_simple_name(g->get_name()) : fp.scope;
+        if (!emitted_tests.insert(subject).second) {
+          continue;
+        }
+        std::string embed;
+        if (auto it = fb_embed.find(fp.block + "\x1f" + fp.loc); it != fb_embed.end()) {
+          embed = it->second;
+          if (embed.empty()) {
+            // Marked ambiguous above: the source line holds more than one
+            // statement, so the refuted obligation cannot be told from its
+            // neighbours. Say so — a testbench with no embedded check otherwise
+            // reads as "the counterexample was spurious".
+            livehd::diag::info("pass.formal", "simfail-embed-ambiguous", "io")
+                .msg(
+                    "formal.simfail testbench carries no embedded check: {} holds more than one statement of block "
+                    "'{}', so the refuted one cannot be identified; put one statement per line to get it back",
+                    fp.loc,
+                    fp.block)
+                .emit();
+          }
+        }
+        const std::string file = simfail_filename(subject);
+        simfail_artifact_paths.push_back(opts.workdir + "/" + file);
+        emit_formalfail_witness(opts, res, fp, kind, path, std::string(g->get_name()), file, simfail_run, embed);
       }
-      emit_formalfail_witness(opts, res, *fp, kind, path, std::string(g->get_name()), prpfail, prpfailrun, embed);
     }
   }
 
@@ -4410,32 +4398,24 @@ void formal_verify_command(Options& opts, Result& res) {
       rv = "formal_report.json";
     }
     if (!rv.empty() && rv != "false" && rv != "0") {
-      const std::string rpath = rv.find('/') != std::string::npos ? rv : workdir(opts) + "/" + rv;
+      const std::string                             rpath = rv.find('/') != std::string::npos ? rv : workdir(opts) + "/" + rv;
       absl::flat_hash_map<std::string, std::string> artifacts;
       // Reference only artifacts that actually exist (the witness emit may skip).
-      auto add_artifact = [&](std::string_view key, const std::string& p) {
+      auto                                          add_artifact = [&](std::string_view key, const std::string& p) {
         if (!p.empty() && fs::exists(p)) {
           artifacts[std::string{key}] = p;
         }
       };
-      std::string pv;
-      if (auto it = labels.find("prpfail"); it != labels.end()) {
-        pv = it->second;
-      }
-      std::string pf = (pv.empty() || pv == "true" || pv == "1") ? std::string{"formalfail.prp"}
-                       : (pv == "false" || pv == "0")            ? std::string{}
-                                                                 : pv;
-      if (!pf.empty()) {
-        const std::string pf_path = pf.find('/') != std::string::npos ? pf : opts.workdir + "/" + pf;
-        add_artifact("prpfail", pf_path);
-        add_artifact("prpfail_json",
-                     pf_path.ends_with(".prp") ? pf_path.substr(0, pf_path.size() - 4) + ".json" : pf_path + ".json");
-        std::string stem = fs::path(pf_path).stem().string(), test_name;
+      if (!simfail_artifact_paths.empty()) {
+        const auto& first_simfail = simfail_artifact_paths.front();
+        add_artifact("simfail", first_simfail);
+        add_artifact("simfail_json", first_simfail.substr(0, first_simfail.size() - 4) + ".json");
+        std::string stem = fs::path(first_simfail).stem().string(), test_name;
         for (char c : stem) {
           test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
         }
         if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
-          test_name = "formalfail_" + test_name;
+          test_name = "simfail_" + test_name;
         }
         add_artifact("vcd", opts.workdir + "/" + test_name + ".vcd");
       }

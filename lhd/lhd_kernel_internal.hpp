@@ -44,9 +44,9 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "bound",  "cache",  "engine",       "jobs",    "mine",   "min_timeout", "partitions",
-    "phase",          "report", "reset",  "reset_cycles", "retry",   "rlimit", "solver",      "spec_mining_timeout",
-    "split",          "stats",  "strict", "timeout",      "witness",
+    "allow_oversize", "bound",       "cache", "engine",       "jobs",   "mine",    "min_timeout", "partitions",
+    "phase",          "report",      "reset", "reset_cycles", "retry",  "rlimit",  "solver",      "spec_mining_timeout",
+    "simfail",        "simfail_run", "split", "stats",        "strict", "timeout", "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
@@ -58,7 +58,7 @@ struct Renamed_ns {
   bool             formal_split = false;
 };
 inline constexpr Renamed_ns kRenamedSetPasses[] = {
-    {             "lec",          "formal", true},
+    {             "lec",          "formal",  true},
     {     "compile.sim",             "sim", false},
     {"compile.isabelle", "formal.isabelle", false},
     {    "compile.lean",     "formal.lean", false},
@@ -71,7 +71,9 @@ inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] =
     // `mine_timeout` differed by one letter and meant unrelated things.
     { "minetimeout", "spec_mining_timeout"},
     {"mine_timeout", "spec_mining_timeout"},
-    {  "prpfailrun",         "prpfail_run"},
+    {     "prpfail",             "simfail"},
+    {  "prpfailrun",         "simfail_run"},
+    { "prpfail_run",         "simfail_run"},
     {"vcdfakedelay",      "vcd_fake_delay"},
     {         "min",              "min_ge"},
     {         "max",              "max_ge"},

@@ -42,7 +42,7 @@
   obligations back to names in <code>res.detail</code>; diagnostic only;
   <code>produce-unsat-cores</code>/<code>timeout-core-timeout</code> must be armed at
   solver SETUP). Witness: per-obligation <code>file:line</code>, REFUTED emits
-  <code>formalfail.prp</code> + <code>formalfail.json</code> + a <code>lhd sim</code>
+  <code>simfail_&lt;formal-test&gt;.prp</code> + its sibling JSON + a <code>lhd sim</code>
   VCD replay (workdir-gated). Tests <code>lhd/tests/lhd_formal_verify_test.sh</code>,
   <code>lhd_formal_portfolio_test.sh</code>, <code>lhd_formal_budget_mine_test.sh</code>,
   <code>lhd_formal_cache_split_test.sh</code>.</p>
@@ -92,10 +92,10 @@
   verdict, unbounded, cycles, <code>unknown_why</code>, <code>aclass</code>,
   <code>solve_ms</code>, <code>in_timeout_core</code>, witness};
   structured <code>timeout_core[]</code> (ids); <code>artifacts</code>
-  {prpfail/prpfail_json/vcd/cache/mined_block}; <code>mined[]</code> (P3).
+  {simfail/simfail_json/vcd/cache/mined_block}; <code>mined[]</code> (P3).
   Per-obligation <code>solve_ms</code> plumbed through <code>Prop_result</code> +
   the <code>serialize_verify/deserialize_verify</code> wire codec (BMC checks +
-  rung candidate checks; cache hits ≈ 0). <code>formalfail.json</code> got its
+  rung candidate checks; cache hits ≈ 0). The simfail JSON got its
   first regression. Agent-workflow doc landed in <code>../docs</code> 07-formal.md.
   Tests: report sections of <code>lhd_formal_verify_test.sh</code> (all three
   verdicts, ids, core consistency, fork-path field survival).</p>

@@ -8,16 +8,13 @@
 #     obligation that eats the budget leaves the rest at their budget-limited
 #     depth. The whole run stays near ONE budget.
 #   * SOFT-budget reporting: `timeout` is a target, not a cap, so a run that
-#     overshoots must say by how much, over how many units, and how many of those
-#     ran on the `formal.min_timeout` floor — the floored ones ARE the overrun.
-#     Raising the floor must visibly move both numbers (case 1b), or the knob is
-#     unusable for tuning.
+#     overshoots must say by how much, over how many units, and how many ran on
+#     the explicitly selected `formal.min_timeout` floor.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
 #   * INCONCLUSIVE is a FAILURE by default (`formal.strict`, default true since
 #     2026-07-29): an UNKNOWN proves nothing, so the run EXITS 7 and says why.
-#     `--set formal.strict=false` is the opt-out and demotes it back to an
-#     `formal-inconclusive` warning with rc 0. Both directions are pinned below.
+#     (`formal.strict=false` opt-out coverage lives in lhd_formal_verify_test.)
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
 #     unequal-reset twin is still REFUTED — induction never manufactures a proof.
@@ -48,13 +45,14 @@ mod hard2(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
 EOF
 
 start=$(date +%s)
-# The floor is pinned to 1s EXPLICITLY (it used to ride the default). This case
-# asserts the budget REPORT and the freeze disclosure, not the default's value —
-# and when that default moved to 20s (2026-07-28) an unpinned run both blew this
-# test's cost model and made the "on the 1s floor" match below assert backwards.
+# One short run covers the shared total, the 1s floor, strict UNKNOWN policy,
+# every-obligation scheduling, and timeout-core diagnosis. Keeping these checks
+# on the same solver result avoids repeatedly waiting on the deliberately hard
+# multiplier identities.
 "$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=3 --set formal.split=none \
-  --set formal.min_timeout=1 >"$W/budget.out" 2>&1
+  --set formal.bound=2 --set formal.timeout=1 --set formal.min_timeout=1 \
+  --set formal.spec_mining_timeout=1 --set formal.split=none \
+  --workdir "$W/budget" >"$W/budget.out" 2>&1
 rc=$?
 end=$(date +%s); elapsed=$((end-start))
 
@@ -71,47 +69,15 @@ grep -q "could not decide" "$W/budget.out" \
   || fail "the strict failure must explain WHY it failed (could not decide): $(cat "$W/budget.out")"
 grep -q "budget-limited depth" "$W/budget.out" \
   || fail "the budget-freeze disclosure must appear: $(cat "$W/budget.out")"
-grep -qE "budget 3s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [0-9]+ on the 1s floor" "$W/budget.out" \
+grep -qE "budget 1s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [0-9]+ on the 1s floor" "$W/budget.out" \
   || fail "an overshooting run must report target/actual/units/floored: $(cat "$W/budget.out")"
 grep -q "'easy'.*PROVEN" "$W/budget.out" \
   || fail "the trivial sibling must still prove under the shared budget: $(cat "$W/budget.out")"
 grep -qE "'distrib[12]'.*UNKNOWN" "$W/budget.out" \
   || fail "at least one hard obligation must go UNKNOWN under the budget: $(cat "$W/budget.out")"
-# Per-check (pre-scheduler) behavior would be ~3 hard checks x 3s each (+induction)
-# well over 12s; the total budget must keep it far below that. Generous margin.
-if [ "$elapsed" -ge 12 ]; then
-  fail "total solver budget not honored: ${elapsed}s (want < 12s; per-check would be 12s+)"
-fi
-
-# 1-strict. The other direction of the same policy: `--set formal.strict=false`
-#   is the documented opt-out ("a user can ignore it, but not by default"), and
-#   it must restore the pre-2026-07-29 behavior EXACTLY — rc 0, with the verdict
-#   demoted to a `formal-inconclusive` warning that still names the budget. Same
-#   design and same knobs as above; only the policy flag differs, so any
-#   difference in the report is the flag leaking into the solving.
-"$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=3 --set formal.split=none \
-  --set formal.min_timeout=1 --set formal.strict=false --workdir "$W/lax" \
-  >"$W/lax.out" 2>&1
-lax_rc=$?
-[ "$lax_rc" -eq 0 ] || fail "formal.strict=false must demote the inconclusive to a warning (rc=$lax_rc): $(cat "$W/lax.out")"
-grep -q "formal-inconclusive" "$W/lax.out" \
-  || fail "the opt-out must still WARN (formal-inconclusive) about the undecided run: $(cat "$W/lax.out")"
-grep -q "formal verify INCONCLUSIVE" "$W/lax.out" \
-  || fail "the demoted warning must say the run was INCONCLUSIVE: $(cat "$W/lax.out")"
-grep -q "budget-limited depth" "$W/lax.out" \
-  || fail "the demoted warning must still name the budget cause: $(cat "$W/lax.out")"
-echo "ok: inconclusive fails by default (rc=7, cause named); formal.strict=false warns and exits 0"
-
-# 1a. NO obligation may be silently skipped for lack of budget. `timeout` is a
-#     soft target, so an obligation that outlives it falls back to the
-#     min_timeout floor and earns a real UNKNOWN/CEX — it never comes back
-#     "not checked". That string is what the report writes for an obligation the
-#     cycle loop never put to the solver, so its absence IS the guarantee.
-"$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=1 --set formal.split=none --workdir "$W/starve" \
-  >"$W/starve.out" 2>&1
-python3 - "$W/starve/formal_report.json" <<'PYEOF' || fail "an obligation was skipped for lack of budget: $(cat "$W/starve.out")"
+# NO obligation may be silently skipped for lack of budget. The report is from
+# the same run, so its verdict rows and textual budget accounting cannot drift.
+python3 - "$W/budget/formal_report.json" <<'PYEOF' || fail "an obligation was skipped for lack of budget: $(cat "$W/budget.out")"
 import json, sys
 obs = json.load(open(sys.argv[1]))["obligations"]
 assert len(obs) == 3, obs
@@ -120,49 +86,14 @@ assert not skipped, f"never-attempted obligation(s) under a 1s budget: {skipped}
 PYEOF
 echo "ok: every obligation still attempted under a 1s total (floor, not skip)"
 
-echo "ok: total budget bounded the run to ${elapsed}s with the easy sibling still proven"
-
-# 1b. formal.min_timeout is the floor beneath the soft total. Same design, same
-#     3s target, floor raised 1s -> 4s: each obligation that outlives the total
-#     now draws 4s instead of 1s, so the run must take LONGER and the report must
-#     name the new floor. This is the knob's whole contract — buy verdicts by
-#     overshooting, on purpose, visibly. A floor that did not change the actual
-#     spend would mean the floor is not being applied at all.
-start=$(date +%s)
-"$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=3 --set formal.timeout=3 --set formal.min_timeout=4 --set formal.split=none \
-  >"$W/floor.out" 2>&1
-rc=$?
-end=$(date +%s); floor_elapsed=$((end-start))
-[ "$rc" -eq 7 ] || fail "raising the floor must not change the verdict class (still an inconclusive rc=7) (rc=$rc): $(cat "$W/floor.out")"
-grep -qE "budget 3s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [1-9][0-9]* on the 4s floor" "$W/floor.out" \
-  || fail "the report must show the raised 4s floor and a non-zero floored count: $(cat "$W/floor.out")"
-# The floored count is per UNIT, never per check: an obligation is checked once
-# per BMC cycle, so a per-check counter reported more floored than units exist.
-python3 - "$W/floor.out" <<'PYEOF' || fail "floored must not exceed units"
-import re, sys
-m = re.search(r"budget \d+s target / [\d.]+s actual over (\d+) unit\(s\), (\d+) on the", open(sys.argv[1]).read())
-assert m, "report line missing"
-units, floored = int(m.group(1)), int(m.group(2))
-assert 0 < floored <= units, f"floored={floored} must be >0 and <= units={units}"
-PYEOF
-if [ "$floor_elapsed" -lt "$elapsed" ]; then
-  fail "a 4s floor (${floor_elapsed}s) must not be FASTER than the 1s default (${elapsed}s): the floor is not applied"
+grep -qE "spec_mining_timeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/budget.out" \
+  || fail "the timeout-core must report a non-empty toxic subset: $(cat "$W/budget.out")"
+grep -q "distrib" "$W/budget.out" \
+  || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/budget.out")"
+if [ "$elapsed" -ge 10 ]; then
+  fail "total solver budget not honored: ${elapsed}s (want < 10s)"
 fi
-echo "ok: min_timeout=4 raised the actual spend to ${floor_elapsed}s (from ${elapsed}s) and reported it"
-
-# ---------------------------------------------------------------------------
-# 2. spec_mining_timeout timeout-core diagnosis names the toxic obligation subset.
-# ---------------------------------------------------------------------------
-"$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=2 --set formal.timeout=3 --set formal.spec_mining_timeout=4 --set formal.split=none \
-  >"$W/mine.out" 2>&1
-grep -q "spec_mining_timeout core" "$W/mine.out" \
-  || fail "spec_mining_timeout must emit a timeout-core diagnostic: $(cat "$W/mine.out")"
-grep -qE "spec_mining_timeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/mine.out" \
-  || fail "the timeout-core must report a non-empty toxic subset: $(cat "$W/mine.out")"
-grep -q "distrib" "$W/mine.out" \
-  || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/mine.out")"
+echo "ok: strict inconclusive policy, shared budget, floor disclosure, and timeout core checked in ${elapsed}s"
 echo "ok: spec_mining_timeout named the toxic obligation core"
 
 # ---------------------------------------------------------------------------

@@ -45,9 +45,9 @@ grep -q "error\[syntax\]: read of undefined variable" "$W/o3" || fail "pretty er
 grep -q 'help: declare it' "$W/o3" || fail "pretty help line missing: $(cat "$W/o3")"
 grep -q 'livehd:.*:error:read of undefined variable' "$W/e3" || fail "pretty stderr must stay clang-style: $(cat "$W/e3")"
 
-# 4. jsonl failure: the stderr diagnostic stream is JSONL records (code, span,
+# 4. json failure: the stderr diagnostic stream is JSONL records (code, span,
 #    hint per line), no clang-style text.
-"$LHD" compile "$W/bad.prp" --workdir "$W/w4" --diag-fmt jsonl >"$W/o4" 2>"$W/e4" && fail "bad.prp must fail"
+"$LHD" compile "$W/bad.prp" --workdir "$W/w4" --diag-fmt json >"$W/o4" 2>"$W/e4" && fail "bad.prp must fail"
 grep -q '"severity":"error".*"message":"read of undefined variable' "$W/e4" || fail "jsonl stderr diag missing: $(cat "$W/e4")"
 grep -q '"code":"undefined-read"' "$W/e4" || fail "jsonl diag lost its code: $(cat "$W/e4")"
 grep -q '^livehd:' "$W/e4" && fail "jsonl mode leaked clang-style text: $(cat "$W/e4")"
@@ -61,4 +61,4 @@ grep -q '"schema_version":1' "$W/r5.json" || fail "--result-json must stay JSON:
 "$LHD" compile "$PRP" --diag-fmt bogus -q 2>/dev/null >"$W/r6.json"
 grep -q '"class":"usage"' "$W/r6.json" || fail "--diag-fmt bogus must be a usage error: $(cat "$W/r6.json")"
 
-echo "PASS: --diag-fmt auto|jsonl|pretty"
+echo "PASS: --diag-fmt auto|json|pretty"

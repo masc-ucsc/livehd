@@ -670,9 +670,23 @@ void check_known_set_passes(const Options& opts) {
     const auto* m = Pass::eprp.get_method(method);
     if (m == nullptr || !m->has_label(flag)) {
       if (auto f2 = renamed_flag(flag); m != nullptr && f2 != flag && m->has_label(f2)) {
+        std::string replacement_pass{pass};
+        for (const auto& common : kFormalCommonFlags) {
+          if (pass == "formal.lec" && common == f2) {
+            replacement_pass = "formal";
+            break;
+          }
+        }
+        std::string replacement_value{value};
+        std::string extra;
+        if (flag == "prpfail" && value != "true" && value != "false" && value != "1" && value != "0" && value != "on"
+            && value != "off") {
+          replacement_value = "true";
+          extra             = "\nsimfail filenames are derived from the formal test or resolved LEC top";
+        }
         throw Lhd_error{"usage",
                         std::format("--set/--config '{}.{}' was renamed", pass, flag),
-                        std::format("use --set {}.{}={} instead", pass, f2, value)};
+                        std::format("use --set {}.{}={} instead{}", replacement_pass, f2, replacement_value, extra)};
       }
       // A flag DELETED outright (not renamed) gets its own reason: the generic
       // "unknown flag" below would send the user hunting for a near-miss spelling
@@ -687,6 +701,10 @@ void check_known_set_passes(const Options& opts) {
                       std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),
                       near.empty() ? std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)
                                    : std::format("{}\n`lhd list options {}\\..*` shows what {} accepts", near, pass, pass)};
+    }
+    if ((flag == "simfail" || flag == "simfail_run") && value != "true" && value != "false" && value != "1" && value != "0"
+        && value != "on" && value != "off") {
+      throw Lhd_error{"usage", std::format("--set/--config {}.{} expects true|false, got '{}'", pass, flag, value), ""};
     }
   }
 }
