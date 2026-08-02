@@ -2686,6 +2686,55 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared_bbox[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "bb:" + key), w, bsg[key]};
     }
   }
+  // formal.ignore_memory: a BLACKBOXED memory's read douts ride the same shared
+  // channel as a true blackbox's outputs — one symbol per (memory, read port),
+  // re-minted per cycle by step_bbox and given to BOTH encoders. Building them
+  // here rather than letting each encoder mint its own is not a nicety: cvc5's
+  // mkConst does NOT intern by name, so two same-named constants are DISTINCT
+  // variables, and the reads would be free on each side independently — the
+  // classic per-side free-constant counterexample (`q(ref=254 impl=255)`), a
+  // false REFUTE on an equivalent pair. Measured exactly that before this.
+  if (!opts.ignore_memory.empty()) {
+    auto ign_named = [&](const hhds::Node_class& n) {
+      const std::string hier{n.get_hier_name()};
+      const std::string canon = canon_flop_name(hier);
+      const auto        leaf  = [](std::string_view v) {
+        auto d = v.rfind('.');
+        return std::string(d == std::string_view::npos ? v : v.substr(d + 1));
+      };
+      const std::string hleaf = leaf(hier);
+      for (const auto& want : opts.ignore_memory) {
+        if (want == hier || want == canon || want == hleaf || canon_flop_name(want) == canon || leaf(want) == hleaf) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Walk BOTH designs: the key is shape+occurrence, so the two agree by
+    // construction, and a memory ignored on one side must be ignored on the
+    // other or the shared symbol is one-sided.
+    for (auto* g : {ref, impl}) {
+      Io_name_map<int> occ;
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+          continue;
+        }
+        auto        sig = read_mem_sig(node);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
+        std::string key = mem_state_key(sig, occ[sg]++);  // advance for EVERY memory: the
+        if (!ign_named(node)) {                           // occurrence order must not shift
+          continue;
+        }
+        for (int r = 0; r < sig.n_rd; ++r) {
+          const std::string k = "ignmem:" + key + ":rd" + std::to_string(r);
+          if (shared_bbox.find(k) == shared_bbox.end()) {
+            shared_bbox[k]
+                = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(sig.bits)), "bb:" + k), sig.bits, false};
+          }
+        }
+      }
+    }
+  }
   const auto* state_boxes_ptr = state_boxes.empty() ? nullptr : &state_boxes;
   const auto* comb_boxes_ptr  = comb_boxes.empty() ? nullptr : &comb_boxes;
 
@@ -3034,6 +3083,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
+    enc.set_ignore_memory(&opts.ignore_memory);
     enc.set_state_boxes(state_boxes_ptr);
     enc.set_comb_boxes(comb_boxes_ptr);
     enc.set_shared_bbox(&shared_bbox);
@@ -4611,6 +4661,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_sub_lib(sub_lib);
     penc.set_name_alias(&name_alias);
     penc.set_collapse_defs(collapse_ptr);
+    penc.set_ignore_memory(&opts.ignore_memory);
     penc.set_state_boxes(state_boxes_ptr);
     penc.set_comb_boxes(comb_boxes_ptr);
     penc.set_shared_bbox(&shared_bbox);
@@ -4874,6 +4925,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
+  enc.set_ignore_memory(&opts.ignore_memory);
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);

@@ -18,6 +18,102 @@
   case splitting, a verdict cache, solver budgets, and witness generation. This
   page intentionally keeps only the work that remains relevant to LEC.</p>
 
+<h2 id="hier-order">LANDED (2026-08-02) — top-down hierarchy, premises discharged bottom-up</h2>
+
+<p><code>formal.lec.hier_order=top_down</code> is the DEFAULT. Every def is proved
+  with EVERY child BOXED — a PREMISE, not a fact — and the premises are
+  discharged by the other entries of the same pass:</p>
+
+<pre>for each def D in the top's subtree, IN ANY ORDER, ALL AT ONCE:
+    prove D_ref == D_impl with EVERY child of D replaced by a box
+
+then, leaves-first (pure bookkeeping, no solving):
+    D is UNCONDITIONALLY proven  iff  D proved AND every child it boxed is</pre>
+
+<p><strong>This is an induction, not circular reasoning.</strong> The module DAG
+  is well-founded — D's premises are strictly-lower nodes and a leaf assumes
+  nothing — so the closure terminates and the composition is ordinary
+  assume-guarantee over a partial order. Both orders discharge the SAME set of
+  per-def obligations, so an all-proven run costs the same either way; what
+  changes is the failure path and the schedule.</p>
+
+<ul>
+<li><strong>No def waits on another def's verdict</strong>, so the hierarchy is
+  dispatched with NO dependency edges — fully parallel, instead of serialized by
+  hierarchy depth.</li>
+<li><strong>Every miter is at its minimum size.</strong> Bottom-up has to FLATTEN
+  a child that did not prove, which is exactly when the parent is hardest — the
+  reason a single unprovable leaf used to make its whole ancestor chain
+  expensive.</li>
+<li><strong>A refuting block is absorbed by its parent, and the chain stops
+  there.</strong> By the time D's refutation is known, its caller P has already
+  been proven with D BOXED, and so has every ancestor of P with P boxed. So
+  re-prove P with D INLINED (everything else still boxed, including D's own
+  children); if P proves, every ancestor's proof only ever depended on P being
+  equivalent, which now holds without the D premise. <strong>Nothing above P is
+  re-solved.</strong> Bottom-up instead learns of D's refutation BEFORE P is
+  proved, so P runs with D flattened, and if P refutes its parent flattens both —
+  the cone grows one level per step, in the worst case to the top. (User ruling,
+  2026-08-02.)</li>
+</ul>
+
+<p><strong>The premise direction is the part to get right.</strong>
+  Assume-guarantee gives <em>(all children equivalent) &rArr; D equivalent</em>
+  and NOTHING in the other direction, so a failing child does not make its parent
+  fail — it leaves the parent CONDITIONAL. Two guards keep that from becoming a
+  wrong verdict, and both are pinned:</p>
+
+<ul>
+<li>a top proved with every child boxed but with an undischarged premise is
+  degraded to <strong>Unknown (exit 7) naming the open blocks</strong> — an
+  assumption the run never discharged is inconclusive, never a pass;</li>
+<li>once a parent re-proves with a refuting block inlined, that block's
+  counterexample is <strong>ABSORBED</strong> and dropped before the run picks a
+  fallback verdict — otherwise an equivalent design would report
+  <code>equiv_fail</code>.</li>
+</ul>
+
+<p><strong>MEASURED on minion</strong> (same compiled inputs, same trust list, the
+  order is the only variable):</p>
+
+<table>
+<tr><th></th><th><code>top_down</code></th><th><code>bottom_up</code></th></tr>
+<tr><td>wall</td><td><strong>146&nbsp;s</strong></td><td>222&nbsp;s</td></tr>
+<tr><td>defs proven</td><td>166/170</td><td>166/170</td></tr>
+<tr><td>exit</td><td>7</td><td>7</td></tr>
+</table>
+
+<p><strong>The failure REPORT is where the difference is stark, and it is the
+  pathology this change was made for.</strong> One def,
+  <code>intpipe_csr_file</code>, is UNKNOWN under both orders (the known
+  <code>needs_array</code> forwarding gap).</p>
+
+<ul>
+<li><strong>bottom_up:</strong> that def does not prove, so it is FLATTENED into
+  <code>intpipe_top</code> &rarr; also UNKNOWN &rarr; flattened into
+  <code>core_top</code> &rarr; also UNKNOWN &rarr; flattened into
+  <code>minion_top</code>, where the accumulated cone finally hits a WORD-LEVEL
+  COMBINATIONAL CYCLE and the encode fails outright. The run's headline is a
+  29-node cycle dump. One unprovable leaf poisoned its entire ancestor chain, and
+  the report says nothing about where the design actually differs.</li>
+<li><strong>top_down:</strong> <code>intpipe_top</code>, <code>core_top</code> and
+  <code>minion_top</code> each PROVE with their children boxed —
+  <code>minion_top</code> reports <em>&ldquo;cones: 297/297 PROVEN, every cut
+  discharged by the cone pass&rdquo;</em> — and the verdict names the three
+  undischarged premises, all traceable to the one def. The combinational cycle
+  never enters a miter at all, because nothing is flattened.</li>
+</ul>
+
+<p>Gate: <code>pass/lec/tests/lec_hier_topdown_test.sh</code>. Case 2 is the
+  fixture the feature exists for (functionality moved ACROSS the inner/mid
+  boundary, so both defs refute standalone while the design does not, and the
+  escalation must stop at the absorbing parent); case 3 (a genuine difference
+  still refutes) and case 4 (both orders agree on every fixture's top verdict)
+  are what keep &ldquo;absorb&rdquo; from becoming &ldquo;swallow&rdquo;.
+  <code>bottom_up</code> is kept for A/B and is forced by
+  <code>hier_refute=fail</code>, which is a leaves-first notion. The algorithm is
+  written up in <code>pass/lec/README.md</code> §1 and §3.</p>
+
 <h2>Verdict discipline</h2>
 
 <p>PASS means definitively equivalent and FAIL means definitively different;
@@ -285,18 +381,43 @@
   microsteps is refused by name); and <code>div != 1</code>, which stays a named
   refusal.</p>
 
-<p><strong>Per-PORT memory polarity is CLOSED by ruling, not by implementation</strong>
-  (user, 2026-08-01): a memory whose ports do not all commit on the SAME edge is
-  NOT A VALID MEMORY, so ONE global <code>posclk</code> is the right model and a
-  mixed-edge memory is a NAMED REFUSAL. (A latch may mix phases — that is what
-  the schedule is for; a memory may not.) The Yosys reader enforces it now: it
-  used to take <code>WR_CLK_POLARITY</code> whole
-  (<code>as_int()</code> &rArr; &ldquo;nonzero == posedge&rdquo;) and drop
-  <code>RD_CLK_POLARITY</code> outright, so a negedge synchronous READ imported
-  as posedge — and a clocked ROM, having NO write ports and therefore an EMPTY
-  write vector, imported as NEGEDGE. Both silent. The polarity is now derived
-  from every clocked port, read ports included, and a disagreement is an error
-  naming the ports. Gate: <code>lhd/tests/mem_clock_edge_test.sh</code>.</p>
+<p><strong>Per-PORT memory polarity is CLOSED — as a FORMAL refusal with an
+  explicit opt-in</strong> (user ruling 2026-08-02). A memory whose ports do not
+  all commit on the same edge is a shape LiveHD does not model, but the LANGUAGE
+  allows it, so it is <em>not</em> a read error: it PARSES and REGENERATES
+  (blackbox — fine to do strange things), and <code>lhd lec</code> /
+  <code>lhd formal</code> refuse it BY NAME at exit 7. The user opts back in per
+  memory with <code>--set formal.ignore_memory=&lt;name&gt;</code>, which
+  BLACKBOXES it: its reads become one shared free symbol per (port, cycle) across
+  the two designs and its contents are never compared, so the logic AROUND it is
+  still proved while nothing is claimed about what it stores — the
+  sequence-transducer box (§2) with the premise ASSERTED by the user rather than
+  proven, and DISCLOSED on the verdict line exactly like
+  <code>formal.lec.trust</code>.</p>
+
+<p>Getting there fixed two silent miscompiles in the Yosys reader, which used to
+  take <code>WR_CLK_POLARITY</code> whole (<code>as_int()</code> &rArr;
+  &ldquo;nonzero == posedge&rdquo;) and drop <code>RD_CLK_POLARITY</code>
+  outright: a negedge synchronous READ imported as posedge, and a clocked ROM —
+  having NO write ports and therefore an EMPTY write vector — imported as
+  NEGEDGE. The polarity now comes from every clocked port, read ports included.
+  The mixed case rides a <code>posclk</code> SENTINEL
+  (<code>Ntype::Memory_posclk_mixed</code>) rather than a new pin, because the
+  Memory cell's global pin block is full and every existing consumer decides the
+  edge with <code>!is_known_false()</code> — so the sentinel reads as posedge
+  everywhere except pass/lec, which tests for it explicitly. Gate:
+  <code>lhd/tests/mem_clock_edge_test.sh</code>, whose case 1d is the soundness
+  one: an ignored memory must NOT swallow a difference in the logic around
+  it.</p>
+
+<p><strong>TRAP measured here:</strong> cvc5's <code>mkConst</code> does NOT
+  intern by name — two constants built with the same string are DISTINCT
+  variables. Minting the &ldquo;shared&rdquo; blackbox read on each side
+  independently therefore made it free PER SIDE and produced the classic
+  <code>q(ref=254 impl=255)</code> false REFUTE. Every shared symbol in this
+  engine must be built ONCE by <code>query.cpp</code> and passed in as a map;
+  the ignored memory's reads ride <code>shared_bbox</code>/<code>step_bbox</code>,
+  the same channel a true blackbox's outputs use.</p>
 
 <p>The "phase-aware sequential/comb BOX contract" that used to be listed here is
   GONE, not deferred: the sequence-transducer box has no transition to be phased.
@@ -309,8 +430,9 @@
 <ol>
 <li><span class="status">DONE</span> read-only hierarchy schedule analysis and deterministic per-phase diagnostics;</li>
 <li><span class="status">DONE</span> flop/latch encoding with edge-specific inputs and two output observations;</li>
-<li><span class="status">CLOSED BY RULING</span> per-port memory polarity — one
-  edge per memory, mixed edges refused by name (see above);</li>
+<li><span class="status">DONE</span> per-port memory polarity — one edge per
+  memory; a mixed-edge memory parses but formal refuses it by name, with
+  <code>formal.ignore_memory</code> as the per-memory opt-in (see above);</li>
 <li>remove mandatory <code>pass.single_edge</code> preprocessing from verify
   (<span class="status">DONE for LEC</span>) — the verify half is also the
   preflight <code>minion_synth_lec_synth</code> dies in, so it unblocks a third
@@ -365,7 +487,7 @@
 <li>A clock-input-only propagation pass fixes clock relationships design-wide before scheduling; a def whose clock ports are unbound as a top is still scheduled from that pass, and two roots warn and assume synchronous unless a ratio is given.</li>
 <li>A chained <code>Clock_cell</code> feeds every consumer in the period from ONE guard sampled on the inactive phase before the cell's own active edge; inversion moves both the consumer edge and the sample point, and division refuses.</li>
 <li>Collapse yields the same verdict as expansion, for a stateless child as well as a stateful one — the box model makes no distinction between them.</li>
-<li>A memory whose ports disagree on the clock edge is REFUSED BY NAME (it is not a valid memory); a single-edge memory preserves registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
+<li>A memory whose ports disagree on the clock edge PARSES but is refused BY NAME by formal, with <code>formal.ignore_memory</code> as the opt-in; a single-edge memory preserves registered-read behavior, forwarding, and collision rules; a whole-array update with a per-port write, a set <code>fwd</code>/<code>undef</code> bit, or an <code>ordering</code> other than read-old is REJECTED in tolg.</li>
 <li>Reset lengths, source-period bounds, output comparisons, assertions, cache keys, and edge-labelled witnesses follow the new schedule.</li>
 <li>A STRUCTURAL encode abort rides <code>unsupported</code>, so it hard-fails by
   name regardless of <code>formal.strict</code>, at exit 7 — and never

@@ -125,7 +125,12 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
 #    into minutes and blows the `< 12s` window assertion below.
 if [ "$MODE" != floor ]; then
 run_lec wall wide 2 30 --set formal.min_timeout=1
-DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN)" "$OUTFILE")
+# MATCHED/TRUSTED are verdicts too, not skips — and under the top-down order
+# (default) the top can settle via semdiff with its children BOXED, which is a
+# real (conditional) verdict and exactly the cheap path this scheduler wants.
+# The assertion here is "nobody was SKIPPED for lack of budget", so every
+# verdict spelling counts.
+DEFS_SEEN=$(grep -cE "lec\[hier\]: '[^']+' (PROVEN|REFUTED|UNKNOWN|MATCHED|TRUSTED)" "$OUTFILE")
 if [ "$DEFS_SEEN" -ge 3 ]; then
   echo "ok: all $DEFS_SEEN defs (2 leaves + top) got a verdict despite a 2s total"
 else

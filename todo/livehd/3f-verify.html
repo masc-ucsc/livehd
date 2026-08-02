@@ -37,18 +37,16 @@
 </ul>
 
 <h2><code>requires</code>/<code>ensures</code> lambda contracts as verify obligations</h2>
-<ul class="subtasks">
-<li>Today they parse and are silently dropped
-  (<code>inou/prp/prp2lnast.cpp:1880-1887</code>); 2f-verify P1 adds only a loud
-  "not an obligation yet" diag. This item is the real lowering: at each call site the
-  caller must prove the callee's <code>requires</code> (assert on the caller side),
-  and the callee may assume it while its <code>ensures</code> becomes the callee's
-  proof obligation — the standard contract split, riding the same
-  prove-then-use assume discipline (rules A–E on 2f-verify).</li>
-<li>Needs a ruling when scheduled: comptime-provable contracts (upass verifier
-  discharge) vs runtime obligations, and how contracts interact with inlining (the
-  inliner erases the call boundary the contract is attached to).</li>
-</ul>
+
+<p><span class="status">DEAD WORK — the language forms were REMOVED (user ruling
+  2026-07-25)</span>. <code>requires</code>/<code>ensures</code> are no longer
+  Pyrope keywords — <code>requires</code> parses as an ordinary identifier, so
+  the contract syntax this section lowers is a syntax error today
+  (<code>inou/prp/BUILD</code>: &ldquo;verif_requires is GONE: requires/ensures
+  were removed from the language&rdquo;). Nothing here is buildable as written.
+  If lambda contracts are wanted again, the language forms have to be
+  re-litigated FIRST; the lowering design below was written against syntax that
+  no longer exists and is kept only as a record of the argument.</p>
 
 <h2>Dropped by ruling (recorded so they don't get re-proposed)</h2>
 <ul class="subtasks">

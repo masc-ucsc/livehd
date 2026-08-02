@@ -35,9 +35,9 @@
   <code>engine=auto</code> raced portfolio, and the PROVEN-only verdict cache
   (<code>formal_cache.json</code>, <code>verify:…</code> keys). 2026-07-12: the
   TOTAL solver budget (<code>formal.timeout</code> = cvc5 time across the run, not
-  wall-clock; <code>formal.budget_mode=wall|rlimit</code>, rlimit = the deterministic
+  wall-clock; <code>formal.budget_mode (REMOVED — accounting is on whenever formal.timeout&gt;0 and formal.rlimit==0; set formal.rlimit for the deterministic tier)</code>, rlimit = the deterministic
   CI path; per-obligation freeze, floored last attempt so nothing is silently
-  unchecked) and the <code>formal.minetimeout</code> timeout-core diagnosis
+  unchecked) and the <code>formal.spec_mining_timeout</code> timeout-core diagnosis
   (separate budget; <code>getTimeoutCoreAssuming</code> maps still-Unknown
   obligations back to names in <code>res.detail</code>; diagnostic only;
   <code>produce-unsat-cores</code>/<code>timeout-core-timeout</code> must be armed at
@@ -102,7 +102,7 @@
 
 
 <h2>P3 — mining (learned facts → Houdini → Pyrope) — CORE LOOP LANDED 2026-07-12</h2>
-<p><strong>The full loop ships</strong> (gated by <code>formal.minetimeout</code>;
+<p><strong>The full loop ships</strong> (gated by <code>formal.spec_mining_timeout</code>;
   mining bills that budget exclusively — the induction rung opens on the mining
   budget even when the stuck run exhausted the main one, which is the normal
   mining scenario). Sources: <em>(1)</em> <code>getLearnedLiterals(INPUT)</code>
@@ -216,7 +216,7 @@
 <li><code>getTimeoutCore()</code> / <code>getTimeoutCoreAssuming()</code>
   (cvc5.h:6063/6101; knob <code>timeout-core-timeout</code>) — a subset of
   assertions that alone reproduces the timeout; the landed
-  <code>minetimeout</code> diagnosis uses this.</li>
+  <code>spec_mining_timeout</code> diagnosis uses this.</li>
 <li><code>getUnsatCore()</code> (gate <code>produce-unsat-cores</code>) — which
   assumed facts a proof actually used ⇒ prune useless assumes, rank mined
   candidates.</li>
@@ -232,17 +232,18 @@
 
 <h2>Traps</h2>
 <ul class="subtasks">
-<li><strong><code>assume_nocheck_synth</code> is consumed by NOTHING, and now permanently.</strong>
-  It parses in a formal block and is then skipped by every engine
-  (<code>lhd/lhd_kernel_formal.cpp</code>, &ldquo;invisible to verify&rdquo; by
-  contract, pinned by <code>lhd_formal_verify_test.sh</code>). Its only planned
-  consumer was the ABC EXDC don't-care network, and that item was DROPPED by
-  user ruling 2026-08-01 — along with <code>pass.abc</code>'s
-  <code>use_proven_assume</code>/<code>use_all_assume</code> options and the
-  constraint-gathering loop they gated, which had been advertising a capability
-  that discarded its own result with a <code>(void)</code>. So writing an
-  <code>assume_nocheck_synth</code> today is a silent no-op with no path to
-  becoming anything else: either give it a diagnostic or retire the form.</li>
+<li><strong><code>assume_nocheck_synth</code> is a SYNTHESIS-tier form; formal
+  ignoring it is CORRECT, not a gap</strong> (user ruling 2026-08-02). The
+  <code>_synth</code> suffix IS the contract: the fact is offered to ABC as a
+  don't-care and is invisible to every formal engine
+  (<code>lhd/lhd_kernel_formal.cpp</code>, pinned by
+  <code>lhd_formal_verify_test.sh</code>). It is never a proof hypothesis, so no
+  verify verdict can lean on it. An earlier draft of this page called the form
+  &ldquo;consumed by nothing, retire it or diagnose it&rdquo; because the ABC
+  EXDC don't-care network had just been dropped — that reasoning was wrong: the
+  form's tier is synthesis, and dropping one unbuilt consumer does not make a
+  correctly-scoped language form dead. Leave it parsing, leave formal ignoring
+  it, and do NOT add a diagnostic.</li>
 <li><strong>tlimit-per is per-checkSat</strong> — only the global TOTAL budget
   prevents (N+1)×timeout runs.</li>
 <li><strong>Deepening after assuming</strong> — on <code>--deepen</code>, frontier

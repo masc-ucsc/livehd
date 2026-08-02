@@ -56,96 +56,11 @@
   <code>xs_core_prp</code> / <code>../xs/repo/build/rtl</code> (Verilog).</li>
 </ul>
 
-<h2>Subtasks — pending</h2>
-<ul class="subtasks">
-<li><strong>A — ABC QoR read-back (phase-1 oracle).</strong> <code>pass.abc</code>
-  currently reports nothing: <code>report_stats</code> is a stub
-  (<code>abc_map.cpp:1574-1578</code>, <code>(void)graphs</code>) and verbose
-  prints only per-region gate counts (<code>abc_map.cpp:1568</code>); the
-  <code>{D}</code> delay target is fire-and-forget into <code>&amp;nf</code>.
-  After each region's flow, extract mapped delay + area + gate count (ABC
-  <code>stime</code>/DelayTrace or Liberty arrivals over the mapped network)
-  and surface them machine-readably: per-region + design-max in the
-  <code>--result-json</code> envelope and a <code>qor.json</code> under
-  <code>--workdir</code>. Attribute the critical path back to source via the
-  existing srcid re-mint (<code>abc_map.cpp:1069-1083</code>) so the agent
-  gets file:line edit targets, not just a number. Known limit, accepted for
-  phase 1: per-region delay is blind to cross-region paths — that is subtask
-  D's job. Also give the lec verdict a first-class envelope field while in
-  there (today drivers infer from exit code + <code>error.class</code> or
-  scrape stdout).</li>
-<li><strong>B — block-scoped synthesis attributes (grammar → LGraph).</strong>
-  Three hops, all downstream machinery already exists (color attr →
-  <code>pass.partition</code> regions → per-region ABC mapping):
-  (1) <em>prpparse grammar</em>: attribute list opening a block,
-  <code>{::[k=v, …] stmts }</code>, emitted as an attr_set scoped to the
-  block (the attr vocabulary is already open — unknown names pass through
-  <code>prp2lnast.cpp</code>, and Category-C synthesis-hint names are reserved
-  in <code>battr.hpp:45-47</code> with zero consumers).
-  (2) <em>tolg lowering</em>: today every non-reg/mem attr dies at
-  <code>lower_attr_set</code> (<code>upass_tolg.cpp:861</code>); stamp the
-  nodes generated for statements inside the block with
-  <code>livehd::attrs::color</code> (block = its own connected region) and
-  stash per-region directive payloads (e.g. on <code>coloring_info</code>
-  JSON). A hint that attaches to nothing must warn — the agent needs feedback
-  that its annotation landed.
-  (3) <em>seeded-color precedence</em>: source-seeded colors must survive
-  <code>pass.color</code> (<code>keep_colored</code> exists,
-  <code>color_common.hpp:66-73</code>; the default clears — define a seeded
-  mode where source colors beat the algorithm, and same-color regions must
-  stay structurally sane per <code>debug_color</code>).</li>
-<li><strong>C — per-region ABC options.</strong> <code>Map_options</code> is one
-  global struct; per-region flow overrides are explicitly unimplemented
-  (<code>pass/abc/README.md</code> Status). <code>Region_body</code> already
-  carries its color id, so thread a color-keyed override table
-  (<code>flow</code>/<code>delay</code>/<code>adder</code>/<code>block_size</code>)
-  into <code>Mapper::map_region</code>, fed from subtask B's block payloads
-  and from global <code>--set</code>. Robustness is part of the contract: the
-  agent will feed hostile flow strings, and ABC can abort with no diagnostic
-  (the <code>adder=cla</code> + auto block width + <code>&amp;dch</code>
-  abort, README.md:103-106) — a failing region must come back as a structured
-  per-region error in the envelope, not a process-wide death.</li>
-<li><strong>D — phase-2 oracle: <code>pass.opentimer</code> driver</strong>
-  (moved here from <a class="xref" href="3y-agent.html">3y-agent</a> item G,
-  2026-07-12, since it is now on the frequency critical path). The pass is
-  ported to hhds and builds, but is linked into nothing and driverless since
-  lgshell died. Work: link into <code>lhd/BUILD</code>, add
-  <code>lhd pass opentimer</code> (lg: input,
-  <code>--set pass.opentimer.*</code> files/margin/freq), replace the
-  stdout-prose report (<code>slowest delay:… pin:…</code>,
-  <code>opentimer.cpp:540-546</code>) with machine-readable critical-path /
-  Fmax output incl. per-path endpoints with srcid attribution; a default
-  generated SDC or clock-period knob (<code>read_sdc</code> handles only
-  <code>[get_ports]</code> today); fix the TODO.txt criticality bugs
-  (back-propagation, launch-to-capture full-path marking); a hermetic test on
-  a <code>pass.abc</code>-mapped netlist + an in-repo .lib
-  (<code>osu018_stdcells.lib</code> or the sky130 subset). It consumes exactly
-  the Sub-cell netlists <code>pass.abc</code> emits, but has never been driven
-  end-to-end since the hhds port — expect debris. Retire the superseded
-  driverless <code>inou.liberty</code> blackbox reader while there.</li>
-<li><strong>E — loop recipe + soundness housekeeping.</strong> Document the
-  canonical agent loop (compile → sim? → lec prev-vs-new → color/abc → score)
-  for agent authors in <code>../docs</code>, including the witness artifacts
-  the agent should react to (<code>simfail_&lt;top&gt;.json</code> root-cut file:line).
-  Review <code>dretime</code> in the default seq flow
-  (<code>abc_map.cpp:60</code>) against the netlist-LEC bug-catcher tests
-  (retiming breaks cycle-accurate state correspondence by construction — why
-  do the seq tests pass, and should <code>dretime</code> stay default?).
-  <span class="status">MOOT 2026-08-01</span> the block-attribute /
-  formal-assume don't-care interplay: the EXDC network was DROPPED by user
-  ruling, and <code>use_proven_assume</code>/<code>use_all_assume</code> were
-  deleted with it (they gated a gathering loop that discarded its own result).
-  The standing rule survives them: a block attribute must never silently create
-  an unsound don't-care.</li>
-<li><strong>F — acceptance.</strong> Committed: an <code>lhd_abc_test.sh</code>-style
-  test where a block attribute creates its own region, a per-region flow
-  override observably changes that region's mapping, <code>qor.json</code>
-  reports per-region delay, and the netlist bug-catcher LEC stays green (plus
-  a negative control). Not committed: the loop demo on
-  <code>../simplechisel/build_dual</code> and <code>xs_core_prp</code> — an
-  agent session that measurably improves post-ABC delay over several accepted
-  iterations with every acceptance LEC-green.</li>
-</ul>
+<h2>Subtasks — pending <span class="status">NONE — all four landed 2026-07-12</span></h2>
+
+<p>A, B, C and D are all in the &ldquo;Subtasks — landed&rdquo; list below; this
+  section was a duplicate that was never trimmed. Removed 2026-08-02 rather than
+  left to contradict the landed list two screens down.</p>
 
 <h2>Explicitly out of v1 (future extensions)</h2>
 <ul>

@@ -54,7 +54,7 @@ lhd compile --reader slang --top data_mem_8x4 --recipe O1 --emit-dir verilog:imp
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<p>A slice of subtask A landed 2026-08-01: tolg wires the per-port <code>clock_pin</code> sink at <code>base + 2</code> as this page specifies, with the port-count check and a regression. The SLANG reader half is what is still open.</p>
 
 <h2>Verification</h2>
 <p>For each fixed memory module, compile to Verilog with <code>--reader slang</code> (impl) and

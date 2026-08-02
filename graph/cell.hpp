@@ -143,6 +143,22 @@ public:
   // with the sequential read-dout pids (n_wr_total + r). Well below Port_invalid.
   static constexpr hhds::Port_id Memory_readall_pid = (hhds::Port_id{1} << 20);
 
+  // Memory `posclk` SENTINEL: the source memory's ports do NOT all commit on the
+  // same clock edge, so the cell's ONE global polarity cannot represent it.
+  //
+  // The language permits such a memory and the readers must not reject it (user
+  // ruling 2026-08-02: parse it, keep it, let it regenerate) — but it is a weird
+  // shape LiveHD does not model, so FORMAL refuses it BY NAME and the user opts
+  // back in per memory with `--set formal.ignore_memory=<name>`, which blackboxes
+  // it. See pass/lec/encode.cpp and pass/lec/README.md §2.
+  //
+  // 2 and not a new pin: the cell-global pin block above is FULL. Every existing
+  // consumer decides the edge with `!is_known_false()`, so a 2 reads as posedge —
+  // the same lossy-but-harmless answer they already gave for this shape — while
+  // the encoder tests for the sentinel explicitly. Only pass/lec may treat it as
+  // anything other than "not negedge".
+  static constexpr int Memory_posclk_mixed = 2;
+
 protected:
   // Sparse: indexed by Ntype_op underlying value. Unused slots ("invalid")
   // never round-trip through cell_name_map (see the init in cell.cpp).

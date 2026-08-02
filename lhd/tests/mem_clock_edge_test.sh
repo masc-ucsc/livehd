@@ -1,8 +1,8 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# ONE EDGE PER MEMORY -- the yosys reader must refuse a mixed-edge memory by
-# name, and must take the surviving edge from EVERY clocked port.
+# ONE EDGE PER MEMORY -- a mixed-edge memory must PARSE but be refused by FORMAL
+# by name, and a single-edge memory must take its edge from EVERY clocked port.
 #
 # The Memory cell carries a SINGLE global `posclk`. Yosys keeps a bit per port
 # (WR_CLK_POLARITY / RD_CLK_POLARITY), and the reader used to take the write
@@ -14,13 +14,17 @@
 #   * a memory with NO write ports (a clocked ROM) has an EMPTY write vector, so
 #     `as_int()` returned 0 and every such ROM imported as NEGEDGE.
 #
-# User ruling 2026-08-01: a memory whose ports do not all commit on the same
-# edge is NOT A VALID MEMORY, so this is a named refusal rather than a
-# modelling gap. (A latch may mix phases -- that is what the formal phase
-# schedule is for; see todo/livehd/2f-latch M10 -- a memory may not.)
+# User ruling 2026-08-02: a memory whose ports do not all commit on the same
+# edge is a shape LiveHD does not model, but the LANGUAGE allows it -- so it is
+# a FORMAL error, not a read error. It parses and regenerates (blackbox: fine to
+# do strange things), `lhd lec` refuses it BY NAME, and the user opts back in
+# per memory with `--set formal.ignore_memory=<name>`, which blackboxes it: the
+# reads become one shared free symbol per (port, cycle) across the two designs
+# and the contents are never compared. (A latch may mix phases -- that is what
+# the formal phase schedule is for; see todo/livehd/2f-latch M10.)
 #
-# Every "it is refused" case is paired with a case that must still COMPILE, or
-# a reader that simply rejected all memories would pass the negative half.
+# Every "it is refused" case is paired with a case that must still pass, or a
+# tool that simply rejected all memories would pass the negative half.
 
 set -u
 
@@ -44,33 +48,82 @@ fail() {
 
 # Compile through the YOSYS reader (the only front end that can express per-port
 # polarity at all) and emit Verilog, so the surviving edge is observable.
-compile_emit() { # <name> <src> <top> -> $W/<name>.log, $W/emit_<name>/
-  rm -rf "$W/emit_$1"
+compile_emit() { # <name> <src> <top> -> $W/<name>.log, $W/emit_<name>/ (Verilog), $W/lg_<name>/ (IR)
+  rm -rf "$W/emit_$1" "$W/lg_$1"
   "$LHD" compile "$2" --reader yosys-verilog --top "$3" \
-    --emit-dir "verilog:$W/emit_$1" --workdir "$W/w_$1" >"$W/$1.log" 2>&1
+    --emit-dir "verilog:$W/emit_$1" --emit-dir "lg:$W/lg_$1" --workdir "$W/w_$1" >"$W/$1.log" 2>&1
   return $?
 }
 
 # ---------------------------------------------------------------------------
 # 1. Mixed edges: posedge write, negedge read. MUST be refused, BY NAME.
 # ---------------------------------------------------------------------------
+# `dbg` is deliberate: it is logic OUTSIDE the memory, so case 1d can introduce a
+# real difference that the ignored memory must NOT swallow.
 cat > "$W/mixed.v" <<'EOF'
 module mixed(input clk, input [3:0] wa, input we, input [7:0] d,
-             input [3:0] ra, output reg [7:0] q);
+             input [3:0] ra, output reg [7:0] q, output [7:0] dbg);
    reg [7:0] m[15:0];
    always @(posedge clk) if (we) m[wa] <= d;
    always @(negedge clk) q <= m[ra];
+   assign dbg = d ^ 8'hFF;
 endmodule
 EOF
-if compile_emit mixed "$W/mixed.v" mixed; then
-  tail -5 "$W/mixed.log"
-  fail "case 1: a memory written on posedge and read on negedge COMPILED -- the read edge was silently dropped"
-fi
+compile_emit mixed "$W/mixed.v" mixed \
+  || { tail -8 "$W/mixed.log"; fail "case 1: a mixed-edge memory must PARSE (the language allows it); only FORMAL refuses it"; }
 grep -qa "mixes clock edges" "$W/mixed.log" \
-  || { tail -8 "$W/mixed.log"; fail "case 1: refused, but not by NAME -- the diagnostic must say which ports disagree"; }
+  || { tail -8 "$W/mixed.log"; fail "case 1: parsed, but SILENTLY -- the lost per-port edges must be warned about where they are lost"; }
 grep -qa "read port 0" "$W/mixed.log" \
-  || { tail -8 "$W/mixed.log"; fail "case 1: the diagnostic does not name the offending port"; }
-echo "ok: a mixed-edge memory is refused by name, naming the disagreeing ports"
+  || { tail -8 "$W/mixed.log"; fail "case 1: the warning does not name the offending port"; }
+echo "ok: a mixed-edge memory parses, with a warning naming the disagreeing ports"
+
+# ---------------------------------------------------------------------------
+# 1b. ...and FORMAL refuses it by name, at exit 7 (could-not-decide), never 10.
+# ---------------------------------------------------------------------------
+sed 's/dbg = d ^ 8.hFF/dbg = ~(~(d ^ 8\x27hFF))/' "$W/mixed.v" > "$W/mixed_eq.v"
+compile_emit mixed_eq "$W/mixed_eq.v" mixed \
+  || { tail -8 "$W/mixed_eq.log"; fail "case 1b: the equivalent variant must compile"; }
+LOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+       --workdir "$W/lw1" 2>&1); LRC=$?
+if [ "$LRC" -eq 0 ]; then
+  fail "case 1b: formal PASSED a memory whose per-port clock edges it cannot model"
+elif [ "$LRC" -eq 10 ]; then
+  fail "case 1b: formal reported exit 10 (a counterexample) for a shape it merely cannot MODEL; rc 7 and rc 10 must never be conflated"
+fi
+grep -qa "PER-PORT clock edge polarity" <<<"$LOUT" \
+  || { tail -8 <<<"$LOUT"; fail "case 1b: refused, but not BY NAME"; }
+echo "ok: formal refuses a mixed-edge memory by name at rc=$LRC (not a counterexample)"
+
+# ---------------------------------------------------------------------------
+# 1c. The diagnostic's own suggestion must WORK VERBATIM, the run must then
+#     PROVE, and the pass must DISCLOSE that a memory was blackboxed.
+# ---------------------------------------------------------------------------
+SUG=$(grep -oaE "formal.ignore_memory=[A-Za-z0-9_:.]+" <<<"$LOUT" | head -1)
+[ -n "$SUG" ] || fail "case 1c: the refusal does not tell the user how to proceed"
+IOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+       --workdir "$W/lw2" --set "$SUG" 2>&1); IRC=$?
+[ "$IRC" -eq 0 ] \
+  || { tail -8 <<<"$IOUT"; fail "case 1c: '--set $SUG' -- the tool's OWN suggestion -- did not let the run proceed (rc=$IRC)"; }
+grep -qa "memory(ies) IGNORED" <<<"$IOUT" \
+  || { tail -8 <<<"$IOUT"; fail "case 1c: an ignore-assisted PASS was not DISCLOSED; it reads as an unconditional proof"; }
+echo "ok: the suggested ignore works verbatim, proves, and the pass is disclosed"
+
+# ---------------------------------------------------------------------------
+# 1d. SOUNDNESS: ignoring a memory must not swallow a difference OUTSIDE it.
+#     Without this, "exclude from formal" would be indistinguishable from
+#     "disable formal".
+# ---------------------------------------------------------------------------
+sed 's/dbg = d ^ 8.hFF/dbg = d ^ 8\x27hF0/' "$W/mixed.v" > "$W/mixed_bad.v"
+compile_emit mixed_bad "$W/mixed_bad.v" mixed \
+  || { tail -8 "$W/mixed_bad.log"; fail "case 1d: the differing variant must compile"; }
+BOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_bad" --top mixed \
+       --workdir "$W/lw3" --set "$SUG" 2>&1); BRC=$?
+if [ "$BRC" -eq 0 ]; then
+  tail -8 <<<"$BOUT"; fail "case 1d: an ignored memory SWALLOWED a real difference in the logic around it"
+fi
+grep -qaiE "refut|not equivalent|equiv_fail" <<<"$BOUT" \
+  || { tail -8 <<<"$BOUT"; fail "case 1d: expected a REFUTATION outside the ignored memory"; }
+echo "ok: an ignored memory does not hide a difference in the logic around it"
 
 # ---------------------------------------------------------------------------
 # 2. The vacuity guard: the SAME design with both ports on posedge must build.

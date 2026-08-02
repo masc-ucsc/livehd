@@ -346,6 +346,19 @@ struct Lec_options {
   // bucket containing a diverged memory uncollapsed (fresh per-design arrays).
   std::vector<std::string> mem_diverged;
 
+  // `formal.ignore_memory` — memories EXCLUDED from the comparison by the user.
+  // Matched by full hier name, canonical name, or bare leaf name (the two
+  // front-ends spell a memory differently, so one entry covers both sides).
+  //
+  // An ignored memory is BLACKBOXED: each read dout becomes ONE SHARED free
+  // symbol per (memory, port, cycle) across ref and impl, and no next-state
+  // array is built. The logic AROUND it is still proved; nothing is claimed
+  // about what it STORES. This is a disclosed ASSUMPTION in exactly the sense
+  // `formal.lec.trust` is for a def, and it is the escape hatch for a memory
+  // the encoder refuses to model — today, one with PER-PORT clock edge
+  // polarity (Ntype::Memory_posclk_mixed).
+  std::vector<std::string> ignore_memory;
+
   // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
   // module-def names the driver has ALREADY proven equivalent in isolation, which
   // are FORCED to the sound black-box path even when they could be flattened (a

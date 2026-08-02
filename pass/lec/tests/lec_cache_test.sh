@@ -63,7 +63,9 @@ else echo "ok: cold run stores 3 verdicts"; fi
 # 2) Identical re-run: every def settles from the cache, no solver at all.
 H --ref "lg:$WORK/A" --impl "lg:$WORK/B"
 if [ "$RC" -ne 0 ]; then echo "FAIL: warm A/B rc=$RC"; fail=1
-elif ! echo "$OUT" | grep -q "3/3 def(s) proven leaves-first (3 via cache, 0 via semdiff, 0 via solver)"; then
+# The order word (top-down vs leaves-first) is formal.lec.hier_order's business;
+# what this case pins is that every def settled FROM THE CACHE with no solver.
+elif ! echo "$OUT" | grep -qE "3/3 def\(s\) proven .*\(3 via cache, 0 via semdiff, 0 via solver\)"; then
   echo "FAIL: warm re-run not fully cache-settled"; echo "$OUT" | grep "lec\[hier\]"; fail=1
 else echo "ok: identical re-run is 3/3 via cache"; fi
 

@@ -411,14 +411,14 @@
   stopped being the blocker on minion's trust list: it went 32 &rarr; 1.</p>
 
 <p><strong>A memory is scheduled WHOLE, on ONE edge — by ruling</strong> (user,
-  2026-08-01): a memory whose ports do not all commit on the same edge is not a
-  valid memory, so the Memory cell's single global <code>posclk</code> is the
-  right model and a mixed-edge memory is a NAMED REFUSAL. A latch may mix phases;
-  a memory may not. The Yosys reader enforces it
-  (<code>lhd/tests/mem_clock_edge_test.sh</code>) — see
-  <a href="2f-lec.html#phase-open">2f-lec</a> for what that closed. Still open
-  there: the cache-key signature, edge-labelled witnesses and multi-root
-  scheduling.</p>
+  2026-08-02). A latch may mix phases; that is what this schedule is for. A
+  MEMORY may not: the cell has one commit point, so a memory whose ports commit
+  on different edges PARSES and REGENERATES (the language allows the shape) but
+  FORMAL refuses it by name, with <code>--set formal.ignore_memory=&lt;name&gt;</code>
+  as the per-memory opt-in that blackboxes it. Gate:
+  <code>lhd/tests/mem_clock_edge_test.sh</code>; details on
+  <a href="2f-lec.html#phase-open">2f-lec</a>, which also still lists the
+  cache-key signature, edge-labelled witnesses and multi-root scheduling.</p>
 
 <p><strong>Hierarchy composes through the sequence-transducer box</strong>, not
   through phase-aware state contracts: a proven child's outputs are one shared

@@ -2573,19 +2573,23 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
       auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
 
-      // ---- ONE edge per memory, enforced ------------------------------------
+      // ---- ONE edge per memory ----------------------------------------------
       // The Memory cell carries a SINGLE global `posclk`; yosys keeps a bit per
       // port. Taking WR_CLK_POLARITY whole (`as_int()`) collapsed a mixed set to
       // "nonzero == posedge", and RD_CLK_POLARITY was dropped outright, so a
-      // negedge synchronous read imported as posedge with no diagnostic.
+      // negedge synchronous read imported as posedge with no diagnostic -- and a
+      // clocked ROM, having NO write ports and therefore an EMPTY write vector,
+      // imported as NEGEDGE. Both silent. The polarity is derived from every
+      // CLOCKED port now, read ports included, which fixes both.
       //
-      // User ruling 2026-08-01: a memory whose ports do not all commit on the
-      // SAME edge is NOT A VALID MEMORY, so this is a named refusal, not a
-      // modelling gap. (A latch may mix phases -- that is what the formal phase
-      // schedule is for -- a memory may not.) The polarity is now derived from
-      // every CLOCKED port, read ports included, which also fixes a clocked-read
-      // ROM: with no write ports WR_CLK_POLARITY is empty, so it used to import
-      // as posclk=0, i.e. negedge.
+      // A memory whose ports DISAGREE is a shape LiveHD does not model. User
+      // ruling 2026-08-02: it is NOT a read error -- the language allows it, so
+      // parse it, keep it, let it regenerate -- it is a FORMAL error. The
+      // sentinel below carries "mixed" downstream; pass/lec refuses such a memory
+      // BY NAME and the user opts back in per memory with
+      // `--set formal.ignore_memory=<name>`, which blackboxes it. A WARNING here
+      // (not silence) because everything downstream of this point sees a single
+      // edge, so the loss has to be visible at the moment it happens.
       const auto param_bit = [&](const RTLIL::IdString& id, int i) {
         if (!cell->hasParam(id)) {
           return false;
@@ -2596,6 +2600,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       };
       bool        have_edge = false;
       bool        mem_pos   = false;
+      bool        mem_mixed = false;
       std::string edge_why;
       const auto  note_edge = [&](const char* kind, int port, bool pos) {
         if (!have_edge) {
@@ -2604,11 +2609,13 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           edge_why  = std::string(kind) + " port " + std::to_string(port) + " is " + (pos ? "posedge" : "negedge");
           return;
         }
-        if (pos != mem_pos) {
-          log_error(
-              "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s): the Memory cell has ONE "
-              "global posclk, and a memory whose ports commit on different edges is not a valid memory. Split it into "
-              "one memory per clock edge.\n",
+        if (pos != mem_pos && !mem_mixed) {
+          mem_mixed = true;
+          log_warning(
+              "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s). The Memory cell has ONE "
+              "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
+              "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
+              "--set formal.ignore_memory=<name>, which blackboxes it).\n",
               cell->name.c_str(), edge_why.c_str(), kind, port, pos ? "posedge" : "negedge");
         }
       };
@@ -2622,7 +2629,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           note_edge("read", i, param_bit(ID::RD_CLK_POLARITY, i));
         }
       }
-      const int wr_clkp = (have_edge && mem_pos) ? 1 : 0;
+      const int wr_clkp = mem_mixed ? Ntype::Memory_posclk_mixed : ((have_edge && mem_pos) ? 1 : 0);
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd")

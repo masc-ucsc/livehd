@@ -101,11 +101,29 @@ void Pass_lec::setup() {
                        "a top proven with a non-empty trust list is DISCLOSED ('PROVEN under N trusted "
                        "def(s)'), never a silent unconditional pass. Trusting the top itself is refused",
                        "");
+  m.add_label_optional("ignore_memory",
+                       "memories EXCLUDED from the comparison: comma-separated names (full hier, canonical, or "
+                       "bare leaf -- one entry covers both sides). An ignored memory is BLACKBOXED: each read "
+                       "dout becomes ONE SHARED free symbol per (memory, port, cycle) across ref and impl and no "
+                       "next-state array is built, so the logic AROUND it is still proved but NOTHING is claimed "
+                       "about what it stores. A disclosed ASSUMPTION, like `trust` for a def. This is the escape "
+                       "hatch for a memory the encoder refuses to model -- today, one whose ports do not all "
+                       "commit on the same clock edge (the language allows that shape, so it parses and "
+                       "regenerates; formal refuses it by name)",
+                       "");
   m.add_label_optional("hier",
-                       "bottom-up hierarchical decomposition (default true): topo-order the module-def DAG, "
-                       "LEC each def leaves-first under the engine, and collapse already-proven children into "
-                       "their parents (a child unprovable in isolation stays flattened). false = flat single LEC",
+                       "hierarchical decomposition (default true): topo-order the module-def DAG and LEC each def "
+                       "with its children collapsed into boxes (see hier_order). false = flat single LEC",
                        "true");
+  m.add_label_optional("hier_order",
+                       "which way the hierarchy is proved. top_down (default) = prove EVERY def with EVERY child "
+                       "BOXED, then discharge each premise from the same pass's other entries (the module DAG is "
+                       "well-founded, so this is an induction). No def waits on another def's verdict, so the "
+                       "hierarchy runs fully in parallel and every miter is at its minimum size; a refuting block is "
+                       "absorbed by re-proving its immediate PARENT with that block inlined, and if the parent "
+                       "proves nothing higher is re-solved | bottom_up = legacy leaves-first, boxing only a child "
+                       "already proven and FLATTENING one that is not",
+                       "top_down");
   m.add_label_optional("hier_refute",
                        "bottom-up driver: what a REFUTED block means for the run. escalate (default) = inline that "
                        "block into its caller (its PROVEN siblings stay boxed) and prove the caller anyway — a "
@@ -282,6 +300,17 @@ void Pass_lec::lec(Eprp_var& var) {
   // same encoder blackbox as collapse here (the driver semantics live in
   // lhd_kernel_formal.cpp's lec_hierarchical). Boxing over-approximates, so this
   // is sound: a PASS is real, a refute at a box boundary can only be spurious.
+  if (std::string ms{var.get("ignore_memory", "")}; !ms.empty()) {
+    size_t pos = 0;
+    while (pos < ms.size()) {
+      size_t c   = ms.find(',', pos);
+      size_t end = c == std::string::npos ? ms.size() : c;
+      if (end > pos) {
+        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
   if (std::string ts{var.get("trust", "")}; !ts.empty()) {
     size_t pos = 0;
     while (pos < ts.size()) {

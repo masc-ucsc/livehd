@@ -8,7 +8,43 @@ Everything here is about `lhd lec --top T`. **Equivalence is a claim about `T`
 only.** Proving other modules is a separate request (`--top X`), never something
 the driver asserts on the user's behalf.
 
-## 1. The shape of the proof
+## 1. The shape of the proof — top-down, then discharge
+
+```
+for each def D in the top's subtree, IN ANY ORDER, ALL AT ONCE:
+    prove D_ref == D_impl with EVERY child of D replaced by a box
+                                                     # a PREMISE, not yet a fact
+
+then, leaves-first (pure bookkeeping, no solving):
+    D is UNCONDITIONALLY proven  iff  D proved AND every child it boxed is
+```
+
+That is the default (`formal.lec.hier_order=top_down`). Every def is proved
+against the *assumption* that its children are equivalent, and those assumptions
+are discharged by the other entries of the same pass.
+
+**This is an induction, not circular reasoning.** The module DAG is well-founded:
+D's premise set is strictly-lower nodes, and a leaf assumes nothing. So the
+closure terminates and the composition is sound — it is ordinary assume-guarantee
+over a partial order. Three things follow, and the third is why it is the default:
+
+- **No def waits on another def's verdict**, so the hierarchy is dispatched with
+  *no* dependency edges — fully parallel, instead of serialized by depth.
+- **Every miter is at its minimum size.** Bottom-up must *flatten* a child that
+  did not prove, which is exactly the case where the parent is hardest.
+- **A refuting block is absorbed by its parent, and the chain stops there** (§3).
+
+The premise direction matters and is easy to get backwards. Assume-guarantee
+gives
+
+> (∀ children C: C_ref ≡ C_impl) ⟹ D_ref ≡ D_impl
+
+and **nothing in the other direction**. Refuting a premise does not refute the
+conclusion, so a child that fails does not make its parent fail — it leaves the
+parent *conditional*. A top proven only conditionally is reported **inconclusive
+(exit 7), naming the undischarged premises**, never a pass.
+
+### `formal.lec.hier_order=bottom_up` — the legacy order
 
 ```
 topo-order the module-def DAG, leaves first
@@ -16,9 +52,15 @@ for each def D (children already settled):
     prove D_ref == D_impl, with every PROVEN child of D replaced by a box
 ```
 
-A def is *settled* as PROVEN, REFUTED or UNKNOWN. Only a **proven** child becomes
-a box; an unproven one stays flattened into its parent, because a box is a
-promise and we only make promises we have discharged.
+Only a proven child becomes a box; an unproven one stays flattened into its
+parent. Kept for A/B measurement, and because `hier_refute=fail` (a debug mode)
+is *defined* in terms of leaves-first order — "skip a def whose child already
+refuted" has no meaning when no def waits on a child.
+
+Both orders discharge **the same set of per-def obligations**, so an all-proven
+run costs the same either way. They must also produce the same verdict for every
+design; an ordering strategy may change cost, never an answer
+(`lec_hier_topdown_test.sh` case 4).
 
 ## 2. What a proven submodule is
 
@@ -93,18 +135,49 @@ equivalent. Only the requested top's boundary is contractual.
 
 So on a refute at def D (`formal.lec.hier_refute=escalate`, the **default**):
 
-- **inline D into its caller** and prove the caller instead;
-- D's **proven siblings and descendants stay boxed** — only the offender is
-  expanded, so the cost is bounded;
-- if the caller proves, that caller-with-D-inlined is what became a proven unit.
-  It is *not* a proof of D: another caller of D may partition differently and has
-  to inline it too;
+- **inline D into its caller P** and re-prove P;
+- D's **siblings and descendants stay boxed** — only the offender is expanded, so
+  the cost is bounded;
+- if P proves, that P-with-D-inlined is what became a proven unit. It is *not* a
+  proof of D: another caller of D may partition differently and has to inline it
+  too;
 - D's counterexample is kept as a **diagnostic** ("the two designs stop agreeing
-  here"), never as the run's verdict.
+  here"), never as the run's verdict. The driver reports how many refutations
+  were **ABSORBED** this way.
+
+### Why top-down makes the escalation stop at P
+
+This is the case the order exists for. Under top-down, by the time D's refutation
+is known, **P has already been proven with D boxed**, and so has every ancestor of
+P with *its* child boxed. So:
+
+1. re-prove P with D inlined, everything else still boxed;
+2. if P proves, P's own boundary behaviour is intact — and every ancestor's proof
+   already only ever depended on *P being equivalent*, which is now established
+   without the D premise. **The chain closes. Nothing above P is re-solved.**
+3. only if P *itself* refutes does the escalation move up a level, and there the
+   same argument applies again.
+
+Bottom-up has no such stopping rule: it learns D refuted *before* P is proved, so
+P runs with D flattened; if P then refutes, P's parent runs with both flattened,
+and the cone grows one level per step — in the worst case all the way to the top,
+which is the slow path this replaces. (User ruling, 2026-08-02.)
+
+**Measured on minion** (same compiled inputs, same trust list, order the only
+variable): 146 s top-down vs 222 s bottom-up, same 166/170 defs proven, same exit.
+The report is where it really shows. One def, `intpipe_csr_file`, is UNKNOWN under
+both. Bottom-up flattens it into `intpipe_top`, which is then UNKNOWN and flattens
+into `core_top`, which flattens into `minion_top` — where the accumulated cone hits
+a word-level combinational cycle and the encode fails outright, so the run's
+headline is a 29-node cycle dump. Top-down proves all three with their children
+boxed (`minion_top`: *297/297 cones PROVEN, every cut discharged*) and names the
+three undischarged premises. The cycle never enters a miter, because nothing is
+flattened.
 
 `formal.lec.hier_refute=fail` is the old fail-fast behaviour: it stops at the
 first differing block, which localizes quickly but calls a boundary mismatch a
-design bug. It is a **debug aid** and announces itself with a warning.
+design bug. It is a **debug aid**, announces itself with a warning, and forces
+`bottom_up` (it is a leaves-first notion).
 
 Under this policy, **a refutation of the top is a real bug** — in the generated
 Pyrope, in the Verilog read, or in LEC itself — and should be chased as one.
@@ -188,6 +261,18 @@ directly now.
 
 PASS means definitively equivalent; FAIL means definitively different; timeout,
 unsupported timing and ambiguous correspondence are INCONCLUSIVE. Collapse,
-pairing, phase scheduling and every retry must preserve that. An abstraction may
-cause more work or an UNKNOWN — never a wrong verdict. A check that compares
-nothing is not a proof of anything.
+pairing, phase scheduling, proof order and every retry must preserve that. An
+abstraction may cause more work or an UNKNOWN — never a wrong verdict. A check
+that compares nothing is not a proof of anything.
+
+Two ways the hierarchy can quietly violate this, both guarded:
+
+- **An undischarged premise is not a proof.** A top proved with every child boxed
+  is only a *conditional* result; if any premise never discharges it is degraded
+  to Unknown (exit 7) naming the open blocks. `rc 7` ("could not decide") and
+  `rc 10` ("here is a counterexample") must never be conflated
+  (`tests/lec_verdict_policy_test.sh`).
+- **An absorbed block CEX is not the design's answer.** Once a parent re-proves
+  with a refuting block inlined, that block's counterexample is a diagnostic; it
+  must be dropped before the run picks a fallback verdict, or a design that is
+  equivalent reports `equiv_fail`.

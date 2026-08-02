@@ -327,6 +327,15 @@ public:
   // box's output symbols are pre-built and shared across the two designs.
   void set_collapse_defs(const Io_name_map<bool>* c) { collapse_defs_ = c; }
 
+  // formal.ignore_memory: memory names (hier or leaf, either side) the user has
+  // EXCLUDED from the comparison. An ignored memory is BLACKBOXED — every read
+  // dout becomes one SHARED free symbol per (memory, port, cycle) across the two
+  // designs and no next-state array is built — so the proof says nothing about
+  // what it stores. It is the escape hatch for a memory this encoder refuses to
+  // model (today: PER-PORT clock edge polarity), and it is a disclosed
+  // ASSUMPTION in exactly the sense formal.lec.trust is for a def.
+  void set_ignore_memory(const std::vector<std::string>* names) { ignore_memory_ = names; }
+
   // Shared state-aware boxes for STATEFUL collapsed leaves (keyed by the box
   // correspondence key from set_box_keys). When a collapsed leaf has an entry
   // here, its outputs/next-state are encoded as UF(inputs, state) instead of
@@ -465,6 +474,7 @@ private:
   const Io_name_map<Val>*                             shared_bbox_   = nullptr;
   const Io_name_map<std::string>*                     name_alias_    = nullptr;
   const Io_name_map<bool>*                            collapse_defs_ = nullptr;
+  const std::vector<std::string>*                     ignore_memory_ = nullptr;
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
   const Io_name_map<std::string>*                     box_keys_      = nullptr;

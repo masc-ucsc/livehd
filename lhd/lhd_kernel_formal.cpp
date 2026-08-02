@@ -389,6 +389,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                                   const livehd::lec::Lec_options&                     base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
                                                   livehd::formal::Verdict_cache* vcache, bool retry_all, bool fail_fast_refute,
+                                                  bool                                         top_down,
                                                   std::vector<std::pair<std::string, int64_t>>* cvc5_hot = nullptr) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
@@ -995,6 +996,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::atomic<bool>         any_unsupported{false};  // any def the ENCODER refused (unmodeled cell) -> hard error
   std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
   std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
+  std::vector<uint8_t>      by_cache(order.size(), 0);    // which def, for the closure-intersected summary
+  std::vector<uint8_t>      by_semdiff(order.size(), 0);
   std::atomic<int>          trusted_count{0};  // defs ASSUMED equal (formal.lec.trust; never solved)
   std::mutex                report_mutex;
   // Refuted-descendant bookkeeping (fail-fast). `refuted` marks a def the solver
@@ -1007,6 +1010,38 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   livehd::lec::Query_result refuted_result;
   std::string               refuted_def;
   bool                      have_refuted = false;
+  // Per-def refutations, so the escalation rounds can RE-PICK the run verdict:
+  // a block CEX that its parent absorbed (the parent re-proved with the block
+  // INLINED) must never surface as the design's answer.
+  absl::flat_hash_map<size_t, livehd::lec::Query_result> refuted_by_ix;
+
+  // ── TOP-DOWN bookkeeping (formal.lec.hier_order=top_down, the default) ─────
+  // Bottom-up boxes only a child ALREADY proven; top-down boxes EVERY child and
+  // discharges the assumption from the same pass's other entries. See the
+  // closure below and pass/lec/README.md §1.
+  //
+  //   assumed[i]   the child keys def i boxed WITHOUT a proof in hand. Empty in
+  //                bottom-up (a box there is always a discharged premise).
+  //   force_flat[i] children this def must DESCEND rather than box. Seeded by
+  //                the escalation rounds: when child C is definitively refuted,
+  //                its parent re-proves with C inlined — which is the ONLY step
+  //                needed, because the parent's conditional proof already
+  //                established that everything else about it matches.
+  std::vector<std::vector<std::string>>              assumed(order.size());
+  std::vector<absl::flat_hash_set<std::string>>      force_flat(order.size());
+  // `refuted` for OTHER defs, snapshotted between rounds. run_def reads a
+  // grandchild's status when deciding what to keep boxed during an escalation,
+  // and two parents in the same retry round can run concurrently — reading the
+  // live array would be a race on another task's slot (and would make the round
+  // depend on scheduling). Written only while no task is in flight.
+  std::vector<uint8_t>                               refuted_snapshot(order.size(), 0);
+  // Parents of a def key (reverse of `children`), for the escalation rounds.
+  absl::flat_hash_map<std::string, std::vector<std::string>> parents;
+  for (const auto& [p, kids] : children) {
+    for (const auto& c : kids) {
+      parents[c].push_back(p);
+    }
+  }
   auto                      run_def      = [&](size_t def_ix) {
     if (settled[def_ix]) {
       return;  // definitively decided in an earlier round — do not re-solve
@@ -1110,32 +1145,98 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // intermediate. These boxes are NOT confirmed away in the flat retry below —
     // they cover the cell the encoder cannot model.
     o.collapse.insert(o.collapse.end(), base.trust.begin(), base.trust.end());
-    std::vector<std::string> coll;  // SPECULATIVE proven-child boxes only (the retry confirms these; trust is excluded)
+    std::vector<std::string> coll;  // SPECULATIVE child boxes (the retry confirms these; trust is excluded)
     bool                     kids_proven = true;
+    assumed[def_ix].clear();
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
         if (is_trusted(c)) {
           continue;  // already force-boxed via the trust seed above; an assumption, so it never flips kids_proven
         }
-        if (auto ci = order_ix.find(c); ci != order_ix.end() && proven[ci->second] != 0) {
-          // A PROVEN child still must NOT collapse when its ref/impl port sets
-          // diverge the tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b`
-          // leaves vs one packed `req` bus): box correspondence is keyed on
-          // port NAMES, so the box would gate this parent to incomplete
-          // (Unknown). Leaving it out of the collapse set descends (flattens)
-          // it into the parent, where prove_equal's bundle compare points at
-          // the parent's own boundary take over. (Read-only probe of two maps
-          // populated before the task DAG runs — safe under the parallel run.)
+        auto       ci        = order_ix.find(c);
+        const bool is_proven = ci != order_ix.end() && proven[ci->second] != 0;
+        // TOP-DOWN: box the child whether or not it is proven YET. The premise
+        // "this child pair is equivalent" is discharged by that child's OWN
+        // entry in this same pass — the module DAG is well-founded, so the
+        // composition is an induction, not circular reasoning. Bottom-up boxes
+        // only what it has already discharged.
+        //   `force_flat` overrides: an escalation round descends the ONE child
+        // whose refutation this def has to absorb.
+        const bool want_box = (top_down || is_proven) && force_flat[def_ix].count(c) == 0;
+        if (want_box) {
+          // A child must NOT collapse when its ref/impl port sets diverge the
+          // tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b` leaves vs one
+          // packed `req` bus): box correspondence is keyed on port NAMES, so the
+          // box would gate this parent to incomplete (Unknown). Leaving it out
+          // of the collapse set descends (flattens) it into the parent, where
+          // prove_equal's bundle compare points at the parent's own boundary
+          // take over. (Read-only probe of two maps populated before the task
+          // DAG runs — safe under the parallel run.)
           auto rg = ref_by_name.find(c);
           auto ig = impl_by_name.find(c);
           if (rg != ref_by_name.end() && ig != impl_by_name.end()
               && livehd::lec::io_bundle_split(rg->second, ig->second)) {
-            continue;  // proven, but box-incompatible port shapes -> descend it
+            kids_proven = kids_proven && is_proven;  // descended: it is not a discharged box here
+            continue;                                // box-incompatible port shapes -> descend it
           }
-          o.collapse.push_back(c);  // proven child -> sound black-box collapse
+          o.collapse.push_back(c);
           coll.push_back(c);
+          if (top_down) {
+            // Every box is a PREMISE here, discharged by the closure below.
+            // Recording only the not-yet-proven ones would make the set depend
+            // on which worker finished first (formal.jobs), and the parallel
+            // determinism gate compares per-def output verbatim.
+            assumed[def_ix].push_back(c);
+          }
         } else {
           kids_proven = false;
+          // ESCALATION: `c` is being INLINED into this def to absorb its
+          // refutation. Only `c` itself has to be expanded — its own children
+          // stay BOXED, so the miter grows by one def's logic and not by a whole
+          // subtree. (The encoder matches a collapse name hierarchically, so a
+          // grandchild named here is boxed even though it is reached through the
+          // flattened `c`.) They are premises like any other box, so they join
+          // `assumed` and the closure has to discharge them too.
+          if (top_down && force_flat[def_ix].count(c) > 0) {
+            if (auto gk = children.find(c); gk != children.end()) {
+              for (const auto& g : gk->second) {
+                auto gi = order_ix.find(g);
+                if (gi == order_ix.end() || force_flat[def_ix].count(g) > 0 || refuted_snapshot[gi->second] != 0) {
+                  continue;  // itself being absorbed, or known-different: descend it too
+                }
+                auto rg = ref_by_name.find(g);
+                auto ig = impl_by_name.find(g);
+                if (rg != ref_by_name.end() && ig != impl_by_name.end()
+                    && livehd::lec::io_bundle_split(rg->second, ig->second)) {
+                  continue;
+                }
+                if (std::find(coll.begin(), coll.end(), g) != coll.end()) {
+                  continue;
+                }
+                o.collapse.push_back(g);
+                coll.push_back(g);
+                assumed[def_ix].push_back(g);
+              }
+            }
+          }
+        }
+      }
+    }
+    // The structural-identity no-solver skip needs every child ACCOUNTED FOR,
+    // not necessarily already proven: under top-down a boxed child is a premise
+    // the closure discharges, so "identical modulo boxed children" is a real
+    // (conditional) proof. A DESCENDED child still blocks it — its internals are
+    // inside this miter and semdiff compared them structurally, which is only a
+    // proof if the child itself was settled.
+    if (top_down) {
+      kids_proven = true;
+      if (auto it = children.find(name); it != children.end()) {
+        for (const auto& c : it->second) {
+          auto ci = order_ix.find(c);
+          const bool boxed = is_trusted(c) || std::find(coll.begin(), coll.end(), c) != coll.end();
+          if (!boxed && !(ci != order_ix.end() && proven[ci->second] != 0)) {
+            kids_proven = false;
+          }
         }
       }
     }
@@ -1181,7 +1282,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         cr.engine     = "cache";
         cr.elapsed_ms = 0;
         cr.detail = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
-        proven[def_ix] = 1;
+        proven[def_ix]   = 1;
+        by_cache[def_ix] = 1;
         ++cache_count;
         std::lock_guard report_lock(report_mutex);
         emit_lec_block_progress(name, cr, o, 0);
@@ -1263,7 +1365,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         sr.engine     = "semdiff";
         sr.elapsed_ms = ms;
         sr.detail     = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
-        proven[def_ix] = 1;
+        proven[def_ix]     = 1;
+        by_semdiff[def_ix] = 1;
         ++semdiff_count;
         {
           std::lock_guard report_lock(report_mutex);
@@ -1499,19 +1602,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // Keep the FIRST refute (leaves-first => the deepest one): it is both the
       // fail-fast trigger for this def's parents and the run's reported verdict.
       if (r.verdict == Verdict::Refuted) {
-        refuted[def_ix] = 1;
+        refuted[def_ix]        = 1;
+        refuted_by_ix[def_ix]  = r;
         if (!have_refuted) {
           refuted_result = r;
           refuted_def    = name;
           have_refuted   = true;
         }
+      } else {
+        refuted_by_ix.erase(def_ix);  // an escalation round re-decided this def
       }
       emit_lec_block_progress(name, r, o, ms);
-    std::print("lec[hier]: '{}' {} ({} child collapse{})\n",
-               name,
-               r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
-               coll.size(),
-               coll.size() == 1 ? "" : "s");
+      std::print("lec[hier]: '{}' {} ({} child collapse{})\n",
+                 name,
+                 r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
+                 coll.size(),
+                 coll.size() == 1 ? "" : "s");
     }
     if ((name == top_key)) {
       top_result = r;
@@ -1519,26 +1625,49 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   };
 
-  // Dispatch the child→parent proof DAG once: all ready leaves in flight (up to
-  // `jobs` workers), a parent unlocked once its children settle, proven children
-  // black-boxed. run_def skips already-`settled` defs, so RE-dispatching is exactly
-  // how an escalating round re-tries only the survivors with a larger slice.
-  auto dispatch_dag = [&]() {
+  // Dispatch the proof DAG once. run_def skips already-`settled` defs, so
+  // RE-dispatching is exactly how an escalating round re-tries only the
+  // survivors.
+  //
+  // BOTTOM-UP: child->parent edges, so a parent waits for its children to settle
+  // and boxes the proven ones. The depth of the hierarchy is a serial chain.
+  //
+  // TOP-DOWN: NO edges at all. Every def boxes every child unconditionally, so
+  // no def's obligation depends on any other def's VERDICT — only on the DAG
+  // being well-founded, which it is. The whole hierarchy is therefore
+  // embarrassingly parallel, and each def's miter is at its MINIMUM size (a
+  // bottom-up parent has to flatten any child that did not prove, which is
+  // exactly the case where the miter is hardest).
+  auto dispatch_dag = [&](const std::vector<size_t>* subset = nullptr) {
     if (order.size() == 1) {
       run_def(0);  // preserve the normal portfolio; no hierarchy parallelism needed
       return;
     }
-    tf::Taskflow          proof_dag;
-    std::vector<tf::Task> tasks;
-    tasks.reserve(order.size());
-    for (size_t i = 0; i < order.size(); ++i) {
-      tasks.push_back(proof_dag.emplace([&, i] { run_def(i); }).name(order[i]));
+    std::vector<size_t> all;
+    if (subset == nullptr) {
+      all.resize(order.size());
+      for (size_t i = 0; i < order.size(); ++i) {
+        all[i] = i;
+      }
+      subset = &all;
     }
-    for (size_t i = 0; i < order.size(); ++i) {
-      if (auto it = children.find(order[i]); it != children.end()) {
-        for (const auto& child : it->second) {
-          if (auto ci = order_ix.find(child); ci != order_ix.end()) {
-            tasks[ci->second].precede(tasks[i]);
+    tf::Taskflow                             proof_dag;
+    absl::flat_hash_map<size_t, tf::Task>    tasks;
+    for (size_t i : *subset) {
+      tasks.emplace(i, proof_dag.emplace([&, i] { run_def(i); }).name(order[i]));
+    }
+    if (!top_down) {
+      for (size_t i : *subset) {
+        if (auto it = children.find(order[i]); it != children.end()) {
+          for (const auto& child : it->second) {
+            auto ci = order_ix.find(child);
+            if (ci == order_ix.end()) {
+              continue;
+            }
+            auto ct = tasks.find(ci->second);
+            if (ct != tasks.end()) {
+              ct->second.precede(tasks.at(i));
+            }
           }
         }
       }
@@ -1566,6 +1695,159 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   budget_on = base.timeout > 0 && base.rlimit == 0 && order.size() > 1;
   budget_t0 = std::chrono::steady_clock::now();
   dispatch_dag();
+
+  // ── DISCHARGE the top-down premises, then ESCALATE only where one failed ───
+  //
+  // Pass A proved every def with ALL children boxed, so each verdict reads
+  // "D_ref == D_impl PROVIDED each boxed child pair is equivalent". Those
+  // premises are the other entries of the same pass, and the module DAG is
+  // well-founded, so the closure below is an induction and not circular
+  // reasoning: D is UNCONDITIONALLY proven iff D proved and every child it
+  // boxed is unconditionally proven. A TRUSTED child is a disclosed assumption
+  // by user request (`formal.lec.trust`) and is treated as discharged — exactly
+  // as bottom-up already does.
+  //
+  // A child that did NOT discharge leaves its ancestors conditional. That is a
+  // strictly better answer than bottom-up's, which flattens the failing child
+  // into every ancestor and grows the miter on the way up. Here the ONE def
+  // that has to absorb the failure is the refuting child's immediate PARENT:
+  // re-prove the parent with that child INLINED and everything else still
+  // boxed. If the parent proves, its own boundary behaviour is intact, and
+  // since every ancestor already proved with the parent BOXED, the whole chain
+  // closes — there is nothing to check higher up (user ruling 2026-08-02).
+  // Only if the parent itself refutes does the escalation move up a level.
+  std::vector<uint8_t> unconditional(order.size(), 0);
+  auto compute_closure = [&]() {
+    std::fill(unconditional.begin(), unconditional.end(), 0);
+    // `order` is leaves-first, so one forward sweep reaches a fixpoint.
+    for (size_t i = 0; i < order.size(); ++i) {
+      if (proven[i] == 0) {
+        continue;
+      }
+      bool all_kids = true;
+      for (const auto& c : assumed[i]) {
+        auto ci = order_ix.find(c);
+        if (ci == order_ix.end() || unconditional[ci->second] == 0) {
+          all_kids = false;
+          break;
+        }
+      }
+      unconditional[i] = all_kids ? 1 : 0;
+    }
+  };
+  if (top_down) {
+    compute_closure();
+    const size_t top_ix = order_ix.at(top_key);
+    // Escalation rounds. Each round picks the refuted defs whose parent boxed
+    // them, inlines exactly those into their parents, and re-proves ONLY those
+    // parents. Bounded by the hierarchy depth: a round that changes nothing
+    // stops. The top itself has no parent to escalate into — its own flat
+    // confirm (inside run_def) is already the last word.
+    for (size_t round = 0; round < order.size() && unconditional[top_ix] == 0; ++round) {
+      std::vector<size_t>              retry;
+      absl::flat_hash_set<size_t>      retry_set;
+      for (size_t i = 0; i < order.size(); ++i) {
+        if (refuted[i] == 0 || order[i] == top_key) {
+          continue;
+        }
+        for (const auto& p : parents[order[i]]) {
+          auto pi = order_ix.find(p);
+          if (pi == order_ix.end()) {
+            continue;
+          }
+          // Already absorbed in an earlier round, or the parent never boxed it.
+          if (force_flat[pi->second].count(order[i]) > 0) {
+            continue;
+          }
+          force_flat[pi->second].insert(order[i]);
+          if (retry_set.insert(pi->second).second) {
+            retry.push_back(pi->second);
+          }
+        }
+      }
+      if (retry.empty()) {
+        break;
+      }
+      refuted_snapshot = refuted;  // no task in flight: safe, and fixes the round
+      for (size_t i : retry) {
+        std::print("lec[hier]: ESCALATE '{}' — re-proving with {} refuted child(ren) INLINED, every other child still boxed\n",
+                   order[i],
+                   force_flat[i].size());
+        settled[i] = 0;  // re-solve this one def
+        proven[i]  = 0;
+        refuted[i] = 0;
+      }
+      dispatch_dag(&retry);
+      compute_closure();
+    }
+    const int cond_only = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}))
+                        - static_cast<int>(std::count(unconditional.begin(), unconditional.end(), uint8_t{1}));
+    if (cond_only > 0) {
+      std::print("lec[hier]: {} def(s) proven only CONDITIONALLY (a boxed child never discharged)\n", cond_only);
+    }
+    // RE-PICK the run's fallback verdict. A block refutation is ABSORBED once
+    // some parent re-proved with that block INLINED: the block boundary differs
+    // but the design does not, which is the whole reason a module boundary is
+    // not part of the specification. An absorbed CEX is a diagnostic, never the
+    // answer, so drop it before the aggregate below can adopt it.
+    have_refuted = false;
+    refuted_def.clear();
+    int absorbed = 0;
+    for (size_t i = 0; i < order.size(); ++i) {
+      auto it = refuted_by_ix.find(i);
+      if (it == refuted_by_ix.end()) {
+        continue;
+      }
+      bool is_absorbed = false;
+      for (const auto& p : parents[order[i]]) {
+        auto pi = order_ix.find(p);
+        if (pi != order_ix.end() && force_flat[pi->second].count(order[i]) > 0 && proven[pi->second] != 0) {
+          is_absorbed = true;  // the parent re-proved with this block inlined
+          break;
+        }
+      }
+      if (is_absorbed) {
+        ++absorbed;
+        continue;
+      }
+      if (!have_refuted) {
+        refuted_result = it->second;
+        refuted_def    = order[i];
+        have_refuted   = true;
+      }
+    }
+    if (absorbed > 0) {
+      std::print("lec[hier]: {} block refutation(s) ABSORBED by a parent that re-proved with the block inlined "
+                 "(a module boundary is not part of the specification)\n",
+                 absorbed);
+    }
+    // A top proven only CONDITIONALLY is not a proof of the top. Degrade it to
+    // Unknown naming the undischarged premise: PASS must mean definitively
+    // equivalent, and an assumption the run never discharged is exactly the
+    // "inconclusive" bucket, never a pass (see the verdict-discipline contract
+    // in pass/lec/tests/lec_verdict_policy_test.sh).
+    if (have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0) {
+      std::string open_premises;
+      int         n = 0;
+      for (size_t i = 0; i < order.size(); ++i) {
+        if (unconditional[i] == 0 && order[i] != top_key && !parents[order[i]].empty()) {
+          open_premises += (n++ ? ", " : "") + order[i];
+          if (n >= 8) {
+            open_premises += ", ...";
+            break;
+          }
+        }
+      }
+      top_result.verdict = Verdict::Unknown;
+      top_result.detail  = std::format(
+          "INCONCLUSIVE: '{}' proved with every child BOXED, but {} premise(s) never discharged ({}) — the top's own "
+          "logic matches, so the difference is inside those block(s); {}",
+          top_key,
+          n,
+          open_premises,
+          top_result.detail);
+    }
+  }
 
   // Soft-budget accounting: `timeout` is a TARGET, so report what it actually
   // cost. `defs_floored` is the overrun's cause — those defs were dispatched
@@ -1610,23 +1892,43 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // separate the two: report only defs actually PROVEN, and disclose the trusted
   // (assumed-equal) count apart — a trusted def was never solved, cached, or
   // semdiff-matched, so it must not inflate any of those figures.
-  const int proven_count  = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
+  // Under top-down, only an UNCONDITIONALLY proven def counts: a conditional
+  // proof is a premise waiting on a child, not a settled definition.
+  const int proven_count
+      = top_down ? static_cast<int>(std::count(unconditional.begin(), unconditional.end(), uint8_t{1}))
+                 : static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
   const int trusted_total = trusted_count.load();
   const int really_proven = proven_count - trusted_total;
+  // Under top-down these are intersected with the closure, so the three
+  // provenance figures always sum to `really_proven` instead of going negative
+  // when a cache/semdiff hit stayed conditional.
+  const auto counted = [&](const std::vector<uint8_t>& how) {
+    int n = 0;
+    for (size_t i = 0; i < order.size(); ++i) {
+      if (how[i] != 0 && (!top_down || unconditional[i] != 0)) {
+        ++n;
+      }
+    }
+    return n;
+  };
+  const int cache_proven   = counted(by_cache);
+  const int semdiff_proven = counted(by_semdiff);
 
-  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via cache, {} via semdiff, {} via solver){}\n",
+  std::print("lec[hier]: {}/{} def(s) proven {} ({} via cache, {} via semdiff, {} via solver){}\n",
              really_proven,
              static_cast<int>(order.size()) - trusted_total,
-             cache_count.load(),
-             semdiff_count.load(),
-             really_proven - semdiff_count.load() - cache_count.load(),
+             top_down ? "top-down" : "leaves-first",
+             cache_proven,
+             semdiff_proven,
+             really_proven - semdiff_proven - cache_proven,
              trusted_total > 0 ? std::format("; {} def(s) TRUSTED (assumed equal, NOT proven)", trusted_total) : std::string{});
-  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} trusted:{} cache:{} semdiff:{}",
+  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical order:{} defs:{} proven:{} trusted:{} cache:{} semdiff:{}",
+                                            top_down ? "top_down" : "bottom_up",
                                             order.size(),
                                             really_proven,
                                             trusted_total,
-                                            cache_count.load(),
-                                            semdiff_count.load()));
+                                            cache_proven,
+                                            semdiff_proven));
 
   // A REFUTED def anywhere in the hierarchy is the run's verdict unless the TOP
   // itself settled. Without this the driver returns top_result alone, so a block
@@ -2788,6 +3090,19 @@ void lec_command(Options& opts, Result& res) {
   // the flat (non-hier) path black-boxes them too — the hier driver rebuilds its
   // own per-def collapse set and re-seeds trust there.
   o.trust = opts.trust;
+  // formal.ignore_memory: memories the user EXCLUDED from the comparison.
+  // `label` merges formal.* and formal.lec.*, so either spelling works.
+  if (std::string ms = label("ignore_memory", ""); !ms.empty()) {
+    size_t pos = 0;
+    while (pos < ms.size()) {
+      size_t c   = ms.find(',', pos);
+      size_t end = c == std::string::npos ? ms.size() : c;
+      if (end > pos) {
+        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
   if (std::string ts = label("trust", ""); !ts.empty()) {
     size_t pos = 0;
     while (pos < ts.size()) {
@@ -3096,6 +3411,36 @@ void lec_command(Options& opts, Result& res) {
                       "fail (default; a refuted block fails the run, its parents are skipped) | escalate (prove the "
                       "parents anyway, to confirm the block-boundary counterexample is reachable at the top)"};
     }
+    // DEFAULT: top_down. Prove every def with EVERY child BOXED, then discharge
+    // each premise from the same pass's other entries (the module DAG is
+    // well-founded, so this is an induction, not circular reasoning). Three
+    // things fall out, and the third is the one that matters on a real failure:
+    //   * no def's obligation depends on another def's VERDICT, so the whole
+    //     hierarchy is dispatched in parallel instead of depth-serialized;
+    //   * every miter is at its MINIMUM size — bottom-up has to FLATTEN a child
+    //     that did not prove, which is exactly when the parent is hardest;
+    //   * a refuting block is absorbed by re-proving its immediate PARENT with
+    //     that block inlined. If the parent proves, every ancestor already
+    //     proved with the parent BOXED, so the chain closes and nothing higher
+    //     is re-solved. Bottom-up instead grows the flattened cone one level at
+    //     a time, all the way to the top in the worst case.
+    // `bottom_up` is the legacy leaves-first order, kept for A/B and because
+    // `hier_refute=fail` (a debug mode) is defined in terms of it.
+    const std::string hier_order = label("hier_order", "top_down");
+    if (hier_order != "top_down" && hier_order != "bottom_up") {
+      throw Lhd_error{"usage",
+                      std::format("--set formal.lec.hier_order expects top_down|bottom_up, got '{}'", hier_order),
+                      "top_down (default; every def proved with all children boxed, premises discharged afterwards, "
+                      "a refuting block absorbed by its parent) | bottom_up (legacy leaves-first: only an "
+                      "already-proven child is boxed)"};
+    }
+    // fail-fast is a leaves-first notion (skip a def whose child already
+    // refuted); under top-down no def waits on a child's verdict, so the two
+    // cannot be combined.
+    const bool top_down_hier = hier_order == "top_down" && hier_refute != "fail";
+    if (hier_order == "top_down" && hier_refute == "fail") {
+      std::print("lec[hier]: formal.lec.hier_refute=fail forces the legacy bottom_up order\n");
+    }
     r = lec_hierarchical(res,
                          ref_var,
                          impl_var,
@@ -3107,6 +3452,7 @@ void lec_command(Options& opts, Result& res) {
                          vcache.get(),
                          retry_all,
                          /*fail_fast_refute=*/hier_refute == "fail",
+                         /*top_down=*/top_down_hier,
                          o.stats ? &cvc5_hot : nullptr);
     if (vcache) {
       vcache->save();
@@ -3354,6 +3700,20 @@ void lec_command(Options& opts, Result& res) {
   // real counterexample outside the trusted cones; an unknown proves nothing).
   if (r.verdict == livehd::lec::Verdict::Proven && !o.trust.empty()) {
     r.detail += std::format("; PROVEN under {} trusted def(s) (assumed equal, NOT proven — formal.lec.trust)", o.trust.size());
+  }
+  // Same rule for an IGNORED memory: its reads were a shared free symbol and its
+  // contents were never compared, so the pass says nothing about what it stores.
+  // Without this line an ignore-assisted pass reads as an unconditional proof —
+  // which is exactly the "a check that compares nothing is not a proof" trap.
+  if (r.verdict == livehd::lec::Verdict::Proven && !o.ignore_memory.empty()) {
+    std::string names;
+    for (const auto& m : o.ignore_memory) {
+      names += (names.empty() ? "" : ", ") + m;
+    }
+    r.detail += std::format("; PROVEN with {} memory(ies) IGNORED (blackboxed, contents NOT compared — "
+                            "formal.ignore_memory={})",
+                            o.ignore_memory.size(),
+                            names);
   }
 
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
@@ -4243,6 +4603,20 @@ void formal_verify_command(Options& opts, Result& res) {
   // per-obligation firsts. bmc / ind still select a single strategy directly.
   o.engine = label("engine", "auto");
   o.solver       = label("solver", "cvc5");
+  // Same escape hatch as lec: both drivers instantiate the same Encoder, so a
+  // memory it refuses to model (per-port clock edges) has to be excludable here
+  // too, or `lhd formal verify` on that design has no way forward.
+  if (std::string ms = label("ignore_memory", ""); !ms.empty()) {
+    size_t pos = 0;
+    while (pos < ms.size()) {
+      size_t c   = ms.find(',', pos);
+      size_t end = c == std::string::npos ? ms.size() : c;
+      if (end > pos) {
+        o.ignore_memory.emplace_back(ms.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
   o.bound        = std::atoi(label("bound", "6").c_str());
   o.timeout      = std::atoi(label("timeout", "120").c_str());
   o.witness      = label("witness", "true") != "false" && label("witness", "true") != "0";

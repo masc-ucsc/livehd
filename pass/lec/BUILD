@@ -320,6 +320,22 @@ sh_test(
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
 )
 
+# TOP-DOWN hierarchical order (formal.lec.hier_order=top_down, the DEFAULT):
+# every def proved with every child BOXED, premises discharged afterwards by the
+# same pass's other entries. Case 2 is the whole point -- functionality moved
+# ACROSS the inner/mid boundary, so both defs refute standalone while the design
+# does not, and the refutation must be ABSORBED by the parent without re-solving
+# anything above it. Case 3 (a genuine difference still refutes) and case 4 (the
+# two orders agree on every fixture) are what keep "absorb" from becoming
+# "swallow".
+sh_test(
+    name = "lec_hier_topdown_test",
+    size = "large",
+    srcs = ["tests/lec_hier_topdown_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
+)
+
 # Structural def-diff reduction (lec.semdiff=structural, M3): a def whose ref/impl
 # are structurally identical (and whose children are proven) is dropped with no
 # solver call; only the changed def is solved, and a non-equivalent edit still

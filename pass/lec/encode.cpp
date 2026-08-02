@@ -838,6 +838,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   auto ends_with = [](std::string_view s, std::string_view suf) {
     return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
   };
+  // formal.ignore_memory: does the user's list name THIS memory? Matched three
+  // ways because the two front-ends spell a memory differently and the user
+  // types whatever the diagnostic printed: the full hier name, its canonical
+  // form (canon_flop_name strips the per-design instance prefix, so one entry
+  // covers both sides), or the bare leaf name after the last '.'.
+  auto mem_ignored = [&](const hhds::Node_class& n) -> bool {
+    if (ignore_memory_ == nullptr || ignore_memory_->empty()) {
+      return false;
+    }
+    const std::string hier{n.get_hier_name()};
+    const std::string canon = canon_flop_name(hier);
+    const auto        leaf  = [](std::string_view v) {
+      auto d = v.rfind('.');
+      return std::string(d == std::string_view::npos ? v : v.substr(d + 1));
+    };
+    const std::string hleaf = leaf(hier);
+    const std::string dbg   = gu::debug_name(n);  // the spelling the diagnostics print
+    for (const auto& want : *ignore_memory_) {
+      if (want == hier || want == canon || want == hleaf || want == dbg || canon_flop_name(want) == canon
+          || leaf(want) == hleaf || leaf(want) == leaf(dbg)) {
+        return true;
+      }
+    }
+    return false;
+  };
   struct MPort {
     bool            rd = false;
     hhds::Pin_class addr, din, en;
@@ -887,6 +912,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // PIN in phase 1 and resolved to a term in phase 2 -- the combinational
     // fixpoint has not run yet when the clock scan happens.
     hhds::Pin_class commit_en;
+    // formal.ignore_memory: the user EXCLUDED this memory from the comparison.
+    // It is blackboxed -- every read dout becomes ONE SHARED free symbol per
+    // (memory, port, cycle) across ref and impl, and no next-state array is
+    // built -- so the proof says nothing about what it stores. A disclosed
+    // ASSUMPTION, exactly like formal.lec.trust on a def.
+    bool            ignored = false;
   };
   std::vector<MemCut>                   mem_cuts;
   Io_name_map<int> mem_occ;  // per-signature occurrence -> stable key
@@ -902,6 +933,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
+    mc.ignored = mem_ignored(node);
     // ---- FAIL CLOSED on a memory clocked by anything but the reference clock.
     // This encoder DISCARDS a Memory's clock_pin and posclk entirely: every
     // write is modelled as landing once per step. That is right for a memory on
@@ -918,6 +950,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           return fail_unsupported("memory '" + gu::debug_name(node)
                                   + "' is written on the FALLING clock edge, which this encoder does not model "
                                     "(it treats every memory write as landing once per step)");
+        }
+        // PER-PORT clock edges (Ntype::Memory_posclk_mixed): the source memory's
+        // ports do not all commit on the same edge, so the reader could not
+        // represent it and said so. A latch may mix phases -- that is what the
+        // formal phase schedule is for -- a memory may not; the encoder has ONE
+        // commit point per memory. This is a FORMAL refusal, not a read error
+        // (user ruling 2026-08-02): the language allows the shape, so it parses
+        // and regenerates, and the user opts back in per memory.
+        if (!mc.ignored && gu::is_const_pin(e.driver)
+            && gu::hydrate_const(e.driver).to_just_i64() == Ntype::Memory_posclk_mixed) {
+          // Offer a name mem_ignored actually ACCEPTS. `debug_name` carries a
+          // node-id prefix ("memory_36:m") that differs between the two designs,
+          // so the bare leaf is the spelling that works on both sides.
+          const std::string hn = std::string{node.get_hier_name()};
+          const auto        d  = hn.rfind('.');
+          const std::string suggest = hn.empty() ? std::string{gu::debug_name(node)}
+                                                 : (d == std::string::npos ? hn : hn.substr(d + 1));
+          return fail_unsupported(
+              "memory '" + hn + "' (" + gu::debug_name(node)
+              + ") has PER-PORT clock edge polarity: its ports do not all commit on the same clock edge, which this "
+                "encoder does not model -- it has ONE commit point per memory. The language allows the shape, so it "
+                "parses and regenerates; formal refuses it. Exclude it with '--set formal.ignore_memory="
+              + suggest
+              + "', which BLACKBOXES it: its reads become one shared free symbol per (port, cycle) on both sides and "
+                "its contents are never compared, so the proof no longer says anything about what it stores");
         }
       } else if (pn == "clock_pin") {
         // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
@@ -1074,7 +1131,33 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
       if (fresh.isNull()) {
-        fresh = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk);
+        // BLACKBOXED memory (formal.ignore_memory): mint the dout WITHOUT the
+        // per-design `prefix`, so REF and IMPL get the SAME symbol -- the
+        // sequence-transducer treatment (pass/lec/README.md §2) applied to a
+        // memory, with the premise ASSERTED by the user instead of proven. The
+        // symbol must still be fresh per CYCLE: the unroll re-encodes, and a
+        // symbol reused across cycles would pin the read to a constant and
+        // false-prove a design whose only difference is WHEN the memory changes.
+        // Phase 2 skips the tie and the next-state, so nothing constrains it.
+        if (mc.ignored) {
+          // Take the CALLER-BUILT symbol: cvc5's mkConst does not intern by
+          // name, so minting "the same name" on each side yields two DISTINCT
+          // free variables and the read diverges per side (a false REFUTE).
+          // query.cpp seeds these into shared_bbox / step_bbox, which is the
+          // same channel a true blackbox's outputs ride.
+          const std::string sk = "ignmem:" + rk;
+          if (shared_bbox_ != nullptr) {
+            if (auto sit = shared_bbox_->find(sk); sit != shared_bbox_->end()) {
+              fresh = sit->second.term;
+            }
+          }
+          if (fresh.isNull()) {
+            return fail("memory '" + gu::debug_name(node) + "' is in formal.ignore_memory but its shared read symbol '"
+                        + sk + "' was not built; the blackbox would be free PER SIDE and could false-refute");
+          }
+        } else {
+          fresh = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk);
+        }
       }
       if (!dout_dpin.is_invalid()) {
         pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn};
@@ -2972,6 +3055,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,
   // build the next-state array and tie each fresh read dout to its real value.
   for (auto& mc : mem_cuts) {
+    // BLACKBOXED (formal.ignore_memory): phase 1 already minted each read dout
+    // as a SHARED free symbol across the two designs. Emit nothing else — no
+    // dout tie, no next-state array, no read_all, no whole-array update — so
+    // the memory contributes exactly one unconstrained shared value per (port,
+    // cycle) and its CONTENTS are never compared. That is the whole meaning of
+    // "excluded from formal": the reads still connect the two designs (so the
+    // logic AROUND the memory is still proved), but nothing is claimed about
+    // what the memory holds. Disclosed by the driver, like a trusted def.
+    if (mc.ignored) {
+      continue;
+    }
     auto fit_unsigned = [&](const Val& v, int wd) -> Term { return fit_to(tm_, Val{v.term, v.width, false}, wd); };
     bool ok           = true;
 
