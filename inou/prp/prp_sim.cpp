@@ -1895,7 +1895,7 @@ private:
       return bin("div_op", mx);
     }
     if (op == "%") {
-      return bin("mod_op", mx);
+      return bin("rem_op", mx);
     }
     if (op == "&") {
       return bin("and_op", mx);

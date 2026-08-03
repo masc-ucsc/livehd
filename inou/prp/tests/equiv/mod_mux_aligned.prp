@@ -15,9 +15,9 @@ pub mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
   stage[1] bd = b
   mut r:u9 = 0
   if sd {
-    r = ad + 1
+    r = ad@[1] + 1
   } else {
-    r = bd + 2
+    r = bd@[1] + 2
   }
   out = r
 }

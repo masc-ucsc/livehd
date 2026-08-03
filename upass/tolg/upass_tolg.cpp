@@ -2075,12 +2075,32 @@ private:
     return not1(z);
   }
 
-  // Bitwise NOT of a 1-bit condition (LSB carries the logical value).
+  // Logical negation of a 1-bit condition, spelled EQ-against-0 -- NOT a
+  // bitwise Not (the same landed rule lower_none_eq applies to `!=`).
+  //
+  // The old bitwise spelling only worked by ANNOTATION TRUNCATION. The Not
+  // cell's contract is ~x == -x-1 (Bitwidth::process_not), so Not(bool) has
+  // the value envelope {-1,-2} -- never zero -- and the hand-stamped 1-bit
+  // unsigned attr was what made cgen's declared-width clip leave the LSB
+  // carrying the logical value. That is exactly the "bits attribute doing
+  // semantic work" contract violation pass.bitfuzz exists to catch, and catch
+  // it it did: stripping the stamp let bitwidth re-infer the honest 2-bit
+  // signed [-2,-1] envelope, cgen emitted the un-clipped net, and a memory
+  // update_enable driven by this helper (`if (en_i) q <= d`) became
+  // always-true -- the array wrote on every cycle regardless of enable
+  // (tests/equiv/comb_array_const_index_read, 35/1024 vectors, all en=0).
+  //
+  // EQ(x, 0) is the exact logical negation for any integer value with the
+  // honest {0,1} envelope, so no attribute is load-bearing; the emitted
+  // baseline text is unchanged (same 1-bit unsigned reg) and re-inference
+  // recovers the identical range. EQ is in abc's supported bit-blast set
+  // (see nonzero1 above -- same reason it avoids Ror).
   [[nodiscard]] Pin not1(const Pin& a) {
-    auto node = make_node(Ntype_op::Not);
-    setup_sink_by_name(node, "a").connect_driver(a);
+    auto node = make_node(Ntype_op::EQ);
+    node.create_sink_pin(0).connect_driver(a);
+    node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     auto d = node.create_driver_pin(0);
-    set_bits(d, 1);
+    set_bits(d, 2);  // boolean: mw=1 magnitude + the always-0 sign slot
     set_unsign(d);
     return d;
   }
@@ -3867,6 +3887,28 @@ private:
     auto q = flop.create_driver_pin(0);
     set_bits(q, v.mw + 1);
     set_unsign(q);
+    // Keep the stage register's RTL name on q, exactly like finalize_regs does
+    // for a `reg`. Without it cgen synthesizes `flop_<nid>`, and pass/lec's
+    // tier-1 state pairing (which is BY NAME) then matches nothing: every flop
+    // of the def falls through to the speculative tier-2 signature pass, whose
+    // uncertain pairs suppress a bounded-bmc PASS. A `stage[N]` design would
+    // report UNKNOWN even though it is provably equivalent.
+    //
+    // `%pipe_*` (the LN-inserted pipe output flop) is a compiler temp with no
+    // counterpart name on the other front-end, so naming it buys no pairing —
+    // it would only push an escaped `\%pipe_0` identifier into the Verilog.
+    {
+      std::string base{name};
+      if (auto ssa = base.find("___ssa_"); ssa != std::string::npos) {
+        base.resize(ssa);
+      }
+      if (!base.empty() && base.front() != '%') {
+        livehd::graph_util::set_pin_name(q, base);
+        // Also stamp the flop NODE name so get_hier_name() reports the register
+        // name instead of the `n<id>` fallback (see finalize_regs).
+        flop.set_name(base);
+      }
+    }
     reg_map_.emplace(std::string(name), flop);
     record(name, q, v.mw);
   }
@@ -5328,7 +5370,7 @@ private:
   // ───────────────────── Pyrope has no general hardware modulo: the signed
   // semantics differ across languages and a full divider is expensive (docs
   // pyrope/02-basics). LiveHD uses TRUNCATED semantics (the remainder's sign
-  // follows the dividend, matching Dlop::mod_op and Verilog `%`). We lower the
+  // follows the dividend, matching Dlop::rem_op and Verilog `%`). We lower the
   // cases that collapse to shift/mask and HARD-error the rest:
   //   (2) |a| < |b| over their whole ranges          → a            (no
   //   remainder) (1) b a comptime power-of-two, a non-negative   → a & (|b|-1)
@@ -5412,7 +5454,7 @@ private:
 
     // A possibly-NEGATIVE dividend is no longer ambiguous: the op is defined as
     // TRUNCATED remainder (sign follows the dividend, like Verilog `%` and
-    // Dlop::mod_op), so it needs no constraint on `a` -- only the mask/digit-sum
+    // Dlop::rem_op), so it needs no constraint on `a` -- only the mask/digit-sum
     // shortcuts below do, and those are optimizations, not the semantics.
     if (!a_nonneg) {
       emit_rem(dst_name, av, b);

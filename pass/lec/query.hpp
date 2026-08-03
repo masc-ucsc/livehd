@@ -174,6 +174,21 @@ struct Lec_options {
                                  // the programmatic-API fallback (a single, fork-free engine for
                                  // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
+  // cvc5 int-blasting (solve-bv-as-int): translate the BV encoding to unbounded
+  // integer arithmetic inside cvc5 (VMCAI'22 "iand" lazy refinement). Measured
+  // split: arithmetic-rewrite miters (reassociated / distributed / commuted
+  // multiplies) that neither abc nor BV bit-blasting finish in 60s prove in
+  // ~0.1s as integers, while mask/extract/memory-heavy cones degrade to Unknown
+  // (nonlinear integer arithmetic is undecidable). Hence:
+  //   auto (default) — solve BV-first; a solver-give-up Unknown earns ONE
+  //     int-blasted re-solve at the formal.min_timeout budget (int_blast_retry,
+  //     called by the drivers — never by the engines, so the portfolio/tier-2
+  //     recursion inside prove_equal retries at most once per driver query);
+  //   off — never int-blast;
+  //   iand | sum | bitwise | bv — force that cvc5 mode from the first solve.
+  // Verdicts stay sound either way (the translation is equisatisfiable).
+  // Main lec solve path only (the verify engine never int-blasts).
+  std::string int_blast = "auto";
   int         bound   = 6;       // BMC / induction depth
   // `timeout` is a SOFT TOTAL budget, not a per-query cap: overshooting it is
   // fine, silently checking nothing is not. The hier driver spends it as total
@@ -330,11 +345,16 @@ struct Lec_options {
   // already makes the correspondence incomplete). A timeout/Unknown never
   // retries (the retry's ceiling is the Unknown the timeout already reports).
   // A BOUNDED bmc-Proven is never claimed while pairs are applied (the shared
-  // s0 constraints can mask a real bounded CEX — a false PASS); only an
-  // unbounded inductive Proven is accepted with pairs in force — it is
-  // self-certifying (any inductive, output-implying, initially-true relation
-  // certifies) PROVIDED the paired reset/init values are equal, which the
-  // producer guarantees and validate_uncertain_pairs re-checks on hint replay.
+  // s0 constraints can mask a real bounded CEX — a false PASS). prove_equal
+  // drops the speculative pairs and retries BMC through the existing prologue:
+  // a detected reset establishes state normally; with no reset, otherwise-
+  // uninitialized reference state starts as tracked '?' (or canonical zero
+  // under gold_x=zero), matching hardware's unspecified power-on contract.
+  // Only that pair-free bounded result, or an unbounded inductive Proven, is
+  // accepted. The latter is self-certifying (any inductive, output-implying,
+  // initially-true relation certifies) PROVIDED the paired reset/init values
+  // are equal, which the producer guarantees and validate_uncertain_pairs
+  // re-checks on hint replay.
   std::vector<std::pair<std::string, std::string>> uncertain_match;
 
   // Confident MEMORY correspondence (2f-lec diverged-use collapse guard; produced
@@ -487,7 +507,14 @@ struct Lec_options {
   // by-value Lec_options copy into every fork, so a worker never touches the
   // cache file -- it just checks membership. A hit skips abc for that cone.
   absl::flat_hash_set<std::string> _cone_cache;
-  bool                  _isolated_worker = false;  // one global-pool child: no nested forks
+  bool                             _isolated_worker = false;  // one global-pool child: no nested forks
+  // Internal-only mode for the speculative-pair recovery leg. With a detected
+  // reset it is inert. Without one, otherwise-uninitialized reference flop state
+  // gets a full '?' plane under gold_x=ignore (implementation power-on remains
+  // arbitrary); gold_x=zero instead gives both sides canonical zero. This avoids
+  // an adversarial independent-state CEX while keeping the chosen no-reset/X
+  // contract explicit in the verdict detail.
+  bool                             _init_no_reset   = false;
 
   // formal.stats / --stats: capture + report cvc5 solve statistics (also
   // registers the cvc5::Plugin -- makes the solve ~8x slower). OFF by default
@@ -598,6 +625,10 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.conelimit < 0) {
     return "lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
   }
+  if (o.int_blast != "auto" && o.int_blast != "off" && o.int_blast != "iand" && o.int_blast != "sum"
+      && o.int_blast != "bitwise" && o.int_blast != "bv") {
+    return "lec.int_blast unknown '" + o.int_blast + "' (auto | off | iand | sum | bitwise | bv)";
+  }
   return {};
 }
 
@@ -628,6 +659,21 @@ bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl);
 // formal.jobs and cvc5 instances never execute concurrently in threads.
 Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
+
+// int_blast=auto second leg: when the BV-first solve `first` came back a
+// SOLVER-GIVE-UP Unknown (not unsupported/oversize/nothing-compared — those no
+// budget can change), re-solve ONCE with cvc5's int-blasting (iand) at the
+// formal.min_timeout budget and adopt the retry iff it SETTLES; a retry Unknown
+// keeps `first` (its detail names the real bottleneck) with a note appended.
+// DRIVER-level only — call it once per driver query, after any flat-confirm,
+// never from inside the engines: prove_equal recurses (tier-2 discipline, the
+// auto portfolio's per-engine attempts), and a retry in that recursion would
+// fire once per inner attempt instead of once per query. `isolated` selects
+// prove_equal_isolated for the re-solve (match how `first` was produced).
+// No-op unless opts.int_blast == "auto".
+Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result first,
+                             const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr,
+                             bool isolated = false);
 
 // Parse a lec.match correspondence spec into {ref_name, impl_name} pairs. Pure (no
 // file IO — a caller resolves any leading "@FILE" to its text first). Pairs are

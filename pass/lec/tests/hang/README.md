@@ -17,6 +17,15 @@ $LHD lec --ref pass/lec/tests/hang/poly_ref.v    --impl pass/lec/tests/hang/poly
 | `distrib` | mul over add          | `a*(b+c)`      | `a*b + a*c`    |
 | `poly`    | 3-way mul commute     | `a*b*c`        | `c*a*b`        |
 
+**Superseded (2026-08-03): all three now PROVE in ~0.1s and no longer reproduce
+anything.** `formal.lec.int_blast=auto` is the default: when the BV solve gives
+up, `lhd lec` re-solves once as unbounded integers (cvc5 `solve-bv-as-int`), and
+a chain of multiplies is exactly what that leg is good at. To get the freeze
+behaviour back, either force the old path with `--set formal.lec.int_blast=off`,
+or mask the product (`& 16'hF0F0`), which buries it under an `iand` lazy
+refinement that neither leg finishes — that is what `//pass/lec:lec_timeout_test`
+now uses. The rest of this file describes the original (still-fixed) bug.
+
 All three are 16-bit. Notes:
 
 - The **encoder is not the problem** — it finishes in milliseconds. The freeze

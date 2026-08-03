@@ -8,6 +8,23 @@
 # query must come back promptly as UNKNOWN (a sound degrade, never a false
 # PROVEN/REFUTED). A positive control checks the bound does NOT break a normal,
 # quickly-solvable proof.
+#
+# The `& 16'hF0F0` on every product is LOAD-BEARING, not decoration. A BARE
+# multiply-rewrite miter is exactly the shape `formal.lec.int_blast=auto` (the
+# default since 2026-08-03) discharges in ~0.1s on its second leg by re-solving
+# as unbounded integers, so all three cases started coming back PROVEN and this
+# test was asserting an obsolete claim. Masking the product buries it under an
+# `iand` lazy refinement, where int-blasting lands in undecidable nonlinear
+# integer arithmetic: measured UNKNOWN on BOTH legs (int_blast=off and
+# int_blast=iand) at formal.timeout=30, so these are genuinely hard and not
+# budget-shaped. Per the standing rule in lec_verdict_policy_test: when a hard
+# fixture starts proving, HARDEN THE FIXTURE — never raise the budget, and never
+# switch the knob off to keep the old fixture alive (that would stop testing the
+# path a user actually gets).
+#
+# `formal.min_timeout=1` bounds that second leg: the retry's whole budget is the
+# min_timeout floor, so leaving it on the 20s default would add ~20s to every
+# case here and crowd the 25s watchdog below.
 
 set -u
 
@@ -24,32 +41,32 @@ fail=0
 # --- the three freeze cases (all sides equivalent; cvc5 cannot decide quickly) ---
 cat > "$WORK/reassoc_ref.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = (a * b) * c;
+  assign z = ((a * b) * c) & 16'hF0F0;
 endmodule
 EOF
 cat > "$WORK/reassoc_impl.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = a * (b * c);
+  assign z = (a * (b * c)) & 16'hF0F0;
 endmodule
 EOF
 cat > "$WORK/distrib_ref.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = a * (b + c);
+  assign z = (a * (b + c)) & 16'hF0F0;
 endmodule
 EOF
 cat > "$WORK/distrib_impl.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = a*b + a*c;
+  assign z = (a*b + a*c) & 16'hF0F0;
 endmodule
 EOF
 cat > "$WORK/poly_ref.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = a * b * c;
+  assign z = (a * b * c) & 16'hF0F0;
 endmodule
 EOF
 cat > "$WORK/poly_impl.v" <<'EOF'
 module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
-  assign z = c * a * b;
+  assign z = (c * a * b) & 16'hF0F0;
 endmodule
 EOF
 # --- positive control: easy equivalent pair must still PROVE under the bound ---
@@ -74,7 +91,7 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
   start=$(date +%s)
   "$LHD" lec --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
          --top foo --set formal.lec.hier=false --set formal.engine=bmc --set formal.lec.decompose=false \
-         --set formal.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
+         --set formal.timeout="$tmo" --set formal.min_timeout=1 --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
   # POLL in 1s steps and exit as soon as the run is reaped, rather than one
   # `sleep $outer`: killing the watchdog subshell does NOT kill a long sleep it

@@ -150,27 +150,57 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
 #endif
 }
 
+// The range of a boolean-producing cell (a comparator, a reduce-OR).
+//
+// It is the ZERO-EXTENDED boolean {0, 1} -- NOT the 1-bit signed {-1, 0}. That
+// is the same convention process_get_mask spells out for a single-bit slice
+// ("a set bit is the unsigned 1; only `#sext` may be negative"), and it is what
+// every front end emits: tolg/cgen declare a comparator result `reg [1:0]`,
+// i.e. 2 signed bits marked unsigned.
+//
+// Modelling it as [-1, 0] made the value NEGATIVE, and a boolean is routinely
+// SHIFTED into position: `(a==1) << 1` is 2 under the real convention and -2
+// under the signed one, whose sign extension sets every bit above it. A one-hot
+// selector assembled that way (`e0 | e1<<1 | e2<<2 | ...`, the shape `match`
+// lowers to) came out with several bits set, and pass.formal correctly REFUTED
+// its own design's one-hotness -- five corpus designs failed to compile the
+// moment pass.bitfuzz made this path run.
 void Bitwidth::set_bw_1bit(hhds::Pin_class dpin) {
   if (dpin.is_invalid()) {
     return;
   }
-  set_bits(dpin, 1);
-  set_sign(dpin);
-  bwmap.insert_or_assign(dpin.get_class_index(), Bitwidth_range(-1, 0));
+  auto [it, inserted] = bwmap.insert_or_assign(dpin.get_class_index(), Bitwidth_range(0, 1));
+  set_bits_sign(dpin, it->second);
 }
 
 void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
   if (dpin.is_invalid()) {
     return;
   }
-  auto       b             = bw.get_sbits();
-  const auto declared_bits = bits_of(dpin);
-  if ((is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) && declared_bits != 0) {
-    // Top-level IO widths are fixed by the source RTL interface. Do not let
-    // abstract signed range inference widen a declared 1-bit signed control
-    // port to the overflow sentinel width (e.g. clock/reset -> 32768 bits).
-    b = declared_bits;
+  // A DECLARED graph-IO port is the source RTL interface: leave it exactly as
+  // declared, width AND sign.
+  //
+  // The old guard tested `bits_of(dpin)` -- the PIN attr -- but a port's
+  // declaration lives on the GraphIO decl, not the pin (node_util.hpp
+  // bits_of(pin, gio, name)), and IO pins normally carry no pin attrs at all.
+  // So it was inert on the FIRST write: inference stamped its own width and
+  // sign onto the port, the guard then dutifully preserved that, and bw_pass
+  // re-seeds from the pin attrs at the top of the next iteration -- feeding an
+  // inferred range back in as if it were the declaration. A port narrowed that
+  // way silently truncates everything downstream (a 4-bit signed `[-8..7]`
+  // input re-read as `[0..3]` collapsed the Sext that carried its sign
+  // extension, since process_sext bypasses a Sext whose source already fits).
+  if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+    if (const auto* gio = current_graph ? current_graph->get_io().get() : nullptr; gio != nullptr) {
+      const auto nm = livehd::graph_util::pin_name_of(dpin);
+      if (!nm.empty() && gio->get_bits(nm) != 0) {
+        return;
+      }
+    }
+    // No declared width (the front end left the port unsized): inference is
+    // allowed to size it, and the stamped value is all any reader has.
   }
+  const auto b = bw.get_sbits();
   set_bits(dpin, b);
   if (bw.is_always_positive() && b > 0) {
     set_unsign(dpin);
@@ -332,8 +362,20 @@ void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec&
 
   for (auto e : inp_edges) {
     if (e.sink.get_port_id() == 0) {
-      auto           n_data_mux = inp_edges.size() - 1;
-      Bitwidth_range bw2(-static_cast<int64_t>(n_data_mux / 2), static_cast<int64_t>(n_data_mux / 2) - 1);
+      // The selector is an INDEX over the data arms, so its envelope is
+      // [0 .. n_data-1] -- non-negative, exactly like process_hotmux's.
+      //
+      // It used to be [-(n/2) .. n/2-1], i.e. [-1..0] for the two-arm case:
+      // the signed 1-bit boolean model that set_bw_1bit also used and that the
+      // rest of the stack contradicts. adjust_bw only ever WIDENS, so that
+      // negative half got unioned into the comparator driving the selector,
+      // its range became [-1..1], is_always_positive() went false, and
+      // set_bits_sign stamped `pin_signed` on the comparator's OUTPUT pin.
+      // cgen keys the emitted comparison's signedness off exactly that pin
+      // (cgen_verilog.cpp `signed_compare = !is_unsign(dpin)`), so an unsigned
+      // compare silently became a signed one.
+      const auto     n_data = inp_edges.size() - 1;
+      Bitwidth_range bw2(0, n_data ? static_cast<int64_t>(n_data) - 1 : 0);
       adjust_bw(e.driver, bw2);
       continue;
     }
@@ -464,15 +506,38 @@ void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   }
   auto n_bw = n_it->second;
 
-  if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64()) {
-    auto max     = a_bw.get_max();
-    auto min     = a_bw.get_min();
-    // Arithmetic >> (rounds toward -inf), NOT division (rounds toward zero): the
-    // two differ for negative operands (`-3 sra 1` == -2, but `-3 / 2` == -1), so
-    // division gives an unsoundly tight lower bound. Shifting by the SMALLEST
-    // amount keeps the widest (most extreme) envelope.
-    auto max_val = max.sra_op(n_bw.get_min());
-    auto min_val = min.sra_op(n_bw.get_min());
+  if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64() && n_bw.get_max().is_just_i64()) {
+    // Take the FOUR-CORNER envelope, the way process_shl does.
+    //
+    // Arithmetic >> (rounds toward -inf), NOT division (rounds toward zero):
+    // the two differ for negative operands (`-3 sra 1` == -2 but `-3 / 2` ==
+    // -1), so division gives an unsoundly tight lower bound.
+    //
+    // Shifting BOTH bounds by the smallest amount is unsound for the same
+    // reason in the other direction: `a >> n` shrinks toward 0 (or -1) as n
+    // grows, so for a NON-NEGATIVE `a` the minimum is `a_min >> n_max`, not
+    // `a_min >> n_min`. With a variable shift the old bound collapsed the range
+    // to a single point -- and adjust_bw then const-folded the whole SRA away.
+    // `packed_assign`'s array select (`19'sh24810 >>> ((sel&3)*4+4)`, shift
+    // amount [4..16]) came out as the constant 9345, and the design degenerated
+    // to `z = 1`.
+    const auto a_max = a_bw.get_max();
+    const auto a_min = a_bw.get_min();
+    const auto n_lo  = n_bw.get_min();
+    const auto n_hi  = n_bw.get_max();
+
+    const Dlop corners[4]
+        = {*a_max.sra_op(n_lo), *a_max.sra_op(n_hi), *a_min.sra_op(n_lo), *a_min.sra_op(n_hi)};
+    Dlop max_val = corners[0];
+    Dlop min_val = corners[0];
+    for (int i = 1; i < 4; ++i) {
+      if (corners[i].gt_op(max_val)->is_known_true()) {
+        max_val = corners[i];
+      }
+      if (corners[i].lt_op(min_val)->is_known_true()) {
+        min_val = corners[i];
+      }
+    }
 
     Bitwidth_range bw(min_val, max_val);
     adjust_bw(node.create_driver_pin(0), bw);
@@ -484,8 +549,20 @@ void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec&
 void Bitwidth::process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
 
-  Dlop max_val;
-  Dlop min_val;
+  // Seed the accumulators EXPLICITLY at zero. A default-constructed Dlop is
+  // Type::Invalid, and arithmetic guards on is_numeric() and returns NIL for a
+  // non-numeric operand (dlop.cpp add_op/sub_op) -- so `max_val.add_op(x)`
+  // yields nil, not x, and every later step stays nil. Comparison hides the
+  // difference (three_way_cmp reads Invalid's zero words, so it behaves like 0,
+  // which is why process_flop's default-seeded accumulators work), but here the
+  // nil pair reaches Bitwidth_range(min,max), where is_just_i64() accepts it
+  // and to_just_i64() reads 0 -- a non-overflow range [0..0]. adjust_bw sees
+  // min==max and CONST-FOLDS the whole adder to zero. Every front end stamps a
+  // width on its Sum nodes, which takes the "pin already has bits" early-exit
+  // in bw_pass, so nothing on a normal path ever reached this; pass.bitfuzz
+  // strips the width and does.
+  Dlop max_val = *Dlop::create_integer(0);
+  Dlop min_val = *Dlop::create_integer(0);
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -875,8 +952,31 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   Dlop res_min = res_max;
 
   if (a_min.is_negative()) {
+    // Probe the worst case: the operand with EVERY bit set.
+    //
+    // The literal -1 expresses that only for a NON-negative mask. A negative
+    // (carve-out) mask makes Dlop::get_mask_op copy bits [positive_mask_bits,
+    // src_bits) of the SOURCE, and src_bits is the source's OWN get_bits() --
+    // and -1 is one bit wide, so exactly one bit gets selected and
+    // get_mask_op's single-bit rule hands back the signed -1 rather than an
+    // all-ones pattern (dlop.cpp: get_mask(-1,-1) == -1). The probe then never
+    // raised res_max and the bound fell back to a_min.neg_op(), i.e. 2^(N-1)
+    // instead of 2^N-1: an 8-bit port zero-extended by `x & 8'hff` was modelled
+    // as [0..128] instead of [0..255]. bits_of hides it (get_bits(128) ==
+    // get_bits(255) == 9), so the Get_mask pin looks identical and only a
+    // consumer reveals it -- `+1` needs 9 bits for 128 but 10 for 255, and the
+    // one-bit-narrow sum truncated: `r(ref=256 impl=0) @ x=255`.
+    //
+    // For a negative mask, probe at the OPERAND's width instead. The positive
+    // branch keeps -1: for a sparse mask like 0xf00 that is the bound that
+    // yields the right envelope.
     Dlop tmp;
-    tmp = gm(*Dlop::create_integer(-1), mask_val);
+    if (mask_val.is_negative()) {
+      const auto a_bits = std::max(a_max.get_bits(), a_min.get_bits());
+      tmp               = gm(*Dlop::get_mask_value(a_bits), mask_val);
+    } else {
+      tmp = gm(*Dlop::create_integer(-1), mask_val);
+    }
     if (tmp.gt_op(res_max)->is_known_true()) {
       res_max = tmp;
     }
@@ -1048,17 +1148,24 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
     return;
   }
 
-  Dlop max_val;
-  max_val = Dlop::create_integer(0);
-  Dlop min_val;
-  min_val = Dlop::create_integer(0);
-  if (!any_negative) {
-    max_val = Dlop::get_mask_value(max_bits - 1);
+  Bitwidth_range bw;
+  if (any_negative) {
+    // The full signed range of max_bits, NOT [-2^(max_bits-1) .. 0].
+    //
+    // Two things were wrong with the old bound. It was UNSOUND: an operand that
+    // *can* be negative only sets the result's sign bit when it actually is, so
+    // `a | b` is perfectly capable of being positive and pinning max at 0 said
+    // otherwise. And it CRASHED: the lower bound came from
+    // Dlop::get_neg_mask_value(max_bits - 1), which returns +1 rather than a
+    // negative value for an argument <= 1 -- so an Or of 1-bit signed values
+    // ([-1..0], sbits 1) built the inverted range [1..0] and tripped
+    // Bitwidth_range::set_range's max >= min assertion.
+    bw.set_sbits_range(max_bits);
   } else {
-    min_val = Dlop::get_neg_mask_value(max_bits - 1);
+    bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits - 1));
   }
 
-  adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
+  adjust_bw(node.create_driver_pin(0), bw);
 }
 
 void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
@@ -1469,15 +1576,32 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         if (pin.is_invalid()) {
           continue;
         }
-        auto b = bits_of(pin);
+        // A DECLARED port is seeded from its DECL -- width and sign together --
+        // and only an undeclared one falls back to the pin attrs.
+        //
+        // The pin's own `pin_signed` says nothing about the source: every front
+        // end stamps it on every graph-IO pin by convention (LGraph values are
+        // signed), so `is_unsign(pin)` is false for `input [2:0] a` and for
+        // `input signed [3:0] b` alike. Reading it made a 3-bit UNSIGNED port
+        // seed as [-4..3] instead of [0..7].
+        //
+        // And a PORT's `bits` is the LITERAL declared bus width, not the
+        // magnitude+sign count used on internal nets -- which is why the signed
+        // arm below is `set_sbits_range(b)` (decl 4 -> [-8..7], exactly a 4-bit
+        // signed port). The unsigned arm must match: `set_ubits_range(b)`, so
+        // decl 3 -> [0..7]. The old `b - 1` gave [0..3] and every value derived
+        // from the port came out a bit too narrow, so cgen emitted a truncating
+        // net -- `lhd lec` caught it as res(ref=8 impl=0) @ ar.x=7.
+        int32_t b      = static_cast<int32_t>(d.bits);
+        bool    unsign = d.unsign;
         if (b == 0) {
-          b = static_cast<int32_t>(d.bits);
+          b      = bits_of(pin);
+          unsign = livehd::graph_util::is_unsign(pin);
         }
         if (b) {
           Bitwidth_range bw;
-          bool           unsign = livehd::graph_util::is_unsign(pin) || d.unsign;
           if (unsign) {
-            bw.set_ubits_range(b - 1);
+            bw.set_ubits_range(b);
           } else {
             bw.set_sbits_range(b);
           }
@@ -1505,6 +1629,33 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       if (inp_edges.empty() && op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::LUT) {
         node.del_node();
         continue;
+      }
+
+      // Seed the range of every CONSTANT operand.
+      //
+      // There are two constant representations and only one of them was ever
+      // seeded. An `Ntype_op::Nconst` NODE is emitted by forward_class and goes
+      // through process_const below; a constant built by
+      // graph_util::create_const is a driver pin on the CONST_NODE SINGLETON,
+      // which no class/flat/hier traversal ever emits (hhds graph.hpp), so
+      // process_const never saw it and it never reached bwmap. Every processor
+      // that looks its operands up -- process_sum, process_mult, process_mux,
+      // process_hotmux, ... -- then bailed with not_finished, so a cell as
+      // ordinary as `x + 1` was uninferable no matter how well bounded `x` was.
+      // (process_get_mask papered over its own case with a local hydrate_const
+      // fallback, which is why masks worked and arithmetic did not.)
+      for (const auto& e : inp_edges) {
+        if (e.driver.is_invalid() || !is_const_pin(e.driver)) {
+          continue;
+        }
+        const auto ci = e.driver.get_class_index();
+        if (bwmap.contains(ci)) {
+          continue;
+        }
+        auto val = hydrate_const(e.driver);
+        if (val.is_numeric()) {
+          bwmap.insert_or_assign(ci, Bitwidth_range(val));
+        }
       }
 
       if (op == Ntype_op::Nconst) {
@@ -1787,13 +1938,14 @@ void Bitwidth::set_subgraph_boundary_bw(hhds::Node_class& node) {
     if (sub_out.is_invalid() || bits == 0) {
       continue;
     }
-    bool sub_unsign = d.unsign;
-    if (sub_unsign) {
-      if (bits == 1) {
-        bw.set_range(0, 1);
-      } else {
-        bw.set_ubits_range(bits - 1);
-      }
+    // Same rule as the top-level IO seeding: an instance port's `bits` is the
+    // LITERAL declared bus width, so unsigned takes ubits(bits) and signed
+    // takes sbits(bits). The old `bits - 1` seeded a 9-bit unsigned child port
+    // as [0..255] instead of [0..511]; the `bits == 1` special case just below
+    // it was the same bug patched for one width (set_range(0,1) IS
+    // set_ubits_range(1)), which is what gave the rule away.
+    if (d.unsign) {
+      bw.set_ubits_range(bits);
     } else {
       bw.set_sbits_range(bits);
     }

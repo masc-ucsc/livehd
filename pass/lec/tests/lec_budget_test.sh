@@ -21,6 +21,12 @@
 # draw-down): every knob below is the SMALLEST value that still separates the
 # behaviors.
 #
+# Since 2026-08-03 an UNSETTLED def costs a further ~2*min_timeout: the default
+# `formal.lec.int_blast=auto` re-solves every solver-give-up Unknown as unbounded
+# integers at the min_timeout budget (base + step again), and that leg runs INSIDE
+# the def's timing, so it draws the budget down like any other solve. That is why
+# min_timeout is pinned to 1 here and why the window bound below is what it is.
+#
 # Timing claims are asserted on the run's OWN accounting (the `Ns actual` in its
 # budget report = the DAG dispatch window), never on the shell's `date` delta: the
 # reported window is stable to the second because it is a sum of solver grants,
@@ -43,13 +49,20 @@ fail=0
 
 # --- N DISTINCT hard leaf defs (not N instances of one def: LEC works per DEF, so
 # --- instances of one def are proven once and would not exercise starvation).
-# --- Each leaf is a 16-bit mul reassoc: equivalent, but the cvc5 bit-blast freezes,
-# --- so every leaf needs a solver call that will burn its whole grant.
+# --- Each leaf is a MASKED 16-bit mul reassoc: equivalent, but the cvc5 bit-blast
+# --- freezes, so every leaf needs a solver call that will burn its whole grant.
+# --- The `& 16'hF0F0` is what keeps it hard: an unmasked multiply rewrite is the
+# --- exact shape `formal.lec.int_blast=auto` (default since 2026-08-03) proves in
+# --- ~0.1s on its second leg by re-solving as unbounded integers, which turned
+# --- every "hard" leaf here into a real PROVEN and tripped the false-PROVEN
+# --- guards below. Under the mask the product sits inside an `iand` lazy
+# --- refinement that int-blasting does not finish either (measured UNKNOWN on
+# --- both legs at formal.timeout=30), so the leaves burn their grant again.
 mkhier() {  # $1=basename $2=nleaves $3=ref|impl
   local e i; if [ "$3" = ref ]; then e='(a*b)*c'; else e='a*(b*c)'; fi
   { for ((i = 0; i < $2; i++)); do
       echo "module mul3_$i(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);"
-      echo "  assign z = $e ^ 16'd$i;"
+      echo "  assign z = (($e) & 16'hF0F0) ^ 16'd$i;"
       echo "endmodule"
     done
     echo -n "module top(input [15:0] a, input [15:0] b, input [15:0] c"
@@ -143,13 +156,20 @@ if grep -qE "budget 2s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [1-9
 else
   echo "FAIL: a starved run must report target/actual/units and a NON-ZERO floored count (per-def budgeting floors nobody): $(cat "$OUTFILE")"; fail=1
 fi
-# Wall bound: the solving window is ~one budget plus a floor per straggler,
-# strictly under the 3*(2+1)=9s the per-def path would spend. Plus a loose
-# end-to-end guard so a real blowup (a def ignoring its cap) still fails loudly.
-if [ "${ACTUAL:-99}" -lt 9 ]; then
-  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 9s; per-def would be 9s+)"
+# Wall bound: the solving window is ~one budget, plus a floor per straggler, plus
+# the int-blast retry every unsettled def draws (~8s measured at these knobs).
+# The TOTAL-vs-PER-DEF discriminator is the FLOORED COUNT asserted just above —
+# deterministic, and no timing model can weaken it. This bound is the separate
+# "the cap was honored at all" guard: a def that ignores its grant does not
+# overshoot by a second, it FREEZES (these miters are still UNKNOWN at
+# formal.timeout=30), so 12s clears the grant sum with room to spare and still
+# fails loudly on a real blowup. It used to read `< 9s == 3*(2+1)`, which the
+# retry leg (~2*min_timeout per unsettled def — see the cost model) turned into a
+# coin flip: 8s measured against a 9s threshold. Plus a loose end-to-end guard.
+if [ "${ACTUAL:-99}" -lt 12 ]; then
+  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 12s; an ungranted def would freeze)"
 else
-  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 9s; total budget not honored)"; fail=1
+  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 12s; total budget not honored)"; fail=1
 fi
 if [ "$ELAPSED" -ge 25 ]; then
   echo "FAIL: end-to-end took ${ELAPSED}s for a 2s budget (want < 25s)"; fail=1

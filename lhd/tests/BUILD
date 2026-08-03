@@ -71,6 +71,18 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# pass.bitfuzz tripwires: strip the per-pin bits/sign annotations, re-infer,
+# and require LEC to PROVE the fuzzed netlist equivalent to the baseline for
+# one pinned design per defect class the first sweeps found. Guards the width
+# contract ("bits are derived metadata; narrowing is an explicit cell") against
+# every future pass that touches the annotations. See todo_bitfuzz.md.
+sh_test(
+    name = "bitfuzz_tripwires_test",
+    size = "large",
+    srcs = ["bitfuzz_tripwires_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # `lhd lec` as the single equivalence command: verilog inputs (slang default +
 # --reader yosys-* override), the cvc5 (default) and lgyosys backends via
 # --set formal.solver, and the retired `check` command's migration error.
@@ -384,7 +396,8 @@ sh_test(
 
 # 2f-lec tier-2 uncertain state correspondence: semdiff full-match pairs
 # injected as uncertain (self-certifying ind PASS, drop-all+retry-once on
-# REFUTE, bounded bmc PASS suppressed), entity-keyed pair hints replayed warm.
+# REFUTE, bounded bmc accepted only after pair-free reset/no-reset retry),
+# entity-keyed pair hints replayed warm.
 sh_test(
     name = "lec_state_pairing_test",
     size = "medium",
@@ -647,6 +660,21 @@ sh_test(
     name = "phase_schedule_test",
     size = "large",
     srcs = ["phase_schedule_test.sh"],
+    data = ["//lhd"],
+)
+
+# formal.lec.int_blast (cvc5 solve-bv-as-int): the translation to unbounded
+# integers is equisatisfiable, so it must never change a verdict -- PROVEN stays
+# PROVEN (comb and sequential), and a REFUTED must keep its CONCRETE
+# counterexample (a witness degrading to UNKNOWN means the model round-trip
+# through the translation broke). Also pins the int_blast=auto DEFAULT: a
+# starved BV solve of a multiply miter must convert via the min_timeout
+# int-blast retry, and int_blast=off must NOT retry. cones=false so cvc5, not
+# abc, solves.
+sh_test(
+    name = "lec_int_blast_test",
+    size = "medium",
+    srcs = ["lec_int_blast_test.sh"],
     data = ["//lhd"],
 )
 

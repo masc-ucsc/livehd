@@ -774,22 +774,46 @@ void apply_lhd_settings(Options& opts) {
 // Recipe name -> ordered (set-name, EPRP method) graph passes.
 std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def) {
   std::string r = opts.recipe.empty() ? std::string{def} : opts.recipe;
+
+  // pass.bitfuzz is a VERIFICATION CANARY, not an optimization: it strips the
+  // per-pin width/sign annotations and makes bitwidth reconstruct them, so any
+  // stage that gave those attributes semantic meaning shows up as a width
+  // disagreement (or, downstream, a LEC refutation). It is off unless the user
+  // asks for it, and it must run AFTER cprop and BEFORE bitwidth --
+  // debug_assert_cells_sized (node_util.hpp) enforces the OPPOSITE contract at
+  // cprop's entry in dbg builds, so an earlier insertion point would trip that
+  // assert by construction.
+  std::vector<std::pair<std::string, std::string>> fuzz;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.bitfuzz.mode" && value != "off") {
+      fuzz.emplace_back("compile.bitfuzz", "pass.bitfuzz");
+      break;
+    }
+  }
+
   if (r == "O0") {
     return {};
   }
   if (r == "O1") {
-    return {
+    std::vector<std::pair<std::string, std::string>> steps{
         {"compile.cprop", "pass.cprop"}
     };
+    // Under O1 there is no bitwidth step to recover the widths, so bitfuzz
+    // brings its own (it runs the inference in-process) and the graph still
+    // leaves the recipe fully sized.
+    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
+    return steps;
   }
   if (r == "O2") {
     // pass.formal is NOT a recipe pass: it runs as a dedicated none|fast|normal
     // mode step in graph_pipeline_and_emits (default fast, none under O0), so it
     // is independent of the O-level optimization recipe below.
-    return {
-        {   "compile.cprop",    "pass.cprop"},
-        {"compile.bitwidth", "pass.bitwidth"}
+    std::vector<std::pair<std::string, std::string>> steps{
+        {"compile.cprop", "pass.cprop"}
     };
+    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
+    steps.emplace_back("compile.bitwidth", "pass.bitwidth");
+    return steps;
   }
   throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
 }

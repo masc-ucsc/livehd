@@ -1527,6 +1527,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         r.cvc5   += rf.cvc5;  // here `rf` is the discarded side; the effort was still spent
       }
     }
+    // int_blast=auto second leg: a solver-give-up Unknown (after any flat retry)
+    // earns ONE int-blasted re-solve at the min_timeout floor. Before the
+    // trusted-box demotion: a retry REFUTE must pass through the same discipline
+    // below as any other refute.
+    r = livehd::lec::int_blast_retry(ref_by_name[name], impl_by_name[name], o, std::move(r), sub_lib, order.size() != 1);
     // A refute that turns on a TRUSTED box input is not a sound disproof (the
     // trusted leaf may ignore that input): degrade it to Unknown, keeping the
     // witness for diagnosis. Under strict (and any witness-carrying Unknown) this
@@ -3062,6 +3067,7 @@ void lec_command(Options& opts, Result& res) {
   o.conelimit    = std::atoi(label("conelimit", "10000").c_str());
   o.phase_sched  = label("phase_sched", "true") != "false" && label("phase_sched", "true") != "0";
   o.box_seq      = label("box_model", "seq") != "uf";
+  o.int_blast    = label("int_blast", "auto");
   o.strict       = label("strict", "true") != "false" && label("strict", "true") != "0";
   if (!o.strict) {
     // ALWAYS warn: with strict off, an INCONCLUSIVE run exits 0 and reads as a
@@ -3670,6 +3676,10 @@ void lec_command(Options& opts, Result& res) {
         rf.cvc5       += r.cvc5;  // the collapsed run's cvc5 effort was still spent (formal.stats)
         r             = std::move(rf);
       }
+      // int_blast=auto second leg (same rule as the hierarchical driver): a
+      // solver-give-up Unknown earns one int-blasted re-solve at min_timeout,
+      // BEFORE the trusted-box demotion so a retry refute obeys it too.
+      r = livehd::lec::int_blast_retry(ref_g.get(), impl_g.get(), o, std::move(r), sub_lib_ptr);
       // Same trusted-box discipline as the hierarchical driver: a refute that
       // turns on a trusted box input is not a disproof (the leaf may treat it as
       // don't-care and cannot be flattened) — degrade to Unknown, keep witness.

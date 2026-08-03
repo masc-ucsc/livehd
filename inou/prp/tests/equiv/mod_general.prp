@@ -17,7 +17,7 @@
 // that merely CONTAINS a remainder compiles, simulates and verifies.
 //
 // SEMANTICS pinned here: TRUNCATED remainder, sign following the DIVIDEND, the
-// same as Verilog `%`, Dlop::mod_op and cvc5 BITVECTOR_SREM. `rs` is the arm
+// same as Verilog `%`, Dlop::rem_op and cvc5 BITVECTOR_SREM. `rs` is the arm
 // that would catch a floored/SMOD encoding -- a negative dividend is exactly
 // where truncated and floored disagree, and it is invisible in the other two.
 // There is ONE op and no unsigned flavour: every LNAST/LGraph value is signed

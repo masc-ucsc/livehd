@@ -110,19 +110,30 @@ else echo "ok: strategy hints persisted"; fi
 # back Unknown skips the re-attempt (still reported inconclusive); a larger
 # budget or formal.retry=all re-attempts. Only WITNESS-FREE Unknowns ledger (a
 # witnessed partial-miter diff is actionable and exits 1 — re-surfaces every
-# run). Fixture: 64-bit multiply reassociation at timeout=1s — equivalent, so
-# no witness, and far beyond a 1s cvc5 budget.
+# run). Fixture: MASKED 64-bit multiply reassociation at timeout=1s — equivalent,
+# so no witness, and far beyond a 1s cvc5 budget.
+#
+# The `& 64'hF0F0...` matters: width alone no longer makes a multiply-rewrite
+# miter hard, because `formal.lec.int_blast=auto` (the default since 2026-08-03)
+# re-solves a BV give-up as unbounded INTEGERS, where 64 bits is no harder than 8
+# — the bare fixture started proving and nothing was ever ledgered as Unknown.
+# Masking buries the product under an `iand` lazy refinement, which int-blasting
+# does not finish either (measured UNKNOWN on both legs at formal.timeout=30).
 cat > "$WORK/H1.v" <<'EOF'
-module hard(input [63:0] a, input [63:0] b, input [63:0] c, output [63:0] y); assign y = (a*b)*c; endmodule
+module hard(input [63:0] a, input [63:0] b, input [63:0] c, output [63:0] y); assign y = ((a*b)*c) & 64'hF0F0F0F0F0F0F0F0; endmodule
 EOF
 cat > "$WORK/H2.v" <<'EOF'
-module hard(input [63:0] a, input [63:0] b, input [63:0] c, output [63:0] y); assign y = a*(b*c); endmodule
+module hard(input [63:0] a, input [63:0] b, input [63:0] c, output [63:0] y); assign y = (a*(b*c)) & 64'hF0F0F0F0F0F0F0F0; endmodule
 EOF
 C "$WORK/H1.v" --top hard --emit-dir "lg:$WORK/H1" --workdir "$WORK/ch1"
 C "$WORK/H2.v" --top hard --emit-dir "lg:$WORK/H2" --workdir "$WORK/ch2"
 WDU="$WORK/wdu"; mkdir -p "$WDU"
+# formal.min_timeout=1: the int-blast retry leg spends the WHOLE floor on every
+# def that comes back Unknown, so the 20s default would add 20s to each U run
+# below for no extra coverage — the ledger is what is under test here.
 U() { TO=$1; shift; OUT=$("$LHD" lec --ref "lg:$WORK/H1" --impl "lg:$WORK/H2" --top hard \
-      --set formal.lec.hier=true --set "formal.timeout=$TO" "$@" --workdir "$WDU" 2>&1); RC=$?; }
+      --set formal.lec.hier=true --set "formal.timeout=$TO" --set formal.min_timeout=1 \
+      "$@" --workdir "$WDU" 2>&1); RC=$?; }
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).
 U 1

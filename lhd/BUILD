@@ -60,6 +60,7 @@ cc_library(
         "//inou/yosys:lgyosys",
         "//lnast",
         "//pass/abc:pass_abc",
+        "//pass/bitfuzz:pass_bitfuzz",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",
         "//pass/common:pass",

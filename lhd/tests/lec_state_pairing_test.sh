@@ -1,9 +1,10 @@
 #!/bin/bash
 # 2f-lec tier-2 uncertain state correspondence: semdiff full-match pairs are
-# injected as UNCERTAIN, PROVEN only via the self-certifying inductive proof,
-# REFUTED confirmed pair-free (drop-all + retry once), bounded bmc PASS never
-# claimed with pairs applied, and a PASS persists entity-keyed pair hints that
-# warm runs replay without the signature pass.
+# injected as UNCERTAIN, PROVEN via the self-certifying inductive proof or a
+# reset-established pair-free BMC retry, REFUTED confirmed pair-free (drop-all
+# + retry once), bounded bmc PASS never claimed directly with pairs applied,
+# and a PASS persists entity-keyed pair hints that warm runs replay without the
+# signature pass.
 LHD=./bazel-bin/lhd/lhd
 
 [ -x "$LHD" ] || LHD=./lhd/lhd
@@ -64,15 +65,11 @@ echo "PASS: real difference still FAILs through the pair-free confirming re-solv
 
 # ---------------------------------------------------------------------------
 # 4. Planted BOGUS (crossed) pair hint on the EQUIVALENT pair: ind goes SAT
-#    (distrusted), bmc bounded-proves — and the bounded PASS is SUPPRESSED
-#    under uncertain pairs. Honest UNKNOWN, never a wrong verdict.
-#
-#    The suppression is a deliberate POLICY refusal, NOT a budget shortfall
-#    (raising formal.bound to 256 still bounded-proves in milliseconds and the
-#    verdict stays UNKNOWN). Because the run therefore proved *nothing*, the
-#    default `formal.strict=true` makes it a hard FAIL; `--set
-#    formal.strict=false` downgrades the very same UNKNOWN to a warning and
-#    exits clean. Both directions are pinned below.
+#    (distrusted), and bmc bounded-proves under the speculative aliases. That
+#    result is never trusted directly. The recovery drops every speculative
+#    alias and reruns pair-free; with no detected reset, reference power-on state
+#    is tracked '?' and implementation power-on remains arbitrary. Only that
+#    stronger pair-free bounded proof is accepted.
 # ---------------------------------------------------------------------------
 plant_crossed_hint() {
   mkdir -p "$1"
@@ -90,45 +87,18 @@ plant_crossed_hint() {
 EOF
 }
 
-# 4a. Default (strict): a suppressed bounded PASS decided nothing, so it must
-#     NOT exit 0 — and it must read as undecided, never as a disproof.
+# Explicitly name no real reset so this pins the no-reset '?' leg even if a
+# frontend injects a conventional reset port into the graph.
 plant_crossed_hint "$W/wd4"
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" 2>&1)
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" \
+      --set formal.reset=missing_reset 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "#4a a suppressed bounded PASS proves nothing; strict (the default) must FAIL (rc=$RC): $OUT"
-echo "$OUT" | grep -q "bounded bmc PASS suppressed under 2 uncertain tier-2 pair(s)" || fail "#4a missing suppression: $OUT"
-echo "$OUT" | grep -q "UNKNOWN" || fail "#4a verdict should be UNKNOWN: $OUT"
-echo "$OUT" | grep -q "PROVEN equivalent" && fail "#4a a crossed speculative pairing must never PROVE: $OUT"
-echo "$OUT" | grep -q "REFUTED" && fail "#4a an undecided run must not be reported as a disproof: $OUT"
-echo "$OUT" | grep -q "could not decide equivalence of 'impl.dut'" || fail "#4a the failure must say the run is undecided: $OUT"
-echo "$OUT" | grep -q "formal.strict=false" || fail "#4a the failure must name the opt-out knob: $OUT"
-# Self-heal: the stale hint whose solve did not PASS is dropped, so a later
-# run pairs fresh and reaches the true (unbounded) PROVEN.
-grep -q '"ra", "xb"' "$W/wd4/formal_cache.json" && fail "#4a stale crossed hint must be cleared: $(cat "$W/wd4/formal_cache.json")"
-echo "PASS: strict (default) turns the suppressed bounded PASS into a hard FAIL"
-
-# 4b. --set formal.strict=false is the opt-in tolerance: the identical UNKNOWN
-#     is only a warning, the run exits clean, and the warning denies being a
-#     proof. (Re-plant the hint — 4a already self-healed it away.)
-plant_crossed_hint "$W/wd4"
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" --set formal.strict=false 2>&1)
-RC=$?
-[ "$RC" -eq 0 ] || fail "#4b formal.strict=false must accept the UNKNOWN and exit clean (rc=$RC): $OUT"
-echo "$OUT" | grep -q "bounded bmc PASS suppressed under 2 uncertain tier-2 pair(s)" || fail "#4b missing suppression: $OUT"
-echo "$OUT" | grep -q "lec INCONCLUSIVE" || fail "#4b the tolerated UNKNOWN must still warn: $OUT"
-echo "$OUT" | grep -q "NOT a proof of equivalence" || fail "#4b the warning must deny being a proof: $OUT"
-echo "$OUT" | grep -q "PROVEN equivalent" && fail "#4b a crossed speculative pairing must never PROVE: $OUT"
-grep -q '"ra", "xb"' "$W/wd4/formal_cache.json" && fail "#4b stale crossed hint must be cleared: $(cat "$W/wd4/formal_cache.json")"
-echo "PASS: formal.strict=false downgrades the same UNKNOWN to a warning, clean exit"
-
-# 4c. Both runs above self-healed the hint, so this one pairs fresh and reaches
-#     the true (unbounded) PROVEN.
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" 2>&1)
-RC=$?
-[ "$RC" -eq 0 ] || fail "#4c post-heal re-run should be PROVEN (rc=$RC): $OUT"
-echo "$OUT" | grep -q "PROVEN with 2 uncertain tier-2 pair(s) applied" || fail "#4c post-heal run should pair fresh and prove: $OUT"
-grep -q '"ra", "xa"' "$W/wd4/formal_cache.json" || fail "#4c post-heal run should store the correct hint"
-echo "PASS: bogus crossed pair hint ends UNKNOWN (bounded PASS suppressed), self-heals, then PROVEs fresh"
+[ "$RC" -eq 0 ] || fail "#4 crossed hint should recover through pair-free no-reset BMC (rc=$RC): $OUT"
+echo "$OUT" | grep -q "pair-free BMC from reset/no-reset initialization (dropped 2 uncertain tier-2 pair(s)" \
+  || fail "#4 missing pair-free recovery disclosure: $OUT"
+echo "$OUT" | grep -q "synthetic ? initialization (no reset)" || fail "#4 missing tracked-? initialization disclosure: $OUT"
+echo "$OUT" | grep -q "PROVEN with 2 uncertain" && fail "#4 must not trust the crossed speculative pairs directly: $OUT"
+echo "PASS: bogus crossed pairs are discarded; pair-free BMC proves from no-reset '?' initialization"
 
 # ---------------------------------------------------------------------------
 # 5. Init-value mismatch: the tier-2 precondition refuses the pair and the
@@ -189,6 +159,134 @@ echo "$OUT" | grep -q "tier-2 state pairing: 2 uncertain pair(s) injected" || fa
 echo "$OUT" | grep -q "PROVEN with 2 uncertain tier-2 pair(s) applied" || fail "#8 missing flat-path disclosure: $OUT"
 grep -q '"ra", "xa"' "$W/wd8/formal_cache.json" || fail "#8 flat-path pair hint not persisted: $(cat "$W/wd8/formal_cache.json")"
 echo "PASS: flat (non-hier) path pairs, proves, and persists the hint"
+
+# ---------------------------------------------------------------------------
+# 9. The inferred control-state pair is FUNCTIONALLY corresponding but not
+#    bit-vector equal: ref stores sel=1 as 1'b1, impl stores it as 2'b11. The
+#    speculative ind step therefore cannot close nxt:sd, while BMC under the
+#    speculative aliases bounded-proves and would normally be suppressed.
+#
+#    Both designs have a real reset. The recovery leg drops the speculative
+#    aliases, starts renamed state independently, drives reset through the
+#    ordinary after_reset prologue, and proves the checked post-reset window.
+# ---------------------------------------------------------------------------
+cat > "$W/reset_ref.v" <<'EOF'
+module dut(
+  input clock,
+  input reset,
+  input sel,
+  input [7:0] a,
+  input [7:0] b,
+  output [8:0] out
+);
+  reg sd;
+  reg [7:0] ad;
+  reg [7:0] bd;
+  always @(posedge clock) begin
+    if (reset) begin
+      sd <= 1'b0;
+      ad <= 8'b0;
+      bd <= 8'b0;
+    end else begin
+      sd <= sel;
+      ad <= a;
+      bd <= b;
+    end
+  end
+  assign out = sd ? (ad + 9'd1) : (bd + 9'd2);
+endmodule
+EOF
+cat > "$W/reset_impl.v" <<'EOF'
+module dut(
+  input signed clock,
+  input signed reset,
+  input signed sel,
+  input signed [7:0] a,
+  input signed [7:0] b,
+  output [8:0] out
+);
+  reg [1:0] xs;
+  reg [8:0] xa;
+  reg [8:0] xb;
+  always @(posedge clock) begin
+    if (reset) begin
+      xs <= 2'b0;
+      xa <= 9'b0;
+      xb <= 9'b0;
+    end else begin
+      xs <= sel;
+      xa <= {1'b0, a};
+      xb <= {1'b0, b};
+    end
+  end
+  assign out = xs ? (xa + 9'd1) : (xb + 9'd2);
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/reset_ref.v" --impl "$W/reset_impl.v" --workdir "$W/wd9" 2>&1)
+RC=$?
+[ "$RC" -eq 0 ] || fail "#9 reset-established pair-free BMC should PASS (rc=$RC): $OUT"
+echo "$OUT" | grep -q "tier-2 state pairing: 3 uncertain pair(s) injected" \
+  || fail "#9 missing speculative-pair injection: $OUT"
+echo "$OUT" | grep -q "pair-free BMC from reset/no-reset initialization (dropped 3 uncertain tier-2 pair(s)" \
+  || fail "#9 missing reset-backed pair-free retry disclosure: $OUT"
+echo "$OUT" | grep -q "BOUNDED-Proven" || fail "#9 reset-backed retry should be a bounded BMC proof: $OUT"
+echo "$OUT" | grep -q "no primary reset input found" && fail "#9 reset fallback failed to detect reset: $OUT"
+echo "PASS: speculative ind failure recovers through pair-free BMC from detected reset"
+
+# ---------------------------------------------------------------------------
+# 10. Exact reset-less mod_mux_aligned shape. Generated fallback names
+#     flop_24/flop_28/flop_32 look like a numeric register bank, but without an
+#     ACTUAL reset they must advance during the prologue rather than be held.
+#     Initial reference state is tracked '?' and becomes defined on the first
+#     unconditional write; the pair-free BMC then proves the checked window.
+# ---------------------------------------------------------------------------
+cat > "$W/noreset_ref.v" <<'EOF'
+module dut(
+  input clock,
+  input sel,
+  input [7:0] a,
+  input [7:0] b,
+  output [8:0] out
+);
+  reg sd;
+  reg [7:0] ad;
+  reg [7:0] bd;
+  always @(posedge clock) begin
+    sd <= sel;
+    ad <= a;
+    bd <= b;
+  end
+  assign out = sd ? (ad + 9'd1) : (bd + 9'd2);
+endmodule
+EOF
+cat > "$W/noreset_impl.v" <<'EOF'
+module dut(
+  input signed sel,
+  input signed [7:0] a,
+  input signed [7:0] b,
+  output [8:0] out,
+  input signed clock
+);
+  reg [8:0] flop_24;
+  reg [8:0] flop_28;
+  reg [1:0] flop_32;
+  always @(posedge clock) begin
+    flop_24 <= {1'b0, a};
+    flop_28 <= {1'b0, b};
+    flop_32 <= sel;
+  end
+  assign out = flop_32 ? (flop_24 + 9'd1) : (flop_28 + 9'd2);
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/noreset_ref.v" --impl "$W/noreset_impl.v" --workdir "$W/wd10" 2>&1)
+RC=$?
+[ "$RC" -eq 0 ] || fail "#10 reset-less recoded state should PASS through tracked-? BMC (rc=$RC): $OUT"
+echo "$OUT" | grep -q "tier-2 state pairing: 3 uncertain pair(s) injected" \
+  || fail "#10 missing speculative-pair injection: $OUT"
+echo "$OUT" | grep -q "pair-free BMC from reset/no-reset initialization (dropped 3 uncertain tier-2 pair(s)" \
+  || fail "#10 missing pair-free no-reset retry disclosure: $OUT"
+echo "$OUT" | grep -q "synthetic ? initialization (no reset)" || fail "#10 missing tracked-? initialization: $OUT"
+echo "PASS: reset-less mod_mux_aligned shape proves via pair-free tracked-? BMC"
 
 echo "ALL PASS: lec tier-2 uncertain state correspondence"
 exit 0

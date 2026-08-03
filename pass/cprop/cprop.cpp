@@ -774,7 +774,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     Dlop a = hydrate_const(inp_edges_ordered[0].driver);
     Dlop b = hydrate_const(inp_edges_ordered[1].driver);
 
-    auto result = a.mod_op(b);  // truncated remainder; invalid on mod-by-zero
+    auto result = a.rem_op(b);  // truncated remainder; invalid on rem-by-zero
 
     replace_node(node, result);
   } else {

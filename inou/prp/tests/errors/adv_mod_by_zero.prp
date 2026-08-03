@@ -4,7 +4,7 @@
 :error: (mod|zero|nil|illegal)
 */
 // Modulo by a comptime-known zero must be reported, same as division:
-// Dlop::mod_op yields nil and folding it silently is unsound.
+// Dlop::rem_op yields nil and folding it silently is unsound.
 const d = 0
 const x = 7 % d
 cputs("x")

@@ -94,6 +94,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {     "compile.upass",        "pass.upass",     Set_pass::List::all},
     {     "compile.cprop",        "pass.cprop",     Set_pass::List::all},
     {  "compile.bitwidth",     "pass.bitwidth",     Set_pass::List::all},
+    {   "compile.bitfuzz",      "pass.bitfuzz",     Set_pass::List::all},
     {    "compile.formal",       "pass.formal",     Set_pass::List::all},
     {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
     {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},

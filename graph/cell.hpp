@@ -107,7 +107,7 @@ enum class Ntype_op : uint8_t {
   Clock_cell = 52,
 
   // Truncated REMAINDER, `a % b` (sign follows the DIVIDEND, like Verilog `%`
-  // and Dlop::mod_op -- NOT a floored modulo). One op: every LNAST/LGraph value
+  // and Dlop::rem_op -- NOT a floored modulo). One op: every LNAST/LGraph value
   // is signed, and unsigned is just the non-negative subset, so there is no
   // second unsigned flavour and nothing downstream switches on a sign flag.
   //

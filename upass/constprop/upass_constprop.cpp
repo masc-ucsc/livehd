@@ -1119,7 +1119,7 @@ upass::Vote uPass_constprop::process_bit_xor(std::string_view dst_name, Bundle& 
 upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
   // Modulo by a comptime-known zero is illegal for the same reason as division:
-  // Dlop::mod_op yields nil, and a nil reaching a constprop output must be
+  // Dlop::rem_op yields nil, and a nil reaching a constprop output must be
   // REPORTED, not silently folded. Mirror process_div's guard. (2f-nil_diag)
   for (size_t i = 1; i < src.size(); ++i) {
     const Dlop d = operand_value(src[i]);
@@ -1137,7 +1137,7 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
     }
   }
   return push_binary_passthrough(
-      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.mod_op(n2); }, /*report_nil=*/true);
+      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.rem_op(n2); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -3324,9 +3324,13 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
       result  = *args[0].div_op(args[1]);
       matched = true;
     }
-  } else if (op == "mod") {
+  } else if (op == "rem") {
+    // "rem", the Ntype_op::Rem cell name -- NOT "mod". Every other branch here
+    // is a cell name (see Ntype::get_op above, which resolves named pins), so a
+    // stale "mod" spelling would leave `__rem(a,b)` matching no kernel and
+    // silently unfolded.
     if (need_n(2)) {
-      result  = *args[0].mod_op(args[1]);
+      result  = *args[0].rem_op(args[1]);
       matched = true;
     }
   } else if (op == "and") {

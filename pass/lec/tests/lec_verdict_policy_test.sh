@@ -25,12 +25,23 @@
 # an ARBITRARY, possibly unreachable state), so `auto` must let bmc clear it — case 7 pins
 # that a bmc bounded-proof still WINS over an ind refute.
 #
-# Case 1/2/3's UNKNOWN is a 16-bit multiply-associativity miter ((a*b)*c vs a*(b*c)):
-# equivalent, but equivalence-checking two structurally different multiplier trees blows
-# up exponentially. Verified genuinely hard, not budget-shaped: it is still UNKNOWN at
-# --set formal.timeout=300, while the same miter at 3/5/8 bits is PROVEN in ms-to-seconds.
+# Case 1/2/3's UNKNOWN is a MASKED 16-bit multiply-associativity miter
+# (((a*b)*c) & 16'hF0F0 vs (a*(b*c)) & 16'hF0F0): equivalent, but equivalence-checking two
+# structurally different multiplier trees blows up exponentially. Verified genuinely hard,
+# not budget-shaped: it is still UNKNOWN at --set formal.timeout=300, while the same miter
+# at 3/5/8 bits is PROVEN in ms-to-seconds.
 # Do NOT "fix" a future failure here by raising the timeout — if this ever starts proving,
 # the fixture is too easy and needs a wider/harder miter to keep pinning the UNKNOWN path.
+# That is exactly what happened on 2026-08-03: the BARE product ((a*b)*c vs a*(b*c)) is the
+# shape `formal.lec.int_blast=auto` — now the default — re-solves as unbounded integers in
+# ~0.1s on its second leg, so cases 1-3 started passing PROVEN. Following the rule above,
+# the fixture was HARDENED rather than the knob switched off: the `& 16'hF0F0` puts the
+# product under an `iand` lazy refinement, where int-blasting lands in undecidable
+# nonlinear integer arithmetic. Measured UNKNOWN on BOTH legs (int_blast=off and
+# int_blast=iand) at formal.timeout=30.
+# `formal.min_timeout` is pinned small in run() for the same reason the timeout is: the
+# int-blast retry's whole budget IS the min_timeout floor, so the 20s default would add
+# ~20s to each of the three UNKNOWN cases.
 
 set -u
 LHD=./bazel-bin/lhd/lhd
@@ -48,12 +59,12 @@ if [ ! -x "$LHD" ]; then
 fi
 WORK="${TEST_TMPDIR:-/tmp/lecpolicy}"; mkdir -p "$WORK"; fail=0
 
-# equivalent but cvc5-can't-decide-quickly (nonlinear multiply) -> UNKNOWN
+# equivalent but cvc5-can't-decide-quickly (masked nonlinear multiply) -> UNKNOWN
 cat > "$WORK/hard_ref.v"  <<'EOF'
-module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z); assign z = (a*b)*c; endmodule
+module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z); assign z = ((a*b)*c) & 16'hF0F0; endmodule
 EOF
 cat > "$WORK/hard_impl.v" <<'EOF'
-module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z); assign z = a*(b*c); endmodule
+module foo(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z); assign z = (a*(b*c)) & 16'hF0F0; endmodule
 EOF
 # genuinely different -> REFUTED
 cat > "$WORK/diff_ref.v"  <<'EOF'
@@ -96,7 +107,16 @@ run() {  # $1=label $2..=lhd args ; sets RC/OUT
   case " ${*:2} " in
     *" --set formal.timeout="*) to=() ;;
   esac
-  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
+  # Same last-wins guard for the int-blast retry's budget (see the header): its
+  # whole grant is the min_timeout floor, so the 20s default would add ~20s to
+  # every UNKNOWN case here. min_timeout is a FLOOR, never a cap, so pinning it
+  # low cannot take a verdict away from the cases that do settle (7).
+  local mt=(--set formal.min_timeout=1)
+  case " ${*:2} " in
+    *" --set formal.min_timeout="*) mt=() ;;
+  esac
+  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} \
+        ${mt[@]+"${mt[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) UNKNOWN, DEFAULT policy (strict is on by default) -> hard fail, and the message has

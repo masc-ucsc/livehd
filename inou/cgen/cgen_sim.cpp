@@ -278,7 +278,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // Same shape and the SAME reason as Div above: this switch has no
       // fail-closed default, so a missing arm here would silently simulate
       // `a % b` as the bare dividend. Truncated remainder, sign following the
-      // dividend -- Dlop::mod_op is exactly that, and there is only one flavour
+      // dividend -- Dlop::rem_op is exactly that, and there is only one flavour
       // because every value is signed.
       if (e.size() < 2) {
         return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits);
@@ -287,7 +287,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (!is_unsign(e[0].driver) || !is_unsign(e[1].driver)) {
         cw += 1;
       }
-      return absl::StrCat(operand(e[0].driver, cw), ".mod_op(", operand(e[1].driver, cw), ")");
+      return absl::StrCat(operand(e[0].driver, cw), ".rem_op(", operand(e[1].driver, cw), ")");
     }
     case Ntype_op::Ror: {
       // OR-reduction: 1 iff ANY bit of ANY operand is set. Each operand must be

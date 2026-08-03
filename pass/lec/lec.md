@@ -156,6 +156,26 @@ everything the encoder needs.
   A term with no cross-process identity (an unnamed symbol prints as
   `var_<allocation-id>`) is deliberately **undigestable** — it is re-proven every
   run rather than risk one digest standing for two different obligations.
+- **Int-blasting** (`formal.lec.int_blast`, default `auto`): hand cvc5 the same
+  BV encoding but have its `solve-bv-as-int` preprocessing translate it to
+  *unbounded-integer* arithmetic (VMCAI'22 int-blasting; bitwise ops become
+  lazily-refined `iand`). The translation is equisatisfiable, so verdicts stay
+  sound. This is the word-level escape hatch for the miters bit-blasting cannot
+  finish — reassociated / distributed / commuted multiplies, where SAT has to
+  re-prove ring axioms bit by bit — at the cost of landing in nonlinear integer
+  arithmetic (undecidable, so expect *more* Unknowns on mask/extract-heavy
+  cones, never a wrong verdict). Measured: 11/12 arithmetic-rewrite miters that
+  neither abc nor BV finish in 60s prove in ~0.1s as integers, while the
+  mask/mem-heavy corpus only ever loses under a blanket switch — which is why
+  the default is a **retry portfolio**, not a mode: `auto` solves BV-first, and
+  a *solver-give-up* Unknown (never an unsupported/oversize refusal — no budget
+  changes those) earns ONE int-blasted re-solve at the `formal.min_timeout`
+  budget (`int_blast_retry`, applied once per driver query, after any
+  flat-confirm, before the trusted-box demotion). The retry adopts a decisive
+  verdict and labels it `int-blast retry (...)`; a retry Unknown keeps the BV
+  detail. `off` disables; `iand | sum | bitwise | bv` force that cvc5 mode from
+  the first solve. Only what cvc5 solves is affected — the abc cone pre-pass
+  above is bit-level by construction and untouched.
 - **Tier-2 uncertain state correspondence** (`lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
   `lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
@@ -170,8 +190,14 @@ everything the encoder needs.
   certifies, given init-equality) — and disclosed as "PROVEN with N uncertain
   tier-2 pair(s)"; **REFUTED under pairs is never final** (drop ALL, re-solve
   once: a pair-free re-refute is the real FAIL, else the ceiling is Unknown);
-  a **bounded bmc PASS is never claimed** while pairs apply (shared-s0
-  over-constraint could mask a bounded CEX); timeout/Unknown never retries.
+  a **bounded bmc PASS is never claimed directly** while pairs apply (shared-s0
+  over-constraint could mask a bounded CEX). That result triggers one pair-free
+  BMC retry through the normal prologue. A detected primary reset establishes
+  state normally. Without reset, otherwise-uninitialized reference state starts
+  with a tracked full `?` plane under the default `gold_x=ignore` (implementation
+  power-on remains arbitrary); `gold_x=zero` instead gives both sides canonical
+  zero. A bounded PASS from that pair-free query is accepted; timeout/Unknown
+  never retries.
   A PASS persists the pairs as entity-keyed **pair hints** in
   `formal_cache.json`; warm runs re-validate and re-inject them (same
   `um=[…]` cache-key segment ⇒ verdict-cache hit) without the signature pass.

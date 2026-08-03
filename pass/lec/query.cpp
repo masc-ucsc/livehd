@@ -2149,12 +2149,46 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     r.uncertain_pairs_used = opts.uncertain_match;
     if (r.verdict == Verdict::Proven && r.output_checks > 0) {
       // A bmc Proven is BOUNDED; with speculative pairs applied the shared-s0
-      // constraints can mask a real bounded CEX (a false PASS). Never claim
-      // it — and skip the pair-free retry: incomplete correspondence gates a
-      // pair-free bmc to Unknown anyway, so demotion loses nothing.
+      // constraints can mask a real bounded CEX (a false PASS). Before
+      // suppressing it, retry BMC with the speculative aliases removed. A real
+      // reset establishes the state relation through the existing after_reset
+      // prologue. If this subblock has no reset, initialize otherwise-unreset
+      // reference state as tracked '?' (or both sides to canonical zero under
+      // gold_x=zero), matching the no-reset hardware contract instead of asking
+      // an adversarial independent initial state to manufacture a difference.
+      //
+      // Do not do this for just_reset/free_toreset/full: this recovery is the
+      // normal post-reset trace proof, and silently changing a user-selected
+      // phase would change the contract. `full` reaches its own two explicit
+      // BMC stages when requested directly; auto's speculative recovery remains
+      // deliberately narrow.
+      if (opts.phase == "after_reset") {
+        Lec_options reset_bmc = opts;
+        reset_bmc.uncertain_match.clear();
+        reset_bmc.engine          = "bmc";
+        reset_bmc._init_no_reset  = true;
+        Query_result rf           = prove_equal(ref, impl, reset_bmc, sub_lib);
+        rf.cvc5                  += r.cvc5;  // the speculative ind|bmc portfolio really ran too
+        if (rf.verdict == Verdict::Refuted) {
+          rf.detail = "pair-free BMC from reset/no-reset initialization (dropped " + tag + "): " + rf.detail;
+          return rf;
+        }
+        Query_result bp;
+        if (try_bounded_proven(rf, bp)) {
+          bp.detail = "pair-free BMC from reset/no-reset initialization (dropped " + tag + "): " + bp.detail;
+          return bp;
+        }
+        // Keep the original suppressed result because it explains why the
+        // speculative proof was unusable; append the pair-free leg's concrete
+        // reason and retain its accounting.
+        r.cvc5    = rf.cvc5;
+        r.detail += "; pair-free reset/no-reset BMC also inconclusive: " + rf.detail;
+      }
+      // No pair-free proof: keep the conservative suppression.
       r.verdict = Verdict::Unknown;
       r.detail  = "bounded bmc PASS suppressed under " + tag + " (shared-s0 over-constraint could mask a bounded CEX; "
-                  "only an unbounded inductive proof is accepted with speculative pairs): "
+                  "only an unbounded inductive proof or a pair-free BMC proof from reset/no-reset initialization is "
+                  "accepted with speculative pairs): "
                 + r.detail;
       return r;
     }
@@ -2752,7 +2786,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // logic to include UF (and keep arrays for the memory cut). The eager internal
   // bit-blaster has no UF/array theory, so a UF query keeps the default solver
   // (below).
-  solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
+  //
+  // formal.int_blast: cvc5's solve-bv-as-int preprocessing translates the whole
+  // BV encoding to unbounded-integer arithmetic (VMCAI'22 int-blasting; bitwise
+  // ops become lazily-refined `iand`). The translation is equisatisfiable, so
+  // verdicts stay sound, but the resulting problem is nonlinear integer
+  // arithmetic — the logic must widen past QF_ABV, and the eager bit-blaster
+  // (below) is moot because no BV terms survive preprocessing.
+  // "auto" (the default) means BV here: the int-blasted leg is the DRIVER-level
+  // int_blast_retry, which re-enters with an explicit "iand".
+  const bool int_blast
+      = opts.int_blast != "off" && opts.int_blast != "auto" && !opts.int_blast.empty();
+  if (int_blast) {
+    solver.setLogic("ALL");
+    solver.setOption("solve-bv-as-int", opts.int_blast);
+  } else {
+    solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
+  }
 
   // Per-checkSat wall-clock bound (formal.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
@@ -2850,8 +2900,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       break;
     }
   }
-  if (!has_mem && state_boxes_ptr == nullptr && comb_boxes_ptr == nullptr) {
-    solver.setOption("bv-solver", "bitblast-internal");  // UF/array queries keep the default solver
+  if (!has_mem && state_boxes_ptr == nullptr && comb_boxes_ptr == nullptr && !int_blast) {
+    solver.setOption("bv-solver", "bitblast-internal");  // UF/array/int-blast queries keep the default solver
   }
   if (opts.witness) {
     solver.setOption("produce-models", "true");
@@ -3314,6 +3364,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
+    const bool init_no_reset    = opts._init_no_reset && opts.phase == "after_reset" && reset_negset.empty();
     // Pipeline flush: a depth-d flop (pipe_min) is a d-stage shift register, and
     // chained flops (e.g. stage[3] feeding a stage[1] add) accumulate latency, so
     // a reset-less pipeline's power-on state needs `latency` cycles of (shared)
@@ -3325,7 +3376,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // then compares only flushed, input-determined behavior. (Sound either way —
     // the window still exercises `bound` free-running cycles, and UNDER-flushing
     // can only cause a false REFUTE, never a false PROVEN.)
-    auto pipeline_latency = [&](hhds::Graph* g) -> int {
+    auto       pipeline_latency = [&](hhds::Graph* g) -> int {
       // ONE topological sweep, NO recursion: forward_hier() is topological, so
       // every driver is finalized before its sink is visited, and a driver
       // MISSING from the memo is exactly a feedback back-edge (contributes 0 —
@@ -3383,7 +3434,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
       Io_name_map<Val>  init;
-      auto                                  collect_flops = [&](hhds::Graph* g) {
+      auto              collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
         // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
         // eff() = canon_flop_name + alias is NOT injective (see the "canonical name
@@ -3460,12 +3511,21 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (const auto& [key, w] : fw) {
         Val v;
-        if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
+        if (init_no_reset && opts.gold_x == "zero") {
+          v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
+        } else if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
           v = init.at(key);
         } else {
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
         }
-        ref_state[key]  = v;
+        ref_state[key] = v;
+        if (init_no_reset && opts.gold_x != "zero") {
+          // No-reset power-on is hardware '?': preserve an arbitrary value term
+          // for dataflow, but mark every REF bit unknown so gold_x=ignore masks
+          // only observations still depending on unwritten state. A real write
+          // replaces both the value and the X plane in Encoder::encode.
+          ref_state[key].x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(w), 0)});
+        }
         impl_state[key] = v;
       }
       // Matched-reset shared init for each STATEFUL collapsed leaf: both designs
@@ -3474,8 +3534,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // the leaf's output VARY per cycle (a constant box false-proves a timing diff).
       for (const auto& [bk, box] : state_boxes) {
         std::string state_key = std::string("\x01") + "leafstate:" + bk;
-        Val         v{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)), "s0_" + state_key), box.state_w, false};
-        ref_state[state_key]  = v;
+        Val         v
+            = init_no_reset && opts.gold_x == "zero"
+                  ? Val{tm.mkBitVector(static_cast<uint32_t>(box.state_w), 0), box.state_w, false}
+                  : Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)), "s0_" + state_key), box.state_w, false};
+        ref_state[state_key] = v;
+        if (init_no_reset && opts.gold_x != "zero") {
+          ref_state[state_key].x_mask
+              = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(box.state_w), 0)});
+        }
         impl_state[state_key] = v;
       }
       // A RESET-LESS register-file BANK (contiguous <base>_0.._N-1 flops with no
@@ -3488,31 +3555,37 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // prologue (reset window) keeps it at its shared initial value, exactly like a
       // gated-by-reset write. Sync-reset pipeline flops (no init, NOT a bank) are
       // left alone — they reset to 0 through their din during the prologue.
-      for (const auto& [key, w] : fw) {
-        if (init.count(key)) {
-          continue;  // has a constant reset value -> resets normally
-        }
-        auto us = key.rfind('_');
-        if (us == std::string::npos || us + 1 >= key.size()) {
-          continue;
-        }
-        std::string idx = key.substr(us + 1);
-        if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
-          continue;
-        }
-        // Count siblings sharing this base with no init: a >1 contiguous group is a bank.
-        std::string base = key.substr(0, us);
-        int         n    = 0;
-        for (const auto& [k2, w2] : fw) {
-          if (k2.rfind(base + "_", 0) == 0 && !init.count(k2)) {
-            auto t = k2.substr(base.size() + 1);
-            if (!t.empty() && std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isdigit(c); })) {
-              ++n;
+      // This hold models writes blocked by an ACTUAL asserted reset. With no
+      // detected reset the prologue only advances ordinary RTL; holding a
+      // generated name group such as flop_24/flop_28/flop_32 prevents it from
+      // reaching its input-driven state and creates a false counterexample.
+      if (!reset_negset.empty()) {
+        for (const auto& [key, w] : fw) {
+          if (init.count(key)) {
+            continue;  // has a constant reset value -> resets normally
+          }
+          auto us = key.rfind('_');
+          if (us == std::string::npos || us + 1 >= key.size()) {
+            continue;
+          }
+          std::string idx = key.substr(us + 1);
+          if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
+            continue;
+          }
+          // Count siblings sharing this base with no init: a >1 contiguous group is a bank.
+          std::string base = key.substr(0, us);
+          int         n    = 0;
+          for (const auto& [k2, w2] : fw) {
+            if (k2.rfind(base + "_", 0) == 0 && !init.count(k2)) {
+              auto t = k2.substr(base.size() + 1);
+              if (!t.empty() && std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isdigit(c); })) {
+                ++n;
+              }
             }
           }
-        }
-        if (n > 1) {
-          bank_hold_keys.insert(key);
+          if (n > 1) {
+            bank_hold_keys.insert(key);
+          }
         }
       }
     }
@@ -4066,13 +4139,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     //
     // Set once, at the frame, rather than at each verdict site, so a new exit
     // path cannot silently lose the qualifier.
-    const bool has_state = !ref_state.empty() || !impl_state.empty() || !ref_mem.empty() || !impl_mem.empty()
-                        || !ref_reads.empty() || !impl_reads.empty();
-    res.bounded = has_state;
+    const bool has_state = !ref_state.empty() || !impl_state.empty() || !ref_mem.empty() || !impl_mem.empty() || !ref_reads.empty()
+                           || !impl_reads.empty();
+    res.bounded          = has_state;
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
-               + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
-               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
-               + bundle_note;
+                 + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
+                 + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
+                                                           : "; synthetic ? initialization (no reset)")
+                                  : "")
+                 + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
+                 + bundle_note;
     // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
@@ -6178,6 +6254,39 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   out.engine       = "isolated-worker";
   out.detail       = died_note + out.detail;
   return out;
+}
+
+Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result first,
+                             const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, bool isolated) {
+  // Only a SOLVER give-up earns the retry: unsupported/oversize/nothing-compared
+  // decided nothing and no re-solve can change them (same encoder, same design),
+  // so re-spending min_timeout there would be pure waste.
+  if (opts.int_blast != "auto" || first.verdict != Verdict::Unknown || first.oversize_refused || first.unsupported
+      || first.nothing_compared) {
+    return first;
+  }
+  // The min_timeout floor is the retry's WHOLE budget (the user's soft total is
+  // already spent — this mirrors the per-unit floor philosophy: a query with no
+  // verdict yet earns one bounded real attempt, never an unbounded one). The
+  // measured int-blast wins (reassociated/distributed/commuted multiplies that
+  // bit-blasting cannot finish) land in <1s, so the floor is generous.
+  Lec_options o2 = opts;
+  o2.int_blast   = "iand";
+  o2.timeout     = std::max(1, opts.min_timeout);
+  o2.min_timeout = std::max(1, opts.min_timeout);
+  Query_result r2 = isolated ? prove_equal_isolated(ref, impl, o2, sub_lib) : prove_equal(ref, impl, o2, sub_lib);
+  if (r2.verdict == Verdict::Unknown) {
+    // Keep the BV result: its detail names the real bottleneck, and the retry's
+    // Unknown adds nothing (int-blast lands in undecidable nonlinear arithmetic
+    // on mask/extract/memory-heavy cones, so its give-up is the EXPECTED case).
+    first.detail += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
+    first.cvc5   += r2.cvc5;  // the retry really ran (formal.stats)
+    return first;
+  }
+  r2.detail = "int-blast retry (BV gave up; re-solved as unbounded integers at " + std::to_string(o2.timeout)
+            + "s): " + r2.detail;
+  r2.cvc5 += first.cvc5;  // the BV leg's effort was still spent
+  return r2;
 }
 
 // ── 2f-verify: single-design property BMC ───────────────────────────────────

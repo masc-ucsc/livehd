@@ -7,6 +7,7 @@
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
+#include "hlop/dlop.hpp"
 #include "node_util.hpp"
 
 namespace {
@@ -125,6 +126,327 @@ TEST(BitwidthInfer, MultProductWidth) {
   EXPECT_LE(bits, 13) << "process_mult width must stay within the 8+4 magnitude + sign envelope";
 }
 
+// Subtraction: `as` (pid 0) adds and `bs` (pid 1) subtracts. `bounded_inputs`
+// leaves the decls SIGNED, so two 8-bit inputs each span [-128..127] and a-b
+// spans [-255..255]: 9 signed bits.
+//
+// The node used to not survive at all. process_sum accumulated into a DEFAULT-CONSTRUCTED Dlop, which
+// is Type::Invalid, and Dlop arithmetic returns nil for a non-numeric operand,
+// so both bounds came out nil; Bitwidth_range then read the nil pair back as
+// the range [0..0] and adjust_bw const-folded the whole adder to zero. Nothing
+// hit it before because every front end stamps a width on its Sum nodes, which
+// takes bw_pass's "pin already has bits" early-exit.
+TEST(BitwidthInfer, SumSubtractSurvivesAndKeepsWidth) {
+  auto g  = bounded_inputs("bw_sum", 8, 8);
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, op);
+  EXPECT_EQ(livehd::graph_util::type_op_of(op), Ntype_op::Sum) << "an unsized Sum must not be const-folded away";
+  EXPECT_EQ(bits, 9) << "a-b over [-128..127] spans [-255..255], which is 9 signed bits";
+}
+
+// Addition widens too: `as` is a multi-driver sink, so both operands land on
+// pid 0 and a+b over [-128..127] spans [-256..254] -- 9 signed bits.
+TEST(BitwidthInfer, SumAddWidens) {
+  auto g  = bounded_inputs("bw_sum_add", 8, 8);
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, op);
+  EXPECT_EQ(livehd::graph_util::type_op_of(op), Ntype_op::Sum) << "an unsized Sum must not be const-folded away";
+  EXPECT_EQ(bits, 9) << "a+b of two 8-bit signed values needs 9 signed bits";
+}
+
+// A CONSTANT operand must not block inference. Constants created by
+// graph_util::create_const live as driver pins on the CONST_NODE singleton,
+// which no class traversal ever emits (hhds graph.hpp) -- so process_const
+// never runs on them and they never land in bwmap. process_get_mask already
+// falls back to hydrate_const for exactly this reason; process_sum and friends
+// did not, so `x + 1` was uninferable even with x fully bounded.
+TEST(BitwidthInfer, SumWithConstantOperand) {
+  auto g  = bounded_inputs("bw_sum_const", 8, 8);
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);  // no bits
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(op.create_sink_pin(0));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, op);
+  EXPECT_EQ(livehd::graph_util::type_op_of(op), Ntype_op::Sum) << "an unsized Sum must not be const-folded away";
+  EXPECT_EQ(bits, 9) << "a+1 over [-128..127] spans [-127..128]: 9 signed bits";
+}
+
+// Same for Mult, which takes the other constant-blind path.
+TEST(BitwidthInfer, MultWithConstantOperand) {
+  auto g  = bounded_inputs("bw_mult_const", 8, 8);
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Mult);
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(op.create_sink_pin(0));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_GT(run_and_read_driver(g, op), 8) << "a*2 over [-128..127] spans [-256..254]: wider than 8 bits";
+}
+
+// ...and for Mux, whose data arms take the same lookup.
+TEST(BitwidthInfer, MuxWithConstantArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_mux_const");
+  gio->add_input("sel", 1);
+  gio->set_bits("sel", 1);
+  gio->add_input("d0", 2);
+  gio->set_bits("d0", 8);
+  gio->add_output("o", 3);
+  auto g = gio->create_graph();
+
+  auto mux = livehd::graph_util::create_typed_node(*g, Ntype_op::Mux);
+  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
+  g->get_input_pin("d0").connect_sink(mux.create_sink_pin(1));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(mux.create_sink_pin(2));
+  mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_GE(run_and_read_driver(g, mux), 8) << "a mux with one constant arm must still infer the data-arm width";
+}
+
+// Get_mask over a SIGNED input must keep every selected bit. `a` declared 3
+// signed bits spans [-4..3]; masking with 0b111 zero-extends, so the result
+// spans [0..7] and needs 4 signed bits. Deriving 3 would mean the emitted net
+// is one bit too narrow and the top bit is silently dropped -- an actual
+// miscompile, which is what `lhd lec` reported (res ref=8 impl=4 @ a=7) when
+// pass.bitfuzz first made this path run.
+TEST(BitwidthInfer, GetMaskKeepsEverySelectedBitOfSignedInput) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_getmask_signed");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 3);
+  gio->set_unsign("a", false);  // signed: [-4..3]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);  // no bits
+  livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
+  livehd::graph_util::setup_sink_by_name(gm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, gm), 4) << "a & 0b111 over [-4..3] spans [0..7]: 4 signed bits";
+}
+
+// Same shape with an UNSIGNED declaration. A PORT's declared `bits` is the
+// LITERAL bus width, so `input [2:0]` spans [0..7] -- masking with 0b111 is the
+// identity and the result is still 4 signed bits. Seeding it as ubits(bits-1)
+// (the internal-net magnitude convention) gave [0..3] and truncated everything
+// downstream.
+TEST(BitwidthInfer, GetMaskOverUnsignedInputKeepsWidth) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_getmask_unsigned");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 3);
+  gio->set_unsign("a", true);  // unsigned: [0..3]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
+  livehd::graph_util::setup_sink_by_name(gm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, gm), 4) << "a 3-bit unsigned PORT spans [0..7]: 4 signed bits";
+}
+
+// The tup_in_port shape: `get_mask(a, 0b111) + 1` where `a` is 3 signed bits.
+// The mask yields [0..7], so the sum spans [1..8] and needs 5 signed bits.
+// Deriving 4 ([-8..7]) drops the 8 and cgen emits a truncating net -- the
+// `res(ref=8 impl=0) @ ar.x=7` counterexample.
+TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_mask_plus1");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 3);
+  gio->set_unsign("a", false);  // signed: [-4..3]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
+  livehd::graph_util::setup_sink_by_name(gm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+
+  auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  gm.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, sum);
+  EXPECT_EQ(livehd::graph_util::bits_of(gm.create_driver_pin(0)), 4) << "a & 0b111 over [-4..3] spans [0..7]";
+  EXPECT_EQ(bits, 5) << "[0..7] + 1 spans [1..8], which needs 5 signed bits";
+}
+
+// The full tup_in_port chain: Get_mask(a,0b111) -> Sext(.,5) -> +1. The mask
+// yields [0..7], the Sext is a no-op on a non-negative source, so the sum still
+// spans [1..8] and needs 5 signed bits. process_sext BYPASSES and deletes a
+// Sext whose source already fits `sign_max`; the sum must be sized from the
+// surviving source either way.
+TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_mask_sext_plus1");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 3);
+  gio->set_unsign("a", false);  // signed: [-4..3]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
+  livehd::graph_util::setup_sink_by_name(gm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+
+  auto sx = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);
+  livehd::graph_util::setup_sink_by_name(sx, "a").connect_driver(gm.create_driver_pin(0));
+  livehd::graph_util::setup_sink_by_name(sx, "b")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(5)));
+
+  auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  sx.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, sum);
+  EXPECT_EQ(bits, 5) << "[0..7] sign-extended then +1 spans [1..8]: 5 signed bits";
+}
+
+// The zero-extend every slang front end emits: a signed N-bit port masked with
+// an ALL-ONES (negative, -1) mask. `x` spans [-128..127] and `x & -1` maps
+// x=-1 to 255, so the image is [0..255] and `+1` needs 10 signed bits.
+//
+// The worst-case probe used the literal -1, but a negative mask makes
+// get_mask_op copy bits [0, src_bits) of the SOURCE and -1 is one bit wide, so
+// the single-bit rule returned -1 and the bound fell back to 2^(N-1) = 128.
+// get_bits(128) == get_bits(255) == 9, so the mask pin itself looked identical
+// and only the consumer exposed it: the sum came out one bit narrow and cgen
+// truncated (`r(ref=256 impl=0) @ x=255`).
+TEST(BitwidthInfer, AllOnesMaskOverSignedPortKeepsFullRange) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_allones_mask");
+  gio->add_input("x", 1);
+  gio->set_bits("x", 8);
+  gio->set_unsign("x", false);  // signed: [-128..127]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("x"));
+  livehd::graph_util::setup_sink_by_name(gm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(-1)));
+
+  auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  gm.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+  sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, sum);
+  EXPECT_EQ(bits, 10) << "[0..255] + 1 spans [1..256], which needs 10 signed bits";
+}
+
+// A VARIABLE arithmetic right shift. `a` is a fixed constant-like range and the
+// shift amount spans [1..4], so `a >> n` spans [a>>4 .. a>>1]. Shifting BOTH
+// bounds by the smallest amount collapses the range to one point, and adjust_bw
+// then const-folds the SRA away entirely -- which is what turned
+// `packed_assign`'s array select into a constant.
+TEST(BitwidthInfer, VariableSraKeepsRangeAndSurvives) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_sra_var");
+  gio->add_input("n", 1);
+  gio->set_bits("n", 3);
+  gio->set_unsign("n", true);  // [0..7]
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  // shift amount = (n & 3) + 1  -> [1..4], strictly positive
+  auto nm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
+  livehd::graph_util::setup_sink_by_name(nm, "a").connect_driver(g->get_input_pin("n"));
+  livehd::graph_util::setup_sink_by_name(nm, "mask")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(3)));
+  auto amt = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
+  nm.create_driver_pin(0).connect_sink(amt.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(amt.create_sink_pin(0));
+
+  auto sra = livehd::graph_util::create_typed_node(*g, Ntype_op::SRA);
+  livehd::graph_util::setup_sink_by_name(sra, "a")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(9345)));
+  livehd::graph_util::setup_sink_by_name(sra, "b").connect_driver(amt.create_driver_pin(0));
+  sra.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  int32_t bits = run_and_read_driver(g, sra);
+  EXPECT_EQ(livehd::graph_util::type_op_of(sra), Ntype_op::SRA)
+      << "a variable-amount SRA spans a real range and must not be const-folded";
+  EXPECT_GT(bits, 0);
+}
+
+// Not's value contract is ~x == -x-1 (see process_not), so Not over a {0,1}
+// boolean spans {-1,-2}: 2 SIGNED bits, and NEVER zero. This lock exists
+// because tolg's not1() used to spell LOGICAL negation as a bitwise Not with a
+// hand-stamped 1-bit unsigned attr -- annotation truncation that only cgen's
+// declared-width clip turned back into a boolean. When bitfuzz stripped the
+// stamp, the honest [-2,-1] came back, `if (not_56)` went always-true, and a
+// memory wrote on every cycle regardless of its enable
+// (tests/equiv/comb_array_const_index_read). The fix is in tolg (EQ-against-0,
+// the landed rule); do NOT "fix" it here by making Not of a boolean stay
+// 1-bit -- that would re-introduce attrs-carry-semantics and break the
+// documented ~x == -x-1 contract abc and the LEC encoder both rely on.
+TEST(BitwidthInfer, NotOfBooleanIsTwoBitSignedNeverZero) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_not_bool");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 8);
+  gio->add_input("b", 2);
+  gio->set_bits("b", 8);
+  gio->add_output("o", 3);
+  auto g = gio->create_graph();
+
+  auto cmp = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
+  g->get_input_pin("a").connect_sink(cmp.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(cmp.create_sink_pin(1));
+
+  auto nt = livehd::graph_util::create_typed_node(*g, Ntype_op::Not);
+  cmp.create_driver_pin(0).connect_sink(nt.create_sink_pin(0));
+  nt.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, nt), 2) << "~{0,1} spans {-2,-1}: 2 signed bits";
+  EXPECT_FALSE(livehd::graph_util::is_unsign(nt.create_driver_pin(0)))
+      << "Not of a boolean is always negative -- it is NOT a logical negation";
+}
+
+// Or of two 1-bit SIGNED values. Each spans [-1..0] (get_sbits 1), so the
+// old process_bit_or built its lower bound from
+// Dlop::get_neg_mask_value(max_bits - 1) == get_neg_mask_value(0), which
+// returns +1 rather than a negative value -- producing the inverted range
+// [1..0] and aborting inside Bitwidth_range::set_range. It must infer a
+// bounded width instead.
+TEST(BitwidthInfer, BitOrOfOneBitSignedValues) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_or_1bit_signed");
+  gio->add_input("a", 1);
+  gio->set_bits("a", 1);
+  gio->set_unsign("a", false);  // signed 1 bit: [-1..0]
+  gio->add_input("b", 2);
+  gio->set_bits("b", 1);
+  gio->set_unsign("b", false);
+  gio->add_output("o", 3);
+  auto g = gio->create_graph();
+
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Or);  // no bits
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, op), 1) << "a|b over [-1..0] stays 1 signed bit";
+}
+
 // Bitwise XOR of u8 ^ u8: the result spans the wider operand's signed width.
 TEST(BitwidthInfer, BitXorWidth) {
   auto g  = bounded_inputs("bw_xor", 8, 8);
@@ -147,15 +469,42 @@ TEST(BitwidthInfer, BitAndWidth) {
   EXPECT_GT(run_and_read_driver(g, op), 0) << "process_bit_and must infer a bounded width";
 }
 
-// A comparator (LT) always produces a 1-bit result regardless of operands.
-TEST(BitwidthInfer, ComparatorIsOneBit) {
+// A comparator (LT) produces the ZERO-EXTENDED boolean {0, 1} regardless of its
+// operands -- 2 signed bits marked unsigned, which is exactly what tolg/cgen
+// declare (`reg [1:0]`). It must NOT come back as the 1-bit signed {-1, 0}:
+// booleans get shifted into position when a `match` is lowered to a one-hot
+// selector, and a negative boolean sign-extends over the bits above it.
+TEST(BitwidthInfer, ComparatorIsUnsignedBoolean) {
   auto g  = bounded_inputs("bw_cmp", 8, 8);
   auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
   g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
   g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, op), 1) << "process_comparator must set a 1-bit result";
+  EXPECT_EQ(run_and_read_driver(g, op), 2) << "a boolean is [0..1]: 2 signed bits";
+  EXPECT_TRUE(livehd::graph_util::is_unsign(op.create_driver_pin(0)))
+      << "a comparator result is non-negative; a signed {-1,0} boolean breaks `cmp << k`";
+}
+
+// The failure shape that made this matter: a boolean shifted into a one-hot
+// position. Under the {0,1} convention `(a<b) << 2` spans [0..4]; under the
+// signed {-1,0} one it spans [-4..0], whose sign extension sets every bit above
+// bit 2 and destroys the one-hotness of the selector it is OR-ed into.
+TEST(BitwidthInfer, ShiftedComparatorStaysNonNegative) {
+  auto g   = bounded_inputs("bw_cmp_shl", 8, 8);
+  auto cmp = livehd::graph_util::create_typed_node(*g, Ntype_op::LT);
+  g->get_input_pin("a").connect_sink(cmp.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(cmp.create_sink_pin(1));
+
+  auto shl = livehd::graph_util::create_typed_node(*g, Ntype_op::SHL);
+  livehd::graph_util::setup_sink_by_name(shl, "a").connect_driver(cmp.create_driver_pin(0));
+  livehd::graph_util::setup_sink_by_name(shl, "b")
+      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(2)));
+  shl.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  (void)run_and_read_driver(g, shl);
+  EXPECT_TRUE(livehd::graph_util::is_unsign(shl.create_driver_pin(0)))
+      << "a shifted boolean must stay non-negative";
 }
 
 // Mux: sink 0 is the selector, sinks 1..N the data arms; the output unions

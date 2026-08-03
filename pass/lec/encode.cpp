@@ -1933,6 +1933,45 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         break;
       }
       case Ntype_op::Sum: {
+        // Verilog's own context rule, exactly: an addition is SIGNED iff every
+        // operand is signed. The pin's own hint cannot answer -- tolg's
+        // bind_result stamps every op output unsigned -- so without this walk a
+        // Sum whose value goes negative was zero-extended by its consumer.
+        // Measured on tests/equiv/sext_scalar_net: `$signed(w) + b` spans
+        // [-9..7], the stamped-unsigned model read -1 at 5 bits as 31 where
+        // iverilog says 255 -- and the side lec got wrong was the BASELINE, so
+        // an equivalent pair refuted (pass.bitfuzz's re-inferred side carried
+        // the accurate sign and exposed the modelling gap).
+        //
+        // A NON-NEGATIVE constant is transparent, not a veto: cgen emits every
+        // constant as a SIGNED literal (`2'sh1`), so in the emitted text it
+        // does not demote the expression -- and it zero- and sign-extends
+        // alike, so const_val's is_signed=false for it is a modelling
+        // convenience, not a sign. (Same stance as cgen's
+        // operand_reads_signed.) A negative constant reads signed already.
+        //
+        // This is NOT the reverted "any operand signed" bitwise rule: ALL
+        // matches Verilog's semantics for `+`/`-` exactly, the same way the Or
+        // arm above matches `|` and the SRA arm below matches `>>>`.
+        {
+          bool every = !all.empty();
+          for (const auto& e : node.inp_edges()) {
+            if (gu::is_const_pin(e.driver)) {
+              if (gu::hydrate_const(e.driver).is_negative()) {
+                continue;  // negative literal: signed in the emitted text
+              }
+              continue;  // non-negative constant: sign-transparent
+            }
+            bool ok2 = true;
+            Val  v   = driver_val(e.driver, ok2);
+            if (!ok2) {
+              every = false;
+              break;
+            }
+            every &= v.is_signed;
+          }
+          out_signed |= every;
+        }
         Term add_acc;
         for (const auto& v : pid(0)) {  // "a" pins: added
           Term t  = fit(v, W);
@@ -1975,7 +2014,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // operands, then narrow.
         //
         // SREM, never SMOD: the op is TRUNCATED remainder (sign follows the
-        // dividend), matching Verilog `%`, Dlop::mod_op and the tolg lowering.
+        // dividend), matching Verilog `%`, Dlop::rem_op and the tolg lowering.
         // SMOD is floored and would flip the sign for a negative dividend --
         // and because BOTH sides of the miter would use the same wrong kind,
         // lec would still report "equivalent". One kind, no sign switch: every
@@ -2085,6 +2124,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           acc        = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
         }
         result = acc.isNull() ? a : acc;
+        // Verilog's rule for a shift: the result's sign is the LEFT operand's
+        // (the amount never counts). Same walk-through as the SRA arm below and
+        // for the same reason -- the pin's own hint is stamped unsigned by
+        // tolg's bind_result, so a shifted NEGATIVE value was zero-extended by
+        // its consumer. Measured on tests/equiv/signed_shift_widen: `sa << ua`
+        // with sa = -4 was materialized at its 10-bit stamped width as 1020 and
+        // zero-extended into the 16-bit output where iverilog says 65532 -- on
+        // the BASELINE side of the miter, so an equivalent pair refuted once
+        // pass.bitfuzz gave the other side the accurate sign.
+        out_signed |= pid(0)[0].is_signed;
         break;
       }
       case Ntype_op::SRA: {

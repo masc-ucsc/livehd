@@ -144,7 +144,8 @@ void Pass_lec::setup() {
                        "tier-2 speculative state correspondence (default true): when unmatched flops survive "
                        "tier-1 name pairing, run pass.semdiff's full-match (SRP/ERP) signature pass per def-pair "
                        "and inject the resulting pairs as UNCERTAIN — REFUTED under them drops all pairs and "
-                       "re-solves once, a bounded bmc PASS is never claimed while they apply, and only an "
+                       "re-solves once; a bounded bmc PASS under them is accepted only after a pair-free retry "
+                       "from detected reset or tracked-? no-reset initialization also proves, otherwise only an "
                        "unbounded inductive proof (self-certifying) accepts them; a PASS persists the pairs as "
                        "entity-keyed pair hints under --workdir. false disables (renamed state stays unmatched)",
                        "true");
@@ -225,6 +226,15 @@ void Pass_lec::setup() {
                        "encoding (UF(inputs), or UF_out(state)+UF_next(inputs,state) with a threaded state cut), "
                        "which forces QF_AUFBV and disables cvc5's eager bit-blaster",
                        "seq");
+  m.add_label_optional("int_blast",
+                       "cvc5 int-blasting (solve-bv-as-int): auto (default) = solve bit-vector-first, and a "
+                       "solver-give-up UNKNOWN earns ONE int-blasted re-solve at the formal.min_timeout budget "
+                       "(arithmetic-rewrite miters — reassociated/distributed/commuted multiplies — that "
+                       "bit-blasting cannot finish prove in <1s as unbounded integers, while mask/extract-heavy "
+                       "cones stay Unknown, so the retry only ever adds information) | off = never | "
+                       "iand | sum | bitwise | bv = force that cvc5 mode from the first solve. Verdicts stay "
+                       "sound (the translation is equisatisfiable); only the main lec solve path is affected",
+                       "auto");
   m.add_label_optional("phase_sched",
                        "encode a latch / negedge / gated-clock design over FOUR ordered microsteps per source "
                        "period (close-low, rise, close-high, fall) instead of rewriting it with pass.single_edge "
@@ -275,6 +285,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.cones        = std::string{var.get("cones", "auto")};
   o.conelimit    = str_tools::to_i(var.get("conelimit", "10000"));
   o.phase_sched  = parse_bool(var.get("phase_sched", "true"));
+  o.int_blast    = std::string{var.get("int_blast", "auto")};
   o.box_seq      = std::string_view{var.get("box_model", "seq")} != "uf";
   o.strict       = parse_bool(var.get("strict", "true"));
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
@@ -334,6 +345,10 @@ void Pass_lec::lec(Eprp_var& var) {
   auto mod  = std::string{impl->get_name()};
 
   auto r = lec::prove_equal(ref.get(), impl.get(), o);
+  // int_blast=auto second leg: a solver-give-up Unknown earns one int-blasted
+  // re-solve at the min_timeout floor (driver-level, so the recursion inside
+  // prove_equal never multiplies it).
+  r = lec::int_blast_retry(ref.get(), impl.get(), o, std::move(r));
 
   // BEFORE the switch: the Refuted/Unknown arms below are .fatal(), so a report
   // printed after them would be lost in exactly the two cases where knowing how hard
