@@ -483,6 +483,8 @@ std::string lit_zero(uint32_t w) { return "(0#" + std::to_string(w) + ")"; }
 
 std::string lit_one(uint32_t w) { return "(1#" + std::to_string(w) + ")"; }
 
+std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v);
+
 std::string lit_const_at(const LeanCtx& ctx, const Node& node, const Dlop& v, uint32_t w) {
   if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
     check_width(ctx, node, w, "Const");
@@ -493,21 +495,18 @@ std::string lit_const_at(const LeanCtx& ctx, const Node& node, const Dlop& v, ui
     }
     return lit_zero(w);
   }
-  if (v.is_known_zero()) {
-    return lit_zero(w);
-  }
-  if (v.same_repr(*Dlop::create_integer(-1))) {
-    return lit_bv(w, "-1");
-  }
-  if (v.is_just_i64()) {
-    return lit_bv(w, std::to_string(v.to_just_i64()));
-  }
-  // Spell the constant as `BitVec.ofInt w <decimal>` — identical to how the
-  // certificate leaf is built (int_of_const + source_leaf), so the fast-view
-  // bridge closes by matching spelling.  (Previously an all-ones mask was emitted
-  // as the shift-form `(1#w <<< w) - 1#w`; same value, but the cert used the
-  // decimal, so the per-node closer could not reconcile the two forms.)
-  return lit_bv(w, lean_int_literal(v.to_decimal_string()));
+  // ONE source of truth for constant spelling: delegate the integer literal to
+  // `int_of_const`, the very function the certificate leaf uses (see
+  // CertBuild::source_leaf), so fast and cert are textually identical for every
+  // constant form by construction.
+  //
+  // Step 5's fast-view bridge compares the two models side by side, and for ops
+  // where a constant survives into the result (compares inside `decide (_ = _)`,
+  // MuxN branches, mask `&&&`) a mere spelling difference is an unprovable goal
+  // even though the value matches.  Spellings here used to diverge per form —
+  // zero as `0#w`, -1 as `-1`, i64 as a bare decimal, an all-ones mask as
+  // `(1#w <<< w) - 1#w` — and each divergence cost a bridge bug.
+  return lit_bv(w, int_of_const(ctx, node, v));
 }
 
 std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v) {
