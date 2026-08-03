@@ -1,0 +1,29 @@
+/*
+:name: mod_general
+:type: equiv
+:verilog_top: mod_general.foo
+:pyrope_top: foo
+*/
+
+// The GENERAL remainder cell (Ntype_op::Rem). These three shapes were HARD
+// ERRORS in tolg until the op existed -- they were the `errors/`-tree tests
+// mod_runtime_divisor, mod_unsupported and mod_signed_dividend, which asserted
+// the absence of the feature and are replaced by this file.
+//
+// Putting the "can this be synthesized?" question in tolg made every other
+// consumer pay for it: bitwidth, constprop, the LEC encoder and the simulator
+// can all reason about `%` perfectly well, and only the netlist mapper cannot.
+// The restriction now lives in pass.abc (diag `rem-unsupported`), so a design
+// that merely CONTAINS a remainder compiles, simulates and verifies.
+//
+// SEMANTICS pinned here: TRUNCATED remainder, sign following the DIVIDEND, the
+// same as Verilog `%`, Dlop::mod_op and cvc5 BITVECTOR_SREM. `rs` is the arm
+// that would catch a floored/SMOD encoding -- a negative dividend is exactly
+// where truncated and floored disagree, and it is invisible in the other two.
+// There is ONE op and no unsigned flavour: every LNAST/LGraph value is signed
+// and unsigned is just the non-negative subset.
+pub comb foo(a:u8, b:u8, s:s8) -> (rr:u8, r5:u3, rs:s8) {
+  rr = a % b     // RUNTIME divisor  (was `mod-runtime-divisor`)
+  r5 = a % 5     // non-power-of-two (was `mod-unsupported-divisor`)
+  rs = s % 8     // possibly-NEGATIVE dividend (was `mod-signed-dividend`)
+}

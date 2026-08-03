@@ -274,6 +274,21 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return absl::StrCat(operand(e[0].driver, cw), ".div_op(", operand(e[1].driver, cw), ")");
     }
+    case Ntype_op::Rem: {
+      // Same shape and the SAME reason as Div above: this switch has no
+      // fail-closed default, so a missing arm here would silently simulate
+      // `a % b` as the bare dividend. Truncated remainder, sign following the
+      // dividend -- Dlop::mod_op is exactly that, and there is only one flavour
+      // because every value is signed.
+      if (e.size() < 2) {
+        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits);
+      }
+      int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
+      if (!is_unsign(e[0].driver) || !is_unsign(e[1].driver)) {
+        cw += 1;
+      }
+      return absl::StrCat(operand(e[0].driver, cw), ".mod_op(", operand(e[1].driver, cw), ")");
+    }
     case Ntype_op::Ror: {
       // OR-reduction: 1 iff ANY bit of ANY operand is set. Each operand must be
       // read at its OWN full width (not the 1-bit node width), then reduced --
@@ -458,204 +473,6 @@ namespace {
 // flattened, so flop/memory/VCD/checkpoint semantics are unchanged, and only a
 // Sub genuinely ON a false loop is touched (normal hierarchical sims are
 // identical). Runs on the live sim graph, before emission. Returns #flattened.
-int flatten_false_loop_subs(hhds::Graph* g) {
-  namespace gu = livehd::graph_util;
-
-  // The whole CLOSURE must be state-free: nested comb Subs are fine (the clone
-  // below re-instantiates them in `g` as ordinary pure-comb leaf instances --
-  // the ExeUnitImp_4/Alu/AluDataModule shape), but any Flop/Latch/Fflop/Memory
-  // anywhere makes inlining change state identity, so those are never touched.
-  auto callee_closure_is_comb = [](auto&& self, const std::shared_ptr<hhds::Graph>& cg) -> bool {
-    if (!cg) {
-      return false;
-    }
-    for (auto n : cg->fast_class()) {
-      auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
-        return false;
-      }
-      if (op == Ntype_op::Sub && !self(self, n.get_subnode_graph())) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  auto driver_of = [](const hhds::Pin_class& sink) -> hhds::Pin_class {
-    if (sink.is_invalid()) {
-      return {};
-    }
-    for (auto e : sink.get_master_node().inp_edges()) {
-      if (e.sink.get_port_id() == sink.get_port_id()) {
-        return e.driver;
-      }
-    }
-    return {};
-  };
-
-  // A Sub S is on a false loop iff a backward COMB walk from one of its input
-  // drivers reaches S's own output (stopping at any other state/loop_last).
-  auto on_false_loop = [&](const hhds::Node_class& s) {
-    absl::flat_hash_set<hhds::Node_class> seen;
-    std::vector<hhds::Pin_class>          stk;
-    for (auto e : s.inp_edges()) {
-      stk.push_back(e.driver);
-    }
-    while (!stk.empty()) {
-      auto d = stk.back();
-      stk.pop_back();
-      if (d.is_invalid() || gu::is_const_pin(d)) {
-        continue;
-      }
-      auto m = d.get_master_node();
-      if (m == s) {
-        return true;
-      }
-      auto op = gu::type_op_of(m);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || gu::is_type_register(m) || op == Ntype_op::IO) {
-        continue;  // a real state boundary -- the loop does not thread through it
-      }
-      if (!seen.insert(m).second) {
-        continue;
-      }
-      for (auto e : m.inp_edges()) {
-        stk.push_back(e.driver);
-      }
-    }
-    return false;
-  };
-
-  // Fixpoint rounds: inlining one level can MOVE the false loop onto a nested
-  // instance that just became a direct child (Alu -> AluDataModule), so rescan
-  // until no on-false-loop comb-closure Sub remains (bounded).
-  int flattened = 0;
-  for (int round = 0; round < 8; ++round) {
-    std::vector<hhds::Node_class> targets;
-    for (auto node : g->fast_class()) {
-      if (gu::type_op_of(node) != Ntype_op::Sub) {
-        continue;
-      }
-      if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
-        continue;
-      }
-      targets.push_back(node);
-    }
-    if (targets.empty()) {
-      break;
-    }
-    flattened += static_cast<int>(targets.size());
-
-    for (auto& sub : targets) {
-      auto cg  = sub.get_subnode_graph();
-      auto sio = sub.get_subnode_io();
-      if (!cg || !sio) {
-        continue;
-      }
-      // The Sub's driver for each input port (by port id) -- feeds a callee input.
-      absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;
-      for (auto e : sub.inp_edges()) {
-        sub_in_drv[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
-      }
-
-      // (a) copy every callee comb node into g (consts/IO ports handled on demand).
-      absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
-      for (auto cn : cg->fast_class()) {
-        auto op = gu::type_op_of(cn);
-        if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
-          continue;
-        }
-        auto neo = gu::create_typed_node(*g, op);
-        if (op == Ntype_op::Sub) {
-          // a nested comb Sub is re-instantiated in g as an ordinary child
-          // instance (the closure check above guarantees it is state-free)
-          neo.set_subnode(cn.get_subnode_io());
-        }
-        if (gu::has_name(cn)) {
-          neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(cn)});
-        }
-        nmap[cn] = neo;
-      }
-
-      // A callee driver pin -> the equivalent driver pin in g.
-      auto map_driver = [&](const hhds::Pin_class& cdrv) -> hhds::Pin_class {
-        if (gu::is_graph_input_pin(cdrv)) {
-          // a callee INPUT port -> the Sub's driver for that port (same port id)
-          auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
-          return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
-        }
-        if (gu::is_const_pin(cdrv)) {
-          return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
-        }
-        auto mit = nmap.find(cdrv.get_master_node());
-        if (mit == nmap.end()) {
-          return {};  // an uncopied node (should not happen for a pure-comb callee)
-        }
-        auto neo = mit->second;
-        auto np  = neo.create_driver_pin(cdrv.get_port_id());
-        if (auto b = gu::bits_of(cdrv); b != 0) {
-          gu::set_bits(np, b);
-        }
-        if (!gu::is_unsign(cdrv)) {
-          gu::set_sign(np);
-        }
-        if (auto pn = gu::pin_name_of(cdrv); !pn.empty()) {
-          gu::set_pin_name(np, pn);
-        }
-        return np;
-      };
-
-      // (b) rewire the callee's internal edges onto the copies.
-      for (auto cn : cg->fast_class()) {
-        auto it = nmap.find(cn);
-        if (it == nmap.end()) {
-          continue;
-        }
-        for (auto e : cn.inp_edges()) {
-          auto gdrv = map_driver(e.driver);
-          if (gdrv.is_invalid()) {
-            continue;
-          }
-          gdrv.connect_sink(it->second.create_sink_pin(e.sink.get_port_id()));
-        }
-      }
-
-      // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
-      // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
-      // Walk out_edges instead of probing get_driver_pin per decl: a declared
-      // output with no consumer has no materialized pin and hhds asserts.
-      absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
-      for (const auto& oe : sub.out_edges()) {
-        out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
-      }
-      std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
-      for (const auto& od : sio->get_output_pin_decls()) {
-        auto sit = out_sinks.find(static_cast<uint32_t>(od.port_id));
-        if (sit == out_sinks.end()) {
-          continue;
-        }
-        auto internal = driver_of(cg->get_output_pin(od.name));  // driver inside the callee
-        if (internal.is_invalid()) {
-          continue;
-        }
-        auto gdrv = map_driver(internal);
-        if (gdrv.is_invalid()) {
-          continue;
-        }
-        reconnect.emplace_back(gdrv, std::move(sit->second));
-      }
-
-      sub.del_node();  // drops the Sub + all its boundary edges
-
-      // (d) drive the former Sub-output consumers from the inlined logic.
-      for (auto& [gdrv, sinks] : reconnect) {
-        for (auto& sk : sinks) {
-          gdrv.connect_sink(sk);
-        }
-      }
-    }
-  }  // fixpoint rounds
-  return flattened;
-}
 
 // A Sub S sits on a FALSE combinational loop when a backward COMB walk from one
 // of its input drivers reaches S itself (stopping at other state/Sub/IO
@@ -1188,7 +1005,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Break a false combinational loop through an ATOMIC pure-comb sub-instance by
   // inlining the offending instance into this graph before scheduling. A no-op
   // unless a stateless Sub's output feeds back into one of its own inputs.
-  flatten_false_loop_subs(g);
+  livehd::graph_util::flatten_false_loop_subs(g);
   // Break a false WORD-level combinational loop through a packed wire: redirect
   // each constant Get_mask slice-read of an `Or`-of-disjoint-ranges net to the one
   // operand that drives the read range. A no-op unless a genuine word-level cycle

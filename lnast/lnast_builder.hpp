@@ -122,6 +122,7 @@ public:
   std::string create_plus_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_mult_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_div_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
   void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
 

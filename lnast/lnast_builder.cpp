@@ -325,6 +325,32 @@ std::string Lnast_builder::create_div_stmts(std::string_view a_var, std::string_
   return res_var;
 }
 
+std::string Lnast_builder::create_mod_stmts(std::string_view a_var, std::string_view b_var) {
+  // NOT a copy of create_div_stmts: division by 1 is the identity, but REMAINDER
+  // by 1 is always ZERO. Returning `a_var` here (the shape one gets by cloning
+  // the div builder) would silently make `x % 1 == x`.
+  if (b_var == "1") {
+    return "0";
+  }
+  if (b_var.empty()) {
+    return "0";  // an absent divisor is the `% 1` case, not `/ 1`
+  }
+
+  auto res_var = create_lnast_tmp();
+  auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_mod());
+  add_ref_child(idx, res_var);
+
+  if (a_var.empty()) {
+    add_const_child(idx, "1");
+  } else {
+    add_value_child(idx, a_var);
+  }
+
+  add_value_child(idx, b_var);
+
+  return res_var;
+}
+
 std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty() && !b_var.empty());
   return emit_binary_result(Lnast_ntype::create_sra(), a_var, b_var);

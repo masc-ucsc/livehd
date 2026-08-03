@@ -170,6 +170,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       break;
     case Ntype_op::Sext:
     case Ntype_op::Div:
+    case Ntype_op::Rem:
     case Ntype_op::SRA:
     case Ntype_op::SHL:
       // a,b are single-driver positional operands -> plain names. (SHL no longer

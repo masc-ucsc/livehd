@@ -2398,27 +2398,19 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
     } else if (std::strncmp(cell->type.c_str(), "$mod", 4) == 0) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
 
-      auto div_node = create_typed_node(*g, Ntype_op::Div, y_bits);
-      auto mul_node = create_typed_node(*g, Ntype_op::Mult, y_bits);
-      auto sub_node = create_typed_node(*g, Ntype_op::Sum, y_bits);
-
+      // ONE Rem cell. This used to build `a - (a/b)*b` out of Div+Mult+Sum,
+      // which is arithmetically right but leaves nothing downstream able to
+      // recognize a remainder -- bitwidth in particular cannot recover the
+      // correlation between `a` and `a/b` and computes a hugely pessimistic
+      // (and negative) range. Mirrors the `$div` arm above.
       hhds::Pin_class a_dpin = get_unsigned_dpin(g, cell, ID::A);
       hhds::Pin_class b_dpin = get_unsigned_dpin(g, cell, ID::B);
 
-      set_type_op(exit_node, Ntype_op::And);
+      set_type_op(exit_node, Ntype_op::Rem);
       set_bits(exit_node.create_driver_pin(0), y_bits);
-      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 
-      setup_sink_by_name(div_node, "a").connect_driver(a_dpin);
-      setup_sink_by_name(div_node, "b").connect_driver(b_dpin);
-
-      setup_sink_by_name(mul_node, "as").connect_driver(div_node.create_driver_pin(0));
-      setup_sink_by_name(mul_node, "as").connect_driver(b_dpin);
-
-      setup_sink_by_name(sub_node, "as").connect_driver(a_dpin);
-      setup_sink_by_name(sub_node, "bs").connect_driver(mul_node.create_driver_pin(0));
-
-      exit_node.create_sink_pin(0).connect_driver(sub_node.create_driver_pin(0));
+      setup_sink_by_name(exit_node, "a").connect_driver(a_dpin);
+      setup_sink_by_name(exit_node, "b").connect_driver(b_dpin);
     } else if (std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
 

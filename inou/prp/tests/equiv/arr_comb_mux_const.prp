@@ -4,28 +4,34 @@
 :verilog_top: arr_comb_mux_const
 :pyrope_top: arr_comb_mux_const
 */
-// TRACKER — comb-array per-entry store loses its RHS (lhdsuite
-// array_problem.md). Known-failing: prp-equiv-arr_comb_mux_const is tagged
-// `fixme`.
+// TRACKER — an UNDRIVEN element of an UNPACKED array is modelled as FREE rather
+// than as a DON'T-CARE, so lec refutes a pair that is equivalent by intent.
 //
-// This .prp is the VERBATIM `lhd compile arr_comb_mux_const.v --emit-dir
-// pyrope:` output (headers added): the golden's elaboration-constant ternary
-// `assign arr[0] = 1 ? d : ~d;` makes the writer emit `_mux_1` declared in one
-// statement and reassigned inside a code block, and tolg then resolves the
-// store din from a STALE version of `_mux_1` — `o` reads the wrong value for
-// sel==0. The emitted Pyrope below is CORRECT (the last `_mux_1` write is
-// `d & 1`); the defect is in lowering it (upass tolg), which is why the
-// original-Verilog leg of prp-v2prp2v-arr_comb_mux_const PROVES while this pair
-// REFUTES. Same root cause as array_store_stale_rhs (reassigned-mut RHS);
-// the clocked twin (mem[waddr] <= 1 ? wdata : ~wdata) lowers correctly.
+// The golden drives only `arr[0]`; `arr[1]` has no driver, which in Verilog is
+// X and means "any value is acceptable". The Pyrope side starts from
+// `mut arr:[2]u1 = 0`, so its element 1 is 0. Reading `arr[sel]` at sel==1
+// therefore compares a committed 0 against the golden's unknown.
+//
+// That comparison SHOULD be discharged: `formal.lec.gold_x` already defaults to
+// `ignore` (the cvc5 analogue of yosys `miter -ignore_gold_x`), every Val
+// carries an X bit-plane, and the miter masks ref-unknown bits out of the
+// compare. It works for a PACKED net — an undriven bit there is read as a
+// constant with literal `?` bits (`3'sb0??`), which seeds the plane, and the
+// impl may drive it 0 OR 1 and still PROVE (measured both ways).
+//
+// The gap is the SOURCE, not the policy: an unpacked array becomes array state
+// whose unwritten contents are UNCONSTRAINED, with no X plane at all. Free is
+// not don't-care — a free symbol is chosen ADVERSARIALLY, so the solver picks
+// exactly the value that breaks the miter (witness `o(ref=1 impl=0)` at sel==1).
+// Fix = seed the X plane for undriven array state (the Memory `undef` pin /
+// read-dout X plane is the existing representation), NOT to change the compare.
+//
+// MEASURED: adding `assign arr[1] = 1'b0;` to the golden makes this exact pair
+// PROVEN, so the undriven element is the ONLY remaining difference.
+// (`prp-v2prp2v-arr_comb_mux_const` passes: its original-Verilog leg never
+// commits element 1 on either side.)
 pub comb arr_comb_mux_const::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
-  mut _mux_1:u1 = 0
   mut arr:[2]u1 = 0
-  _mux_1 = (~d) & 1 & 1
-  o = 0ub?
-  {
-    _mux_1 = d & 1
-  }
-  arr[0] = _mux_1
+  arr[0] = d          // the golden's `1 ? d : ~d` — a constant condition, so `d`
   o = arr[sel]
 }

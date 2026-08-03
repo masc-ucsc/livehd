@@ -19,4 +19,21 @@ namespace livehd::graph_util {
 // cprop. Returns the number of rewired reads.
 int split_packed_selfref_wires(hhds::Graph* g);
 
+// Break a false combinational loop that runs THROUGH a pure-comb sub-instance:
+// inline the offending instance into `g` so the cycle becomes ordinary logic
+// the scheduler can linearize. The whole callee CLOSURE must be state-free --
+// nested comb Subs are fine and are re-instantiated as ordinary pure-comb leaf
+// instances (the ExeUnitImp_4/Alu/AluDataModule shape) -- because inlining a
+// Flop/Latch/Memory would change state identity. A no-op unless a stateless
+// Sub's output actually feeds back into one of its own inputs.
+//
+// Same deal as split_packed_selfref_wires above, and it must run in the same
+// places: a WRITER cannot assume an optimization pass ran first. cgen_verilog
+// emits one always_comb of ordered BLOCKING assignments, so a residual cycle
+// makes it emit a read before the line that assigns it -- Verilog that is not
+// combinational at all (measured on tests/equiv/sim_sub_nested_comb_feedback:
+// 299/300 vectors wrong at O0, 0/300 at O1, from the SAME source).
+// Returns the number of instances inlined.
+int flatten_false_loop_subs(hhds::Graph* g);
+
 }  // namespace livehd::graph_util

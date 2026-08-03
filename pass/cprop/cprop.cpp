@@ -769,6 +769,14 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     auto result = a.div_op(b);
 
     replace_node(node, result);
+  } else if (op == Ntype_op::Rem) {
+    I(inp_edges_ordered.size() == 2);
+    Dlop a = hydrate_const(inp_edges_ordered[0].driver);
+    Dlop b = hydrate_const(inp_edges_ordered[1].driver);
+
+    auto result = a.mod_op(b);  // truncated remainder; invalid on mod-by-zero
+
+    replace_node(node, result);
   } else {
 #ifndef NDEBUG
     Pass::info("FIXME: cprop still does not copy prop node:{}\n", debug_name(node));

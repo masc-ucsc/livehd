@@ -1964,6 +1964,29 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         result  = fit(Val{q, dw, out_signed}, W);
         break;
       }
+      case Ntype_op::Rem: {
+        if (pid(0).size() != 1 || pid(1).size() != 1) {
+          return fail("Rem expects single a/b drivers");
+        }
+        // Same width discipline as Div, and it matters MORE here: the result
+        // width is legitimately tiny (`a % 4` is 2 bits), so fitting the DIVISOR
+        // to W would truncate 4 to 0 and hand cvc5 a remainder-by-zero, which is
+        // all-ones rather than an error. Compute at a width holding both
+        // operands, then narrow.
+        //
+        // SREM, never SMOD: the op is TRUNCATED remainder (sign follows the
+        // dividend), matching Verilog `%`, Dlop::mod_op and the tolg lowering.
+        // SMOD is floored and would flip the sign for a negative dividend --
+        // and because BOTH sides of the miter would use the same wrong kind,
+        // lec would still report "equivalent". One kind, no sign switch: every
+        // value here is signed and unsigned is just the non-negative subset.
+        int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
+        Term a  = fit(pid(0)[0], dw);
+        Term b  = fit(pid(1)[0], dw);
+        Term r  = tm_.mkTerm(Kind::BITVECTOR_SREM, {a, b});
+        result  = fit(Val{r, dw, true}, W);
+        break;
+      }
       case Ntype_op::Not: {
         if (all.empty()) {
           return fail("Not has no operand");

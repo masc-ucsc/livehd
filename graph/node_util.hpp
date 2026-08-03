@@ -941,6 +941,7 @@ namespace ge_detail {
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
 
     case Ntype_op::Div:
+    case Ntype_op::Rem:
     case Ntype_op::Memory: return atleast1(ge_detail::port_bits_sum(node));
 
     case Ntype_op::Mult: {

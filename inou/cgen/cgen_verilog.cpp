@@ -635,6 +635,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
         case Ntype_op::Sum:
         case Ntype_op::Ror:
         case Ntype_op::Div:
+        case Ntype_op::Rem:
         case Ntype_op::Not:
         case Ntype_op::LT:
         case Ntype_op::GT:
@@ -1598,6 +1599,10 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto lhs   = get_expression(get_driver(find_sink_pin(node, "a")));
     auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
     final_expr = absl::StrCat(lhs, "/", rhs);
+  } else if (op == Ntype_op::Rem) {
+    auto lhs   = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
+    final_expr = absl::StrCat(lhs, "%", rhs);
   } else if (op == Ntype_op::Not) {
     auto lhs_dpin = get_driver(find_sink_pin(node, "a"));
     auto lhs      = get_expression(lhs_dpin);
@@ -3055,6 +3060,10 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // skips cprop. So the same design emitted correctly at O1 and incorrectly at
   // O0. Calling it here makes the Verilog writer self-sufficient rather than
   // dependent on an optimization pass having run first.
+  // Break a false comb loop through a pure-comb sub-instance FIRST (a cycle
+  // crossing an instance boundary is invisible to the word-level splitter
+  // below), then the packed-wire one. Same pair, same order, as cgen_sim.
+  livehd::graph_util::flatten_false_loop_subs(graph.get());
   livehd::graph_util::split_packed_selfref_wires(graph.get());
 
   pin2var.clear();

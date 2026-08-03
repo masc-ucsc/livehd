@@ -106,6 +106,17 @@ enum class Ntype_op : uint8_t {
   // seeing ICG latches at all.
   Clock_cell = 52,
 
+  // Truncated REMAINDER, `a % b` (sign follows the DIVIDEND, like Verilog `%`
+  // and Dlop::mod_op -- NOT a floored modulo). One op: every LNAST/LGraph value
+  // is signed, and unsigned is just the non-negative subset, so there is no
+  // second unsigned flavour and nothing downstream switches on a sign flag.
+  //
+  // Slot 54 is the last free EVEN slot, and even is required: bit 0 is
+  // is_loop_last, and a remainder is combinational. Picking anything else would
+  // move Last_invalid, which resizes the four `Last_invalid`-sized tables below
+  // AND invalidates every serialized lgdb (the raw value is stored in the node).
+  Rem = 54,
+
   // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
   // Tuple-related ops (TupAdd, TupGet) and AttrGet were dropped along with
   // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
@@ -122,6 +133,7 @@ static_assert((static_cast<uint8_t>(Ntype_op::Latch) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Fflop) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Sub) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Clock_cell) & 1) == 0);  // combinational
+static_assert((static_cast<uint8_t>(Ntype_op::Rem) & 1) == 0);         // combinational
 static_assert((static_cast<uint8_t>(Ntype_op::Sum) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
@@ -194,6 +206,7 @@ protected:
     a[static_cast<size_t>(Ntype_op::Sub)]      = "sub";
     a[static_cast<size_t>(Ntype_op::Nconst)]   = "const";
     a[static_cast<size_t>(Ntype_op::Clock_cell)] = "clock_cell";
+    a[static_cast<size_t>(Ntype_op::Rem)]      = "rem";
     a[static_cast<size_t>(Ntype_op::AttrSet)]  = "attr_set";
     return a;
   }();

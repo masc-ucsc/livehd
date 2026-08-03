@@ -5334,6 +5334,18 @@ private:
   //   remainder) (1) b a comptime power-of-two, a non-negative   → a & (|b|-1)
   //   (low bits) (3) |b| == 3 (comptime),       a non-negative   → base-4
   //   digit-sum reduce
+  // Build the general `a % b` cell. |a % b| <= |a| under truncated semantics, so
+  // the dividend's width is always a sound result width; the sign slot rides
+  // along because every LGraph value is signed (unsigned is the non-negative
+  // subset), which is also why there is exactly ONE remainder op and nothing
+  // downstream switches on a sign flag.
+  void emit_rem(const std::string& dst_name, const Val& av, const Lnast_nid& b) {
+    auto remn = make_node(Ntype_op::Rem);
+    setup_sink_by_name(remn, "a").connect_driver(av.pin);
+    setup_sink_by_name(remn, "b").connect_driver(leaf(b).pin);
+    bind_result(dst_name, remn.create_driver_pin(0), av.mw > 0 ? av.mw : 1);
+  }
+
   void lower_mod(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -5378,14 +5390,13 @@ private:
       }
     }
 
-    // The remaining lowerings all need a comptime-constant divisor.
+    // A RUNTIME divisor is a first-class remainder cell. It used to be a hard
+    // error here, which put the "can this be synthesized?" question in the
+    // wrong pass: bitwidth, constprop, LEC and sim can all reason about `%`
+    // perfectly well, and only the netlist mapper cannot. pass.abc raises the
+    // diagnostic now, so the rest of LiveHD handles remainder normally.
     if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
-      error_at(b,
-               {"mod-runtime-divisor", "unsupported"},
-               "upass.tolg: `a % b` with a runtime divisor has no hardware "
-               "lowering — only a comptime power-of-two "
-               "divisor, `% 3`, or a divisor provably larger than `a` lowers "
-               "to shift/mask");
+      emit_rem(dst_name, av, b);
       return;
     }
     const int64_t bval = const_val(b);
@@ -5399,13 +5410,12 @@ private:
       return;
     }
 
+    // A possibly-NEGATIVE dividend is no longer ambiguous: the op is defined as
+    // TRUNCATED remainder (sign follows the dividend, like Verilog `%` and
+    // Dlop::mod_op), so it needs no constraint on `a` -- only the mask/digit-sum
+    // shortcuts below do, and those are optimizations, not the semantics.
     if (!a_nonneg) {
-      error_at(a,
-               {"mod-signed-dividend", "unsupported"},
-               "upass.tolg: `a % {}` with a possibly-negative `a` has no "
-               "hardware lowering — signed modulo semantics "
-               "are language-dependent (constrain `a` to a non-negative range)",
-               bval);
+      emit_rem(dst_name, av, b);
       return;
     }
 
@@ -5434,23 +5444,16 @@ private:
       } else if (av.mw > 0 && av.mw <= 62) {
         init_max = (int64_t{1} << av.mw) - 1;  // sound for ≤ 62 bits
       } else {
-        error_at(a,
-                 {"mod-three-too-wide", "unsupported"},
-                 "upass.tolg: `a % 3` on a dividend wider than 62 bits has no "
-                 "hardware lowering — constrain `a` to a "
-                 "non-negative range that fits 62 bits");
+        // No sound int64 bound for the digit-sum loop -- fall back to the cell.
+        emit_rem(dst_name, av, b);
         return;
       }
       bind_result(dst_name, lower_mod3(av, init_max), 2);  // result in [0, 2]
       return;
     }
 
-    error_at(b,
-             {"mod-unsupported-divisor", "unsupported"},
-             "upass.tolg: `a % {}` has no hardware lowering — only a "
-             "power-of-two divisor, `% 3`, or a divisor "
-             "provably larger than `a` lowers to shift/mask",
-             bval);
+    // Any other divisor: the general cell.
+    emit_rem(dst_name, av, b);
   }
 
   // `a % 3` for a non-negative `a` whose max value is `init_max`. Because

@@ -720,12 +720,15 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
         return fit_wrap(builder_.create_div_stmts(lhs, rhs), ti.bits, ti.is_signed);
       }
       return builder_.create_div_stmts(lhs, rhs);
-    case BinaryOperator::Mod: {
-      // a % b == a - (a/b)*b (LNAST mod has no LGraph lowering)
-      auto q = builder_.create_div_stmts(lhs, rhs);
-      auto p = builder_.create_mult_stmts(q, rhs);
-      return builder_.create_minus_stmts(lhs, p);  // |a%b| < |b| so it fits the type
-    }
+    case BinaryOperator::Mod:
+      // Emit the REAL `mod` node. The old expansion `a - (a/b)*b` was
+      // arithmetically right but destroyed the one thing bitwidth needs: with
+      // `a` and `a/b` as independent intervals the correlation between them is
+      // unrecoverable, so `(sel+1) % 4` came out [-15,4] instead of [0,3] and
+      // check_index_nonneg rejected a legal design (tests/equiv/
+      // negative_array_index). Lnast_range::mod() gives the exact range
+      // directly. No fit_wrap: |a%b| < |b|, so the result always fits.
+      return builder_.create_mod_stmts(lhs, rhs);
     case BinaryOperator::BinaryAnd: return builder_.create_bit_and_stmts(lhs, rhs);
     case BinaryOperator::BinaryOr: return builder_.create_bit_or_stmts({lhs, rhs});
     case BinaryOperator::BinaryXor: return builder_.create_bit_xor_stmts(lhs, rhs);

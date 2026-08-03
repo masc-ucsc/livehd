@@ -491,6 +491,62 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   return true;
 }
 
+namespace {
+// Rewrite the TRIVIALLY convertible remainders in a region into a mask, in
+// place, and report whether any survived.
+//
+// `a % 2^k` is `a & (2^k - 1)` -- but ONLY for a non-negative dividend. The op
+// is truncated remainder (the sign follows the dividend), so `-9 % 8` is -1,
+// not 7, and masking a negative value is simply a different function.
+//
+// upass/tolg's lower_mod already folds this shape when it lowers Pyrope, so a
+// Rem arriving from THAT path is non-trivial by construction. This pass exists
+// for the readers that build the cell directly -- inou/yosys turns `$mod` into
+// a Rem with whatever divisor the Verilog had, so a perfectly ordinary
+// `x % 8` read from Verilog would otherwise hit the error below despite being
+// one AND gate.
+void rewrite_trivial_rems(hhds::Graph* g) {
+  std::vector<hhds::Node_class> to_fix;
+  for (auto n : g->fast_class()) {
+    if (gu::type_op_of(n) != Ntype_op::Rem) {
+      continue;
+    }
+    auto b = gu::get_driver_of_sink_name(n, "b");
+    auto a = gu::get_driver_of_sink_name(n, "a");
+    if (b.is_invalid() || a.is_invalid() || !gu::is_const_pin(b)) {
+      continue;
+    }
+    const auto bc = gu::hydrate_const(b);
+    if (bc.has_unknowns() || !bc.is_just_i64()) {
+      continue;
+    }
+    const int64_t bv = bc.to_just_i64();
+    const int64_t ba = bv < 0 ? -bv : bv;
+    // A negative-capable dividend cannot use the mask (see above). `is_unsign`
+    // is the same non-negativity test lower_mod uses.
+    if (ba < 2 || (ba & (ba - 1)) != 0 || !gu::is_unsign(a)) {
+      continue;
+    }
+    to_fix.push_back(n);
+  }
+  for (auto n : to_fix) {
+    auto a  = gu::get_driver_of_sink_name(n, "a");
+    auto bc = gu::hydrate_const(gu::get_driver_of_sink_name(n, "b"));
+    const int64_t bv = bc.to_just_i64();
+    const int64_t ba = bv < 0 ? -bv : bv;
+
+    auto andn = gu::create_typed_node(*g, Ntype_op::And, gu::bits_of(n.get_driver_pin(0)));
+    gu::setup_sink_by_name(andn, "as").connect_driver(a);
+    gu::setup_sink_by_name(andn, "as").connect_driver(gu::create_const(*g, *Dlop::create_integer(ba - 1)));
+    auto newd = andn.create_driver_pin(0);
+    for (const auto& e : n.get_driver_pin(0).out_edges()) {
+      e.sink.connect_driver(newd);
+    }
+    n.del_node();
+  }
+}
+}  // namespace
+
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // A refusal already happened: work() will make it fatal once the ABC frame is
   // torn down, so translating the remaining regions can only burn time and
@@ -926,6 +982,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // netlist (breaks clock-tree synthesis and timing). Only the flop's din cone
   // (genuine comb logic) crosses into ABC. A clk_demoted register's GATED
   // clock cone, by contrast, IS genuine logic and does cross as a PO.
+  // Convert the trivially-mappable remainders BEFORE the boundary scan, so the
+  // refusal below only fires for a shape that genuinely has no gate translation.
+  rewrite_trivial_rems(rb.src);
+
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
   for (auto n : rb.src->forward_class()) {
@@ -951,19 +1011,37 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
     // cases below and fell into the bit-blast loop, aborting the whole region.
     const bool latch_boundary = op == Ntype_op::Latch;
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && !flop_boundary && !latch_boundary) {
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem && !flop_boundary
+        && !latch_boundary) {
       continue;
     }
     if (op == Ntype_op::Div) {
-      // Division (and modulo, which lowers to a - (a/b)*b, hence a Div) is not
-      // bit-blasted: a synthesizable divider is large and out of scope. The Div
-      // node is kept native as a blackbox boundary (its output feeds the AIG as a
-      // fresh PI, its inputs are cut as POs), exactly like a Sub/Memory instance,
-      // and rebuilt unchanged on read-back. Warn so the user knows this cone is
-      // not technology-mapped.
+      // Division is not bit-blasted: a synthesizable divider is large and out of
+      // scope. The Div node is kept native as a blackbox boundary (its output
+      // feeds the AIG as a fresh PI, its inputs are cut as POs), exactly like a
+      // Sub/Memory instance, and rebuilt unchanged on read-back. Warn so the
+      // user knows this cone is not technology-mapped.
       livehd::diag::warn("pass.abc", "div-blackbox", "unsupported")
-          .msg("pass.abc: division/modulo in region '{}' is blackboxed (kept as a native div, not technology-mapped)",
+          .msg("pass.abc: division in region '{}' is blackboxed (kept as a native div, not technology-mapped)",
                rb.module_name)
+          .emit();
+    }
+    if (op == Ntype_op::Rem) {
+      // REMAINDER is where the synthesis constraint lives, and it is an ERROR
+      // rather than a warning. The rest of LiveHD handles `%` as an ordinary
+      // op -- bitwidth ranges it, constprop folds it, the LEC encoder proves it
+      // (SREM), the simulator runs it -- because none of those need it to become
+      // gates. Only the netlist mapper does. Raising it HERE, rather than at
+      // lowering time, is what lets a design that merely CONTAINS `%` compile,
+      // simulate and verify.
+      //
+      // Anything trivially convertible was already rewritten to a mask by
+      // rewrite_trivial_rems() above, so reaching this point means the shape
+      // genuinely has no easy gate-level translation.
+      livehd::diag::err("pass.abc", "rem-unsupported", "unsupported")
+          .msg("pass.abc: remainder (`%`) in region '{}' has no gate-level translation", rb.module_name)
+          .hint("only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
+                "remainders out of the synthesized region")
           .emit();
     }
     Bbox bb;
@@ -1034,8 +1112,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         continue;
       }
       auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
-        continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {
+        continue;  // blackbox boundary (Sub instance / memory / divider / remainder) -- handled separately
       }
       if (gu::is_type_flop(n)) {
         continue;  // flop: a 1-bit latch in seq mode, a native boundary in !seq mode -- never bit-blasted
@@ -1637,7 +1715,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     q.module = rb.module_name;
     q.color  = rb.color;
     for (const auto& bb : bboxes) {
-      if (bb.op == Ntype_op::Div) {
+      if (bb.op == Ntype_op::Div || bb.op == Ntype_op::Rem) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial
       }
     }
