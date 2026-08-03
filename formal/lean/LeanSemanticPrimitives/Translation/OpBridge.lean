@@ -852,4 +852,41 @@ theorem sum1_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
   push_cast
   rw [← Int.sub_emod]
 
+
+/-- Zero-const spelling: the fast model emits `0#w` (lit_zero) while a cert source
+leaf is `BitVec.ofInt w 0`.  Normalizes the two for compares / MuxN branches. -/
+theorem ofInt_zero_eq (w : Nat) : (BitVec.ofInt w 0 : BitVec w) = 0#w := by
+  apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_ofInt]
+
+/-- For `w ≤ wa`, a BitVec's unsigned and signed values agree mod `2^w`. -/
+theorem toNat_toInt_emod_le {wa w : Nat} (a : BitVec wa) (hle : w ≤ wa) :
+    (a.toNat : Int) % (2:Int)^w = a.toInt % (2:Int)^w := by
+  have hbmod : a.toInt ≡ (a.toNat : Int) [ZMOD ((2^wa : Nat) : Int)] := by
+    unfold Int.ModEq; rw [BitVec.toInt_eq_toNat_bmod, Int.bmod_emod]
+  have hdvd : (2:Int)^w ∣ ((2^wa : Nat) : Int) := by push_cast; exact pow_dvd_pow 2 hle
+  exact (hbmod.of_dvd hdvd).symm
+
+/-- Sext sign-truncate variant: sign position `amt = out width w ≤ operand width `wa`.
+The result is the low `w` bits (the sign bit is at/above the output, so irrelevant),
+matching `bv_sext a : BitVec w`.  Companion to `sext_bridge` (which needs `amt = wa`). -/
+theorem sext_bridge_low {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam)
+    (hamt : amt.toNat = w) (hle : w ≤ wa) :
+    eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by
+  have hcert : eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = mk_bv w (Int.ofNat a.toNat) := by
+    simp only [eval_op, bv_uint_bvenc]
+    rw [show (Int.ofNat amt.toNat).toNat = w from by simp [hamt]]
+    by_cases hw : w = 0
+    · subst hw; apply mk_bv_eq_of_emod; simp
+    · rw [if_neg hw]
+      have hb : mk_bv w (Int.ofNat a.toNat % 2^w - 2^w) = mk_bv w (Int.ofNat a.toNat % 2^w) := by
+        apply mk_bv_eq_of_emod; rw [Int.sub_emod, Int.emod_emod_of_dvd _ (dvd_refl _)]; simp
+      rw [show (if Int.ofNat a.toNat % 2^w < (2:Int)^(w-1) then mk_bv w (Int.ofNat a.toNat % 2^w)
+              else mk_bv w (Int.ofNat a.toNat % 2^w - 2^w))
+            = mk_bv w (Int.ofNat a.toNat % 2^w) from by rw [hb]; exact ite_self _]
+      apply mk_bv_eq_of_emod; rw [Int.emod_emod_of_dvd _ (dvd_refl _)]
+  rw [hcert]; unfold bvenc bv_sext; apply mk_bv_eq_of_emod
+  rw [BitVec.toNat_ofInt]; simp only [Int.ofNat_eq_natCast]; push_cast
+  rw [Int.toNat_of_nonneg (Int.emod_nonneg _ (by positivity)), Int.emod_emod_of_dvd _ (dvd_refl _)]
+  exact toNat_toInt_emod_le a hle
+
 end OpBridge

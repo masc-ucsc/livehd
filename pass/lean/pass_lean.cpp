@@ -2035,9 +2035,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         deplist += phi_dep(info.deps[k]);
       }
       std::string bridge_call;
+      // Sext dispatches between two lemmas at proof time (see below).
+      bool sext_mode = false;
+      std::string sext_a, sext_amt;
       // Post-bridge closer simp set; the default unfolds the node def + normalizes
-      // constant Int spellings.  Some ops extend it (e.g. n-ary Or unfolds a fold).
-      std::string closer = "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
+      // constant Int spellings.  `ofInt_zero_eq` reconciles the fast model's zero
+      // literal `0#w` with the cert source leaf `BitVec.ofInt w 0` for ops where a
+      // zero const survives into the result (compares, MuxN branches).
+      std::string closer = "ofInt_zero_eq, bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
       bool supported = true;
       if (info.op_expr.rfind("LGraphOp.Op_GetMask", 0) == 0) {
         // `decide` (kernel), not `native_decide`: native_decide compiles a
@@ -2082,8 +2087,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " "
                       + std::to_string(cw) + " _ _ (by decide) (by decide)";
       } else if (info.op_expr == "LGraphOp.Op_Sext" && info.deps.size() == 2) {
-        // operands passed explicitly so the amt.toNat = a.width side goal decides.
-        bridge_call = "sext_bridge " + raw_dep(info.deps[0]) + " " + raw_dep(info.deps[1]) + " (by decide)";
+        // Sext's `amount` is the sign position = min(out_width, operand_width):
+        // amount = operand_width for a full sign-extend (out >= operand), amount =
+        // out_width for a sign-truncate (out < operand).  Rather than compute which,
+        // dispatch at proof time with `first`: try sext_bridge (amt = operand width),
+        // then sext_bridge_low (amt = out width <= operand width).  Operands are
+        // passed explicitly so the `by decide` side goals are on concrete widths.
+        sext_mode = true;
+        sext_a = raw_dep(info.deps[0]);
+        sext_amt = raw_dep(info.deps[1]);
       } else if (info.op_expr == "LGraphOp.Op_SLT" && info.deps.size() == 2
                  && width_of(info.deps[0]) == width_of(info.deps[1])) {
         bridge_call = "slt_bridge";
@@ -2103,7 +2115,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (supported) {
         ofs << "  show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op ("
             << info.op_expr << ") " << info.width << " [" << deplist << "]\n";
-        ofs << "  rw [" << srcfacts << bridge_call << "]\n";
+        if (sext_mode) {
+          ofs << "  first\n";
+          ofs << "  | rw [" << srcfacts << "sext_bridge " << sext_a << " " << sext_amt << " (by decide)]\n";
+          ofs << "  | rw [" << srcfacts << "sext_bridge_low " << sext_a << " " << sext_amt
+              << " (by decide) (by decide)]\n";
+        } else {
+          ofs << "  rw [" << srcfacts << bridge_call << "]\n";
+        }
         // Unfold the factored node def and normalize constant Int spellings
         // (fast model emits `15`/`-1`; the cert source facts use `Int.ofNat 15` /
         // `-Int.ofNat 1` — same value, so normalize casts to close by rfl).
