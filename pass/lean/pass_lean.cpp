@@ -1000,6 +1000,27 @@ std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const
   return order;
 }
 
+// Balanced binary-search-tree literal over sorted (key, value) pairs, as
+// `OpBridge.BT` data.  Step-5 lookups (φ / sourceEnv / graphCert.nodes) must be
+// this, NOT a flat `if n = k then .. else ..` chain: reducing an if-chain (or an
+// if-TREE) beta-substitutes the key across the whole N-node term, i.e. O(N) per
+// lookup and O(N^2) over the design.  `BT.find` navigates the tree *value*
+// instead — O(log N) per lookup, O(N) overall.  Emit values as closures so the
+// tree stays independent of the design inputs.
+std::string bst_literal(const std::vector<std::pair<uint32_t, std::string>>& sorted, size_t lo, size_t hi) {
+  if (lo >= hi) {
+    return "BT.lf";
+  }
+  const size_t mid = lo + (hi - lo) / 2;
+  return "(BT.nd " + std::to_string(sorted[mid].first) + " (" + sorted[mid].second + ") "
+         + bst_literal(sorted, lo, mid) + " " + bst_literal(sorted, mid + 1, hi) + ")";
+}
+
+std::string bst_literal(std::vector<std::pair<uint32_t, std::string>> pairs) {
+  std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  return bst_literal(pairs, 0, pairs.size());
+}
+
 std::string nat_list(const std::vector<uint32_t>& xs) {
   std::ostringstream oss;
   oss << "[";
@@ -1809,19 +1830,52 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   }
   ofs << "]\n\n";
 
-  if (sequential) {
-    ofs << "def " << base_name << "_sourceEnv (i : " << base_name << "_in) (s : " << base_name << "_state) : Nat -> BV := fun n =>\n";
+  // In bridge mode the lookups must be O(log N) (BT data + find), see bst_literal.
+  const bool bridge_lookups = emit_cert && emit_fast_bridge && memory_nodes.empty();
+  const std::string senv_params = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)")
+                                             : ("(i : " + base_name + "_in)");
+  const std::string senv_args    = sequential ? "i s" : "i";
+  const std::string senv_closure = sequential ? "fun i s => " : "fun i => ";
+  const std::string senv_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)")
+                                              : ("(" + base_name + "_in → BV)");
+  if (bridge_lookups) {
+    std::vector<std::pair<uint32_t, std::string>> src_pairs;
+    for (const auto& sid : source_ids) {
+      src_pairs.emplace_back(sid, senv_closure + cert_build.source_exprs.at(sid));
+    }
+    ofs << "def " << base_name << "_srcTree : BT " << senv_ty << " :=\n  " << bst_literal(src_pairs) << "\n\n";
+    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> BV := fun n =>\n"
+        << "  (BT.find " << base_name << "_srcTree n).elim (mk_bv 0 0) (fun f => f " << senv_args << ")\n\n";
   } else {
-    ofs << "def " << base_name << "_sourceEnv (i : " << base_name << "_in) : Nat -> BV := fun n =>\n";
+    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> BV := fun n =>\n";
+    for (const auto& sid : source_ids) {
+      ofs << "  if n = " << sid << " then " << cert_build.source_exprs.at(sid) << " else\n";
+    }
+    ofs << "  mk_bv 0 0\n\n";
   }
-  for (const auto& sid : source_ids) {
-    ofs << "  if n = " << sid << " then " << cert_build.source_exprs.at(sid) << " else\n";
-  }
-  ofs << "  mk_bv 0 0\n\n";
 
+  if (bridge_lookups) {
+    std::vector<std::pair<uint32_t, std::string>> node_pairs;
+    for (const auto& nc : cert_nodes) {
+      // each entry is `{ nid := <id>, op := ..., width := ..., deps := [...] }`
+      const auto pos = nc.find("nid := ");
+      if (pos == std::string::npos) {
+        fatal(ctx, "cert node entry without an nid: " + nc);
+      }
+      const uint32_t nid = static_cast<uint32_t>(std::stoul(nc.substr(pos + 7)));
+      node_pairs.emplace_back(nid, "(" + nc + " : NodeCert)");
+    }
+    ofs << "def " << base_name << "_nodesTree : BT NodeCert :=\n  " << bst_literal(node_pairs) << "\n\n";
+    ofs << "def " << base_name << "_nodesFn : Nat → Option NodeCert := fun n => BT.find " << base_name
+        << "_nodesTree n\n\n";
+  }
   ofs << "def " << base_name << "_graphCert : GraphCert :=\n";
-  ofs << "  { topo := " << nat_list(topo_ids) << ", sources := " << nat_list(source_ids)
-      << ", nodes := nodes_of_list " << base_name << "_nodeCerts }\n\n";
+  ofs << "  { topo := " << nat_list(topo_ids) << ", sources := " << nat_list(source_ids) << ", nodes := ";
+  if (bridge_lookups) {
+    ofs << base_name << "_nodesFn }\n\n";
+  } else {
+    ofs << "nodes_of_list " << base_name << "_nodeCerts }\n\n";
+  }
 
   ofs << "def " << base_name << "_outputsFromCert (rho : Nat -> BV) : " << base_name << "_out :=\n";
   ofs << "  { ";
@@ -1994,12 +2048,22 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
     ofs << "\n-- Step-5 fast-view bridge: fast model = certificate model.\n\n";
 
-    // φ: encoded fast node values on topo nodes, sourceEnv on leaves.
-    ofs << "def " << base_name << "_phi " << P << " : Nat → BV := fun n =>\n";
-    for (const auto id : topo_ids) {
-      ofs << "  if n = " << id << " then bvenc (" << base_name << "_fv" << id << " " << A << ") else\n";
+    // φ: encoded fast node values on topo nodes, sourceEnv on leaves — as BT data
+    // + find (O(log N) per lookup).  Values are closures so the tree never
+    // substitutes the design inputs into N positions.  See bst_literal.
+    {
+      const std::string phi_closure = sequential ? "fun i s => " : "fun i => ";
+      const std::string phi_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)")
+                                                 : ("(" + base_name + "_in → BV)");
+      std::vector<std::pair<uint32_t, std::string>> phi_pairs;
+      for (const auto id : topo_ids) {
+        phi_pairs.emplace_back(id, phi_closure + "bvenc (" + base_name + "_fv" + std::to_string(id) + " " + A + ")");
+      }
+      ofs << "def " << base_name << "_phiTree : BT " << phi_ty << " :=\n  " << bst_literal(phi_pairs) << "\n\n";
+      ofs << "def " << base_name << "_phi " << P << " : Nat → BV := fun n =>\n"
+          << "  (BT.find " << base_name << "_phiTree n).elim (" << base_name << "_sourceEnv " << A << " n) (fun f => f "
+          << A << ")\n\n";
     }
-    ofs << "  " << base_name << "_sourceEnv " << A << " n\n\n";
 
     // Per-source facts: sourceEnv value equals bvenc of the leaf BitVec.
     for (const auto sid : source_ids) {
@@ -2008,9 +2072,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       ofs << "theorem " << base_name << "_src" << sid << " " << P << " : "
           << base_name << "_sourceEnv " << A << " " << sid << " = bvenc (" << leaf << ") := by\n";
       if (kind == 1) {
-        ofs << "  simp only [" << base_name << "_sourceEnv]; norm_num; exact mk_bv_ofInt _\n";
+        // sourceEnv is BT.find-based: the lookup reduces by whnf, so the const
+        // case closes by unifying mk_bv with bvenc, and inputs/flops are defeq.
+        ofs << "  exact mk_bv_ofInt _\n";
       } else {
-        ofs << "  simp [" << base_name << "_sourceEnv, bvenc]\n";
+        ofs << "  rfl\n";
       }
     }
     ofs << "\n";
@@ -2151,31 +2217,21 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       ofs << "\n";
     }
 
-    // Source agreement: φ = sourceEnv off-topo (definitional after killing branches).
+    // Source agreement: φ = sourceEnv off-topo.  With the BT-based φ this is one
+    // application of BT.find_eq_none (a dependency outside the topo list is not a
+    // phiTree key, so the lookup is `none` and φ falls through to sourceEnv).
+    // The former proof listed one `if_neg` accessor per topo node — an O(N^2) term.
+    ofs << "theorem " << base_name << "_phiTree_keys_sub : BT.keys " << base_name << "_phiTree ⊆ " << G
+        << ".topo := by native_decide\n";
     ofs << "theorem " << base_name << "_bridge_src " << P << " : ∀ n ∈ " << G << ".topo, ∀ d ∈ depopts_of "
         << G << " n, d ∉ " << G << ".topo → " << base_name << "_sourceEnv " << A << " d = " << base_name
         << "_phi " << A << " d := by\n";
     ofs << "  intro n _ d _ hd\n";
-    ofs << "  simp only [" << G << ", List.mem_cons, List.not_mem_nil, or_false, not_or] at hd\n";
-    {
-      std::string ifnegs;
-      const size_t n = topo_ids.size();
-      for (size_t k = 0; k < n; ++k) {
-        std::string acc = "hd";
-        if (n == 1) {
-          // hd : d ≠ t0
-        } else {
-          for (size_t j = 0; j < k; ++j) {
-            acc += ".2";
-          }
-          if (k + 1 < n) {
-            acc += ".1";
-          }
-        }
-        ifnegs += ", if_neg " + acc;
-      }
-      ofs << "  simp only [" << base_name << "_phi" << ifnegs << "]\n\n";
-    }
+    ofs << "  have hnone : BT.find " << base_name << "_phiTree d = none :=\n";
+    ofs << "    BT.find_eq_none _ d (fun hc => hd (" << base_name << "_phiTree_keys_sub hc))\n";
+    ofs << "  show " << base_name << "_sourceEnv " << A << " d = (BT.find " << base_name
+        << "_phiTree d).elim (" << base_name << "_sourceEnv " << A << " d) (fun f => f " << A << ")\n";
+    ofs << "  rw [hnone]\n  rfl\n\n";
 
     // Step-5 theorem: _comb = _comb_cert.
     ofs << "theorem " << base_name << "_comb_refines_fast " << P << " : " << base_name << "_comb " << A
@@ -2190,9 +2246,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (oid == output_cert_ids.end()) {
         continue;
       }
+      // φ at a topo id is `bvenc (fv<id> ..)` by defeq (BT.find on a literal key
+      // reduces), so `rfl` closes it — never `simp [φ]`, which would materialize
+      // the whole lookup structure into the proof term.
       ofs << "  rw [hb " << oid->second << " (by decide), show " << base_name << "_phi " << A << " "
-          << oid->second << " = bvenc (" << base_name << "_fv" << oid->second << " " << A << ") from by simp ["
-          << base_name << "_phi]]\n";
+          << oid->second << " = bvenc (" << base_name << "_fv" << oid->second << " " << A << ") from by rfl]\n";
     }
     ofs << "  simp only [bv_to_bitvec_bvenc, bv_zext_id]\n\n";
 
@@ -2215,7 +2273,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         const uint32_t d = dit->second;
         if (topo_set.count(d)) {
           ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d
-              << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by simp [" << base_name << "_phi]]\n";
+              << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by rfl]\n";
         } else {
           ofs << "  -- TODO(step5): flop din " << d << " is a source (off-topo); needs evalGraph-off-topo lemma\n";
           ++seq_gaps;
