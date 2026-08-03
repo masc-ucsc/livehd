@@ -773,6 +773,11 @@ public:
         // Whole-run trace only for a plain `sim.vcd` (no window, not on-fail mode);
         // a window sets the path at vcd_from, on-fail sets it only on the re-run.
         o << "  if (_ckpt.vcd_from < 0 && !_ckpt.vcd_on_fail) " << var << ".__vcd_path = _vcdp_" << var << ";\n";
+        // cgen gives __vcd_path a baked whole-run default. A window/on-fail
+        // run must suppress that default until its selected start cycle;
+        // otherwise cycle 0 opens sim.vcd and changing the path later has no
+        // effect on the already-live writer.
+        o << "  else " << var << ".__vcd_path.clear();\n";
       }
     }
     // Every testbench value is a Slop of a fixed, generation-time width (see the

@@ -30,21 +30,34 @@ cat > "$W/cr.prp" <<'EOF'
 :name: cr
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:bool, clkb:bool) -> (value:u8@[0], bvalue:u8@[1]) {
+  reg count:u8 = 0
+  reg b:u8:[clock_pin=ref clkb] = 0
+  value = count
+  bvalue = b
+  if enable { wrap count += 1 }
+  b = count
+}
 test cnt.run {
   mut acc   = cnt
   mut v     = 0
+  mut bv    = 0
   mut total = 0
   tick 20 {
     acc.enable = true
     acc.reset  = clock < 2
+    // One secondary-clock rise at cycle 10, then hold high across ckp12.
+    // A restart that loses __clkprev_clkb invents a second rise at cycle 12.
+    acc.clkb   = (clock >= 10) and (clock <= 13)
     step
     v = acc.value
+    bv = acc.bvalue
     total = total + v
-    puts("cyc {clock} v {v}")
+    puts("cyc {clock} v {v} bv {bv}")
   }
   puts("FINAL total {total}")
   assert(v == 18)
+  assert(bv == 8)
 }
 EOF
 

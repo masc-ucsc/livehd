@@ -177,8 +177,12 @@ if [ -f "$MSRC" ]; then
       grep -oE "cones: [^;)]*(\([^)]*\))?" "$WORK/lec_mgood.txt" | head -1; fail=1
     fi
 
+    # `auto`, not `engine=ind`: an inductive-only CEX may sit on an UNREACHABLE
+    # state, so `ind` alone reports UNKNOWN for a stateful design rather than
+    # exit 10 (only a SURE counterexample is a failure). `auto`'s bmc leg
+    # confirms this one from reset, which is what makes it a real refutation.
     "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mbad.net" --lib lg:"$WORK/models" --top "$MTOP" \
-           --set formal.engine=ind --set formal.lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
+           --set formal.lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
     MBRC=$?
     if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad.txt"; then
       echo "ok: broken memory WRITE ADDRESS -> REFUTED (the port decomposition never masks it)"

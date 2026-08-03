@@ -14,11 +14,11 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
-#include "cell.hpp"        // Ntype / Ntype_op
-#include "diag.hpp"        // livehd::diag::err — Stage 0 comb-loop safety net
-#include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
+#include "cell.hpp"           // Ntype / Ntype_op
+#include "diag.hpp"           // livehd::diag::err — Stage 0 comb-loop safety net
+#include "node_util.hpp"      // //graph:graph — livehd::graph_util::* helpers
 #include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
-#include "str_tools.hpp"  // str_tools::ends_with
+#include "str_tools.hpp"      // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::debug_name;
@@ -49,25 +49,25 @@ auto sorted_inp(const hhds::Node_class& node) {
 
 const char* op_name(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Sum: return "Sum";
-    case Ntype_op::Mult: return "Mult";
-    case Ntype_op::Div: return "Div";
-    case Ntype_op::And: return "And";
-    case Ntype_op::Or: return "Or";
-    case Ntype_op::Xor: return "Xor";
-    case Ntype_op::Not: return "Not";
-    case Ntype_op::LT: return "LT";
-    case Ntype_op::GT: return "GT";
-    case Ntype_op::EQ: return "EQ";
-    case Ntype_op::SHL: return "SHL";
-    case Ntype_op::SRA: return "SRA";
-    case Ntype_op::Mux: return "Mux";
-    case Ntype_op::Hotmux: return "Hotmux";
+    case Ntype_op::Sum     : return "Sum";
+    case Ntype_op::Mult    : return "Mult";
+    case Ntype_op::Div     : return "Div";
+    case Ntype_op::And     : return "And";
+    case Ntype_op::Or      : return "Or";
+    case Ntype_op::Xor     : return "Xor";
+    case Ntype_op::Not     : return "Not";
+    case Ntype_op::LT      : return "LT";
+    case Ntype_op::GT      : return "GT";
+    case Ntype_op::EQ      : return "EQ";
+    case Ntype_op::SHL     : return "SHL";
+    case Ntype_op::SRA     : return "SRA";
+    case Ntype_op::Mux     : return "Mux";
+    case Ntype_op::Hotmux  : return "Hotmux";
     case Ntype_op::Get_mask: return "Get_mask";
     case Ntype_op::Set_mask: return "Set_mask";
-    case Ntype_op::Sext: return "Sext";
-    case Ntype_op::Nconst: return "Nconst";
-    default: return "op?";
+    case Ntype_op::Sext    : return "Sext";
+    case Ntype_op::Nconst  : return "Nconst";
+    default                : return "op?";
   }
 }
 }  // namespace
@@ -202,12 +202,12 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     }
     return absl::StrCat("Slop<", tw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");  // already a Slop<tw> expr
   }
-  const std::string& base = it->second;
+  const std::string& base         = it->second;
   // A Sum with a subtrahend (a `-` operand, sink pid != 0) can go negative; its
   // value wraps at the node width, so WIDENING it must sign-extend to propagate
   // the borrow -- matching Verilog re-evaluating `a - b` at the consumer width.
   // Safe: a non-negative sum has top bit 0, so sext == zext there.
-  bool sum_with_sub = false;
+  bool               sum_with_sub = false;
   if (sign_mode == 0 && is_unsign(dpin)) {
     auto mn = dpin.get_master_node();
     if (!mn.is_invalid() && type_op_of(mn) == Ntype_op::Sum) {
@@ -254,11 +254,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return absl::StrCat("Slop<", tw, ">::sum_op({", adds, "}, {", subs, "})");
     }
-    case Ntype_op::And: return fold("and_op");
-    case Ntype_op::Or: return fold("or_op");
-    case Ntype_op::Xor: return fold("xor_op");
+    case Ntype_op::And : return fold("and_op");
+    case Ntype_op::Or  : return fold("or_op");
+    case Ntype_op::Xor : return fold("xor_op");
     case Ntype_op::Mult: return fold("mult_op");
-    case Ntype_op::Div: {
+    case Ntype_op::Div : {
       // Binary, order-sensitive, and sign-aware (slop div_op dispatches on the
       // operand sign). Without this case Div fell through to the default and
       // simulated as the bare dividend. Read each operand at its own width with
@@ -282,8 +282,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e.empty()) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
-      auto ow = [&](size_t i) { return operand(e[i].driver, std::max(wbits_of(e[i].driver), 1)); };
-      std::string s = (e.size() == 1) ? absl::StrCat(ow(0), ".ror_op()") : ow(0);
+      auto        ow = [&](size_t i) { return operand(e[i].driver, std::max(wbits_of(e[i].driver), 1)); };
+      std::string s  = (e.size() == 1) ? absl::StrCat(ow(0), ".ror_op()") : ow(0);
       for (size_t i = 1; i < e.size(); ++i) {
         s = absl::StrCat(s, ".ror_op(", ow(i), ")");
       }
@@ -311,8 +311,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // Slop's compare ops return a Bool whose true value is all-ones (-1); a bare
       // zext_to<tw> would leave `tw` all-ones (e.g. 3 for a 2-bit consumer) instead
       // of 1. Clamp to a single bit first so the boolean is 0/1 in any width.
-      return absl::StrCat(operand(e[0].driver, cw), ".", m, "(", operand(e[1].driver, cw), ").zext_to<1>().zext_to<", tw,
-                          ">()");
+      return absl::StrCat(operand(e[0].driver, cw), ".", m, "(", operand(e[1].driver, cw), ").zext_to<1>().zext_to<", tw, ">()");
     }
     case Ntype_op::SHL:
       if (e.size() < 2) {
@@ -353,12 +352,11 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       int  val_sign   = -1;
       bool single_bit = false;
       if (is_const_pin(e[1].driver)) {
-        auto mv  = hydrate_const(e[1].driver);
-        val_sign = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
+        auto mv    = hydrate_const(e[1].driver);
+        val_sign   = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
         single_bit = !mv.is_negative() && mv.popcount() == 1;
       }
-      std::string gm = absl::StrCat("(", operand(e[0].driver, cw, val_sign), ".get_mask_op(",
-                                    operand(e[1].driver, cw, -1), "))");
+      std::string gm = absl::StrCat("(", operand(e[0].driver, cw, val_sign), ".get_mask_op(", operand(e[1].driver, cw, -1), "))");
       if (single_bit) {
         gm = absl::StrCat(gm, ".zext_to<1>()");
       }
@@ -372,8 +370,12 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e.size() < 3) {
         return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, -1);
       }
-      return absl::StrCat(operand(e[0].driver, wbits, -1), ".set_mask_op(", operand(e[1].driver, wbits, -1), ", ",
-                          operand(e[2].driver, wbits), ")");
+      return absl::StrCat(operand(e[0].driver, wbits, -1),
+                          ".set_mask_op(",
+                          operand(e[1].driver, wbits, -1),
+                          ", ",
+                          operand(e[2].driver, wbits),
+                          ")");
     }
     case Ntype_op::Sext: {
       // value sign-extended from a bit position (2nd input, normally constant).
@@ -389,8 +391,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       // read the source wide enough to preserve the sign bit before extending
       int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
-      return absl::StrCat("Slop<", tw, ">{", operand(e[0].driver, sw, /*signed=*/1), ".sext_op(",
-                          std::to_string(frombit), ")}");
+      return absl::StrCat("Slop<", tw, ">{", operand(e[0].driver, sw, /*signed=*/1), ".sext_op(", std::to_string(frombit), ")}");
     }
     case Ntype_op::Mux:
     case Ntype_op::Hotmux: {
@@ -529,129 +530,129 @@ int flatten_false_loop_subs(hhds::Graph* g) {
   // until no on-false-loop comb-closure Sub remains (bounded).
   int flattened = 0;
   for (int round = 0; round < 8; ++round) {
-  std::vector<hhds::Node_class> targets;
-  for (auto node : g->fast_class()) {
-    if (gu::type_op_of(node) != Ntype_op::Sub) {
-      continue;
-    }
-    if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
-      continue;
-    }
-    targets.push_back(node);
-  }
-  if (targets.empty()) {
-    break;
-  }
-  flattened += static_cast<int>(targets.size());
-
-  for (auto& sub : targets) {
-    auto cg  = sub.get_subnode_graph();
-    auto sio = sub.get_subnode_io();
-    if (!cg || !sio) {
-      continue;
-    }
-    // The Sub's driver for each input port (by port id) -- feeds a callee input.
-    absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;
-    for (auto e : sub.inp_edges()) {
-      sub_in_drv[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
-    }
-
-    // (a) copy every callee comb node into g (consts/IO ports handled on demand).
-    absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
-    for (auto cn : cg->fast_class()) {
-      auto op = gu::type_op_of(cn);
-      if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+    std::vector<hhds::Node_class> targets;
+    for (auto node : g->fast_class()) {
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
-      auto neo = gu::create_typed_node(*g, op);
-      if (op == Ntype_op::Sub) {
-        // a nested comb Sub is re-instantiated in g as an ordinary child
-        // instance (the closure check above guarantees it is state-free)
-        neo.set_subnode(cn.get_subnode_io());
-      }
-      if (gu::has_name(cn)) {
-        neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(cn)});
-      }
-      nmap[cn] = neo;
-    }
-
-    // A callee driver pin -> the equivalent driver pin in g.
-    auto map_driver = [&](const hhds::Pin_class& cdrv) -> hhds::Pin_class {
-      if (gu::is_graph_input_pin(cdrv)) {
-        // a callee INPUT port -> the Sub's driver for that port (same port id)
-        auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
-        return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
-      }
-      if (gu::is_const_pin(cdrv)) {
-        return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
-      }
-      auto mit = nmap.find(cdrv.get_master_node());
-      if (mit == nmap.end()) {
-        return {};  // an uncopied node (should not happen for a pure-comb callee)
-      }
-      auto neo = mit->second;
-      auto np  = neo.create_driver_pin(cdrv.get_port_id());
-      if (auto b = gu::bits_of(cdrv); b != 0) {
-        gu::set_bits(np, b);
-      }
-      if (!gu::is_unsign(cdrv)) {
-        gu::set_sign(np);
-      }
-      if (auto pn = gu::pin_name_of(cdrv); !pn.empty()) {
-        gu::set_pin_name(np, pn);
-      }
-      return np;
-    };
-
-    // (b) rewire the callee's internal edges onto the copies.
-    for (auto cn : cg->fast_class()) {
-      auto it = nmap.find(cn);
-      if (it == nmap.end()) {
+      if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
         continue;
       }
-      for (auto e : cn.inp_edges()) {
-        auto gdrv = map_driver(e.driver);
+      targets.push_back(node);
+    }
+    if (targets.empty()) {
+      break;
+    }
+    flattened += static_cast<int>(targets.size());
+
+    for (auto& sub : targets) {
+      auto cg  = sub.get_subnode_graph();
+      auto sio = sub.get_subnode_io();
+      if (!cg || !sio) {
+        continue;
+      }
+      // The Sub's driver for each input port (by port id) -- feeds a callee input.
+      absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;
+      for (auto e : sub.inp_edges()) {
+        sub_in_drv[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
+      }
+
+      // (a) copy every callee comb node into g (consts/IO ports handled on demand).
+      absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
+      for (auto cn : cg->fast_class()) {
+        auto op = gu::type_op_of(cn);
+        if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+          continue;
+        }
+        auto neo = gu::create_typed_node(*g, op);
+        if (op == Ntype_op::Sub) {
+          // a nested comb Sub is re-instantiated in g as an ordinary child
+          // instance (the closure check above guarantees it is state-free)
+          neo.set_subnode(cn.get_subnode_io());
+        }
+        if (gu::has_name(cn)) {
+          neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(cn)});
+        }
+        nmap[cn] = neo;
+      }
+
+      // A callee driver pin -> the equivalent driver pin in g.
+      auto map_driver = [&](const hhds::Pin_class& cdrv) -> hhds::Pin_class {
+        if (gu::is_graph_input_pin(cdrv)) {
+          // a callee INPUT port -> the Sub's driver for that port (same port id)
+          auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
+          return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
+        }
+        if (gu::is_const_pin(cdrv)) {
+          return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
+        }
+        auto mit = nmap.find(cdrv.get_master_node());
+        if (mit == nmap.end()) {
+          return {};  // an uncopied node (should not happen for a pure-comb callee)
+        }
+        auto neo = mit->second;
+        auto np  = neo.create_driver_pin(cdrv.get_port_id());
+        if (auto b = gu::bits_of(cdrv); b != 0) {
+          gu::set_bits(np, b);
+        }
+        if (!gu::is_unsign(cdrv)) {
+          gu::set_sign(np);
+        }
+        if (auto pn = gu::pin_name_of(cdrv); !pn.empty()) {
+          gu::set_pin_name(np, pn);
+        }
+        return np;
+      };
+
+      // (b) rewire the callee's internal edges onto the copies.
+      for (auto cn : cg->fast_class()) {
+        auto it = nmap.find(cn);
+        if (it == nmap.end()) {
+          continue;
+        }
+        for (auto e : cn.inp_edges()) {
+          auto gdrv = map_driver(e.driver);
+          if (gdrv.is_invalid()) {
+            continue;
+          }
+          gdrv.connect_sink(it->second.create_sink_pin(e.sink.get_port_id()));
+        }
+      }
+
+      // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
+      // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
+      // Walk out_edges instead of probing get_driver_pin per decl: a declared
+      // output with no consumer has no materialized pin and hhds asserts.
+      absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
+      for (const auto& oe : sub.out_edges()) {
+        out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
+      }
+      std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
+      for (const auto& od : sio->get_output_pin_decls()) {
+        auto sit = out_sinks.find(static_cast<uint32_t>(od.port_id));
+        if (sit == out_sinks.end()) {
+          continue;
+        }
+        auto internal = driver_of(cg->get_output_pin(od.name));  // driver inside the callee
+        if (internal.is_invalid()) {
+          continue;
+        }
+        auto gdrv = map_driver(internal);
         if (gdrv.is_invalid()) {
           continue;
         }
-        gdrv.connect_sink(it->second.create_sink_pin(e.sink.get_port_id()));
+        reconnect.emplace_back(gdrv, std::move(sit->second));
       }
-    }
 
-    // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
-    // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
-    // Walk out_edges instead of probing get_driver_pin per decl: a declared
-    // output with no consumer has no materialized pin and hhds asserts.
-    absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
-    for (const auto& oe : sub.out_edges()) {
-      out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
-    }
-    std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
-    for (const auto& od : sio->get_output_pin_decls()) {
-      auto sit = out_sinks.find(static_cast<uint32_t>(od.port_id));
-      if (sit == out_sinks.end()) {
-        continue;
-      }
-      auto internal = driver_of(cg->get_output_pin(od.name));  // driver inside the callee
-      if (internal.is_invalid()) {
-        continue;
-      }
-      auto gdrv = map_driver(internal);
-      if (gdrv.is_invalid()) {
-        continue;
-      }
-      reconnect.emplace_back(gdrv, std::move(sit->second));
-    }
+      sub.del_node();  // drops the Sub + all its boundary edges
 
-    sub.del_node();  // drops the Sub + all its boundary edges
-
-    // (d) drive the former Sub-output consumers from the inlined logic.
-    for (auto& [gdrv, sinks] : reconnect) {
-      for (auto& sk : sinks) {
-        gdrv.connect_sink(sk);
+      // (d) drive the former Sub-output consumers from the inlined logic.
+      for (auto& [gdrv, sinks] : reconnect) {
+        for (auto& sk : sinks) {
+          gdrv.connect_sink(sk);
+        }
       }
     }
-  }
   }  // fixpoint rounds
   return flattened;
 }
@@ -989,8 +990,8 @@ static inline uint64_t fnv1a_str(uint64_t h, std::string_view s) {
 }
 
 uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
-  namespace gu = livehd::graph_util;
-  uint64_t h = 0xcbf29ce484222325ULL;
+  namespace gu                                       = livehd::graph_util;
+  uint64_t                                         h = 0xcbf29ce484222325ULL;
   absl::flat_hash_map<hhds::Class_index, uint32_t> seq;
   uint32_t                                         ni = 0;
   for (auto n : g->fast_class()) {
@@ -1167,14 +1168,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   cycle_reported_   = false;
   cycle_first_label_.clear();
 
-  hhds::Graph* g   = graph.get();
-  auto         gio = g->get_io();
+  hhds::Graph* g     = graph.get();
+  auto         gio   = g->get_io();
   const auto   gname = std::string{graph->get_name()};
   const auto   mod   = cpp_id(gname);
 
   // VCD trace (sim.vcd): only the --top module emits it (so a
   // hierarchy writes one file). top empty -> single-module run, emit anyway.
-  const auto entity  = gname.substr(gname.rfind('.') + 1);
+  const auto entity = gname.substr(gname.rfind('.') + 1);
   // A `test` block lowers to a compiler-minted (`%`-named) comb — a testbench,
   // not synthesizable hardware. Its asserts are checked by running the `lhd sim`
   // driver (prp_sim), never by emitting a Slop unit (which would pull in the
@@ -1200,7 +1201,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // one VCD carries the whole design tree, not just the top's io.
   // `top` may be the bare entity or the full internal `file.entity` name — the
   // full form is the only spelling that disambiguates two same-entity modules.
-  const bool is_top  = top.empty() || entity == top || gname == top;
+  const bool is_top = top.empty() || entity == top || gname == top;
 
   // Liveness: only logic something REAL consumes gets emitted — backward BFS
   // from the sinks (IO nodes cover the graph outputs; state elements, Memory
@@ -1210,8 +1211,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     std::vector<hhds::Node_class> lstk;
     for (auto n : g->fast_class()) {
       auto nop = livehd::graph_util::type_op_of(n);
-      if (nop == Ntype_op::Sub || nop == Ntype_op::Memory || nop == Ntype_op::IO
-          || livehd::graph_util::is_type_register(n)) {
+      if (nop == Ntype_op::Sub || nop == Ntype_op::Memory || nop == Ntype_op::IO || livehd::graph_util::is_type_register(n)) {
         if (live_.insert(n.get_class_index()).second) {
           lstk.push_back(n);
         }
@@ -1240,7 +1240,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
   }
-  const bool vcd_on  = !vcd_file.empty();
+  const bool vcd_on = !vcd_file.empty();
 
   const std::string fstem = sim_file_stem(gname);
   const std::string base  = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
@@ -1267,8 +1267,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     gen_digests_[gname] = hex;  // persisted below, after a clean emission
   }
-  auto              hout = std::make_shared<File_output>(absl::StrCat(base, ".hpp"));  // interface
-  auto              fout = std::make_shared<File_output>(absl::StrCat(base, ".cpp"));  // definitions ("the slop")
+  auto hout = std::make_shared<File_output>(absl::StrCat(base, ".hpp"));  // interface
+  auto fout = std::make_shared<File_output>(absl::StrCat(base, ".cpp"));  // definitions ("the slop")
 
   // Header (<name>.hpp): data members + In/Out + method DECLARATIONS only. A
   // module that instantiates this one #includes this small header (by-value
@@ -1276,8 +1276,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // (in the .cpp) does. The cycle()/reset_cycle() bodies live in the .cpp and
   // are compiled exactly once.
   hout->append("// Generated by inou.cgen.sim (LiveHD, TODO 3d). Do not edit.\n");
-  hout->append("#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
-               "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
+  hout->append(
+      "#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
+      "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
   // Forward-declare the signal record (full definition in checkpoint.hpp, included
   // by the .cpp); the header only needs it for the describe_signals() signature.
   hout->append("namespace hlop::ckpt { struct Signal; }\n");
@@ -1335,10 +1336,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   {
     // The module's reference clock port: one tick IS one period of it, so it is
     // the net an ICG fold consumes (see icg_guards).
-    const std::string clock_port = clock_input_of(g);
+    const std::string clock_port          = clock_input_of(g);
     // See through tolg's identity port wrappers (unary Get_mask width-adjust,
     // and the Get_mask(v,-1) to-positive idiom), same as clock_input_of().
-    auto resolve_passthrough = [](hhds::Pin_class p) {
+    auto              resolve_passthrough = [](hhds::Pin_class p) {
       for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
         auto n = p.get_master_node();
         if (type_op_of(n) != Ntype_op::Get_mask) {
@@ -1385,8 +1386,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
-          .msg("module `{}`: flop `{}` has a derived clock inou.cgen.sim cannot fold into a commit guard", gname,
-               debug_name(node))
+          .msg("module `{}`: flop `{}` has a derived clock inou.cgen.sim cannot fold into a commit guard", gname, debug_name(node))
           .hint(
               "only the ICG shape `<clock> & <enable>` is folded (commit when the enable is high at the reference "
               "edge); any other derived clock would be simulated as if it ticked every step, with the gate as dead "
@@ -1406,12 +1406,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // ---- flops (Flop cells; Latch/Memory -> later phase) ----
   struct Flop {
-    hhds::Node_class         node;
-    std::string              member;
-    int                      bits;
-    int                      depth;          // pipe_min shift-register depth (>=1)
-    std::vector<std::string> stages;         // depth-1 intermediate stage members (q is the last)
-    bool                     posedge = true; // false = negedge flop (posclk known-false)
+    hhds::Node_class             node;
+    std::string                  member;
+    int                          bits;
+    int                          depth;              // pipe_min shift-register depth (>=1)
+    std::vector<std::string>     stages;             // depth-1 intermediate stage members (q is the last)
+    bool                         posedge    = true;  // false = negedge flop (posclk known-false)
+    bool                         is_latch   = false;
     // 2f-latch M8 step 0d. On a LATCH, `posclk` is the ENABLE POLARITY, not an
     // edge (graph/cell.cpp): known-false means transparent while enable == 0,
     // so the write test is INVERTED. Reading the pin with the Flop meaning did
@@ -1419,7 +1420,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // left the enable un-inverted — for the one shape that produces it, a
     // yosys-imported active-low $dlatch. cgen_verilog gets this right
     // (`neg_en` -> `if (!en)`), so sim silently disagreed with its own Verilog.
-    bool                     neg_enable = false;
+    bool                         neg_enable = false;
     // ICG fold (2f-latch M5): non-clock operands of a `<clock> & <enable>` clock
     // cone. Non-empty => this flop commits only in ticks where every guard is
     // true. Empty => an ungated clock, i.e. commit every tick.
@@ -1429,8 +1430,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // hangs on a DIFFERENT clock net (a second clock port the testbench drives
     // as data), so it commits only on a detected edge of that net, tracked by
     // `prev_member`.
-    hhds::Pin_class sec_clock;
-    std::string     prev_member;
+    hhds::Pin_class              sec_clock;
+    std::string                  prev_member;
   };
   std::vector<Flop> flops;
   for (auto node : g->fast_class()) {
@@ -1441,12 +1442,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // this emitter already performs. tolg has already baked the hold mux into
     // din (`din = en ? d : q`) and wired `enable = en`, so
     //     q_next = en ? din : q = en ? d : q
-    // which IS transparency sampled at the end of the tick. A master/slave pair
-    // needs no extra machinery either: the two latches sit on opposite phases,
-    // so only one of them updates in any given tick and the simultaneous
-    // commit-from-pre-tick-state below reproduces the one-cycle latency
-    // (verified against the iverilog-validated schedule in
-    // tests/sim/latch_sim_master_slave.prp).
+    // which IS transparency sampled at the end of the tick. The scheduler below
+    // evaluates a low window and then a high window, carrying the settled low
+    // value into the latter. That supplies both master/slave ordering and the
+    // coincident-edge read-through needed by the L1 fixture (verified against
+    // the Icarus schedules in tests/sim/latch_sim_{master_slave,l1_buffer}.prp).
     //
     // The Latch cell shares Flop's pin ids (M2), so every named lookup below —
     // din, enable, and the absent reset/initial/pipe_min — resolves unchanged.
@@ -1458,7 +1458,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (auto pm = get_driver(find_sink_pin(node, "pipe_min")); !pm.is_invalid() && is_const_pin(pm)) {
       depth = std::max<int>(1, static_cast<int>(hydrate_const(pm).to_just_i64()));
     }
-    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, false, {}, {}, {}};
+    Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, type_op_of(node) == Ntype_op::Latch, false, {}, {}, {}};
     const std::string ref_clock = clock_input_of(g);
     f.clock_guards              = icg_guards(node, ref_clock);
     // SECONDARY CLOCK (2f-latch M6): a clock_pin wired to a graph input that is
@@ -1556,42 +1556,42 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     int             wridx    = -1;  // write port index (for the FWD bit)
   };
   struct Mem {
-    hhds::Node_class     node;
-    std::string          member;
-    int                  bits = 1, size = 0, type = 2;
+    hhds::Node_class node;
+    std::string      member;
+    int              bits = 1, size = 0, type = 2;
     // Per-(read,write) forwarding matrix (graph/cell.cpp): bit (rdidx*n_wr +
     // wridx). Held as the const itself — Dlop::bit_test is arbitrary precision,
     // and n_rd*n_wr overflows an int on wide shapes.
-    spool_ptr<Dlop>      fwd;
+    spool_ptr<Dlop>  fwd;
     // Same layout: bit (rdidx*n_wr + wridx) set => that collision is UNDEFINED
     // (Pyrope ordering="none"). Slop has no x, so the ruling's "sim randomizes"
     // applies — a latent collision then fails loudly instead of silently
     // reading the committed value.
-    spool_ptr<Dlop>      undef;
-    int                  n_wr = 0;
-    int                  n_rd = 0;
-    int                  wensize = 1;  // sub-word write-enable lanes (1 = whole entry)
+    spool_ptr<Dlop>  undef;
+    int              n_wr    = 0;
+    int              n_rd    = 0;
+    int              wensize = 1;  // sub-word write-enable lanes (1 = whole entry)
     // The two matrices classified into one of the four hlop::Memory_* types.
     // Every `ordering` mode makes each row a PREFIX over the user write ports
     // (upass_tolg.cpp ~3585), so a row is a count, never a bit vector.
     enum class Order { old, fwd, program, none };
     Order                order     = Order::old;
-    int                  n_user_wr = 0;         // trailing ports are reset/restore: never forward
-    std::vector<int>     fwd_upto;              // per read port; Order::program only
-    std::vector<MemPort> ports;  // real ports, in port order (phantoms dropped)
+    int                  n_user_wr = 0;  // trailing ports are reset/restore: never forward
+    std::vector<int>     fwd_upto;       // per read port; Order::program only
+    std::vector<MemPort> ports;          // real ports, in port order (phantoms dropped)
     // Whole-array support (the `update` bus is driven): one update/read_all bus
     // instead of N per-entry ports. registered when a clock is present.
-    hhds::Pin_class update, update_enable, init, reset, clock;
-    bool             has_read_all = false;
-    bool is_whole() const { return !update.is_invalid(); }
-    bool registered() const { return !clock.is_invalid(); }
+    hhds::Pin_class      update, update_enable, init, reset, clock;
+    bool                 has_read_all = false;
+    bool                 is_whole() const { return !update.is_invalid(); }
+    bool                 registered() const { return !clock.is_invalid(); }
   };
   std::vector<Mem> mems;
   for (auto node : g->fast_class()) {
     if (type_op_of(node) != Ntype_op::Memory) {
       continue;
     }
-    Mem                  m;
+    Mem m;
     m.node = node;
     std::vector<MemPort> pv;  // indexed by port_id (raw_pid/12)
     for (auto e : node.inp_edges()) {
@@ -1725,9 +1725,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (bad_row) {
         livehd::diag::err("inou.cgen.sim", "mem-ordering-matrix-not-a-prefix", "unsupported")
             .msg("memory `{}` has a `fwd`/`undef` row that is not a prefix over its {} write ports", m.member, m.n_wr)
-            .hint("every `ordering` value (none/old/program/fwd) produces a prefix row; a hole means the matrix came "
-                  "from the deprecated numeric `fwd=` attribute, which cgen.sim cannot map to a hlop::Memory_* type -- "
-                  "use `ordering=` instead")
+            .hint(
+                "every `ordering` value (none/old/program/fwd) produces a prefix row; a hole means the matrix came "
+                "from the deprecated numeric `fwd=` attribute, which cgen.sim cannot map to a hlop::Memory_* type -- "
+                "use `ordering=` instead")
             .fatal();
       }
       // `fwd` and `undef` are MUTUALLY EXCLUSIVE per (read,write) pair, and
@@ -1737,8 +1738,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (max_fwd > 0 && max_undef > 0) {
         livehd::diag::err("inou.cgen.sim", "mem-fwd-and-undef-both-set", "unsupported")
             .msg("memory `{}` drives BOTH the `fwd` and the `undef` matrix", m.member)
-            .hint("the two are mutually exclusive per (read,write) pair -- each `ordering` value sets one of them, so "
-                  "a cell with both did not come from an `ordering` attribute and has no hlop::Memory_* equivalent")
+            .hint(
+                "the two are mutually exclusive per (read,write) pair -- each `ordering` value sets one of them, so "
+                "a cell with both did not come from an `ordering` attribute and has no hlop::Memory_* equivalent")
             .fatal();
       }
       // The reset/restore write ports are the tail no row ever names, so the
@@ -1766,6 +1768,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hhds::Node_class node;
     std::string      inst;           // member name
     std::string      callee_struct;  // cpp_id of the callee module name
+    bool             negedge_only;   // state advances in the fall half, after the parent's rise
   };
   std::vector<Sub>         subs;
   std::vector<std::string> sub_includes;  // distinct callee headers
@@ -1778,8 +1781,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       continue;
     }
     std::string cname{sio->get_name()};
-    if (cname.empty() || cname == livehd::graph_util::lgassert_module_name
-        || cname == livehd::graph_util::fproperty_module_name) {
+    if (cname.empty() || cname == livehd::graph_util::lgassert_module_name || cname == livehd::graph_util::fproperty_module_name) {
       // Recognized primitives, not real sub-graphs: instantiating one emitted
       // an #include for a module with no body and broke the sim host-compile
       // (any design with an undischarged assert). Skipped like cgen_verilog's
@@ -1787,7 +1789,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // runtime-fallback item (2f-formal / 4b slop emission).
       continue;
     }
-    subs.push_back({node, cpp_id(default_instance_name(node)), cpp_id(cname)});
+    bool child_posedge = false;
+    bool child_negedge = false;
+    if (auto sg = node.get_subnode_graph()) {
+      for (auto sn : sg->fast_class()) {
+        if (!is_type_flop(sn)) {
+          continue;
+        }
+        bool pos = true;
+        if (auto pc = get_driver(find_sink_pin(sn, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
+          pos = !hydrate_const(pc).is_known_false();
+        }
+        child_posedge |= pos;
+        child_negedge |= !pos;
+      }
+    }
+    subs.push_back({node, cpp_id(default_instance_name(node)), cpp_id(cname), child_negedge && !child_posedge});
     auto hdr = absl::StrCat(sim_file_stem(cname), ".hpp");
     if (std::find(sub_includes.begin(), sub_includes.end(), hdr) == sub_includes.end()) {
       sub_includes.push_back(hdr);
@@ -1802,13 +1819,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // emitted as a namespace-scope constexpr array just above the struct.
   auto mem_prefix_name = [](const Mem& m) { return absl::StrCat("__", m.member, "_fwd_upto"); };
   auto mem_type        = [&](const Mem& m) -> std::string {
-    const std::string common = absl::StrCat("Slop<", m.bits, ">, ", m.bits, ", ", m.size, ", ", m.n_rd, ", ", m.n_wr, ", ",
-                                                   m.n_user_wr, ", ", m.wensize);
+    const std::string common = absl::
+        StrCat("Slop<", m.bits, ">, ", m.bits, ", ", m.size, ", ", m.n_rd, ", ", m.n_wr, ", ", m.n_user_wr, ", ", m.wensize);
     switch (m.order) {
-      case Mem::Order::fwd: return absl::StrCat("hlop::Memory_fwd<", common, ">");
-      case Mem::Order::none: return absl::StrCat("hlop::Memory_none<", common, ">");
+      case Mem::Order::fwd    : return absl::StrCat("hlop::Memory_fwd<", common, ">");
+      case Mem::Order::none   : return absl::StrCat("hlop::Memory_none<", common, ">");
       case Mem::Order::program: return absl::StrCat("hlop::Memory_program<", common, ", ", mem_prefix_name(m), ">");
-      case Mem::Order::old: break;
+      case Mem::Order::old    : break;
     }
     return absl::StrCat("hlop::Memory_old<", common, ">");
   };
@@ -1852,7 +1869,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   for (const auto& m : mems) {
-    hout->append(absl::StrCat("  ", mem_type(m), " ", m.member, "{};  // memory (ordering=",
+    hout->append(absl::StrCat("  ",
+                              mem_type(m),
+                              " ",
+                              m.member,
+                              "{};  // memory (ordering=",
                               m.order == Mem::Order::fwd       ? "fwd"
                               : m.order == Mem::Order::none    ? "none"
                               : m.order == Mem::Order::program ? "program"
@@ -1949,8 +1970,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (vcd_on) {
     int  k   = 0;
     auto add = [&](const std::string& nm, int b, const std::string& acc, bool pe = true, bool is_in = false) {
-      vsig.push_back({absl::StrCat("__vv", k), (b > 1 ? absl::StrCat(nm, "[", b - 1, ":0]") : nm), acc,
-                      absl::StrCat("__vs", k), absl::StrCat("__vp", k), b, pe, is_in});
+      vsig.push_back({absl::StrCat("__vv", k),
+                      (b > 1 ? absl::StrCat(nm, "[", b - 1, ":0]") : nm),
+                      acc,
+                      absl::StrCat("__vs", k),
+                      absl::StrCat("__vp", k),
+                      b,
+                      pe,
+                      is_in});
       ++k;
     };
     for (const auto& io : ios) {
@@ -2048,8 +2075,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // the `_r` map keyed by the hierarchical `_p`+member name (pyrope literal),
   // memories -> one `<_dir>/<_p><member>.hex` file each, sub-instances recursed.
   // design_hash folds member names+widths (cross-version warn, never reject).
-  hout->append("  void dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const;\n");
-  hout->append("  void load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir);\n");
+  hout->append(
+      "  void dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const;\n");
+  hout->append(
+      "  void load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir);\n");
   hout->append("  std::uint64_t design_hash() const;\n");
   // Observability (lhd sim --list-signals / --probe / --break-when): every scalar
   // signal (flop / pipe stage / sync-read reg / input) by hierarchical name.
@@ -2066,7 +2095,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // so its scope shows the clock waveform. A clockless module still gets one
     // when it is the ROOT (the testbench tick is its clock) -- registered in
     // __vcd_init, not __vcd_hier, so a clockless SUB scope stays data-only.
-    const bool has_clock = !clk_field.empty() || !flops.empty();
+    const bool  has_clock = !clk_field.empty() || !flops.empty();
     // The BAKED clock label was uniquified against the traced names at codegen,
     // but a `tick clocks=(name=…)` clause overrides __clk_name at RUN time -- a
     // label matching a traced 1-bit signal would make registration throw. Guard
@@ -2152,11 +2181,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         const char* x = v.bits > 1 ? "bx" : "x";
         if (v.is_input) {
-          fout->append(absl::StrCat("      if (!__root && !", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var,
-                                    ", \"", x, "\");\n"));
-        } else {
           fout->append(
-              absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
+              absl::StrCat("      if (!__root && !", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
+        } else {
+          fout->append(absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
         }
       }
       fout->append("    } else {\n");
@@ -2165,8 +2193,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           continue;
         }
         const char* x = v.bits > 1 ? "bx" : "x";
-        fout->append(
-            absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
+        fout->append(absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
       }
       fout->append("    }\n  }\n");
       for (const auto& s : subs) {
@@ -2188,11 +2215,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       std::string upd = vcd_fakedelay ? absl::StrCat(" ", v.prev, " = ", v.snap, ";") : std::string{};
       if (v.is_input) {
-        fout->append(absl::StrCat("      if (!__root) { __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ",
-                                  v.bits, "));", upd, " }\n"));
+        fout->append(absl::StrCat("      if (!__root) { __w->change(",
+                                  v.var,
+                                  ", vcd::to_vcd_bits(",
+                                  v.snap,
+                                  ", ",
+                                  v.bits,
+                                  "));",
+                                  upd,
+                                  " }\n"));
       } else {
-        fout->append(
-            absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
+        fout->append(absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
       }
     }
     fout->append("    } else {\n");
@@ -2201,8 +2234,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       std::string upd = vcd_fakedelay ? absl::StrCat(" ", v.prev, " = ", v.snap, ";") : std::string{};
-      fout->append(
-          absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
+      fout->append(absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
     }
     fout->append("    }\n  }\n");
     for (const auto& s : subs) {
@@ -2221,6 +2253,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append("    ", s, " = ", rv, ";\n");
     }
     fout->append("    ", f.member, " = ", rv, ";\n");
+  }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append("    ", f.prev_member, " = false;\n");
+      }
+    }
   }
   for (const auto& m : mems) {
     // Power-on contents: apply the comptime `init` bus (ROM / `const`/`mut` array
@@ -2274,15 +2314,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // This resolves the DivUnit/ExeUnitImp_2 comb-loop-through-instance class
   // without flattening the stateful callee (state identity/checkpoint names
   // are untouched). ----
-  absl::flat_hash_set<hhds::Class_index> moore_deferred;
-  std::vector<const Sub*>                deferred_moore;
+  absl::flat_hash_set<hhds::Class_index>                                 moore_deferred;
+  std::vector<const Sub*>                                                deferred_moore;
+  absl::flat_hash_set<hhds::Class_index>                                 fall_deferred;
+  std::vector<const Sub*>                                                deferred_fall;
   // Per-OUTPUT-cone deferral (Stage-2): a MEALY callee (some comb in->out path,
   // so callee_is_moore declines the whole-callee treatment) whose FED-BACK
   // outputs are all pure state reads. Pre-binding just those outputs via peek()
   // un-cycles the schedule; the atomic cycle(in) call then orders normally (its
   // input cone reads only pre-bound values, emitted on demand below). The
   // CSR/NewCSR::MipModule and DivUnit/SRT16 residual class.
-  absl::flat_hash_set<hhds::Class_index> mealy_prebound;
+  absl::flat_hash_set<hhds::Class_index>                                 mealy_prebound;
   // Memoized per callee def: the set of output pids that are pure current-state
   // reads (a Moore callee: ALL of them). Used by the fed-back walk to decide
   // whether another Sub's output is a boundary or an atomic pass-through.
@@ -2311,15 +2353,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   };
   for (const auto& s : subs) {
     auto fed_back = sub_false_loop_output_pids(s.node, sub_out_is_state_only);
-    if (fed_back.empty()) {
+    if (fed_back.empty() && !s.negedge_only) {
       continue;
     }
-    const bool                    moore = callee_is_moore(s.node.get_subnode_graph(), s.node.get_subnode_io());
+    const bool                    moore = s.negedge_only || callee_is_moore(s.node.get_subnode_graph(), s.node.get_subnode_io());
     absl::flat_hash_set<uint32_t> state_only;
-    if (moore) {
+    if (s.negedge_only) {
+      fall_deferred.insert(s.node.get_class_index());
+    } else if (moore) {
       moore_deferred.insert(s.node.get_class_index());
     } else {
-      state_only = callee_state_only_outputs(s.node.get_subnode_graph(), s.node.get_subnode_io());
+      state_only          = callee_state_only_outputs(s.node.get_subnode_graph(), s.node.get_subnode_io());
       bool all_state_only = true;
       for (auto pid : fed_back) {
         if (!state_only.contains(pid)) {
@@ -2332,14 +2376,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       mealy_prebound.insert(s.node.get_class_index());
     }
-    fout->append(absl::StrCat("    auto ", s.inst, "__pre = ", s.inst,
-                              moore ? ".peek({});  // Moore sub: outputs from current state (call deferred)\n"
-                                    : ".peek({});  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
+    fout->append(absl::StrCat("    auto ",
+                              s.inst,
+                              "__pre = ",
+                              s.inst,
+                              s.negedge_only ? ".peek({});  // negedge-only sub: advance after the parent's rise\n"
+                              : moore        ? ".peek({});  // Moore sub: outputs from current state (call deferred)\n"
+                                             : ".peek({});  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
     // Bind only pins that EXIST (enumerated via the instance's out-edges): a
     // declared-but-unread output has no created pin, and hhds' name lookup
     // asserts on it (find_pin "requested pin was not created" -- the DataPath
     // family crash). The lazy out_edges view is iterated read-only.
-    auto                                    sio = s.node.get_subnode_io();
+    auto                                       sio = s.node.get_subnode_io();
     absl::flat_hash_map<uint32_t, std::string> pid2name;
     for (const auto& d : sio->get_output_pin_decls()) {
       pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
@@ -2380,7 +2428,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Moore-deferral / pre-binding above). The guard is load-bearing: a second
   // emission would call child.cycle() twice and double-advance its state.
   absl::flat_hash_set<hhds::Class_index> emitted_subs;
-  auto emit_sub_call = [&](auto&& ensure_fn, const hhds::Node_class& node) -> void {
+  auto                                   emit_sub_call = [&](auto&& ensure_fn, const hhds::Node_class& node) -> void {
     if (!emitted_subs.insert(node.get_class_index()).second) {
       return;
     }
@@ -2409,7 +2457,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               .msg(
                   "combinational loop through instance `{}` ({}::{}): input `{}` is fed by logic that depends on "
                   "this instance's own output",
-                  s.inst, gname, s.callee_struct, d.name)
+                  s.inst,
+                  gname,
+                  s.callee_struct,
+                  d.name)
               .hint(
                   "a sub-instance is simulated atomically (all inputs -> all outputs), so an output that feeds back "
                   "into one of its inputs forms a cycle the single-pass schedule cannot break; restructure so the "
@@ -2432,7 +2483,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   };
 
   absl::flat_hash_set<pin_key_t> prefetch_seen;
-  auto ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
+  auto                           ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
     if (drv.is_invalid() || is_const_pin(drv)) {
       return;
     }
@@ -2473,7 +2524,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     int  wb  = wbits_of(dp);
     auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-    fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(n, wb), ";  // ", op_name(nop), " (mem-operand prefetch)\n"));
+    fout->append(
+        absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(n, wb), ";  // ", op_name(nop), " (mem-operand prefetch)\n"));
     pin2var[dp.get_class_index()] = var;
   };
   auto ensure_ready = [&](const hhds::Pin_class& drv) { ensure_ready_impl(ensure_ready_impl, drv); };
@@ -2511,7 +2563,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // C++ depend on its data, and under ordering="program" the canonical
         // shape `o1 = mem[a]; mem[b] = f(o1); o4 = mem[c]` -- a legal
         // read-modify-write -- would then look like a combinational cycle.
-        int staged = 0;  // write ports staged so far, by ordinal
+        int  staged        = 0;  // write ports staged so far, by ordinal
         auto stage_through = [&](int upto) {
           if (upto <= staged) {
             return;
@@ -2536,8 +2588,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               ensure_ready(wp.din);
               din = operand(wp.din, m.bits);
             }
-            fout->append(absl::StrCat("    ", m.member, ".stage_write<", wp.wridx, ">(", emit_wen(m, wp), ", ",
-                                      operand(wp.addr, std::max(1, bits_of(wp.addr))), ", ", din, ");\n"));
+            fout->append(absl::StrCat("    ",
+                                      m.member,
+                                      ".stage_write<",
+                                      wp.wridx,
+                                      ">(",
+                                      emit_wen(m, wp),
+                                      ", ",
+                                      operand(wp.addr, std::max(1, bits_of(wp.addr))),
+                                      ", ",
+                                      din,
+                                      ");\n"));
           }
           staged = upto;
         };
@@ -2548,9 +2609,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             return 0;
           }
           switch (m.order) {
-            case Mem::Order::old: return 0;
-            case Mem::Order::fwd:
-            case Mem::Order::none: return m.n_user_wr;
+            case Mem::Order::old    : return 0;
+            case Mem::Order::fwd    :
+            case Mem::Order::none   : return m.n_user_wr;
             case Mem::Order::program: return m.fwd_upto[static_cast<size_t>(rdidx)];
           }
           return 0;
@@ -2568,11 +2629,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // UNDEF-then-FWD-then-stored chain does (and at latency 1 the same
             // resolved value is what the read register latches, at the edge).
             stage_through(read_prefix(p.rdidx));  // program-order staging, see above
-            ensure_ready(p.addr);  // computed read address emitted before this early (loop_last) memory node
+            ensure_ready(p.addr);                 // computed read address emitted before this early (loop_last) memory node
             int  ab  = std::max(1, bits_of(p.addr));
             auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-            fout->append(absl::StrCat("    Slop<", m.bits, "> ", var, " = ", m.member, ".read<", p.rdidx, ">(",
-                                      operand(p.addr, ab), ");  // mem read\n"));
+            fout->append(absl::StrCat("    Slop<",
+                                      m.bits,
+                                      "> ",
+                                      var,
+                                      " = ",
+                                      m.member,
+                                      ".read<",
+                                      p.rdidx,
+                                      ">(",
+                                      operand(p.addr, ab),
+                                      ");  // mem read\n"));
             pin2var[dout.get_class_index()] = var;
           }
         }
@@ -2591,6 +2661,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // Instantiate the callee directly: build its In from this Sub's input
       // drivers, call child.cycle(), and register each output driver pin to the
       // returned struct field (no intermediate wires).
+      if (fall_deferred.contains(node.get_class_index())) {
+        for (const auto& s : subs) {
+          if (s.node.get_class_index() == node.get_class_index()) {
+            deferred_fall.push_back(&s);
+            break;
+          }
+        }
+        continue;
+      }
       if (moore_deferred.contains(node.get_class_index())) {
         // outputs were pre-bound from peek(); the state-advancing cycle(in)
         // call is emitted after the walk, when its input operands are bound
@@ -2632,8 +2711,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (auto e : node.inp_edges()) {
       ensure_ready(e.driver);
     }
-    int  wb   = wbits_of(dpin);
-    auto var  = absl::StrCat("cg_", std::to_string(tmp_cnt++));
+    int  wb  = wbits_of(dpin);
+    auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
     fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(node, wb), ";  // ", op_name(op), "\n"));
     pin2var[dpin.get_class_index()] = var;
   }
@@ -2649,7 +2728,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!dsio) {
       continue;
     }
-    absl::flat_hash_map<uint32_t, const void*> bound_pids;  // pid -> decl (dedupe)
+    absl::flat_hash_map<uint32_t, const void*>                 bound_pids;  // pid -> decl (dedupe)
     absl::flat_hash_map<uint32_t, std::pair<std::string, int>> pid2in;
     for (const auto& d : dsio->get_input_pin_decls()) {
       pid2in[static_cast<uint32_t>(d.port_id)] = {d.name, d.bits > 0 ? static_cast<int>(d.bits) : 1};
@@ -2663,8 +2742,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       // cpp_port_path for the same reason as the __pre read above: In mirrors a
       // tuple port as a nested struct, so the leaf is `io_data.instruction`.
-      fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_port_path(it->second.first), " = ",
-                                operand(e.driver, it->second.second), ";\n"));
+      fout->append(absl::StrCat("    ",
+                                s.inst,
+                                "__i.",
+                                cpp_port_path(it->second.first),
+                                " = ",
+                                operand(e.driver, it->second.second),
+                                ";\n"));
     }
     fout->append(absl::StrCat("    ", s.inst, ".cycle(", s.inst, "__i);  // deferred Moore-sub state advance\n"));
   }
@@ -2675,9 +2759,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // silently-wrong sim that substitutes 0.
   if (cycle_unresolved_ && !cycle_reported_) {
     livehd::diag::err("inou.cgen.sim", "combinational-loop", "unsupported")
-        .msg("module `{}` has a combinational loop the single-pass sim schedule cannot order: {} was read before it "
-             "could be computed",
-             gname, cycle_first_label_.empty() ? std::string{"a value"} : cycle_first_label_)
+        .msg(
+            "module `{}` has a combinational loop the single-pass sim schedule cannot order: {} was read before it "
+            "could be computed",
+            gname,
+            cycle_first_label_.empty() ? std::string{"a value"} : cycle_first_label_)
         .hint(
             "inou.cgen.sim emits one sequential `cycle()` per module; a combinational cycle (a real loop, or a false "
             "loop through an atomic Sub instance) has no valid emission order")
@@ -2697,19 +2783,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // stage feeding a negedge stage on the same clock hands over WITHIN one
   // period, which the old single-phase commit turned into a full-cycle lag.
   //
-  // A design with no negedge flop emits byte-for-byte what it did before: the
-  // partition below is the whole difference, and the second phase is skipped.
-  auto emit_flop_next = [&](const Flop& f) {
-    auto din  = get_driver(find_sink_pin(f.node, "din"));
-    auto rstp = get_driver(find_sink_pin(f.node, "reset_pin"));
-    auto initp = get_driver(find_sink_pin(f.node, "initial"));
-    auto enp  = get_driver(find_sink_pin(f.node, "enable"));
+  // A design with no negedge flop skips the fall re-evaluation; latches still
+  // use the low/high window pair and memories remain in the rise phase.
+  auto emit_flop_next = [&](const Flop& f, bool latch_low = false, bool latch_high = false) {
+    auto din      = get_driver(find_sink_pin(f.node, "din"));
+    auto rstp     = get_driver(find_sink_pin(f.node, "reset_pin"));
+    auto initp    = get_driver(find_sink_pin(f.node, "initial"));
+    auto enp      = get_driver(find_sink_pin(f.node, "enable"));
     bool negreset = false;
     if (auto np = get_driver(find_sink_pin(f.node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
       negreset = !hydrate_const(np).is_known_false();
     }
     const std::string rstval = initp.is_invalid() ? absl::StrCat("Slop<", f.bits, ">::create_integer(0)") : operand(initp, f.bits);
-    std::string       rtest;          // C++ bool: reset asserted (empty = no reset)
+    std::string       rtest;  // C++ bool: reset asserted (empty = no reset)
     bool              reset_always = false;
     if (!rstp.is_invalid()) {
       if (is_const_pin(rstp)) {
@@ -2718,7 +2804,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         rtest = absl::StrCat(operand(rstp, 1), negreset ? ".is_known_false()" : ".is_known_true()");
       }
     }
-    std::string etest;                // C++ bool: write enabled (empty = always)
+    std::string etest;  // C++ bool: write enabled (empty = always)
     if (!enp.is_invalid() && !is_const_pin(enp)) {
       // `neg_enable` = an active-LOW latch gate: transparent while enable == 0.
       // is_known_false() rather than !is_known_true(), so an UNKNOWN enable
@@ -2738,15 +2824,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::string core = etest.empty() ? value_in : absl::StrCat("(", etest, " ? ", value_in, " : ", hold, ")");
       return rtest.empty() ? core : absl::StrCat("(", rtest, " ? ", rstval, " : ", core, ")");
     };
-    const std::string din_expr = din.is_invalid() ? f.member : operand(din, f.bits);
+    auto              next_name = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_next"); };
+    auto              hold_name = [&](const std::string& base) { return latch_high ? absl::StrCat(base, "_low") : base; };
+    const std::string din_expr  = din.is_invalid() ? f.member : operand(din, f.bits);
     if (f.depth <= 1) {
-      fout->append("    auto ", f.member, "_next = ", next_of(din_expr, f.member), ";\n");
+      fout->append("    auto ", next_name(f.member), " = ", next_of(din_expr, hold_name(f.member)), ";\n");
     } else {
-      fout->append("    auto ", f.stages[0], "_next = ", next_of(din_expr, f.stages[0]), ";\n");
+      fout->append("    auto ", next_name(f.stages[0]), " = ", next_of(din_expr, hold_name(f.stages[0])), ";\n");
       for (size_t i = 1; i < f.stages.size(); ++i) {
-        fout->append("    auto ", f.stages[i], "_next = ", next_of(f.stages[i - 1], f.stages[i]), ";\n");
+        fout->append("    auto ", next_name(f.stages[i]), " = ", next_of(f.stages[i - 1], hold_name(f.stages[i])), ";\n");
       }
-      fout->append("    auto ", f.member, "_next = ", next_of(f.stages.back(), f.member), ";\n");
+      fout->append("    auto ", next_name(f.member), " = ", next_of(f.stages.back(), hold_name(f.member)), ";\n");
     }
   };
 
@@ -2778,9 +2866,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // for coincident edges.
     if (!f.sec_clock.is_invalid()) {
       const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
-      absl::StrAppend(&guard, guard.empty() ? "" : " && ",
-                      f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")")
-                                : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
+      absl::StrAppend(
+          &guard,
+          guard.empty() ? "" : " && ",
+          f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")") : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
     }
     const std::string ind = guard.empty() ? "    " : "      ";
     if (!guard.empty()) {
@@ -2795,12 +2884,113 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   };
 
-  // PHASE 1 (the rise): posedge state only.
-  bool any_negedge = false;
+  auto invalidate_upstream = [&](auto&& self, const hhds::Pin_class& p) -> void {
+    if (p.is_invalid() || is_const_pin(p) || livehd::graph_util::is_graph_input_pin(p)) {
+      return;
+    }
+    auto n = p.get_master_node();
+    if (is_type_register(n) || type_op_of(n) == Ntype_op::Memory || type_op_of(n) == Ntype_op::Sub) {
+      return;
+    }
+    auto dp = n.get_driver_pin(0);
+    if (!dp.is_invalid()) {
+      pin2var.erase(dp.get_class_index());
+      prefetch_seen.erase(dp.get_class_index());
+    }
+    for (const auto& e : n.inp_edges()) {
+      self(self, e.driver);
+    }
+  };
+  auto invalidate_downstream = [&](const hhds::Pin_class& root) {
+    std::vector<hhds::Pin_class>           work{root};
+    absl::flat_hash_set<hhds::Class_index> seen;
+    while (!work.empty()) {
+      auto p = work.back();
+      work.pop_back();
+      if (p.is_invalid() || !seen.insert(p.get_class_index()).second) {
+        continue;
+      }
+      for (const auto& e : p.out_edges()) {
+        auto n = e.sink.get_master_node();
+        if (is_type_register(n) || type_op_of(n) == Ntype_op::Memory || type_op_of(n) == Ntype_op::Sub
+            || Ntype::has_multiple_driver_pins(type_op_of(n))) {
+          continue;
+        }
+        auto dp = n.get_driver_pin(0);
+        if (!dp.is_invalid()) {
+          pin2var.erase(dp.get_class_index());
+          prefetch_seen.erase(dp.get_class_index());
+          work.push_back(dp);
+        }
+      }
+    }
+  };
+
+  // PHASE 0/1 (low settle, then the rise).  An active-low latch is still
+  // transparent immediately before the rising edge, so a posedge consumer at
+  // that same edge samples the latch's just-settled value, not its previous
+  // committed member.  Stage every latch first, then temporarily bind the Q of
+  // active-low latches to its staged value while building posedge next-state.
+  // This is the L1/coincident-edge rule and is equivalent to Verilog's latch
+  // transparency before the active event without requiring an event queue.
+  bool              any_negedge    = false;
+  const std::string ref_clock_name = clock_input_of(g);
+  const auto        ref_clock_pin  = ref_clock_name.empty() ? hhds::Pin_class{} : g->get_input_pin(ref_clock_name);
+  // Low window: force the synthetic reference clock to zero and stage every
+  // latch into `<q>_low`.  This works for both explicit active-low cells and a
+  // source-level `if !clk` gate (whose cell polarity remains active-high).
   for (const auto& f : flops) {
-    if (f.posedge) {
+    if (!f.is_latch) {
+      continue;
+    }
+    for (const auto* port : flop_operand_ports) {
+      invalidate_upstream(invalidate_upstream, get_driver(find_sink_pin(f.node, port)));
+    }
+    if (!ref_clock_pin.is_invalid()) {
+      pin2var[ref_clock_pin.get_class_index()] = "Slop<1>::create_integer(0)";
+    }
+    for (const auto* port : flop_operand_ports) {
+      ensure_ready(get_driver(find_sink_pin(f.node, port)));
+    }
+    emit_flop_next(f, true, false);
+  }
+  // High window: rebuild with the reference clock at one.  The low-window
+  // result is the hold value, so a latch open in either half retains the last
+  // transparent value and closes with the correct end-of-period state.
+  for (const auto& f : flops) {
+    if (!f.is_latch) {
+      continue;
+    }
+    for (const auto* port : flop_operand_ports) {
+      invalidate_upstream(invalidate_upstream, get_driver(find_sink_pin(f.node, port)));
+    }
+    if (!ref_clock_pin.is_invalid()) {
+      pin2var[ref_clock_pin.get_class_index()] = "Slop<1>::create_integer(1)";
+    }
+    for (const auto* port : flop_operand_ports) {
+      ensure_ready(get_driver(find_sink_pin(f.node, port)));
+    }
+    emit_flop_next(f, false, true);
+  }
+  if (!ref_clock_pin.is_invalid()) {
+    pin2var[ref_clock_pin.get_class_index()] = absl::StrCat("in.", cpp_port_path(ref_clock_name));
+  }
+  for (const auto& f : flops) {
+    if (f.is_latch) {
+      auto qpin = f.node.get_driver_pin(0);
+      if (!qpin.is_invalid()) {
+        invalidate_downstream(qpin);
+        pin2var[qpin.get_class_index()] = absl::StrCat(f.member, "_low");
+      }
+    }
+  }
+  for (const auto& f : flops) {
+    if (!f.is_latch && f.posedge) {
+      for (const auto* port : flop_operand_ports) {
+        ensure_ready(get_driver(find_sink_pin(f.node, port)));
+      }
       emit_flop_next(f);
-    } else {
+    } else if (!f.is_latch && !f.posedge) {
       any_negedge = true;
     }
   }
@@ -2879,24 +3069,81 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // or not a trace is dumped. The member exists on every module.
   fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
 
+  // Memories are posedge state.  Stage and commit them while every operand is
+  // still the PRE-RISE binding, alongside the posedge flops below.  The old
+  // placement after phase 2 was both semantically late and unsafe: phase 2 had
+  // erased cones reachable from a posedge Q, so a write enable/data/address in
+  // one of those cones degraded to `0 /*UNRESOLVED-CYCLE*/` and the write was
+  // silently dropped.
+  for (const auto& m : mems) {
+    if (m.is_whole() && !m.registered()) {
+      continue;  // combinational whole-array: contents applied in the combinational section
+    }
+    for (const auto& p : m.ports) {
+      if (p.rd || p.addr.is_invalid() || p.din.is_invalid()) {
+        continue;
+      }
+      if (!p.enable.is_invalid() && is_const_pin(p.enable) && hydrate_const(p.enable).is_known_false()) {
+        continue;
+      }
+      fout->append(absl::StrCat("    ",
+                                m.member,
+                                ".stage_write<",
+                                p.wridx,
+                                ">(",
+                                emit_wen(m, p),
+                                ", ",
+                                operand(p.addr, std::max(1, bits_of(p.addr))),
+                                ", ",
+                                operand(p.din, m.bits),
+                                ");\n"));
+    }
+    for (const auto& p : m.ports) {
+      if (p.rd && m.type == 1 && !p.addr.is_invalid()) {
+        const int ab = std::max(1, bits_of(p.addr));
+        fout->append(absl::StrCat("    ",
+                                  m.member,
+                                  "_q",
+                                  p.rdidx,
+                                  " = ",
+                                  m.member,
+                                  ".read<",
+                                  p.rdidx,
+                                  ">(",
+                                  operand(p.addr, ab),
+                                  ");  // sync read: the RESOLVED value\n"));
+      }
+    }
+    std::string whole_close;
+    if (m.is_whole()) {
+      const int W = m.bits * m.size;
+      if (!m.reset.is_invalid()) {
+        const std::string initbus = m.init.is_invalid() ? absl::StrCat("Slop<", W, ">::create_integer(0)") : operand(m.init, W);
+        fout->append(absl::StrCat("    if ((",
+                                  operand(m.reset, 1),
+                                  ").is_known_true()) { ",
+                                  m.member,
+                                  ".apply_update(",
+                                  initbus,
+                                  "); ",
+                                  m.member,
+                                  ".clear_pending(); } else {\n"));
+        whole_close = "    }\n";
+      }
+      const std::string ue
+          = m.update_enable.is_invalid() ? "" : absl::StrCat("if ((", operand(m.update_enable, 1), ").is_known_true()) ");
+      fout->append(absl::StrCat("    ", ue, m.member, ".apply_update(", operand(m.update, W), ");\n"));
+    }
+    fout->append(whole_close);
+    fout->append(absl::StrCat("    ", m.member, ".tick();\n"));
+  }
+
   // commit flops (+ pipe stages) at the clock edge (PHASE 1: the rise)
   for (const auto& f : flops) {
     if (!f.posedge) {
       continue;  // negedge state commits in phase 2, below
     }
     commit_state(f);
-  }
-
-  // Secondary-clock levels for the NEXT tick's edge detection. Updated after
-  // every commit that reads them, so an edge is seen exactly once (2f-latch M6).
-  {
-    absl::flat_hash_set<std::string> done;
-    for (const auto& f : flops) {
-      if (f.prev_member.empty() || !done.insert(f.prev_member).second) {
-        continue;
-      }
-      fout->append("    ", f.prev_member, " = (", operand(f.sec_clock, 1), ").is_known_true();\n");
-    }
   }
 
   // PHASE 2 (the fall): negedge state, evaluated AFTER the rise committed.
@@ -2910,7 +3157,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // A Sub instance in that cone is REFUSED rather than re-emitted: emit_sub_call
   // advances the child's state, so re-running it inside one tick would
   // double-advance it. That is a silent wrong answer, so it fails closed.
-  if (any_negedge) {
+  if (any_negedge || !deferred_fall.empty()) {
     absl::flat_hash_set<hhds::Class_index> stale;
     {
       std::vector<hhds::Pin_class> work;
@@ -2930,7 +3177,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         for (const auto& e : p.out_edges()) {
           auto sn = e.sink.get_master_node();
           if (type_op_of(sn) == Ntype_op::Sub) {
-            hit_sub = true;
+            if (!fall_deferred.contains(sn.get_class_index())) {
+              hit_sub = true;
+            }
             continue;
           }
           if (is_type_register(sn) || Ntype::has_multiple_driver_pins(type_op_of(sn))) {
@@ -2959,6 +3208,33 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (auto ci : stale) {
       pin2var.erase(ci);
       prefetch_seen.erase(ci);
+    }
+    // A negedge-only child samples after the parent's rise.  Its current-state
+    // outputs were pre-bound before the walk, but its state-advancing call is
+    // delayed until now so inputs driven by parent posedge Qs are rebuilt from
+    // the just-committed members.  Re-peek after the call so a local negedge
+    // consumer sees the child's post-fall state in this same period.
+    for (const auto* sp : deferred_fall) {
+      const auto& s   = *sp;
+      auto        sio = s.node.get_subnode_io();
+      if (!sio) {
+        continue;
+      }
+      fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__fall_i;\n"));
+      for (const auto& d : sio->get_input_pin_decls()) {
+        auto drv = get_driver(find_sink_pin(s.node, d.name));
+        int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+        ensure_ready(drv);
+        fout->append(absl::StrCat("    ", s.inst, "__fall_i.", cpp_port_path(d.name), " = ", operand(drv, wb), ";\n"));
+      }
+      fout->append(absl::StrCat("    ", s.inst, ".cycle(", s.inst, "__fall_i);\n"));
+      fout->append(absl::StrCat("    auto ", s.inst, "__fall_o = ", s.inst, ".peek(", s.inst, "__fall_i);\n"));
+      for (const auto& d : sio->get_output_pin_decls()) {
+        auto opin = find_driver_pin(s.node, d.name);
+        if (!opin.is_invalid()) {
+          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__fall_o.", cpp_port_path(d.name));
+        }
+      }
     }
     // Re-ready EVERY cone the negedge emission below will read: the four
     // operand ports of emit_flop_next(), plus the ICG guards and secondary
@@ -2993,6 +3269,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
+  // Secondary-clock levels for the NEXT tick's edge detection.  Both the
+  // rise and fall guards must observe the same PRE-TICK level.  Updating this
+  // between the two phases made every secondary negedge test compare `cur`
+  // against itself and therefore miss the edge permanently.
+  {
+    absl::flat_hash_set<std::string> done;
+    for (const auto& f : flops) {
+      if (f.prev_member.empty() || !done.insert(f.prev_member).second) {
+        continue;
+      }
+      fout->append("    ", f.prev_member, " = (", operand(f.sec_clock, 1), ").is_known_true();\n");
+    }
+  }
+
   // Fail closed on a PHASE-2 substitution. Stage 0 above already cleared this
   // graph of real combinational cycles, so an operand that is STILL unbound
   // here is not a loop: it is a negedge cone that phase 2 dropped and did not
@@ -3013,58 +3303,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     return;
   }
 
-  // memory edge: stage every write port, latch each sync-read register from the
-  // RESOLVED value, then commit. Ordering applies at latency 1 exactly as at
-  // latency 0 -- the cgen_memory wrapper's read register latches `d0_fwd`, the
-  // post-UNDEF/FWD value, not the raw array.
-  for (const auto& m : mems) {
-    if (m.is_whole() && !m.registered()) {
-      continue;  // combinational whole-array: contents applied in the combinational section
-    }
-    // Stage every write port. The subset the combinational walk already staged
-    // (the ones some read observes) is re-staged here with the same SSA
-    // operands, so this is idempotent.
-    for (const auto& p : m.ports) {
-      if (p.rd || p.addr.is_invalid() || p.din.is_invalid()) {
-        continue;
-      }
-      if (!p.enable.is_invalid() && is_const_pin(p.enable) && hydrate_const(p.enable).is_known_false()) {
-        continue;  // never fires
-      }
-      fout->append(absl::StrCat("    ", m.member, ".stage_write<", p.wridx, ">(", emit_wen(m, p), ", ",
-                                operand(p.addr, std::max(1, bits_of(p.addr))), ", ", operand(p.din, m.bits), ");\n"));
-    }
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1 && !p.addr.is_invalid()) {
-        int ab = std::max(1, bits_of(p.addr));
-        fout->append(absl::StrCat("    ", m.member, "_q", std::to_string(p.rdidx), " = ", m.member, ".read<", p.rdidx, ">(",
-                                  operand(p.addr, ab), ");  // sync read: the RESOLVED value\n"));
-      }
-    }
-    // Registered whole-array next-state: reset (highest) > per-port write > update
-    // (lowest). Apply the bulk update FIRST so the per-port writes below override
-    // the entries they touch (later assignment wins).
-    std::string whole_close;
-    if (m.is_whole()) {
-      const int W = m.bits * m.size;
-      if (!m.reset.is_invalid()) {
-        std::string initbus
-            = m.init.is_invalid() ? absl::StrCat("Slop<", W, ">::create_integer(0)") : operand(m.init, W);
-        // A reset outranks this cycle's per-port writes, so drop them rather
-        // than let tick() commit them on top of the restored contents.
-        fout->append(absl::StrCat("    if ((", operand(m.reset, 1), ").is_known_true()) { ", m.member, ".apply_update(",
-                                  initbus, "); ", m.member, ".clear_pending(); } else {\n"));
-        whole_close = "    }\n";
-      }
-      std::string ue = m.update_enable.is_invalid() ? "" : absl::StrCat("if ((", operand(m.update_enable, 1), ").is_known_true()) ");
-      fout->append(absl::StrCat("    ", ue, m.member, ".apply_update(", operand(m.update, W), ");\n"));
-    }
-    fout->append(whole_close);  // close the reset `else` block, if any
-    // Commit: ascending write-port order, so the highest enabled port wins a
-    // same-address collision (per lane), and a bulk `update` is overridden by
-    // the per-port writes that land on top of it.
-    fout->append(absl::StrCat("    ", m.member, ".tick();\n"));
-  }
   fout->append("    return o;\n}\n");
 
   // peek(): the outputs implied by the CURRENT (post-last-edge) state, with NO
@@ -3088,6 +3326,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& s : subs) {
     fout->append(absl::StrCat("    auto _pk_", s.inst, " = ", s.inst, ";  // sub-instance snapshot\n"));
   }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append(absl::StrCat("    auto _pk_", f.prev_member, " = ", f.prev_member, ";\n"));
+      }
+    }
+  }
   fout->append("    auto _pk_tick = __vcd_tick;\n");  // peek must not perturb the period counter
   if (vcd_on) {
     fout->append("    auto _pk_vcd = std::move(__vcd); auto _pk_vp = __vcd_path; __vcd_path.clear();\n");
@@ -3105,6 +3351,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& s : subs) {
     fout->append(absl::StrCat("    ", s.inst, " = _pk_", s.inst, ";\n"));
   }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append(absl::StrCat("    ", f.prev_member, " = _pk_", f.prev_member, ";\n"));
+      }
+    }
+  }
   fout->append("    __vcd_tick = _pk_tick;\n");
   if (vcd_on) {
     fout->append("    __vcd = std::move(_pk_vcd); __vcd_path = _pk_vp;\n");
@@ -3114,13 +3368,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
   // literal); memories -> one editable `<_dir>/<_p><member>.hex` each; recurse
   // into sub-instances. Mirrors the reset_cycle/peek member walk. ----
-  fout->append("void ", mod,
+  fout->append("void ",
+               mod,
                "::dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const {\n");
   for (const auto& f : flops) {
     for (const auto& s : f.stages) {
       fout->append(absl::StrCat("  _r[_p + \"", s, "\"] = ", s, ".to_pyrope();\n"));
     }
     fout->append(absl::StrCat("  _r[_p + \"", f.member, "\"] = ", f.member, ".to_pyrope();\n"));
+  }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append(absl::StrCat("  _r[_p + \"", f.prev_member, "\"] = ", f.prev_member, " ? \"true\" : \"false\";\n"));
+      }
+    }
   }
   for (const auto& m : mems) {
     fout->append(absl::StrCat("  hlop::ckpt::write_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
@@ -3145,22 +3408,54 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // ---- load_state: set each flop/reg from the map IF PRESENT (a missing key
   // keeps the reset value -> cross-version reload tolerance); memories from the
   // hex file if present; recurse into sub-instances. ----
-  fout->append("void ", mod,
+  fout->append("void ",
+               mod,
                "::load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir) {\n");
   for (const auto& f : flops) {
     for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"", s, "\"); _it != _r.end()) ", s, " = Slop<", f.bits,
+      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                s,
+                                "\"); _it != _r.end()) ",
+                                s,
+                                " = Slop<",
+                                f.bits,
                                 ">::from_pyrope(_it->second);\n"));
     }
-    fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"", f.member, "\"); _it != _r.end()) ", f.member, " = Slop<",
-                              f.bits, ">::from_pyrope(_it->second);\n"));
+    fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                              f.member,
+                              "\"); _it != _r.end()) ",
+                              f.member,
+                              " = Slop<",
+                              f.bits,
+                              ">::from_pyrope(_it->second);\n"));
+  }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                  f.prev_member,
+                                  "\"); _it != _r.end()) ",
+                                  f.prev_member,
+                                  " = Slop<1>::from_pyrope(_it->second).is_known_true();\n"));
+      }
+    }
   }
   for (const auto& m : mems) {
     fout->append(absl::StrCat("  hlop::ckpt::read_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"", m.member, "_q", p.rdidx, "\"); _it != _r.end()) ",
-                                  m.member, "_q", p.rdidx, " = Slop<", m.bits, ">::from_pyrope(_it->second);\n"));
+        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                  m.member,
+                                  "_q",
+                                  p.rdidx,
+                                  "\"); _it != _r.end()) ",
+                                  m.member,
+                                  "_q",
+                                  p.rdidx,
+                                  " = Slop<",
+                                  m.bits,
+                                  ">::from_pyrope(_it->second);\n"));
       }
     }
   }
@@ -3169,8 +3464,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   for (const auto& io : ios) {
     if (io.is_input) {
-      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.", io.field, "\"); _it != _r.end()) __in.", io.field,
-                                " = Slop<", io.bits, ">::from_pyrope(_it->second);\n"));
+      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.",
+                                io.field,
+                                "\"); _it != _r.end()) __in.",
+                                io.field,
+                                " = Slop<",
+                                io.bits,
+                                ">::from_pyrope(_it->second);\n"));
     }
   }
   fout->append("}\n");
@@ -3186,29 +3486,58 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.member, "\"), ", f.bits, ");\n"));
   }
+  {
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : flops) {
+      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.prev_member, "\"), 1);\n"));
+      }
+    }
+  }
   for (const auto& m : mems) {
     // Ordering + wensize are part of the memory's identity: a checkpoint taken
     // under one same-cycle mode restores into a different machine under another,
     // and without this the hash would not budge.
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", m.member,
-                              "\"), ", m.bits, "), ", m.size, ");\n"));
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(_h, ", static_cast<int>(m.order), "), ",
-                              m.wensize, ");\n"));
+    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                              m.member,
+                              "\"), ",
+                              m.bits,
+                              "), ",
+                              m.size,
+                              ");\n"));
+    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(_h, ",
+                              static_cast<int>(m.order),
+                              "), ",
+                              m.wensize,
+                              ");\n"));
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", m.member, "_q", p.rdidx, "\"), ",
-                                  m.bits, ");\n"));
+        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                                  m.member,
+                                  "_q",
+                                  p.rdidx,
+                                  "\"), ",
+                                  m.bits,
+                                  ");\n"));
       }
     }
   }
   for (const auto& s : subs) {
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, \"", s.inst, "\"); _h = hlop::ckpt::fnv1a_u64(_h, ", s.inst,
+    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, \"",
+                              s.inst,
+                              "\"); _h = hlop::ckpt::fnv1a_u64(_h, ",
+                              s.inst,
                               ".design_hash());\n"));
   }
   // Interface (every I/O port name+width+direction) so a port change warns.
   for (const auto& io : ios) {
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", io.field,
-                              "\"), ", io.bits, "), ", io.is_input ? 1 : 2, ");\n"));
+    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                              io.field,
+                              "\"), ",
+                              io.bits,
+                              "), ",
+                              io.is_input ? 1 : 2,
+                              ");\n"));
   }
   // A coarse logic fingerprint: the cell count (computed at codegen). It is not a
   // full structural hash, but it makes a logic-only change (added/removed cells —
@@ -3260,8 +3589,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& m : mems) {
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _m[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx,
-                                  ".to_i64_low();\n"));
+        fout->append(absl::StrCat("  _m[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_i64_low();\n"));
       }
     }
   }

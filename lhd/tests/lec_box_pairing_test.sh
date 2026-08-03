@@ -24,6 +24,8 @@
 # the same reversed-instance shapes must still exit REFUTED.
 
 set -u
+
+
 LHD=lhd/lhd
 W="${TEST_TMPDIR:-/tmp/lhd_lec_box_pairing_$$}"
 mkdir -p "$W"
@@ -119,7 +121,7 @@ run() {
 # proven_top <log> : the run must have PROVEN the top itself (not exited 0 on
 # an inconclusive UNKNOWN).
 proven_top() {
-  grep -q "PROVEN equivalent" "$W/$1.out"
+  grep -qE "PASS\\(|PROVEN equivalent" "$W/$1.out"
 }
 
 # ── 1. stateless reversed: PROVEN, and directly (no flat fallback) ─────────

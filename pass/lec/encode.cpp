@@ -15,6 +15,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
+#include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
 
 namespace livehd::lec {
@@ -39,10 +40,26 @@ static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
     if (gu::type_op_of(n) != Ntype_op::Get_mask) {
       return {};
     }
+    // Take the `a` operand (sink pid 0); `mask` is pid 2 (graph/cell.cpp).
+    //
+    // This used to compare `e.sink.get_port_id() < a.get_port_id()` -- the
+    // candidate's SINK pid against the held pin's DRIVER pid, two different
+    // numbering spaces. A driver pid is 0 for any single-output node, so once
+    // any edge was taken the test read `sink_pid < 0`, which is never true, and
+    // whichever edge iterated FIRST won. When that was `mask` the walk landed on
+    // the constant and gave up -- so an ICG whose operands arrive through the
+    // width-mask wrappers (`Get_mask(clk_b,1) & Get_mask(gate,1)`, exactly what
+    // a typed 1-bit port read produces) resolved to NOTHING and the flop was
+    // refused as an unmodellable derived clock. Order-dependent, which is why it
+    // survived: the same shape resolves fine when the edges come out the other
+    // way round. Measured on tests/equiv/mclk_derived.
     hhds::Pin_class a;
+    hhds::Port_id   a_pid = Port_invalid;
     for (const auto& e : n.inp_edges()) {
-      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-        a = e.driver;
+      const auto spid = e.sink.get_port_id();
+      if (a.is_invalid() || spid < a_pid) {
+        a     = e.driver;
+        a_pid = spid;
       }
     }
     p = a;
@@ -151,6 +168,37 @@ static bool memory_clock_shape_ok(hhds::Pin_class p, int depth = 0) {
       }
     }
     return data_ins <= 1;
+  }
+  // A WIDTH MASK on the clock, not a clock gate. cgen emits every net read as
+  // `net & MASK`, so routing a design out to Verilog and back turns a plain
+  // `.clk(clock)` port binding into `And(clock, 1'h1)` -- and the memory inside
+  // ware/rtl/cgen_memory_*.v (the graph Memory cell's own Verilog body, which
+  // every emitted design instantiates) is reached through exactly that edge. A
+  // non-zero constant ANDed with a 1-bit clock is the identity, so the shape
+  // stays legal; recurse into the single data operand.
+  //
+  // TWO data operands is a real clock GATE (`clk & enable`) and is still
+  // refused here, for the same reason the Sub arm refuses a two-input cell:
+  // that shape belongs to the clock-cell path, which turns it into a write
+  // ENABLE, and silently accepting it here would model a gated memory as if it
+  // were written every cycle.
+  if (op == Ntype_op::And) {
+    hhds::Pin_class data;
+    int             data_ins = 0;
+    for (const auto& e : n.inp_edges()) {
+      if (gu::is_const_pin(e.driver)) {
+        if (gu::hydrate_const(e.driver).is_known_false()) {
+          return false;  // `clk & 0` is a constant, not a clock
+        }
+        continue;
+      }
+      ++data_ins;
+      data = e.driver;
+    }
+    if (data_ins != 1) {
+      return false;
+    }
+    return memory_clock_shape_ok(data, depth + 1);
   }
   if (op != Ntype_op::Set_mask) {
     return false;
@@ -2863,21 +2911,45 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // the conventional spellings when (as in a pure-ICG design) no flop is
         // wired straight to a clock input. A miss just leaves the flop ungated,
         // i.e. the previous behavior — never a wrong verdict.
+        // A clock that reaches EVERY flop through the gate never lands in
+        // `clk_inputs` (that census walks flop clock_pins, and Get_mask wrappers
+        // only -- an And stops it). Requiring membership therefore missed the
+        // second-domain ICG entirely: `gclk = clk_b and gate` with another flop
+        // on the default `clock` left `clk_inputs = {clock}`, neither operand
+        // matched, and the flop was refused as an unmodellable derived clock.
+        // Measured on tests/equiv/mclk_derived.
+        //
+        // So fall back to the conventional-spelling heuristic PER OPERAND. It is
+        // the same disambiguator the empty-census case already used, and it is
+        // deliberately narrow in both directions (`clk_b` matches; `gate`,
+        // `clock_en`, `gclk_gate` do not -- Design_clocks::name_looks_like_clock).
         auto is_clock_operand = [&](const hhds::Pin_class& d) {
           auto ci = resolve_clk_input(d);
           if (ci.is_invalid()) {
             return false;
           }
           const std::string nm{gu::pin_name_of(ci)};
-          return clk_inputs.empty() ? (nm == "clk" || nm == "clock") : clk_inputs.count(nm) > 0;
+          return clk_inputs.count(nm) > 0 || livehd::latch_contract::Design_clocks::name_looks_like_clock(nm);
         };
-        bool              saw_clock = false;
-        std::vector<Term> guards;
-        bool              gok = true;
+        // AMBIGUITY IS A REFUSAL, not a coin flip: if two operands both look
+        // like clocks this is not an ICG (it is an AND of two clocks), and
+        // picking the first would silently drop the other.
+        int n_clockish = 0;
         for (const auto& e : cn.inp_edges()) {
-          if (!saw_clock && is_clock_operand(e.driver)) {
+          n_clockish += is_clock_operand(e.driver) ? 1 : 0;
+        }
+        bool              saw_clock = n_clockish != 1;  // !=1 -> never fold below
+        hhds::Pin_class   gate_ref;                     // the gate's reference clock input
+        std::vector<Term> guards;
+        bool              gok = n_clockish == 1;
+        for (const auto& e : cn.inp_edges()) {
+          if (gok && !saw_clock && is_clock_operand(e.driver)) {
             saw_clock = true;
+            gate_ref  = resolve_clk_input(e.driver);
             continue;
+          }
+          if (!gok) {
+            break;
           }
           bool ok2 = true;
           Val  gv  = driver_val(e.driver, ok2);
@@ -2889,6 +2961,37 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         if (gok && saw_clock && !guards.empty()) {
           commits = guards.size() == 1 ? guards[0] : tm_.mkTerm(Kind::AND, guards);
+          // SECOND-DOMAIN GATE. "commit iff the enables hold" is relative to the
+          // REFERENCE clock, which is only the whole story when the gate hangs
+          // off the design's one clock. If the gate's reference is a DIFFERENT
+          // net from the flops' clock, the enable alone would let this flop
+          // commit on the other domain's edges -- conflating two clocks, which
+          // is exactly the false-PROVEN class the gated-vs-ungated guards exist
+          // to stop. Combine it with a DETECTED EDGE of the gate's own
+          // reference, the same model the multi-clock path uses, so the flop
+          // commits only on clk_b's rise AND with the enable true.
+          if (!gate_ref.is_invalid()) {
+            const std::string rnm{gu::pin_name_of(gate_ref)};
+            if (!clk_inputs.empty() && clk_inputs.count(rnm) == 0) {
+              bool rok = true;
+              Val  rv  = driver_val(gate_ref, rok);
+              if (!rok || rv.term.isNull()) {
+                return fail_unsupported("flop '" + gu::debug_name(node)
+                                        + "' is gated by a clock whose reference has no encodable driver");
+              }
+              const std::string ckey  = frame_tag(prefix) + std::string("\x01clk:") + rnm;
+              auto              pit   = clk_prev_.find(ckey);
+              if (pit == clk_prev_.end()) {
+                pit = clk_prev_.emplace(ckey, seed_state(std::string("\x01clk:") + rnm, 1, false)).first;
+              }
+              const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
+              const Term cur_hot  = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+              const Term rise     = tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot});
+              commits             = tm_.mkTerm(Kind::AND, {rise, commits});
+              out.outputs[std::string("\x01nxt:\x01clk:") + rnm]
+                  = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+            }
+          }
         }
       } else if (multi_clock && !clk_in.is_invalid()) {
         // Two or more clock inputs: no net is "the" clock, soeach flop commits on
@@ -3104,7 +3207,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // (whole-array update, per-port write mask, sync-read register) all hold --
     // which is what lets a rise-written array be READ by a fall-registered port
     // in the same source period.
-    if (phased && !phase_plan_->multi_root()) {
+    // A COMBINATIONAL memory (type==2: no clock at all) is PURE LOGIC and must be
+    // evaluated on EVERY microstep -- it is a lookup table, not an endpoint. It
+    // has no entry in the schedule (which enumerates CLOCKED endpoints only), so
+    // without this guard it fell to the `Phase::Rise` default below and was
+    // suppressed on the other three microsteps: its reads then served STALE data
+    // to anything sampling at fall.
+    //   Measured: a comb array feeding an output, in a design with any negedge
+    // flop (which is what forces P>1), REFUTED against its own Verilog source --
+    // `logic [3:0] rf_read [4]` + `assign o = rf_read[addr]`. It needs BOTH the
+    // negedge endpoint (else single_step() and the gate never fires) and the
+    // comb ARRAY (a scalar read is not a Memory cell and is never gated), which
+    // is why it hid behind a register-file shape. See
+    // lhd/tests/mem_partsel_write_test.sh.
+    if (phased && !phase_plan_->multi_root() && !mc.is_comb) {
       const Phase_endpoint* mpe = nullptr;
       if (auto pit = phase_plan_->ep.find(box_node_key(mc.node)); pit != phase_plan_->ep.end()) {
         mpe = &pit->second;

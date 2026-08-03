@@ -360,47 +360,17 @@ cc_direct_headers(
     visibility = ["//visibility:private"],
 )
 
-# SILENT-SIM-BUG trackers (2026-07-25 latch/edge audit). Each fixture is a
+# SILENT-SIM-BUG regressions (fixed 2026-08-02). Each fixture is a
 # 4-tick run whose asserts capture the CORRECT end-of-tick values (taken from
 # Icarus on the netlist LiveHD itself emits), and each fails TODAY on a shape
 # `lhd sim` gets wrong with NO diagnostic -- reports 0 errors and hands back
 # wrong numbers. Every one also carries CONTROL asserts that pass, so a failure
 # is always attributable to the named bug rather than to a dead testbench.
 #
-# They are tagged `fixme` (the repo's known-broken convention; `.bazelrc`
-# filters `-fixme`) so `bazel test //...` stays green. Run one with:
-#   bazel test //inou/prp:prp-sim-latch_sim_clockgate_high --test_tag_filters=
-# Drop the name from this list the moment its bug is fixed -- that promotion IS
-# the regression test.
-_SIM_FIXME = [
-    # A transparent-HIGH latch gated by the design's CLOCK net never commits:
-    # the gate cone reads the clock as ordinary DATA and cgen_sim never pokes
-    # that In field. `lhd sim` and `lhd formal verify` disagree on this shape.
-    "latch_sim_clockgate_high",
-    # The US7624363 L1 case: a transparent-LOW latch on clk closes at the RISE
-    # and a posedge flop on the same clk samples at that same rise, so it must
-    # read THROUGH the latch. cgen_sim gives it the previous commit -- a full
-    # period late. pass.single_edge refuses this shape for LEC; sim is silent.
-    "latch_sim_l1_buffer",
-    # A negedge flop in a SECOND clock domain never commits: the per-net
-    # previous-level bit is updated BEFORE the phase-2 block, so the negedge
-    # guard `(!cur && prev)` is a tautological false.
-    "flop_sim_secondary_negedge",
-    # A memory write is silently DROPPED when the design also holds a negedge
-    # flop: the memory next-state section is emitted after phase 2 has erased
-    # its operand cones AND after the negedge-operand-unresolved check, so the
-    # write guard comes out as a literal `0 /*UNRESOLVED-CYCLE*/`.
-    "mem_sim_negedge_write",
-    # Negedge state INSIDE a submodule lands a full period late: the two-phase
-    # tick builds its stale set from THIS graph's flops only, and the child's
-    # cycle() runs during the parent's comb walk, before the parent's commits.
-    "hier_sim_negedge_sub",
-    # Reading a DUT output BEFORE `step` consumes a second-domain clock edge:
-    # peek() runs a full cycle() and rolls back flops/memories/tick but NOT the
-    # per-net previous-clock-level bit. Triggered by an ordinary debugging
-    # habit, not by anything wrong with the design.
-    "flop_sim_peek_secondary",
-]
+# They are live tests now. Keep the list for the target-generating expression
+# below and for future independently diagnosed trackers; an entry here is a
+# known failure and must be removed as part of its fix.
+_SIM_FIXME = []
 
 [
     sh_test(

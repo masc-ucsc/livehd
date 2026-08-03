@@ -168,23 +168,37 @@ def main():
              "--workdir", os.path.join(work, "w_native_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=NATIVE_CHECK_TIMEOUT)
+    # OUR ENGINE MUST DECIDE (user ruling 2026-08-02). The two legs have
+    # DIFFERENT contracts on purpose:
+    #
+    #   lgcheck  an INDEPENDENT oracle. A definitive FAIL is always an error --
+    #            it caught a real difference. Its INCONCLUSIVE is NOT an error:
+    #            lgcheck simply could not decide, which says nothing about us.
+    #
+    #   lhd lec  OUR engine, on OUR corpus. It must PROVE. Anything else --
+    #            UNKNOWN, an encoder refusal, a timeout -- is a gap in the tool
+    #            that this corpus exists to surface, so it FAILS the test rather
+    #            than printing a note nobody reads. PASS(n) counts as proven (a
+    #            complete BMC is a real result, just annotated with its depth).
     except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - native Pyrope check inconclusive "
-              "(lhd lec timeout >{}s, NOT a fail)".format(name, NATIVE_CHECK_TIMEOUT))
+        print("{} - v2prp2v - FAILED: lhd lec TIMED OUT >{}s on our own corpus "
+              "(our engine must decide these)".format(name, NATIVE_CHECK_TIMEOUT))
+        native_failed = True
     else:
         native_out = native.stdout.decode("utf-8", "ignore")
-        if native.returncode == 0:
-            if "INCONCLUSIVE" in native_out or "UNKNOWN" in native_out:
-                print("{} - v2prp2v - native Pyrope check inconclusive "
-                      "(solver gave up; NOT a proof; impl-top:{} ref-top:{})".format(
-                          name, vtop, ptop))
-            else:
-                print("{} - v2prp2v - native Pyrope check success "
-                      "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
+        if native.returncode == 0 and "INCONCLUSIVE" not in native_out and "UNKNOWN" not in native_out:
+            print("{} - v2prp2v - native Pyrope check success "
+                  "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
+        elif native.returncode == 0:
+            print("{} - v2prp2v - FAILED: lhd lec did not PROVE (inconclusive on our own "
+                  "corpus; impl-top:{} ref-top:{})".format(name, vtop, ptop))
+            print(native_out)
+            native_failed = True
         elif "REFUSAL, not a timeout" in native_out:
-            print("{} - v2prp2v - native Pyrope check inconclusive "
-                  "(encoder refusal; equivalence unchecked; impl-top:{} ref-top:{})".format(
-                      name, vtop, ptop))
+            print("{} - v2prp2v - FAILED: lhd lec REFUSED to encode (unmodelled cell; "
+                  "impl-top:{} ref-top:{})".format(name, vtop, ptop))
+            print(native_out)
+            native_failed = True
         else:
             native_failed = True
             print("{} - v2prp2v - FAILED: emitted Pyrope not equivalent to reference "

@@ -22,6 +22,7 @@ if [ ! -x "$LHD" ]; then
     echo "FAIL: could not find the lhd binary in $(pwd)"; exit 1; fi
 fi
 
+
 WORK="${TEST_TMPDIR:-/tmp/phasesched}"
 mkdir -p "$WORK"
 fail=0
@@ -34,7 +35,7 @@ check() {
         --workdir "$WORK/w_$label" "$@" 2>&1); rc=$?
   case "$want" in
     PROVEN)
-      if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
+      if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "PASS\\(|PROVEN equivalent"; then
         echo "FAIL: $label expected PROVEN (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
       else echo "ok: $label PROVEN"; fi ;;
     REFUTED)

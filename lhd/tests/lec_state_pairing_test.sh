@@ -5,6 +5,7 @@
 # claimed with pairs applied, and a PASS persists entity-keyed pair hints that
 # warm runs replay without the signature pass.
 LHD=./bazel-bin/lhd/lhd
+
 [ -x "$LHD" ] || LHD=./lhd/lhd
 [ -x "$LHD" ] || { echo "FAIL: lhd binary not found"; exit 1; }
 W="${TEST_TMPDIR:-/tmp/lec_state_pairing_$$}"
@@ -157,7 +158,12 @@ echo "PASS: all-names-match design does zero tier-2 work"
 #    the unmatched cut points) — the unbounded ind PROVEN of #1 is exactly
 #    what tier-2 buys. Forcing engine=ind shows the gate directly: UNKNOWN.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false 2>&1)
+#    A bounded result is INCONCLUSIVE by default now, so this case -- whose whole
+#    point is that the fallback is BOUNDED -- opts out of strict explicitly. That
+#    is the honest shape: it asserts the bounded pass EXISTS, not that a bounded
+#    pass is equivalence.
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false \
+      --set formal.strict=false 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#7 pairing-off auto run should still bounded-pass (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite formal.lec.state_pairing=false: $OUT"

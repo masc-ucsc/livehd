@@ -4,6 +4,8 @@
 */
 
 // todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+// FIXED 2026-08-02: this is now a live regression; the failure description
+// below records the pre-fix behavior.
 //
 // THE L1 / COINCIDENT-COMMIT-EDGE CASE (US7624363), in simulation.
 //

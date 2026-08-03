@@ -495,37 +495,52 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
-        # Optional `:equiv_engine: cvc5`: discharge the pair with `lhd lec` (the
-        # native phase-aware encoder) instead of lgcheck. Needed for pairs whose
-        # two sides differ in LATCH / CLOCK-EDGE structure: lgcheck's cascade
-        # ends in a bounded miter that steps ONE posedge per step, so it cannot
-        # represent a latch closing before an edge or a negedge endpoint
-        # committing inside the period, and it reports a mismatch between two
-        # designs that are equivalent (verified: every such pair PROVES under
-        # `lhd lec`, and the same pair's INDEPENDENT oracle is the v2prp2v
-        # original-Verilog leg plus lhd/tests/single_edge_four_classes_test.sh,
-        # which runs the source and normalized netlists under Icarus).
-        # Deliberately opt-in per fixture: lgcheck stays the default oracle.
-        if (test.params.get('equiv_engine') or '').strip() == 'cvc5':
-            lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
-                       '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
-                       '--workdir', os.path.join(odir, 'w_lec')]
-            lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            try:
-                llog, _ = lec.communicate()
-                lrc = lec.returncode
-            except Exception:
-                lec.kill()
-                lrc, llog = 1, b''
-            ltxt = llog.decode('utf-8', 'ignore')
-            if lrc == 0 and 'UNKNOWN' not in ltxt and 'INCONCLUSIVE' not in ltxt:
-                print('{} - equiv - success via lhd lec (verilog_top:{} pyrope_top:{})'.format(
-                    name, verilog_top, pyrope_top))
-                return 0
-            print('{} - equiv - FAILED: lhd lec not equivalent (verilog_top:{} pyrope_top:{})'.format(
-                name, verilog_top, pyrope_top))
+        # OUR ENGINE ALWAYS RUNS. This corpus is a test of `lhd lec` as much as
+        # it is of the front end, so every pair is discharged by our own encoder
+        # and must PROVE. The two legs have DIFFERENT contracts on purpose:
+        #
+        #   lhd lec  OURS. Must PROVE (PASS(n) counts -- a complete BMC is a real
+        #            result). UNKNOWN, a timeout or an encoder refusal is a gap in
+        #            the tool that this corpus exists to surface, so it FAILS.
+        #
+        #   lgcheck  an INDEPENDENT oracle (yosys). A definitive FAIL is always an
+        #            error -- it found a real difference, and if we PROVED the same
+        #            pair then one of the two engines is wrong and that is exactly
+        #            what we want to hear about. Its INCONCLUSIVE is NOT an error:
+        #            lgcheck simply could not decide, which says nothing about us.
+        #
+        # `:equiv_engine: cvc5` keeps its meaning: SKIP lgcheck for pairs whose two
+        # sides differ in LATCH / CLOCK-EDGE structure. lgcheck's cascade ends in a
+        # bounded miter that steps ONE posedge per step, so it cannot represent a
+        # latch closing before an edge or a negedge endpoint committing inside the
+        # period, and it calls equivalent designs different. For those the
+        # independent oracle is the v2prp2v original-Verilog leg plus
+        # lhd/tests/single_edge_four_classes_test.sh (Icarus on source vs
+        # normalized netlists).
+        lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
+                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
+                   '--workdir', os.path.join(odir, 'w_lec')]
+        lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            llog, _ = lec.communicate()
+            lrc = lec.returncode
+        except Exception:
+            lec.kill()
+            lrc, llog = 1, b''
+        ltxt = llog.decode('utf-8', 'ignore')
+        # PASS(n) is a real pass (exit 0); only a genuine UNKNOWN (solver timeout,
+        # encoder refusal, unattributable divergence) is a failure here.
+        lec_ok = lrc == 0 and 'UNKNOWN' not in ltxt and 'INCONCLUSIVE' not in ltxt
+        if not lec_ok:
+            print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
+                  'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             print(ltxt)
-            return 1
+
+        if (test.params.get('equiv_engine') or '').strip() == 'cvc5':
+            if lec_ok:
+                print('{} - equiv - success via lhd lec (lgcheck skipped: latch/edge structure; '
+                      'verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+            return 0 if lec_ok else 1
 
         lgcheck_cmd = ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
                        '--reference_top', verilog_top, '--implementation_top', pyrope_top]
@@ -551,10 +566,26 @@ class PrpRunner:
             check.kill()
             crc, clog = 1, b''
 
+        # lgcheck rc: 0 pass | 2 INCONCLUSIVE (no proof, no counterexample) | else FAIL.
+        # Only a definitive FAIL is an error; an inconclusive independent oracle
+        # says nothing about this pair. Combine with our own leg above -- BOTH
+        # must be satisfied.
         if crc == 0:
-            print('{} - equiv - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
-            return 0
-        print('{} - equiv - FAILED: lgcheck not equivalent (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+            if lec_ok:
+                print('{} - equiv - success (lhd lec + lgcheck; verilog_top:{} pyrope_top:{})'.format(
+                    name, verilog_top, pyrope_top))
+            return 0 if lec_ok else 1
+        if crc == 2:
+            print('{} - equiv - lgcheck inconclusive (no proof, no counterexample; NOT a fail) '
+                  '{}(verilog_top:{} pyrope_top:{})'.format(
+                      name, 'but lhd lec PROVED it ' if lec_ok else '', verilog_top, pyrope_top))
+            return 0 if lec_ok else 1
+        # lgcheck says DIFFERENT. Always an error -- and if our engine PROVED the
+        # same pair, say so loudly: two engines disagreeing means one of them is
+        # wrong, which is the single most valuable signal this corpus produces.
+        print('{} - equiv - FAILED: lgcheck not equivalent{} (verilog_top:{} pyrope_top:{})'.format(
+            name, ' WHILE lhd lec PROVED it -- the two engines DISAGREE' if lec_ok else '',
+            verilog_top, pyrope_top))
         print(clog.decode('utf-8', 'ignore'))
         return 1
 

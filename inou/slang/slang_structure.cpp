@@ -1207,9 +1207,13 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
 // state as well -- neither can own it as a temp.
 void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
   using PB = slang::ast::ProceduralBlockSymbol;
-  absl::flat_hash_map<const slang::ast::Symbol*, const PB*>                   owner;   // blocking-written -> its edge block
-  absl::flat_hash_set<const slang::ast::Symbol*>                              multi;   // ...written by more than one
-  std::vector<std::pair<const PB*, absl::flat_hash_set<const slang::ast::Symbol*>>> reads;  // per-block reads (null = module level)
+  absl::flat_hash_map<const slang::ast::Symbol*, const PB*> owner;  // blocking-written -> its edge block
+  absl::flat_hash_set<const slang::ast::Symbol*>            multi;  // ...written by more than one
+  // Per-block reads (null block = module level). Kept as the collector's raw
+  // vector, NOT a hash set: the resolve loop below iterates these and probes
+  // `owner`, so a set here would buy nothing and cost one table per member --
+  // and a Chisel-generated module has tens of thousands of members.
+  std::vector<std::pair<const PB*, std::vector<const slang::ast::ValueSymbol*>>> reads;
 
   std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
@@ -1230,7 +1234,7 @@ void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
         const auto&           pbs = member.as<PB>();
         Named_value_collector nv;
         pbs.getBody().visit(nv);
-        reads.emplace_back(&pbs, absl::flat_hash_set<const slang::ast::Symbol*>(nv.syms.begin(), nv.syms.end()));
+        reads.emplace_back(&pbs, std::move(nv.syms));
         Ff_blocking_collector wc;
         pbs.getBody().visit(wc);
         bool is_edge = false;
@@ -1271,21 +1275,31 @@ void Slang_context::collect_blocking_ff_state(const slang::ast::Scope& body) {
       Named_value_collector nv;
       member.visit(nv);
       if (!nv.syms.empty()) {
-        reads.emplace_back(nullptr, absl::flat_hash_set<const slang::ast::Symbol*>(nv.syms.begin(), nv.syms.end()));
+        reads.emplace_back(nullptr, std::move(nv.syms));
       }
     }
   };
   walk(body);
 
-  for (const auto& [sym, pbs] : owner) {
-    if (multi.contains(sym)) {
-      blocking_ff_state_.insert(sym);
-      continue;
-    }
-    for (const auto& [rb, rset] : reads) {
-      if (rb != pbs && rset.contains(sym)) {
+  // Resolve owner-vs-reader by walking the READS once and probing `owner`, not
+  // by walking `owner` and scanning every read set. Both compute the same set --
+  // a blocking-written sym is state iff two edge blocks write it, or something
+  // other than its owning block reads it -- but the owner-outer form is
+  // |owner| x |reads| hash probes, and a symbol that is NOT read outside (the
+  // common case, a genuine process-local temp) scans the whole `reads` vector
+  // before concluding so. On XiangShan's Backend (1089 modules; Rob alone has
+  // ~83k module-level members) that pair was 83% of every sample taken during
+  // the slang->LNAST phase, and 28s of a 2m51 `lhd compile`. This form is
+  // linear in the number of read refs; the same run is 2m23.
+  // `multi` is a subset of `owner` (only a second, different writer puts a sym
+  // there), so seeding from it is exact.
+  for (const auto* sym : multi) {
+    blocking_ff_state_.insert(sym);
+  }
+  for (const auto& [rb, rsyms] : reads) {
+    for (const auto* sym : rsyms) {
+      if (auto it = owner.find(sym); it != owner.end() && it->second != rb) {
         blocking_ff_state_.insert(sym);
-        break;
       }
     }
   }

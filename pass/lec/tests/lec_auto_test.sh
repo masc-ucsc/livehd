@@ -21,6 +21,7 @@
 
 set -u
 LHD=./bazel-bin/lhd/lhd
+
 if [ ! -x "$LHD" ]; then
   if [ -x ./lhd/lhd ]; then LHD=./lhd/lhd; else
     echo "FAIL: could not find the lhd binary in $(pwd)"; exit 1; fi

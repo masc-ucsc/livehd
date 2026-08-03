@@ -4,6 +4,8 @@
 */
 
 // todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+// FIXED 2026-08-02: this is now a live regression; the failure description
+// below records the pre-fix behavior.
 //
 // A transparent-HIGH latch GATED BY THE DESIGN'S CLOCK NET. This is the ICG
 // enable latch, the slave half of a master/slave pair, and the exact shape of

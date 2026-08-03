@@ -44,10 +44,16 @@ compile good.sv g_native slang
 compile good.sv g_ys     yosys-slang
 compile bad.sv  b_native slang
 
-verdict() {  # $1=impl $2=ref -> PROVEN | REFUTED | UNKNOWN
-  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top rf --set formal.lec.hier=false --set formal.engine=ind \
+# `auto`, not `engine=ind`. An inductive-only CEX starts from an ARBITRARY state
+# that may be UNREACHABLE, so `ind` alone can no longer report REFUTED for a
+# stateful design (user ruling 2026-08-02: only a SURE counterexample is a
+# failure). `auto` races ind|bmc and bmc confirms the CEX from reset, which is
+# what makes the corrupted-RF case below a real refutation rather than a lead.
+verdict() {  # $1=impl $2=ref -> PROVEN | PASS(n) | REFUTED | UNKNOWN
+  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top rf --set formal.lec.hier=false \
        --workdir "$WORK/q_${1}_${2}_$$" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1
+    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
+    | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; depth is not what this test checks
 }
 
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }

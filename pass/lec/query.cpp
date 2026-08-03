@@ -404,6 +404,10 @@ std::string serialize_result(const Query_result& r) {
   // refusal byte above: lose it in the fork and the parent sees
   // nothing_compared=false, so an empty comparison reports a clean exit-0 pass.
   b.push_back(static_cast<char>(r.nothing_compared ? 1 : 0));
+  // Bounded-proof qualifier, same process boundary and the same silent-loss
+  // trap: lose it in the fork and the parent sees an UNBOUNDED Proven for a
+  // 6-cycle claim -- and hierarchically discharges a parent's premise with it.
+  b.push_back(static_cast<char>(r.bounded ? 1 : 0));
   // cvc5 solve statistics (formal.stats). Same tail discipline, and the same
   // silent-loss trap: the whole solve happens in the child, so WITHOUT this the
   // parent's `--stats` report is all zeros on every forked path. Strict tail,
@@ -654,6 +658,11 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     return true;  // best-effort tail: older blob, no empty-miter flag
   }
   r.nothing_compared = b.front() != 0;
+  b.remove_prefix(1);
+  if (b.empty()) {
+    return true;  // best-effort tail: older blob, no bounded flag
+  }
+  r.bounded = b.front() != 0;
   b.remove_prefix(1);
   // cvc5 statistics tail (mirror serialize_result). All-or-nothing inside
   // get_cvc5_stats: a truncated tail leaves Cvc5_stats{}, which reads as "no
@@ -1230,9 +1239,10 @@ bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
   if (bmc.verdict != Verdict::Proven || bmc.output_checks <= 0) {
     return false;  // Unknown, or vacuous (no outputs compared) -> not a PASS
   }
-  out        = bmc;
-  out.engine = "bmc";
-  out.detail = "auto: bmc BOUNDED-Proven (no CEX up to bound " + std::to_string(bmc.checked_steps) + ", "
+  out         = bmc;
+  out.engine  = "bmc";
+  out.bounded = true;  // qualifier: the CLI reports a bounded proof INCONCLUSIVE
+  out.detail  = "auto: bmc BOUNDED-Proven (no CEX up to bound " + std::to_string(bmc.checked_steps) + ", "
              + std::to_string(bmc.output_checks) + " output checks; PASS by bounded-proof policy — "
                "cycles beyond the bound are unproven); "
              + bmc.detail;
@@ -2827,7 +2837,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Memory cuts (M4) introduce array symbols; those keep the default solver.
   bool has_mem = false;
   for (auto* g : {ref, impl}) {
-    for (auto node : g->forward_class()) {
+    // Hierarchical: a memory one level down still introduces ARRAY symbols, and
+    // the eager bit-blaster this gates has no array theory.
+    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
       if (graph_util::type_op_of(node) == Ntype_op::Memory) {
         has_mem = true;
         break;
@@ -2863,7 +2876,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // verdict, only remove a semdiff-contradicted (diverged) collapse.
   auto mem_names_by_shape = [&](hhds::Graph* g) {
     absl::flat_hash_map<std::string, std::vector<std::string>> by;
-    for (auto node : g->forward_class()) {
+    // Same hierarchy rule as build_shared_mems: a census that stops at the top
+    // body reports 0 memories for a shape that exists one level down, and
+    // shape_collapse_ok's `rn <= 1 && in <= 1` fast path then declares that
+    // shape UNAMBIGUOUS from an EMPTY census -- silently disabling the
+    // crossed-occurrence guard it exists to enforce.
+    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
@@ -2960,7 +2979,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     Io_name_map<cvc5::Term> sm;
     Io_name_map<int>        occ;
     auto                                         add = [&](hhds::Graph* g) {
-      for (auto node : g->forward_class()) {
+      // HIERARCHICAL, like the flop census (add_flops): the ENCODER enumerates
+      // memories with forward_hier under the ambient opaque scope, so a census
+      // that walked only the top BODY missed every memory one level down. Those
+      // got no shared current-state array -- each design minted its own free
+      // array -- and the miter REFUTED two BYTE-IDENTICAL designs. Measured with
+      // formal.lec.hier=false (the config that puts a submodule memory in the
+      // top miter); see lhd/tests/mem_hier_census_test.sh.
+      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -4028,6 +4055,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       impl_reads = std::move(ie.next_read);
     }
 
+    // Every Proven that leaves this BMC frame is BOUNDED by construction -- the
+    // miter was unrolled N steps and no further -- EXCEPT when the design holds
+    // no state at all. A stateless miter has no "deeper cycles": its outputs are
+    // a pure function of the current inputs, so one step already decides every
+    // step, and calling that bounded would demote every combinational proof in
+    // the corpus (measured: most of tests/equiv). State here means a flop/latch
+    // cut, a memory array, or a registered read -- if none of the four maps has
+    // an entry on either side, there is nothing to unroll.
+    //
+    // Set once, at the frame, rather than at each verdict site, so a new exit
+    // path cannot silently lose the qualifier.
+    const bool has_state = !ref_state.empty() || !impl_state.empty() || !ref_mem.empty() || !impl_mem.empty()
+                        || !ref_reads.empty() || !impl_reads.empty();
+    res.bounded = has_state;
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
                + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
                + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
@@ -5921,6 +5962,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   } else if (r.isSat()) {
     res.witness = build_witness();
+    // Does this miter cut any STATE? A `\x01`-prefixed compare point is a
+    // next-state/memory cut; only outputs otherwise. With no state cut there is
+    // no arbitrary start state to be unreachable.
+    bool has_state_cut = false;
+    for (const auto& d : ind_diffs) {
+      if (!d.first.empty() && (d.first[0] == '\x01' || d.first.rfind("nxt:", 0) == 0
+                               || d.first.rfind("mem:", 0) == 0)) {
+        has_state_cut = true;
+        break;
+      }
+    }
     // A divergence on a COMMON output is a genuine refutation when the
     // correspondence is complete. With unmatched cut points the engine cannot
     // attribute the divergence soundly (a matched ref output may read a ref-only
@@ -5928,6 +5980,25 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (incomplete) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; matched portion DIFFERS (witness below; may be an artifact of the unmatched cut points)";
+    } else if (has_state_cut) {
+      // ONLY A SURE COUNTEREXAMPLE IS A FAILURE (user ruling 2026-08-02).
+      //
+      // The inductive step starts from an ARBITRARY equal state, so a
+      // single-step CEX may sit on a state the design can never reach -- and
+      // then the two designs ARE equivalent and this is a FALSE refutation.
+      // Measured: a mod-10 counter spelled `s == 9` vs `s >= 9` agrees on every
+      // reachable state 0..9, and 1-induction "refutes" it from s=62.
+      //
+      // So an inductive-only CEX is UNKNOWN -- a lead to investigate, never the
+      // exit-10 "here is a counterexample". `auto` already applied this rule via
+      // its bmc leg; `--set formal.engine=ind` bypassed it and reported exit 10
+      // on equivalent designs.
+      //
+      // A STATELESS miter has no unreachable start state, so its CEX is real and
+      // still refutes -- that is what `has_state_cut` distinguishes.
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; single-step CEX from an ARBITRARY start state -- may be UNREACHABLE, so NOT a disproof "
+                     "(the witness is a lead; bmc starts from reset and can confirm it)";
     } else {
       res.verdict = Verdict::Refuted;
     }

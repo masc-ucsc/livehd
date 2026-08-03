@@ -4,6 +4,8 @@
 */
 
 // todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+// FIXED 2026-08-02: this is now a live regression; the failure description
+// below records the pre-fix behavior.
 //
 // A NEGEDGE flop in a SECOND clock domain never commits. This is M6's
 // detected-edge model crossed with M5's two-phase tick, and the crossing is

@@ -10,6 +10,7 @@
 set -u
 
 LHD=./bazel-bin/lhd/lhd
+
 if [ ! -x "$LHD" ]; then
   if [ -x ./lhd/lhd ]; then LHD=./lhd/lhd; else
     echo "FAIL: could not find the lhd binary in $(pwd)"; exit 1; fi
@@ -57,7 +58,8 @@ verdict() {
   $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
        --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1
+    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
+    | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; this test is about phase mechanics, not depth
 }
 
 expect() {  # $1=label $2=got $3=want

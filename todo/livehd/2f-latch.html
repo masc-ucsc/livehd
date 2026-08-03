@@ -42,10 +42,10 @@
 
 <h2 id="open">Still open</h2>
 
-<p><strong>SIMULATION is where the remaining latch bugs are, and they are
-  SILENT.</strong> Six live 4-tick trackers in <code>inou/prp/tests/sim/</code>
-  (tagged <code>fixme</code>; every fixture carries CONTROL asserts that pass, so
-  a failure is always attributable):</p>
+<p><strong>R9 SIMULATION PHASE SCHEDULER LANDED 2026-08-02.</strong> These six
+  4-tick trackers in <code>inou/prp/tests/sim/</code> are now live regressions
+  (no <code>fixme</code> tag); every fixture retains its independent control
+  asserts so a future failure stays attributable:</p>
 
 <table>
 <tr><th>tracker</th><th>what is wrong</th></tr>
@@ -57,10 +57,15 @@
 <tr><td><code>flop_sim_peek_secondary</code></td><td>a pre-step output read consumes a second-domain clock edge</td></tr>
 </table>
 
-<p>The fix is the sim analogue of M10: a two-phase (eventually four-microstep)
-  tick in <code>cgen_sim</code>. It needs the iverilog oracle, per the binding
-  <a href="#rules">cross-model gating rule</a> — our own simulator on both sides
-  proves nothing.</p>
+<p>The shipped scheduler evaluates the low/high latch windows around the
+  rise/fall commits, stages memories from pre-rise operands, retains one
+  secondary-clock history value through both edge phases and checkpoint/peek,
+  and advances negedge-only child state after the parent's rise. The full
+  Pyrope simulation suite passes together with the Icarus-backed
+  <code>single_edge_{icg,four_classes}_test</code> gates required by the binding
+  <a href="#rules">cross-model gating rule</a>.</p>
+
+<h3>Remaining open work</h3>
 
 <p><strong>FRONT END.</strong> Latch contract rules A (self-gated enable) and B
   (Q&rarr;own D) are checked in <code>graph/latch_contract.cpp</code> but not

@@ -34,6 +34,14 @@
 
 set -u
 LHD=./bazel-bin/lhd/lhd
+
+# BOUNDED-RESCUE: several cases here assert that a BMC pass CLEARS a spurious
+# inductive refutation (an ind CEX on an UNREACHABLE state). That rescue is by
+# construction a BOUNDED claim, so the cases opt in explicitly rather than
+# relying on the default -- which is now "a bounded proof is INCONCLUSIVE".
+# Keeping the opt-in visible here is the point: it says out loud that the rescue
+# buys a k-cycle result, not equivalence. `lhd` warns on every run that sets it.
+BOUNDED="--set formal.strict=false"
 if [ ! -x "$LHD" ]; then
   if [ -x ./lhd/lhd ]; then LHD=./lhd/lhd; else
     echo "FAIL: could not find the lhd binary in $(pwd)"; exit 1; fi
@@ -162,7 +170,9 @@ else echo "ok: PROVEN -> exit 0"; fi
 #    Guards the soundness rationale AND the exit-code policy: an ind Refute must never
 #    on its own fail a design bmc can prove — the `auto` race only escalates an ind CEX
 #    to a failure when bmc could NOT settle the query.
-run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set formal.timeout=20
+# The rescue is a BOUNDED claim, so it is now INCONCLUSIVE by default; this
+# case asserts the rescue MECHANISM, so it opts out of strict explicitly.
+run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set formal.timeout=20 $BOUNDED
 if [ "$RC" -ne 0 ]; then
   echo "FAIL: unreachable-state ind-refute rc=$RC (want 0: bmc clears a spurious ind CEX)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then

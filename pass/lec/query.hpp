@@ -83,6 +83,19 @@ struct Query_result {
   // warnings. A check that compares nothing is not a proof of anything.
   bool nothing_compared = false;
 
+  // The Proven verdict is BOUNDED: BMC found no counterexample up to
+  // `formal.bound`, which says nothing about deeper cycles. An INDUCTIVE proof
+  // leaves this false -- that one is unbounded.
+  //
+  // It is a verdict QUALIFIER, not a verdict: the CLI reports a bounded proof
+  // as INCONCLUSIVE (exit 7 -- "could not decide", NEVER exit 10, since no
+  // counterexample was found), and `formal.strict=false` is the single escape.
+  // It also propagates through hierarchical composition: a bounded
+  // child must NOT discharge a parent's box premise, because the box contract
+  // (see box_model=seq) is explicitly "from reset, identical input sequences
+  // produce identical output sequences" -- unbounded.
+  bool bounded = false;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;
@@ -358,7 +371,6 @@ struct Lec_options {
   // the encoder refuses to model — today, one with PER-PORT clock edge
   // polarity (Ntype::Memory_posclk_mixed).
   std::vector<std::string> ignore_memory;
-
   // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
   // module-def names the driver has ALREADY proven equivalent in isolation, which
   // are FORCED to the sound black-box path even when they could be flattened (a

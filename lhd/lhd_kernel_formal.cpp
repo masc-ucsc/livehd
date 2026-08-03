@@ -1027,6 +1027,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   //                its parent re-proves with C inlined — which is the ONLY step
   //                needed, because the parent's conditional proof already
   //                established that everything else about it matches.
+  // A def whose Proven verdict is only BOUNDED. It may NOT discharge a parent's
+  // box premise: the sequence-transducer contract a box stands for is
+  // explicitly unbounded ("from reset, identical input sequences produce
+  // identical output sequences"), and a k-cycle claim does not establish it. A
+  // child that diverges at cycle bound+1 would otherwise compose into an
+  // unbounded top proof with no caveat on the run's verdict line.
+  std::vector<uint8_t>                              bounded_proof(order.size(), 0);
   std::vector<std::vector<std::string>>              assumed(order.size());
   std::vector<absl::flat_hash_set<std::string>>      force_flat(order.size());
   // `refuted` for OTHER defs, snapshotted between rounds. run_def reads a
@@ -1554,7 +1561,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     lec_store_cones(vcache, r);
     if (r.verdict == Verdict::Proven) {
-      proven[def_ix] = 1;
+      proven[def_ix]        = 1;
+      bounded_proof[def_ix] = r.bounded ? 1 : 0;
       if (vcache != nullptr) {
         if (!ckey.empty()) {
           vcache->insert(ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F; v1 skips Refuted)
@@ -1717,6 +1725,19 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // closes — there is nothing to check higher up (user ruling 2026-08-02).
   // Only if the parent itself refutes does the escalation move up a level.
   std::vector<uint8_t> unconditional(order.size(), 0);
+  // True when def `i` has NO undischarged premise -- i.e. it is non-unconditional
+  // only because its OWN proof is bounded. The conditional-degradation message
+  // below must not fire then: it would print "0 premise(s) never discharged ()"
+  // and hide the real reason, which the bounded-pass policy states precisely.
+  auto open_premise_free = [&](size_t i) {
+    for (const auto& c : assumed[i]) {
+      auto ci = order_ix.find(c);
+      if (ci == order_ix.end() || unconditional[ci->second] == 0) {
+        return false;
+      }
+    }
+    return true;
+  };
   auto compute_closure = [&]() {
     std::fill(unconditional.begin(), unconditional.end(), 0);
     // `order` is leaves-first, so one forward sweep reaches a fixpoint.
@@ -1730,6 +1751,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (ci == order_ix.end() || unconditional[ci->second] == 0) {
           all_kids = false;
           break;
+        }
+        // BOUNDEDNESS PROPAGATES UP. A bounded child still DISCHARGES the
+        // premise -- blocking it would strand every design whose leaves prove by
+        // BMC, which is the common case (measured: 170 suite failures) -- but the
+        // parent's claim is then no stronger than the child's. Marking the parent
+        // bounded keeps the composition working AND keeps the final verdict
+        // honest: the top ends up bounded, and the bounded-pass policy decides
+        // whether that is a pass. The alternative, silently treating a k-cycle
+        // child as an unbounded sequence-transducer contract, is the hole.
+        if (bounded_proof[ci->second] != 0) {
+          bounded_proof[i] = 1;
         }
       }
       unconditional[i] = all_kids ? 1 : 0;
@@ -1826,7 +1858,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // equivalent, and an assumption the run never discharged is exactly the
     // "inconclusive" bucket, never a pass (see the verdict-discipline contract
     // in pass/lec/tests/lec_verdict_policy_test.sh).
-    if (have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0) {
+    if (have_top && top_result.verdict == Verdict::Proven && unconditional[top_ix] == 0 && !open_premise_free(top_ix)) {
       std::string open_premises;
       int         n = 0;
       for (size_t i = 0; i < order.size(); ++i) {
@@ -1948,6 +1980,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                     skipped ? "" : " (top itself inconclusive)",
                                     top_result.detail);
     have_top           = true;
+  }
+  if (have_top && top_result.verdict == Verdict::Proven && top_down) {
+    if (auto ti = order_ix.find(top_key); ti != order_ix.end() && bounded_proof[ti->second] != 0) {
+      top_result.bounded = true;  // some premise in the tree was only bounded
+    }
   }
   if (!have_top) {
     top_result.verdict = Verdict::Unknown;
@@ -3026,6 +3063,17 @@ void lec_command(Options& opts, Result& res) {
   o.phase_sched  = label("phase_sched", "true") != "false" && label("phase_sched", "true") != "0";
   o.box_seq      = label("box_model", "seq") != "uf";
   o.strict       = label("strict", "true") != "false" && label("strict", "true") != "0";
+  if (!o.strict) {
+    // ALWAYS warn: with strict off, an INCONCLUSIVE run exits 0 and reads as a
+    // pass to anything checking the exit code -- including a run that proved
+    // nothing at all. It is a legitimate "quick check" mode, but it must never
+    // be silent, because the failure it hides looks exactly like success.
+    livehd::diag::warn("pass.lec", "strict-off", "unsupported")
+        .msg("formal.strict=false: an INCONCLUSIVE verdict will exit 0 and be indistinguishable from a real proof")
+        .hint("this is a QUICK-CHECK mode, not an equivalence gate -- a run that decided nothing also passes. Leave "
+              "formal.strict=true (the default) for anything that gates a commit")
+        .emit();
+  }
   o.allow_oversize = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.state_pairing = label("state_pairing", "true") != "false" && label("state_pairing", "true") != "0";
@@ -3693,6 +3741,21 @@ void lec_command(Options& opts, Result& res) {
                     "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
   }
 
+  // VERDICT TAXONOMY (user ruling 2026-08-02):
+  //
+  //   REFUTED   BMC found a counterexample                       -> exit 10
+  //   UNKNOWN   the solver TIMED OUT / gave up, decided nothing  -> formal.strict
+  //   PASS      proved INDUCTIVELY: holds for all cycles          -> exit 0
+  //   PASS(n)   BMC ran to completion, no counterexample, and is
+  //             EXHAUSTIVE OVER INPUTS for n cycles from reset    -> exit 0
+  //
+  // PASS(n) is a real pass, not an "undecided": it decided something definitive
+  // and complete, just to a depth. Reporting it as UNKNOWN conflated it with a
+  // solver give-up, which is the distinction `formal.strict` is meant to act on
+  // -- strict is about TIMEOUTS, not about proof depth. The depth is carried in
+  // the verdict word so a reader can see exactly what was established; a pair
+  // that first diverges at cycle 40 reports PASS(6) and is honest about it.
+
   // A PROVEN verdict obtained with a non-empty trust list is CONDITIONAL on those
   // assumptions — disclose it on the verdict line and in the machine-readable
   // detail (envelope/JSON), so a trust-assisted pass is never read as an
@@ -3719,7 +3782,27 @@ void lec_command(Options& opts, Result& res) {
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
   bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
 
-  const char* verdict = lec_known ? (lec_equiv ? "PROVEN equivalent" : "REFUTED (not equivalent)") : "UNKNOWN";
+  // A completed BMC is NOT "UNKNOWN". It decided something DEFINITIVE and
+  // exhaustive: for EVERY input combination, from reset, the two designs agree
+  // for `bound` cycles. What it does not cover is cycle bound+1 onward, so it is
+  // not EQUIVALENCE -- but reporting it with the same word the solver uses when
+  // it gives up conflates a real (bounded) result with "could not decide", which
+  // is the conflation the verdict-discipline contract exists to prevent.
+  //
+  // So it gets its own headline. The EXIT CLASS is still the inconclusive one
+  // (formal.strict decides, and it is never the exit-10 "here is a
+  // counterexample"), because a k-cycle result must not gate a commit as though
+  // it were equivalence -- measured, a pair diverging at cycle 40 is exhaustively
+  // equal for the first 39.
+  // PASS(n): complete and exhaustive over inputs, to n cycles from reset. A
+  // plain PASS is the inductive (all-cycles) proof. UNKNOWN now means only what
+  // it says -- the solver timed out or gave up.
+  const std::string pass_word
+      = r.bounded ? std::format("PASS({}) equivalent for {} cycles from reset (exhaustive over inputs; "
+                                "deeper cycles not checked)",
+                                o.bound, o.bound)
+                  : std::string{"PROVEN equivalent"};
+  const char* verdict = lec_known ? (lec_equiv ? pass_word.c_str() : "REFUTED (not equivalent)") : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
   // The witness names the diverging COMMON outputs; print it on Refuted AND on the
   // Unknown-because-incomplete-correspondence case (where a matched-portion diff is

@@ -4,6 +4,8 @@
 */
 
 // todo/livehd/2f-latch — SILENT SIM BUG TRACKER (2026-07-25 audit).
+// FIXED 2026-08-02: this is now a live regression; the failure description
+// below records the pre-fix behavior.
 //
 // READING A DUT OUTPUT BEFORE `step` EATS A SECOND-DOMAIN CLOCK EDGE.
 //
@@ -56,5 +58,8 @@ test pksec.pre_step_read_must_not_consume_a_clock_edge {
     // committed by tick 3. Today the pre-step peek consumed that edge.
     assert((clock >= 3) implies (acc.qb != 0), "a pre-step read must not consume the second domain's clock edge")
   }
-  assert(pre == 0, "the pre-step value is observed, so the read is not optimized away")
+  // At the final iteration this is the value captured on clkb's tick-2 rise.
+  // Pin the value (rather than the pre-fix zero) so the trigger remains an
+  // observable read without encoding the bug into the control assertion.
+  assert(pre == 28, "the pre-step read observes the already-committed second-domain value")
 }

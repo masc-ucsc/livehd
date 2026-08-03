@@ -646,6 +646,35 @@ sh_test(
 # different edges is not a valid memory, so it is a NAMED refusal; the ROM cases
 # pin that the surviving edge now comes from every clocked port, not just the
 # write side.
+# MEMORY READ FORWARDING under cvc5, MUTANT-GATED. A memory (Pyrope) against
+# four named flops + muxes (Verilog), with a self-referential write and a
+# forwarding read at a RUNTIME index -- the `needs_array` shape. Every proof is
+# paired with a mutant that must still refute (forward dropped; forward not
+# gated by the write enable; write-data self-read dropped), because a model that
+# silently ignored forwarding would make the mutants equivalent too.
+# REGRESSION: a COMBINATIONAL memory (type==2, no clock) must be evaluated on
+# EVERY microstep. The M10 phase schedule enumerates CLOCKED endpoints only, so a
+# comb array had no entry, fell to the Phase::Rise default, and was suppressed on
+# the other three microsteps -- serving STALE reads to anything sampling at fall.
+# Needs BOTH a negedge endpoint (else single_step() and the gate never fires) and
+# a comb ARRAY (a scalar read is not a Memory cell), which is why it hid inside a
+# register file. Reduced from minion's prim_rf_1r1w_diff_preview, sub-second.
+sh_test(
+    name = "mem_partsel_write_test",
+    size = "small",
+    srcs = ["mem_partsel_write_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "mem_forward_test",
+    size = "medium",
+    srcs = ["mem_forward_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver on compiled RTL
+)
+
 sh_test(
     name = "mem_clock_edge_test",
     size = "medium",

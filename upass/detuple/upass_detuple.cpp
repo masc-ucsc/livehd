@@ -3,6 +3,7 @@
 #include "upass_detuple.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -485,16 +486,27 @@ private:
     cand_uses_.clear();
     {
       std::vector<std::string_view> seen_here;  // first-ref-per-node per name (reused)
-      for (const auto n : src_->depth_preorder(src_->get_root())) {
-        if (n.is_invalid()) {
-          continue;
-        }
+      // `in_sig`: this node lives under a func_def's SIGNATURE (one of the
+      // `tuple_add` children of `fdef`), which is the PORT DECLARATION, not code.
+      // Detuple runs BEFORE the SSA I/O flattening, so a nested port still
+      // spells every level as a BARE name token: `inp:(bits:(v:u3))` is
+      //   store(ref 'inp', 'nil', tuple_add(store(ref 'bits', 'nil',
+      //                                     tuple_add(store(ref 'v', 'nil', TYPE)))))
+      // That `ref 'v'` is a field-NAME token, not a use of a same-named body
+      // candidate (`wire v:(…)`). Counting it as one rejected the split and left
+      // the tuple wire/reg for tolg to hard-error on ("tuple/field store to 'v'
+      // has no hardware lowering") — a Chisel/slang re-emit hits this constantly
+      // (an `io_…_exceptionVec` port leaf plus an internal `exceptionVec`
+      // bundle). Same class as the shape-tuple_add and bare-type_spec skips
+      // above. ONLY the store's NAME slot is exempt: any other ref in the
+      // signature (a port default expression) still counts as a real use.
+      auto scan_node = [&](const Lnast_nid& n, bool in_sig) {
         // Skip a struct shape bundle's tuple_add: its children are field-NAME
         // tokens (see Pass C2), never real uses of a same-named candidate.
         if (Lnast_ntype::is_tuple_add(type_of(n))) {
           auto d = src_->get_first_child(n);
           if (!d.is_invalid() && Lnast_ntype::is_ref(type_of(d)) && shape_temps.contains(std::string(name_of(d)))) {
-            continue;
+            return;
           }
         }
         // Skip a BARE field type_spec `type_spec(f, T)`: `f` is a field-NAME token
@@ -503,14 +515,18 @@ private:
         if (Lnast_ntype::is_type_spec(type_of(n))) {
           auto d = src_->get_first_child(n);
           if (!d.is_invalid() && Lnast_ntype::is_ref(type_of(d)) && field_names.contains(std::string(name_of(d)))) {
-            continue;
+            return;
           }
         }
+        const bool skip_name_slot = in_sig && Lnast_ntype::is_store(type_of(n));
         seen_here.clear();
         int idx = 0;
         for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c), ++idx) {
           if (!Lnast_ntype::is_ref(type_of(c))) {
             continue;
+          }
+          if (skip_name_slot && idx == 0) {
+            continue;  // a port's field-NAME token, not a use
           }
           const auto nm = name_of(c);
           if (cand.find(nm) == cand.end()) {
@@ -522,7 +538,20 @@ private:
           seen_here.emplace_back(nm);
           cand_uses_[std::string(nm)].push_back(Use{n, c, idx});
         }
-      }
+      };
+      // Pre-order walk (same node order as before), carrying the signature flag
+      // down. A `tuple_add` directly under a `func_def` is a signature region.
+      std::function<void(const Lnast_nid&, bool)> walk = [&](const Lnast_nid& n, bool in_sig) {
+        if (n.is_invalid()) {
+          return;
+        }
+        scan_node(n, in_sig);
+        const bool fdef = Lnast_ntype::is_func_def(type_of(n));
+        for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c)) {
+          walk(c, in_sig || (fdef && Lnast_ntype::is_tuple_add(type_of(c))));
+        }
+      };
+      walk(src_->get_root(), false);
     }
 
     // Finalize: a candidate becomes a split iff its leaf fields are known and
@@ -894,6 +923,7 @@ private:
   // Recursively copy children of src_n under dst_parent, applying the rewrites.
   void copy_transformed(const Lnast_nid& src_n, const Lnast_nid& dst_parent) {
     std::string drop_typedef_of;  // non-empty: dropping a dead `type T=(...)` region for this T
+    const bool  in_func_sig = Lnast_ntype::is_func_def(type_of(src_n));
     for (auto c = src_->get_first_child(src_n); !c.is_invalid(); c = src_->get_sibling_next(c)) {
       // Drop the contiguous `type T=(...)` region (declare(T,'type') .. store(T,Ttemp))
       // for a type fully consumed by split memories — it is dead and re-emits as
@@ -906,6 +936,15 @@ private:
           }
         }
         continue;  // drop every node of the region (incl. the terminator)
+      }
+      // A func_def's signature `tuple_add`s are the PORT DECLARATION: their bare
+      // `store(ref 'f', 'nil', TYPE)` entries are field-NAME tokens (see the
+      // use-site scan), so a split candidate that happens to share a port
+      // field's name must NOT rewrite them. Nothing in a declaration ever needs
+      // a leaf split — copy the whole signature verbatim.
+      if (in_func_sig && Lnast_ntype::is_tuple_add(type_of(c))) {
+        copy_subtree(c, dst_parent);
+        continue;
       }
       if (Lnast_ntype::is_declare(type_of(c))) {
         auto t0 = src_->get_first_child(c);

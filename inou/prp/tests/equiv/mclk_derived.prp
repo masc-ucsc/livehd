@@ -20,6 +20,10 @@ mod derived(clk_b:bool, gate:bool, da:u8, db:u8) -> (qa:u8@[1], qb:u8@[1]) {
   reg qa:u8 = 0
   qa = da
   mut gclk = clk_b and gate
-  reg qb:u8:[clock_pin=ref gclk] = 0
+  // ASYNC reset, matching the golden. A SYNC reset on a GATED clock is swallowed
+  // whenever the gate is low through reset (gclk never rises), so the two sides
+  // could only agree by accident -- and lgcheck, which is edge-blind here, calls
+  // it a difference. Async is the correct spelling for a gated flop.
+  reg qb:u8:[clock_pin=ref gclk, async=true] = 0
   qb = db
 }

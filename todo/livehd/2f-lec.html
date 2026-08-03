@@ -476,8 +476,83 @@ then, leaves-first (pure bookkeeping, no solving):
   next-state contents. What makes exactly those two arrays unusual is a
   variable-index read of their NEXT (comb) value at
   <code>intpipe_csr_file.sv:2410</code> — the <code>needs_array</code> forwarding
-  case at <code>query.cpp:4855-4880</code>. That, not permutation retry, is what
-  keeps the def UNKNOWN.</p>
+  case. That, not permutation retry, is what kept the def UNKNOWN.</p>
+
+<p><strong>RE-MEASURED 2026-08-02: the <code>needs_array</code> characterization
+  above is STALE — forwarding is not the blocker any more.</strong> Instrumented
+  on the real def (<code>LEC_CONE_LOG=1</code>), the read-port merges DISCHARGE:
+  <code>76/82</code> on one memory-bearing def and <code>43/43</code> on the
+  other, and the cone pass reports <code>48/55 PROVEN (48 by abc, 30 via dout
+  merge)</code> — i.e. 30 cones prove BECAUSE of the forwarding merge. The
+  circular &ldquo;array needs the merge, merge needs the array&rdquo; deadlock
+  this item described is not what the def hits today; the top-down order changed
+  which obligations are attempted and with what boxing.</p>
+
+<p><strong>ROOT-CAUSED 2026-08-02 — an UNREACHABLE step-case, with the
+  mechanism.</strong> The two sides handle the <code>csr_cause_t.reserved1</code>
+  field differently, and only in states the design cannot reach:</p>
+
+<ul>
+<li>The SystemVerilog feedback path is
+  <code>reg_mcause_pre[i] &lt;= reg_mcause_next[i]</code>,
+  <code>reg_mcause_next = reg_mcause</code>,
+  <code>reg_mcause[i] = write_cause_non_reserved(reg_mcause_pre[i])</code> — so
+  <code>reserved1</code> is zeroed on every pass.</li>
+<li>The compiled REFERENCE drops that: the masked wire <code>reg_mcause</code>
+  has ZERO occurrences in the emitted graph, the hold arm is
+  <code>set_mask_17556 = reg_mcause_pre</code> (RAW), and the only bits ever read
+  back are <code>[68:64]</code> (the <code>cause</code> field) plus bit 127
+  (<code>interrupt_x</code>). <code>reserved1</code> is carried through
+  UNMASKED.</li>
+<li>The Pyrope keeps the mask explicit — <code>t1580 = (interrupt_x &lt;&lt; 63)
+  | 0 | cause</code>, so its next-state drives those bits to a STRUCTURAL
+  CONSTANT 0.</li>
+</ul>
+
+<p>In every reachable state the two agree (reset gives 0, and
+  <code>write_cause</code>, <code>write_cause_non_reserved</code> and
+  <code>cause = '0</code> all zero the field). The inductive step starts from an
+  ARBITRARY equal state, picks <code>reserved1 = all ones</code>, and the raw-hold
+  side keeps it while the force-0 side does not — the exact CEX
+  (<code>ref = 2^128 &minus; 2^64</code>, <code>impl = 0</code>). BMC cannot
+  adjudicate it: 900&nbsp;s at bound 4 returns Unknown.</p>
+
+<p><strong>The fix is one-step inductive strengthening, and it discharges
+  STRUCTURALLY — no solver.</strong> Detect a state bit whose next-state is the
+  constant 0 (or 1) on EITHER side unconditionally, and constrain the shared
+  current-state symbol accordingly in the step frame. Sound because both
+  obligations are structural: reset drives the bit to that constant, and every
+  next-state assignment drives it there, so the invariant is inductive and holds
+  from cycle 0. <code>Lec_options::assumptions</code> is the existing (unwired)
+  hook. This is not a one-def patch — <code>reg_scause_pre</code> has the
+  identical shape (the regenerated Pyrope refutes there instead), and the general
+  pattern is &ldquo;one front-end folds a mask the other keeps&rdquo;, which will
+  recur.</p>
+
+<p><strong>Also found:</strong> lhdsuite's checked-in
+  <code>minion/pyrope/intpipe_csr_file.prp</code> is STALE — 9402 lines vs 10950
+  regenerated, 2608 differing lines. Worth refreshing, but it is NOT the cause:
+  the regenerated Pyrope fails the same way on the sibling register.</p>
+
+<p><strong>What blocked it before this diagnosis</strong> was read as the
+  INDUCTIVE STEP, not a memory cut: <code>ind</code> refutes on <code>nxt:reg_mcause_pre</code> (a wide
+  flop next-state) with a single-step CEX that may be an unreachable step-case,
+  and <code>bmc</code> cannot clear it either (Unknown at 124&nbsp;s). The
+  residual DIFF cones are ordinary flop cones —
+  <code>nxt:msg_port_pget</code>, <code>nxt:msg_port_xcpt</code>,
+  <code>msg_port_wr_addr_reg_next</code> — with no memory cut among them. So the
+  next move is a reachability/invariant question (tier-2 state correspondence or
+  a stronger BMC budget), NOT forwarding. Whoever picks this up should re-measure
+  before designing: this page sent one attempt down the forwarding path already.</p>
+
+<p><strong>Forwarding itself is now gated</strong>, for every ordering and
+  independently of this def: <code>lhd/tests/mem_forward_test.sh</code> LECs a
+  MEMORY against a FLOP-ARRAY+MUX implementation under cvc5 — a self-referential
+  write plus a forwarding read at a runtime index — and pairs every proof with a
+  mutant that must still refute (forward dropped; forward not gated by the write
+  enable; write-data self-read dropped; <code>ordering="old"</code> vs
+  forwarding). <code>inou/prp/tests/equiv/mem_fwd_selfwrite</code> covers the
+  same pair through lgcheck and its v2prp2v reverse leg.</p>
 
 <h2>Acceptance</h2>
 

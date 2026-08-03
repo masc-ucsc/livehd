@@ -1,0 +1,25 @@
+/*
+:name: tuple_wire_port_leaf_name
+:type: equiv
+:verilog_top: tuple_wire_port_leaf_name
+:pyrope_top: tuple_wire_port_leaf_name
+*/
+// REGRESSION — a body tuple `wire` whose NAME equals a PORT FIELD's name.
+//
+// upass.detuple runs BEFORE the SSA I/O flattening, so a nested port is still
+// spelled with a bare name token per level: `inp:(bits:(vec:u1))` is
+//   store(ref 'inp','nil', tuple_add(store(ref 'bits','nil',
+//                                    tuple_add(store(ref 'vec','nil',TYPE)))))
+// The use-site scan that gates the struct-wire/reg split counted that
+// `ref 'vec'` as a whole-tuple USE of the body candidate `vec`, refused the
+// split, and left a tuple-typed wire for tolg -> hard error
+// "tuple/field store to 'vec' has no hardware lowering". Same class as the
+// shape-tuple_add / bare-type_spec skips the scan already had. A Chisel or
+// slang re-emit hits this constantly (an `io_..._exceptionVec` port leaf next
+// to an internal `exceptionVec` bundle), so it is not an exotic shape.
+pub comb tuple_wire_port_leaf_name(inp:(bits:(vec:u1)), a:u1, b:u1) -> (o:u2) {
+  wire vec:(hi:u1, lo:u1) = nil
+  vec.hi = a & inp.bits.vec
+  vec.lo = b
+  o = (vec.hi << 1) | vec.lo
+}

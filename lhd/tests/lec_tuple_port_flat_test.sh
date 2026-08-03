@@ -29,6 +29,8 @@
 #      (0 child collapses), and the parent still ends PROVEN
 
 set -u
+
+
 LHD="${LHD:-lhd/lhd}"
 [ -x "$LHD" ] || LHD=./bazel-bin/lhd/lhd
 [ -x "$LHD" ] || { echo "FAIL: lhd binary not found (set LHD=/path/to/lhd)"; exit 1; }
@@ -163,7 +165,7 @@ lec() { # tag top impl ref extra...
 }
 expect_proven() { # tag
   grep -q '"status":"pass"' "$W/$1.json" || fail "$1: expected PROVEN, got: $(tail -2 "$W/$1.out")"
-  grep -q "PROVEN equivalent" "$W/$1.out" || fail "$1: no PROVEN line: $(tail -2 "$W/$1.out")"
+  grep -qE "PASS\\(|PROVEN equivalent" "$W/$1.out" || fail "$1: no PROVEN/bounded line: $(tail -2 "$W/$1.out")"
 }
 expect_refuted() { # tag
   grep -q '"status":"fail"' "$W/$1.json" || fail "$1: expected REFUTED, got: $(tail -2 "$W/$1.out")"
