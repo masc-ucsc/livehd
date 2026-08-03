@@ -256,6 +256,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# 2f-sim: the agent-oriented `lhd sim --query` API — cgen_sim's per-module
+# iface.json manifest and lossless observe_signals/observe_mem surface, the
+# per-test sim_catalog.json (now carrying outputs and memories, which the legacy
+# describe_signals catalog never had), the five v1 operation families, and the
+# unchanged legacy --probe/--break-when shapes. Structural checks run
+# hermetically; the run checks need the sibling ../hlop/../iassert headers.
+sh_test(
+    name = "lhd_sim_query_test",
+    srcs = ["lhd_sim_query_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p-partition: `lhd pass color <alg>` colors a flat top, `lhd pass
 # partition` rebuilds it as one-module-per-region + a new top, and the
 # partitioned Verilog is LEC-equivalent to the original (acyclic + synth).

@@ -380,6 +380,9 @@ void write_pretty(const Options& opts, const Result& res) {
   if (!res.sim_debug_json.empty()) {  // --list-signals/--probe/--break-when: explicitly requested, always shown
     std::print("  debug: {}\n", res.sim_debug_json);
   }
+  if (!res.sim_query_json.empty()) {  // --query: same always-shown policy — the answers ARE the output
+    std::print("  query: {}\n", res.sim_query_json);
+  }
   if (!res.qor_json.empty()) {
     write_pretty_qor(res.qor_json);
   }
@@ -565,6 +568,11 @@ void write_result(const Options& opts, const Result& res) {
   if (!res.sim_debug_json.empty()) {
     w.Key("debug");
     w.RawValue(res.sim_debug_json.data(), res.sim_debug_json.size(), rapidjson::kObjectType);
+  }
+
+  if (!res.sim_query_json.empty()) {
+    w.Key("query");
+    w.RawValue(res.sim_query_json.data(), res.sim_query_json.size(), rapidjson::kObjectType);
   }
 
   if (!res.qor_json.empty()) {

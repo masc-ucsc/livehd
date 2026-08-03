@@ -1,0 +1,22 @@
+/*
+:name: sext_scalar_net
+:type: equiv
+:verilog_top: sext_scalar_net
+:pyrope_top: sext_scalar_net
+*/
+//
+// Regression: cgen must not part-select a net it declared as a SCALAR.
+//
+// add_to_pin2var emits a 1-bit net as a bare `reg name;` (no range), but the
+// Sext branch appended `[b-1:0]` to whatever expression it was handed. On a
+// 1-bit operand that produced `sext_N = get_mask_M_u[0:0];`, which is not legal
+// Verilog: slang rejects the regenerated file with "scalar type cannot be
+// indexed". yosys reads it anyway, so lgcheck PASSED while `lhd lec` could not
+// even load the implementation -- the round trip was unverifiable, not wrong.
+//
+// Largest single blocker in the tmp/chimera sweep. Sext now asks decl_bits_of()
+// how the operand was declared and drops a select that covers the whole net.
+pub comb sext_scalar_net::[timecheck=false](a:u4, b:s4) -> (y:u8) {
+  y = 0ub????????
+  y = (unsigned(a == 0)#sext[0..=0] + b#[0..=3]#sext[0..=3])#[0..=7]
+}

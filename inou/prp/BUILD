@@ -69,6 +69,9 @@ cc_library(
         "//lnast",
         "//pass/common:pass",
         "@prpparse//:prpparse",
+        # 2f-sim B0: prp_sim reads cgen_sim's per-module <stem>.iface.json
+        # manifest instead of text-scraping the generated headers.
+        "@rapidjson",
     ],
     alwayslink = True,
 )
@@ -451,9 +454,14 @@ _SIM_FIXME = []
             # below), NOT equiv pairs — never let the equiv glob pick them up.
             "tests/equiv/*_tb.prp",
             "tests/equiv/accum.prp",
-            # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
-            # ordered compare reads unsigned). Run via the fixme target below.
-            "tests/equiv/signed_one_bit_cmp.prp",
+            # signed_one_bit_cmp was PROMOTED out of this exclude list
+            # (2026-08-02): it tracked a 1-bit signed ordered compare reading
+            # unsigned, and the cause was cgen's Sext branch appending `[b-1:0]`
+            # to a net it had DECLARED as a scalar `reg`. `signed(x#[3]) < 0` is
+            # exactly a Sext of one bit, so the emitted select was both illegal
+            # Verilog and read back wrong. Sext now consults decl_bits_of() (see
+            # tests/equiv/sext_scalar_net). It runs as an ordinary prp-equiv-*
+            # pair again, and its standalone target below was deleted.
             # The 2026-07-29 corpus TRACKERS: one minimal repro per remaining
             # hard-failure category, each verified to fail TODAY. They carry no
             # marker in their NAME -- the `fixme` TAG is what marks them -- so
@@ -482,6 +490,14 @@ _SIM_FIXME = []
             # files are the real source form of each shape, and all three
             # directions prove. The writer half of both is pinned as a TEXT gate
             # by //pass/prp_writer:prp_writer_decl_emit_test.sh.
+            # partsel_oob_ascending (2026-08-02 chimera sweep): the golden does
+            # not even READ -- an out-of-range select on an ascending vector
+            # lowers to a negative shift -- so there is no forward direction to
+            # run until inou/slang resolves the select to X.
+            "tests/equiv/partsel_oob_ascending.prp",
+            # signed_bitwise_mux_arm (2026-08-02): a bitwise op's result loses
+            # its operands' sign, so the forward direction refutes too.
+            "tests/equiv/signed_bitwise_mux_arm.prp",
             "tests/equiv/latch_rule_a.prp",
             "tests/equiv/latch_rule_b.prp",
             "tests/equiv/dual_async_set_reset.prp",
@@ -549,23 +565,10 @@ _SIM_FIXME = []
     )
 ]
 
-# Known-failing equiv tracker (fixme): a MISCOMPILE that compiles clean but LECs
-# wrong, so it cannot live in tests/fixme/ (compile-only). Excluded from the
-# globs above; tagged `fixme` so `bazel test //... (-fixme)` stays green. Run it:
-#   bazel test //inou/prp:prp-equiv-signed_one_bit_cmp --test_tag_filters=
-sh_test(
-    name = "prp-equiv-signed_one_bit_cmp",
-    srcs = ["tests/pyrope_test.py"],
-    args = ["-i", "$(location //inou/prp:tests/equiv/signed_one_bit_cmp.prp)"],
-    data = [
-        "//inou/prp:tests/prplib.py",
-        "//inou/prp:tests/pyrope_test.py",
-        "//inou/prp:tests/equiv/signed_one_bit_cmp.prp",
-        "//inou/prp:tests/equiv/signed_one_bit_cmp.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
-)
+# signed_one_bit_cmp's standalone tracker target was DELETED (2026-08-02): the
+# miscompile is fixed and the pair is back in the equiv glob above. The target
+# also never actually carried the `fixme` tag its comment claimed, so it had been
+# running -- and failing -- in the default `bazel test //...` all along.
 
 [
     sh_test(
@@ -636,6 +639,9 @@ sh_test(
         "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
         "selfref_slice_assign",     # concurrent slice assigns solved in source order
         "selfref_concat_assign",    # self-referential whole-vector assign never driven
+        # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
+        "partsel_oob_ascending",    # out-of-range select on a `[0:N]` vector: negative shift, not X
+        "signed_bitwise_mux_arm",   # `sa | 2'sb11` behind a mux zero-extends (bitwise drops sign)
         # The three formal phase-scheduler trackers (phase_latch_flop_edges,
         # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
         # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
@@ -729,6 +735,10 @@ _V2PRP2V_NATIVE_FIXME = [
     "reg_clock_from_logic",
     "negative_array_index",
     "blocking_ff_state",
+    # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
+    # an ascending vector lowers to a negative shift), so neither leg can run.
+    "partsel_oob_ascending",
+    "signed_bitwise_mux_arm",
 ]
 
 # Two goldens cannot be checked against their original Verilog: both available
@@ -829,6 +839,9 @@ _V2PRP2V_VERILOG_FIXME = [
     "reg_decl_init_dropped",
     "selfref_slice_assign",
     "selfref_concat_assign",
+    # 2026-08-02 chimera sweep (see _V2PRP2V_NATIVE_FIXME for the root cause).
+    "partsel_oob_ascending",
+    "signed_bitwise_mux_arm",
 ]
 
 [

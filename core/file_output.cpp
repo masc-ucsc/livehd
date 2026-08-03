@@ -8,13 +8,35 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <climits>
 #include <format>
 #include <iostream>
 #include <print>
 
+#include "diag.hpp"
 #include "iassert.hpp"
 
-File_output::File_output(std::string_view fname) : filename(fname), sz(0), aborted(false) {}
+File_output::File_output(std::string_view fname) : filename(fname), sz(0), aborted(false) {
+  // A path component longer than NAME_MAX cannot be open()ed, and the write
+  // happens in the DESTRUCTOR -- where the failure used to hit `I(fd >= 0)` and
+  // SIGABRT with no diagnostic at all. cgen names its output `<unit>.v` after
+  // the Pyrope unit (`<file-stem>.<module>`), so a design with a long generated
+  // module name blows past the limit on its own: the corpus case was
+  // OpenABC's `bp_fe_top_itlb_vaddr_width_p56_..._tag_width_p10` (205 chars).
+  // Refuse EARLY, where reporting is still possible, and disarm the destructor.
+  const auto slash = filename.find_last_of('/');
+  const auto base  = slash == std::string::npos ? std::string_view{filename} : std::string_view{filename}.substr(slash + 1);
+  if (base.size() > static_cast<size_t>(NAME_MAX)) {
+    aborted = true;
+    livehd::diag::err("core.file_output", "filename-too-long", "io")
+        .msg("cannot create '{}': the file name is {} characters, over the {} the filesystem allows",
+             base,
+             base.size(),
+             NAME_MAX)
+        .hint("shorten the module/unit name, or emit to a directory with --emit-dir")
+        .emit();
+  }
+}
 
 // Portable, thread-safe error string helper for GNU & POSIX strerror_r.
 #include <cerrno>

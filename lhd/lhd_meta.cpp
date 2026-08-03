@@ -21,7 +21,7 @@ constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
-    R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert"])json";
+    R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -1163,7 +1163,7 @@ constexpr std::string_view kJsonPassLiberty =
     R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
 
 constexpr std::string_view kJsonSimCommand =
-    R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-at","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true"]})json";
+    R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-at","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
 
 constexpr std::string_view kJsonList =
     R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","recipes","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list recipes","lhd list log-channels"]})json";
@@ -1554,7 +1554,7 @@ int help_command(const Options& opts) {
     return help_pass(sub);
   }
   if (topic == "sim") {
-    std::print(
+    std::print("{}",
         "lhd sim — build and run a C++ simulation of a Pyrope design's `test` blocks\n"
         "\n"
         "usage: lhd sim <file.prp> [test.name] [flags]\n"
@@ -1583,6 +1583,14 @@ int help_command(const Options& opts) {
         "  --list-signals       list the observable scalar signals (hierarchical names) as JSON, then exit\n"
         "  --probe SIG,... [--probe-from A --probe-to B]  per-cycle JSON trajectory of SIG (no re-instrumenting)\n"
         "  --break-when 'SIG OP V'  report the first cycle a `SIG >|<|>=|<=|==|!= VALUE|SIG` condition holds\n"
+        "  --query FILE|-|{...} batched JSON questions about the run, answered from ONE replay; the\n"
+        "                       answers become the result envelope's `query` member. The request is\n"
+        "                       {\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[{\"id\":..,\"op\":..}]}\n"
+        "                       with ops signals|value|values|changes|next_change|find|snapshot|diff;\n"
+        "                       a query names a signal (or a {scope|glob|regex|kind} selector) and a\n"
+        "                       time {\"cycle\":N}. Unknown ops/fields/phases and bad ranges are usage\n"
+        "                       errors; a bad SIGNAL is an in-band per-query error, so one typo never\n"
+        "                       erases the other answers. Not combinable with --restart-at/--vcd-*\n"
         "  --setup-only         generate the C++ sim driver, do not build/run\n"
         "  --run-only           host-compile + run an existing sim (needs --workdir from --setup-only)\n"
         "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
@@ -1596,6 +1604,11 @@ int help_command(const Options& opts) {
         "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
         "  lhd sim foo.prp --result-json r.json           # envelope + per-test located-failure array\n"
         "  lhd sim foo.prp --set sim.vcd=true             # also dump a VCD per test\n"
+        "  lhd sim foo.prp my_test --result-json r.json \\\n"
+        "      --query '{\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[\n"
+        "        {\"id\":\"pc\",\"op\":\"value\",\"signal\":\"cpu.fetch.pc\",\"at\":{\"cycle\":42}},\n"
+        "        {\"id\":\"regs\",\"op\":\"signals\",\"scope\":\"cpu.rf\"}]}'\n"
+        "                                                # one replay answers both; `regs` needs none\n"
         "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
         "  ./build/sim/drv.bin --test my_test --seed 7    # run the built driver directly\n"
         "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
@@ -1715,6 +1728,12 @@ int exit_code_for(std::string_view error_class) {
   }
   if (error_class == "assert") {
     return 11;  // a testbench assert fired: the DESIGN failed, not the tool
+  }
+  if (error_class == "compile") {
+    return 12;  // the GENERATED sim driver failed to host-compile — our codegen or the
+                // host toolchain, never the design's semantics (that is `assert`).
+                // `lhd sim` has raised this class since the fast build path landed;
+                // it was unlisted here and fell through to the exit-1 catch-all.
   }
   return 1;  // internal, and any class not listed above
 }

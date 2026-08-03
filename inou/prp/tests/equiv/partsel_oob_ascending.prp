@@ -1,0 +1,28 @@
+/*
+:name: partsel_oob_ascending
+:type: equiv
+:verilog_top: partsel_oob_ascending
+:pyrope_top: partsel_oob_ascending
+*/
+//
+// FIXME tracker -- an OUT-OF-RANGE part-select on an ASCENDING (big-endian)
+// vector is a hard compile error where Verilog defines the result as X.
+//
+// `wire [0:24] x` indexes left-to-right, so declared index i sits at
+// LSB-relative position (24 - i). A select whose base is 31..38 therefore
+// lowers to a NEGATIVE shift and upass.bitwidth's check_shift_amount rejects
+// the whole design: "shift amount is always negative (range [-13, -6])". The
+// IEEE rule is that a part-select entirely outside the vector yields X.
+//
+// The asymmetry the .v pins down: the IDENTICAL out-of-range select on a
+// DESCENDING `wire [24:0]` compiles clean. Only the ascending form dies.
+//
+// This body is what the reader SHOULD have produced -- the select can never
+// land inside the vector, so every bit of `y` is unknown. Flipping this pair
+// green means inou/slang resolves an unreachable select to X instead of
+// handing upass.bitwidth a negative shift.
+//
+// Corpus: tmp/chimera vloghammer partsel_00093 / _00403 / _00716.
+pub comb partsel_oob_ascending::[timecheck=false](a:u25, s:u3) -> (y:u4) {
+  y = 0ub????
+}

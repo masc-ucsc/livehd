@@ -7,24 +7,1401 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iostream>
+#include <limits>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <thread>
 
+#include "absl/strings/str_join.h"
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "pass.hpp"
 #include "prp_sim.hpp"
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
 namespace lhd {
 
 // ---- sim --------------------------------------------------------------------
 
 std::string shell_quote(const std::string& s);  // defined below (check section)
+
+// ---- `sim --query`: the batched JSON query API (todo/livehd/2f-sim.html) ------
+//
+// The kernel/driver seam is deliberately asymmetric. The KERNEL owns JSON: it
+// parses and validates the request, resolves every selector against the STATIC
+// catalog the generator wrote (sim_catalog.json — names, kinds and widths are
+// all known at codegen time), answers whatever needs no simulation at all,
+// unions what is left into ONE time interval, and hands the driver a
+// selector-free line plan. The generated driver has no JSON parser and must not
+// grow one: it reads the plan, evaluates it inside its single tick loop, and
+// writes sim_query.json back, which the kernel merges and embeds verbatim as the
+// envelope's "query" member (exactly like the "debug" sidecar).
+//
+// The split is what makes a batch answerable in ONE replay, and it is also why
+// the kernel is the only side that ever reports a "usage" verdict: by the time
+// the driver runs, the request is already known to be well-formed.
+namespace {
+
+namespace rj = rapidjson;
+
+// A malformed REQUEST is a process-level usage error (exit 2): the invocation
+// was wrong, so there is nothing to answer. Contrast Q_fail below.
+[[noreturn]] void query_usage(const std::string& msg, const std::string& hint = "") {
+  throw Lhd_error{"usage", std::format("--query: {}", msg), hint};
+}
+
+// A per-QUERY failure. One bad signal name must never erase the batch's other
+// answers, so these become in-band `ok:false` results with the enumerated class
+// vocabulary (unknown_signal|ambiguous_selector|invalid_range|unsupported|
+// timeout|limit) instead of failing the process.
+struct Q_fail {
+  std::string              cls;
+  std::string              msg;
+  std::string              hint;
+  std::vector<std::string> suggestions;
+};
+
+// One sim_catalog.json record. Widths are BOTH reported on purpose: `bits` is
+// the internal Slop width (9 for a `u8` register — today's pinned probe
+// behavior) and `declared_bits` is what the source asked for.
+struct Cat_sig {
+  std::string name;
+  std::string alias;  // the legacy spelling (`acc.__in.din`), empty when none
+  std::string kind;   // flop|pipe|memrd|input|output|memory
+  long        bits          = 0;
+  long        declared_bits = 0;
+  long        size          = -1;  // memory words; -1 = not a memory
+  bool        is_signed     = false;
+};
+
+struct Sim_catalog {
+  std::string          test;
+  std::string          clock;
+  std::vector<Cat_sig> sigs;  // CATALOG ORDER — the deterministic expansion order of every selector
+};
+
+// What plan_sim_query hands back to the run: the kernel-answered results (by
+// REQUEST position; empty string = the driver owns it) plus the ids, so the
+// sidecar can be spliced back into request order afterwards.
+struct Query_plan {
+  bool                     active     = false;  // --query was given
+  bool                     wrote_plan = false;  // some query needs the replay
+  std::string              test;
+  std::string              clock;
+  std::vector<std::string> ids;
+  std::vector<std::string> kernel_results;  // parallel to ids
+};
+
+// `*` (any run, dots included) and `?` (one char). Deliberately NOT a full
+// fnmatch: character classes would collide with the `[index]` memory spelling.
+bool glob_match(std::string_view pat, std::string_view s) {
+  size_t pi = 0, si = 0, ss = 0;
+  size_t star = std::string_view::npos;
+  while (si < s.size()) {
+    if (pi < pat.size() && (pat[pi] == '?' || pat[pi] == s[si])) {
+      ++pi;
+      ++si;
+    } else if (pi < pat.size() && pat[pi] == '*') {
+      star = pi++;
+      ss   = si;
+    } else if (star != std::string_view::npos) {
+      pi = star + 1;
+      si = ++ss;
+    } else {
+      return false;
+    }
+  }
+  while (pi < pat.size() && pat[pi] == '*') {
+    ++pi;
+  }
+  return pi == pat.size();
+}
+
+size_t edit_distance(std::string_view a, std::string_view b) {
+  std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
+  for (size_t j = 0; j <= b.size(); ++j) {
+    prev[j] = j;
+  }
+  for (size_t i = 1; i <= a.size(); ++i) {
+    cur[0] = i;
+    for (size_t j = 1; j <= b.size(); ++j) {
+      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)});
+    }
+    prev = cur;
+  }
+  return prev[b.size()];
+}
+
+// Up to 5 nearest catalog names. An unknown name that merely disappears leaves
+// an agent guessing; a name plus its neighbours is actionable.
+std::vector<std::string> nearest_names(const Sim_catalog& cat, std::string_view want) {
+  std::vector<std::pair<size_t, std::string>> scored;
+  scored.reserve(cat.sigs.size());
+  for (const auto& s : cat.sigs) {
+    scored.emplace_back(edit_distance(want, s.name), s.name);
+  }
+  std::sort(scored.begin(), scored.end());
+  std::vector<std::string> out;
+  for (const auto& [d, n] : scored) {
+    if (out.size() >= 5 || d > 8) {
+      break;
+    }
+    out.push_back(n);
+  }
+  return out;
+}
+
+// A comparison literal -> exactly ceil(bits/4) lowercase hex digits of the
+// two's-complement value at `bits`. ARBITRARY PRECISION on purpose: the plan is
+// the wire format for `find`, and --break-when's 64-bit strtoull hole must not
+// be recreated one layer down. Accepts decimal (optionally signed) or 0x-hex.
+std::string literal_to_hex(std::string_view lit, long bits, std::string& err) {
+  while (!lit.empty() && (lit.front() == ' ' || lit.front() == '\t')) {
+    lit.remove_prefix(1);
+  }
+  while (!lit.empty() && (lit.back() == ' ' || lit.back() == '\t')) {
+    lit.remove_suffix(1);
+  }
+  bool neg = false;
+  if (!lit.empty() && (lit.front() == '+' || lit.front() == '-')) {
+    neg = lit.front() == '-';
+    lit.remove_prefix(1);
+  }
+  std::vector<uint8_t> mag;  // little-endian magnitude
+  if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
+    auto hx = lit.substr(2);
+    for (size_t k = 0; k < hx.size(); ++k) {
+      const char c = hx[hx.size() - 1 - k];
+      int        d = 0;
+      if (c >= '0' && c <= '9') {
+        d = c - '0';
+      } else if (c >= 'a' && c <= 'f') {
+        d = c - 'a' + 10;
+      } else if (c >= 'A' && c <= 'F') {
+        d = c - 'A' + 10;
+      } else {
+        err = std::format("'{}' is not a hex literal", lit);
+        return {};
+      }
+      if (k / 2 >= mag.size()) {
+        mag.push_back(0);
+      }
+      mag[k / 2] |= static_cast<uint8_t>(d << (4 * (k % 2)));
+    }
+  } else if (!lit.empty()) {
+    for (char c : lit) {
+      if (c < '0' || c > '9') {
+        err = std::format("'{}' is not a decimal or 0x-hex literal", lit);
+        return {};
+      }
+      unsigned carry = static_cast<unsigned>(c - '0');
+      for (auto& b : mag) {
+        const unsigned t = static_cast<unsigned>(b) * 10U + carry;
+        b                = static_cast<uint8_t>(t & 0xffU);
+        carry            = t >> 8;
+      }
+      while (carry != 0) {
+        mag.push_back(static_cast<uint8_t>(carry & 0xffU));
+        carry >>= 8;
+      }
+    }
+  } else {
+    err = "empty comparison literal";
+    return {};
+  }
+  // Reject a literal the signal cannot hold rather than truncating it: a silent
+  // truncation turns a typo into a comparison that never (or always) fires.
+  size_t bitlen = 0;
+  for (size_t i = mag.size(); i-- > 0;) {
+    if (mag[i] != 0) {
+      unsigned v = mag[i];
+      bitlen     = i * 8;
+      while (v != 0) {
+        ++bitlen;
+        v >>= 1;
+      }
+      break;
+    }
+  }
+  if (static_cast<long>(bitlen) > bits) {
+    err = std::format("literal needs {} bits but the signal is {} bits wide", bitlen, bits);
+    return {};
+  }
+  const size_t nbytes = static_cast<size_t>((bits + 7) / 8);
+  mag.resize(nbytes, 0);
+  if (neg) {
+    unsigned carry = 1;
+    for (auto& b : mag) {
+      const unsigned t = static_cast<unsigned>(static_cast<uint8_t>(~b)) + carry;
+      b                = static_cast<uint8_t>(t & 0xffU);
+      carry            = t >> 8;
+    }
+  }
+  if (const long rem = bits % 8; rem != 0 && nbytes != 0) {
+    mag[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
+  }
+  const size_t ndig = static_cast<size_t>((bits + 3) / 4);
+  std::string  out;
+  out.reserve(ndig);
+  for (size_t k = ndig; k-- > 0;) {
+    const unsigned nib  = (mag[k / 2] >> (4 * (k % 2))) & 0xfU;
+    out                += "0123456789abcdef"[nib];
+  }
+  return out;
+}
+
+// The generator writes sim_catalog.json beside the driver. Its ABSENCE is not a
+// user mistake — every generated sim dir has one — so it reads as an internal
+// error naming the stale dir rather than as bad input.
+Sim_catalog load_sim_catalog(const std::string& simdir, const std::string& test_sel) {
+  const std::string path = std::format("{}/sim_catalog.json", simdir);
+  std::ifstream     ifs(path);
+  if (!ifs.is_open()) {
+    throw Lhd_error{"internal",
+                    std::format("--query needs the signal catalog, but {} does not exist", path),
+                    "the sim dir predates the query API — re-run without --run-only (or delete --workdir) to regenerate it"};
+  }
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  rj::Document doc;
+  doc.Parse(ss.str().c_str());
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("kind") || !doc["kind"].IsString()
+      || std::string_view{doc["kind"].GetString()} != "sim_catalog" || !doc.HasMember("tests") || !doc["tests"].IsObject()) {
+    throw Lhd_error{"internal", std::format("malformed signal catalog {}", path), "regenerate the sim dir (drop --run-only)"};
+  }
+
+  // Exactly ONE selected test, matching every other observability mode: a batch
+  // plans one replay, and "which run is cycle 42 in?" has no answer otherwise.
+  const auto&              tmap  = doc["tests"];
+  const rj::Value*         entry = nullptr;
+  std::string              name;
+  std::vector<std::string> keys;
+  for (auto it = tmap.MemberBegin(); it != tmap.MemberEnd(); ++it) {
+    keys.emplace_back(it->name.GetString());
+  }
+  if (!test_sel.empty()) {
+    for (auto it = tmap.MemberBegin(); it != tmap.MemberEnd(); ++it) {
+      const std::string k    = it->name.GetString();
+      // The selector may be the dotted name or just its tail (`run` for `cnt.run`),
+      // the same two spellings the driver's --test accepts.
+      const auto        dot  = k.rfind('.');
+      const std::string tail = dot == std::string::npos ? k : k.substr(dot + 1);
+      if (k == test_sel || tail == test_sel) {
+        entry = &it->value;
+        name  = k;
+        break;
+      }
+    }
+    if (entry == nullptr) {
+      query_usage(std::format("no test matched '{}'", test_sel), std::format("this sim holds: {}", absl::StrJoin(keys, ", ")));
+    }
+  } else if (keys.size() == 1) {
+    entry = &tmap.MemberBegin()->value;
+    name  = keys.front();
+  } else {
+    query_usage("a query batch needs exactly one selected test",
+                std::format("name one as the second positional: {}", absl::StrJoin(keys, ", ")));
+  }
+
+  Sim_catalog cat;
+  cat.test = name;
+  if (entry->HasMember("clock") && (*entry)["clock"].IsString()) {
+    cat.clock = (*entry)["clock"].GetString();
+  }
+  if (!entry->HasMember("signals") || !(*entry)["signals"].IsArray()) {
+    throw Lhd_error{"internal", std::format("catalog entry '{}' has no signals array ({})", name, path), ""};
+  }
+  for (const auto& s : (*entry)["signals"].GetArray()) {
+    if (!s.IsObject() || !s.HasMember("name") || !s["name"].IsString()) {
+      continue;
+    }
+    Cat_sig c;
+    c.name = s["name"].GetString();
+    if (s.HasMember("alias") && s["alias"].IsString()) {
+      c.alias = s["alias"].GetString();
+    }
+    c.kind          = (s.HasMember("kind") && s["kind"].IsString()) ? s["kind"].GetString() : "flop";
+    c.bits          = (s.HasMember("bits") && s["bits"].IsNumber()) ? s["bits"].GetInt64() : 0;
+    c.declared_bits = (s.HasMember("declared_bits") && s["declared_bits"].IsNumber()) ? s["declared_bits"].GetInt64() : c.bits;
+    c.size          = (s.HasMember("size") && s["size"].IsNumber()) ? s["size"].GetInt64() : -1;
+    c.is_signed     = s.HasMember("signed") && s["signed"].IsBool() && s["signed"].GetBool();
+    cat.sigs.push_back(std::move(c));
+  }
+  return cat;
+}
+
+// --query FILE | - (stdin) | {inline JSON}. The inline form is what makes the
+// agent loop one invocation with no scratch file.
+std::string read_query_request(const std::string& spec) {
+  if (spec.front() == '{') {
+    return spec;
+  }
+  if (spec == "-") {
+    std::ostringstream oss;
+    oss << std::cin.rdbuf();
+    return oss.str();
+  }
+  std::ifstream ifs(spec);
+  if (!ifs.is_open()) {
+    throw Lhd_error{"missing_file",
+                    std::format("--query file '{}' does not exist", spec),
+                    "pass `-` to read the request from stdin"};
+  }
+  std::ostringstream oss;
+  oss << ifs.rdbuf();
+  return oss.str();
+}
+
+// A request timestamp. {"cycle":N} is absolute; {"event":"fail","offset":K} is
+// resolved DURING the run — the kernel cannot know the failing cycle at plan
+// time, so it travels as the token `F<offset>` and the driver resolves it once
+// the assert has (or has not) fired.
+struct Q_time {
+  long cycle    = -1;  // -1 = unbounded on this side
+  bool is_event = false;
+  long offset   = 0;
+};
+
+void reject_unknown_members(const rj::Value& obj, std::initializer_list<std::string_view> known, std::string_view where) {
+  for (auto it = obj.MemberBegin(); it != obj.MemberEnd(); ++it) {
+    const std::string_view k = it->name.GetString();
+    if (std::find(known.begin(), known.end(), k) == known.end()) {
+      query_usage(std::format("unknown field '{}' in {}", k, where),
+                  "v1 rejects unknown request fields rather than ignoring them (a typo must not silently change the answer)");
+    }
+  }
+}
+
+Q_time parse_time(const rj::Value& v, std::string_view where) {
+  if (!v.IsObject()) {
+    query_usage(std::format("{} must be an object, e.g. {{\"cycle\": 10}}", where));
+  }
+  reject_unknown_members(v, {"cycle", "event", "offset", "phase"}, where);
+  if (v.HasMember("phase")) {
+    if (!v["phase"].IsString() || std::string_view{v["phase"].GetString()} != "post") {
+      query_usage(std::format("{}.phase: only \"post\" exists in v1", where),
+                  "post is the only observation point the generated code exposes; a `pre` phase is the first planned extension");
+    }
+  }
+  Q_time t;
+  if (v.HasMember("event")) {
+    if (!v["event"].IsString() || std::string_view{v["event"].GetString()} != "fail") {
+      query_usage(std::format("{}.event: only \"fail\" exists in v1", where));
+    }
+    t.is_event = true;
+    if (v.HasMember("offset")) {
+      if (!v["offset"].IsInt64()) {
+        query_usage(std::format("{}.offset must be an integer", where));
+      }
+      t.offset = v["offset"].GetInt64();
+    }
+    if (v.HasMember("cycle")) {
+      query_usage(std::format("{}: give either a cycle or an event, not both", where));
+    }
+    return t;
+  }
+  if (!v.HasMember("cycle")) {
+    query_usage(std::format("{} needs a \"cycle\" (or an \"event\")", where));
+  }
+  if (!v["cycle"].IsInt64() || v["cycle"].GetInt64() < 0) {
+    query_usage(std::format("{}.cycle must be a non-negative integer", where));
+  }
+  t.cycle = v["cycle"].GetInt64();
+  return t;
+}
+
+// A selector: an exact name, or any AND-combination of scope/glob/regex/kind.
+struct Q_sel {
+  bool        has     = false;
+  bool        by_name = false;
+  std::string signal;  // exact name (or alias), possibly `mem[3]`
+  std::string scope;
+  std::string glob;
+  std::string regex;
+  std::string kind;
+};
+
+Q_sel parse_selector(const rj::Value& q, std::string_view where) {
+  Q_sel s;
+  auto  str = [&](const char* k) -> std::string {
+    if (!q[k].IsString()) {
+      query_usage(std::format("{}.{} must be a string", where, k));
+    }
+    s.has = true;
+    return q[k].GetString();
+  };
+  if (q.HasMember("signal")) {
+    s.signal  = str("signal");
+    s.by_name = true;
+  }
+  if (q.HasMember("scope")) {
+    s.scope = str("scope");
+  }
+  if (q.HasMember("glob")) {
+    s.glob = str("glob");
+  }
+  if (q.HasMember("regex")) {
+    s.regex = str("regex");
+  }
+  if (q.HasMember("kind")) {
+    s.kind                                     = str("kind");
+    static constexpr std::string_view kKinds[] = {"flop", "pipe", "memrd", "input", "output", "memory"};
+    if (std::find(std::begin(kKinds), std::end(kKinds), std::string_view{s.kind}) == std::end(kKinds)) {
+      query_usage(std::format("{}.kind '{}' is not a v1 signal kind", where, s.kind),
+                  "flop | pipe | memrd | input | output | memory");
+    }
+  }
+  return s;
+}
+
+// Selector -> catalog indices, in CATALOG ORDER (never match order): the
+// expansion order has to be reproducible for the response to be diffable.
+std::vector<size_t> resolve_sel(const Q_sel& sel, const Sim_catalog& cat, std::string_view where) {
+  std::optional<std::regex> re;
+  if (!sel.regex.empty()) {
+    try {
+      re.emplace(sel.regex, std::regex::ECMAScript);
+    } catch (const std::regex_error& e) {
+      query_usage(std::format("{}.regex '{}' does not compile: {}", where, sel.regex, e.what()));
+    }
+  }
+  std::vector<size_t> out;
+  for (size_t i = 0; i < cat.sigs.size(); ++i) {
+    const auto& c = cat.sigs[i];
+    if (sel.by_name && c.name != sel.signal && c.alias != sel.signal) {
+      continue;
+    }
+    if (!sel.scope.empty() && c.name != sel.scope && !std::string_view{c.name}.starts_with(sel.scope + ".")) {
+      continue;
+    }
+    if (!sel.glob.empty() && !glob_match(sel.glob, c.name)) {
+      continue;
+    }
+    if (re.has_value() && !std::regex_match(c.name, *re)) {
+      continue;
+    }
+    if (!sel.kind.empty() && c.kind != sel.kind) {
+      continue;
+    }
+    out.push_back(i);
+  }
+  return out;
+}
+
+// Exactly-one resolution (`value`, `changes`, a find leaf, a sample entry).
+// Zero and many are DIFFERENT failures with different fixes, so they carry
+// different classes.
+size_t resolve_one(const Q_sel& sel, const Sim_catalog& cat, std::string_view where) {
+  auto hits = resolve_sel(sel, cat, where);
+  if (hits.empty()) {
+    const std::string want = sel.by_name ? sel.signal : std::string{where};
+    throw Q_fail{"unknown_signal", std::format("no signal matches {}", want), "", nearest_names(cat, want)};
+  }
+  if (hits.size() > 1) {
+    std::vector<std::string> some;
+    for (size_t k = 0; k < hits.size() && k < 5; ++k) {
+      some.push_back(cat.sigs[hits[k]].name);
+    }
+    throw Q_fail{"ambiguous_selector",
+                 std::format("{} matches {} signals; this operation needs exactly one", where, hits.size()),
+                 "narrow the selector, or use `values`/`snapshot` for a set",
+                 some};
+  }
+  return hits.front();
+}
+
+// A bare hierarchical name (find leaves and `sample` entries take strings, not
+// selector objects).
+size_t resolve_name(const std::string& name, const Sim_catalog& cat) {
+  for (size_t i = 0; i < cat.sigs.size(); ++i) {
+    if (cat.sigs[i].name == name || cat.sigs[i].alias == name) {
+      return i;
+    }
+  }
+  throw Q_fail{"unknown_signal", std::format("no signal named '{}'", name), "", nearest_names(cat, name)};
+}
+
+std::string q_error_result(const std::string& id, const Q_fail& f) {
+  rj::StringBuffer             sb;
+  rj::Writer<rj::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("id");
+  w.String(id.c_str());
+  w.Key("ok");
+  w.Bool(false);
+  w.Key("error");
+  w.StartObject();
+  w.Key("class");
+  w.String(f.cls.c_str());
+  w.Key("message");
+  w.String(f.msg.c_str());
+  if (!f.hint.empty()) {
+    w.Key("hint");
+    w.String(f.hint.c_str());
+  }
+  w.Key("suggestions");
+  w.StartArray();
+  for (const auto& s : f.suggestions) {
+    w.String(s.c_str());
+  }
+  w.EndArray();
+  w.EndObject();
+  w.EndObject();
+  return sb.GetString();
+}
+
+// `signals` is answered ENTIRELY HERE: the catalog is static, so enumeration
+// never needs a simulation. (The query still keeps its request position.)
+std::string q_signals_result(const std::string& id, const std::vector<size_t>& hits, const Sim_catalog& cat, long max_results) {
+  const bool                   truncated = static_cast<long>(hits.size()) > max_results;
+  rj::StringBuffer             sb;
+  rj::Writer<rj::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("id");
+  w.String(id.c_str());
+  w.Key("ok");
+  w.Bool(true);
+  w.Key("count");
+  w.Int64(static_cast<int64_t>(hits.size()));
+  w.Key("complete");
+  w.Bool(!truncated);
+  w.Key("truncated");
+  w.Bool(truncated);
+  w.Key("signals");
+  w.StartArray();
+  for (size_t k = 0; k < hits.size() && static_cast<long>(k) < max_results; ++k) {
+    const auto& c = cat.sigs[hits[k]];
+    w.StartObject();
+    w.Key("name");
+    w.String(c.name.c_str());
+    w.Key("kind");
+    w.String(c.kind.c_str());
+    w.Key("bits");
+    w.Int64(c.bits);
+    w.Key("declared_bits");
+    w.Int64(c.declared_bits);
+    w.Key("signed");
+    w.Bool(c.is_signed);
+    w.Key("direction");
+    if (c.kind == "input") {
+      w.String("in");
+    } else if (c.kind == "output") {
+      w.String("out");
+    } else {
+      w.Null();
+    }
+    w.Key("size");
+    if (c.size >= 0) {
+      w.Int64(c.size);
+    } else {
+      w.Null();
+    }
+    w.Key("alias");
+    if (c.alias.empty()) {
+      w.Null();
+    } else {
+      w.String(c.alias.c_str());
+    }
+    // Absent-until-plumbed, spelled explicitly so an agent never has to guess
+    // whether the engine forgot the field or the design has no such fact.
+    w.Key("source");
+    w.Null();
+    w.Key("clock_domain");
+    w.Null();
+    w.Key("ops");
+    w.StartArray();
+    if (c.kind == "memory") {
+      w.String("value");  // indexed WORD reads only — no whole-memory dump/diff in v1
+    } else {
+      for (const char* op : {"value", "values", "changes", "next_change", "find", "snapshot", "diff"}) {
+        w.String(op);
+      }
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  return sb.GetString();
+}
+
+// `mem[7]` -> ("mem", 7). Memory words are addressed by explicit index only.
+std::pair<std::string, long> split_index(const std::string& name) {
+  if (name.empty() || name.back() != ']') {
+    return {name, -1};
+  }
+  const auto ob = name.rfind('[');
+  if (ob == std::string::npos || ob == 0) {
+    return {name, -1};
+  }
+  const auto digits = name.substr(ob + 1, name.size() - ob - 2);
+  if (digits.empty() || digits.find_first_not_of("0123456789") != std::string::npos) {
+    return {name, -1};
+  }
+  return {name.substr(0, ob), std::stol(digits)};
+}
+
+// One `find` expression node -> POST-ORDER X lines (a tiny stack machine the
+// driver evaluates without a parser). Returns the node count it emitted.
+size_t emit_expr(const rj::Value& n, const Sim_catalog& cat, std::string& out) {
+  if (!n.IsObject()) {
+    query_usage("find.expr nodes must be objects");
+  }
+  if (n.HasMember("all") || n.HasMember("any")) {
+    const bool  is_all = n.HasMember("all");
+    const char* key    = is_all ? "all" : "any";
+    reject_unknown_members(n, {"all", "any"}, "find.expr");
+    if (!n[key].IsArray() || n[key].Empty()) {
+      query_usage(std::format("find.expr.{} needs a non-empty array of sub-expressions", key));
+    }
+    size_t total = 0;
+    for (const auto& sub : n[key].GetArray()) {
+      total += emit_expr(sub, cat, out);
+    }
+    out += std::format("X {} {}\n", key, n[key].Size());
+    return total + 1;
+  }
+  if (n.HasMember("not")) {
+    reject_unknown_members(n, {"not"}, "find.expr");
+    const size_t sub  = emit_expr(n["not"], cat, out);
+    out              += "X not\n";
+    return sub + 1;
+  }
+  reject_unknown_members(n, {"sig", "cmp", "value", "sig2", "slice"}, "find.expr leaf");
+  if (!n.HasMember("sig") || !n["sig"].IsString() || !n.HasMember("cmp") || !n["cmp"].IsString()) {
+    query_usage("a find.expr leaf needs a \"sig\" and a \"cmp\"");
+  }
+  if (n.HasMember("slice")) {
+    throw Q_fail{"unsupported",
+                 "find.expr leaf `slice` is not in the v1 plan protocol",
+                 "compare the whole signal, or slice with a separate expression once the protocol carries it",
+                 {}};
+  }
+  const std::string cmp = n["cmp"].GetString();
+  const auto&       c   = cat.sigs[resolve_name(n["sig"].GetString(), cat)];
+  if (cmp == "changed" || cmp == "rising" || cmp == "falling") {
+    if (cmp != "changed" && c.bits != 1) {
+      throw Q_fail{"unsupported",
+                   std::format("`{}` is only defined on a 1-bit signal ({} is {} bits)", cmp, c.name, c.bits),
+                   "",
+                   {}};
+    }
+    if (n.HasMember("value") || n.HasMember("sig2")) {
+      query_usage(std::format("find.expr `{}` takes no value/sig2", cmp));
+    }
+    out += std::format("X edge {} {}\n", c.name, cmp);
+    return 1;
+  }
+  static constexpr std::string_view kCmps[] = {"==", "!=", "<", "<=", ">", ">="};
+  if (std::find(std::begin(kCmps), std::end(kCmps), std::string_view{cmp}) == std::end(kCmps)) {
+    query_usage(std::format("find.expr cmp '{}' is not a v1 comparator", cmp), "== != < <= > >= changed rising falling");
+  }
+  const bool ordered = cmp != "==" && cmp != "!=";
+  // The driver compares UNSIGNED magnitudes at arbitrary width (it has no
+  // catalog, so it cannot know an operand is signed). Refusing the query is the
+  // only honest option: emitting the compare anyway is exactly the --break-when
+  // strtoull hole one layer down — a confidently wrong cycle number.
+  if (ordered && c.is_signed) {
+    throw Q_fail{"unsupported",
+                 std::format("ordered compare on the signed signal '{}' is not in the v1 plan protocol", c.name),
+                 "the plan's comparator is an unsigned magnitude compare; use == / != , or compare an unsigned signal",
+                 {}};
+  }
+  if (n.HasMember("sig2")) {
+    if (n.HasMember("value")) {
+      query_usage("find.expr leaf takes either a value or a sig2, not both");
+    }
+    if (!n["sig2"].IsString()) {
+      query_usage("find.expr leaf sig2 must be a string");
+    }
+    const auto& c2 = cat.sigs[resolve_name(n["sig2"].GetString(), cat)];
+    if (ordered && c2.is_signed) {
+      throw Q_fail{"unsupported",
+                   std::format("ordered compare on the signed signal '{}' is not in the v1 plan protocol", c2.name),
+                   "the plan's comparator is an unsigned magnitude compare",
+                   {}};
+    }
+    out += std::format("X cmp2 {} {} {}\n", c.name, cmp, c2.name);
+    return 1;
+  }
+  if (!n.HasMember("value")) {
+    query_usage("find.expr leaf needs a \"value\" or a \"sig2\"");
+  }
+  // Numbers are accepted for ergonomics, but a wide literal MUST be written as a
+  // string: JSON numbers are doubles in every consumer we do not control.
+  std::string lit;
+  if (n["value"].IsString()) {
+    lit = n["value"].GetString();
+  } else if (n["value"].IsInt64()) {
+    lit = std::to_string(n["value"].GetInt64());
+  } else {
+    query_usage("find.expr leaf value must be a decimal/0x-hex string or an integer");
+  }
+  if (!lit.empty() && lit.front() == '-' && !c.is_signed) {
+    query_usage(std::format("find.expr leaf on '{}': a negative literal against an unsigned {}-bit signal", c.name, c.bits));
+  }
+  std::string err;
+  const auto  hex = literal_to_hex(lit, c.bits, err);  // bare lowercase hex: no 0x, no sign — that is the wire form
+  if (!err.empty()) {
+    query_usage(std::format("find.expr leaf on '{}': {}", c.name, err));
+  }
+  out += std::format("X cmp {} {} {}\n", c.name, cmp, hex);
+  return 1;
+}
+
+// Validate + plan the whole batch. Throws Lhd_error{usage} for a malformed
+// REQUEST; per-query problems land in plan.kernel_results as ok:false objects.
+Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, const std::string& plan_path) {
+  rj::Document doc;
+  doc.Parse(request.c_str());
+  if (doc.HasParseError()) {
+    query_usage(std::format("the request is not valid JSON (offset {})", doc.GetErrorOffset()));
+  }
+  if (!doc.IsObject()) {
+    query_usage("the request must be a JSON object");
+  }
+  reject_unknown_members(doc, {"schema_version", "kind", "queries", "max_results", "allow_rng_divergence"}, "the request");
+  if (!doc.HasMember("schema_version") || !doc["schema_version"].IsInt() || doc["schema_version"].GetInt() != 1) {
+    query_usage("the request needs \"schema_version\": 1", "an unknown schema version is rejected, never best-effort parsed");
+  }
+  if (!doc.HasMember("kind") || !doc["kind"].IsString() || std::string_view{doc["kind"].GetString()} != "sim_query") {
+    query_usage("the request needs \"kind\": \"sim_query\"");
+  }
+  if (!doc.HasMember("queries") || !doc["queries"].IsArray()) {
+    query_usage("the request needs a \"queries\" array");
+  }
+  long max_results = 1000;
+  if (doc.HasMember("max_results")) {
+    if (!doc["max_results"].IsInt64() || doc["max_results"].GetInt64() <= 0) {
+      query_usage("max_results must be a positive integer");
+    }
+    max_results = doc["max_results"].GetInt64();
+  }
+  if (doc.HasMember("allow_rng_divergence") && doc["allow_rng_divergence"].GetBool()) {
+    // Recognized, and deliberately NOT silently ignored: honoring it means
+    // replaying from a checkpoint whose PRNG stream position was never saved,
+    // which every result would have to be marked `reproducible:false` for.
+    throw Lhd_error{"unsupported",
+                    "--query: allow_rng_divergence is not implemented yet",
+                    "drop the field; a randomized run replays from cycle 0, which is the reproducible answer"};
+  }
+
+  Query_plan plan;
+  plan.active = true;
+  plan.test   = cat.test;
+  plan.clock  = cat.clock;
+
+  std::string body;  // the Q/G/S/X lines, in request order
+  // The union of every replayed query's interval. -1 on either side means
+  // "unbounded there", which is how the driver reads FROM/TO.
+  bool        lo_unbounded = false, hi_unbounded = false;
+  long        lo_min = std::numeric_limits<long>::max(), hi_max = -1;
+  auto        note_lo = [&](long c) {
+    if (c < 0) {
+      lo_unbounded = true;
+    } else {
+      lo_min = std::min(lo_min, c);
+    }
+  };
+  auto note_hi = [&](long c) {
+    if (c < 0) {
+      hi_unbounded = true;
+    } else {
+      hi_max = std::max(hi_max, c);
+    }
+  };
+
+  // A failure-anchored bound has no value until the run happens, so the batch
+  // cannot bound its sampling window: it must observe the whole run.
+  bool        any_event = false;
+  const auto  tok       = [&](const Q_time& t) {
+    if (t.is_event) {
+      any_event = true;
+      return std::format("F{}{}", t.offset < 0 ? "" : "+", t.offset);
+    }
+    return std::to_string(t.cycle);
+  };
+  std::map<std::string, size_t> seen_ids;
+  for (const auto& q : doc["queries"].GetArray()) {
+    if (!q.IsObject()) {
+      query_usage("every entry of \"queries\" must be an object");
+    }
+    if (!q.HasMember("id") || !q["id"].IsString()) {
+      query_usage("every query needs a string \"id\" (the response echoes it)");
+    }
+    const std::string id = q["id"].GetString();
+    // The id is a FIELD of the space-separated plan line, and it is the join key
+    // of the response — so no whitespace, and no duplicates.
+    if (id.empty() || id.find_first_of(" \t\n\r") != std::string::npos) {
+      query_usage(std::format("query id '{}' must be non-empty and contain no whitespace", id));
+    }
+    if (!seen_ids.emplace(id, plan.ids.size()).second) {
+      query_usage(std::format("duplicate query id '{}'", id));
+    }
+    if (!q.HasMember("op") || !q["op"].IsString()) {
+      query_usage(std::format("query '{}' needs a string \"op\"", id));
+    }
+    const std::string op    = q["op"].GetString();
+    const std::string where = std::format("query '{}'", id);
+    plan.ids.push_back(id);
+    plan.kernel_results.emplace_back();
+    std::string& kres = plan.kernel_results.back();
+
+    // Everything below may raise Q_fail (a per-query answer) — a bad name in one
+    // query must not cost the batch its other answers.
+    try {
+      if (op == "signals") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind"}, where);
+        const auto sel  = parse_selector(q, where);
+        auto       hits = resolve_sel(sel, cat, where);
+        if (hits.empty() && sel.by_name) {
+          throw Q_fail{"unknown_signal", std::format("no signal named '{}'", sel.signal), "", nearest_names(cat, sel.signal)};
+        }
+        kres = q_signals_result(id, hits, cat, max_results);
+        continue;
+      }
+
+      // Everything else needs the replay. Resolve first, THEN emit lines, so a
+      // failing query contributes neither a plan line nor a time bound.
+      std::string line;
+      if (op == "value") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "at", "index"}, where);
+        if (!q.HasMember("at")) {
+          query_usage(std::format("{}: `value` needs an \"at\"", where));
+        }
+        auto sel = parse_selector(q, where);
+        long idx = -1;
+        if (sel.by_name) {
+          auto [base, parsed] = split_index(sel.signal);
+          if (parsed >= 0) {
+            sel.signal = base;
+            idx        = parsed;
+          }
+        }
+        if (q.HasMember("index")) {
+          if (!q["index"].IsInt64() || q["index"].GetInt64() < 0) {
+            query_usage(std::format("{}.index must be a non-negative integer", where));
+          }
+          idx = q["index"].GetInt64();
+        }
+        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
+        const auto  t = parse_time(q["at"], std::format("{}.at", where));
+        if (c.kind == "memory" && idx < 0) {
+          throw Q_fail{"unsupported",
+                       std::format("'{}' is a memory: read a WORD ({}[K]) — whole-memory reads are not in v1", c.name, c.name),
+                       "",
+                       {}};
+        }
+        if (c.kind != "memory" && idx >= 0) {
+          throw Q_fail{"unsupported", std::format("'{}' is a {}, not a memory — it takes no index", c.name, c.kind), "", {}};
+        }
+        if (idx >= 0 && c.size >= 0 && idx >= c.size) {
+          throw Q_fail{"invalid_range", std::format("index {} is outside '{}' ({} words)", idx, c.name, c.size), "", {}};
+        }
+        line = idx >= 0 ? std::format("Q {} memvalue {} {} {}\n", id, c.name, idx, tok(t))
+                        : std::format("Q {} value {} {}\n", id, c.name, tok(t));
+        note_lo(t.cycle);
+        note_hi(t.cycle);
+      } else if (op == "values" || op == "snapshot") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "at"}, where);
+        const auto sel = parse_selector(q, where);
+        if (!sel.has) {
+          query_usage(std::format("{}: `{}` needs a selector", where, op),
+                      "signal | scope | glob | regex | kind — omitting it is an error, not an implicit select-all");
+        }
+        if (!q.HasMember("at")) {
+          query_usage(std::format("{}: `{}` needs an \"at\"", where, op));
+        }
+        const auto t = parse_time(q["at"], std::format("{}.at", where));
+        auto hits = resolve_sel(sel, cat, where);
+        std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });  // selectors never enumerate memory words
+        if (hits.empty()) {
+          throw Q_fail{"unknown_signal",
+                       std::format("{} selects no signal", where),
+                       "",
+                       sel.by_name ? nearest_names(cat, sel.signal) : std::vector<std::string>{}};
+        }
+        line = std::format("Q {} {} {} {}\n", id, op, tok(t), hits.size());
+        for (size_t i : hits) {
+          line += std::format("G {}\n", cat.sigs[i].name);
+        }
+        note_lo(t.cycle);
+        note_hi(t.cycle);
+      } else if (op == "diff") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "from", "to"}, where);
+        const auto sel = parse_selector(q, where);
+        if (!sel.has) {
+          query_usage(std::format("{}: `diff` needs a selector", where));
+        }
+        if (!q.HasMember("from") || !q.HasMember("to")) {
+          query_usage(std::format("{}: `diff` needs a \"from\" and a \"to\"", where));
+        }
+        const auto f = parse_time(q["from"], std::format("{}.from", where));
+        const auto t = parse_time(q["to"], std::format("{}.to", where));
+        if (f.cycle > t.cycle) {
+          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
+        }
+        auto hits = resolve_sel(sel, cat, where);
+        std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });
+        if (hits.empty()) {
+          throw Q_fail{"unknown_signal", std::format("{} selects no signal", where), "", {}};
+        }
+        line = std::format("Q {} diff {} {} {}\n", id, tok(f), tok(t), hits.size());
+        for (size_t i : hits) {
+          line += std::format("G {}\n", cat.sigs[i].name);
+        }
+        note_lo(f.cycle);
+        note_hi(t.cycle);
+      } else if (op == "changes") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "from", "to", "count_only"}, where);
+        const auto sel = parse_selector(q, where);
+        Q_time     f, t;
+        if (q.HasMember("from")) {
+          f = parse_time(q["from"], std::format("{}.from", where));
+        }
+        if (q.HasMember("to")) {
+          t = parse_time(q["to"], std::format("{}.to", where));
+        }
+        if (f.cycle >= 0 && t.cycle >= 0 && f.cycle > t.cycle) {
+          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
+        }
+        bool count_only = false;
+        if (q.HasMember("count_only")) {
+          if (!q["count_only"].IsBool()) {
+            query_usage(std::format("{}.count_only must be a boolean", where));
+          }
+          count_only = q["count_only"].GetBool();
+        }
+        // The plan carries ONE signal per `changes`, so a scope expansion has no
+        // wire form yet. Say so per-query rather than silently answering about
+        // whichever signal happened to sort first.
+        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
+        line          = std::format("Q {} changes {} {} {} {}\n", id, c.name, tok(f), tok(t), count_only ? 1 : 0);
+        note_lo(f.cycle);
+        note_hi(t.cycle);
+      } else if (op == "next_change") {
+        reject_unknown_members(q, {"id", "op", "signal", "scope", "glob", "regex", "kind", "after", "to"}, where);
+        const auto sel = parse_selector(q, where);
+        Q_time     a, t;
+        if (q.HasMember("after")) {
+          a = parse_time(q["after"], std::format("{}.after", where));
+        }
+        if (q.HasMember("to")) {
+          t = parse_time(q["to"], std::format("{}.to", where));
+        }
+        if (a.cycle >= 0 && t.cycle >= 0 && a.cycle > t.cycle) {
+          query_usage(std::format("{}: after {} is past to {}", where, a.cycle, t.cycle));
+        }
+        const auto& c = cat.sigs[resolve_one(sel, cat, where)];
+        line          = std::format("Q {} next_change {} {} {}\n", id, c.name, tok(a), tok(t));
+        note_lo(a.cycle);
+        note_hi(t.cycle);
+      } else if (op == "find") {
+        reject_unknown_members(q, {"id", "op", "dir", "from", "to", "expr", "sample"}, where);
+        std::string dir = "fwd";
+        if (q.HasMember("dir")) {
+          if (!q["dir"].IsString()) {
+            query_usage(std::format("{}.dir must be a string", where));
+          }
+          const std::string d = q["dir"].GetString();
+          if (d == "forward" || d == "fwd") {
+            dir = "fwd";
+          } else if (d == "backward" || d == "bwd") {
+            dir = "bwd";
+          } else {
+            query_usage(std::format("{}.dir '{}' is not forward|backward", where, d));
+          }
+        }
+        Q_time f, t;
+        if (q.HasMember("from")) {
+          f = parse_time(q["from"], std::format("{}.from", where));
+        }
+        if (q.HasMember("to")) {
+          t = parse_time(q["to"], std::format("{}.to", where));
+        }
+        if (f.cycle >= 0 && t.cycle >= 0 && f.cycle > t.cycle) {
+          query_usage(std::format("{}: from {} is after to {}", where, f.cycle, t.cycle));
+        }
+        if (!q.HasMember("expr")) {
+          query_usage(std::format("{}: `find` needs an \"expr\" tree", where));
+        }
+        std::string  xs;
+        const size_t nx = emit_expr(q["expr"], cat, xs);
+        std::string  ss;
+        size_t       nsample = 0;
+        if (q.HasMember("sample")) {
+          if (!q["sample"].IsArray()) {
+            query_usage(std::format("{}.sample must be an array of signal names", where));
+          }
+          for (const auto& s : q["sample"].GetArray()) {
+            if (!s.IsString()) {
+              query_usage(std::format("{}.sample entries must be strings", where));
+            }
+            ss += std::format("S {}\n", cat.sigs[resolve_name(s.GetString(), cat)].name);
+            ++nsample;
+          }
+        }
+        line = std::format("Q {} find {} {} {} {} {}\n", id, dir, tok(f), tok(t), nx, nsample) + xs + ss;
+        note_lo(f.cycle);
+        note_hi(t.cycle);
+      } else {
+        query_usage(std::format("{}: unknown op '{}'", where, op),
+                    "signals | value | values | changes | next_change | find | snapshot | diff");
+      }
+      body += line;
+    } catch (const Q_fail& f) {
+      kres = q_error_result(id, f);
+    }
+  }
+
+  if (body.empty()) {
+    return plan;  // every question was answered from the catalog — no plan, no replay work
+  }
+  std::ofstream pf(plan_path);
+  if (!pf.is_open()) {
+    throw Lhd_error{"config", std::format("could not write the query plan {}", plan_path), ""};
+  }
+  pf << "V 1\n";
+  pf << std::format("FROM {}\n", any_event || lo_unbounded || lo_min == std::numeric_limits<long>::max() ? -1 : lo_min);
+  pf << std::format("TO {}\n", any_event || hi_unbounded ? -1 : hi_max);
+  pf << std::format("MAXRES {}\n", max_results);
+  pf << body;
+  plan.wrote_plan = true;
+  return plan;
+}
+
+// ---- value enrichment --------------------------------------------------------
+//
+// The driver has NO catalog — it knows bit patterns, not widths or signedness —
+// so every value it writes is the minimal {"hex":"<full-width canonical hex>"}.
+// Width, signedness, the decimal rendering and known_mask are catalog facts, and
+// the kernel is the side that holds the catalog. Adding them here keeps exactly
+// ONE copy of the metadata in the system; teaching the generated C++ a second
+// one is how the two drift.
+using Json_writer = rj::Writer<rj::StringBuffer>;
+
+const Cat_sig* find_sig(const Sim_catalog& cat, std::string_view name) {
+  for (const auto& c : cat.sigs) {
+    if (c.name == name || c.alias == name) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+// Canonical hex -> little-endian magnitude bytes.
+std::vector<uint8_t> hex_to_bytes(std::string_view hx) {
+  std::vector<uint8_t> v;
+  for (size_t k = 0; k < hx.size(); ++k) {
+    const char c = hx[hx.size() - 1 - k];
+    int        d = 0;
+    if (c >= '0' && c <= '9') {
+      d = c - '0';
+    } else if (c >= 'a' && c <= 'f') {
+      d = c - 'a' + 10;
+    } else if (c >= 'A' && c <= 'F') {
+      d = c - 'A' + 10;
+    } else {
+      return {};
+    }
+    if (k / 2 >= v.size()) {
+      v.push_back(0);
+    }
+    v[k / 2] |= static_cast<uint8_t>(d << (4 * (k % 2)));
+  }
+  return v;
+}
+
+std::string bytes_to_dec(std::vector<uint8_t> v) {
+  auto nonzero = [&] { return std::any_of(v.begin(), v.end(), [](uint8_t b) { return b != 0; }); };
+  if (!nonzero()) {
+    return "0";
+  }
+  std::string s;
+  while (nonzero()) {
+    unsigned rem = 0;
+    for (size_t i = v.size(); i-- > 0;) {
+      const unsigned cur = (rem << 8) | v[i];
+      v[i]               = static_cast<uint8_t>(cur / 10);
+      rem                = cur % 10;
+    }
+    s += static_cast<char>('0' + rem);
+  }
+  std::reverse(s.begin(), s.end());
+  return s;
+}
+
+// The signed decimal rendering of a hex value. The interpretation WIDTH is the
+// source-declared one (an `s12` holding -3 is "-3", not 4093) — but only when
+// the value actually fits there: an internal width carries one more bit than
+// the declaration (9 for a `u8`), and truncating a value that uses it would
+// silently report a different number than `hex` says.
+std::string hex_to_dec(std::string_view hx, long bits, long declared_bits, bool is_signed) {
+  auto v = hex_to_bytes(hx);
+  if (v.empty()) {
+    return {};
+  }
+  long width = (declared_bits > 0 && declared_bits <= bits) ? declared_bits : bits;
+  auto bit   = [&](long i) {
+    const size_t byte = static_cast<size_t>(i) / 8;
+    return byte < v.size() && ((v[byte] >> (i % 8)) & 1U) != 0;
+  };
+  for (long i = width; i < bits; ++i) {
+    if (bit(i)) {
+      width = bits;  // the value overflows its declared width — report it whole
+      break;
+    }
+  }
+  const size_t nbytes = static_cast<size_t>((width + 7) / 8);
+  v.resize(nbytes, 0);
+  if (const long rem = width % 8; rem != 0 && nbytes != 0) {
+    v[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
+  }
+  const bool neg = is_signed && width > 0 && bit(width - 1);
+  if (neg) {
+    unsigned carry = 1;
+    for (auto& b : v) {
+      const unsigned t = static_cast<unsigned>(static_cast<uint8_t>(~b)) + carry;
+      b                = static_cast<uint8_t>(t & 0xffU);
+      carry            = t >> 8;
+    }
+    if (const long rem = width % 8; rem != 0 && nbytes != 0) {
+      v[nbytes - 1] &= static_cast<uint8_t>((1U << rem) - 1U);
+    }
+  }
+  return (neg ? "-" : "") + bytes_to_dec(std::move(v));
+}
+
+void write_value_enriched(Json_writer& w, const rj::Value& v, const Cat_sig* c) {
+  if (c == nullptr || !v.IsObject() || !v.HasMember("hex") || !v["hex"].IsString()) {
+    v.Accept(w);  // nothing to enrich it WITH — never guess a width
+    return;
+  }
+  const std::string hex = v["hex"].GetString();
+  std::string       err;
+  // All-ones at the internal width. v1 is strictly 2-state (Slop resolves x/?
+  // to seeded-PRNG bits at parse time), so an engine reporting an unknown bit
+  // here would be inventing one; the honest disclosure is run.seed/rng_draws.
+  const auto        known_mask = literal_to_hex("-1", c->bits, err);
+  w.StartObject();
+  w.Key("bits");
+  w.Int64(c->bits);
+  w.Key("declared_bits");
+  w.Int64(c->declared_bits);
+  w.Key("signed");
+  w.Bool(c->is_signed);
+  w.Key("hex");
+  w.String(hex.c_str());
+  w.Key("dec");
+  w.String(hex_to_dec(hex, c->bits, c->declared_bits, c->is_signed).c_str());
+  w.Key("known_mask");
+  w.String(known_mask.c_str());
+  // WHEN in the cycle this value was observed. State settles at the end of the
+  // period (where --probe has always sampled); a combinational OUTPUT is the
+  // value it drove DURING the period, computed from the state entering it —
+  // which is what the VCD shows at that period's timestamps. So a register and
+  // an output reading it are one commit apart. That is correct and cheap (the
+  // alternative is re-evaluating the design once per sampled cycle), but it is
+  // surprising, so every value says which one it is instead of relying on the
+  // reader having found the documentation.
+  w.Key("sampled");
+  w.String(c->kind == "output" ? "during_period" : "settled");
+  for (auto it = v.MemberBegin(); it != v.MemberEnd(); ++it) {
+    const std::string_view k = it->name.GetString();
+    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask"
+        || k == "sampled") {
+      continue;  // ours; a driver that starts emitting them must not double-write
+    }
+    w.Key(it->name.GetString());
+    it->value.Accept(w);
+  }
+  w.EndObject();
+}
+
+// Every member spelling that holds a value object, across the five operations:
+// `value` (value/values), `from_value`/`to_value` (diff), `old`/`new` (changes).
+bool is_value_key(std::string_view k) { return k == "value" || k == "from_value" || k == "to_value" || k == "old" || k == "new"; }
+
+// One row of a values/diff/changes/sample array. A row names its own signal;
+// a single-signal `changes` may leave that to the result level instead.
+void write_row_enriched(Json_writer& w, const rj::Value& row, const Sim_catalog& cat, const Cat_sig* outer) {
+  if (!row.IsObject()) {
+    row.Accept(w);
+    return;
+  }
+  const Cat_sig* c = outer;
+  if (row.HasMember("signal") && row["signal"].IsString()) {
+    if (const auto* f = find_sig(cat, row["signal"].GetString()); f != nullptr) {
+      c = f;
+    }
+  }
+  w.StartObject();
+  for (auto it = row.MemberBegin(); it != row.MemberEnd(); ++it) {
+    w.Key(it->name.GetString());
+    if (is_value_key(it->name.GetString())) {
+      write_value_enriched(w, it->value, c);
+    } else {
+      it->value.Accept(w);
+    }
+  }
+  w.EndObject();
+}
+
+void write_result_enriched(Json_writer& w, const rj::Value& r, const Sim_catalog& cat) {
+  if (!r.IsObject()) {
+    r.Accept(w);
+    return;
+  }
+  const Cat_sig* c = nullptr;
+  if (r.HasMember("signal") && r["signal"].IsString()) {
+    c = find_sig(cat, r["signal"].GetString());
+  }
+  w.StartObject();
+  for (auto it = r.MemberBegin(); it != r.MemberEnd(); ++it) {
+    w.Key(it->name.GetString());
+    if (is_value_key(it->name.GetString())) {
+      write_value_enriched(w, it->value, c);
+    } else if (it->value.IsArray()) {
+      w.StartArray();
+      for (const auto& row : it->value.GetArray()) {
+        write_row_enriched(w, row, cat, c);
+      }
+      w.EndArray();
+    } else {
+      it->value.Accept(w);
+    }
+  }
+  w.EndObject();
+}
+
+// The response the envelope carries: the driver's sidecar with every value
+// enriched from the catalog and the kernel-answered queries SPLICED BACK into
+// their request positions. Request order is part of the contract, and `signals`
+// results never reach the driver at all.
+std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, const std::string& sidecar_path) {
+  std::string raw;
+  if (plan.wrote_plan) {
+    std::ifstream ifs(sidecar_path);
+    if (ifs.is_open()) {
+      std::stringstream ss;
+      ss << ifs.rdbuf();
+      raw = ss.str();
+      while (!raw.empty() && (raw.back() == '\n' || raw.back() == '\r' || raw.back() == ' ' || raw.back() == '\t')) {
+        raw.pop_back();
+      }
+    }
+  }
+  rj::Document doc;
+  bool         have_driver = false;
+  if (raw.size() >= 2 && raw.front() == '{') {
+    doc.Parse(raw.c_str());
+    have_driver = !doc.HasParseError() && doc.IsObject() && doc.HasMember("results") && doc["results"].IsArray();
+  }
+  // Index the driver's answers BY ID, not by position: the plan and the response
+  // agree on ids, and a positional join would mis-attribute every later answer
+  // if the driver ever dropped one.
+  std::map<std::string, const rj::Value*> by_id;
+  if (have_driver) {
+    for (const auto& r : doc["results"].GetArray()) {
+      if (r.IsObject() && r.HasMember("id") && r["id"].IsString()) {
+        by_id.emplace(r["id"].GetString(), &r);
+      }
+    }
+  }
+
+  rj::StringBuffer             sb;
+  rj::Writer<rj::StringBuffer> w(sb);
+  w.StartObject();
+  if (have_driver) {
+    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+      const std::string_view key = it->name.GetString();
+      if (key == "results") {
+        continue;  // rebuilt below, in request order
+      }
+      w.Key(it->name.GetString());
+      if (key != "run" || !it->value.IsObject()) {
+        it->value.Accept(w);
+        continue;
+      }
+      // The driver reports what it MEASURED (samples, replay bounds, seed,
+      // fail_cycle); which test and which clock those belong to are selection
+      // facts only this side knows, so they are added rather than duplicated
+      // into the generated code.
+      w.StartObject();
+      for (auto rit = it->value.MemberBegin(); rit != it->value.MemberEnd(); ++rit) {
+        w.Key(rit->name.GetString());
+        rit->value.Accept(w);
+      }
+      if (!it->value.HasMember("test")) {
+        w.Key("test");
+        w.String(plan.test.c_str());
+      }
+      if (!it->value.HasMember("clock")) {
+        w.Key("clock");
+        if (plan.clock.empty()) {
+          w.Null();
+        } else {
+          w.String(plan.clock.c_str());
+        }
+      }
+      w.EndObject();
+    }
+  } else {
+    // No replay was needed (or the driver produced nothing): the kernel is the
+    // whole engine for this batch, and says only what it actually knows.
+    w.Key("schema_version");
+    w.Int(1);
+    w.Key("kind");
+    w.String("sim_query_result");
+    w.Key("run");
+    w.StartObject();
+    w.Key("test");
+    w.String(plan.test.c_str());
+    w.Key("clock");
+    if (plan.clock.empty()) {
+      w.Null();
+    } else {
+      w.String(plan.clock.c_str());
+    }
+    w.Key("phase");
+    w.String("post");
+    w.EndObject();
+  }
+  w.Key("results");
+  w.StartArray();
+  for (size_t i = 0; i < plan.ids.size(); ++i) {
+    if (!plan.kernel_results[i].empty()) {
+      w.RawValue(plan.kernel_results[i].data(), plan.kernel_results[i].size(), rj::kObjectType);
+      continue;
+    }
+    if (auto it = by_id.find(plan.ids[i]); it != by_id.end()) {
+      write_result_enriched(w, *it->second, cat);
+      continue;
+    }
+    // The query was planned but came back unanswered (an older driver, or one
+    // that died mid-batch). An absent id would read as "not asked"; say why.
+    const auto miss = q_error_result(plan.ids[i],
+                                     Q_fail{"unsupported",
+                                            "the generated sim driver returned no answer for this query",
+                                            "regenerate the sim dir (drop --run-only) so the driver carries the query evaluator",
+                                            {}});
+    w.RawValue(miss.data(), miss.size(), rj::kObjectType);
+  }
+  w.EndArray();
+  w.EndObject();
+  return sb.GetString();
+}
+
+}  // namespace
 
 // `lhd sim <file.prp> [test.name] [--arg k=v ...]` — lower the design's DUT
 // modules to Slop<N> structs (inou.cgen.sim) and, for each `test` block,
@@ -213,6 +1590,17 @@ void sim_command(Options& opts, Result& res) {
     throw Lhd_error{"usage",
                     "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
                     "run once with checkpointing on to create them, then --restart-at"};
+  }
+  // --query owns the replay: it plans ONE traversal over the union of the
+  // batch's time ranges and picks its own checkpoint. --restart-at and the VCD
+  // window flags plan the same replay differently (--vcd-from silently doubles
+  // as a restart target), so the two planners would fight over one run. v1 says
+  // so instead of picking a winner; composition can come later.
+  if (!opts.sim_query.empty()
+      && (opts.sim_restart_at >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
+    throw Lhd_error{"usage",
+                    "--query cannot be combined with --restart-at / --vcd-from / --vcd-to / --vcd-on-fail",
+                    "run the query batch on its own; a VCD or a restart is a separate invocation"};
   }
 
   std::vector<prp_sim::Test_info> tests;
@@ -798,6 +2186,27 @@ void sim_command(Options& opts, Result& res) {
       run_args += " --break-when " + shell_quote(opts.sim_break_when);
     }
   }
+  // --query: the kernel half of the batched query API. Everything JSON happens
+  // HERE — validate the request, resolve every selector against the static
+  // catalog, answer whatever needs no simulation, union the surviving time
+  // ranges, and leave the driver a selector-free line plan. A batch of nothing
+  // but `signals` needs no plan at all: the run still happens (a query run is
+  // still a test run) but it carries no query work.
+  const std::string sim_query_path  = std::format("{}/sim_query.json", simdir);
+  const std::string query_plan_path = std::format("{}/sim_query_plan.txt", simdir);
+  Sim_catalog       query_cat;
+  Query_plan        query_plan;
+  if (!opts.sim_query.empty()) {
+    // Stale artifacts from a reused --workdir would read as THIS run's answers.
+    std::error_code ec_rm3;
+    fs::remove(sim_query_path, ec_rm3);
+    fs::remove(query_plan_path, ec_rm3);
+    query_cat  = load_sim_catalog(simdir, test_sel);
+    query_plan = plan_sim_query(read_query_request(opts.sim_query), query_cat, query_plan_path);
+    if (query_plan.wrote_plan) {
+      run_args += " --query-plan " + shell_quote(query_plan_path) + " --query-json " + shell_quote(sim_query_path);
+    }
+  }
   // Forward each `--arg key=value` as `--key value`, but ONLY when `key` is a
   // parameter of a SELECTED test (`selected_params`). Two reasons:
   //  * a key that is a driver control flag (`--arg help=1` -> `--help`, `--arg
@@ -880,6 +2289,13 @@ void sim_command(Options& opts, Result& res) {
     if (dj.size() >= 2 && dj.front() == '{') {
       res.sim_debug_json = dj;
     }
+  }
+
+  // The --query answers, embedded as the envelope's "query" member. ABOVE the
+  // rc mapping on purpose: an assert-firing replay is still exit 11, and its
+  // query answers are exactly what the agent asked the failing run for.
+  if (query_plan.active) {
+    res.sim_query_json = finalize_sim_query(query_plan, query_cat, sim_query_path);
   }
 
   // The binary's EXIT CODE is the authoritative verdict (0 = all selected tests

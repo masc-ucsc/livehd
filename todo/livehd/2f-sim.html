@@ -287,17 +287,20 @@
   generated driver already enforces this).</li>
 <li>Plan the complete batch before replay: union its time ranges, select one
   checkpoint, and traverse the interval once.</li>
-<li><strong>Checkpoint compatibility is a planner rule, not a warning.</strong> In the
-  agent edit loop, workdir checkpoints are stale almost every time — any edit flips
-  <code>design_hash</code> (it folds a cell-count logic fingerprint). The batch planner
-  treats a hash-mismatched checkpoint as <em>unusable</em> and falls back to the next
-  older matching checkpoint or a cycle-0 replay — never warn-and-load, which would
-  produce silently wrong answers from stale state. This is deliberately stricter than
-  <code>--restart-at</code>, whose warn-only cross-version reload is preserved
-  unchanged for the editable-checkpoint use case. The response reports checkpoints
-  considered, the one used (<code>null</code> when replaying from 0), and why others
-  were skipped. A "compatible" checkpoint includes the per-net
-  <code>__clkprev_*</code> secondary-clock edge state (pinned by
+<li><strong>Checkpoint acceleration is DEFERRED (ruling 2026-08-03), not
+  implemented.</strong> A batch always replays from cycle 0 and discloses that
+  (<code>checkpoint_used: null</code> plus <code>cycles_replayed</code>). The reason is
+  measured, not theoretical: checkpoints ride a 10-second WALL-CLOCK cadence floor, so
+  the short runs of an actual agent debug loop produce ZERO checkpoints and the
+  machinery would never trigger — while costing a design-hash validation policy and a
+  PRNG-divergence policy to get right. If replay cost ever becomes the bottleneck, the
+  better lever is reusing ONE replay across several query batches, not restarting from
+  the middle of a previous one. When it is built, the rule it must follow is: treat a
+  hash-mismatched checkpoint as <em>unusable</em> and fall back to an older matching one
+  or to cycle 0 — never warn-and-load, which would answer from stale state. That is
+  deliberately stricter than <code>--restart-at</code>, whose warn-only cross-version
+  reload stays as-is, and "compatible" must include the per-net
+  <code>__clkprev_*</code> secondary-clock bits (pinned by
   <code>lhd_sim_restart_test.sh</code>).</li>
 <li><strong>PRNG rule.</strong> The PRNG stream position is not checkpointed (only
   <code>seed</code> and the draw count are recorded), so replay from a checkpoint of a
@@ -305,13 +308,14 @@
   <code>rng_draws != 0</code>, replay from cycle 0 for deterministic answers; a request
   may opt in with <code>"allow_rng_divergence": true</code>, which proceeds from the
   checkpoint and marks every result <code>reproducible:false</code>.</li>
-<li><strong>Early-stop is verdict-neutral.</strong> A query run is still a test run:
-  stopping replay early would skip later asserts and truncate the verdict. Early-stop
-  is allowed only when no other batched query, legacy sugar, or full-run verdict needs
-  the tail; when it triggers, the envelope's <code>tests</code> member is marked
-  partial (<code>replay_stopped_at</code>) so an agent can never mistake a truncated
-  replay for a passing run, and no checkpoints are written from the truncated replay.
-  Legacy <code>--break-when</code> keeps its pinned full-run traversal.</li>
+<li><strong>Early stop is DROPPED (ruling 2026-08-03).</strong> Verdict neutrality
+  makes it nearly inapplicable — a query run is a test run, so replay may only stop
+  when nothing else needs the tail AND the verdict does not matter, which is almost
+  never. The benefit it was reaching for was avoiding work over cycles nobody asked
+  about, and bounding the SAMPLING window to the planned interval already captures
+  that: the loop runs to completion (so asserts fire and the verdict is exactly an
+  unqueried run's) while only the requested cycles are recorded. Legacy
+  <code>--break-when</code> keeps its full-run traversal, unchanged.</li>
 <li>Sample only the settled post-step state (see Time model). Unsupported phases fail
   explicitly.</li>
 <li><strong>Output sampling is inline, never peek().</strong> The only output-read path
@@ -400,7 +404,84 @@
   requires excessive result rows, tool calls or replay work is evidence for a later
   aggregation or expression-language extension.</p>
 
-<h2>Subtasks — pending</h2>
+<h2>Status — B0/A/B/C/D/E landed 2026-08-03</h2>
+
+<p>The API works end to end: <code>lhd sim … --query</code> answers a batch and the
+  answers ride the envelope's <code>query</code> member. Pinned by
+  <code>lhd/tests/lhd_sim_query_test.sh</code>; the 13 existing sim shell tests and all
+  184 <code>prp-sim-*</code> fixtures stay green.</p>
+
+<p><strong>Corrections that only appeared on code contact</strong> — the spec above was
+  written from a read-only review, and three of its statements were wrong:</p>
+
+<ul>
+<li><strong>Selector fields are FLAT on the query object</strong>
+  (<code>{"op":"values","scope":"cpu.rob"}</code>), not nested under a
+  <code>selector</code> key. Every op takes <code>signal</code> or any of
+  <code>scope</code>/<code>glob</code>/<code>regex</code>/<code>kind</code> in the same
+  position, which is what the document's own <code>rob_delta</code> example already did.</li>
+<li><strong>Outputs and state are sampled one commit apart, by construction.</strong> A
+  <code>flop</code>/<code>memrd</code>/<code>input</code> reads its SETTLED end-of-period
+  value (where <code>--probe</code> has always sampled); an <code>output</code> reads the
+  value it DROVE DURING that period, computed from the state entering the cycle — exactly
+  what the VCD shows at that period's timestamps, and free, because <code>cycle()</code>
+  already computed it. Reporting a post-commit output instead would cost a
+  <code>peek()</code> per sampled cycle (O(total design state)). So at a cycle where a
+  counter flop reads 6, its combinational output reads 5. This asymmetry is the contract,
+  and it is pinned.</li>
+<li><strong>The bit-rotted memory read was doubly dead.</strong> Fixing the reflection
+  (B0) was necessary but not sufficient: a single-segment <code>acc.bank[2]</code> never
+  reaches the field resolver with its subscript attached (the index is a separate
+  expression node), so only the DOTTED hierarchical branch ever saw brackets. Wiring the
+  subscript through is an expression-emitter change, not a reflection one. The query API
+  does not depend on it — <code>--query</code> reads memory words through the generated
+  <code>observe_mem()</code>, which is pinned.</li>
+</ul>
+
+<p><strong>Follow-on work, landed 2026-08-03 after using the API:</strong></p>
+
+<ul>
+<li><strong><code>{"event":"fail","offset":K}</code> anchors LANDED</strong> — the
+  headline loop is now one invocation. A failure-relative cycle travels as the plan
+  token <code>F&lt;offset&gt;</code> and the driver resolves it against the failing
+  assert's cycle after the run; the run that REPORTS the failure answers questions about
+  it, with no round trip to learn the cycle first. An anchored query on a test that
+  passed is answered plainly ("the test did not fail"), never guessed at. A batch
+  containing one cannot bound its sampling window, so it observes the whole run.</li>
+<li><strong>The sample stream stores only referenced signals</strong> — the driver
+  derives the needed set from the plan it parses (query signals, selector expansions,
+  find samples and predicate leaves) and keeps only those. The stream was the one thing
+  growing as signals × cycles, on designs where a batch asks about a handful of signals
+  out of thousands.</li>
+<li><strong>Every value declares WHEN it was sampled</strong> (<code>"sampled":
+  "settled"</code> or <code>"during_period"</code>), so the output-vs-state asymmetry is
+  self-describing rather than a documented trap.</li>
+<li><strong>A catalog self-check is pinned</strong>: one selector over the whole catalog
+  must answer for every non-memory signal. Both late bugs in this feature had the same
+  shape — the catalog advertising something the engine could not answer — and this
+  catches that class in a single query.</li>
+</ul>
+
+<p><strong>Known gaps, all failing loudly rather than silently:</strong></p>
+
+<ul>
+<li><code>changes</code>/<code>next_change</code> take ONE signal (no scope expansion);
+  <code>find</code> has no <code>slice</code> leaf; signed ordered compares and
+  <code>allow_rng_divergence</code> are refused. All return in-band
+  <code>unsupported</code>.</li>
+<li>Early stop is not implemented. Sampling is bounded to the planned window, but the
+  tick loop always runs to completion — which is the verdict-neutrality rule satisfied
+  the cheap way.</li>
+<li><code>invalid_range</code> split, resolving the spec's self-conflict: a bad TIME
+  range is a process usage error (exit 2), an out-of-bounds MEMORY index is an in-band
+  per-query <code>invalid_range</code>.</li>
+</ul>
+
+<h2>Subtasks — landed 2026-08-03</h2>
+
+<p>B0 through E landed together; F (the internal engine-oracle smoke) is the one
+  still open. Each entry below is what actually shipped — where the plan and the
+  code disagreed, the Status section above records the correction.</p>
 
 <ul class="subtasks">
 <li><strong>B0 — interface manifest (prerequisite).</strong> The driver's only DUT
@@ -459,6 +540,11 @@
   schema and examples to <code>lhd help sim</code> and <code>lhd describe sim</code>
   (four hand-maintained places: <code>parse_args</code>, the Options struct, the help
   block, the describe record).</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+
+<ul class="subtasks">
 <li><strong>F — engine-oracle smoke.</strong> An internal WaveformQA-<em>style</em>
   question set: generate questions in the same 24-subcategory stratification over
   existing sim fixtures (counter, fsm_runner, wide_values, mem_ordering_sim,

@@ -173,6 +173,12 @@ struct Options {
   long        sim_probe_from = -1;       // --probe-from A
   long        sim_probe_to   = -1;       // --probe-to B
   std::string sim_break_when;            // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
+  // `sim --query FILE|-|{inline}` (2f-sim): a BATCHED JSON request
+  // ({schema_version:1, kind:"sim_query", queries:[...]}). Batching is what lets
+  // the planner union every question's time range and answer them all from ONE
+  // replay; the legacy flags above stay the low-ceremony spelling of the same
+  // engine. Answers land in the envelope's "query" member.
+  std::string sim_query;
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -209,6 +215,12 @@ struct Result {
   // pre-serialized JSON object {signals?, probe?, break?} read back from the
   // driver's debug sidecar, embedded verbatim as the result's "debug" member.
   std::string sim_debug_json;
+
+  // `lhd sim --query` payload (2f-sim): the {schema_version, kind:"sim_query_result",
+  // run, results} object embedded verbatim as the result's "query" member. Built
+  // from the driver's <simdir>/sim_query.json sidecar merged with the queries the
+  // kernel answered from the static catalog alone (`signals`), in REQUEST order.
+  std::string sim_query_json;
 
   // `lhd pass abc` QoR payload (2opt-freq A): the qor.json sidecar content
   // (per-region + total mapped gates/area/critical delay, source-attributed),

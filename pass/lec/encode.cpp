@@ -31,40 +31,95 @@ namespace gu = livehd::graph_util;
 // signal that this encoder cannot model the element's commit condition, since
 // its only gating branches are the ICG fold and the multi-clock detected edge.
 // File scope so the flop loop and the memory cut share ONE definition.
-static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
-  for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
-    if (gu::is_graph_input_pin(p)) {
-      return p;
+// Peel WIDTH-ONLY wrappers off a clock driver so the shape dispatch below sees
+// the operator that actually derives the clock.
+//
+// Widths do not line up across a Verilog round trip: cgen's value model needs
+// one extra bit for an unsigned magnitude, so `clk_b & gate` (two 1-bit nets)
+// comes back as a 2-bit `and_28`, and the reader then narrows it with a
+// Get_mask before it reaches the flop's clock_pin. The ICG fold matched on the
+// IMMEDIATE driver's op, saw `get_mask` instead of `and`, and refused the flop
+// as an unmodellable derived clock -- measured on tests/equiv/mclk_derived,
+// which is the identical `<clock> & <enable>` cone the fold exists to handle.
+// The extra bit carries no information (it is a zero/sign extension of the same
+// value), so a narrowing is not part of the clock's SHAPE.
+//
+// Same peel set as resolve_clk_input, and the same lowest-port-id rule for
+// picking the value operand out of Get_mask/Set_mask/Sext -- these all take the
+// value on the low pid and the mask/amount above it. Depth-capped.
+static hhds::Pin_class peel_clock_width(hhds::Pin_class p, int depth = 0) {
+  while (!p.is_invalid() && depth < 16) {
+    ++depth;
+    const auto op = gu::type_op_of(p.get_master_node());
+    // A MASK-SHAPED And is a width adjustment too, not a gate: narrowing a
+    // value to N bits is spelled `v & MASK`, and that is how the LSB of the
+    // 2-bit `and_28` is taken before it reaches the clock_pin. Exactly ONE
+    // non-constant operand distinguishes it from a real clock gate (`clk &
+    // enable`, two data operands), which must NOT be peeled -- that one folds
+    // into a commit guard below and dropping it would model a gated flop as
+    // committing every step.
+    if (op == Ntype_op::And) {
+      hhds::Pin_class data;
+      int             data_ins = 0;
+      bool            keeps_b0 = true;
+      for (const auto& e : p.get_master_node().inp_edges()) {
+        if (gu::is_const_pin(e.driver)) {
+          keeps_b0 &= !gu::hydrate_const(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
+          continue;
+        }
+        ++data_ins;
+        data = e.driver;
+      }
+      if (data_ins != 1 || !keeps_b0 || data.is_invalid()) {
+        break;
+      }
+      p = data;
+      continue;
     }
-    auto n = p.get_master_node();
-    if (gu::type_op_of(n) != Ntype_op::Get_mask) {
-      return {};
+    if (op != Ntype_op::Get_mask && op != Ntype_op::Sext) {
+      break;
     }
-    // Take the `a` operand (sink pid 0); `mask` is pid 2 (graph/cell.cpp).
-    //
-    // This used to compare `e.sink.get_port_id() < a.get_port_id()` -- the
-    // candidate's SINK pid against the held pin's DRIVER pid, two different
-    // numbering spaces. A driver pid is 0 for any single-output node, so once
-    // any edge was taken the test read `sink_pid < 0`, which is never true, and
-    // whichever edge iterated FIRST won. When that was `mask` the walk landed on
-    // the constant and gave up -- so an ICG whose operands arrive through the
-    // width-mask wrappers (`Get_mask(clk_b,1) & Get_mask(gate,1)`, exactly what
-    // a typed 1-bit port read produces) resolved to NOTHING and the flop was
-    // refused as an unmodellable derived clock. Order-dependent, which is why it
-    // survived: the same shape resolves fine when the edges come out the other
-    // way round. Measured on tests/equiv/mclk_derived.
+    // Take the `a` operand (sink pid 0); the mask / bit count is pid 2 resp. 1
+    // (graph/cell.cpp). Track the SINK pid explicitly: comparing against
+    // `a.get_port_id()` would read the held pin's DRIVER pid, which is 0 for any
+    // single-output node, so the test would be `sink_pid < 0` -- never true --
+    // and whichever edge iterated first would win. When that is the constant the
+    // walk lands on it and gives up, order-dependently.
     hhds::Pin_class a;
     hhds::Port_id   a_pid = Port_invalid;
-    for (const auto& e : n.inp_edges()) {
+    for (const auto& e : p.get_master_node().inp_edges()) {
       const auto spid = e.sink.get_port_id();
       if (a.is_invalid() || spid < a_pid) {
         a     = e.driver;
         a_pid = spid;
       }
     }
+    if (a.is_invalid()) {
+      break;
+    }
     p = a;
   }
-  return {};
+  return p;
+}
+
+static hhds::Pin_class resolve_clk_input(hhds::Pin_class p) {
+  // ONE definition of "width adjustment", shared with the shape dispatch: strip
+  // every wrapper that cannot change bit 0 (the only bit an edge is detected
+  // on), then ask whether what is left is a clock INPUT.
+  //
+  // This used to peel Get_mask only, and to compare `e.sink.get_port_id() <
+  // a.get_port_id()` -- the candidate's SINK pid against the held pin's DRIVER
+  // pid, two different numbering spaces. A driver pid is 0 for any
+  // single-output node, so once any edge was taken the test read `sink_pid < 0`
+  // and whichever edge iterated FIRST won; when that was `mask` the walk landed
+  // on the constant and gave up. Both bugs hit the same design: an ICG whose
+  // operands arrive through width wrappers resolved to NOTHING and the flop was
+  // refused as an unmodellable derived clock. Measured on
+  // tests/equiv/mclk_derived, whose golden spells the same cone at native width
+  // and always passed -- the asymmetry only shows on a Verilog round trip,
+  // where cgen's extra magnitude bit forces the extension in.
+  const auto base = peel_clock_width(p);
+  return gu::is_graph_input_pin(base) ? base : hhds::Pin_class{};
 }
 
 // 2f-latch M9 -- decode a clock_pin driver that is (or reaches, through the
@@ -1827,6 +1882,34 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       case Ntype_op::Or:
       case Ntype_op::Xor: {
         Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
+        // A bitwise op is a width-preserving pass-through of its operands'
+        // VALUES, so a signed value flowing into one is still signed coming out
+        // -- and that decides how a later consumer WIDENS it. The pin's own hint
+        // cannot answer: tolg's bind_result drops it on every op output, which
+        // is why cgen carries the same walk-through in operand_reads_signed.
+        //
+        // Without this the two ends disagreed about our OWN emitted code. cgen
+        // widens a shift's left operand with `$signed(N'sb0) | $signed(val)`; on
+        // the way back in that is Or(const 0, val_signed), the Or read UNSIGNED,
+        // so `fit` in the SHL case zero-extended a negative operand: `sa <<
+        // ua` with sa = 3'sb100 (-4) encoded as 4, and lec REFUTED
+        // tests/equiv/signed_shift_widen against a golden that iverilog says is
+        // identical on all 64 inputs. A wrong verdict, and on a shape our own
+        // back end emits for every signed shift.
+        // Or ONLY, and only when every operand is signed: that is the widening
+        // PAD our own back end emits (`$signed(N'sb0) | $signed(val)`), where a
+        // zero operand carries no sign of its own but is stored signed. An
+        // `And(val, MASK)` -- the width mask on every net read -- is NOT this:
+        // a masked value is non-negative, and marking it signed made later
+        // widenings sign-extend it. Measured: the broad rule fixed 2 tests and
+        // broke 6.
+        if (op == Ntype_op::Or && !all.empty()) {
+          bool every = true;
+          for (const auto& v : all) {
+            every &= v.is_signed;
+          }
+          out_signed |= every;
+        }
         for (const auto& v : all) {
           Term t = fit(v, W);
           result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
@@ -1998,6 +2081,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         Term       shf = fit_to(tm_, Val{pid(1)[0].term, pid(1)[0].width, false}, cw);  // shift amount: unsigned
         Kind       k   = a.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR;
         result         = fit_to(tm_, Val{tm_.mkTerm(k, {af, shf}), cw, a.is_signed}, W);
+        // An arithmetic shift PRESERVES the operand's sign, so the result is
+        // signed whenever `a` is -- and the pin's own hint cannot say so, since
+        // tolg's bind_result drops it on every op output. cgen already carries
+        // exactly this walk-through (operand_reads_signed recurses into an SRA's
+        // `a`); without the same rule here a CHAINED right shift demoted its
+        // OUTER shift to logical, because the inner SRA's result Val said
+        // unsigned. Measured on tests/equiv/shift_nested_sra: `((a >>> b) >>> b)
+        // ^ (a << b)` at a = -72, b = 1 encoded 30 where both iverilog and our
+        // own emitted Verilog say 158 -- and the side lec got wrong was the
+        // hand-written GOLDEN, on all 1024 input pairs of which the two designs
+        // agree.
+        out_signed |= a.is_signed;
         break;
       }
       case Ntype_op::Sext: {
@@ -2834,7 +2929,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
     } else if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
-      auto        cn      = clk_d.get_master_node();
+      // Dispatch on the clock's SHAPE, with pure width adjustment peeled off
+      // (see peel_clock_width): a round-tripped `clk & en` reaches the flop as
+      // get_mask(and(...)) and must still fold as the ICG it is.
+      auto        cn      = peel_clock_width(clk_d).get_master_node();
       const auto  cop     = gu::type_op_of(cn);
       const auto  clk_in  = resolve_clk_input(clk_d);
       if (cop == Ntype_op::Clock_cell) {
@@ -3036,10 +3134,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Latches and negedge flops do not reach this: pass.single_edge lowers
       // them away first, and it declines (loudly) what it cannot lower.
       if (commits.isNull() && !clock_modelled && resolve_clk_input(clk_d).is_invalid()) {
-        return fail_unsupported("flop '" + gu::debug_name(node)
-                                + "' has a derived clock the encoder cannot model (not a clock input, and not a "
-                                  "foldable `<clock> & <enables>` gate); refusing rather than encode it as "
-                                  "committing every step");
+        return fail_unsupported("flop '" + gu::debug_name(node) + "' has a derived clock the encoder cannot model (driver op is "
+                                + std::string(Ntype::get_name(gu::type_op_of(clk_d.get_master_node())))
+                                + ", which is neither a clock input nor a foldable `<clock> & <enables>` gate); refusing "
+                                  "rather than encode it as committing every step");
       }
     }
 

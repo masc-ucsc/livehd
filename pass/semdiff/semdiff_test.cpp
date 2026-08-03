@@ -513,6 +513,76 @@ TEST(Semdiff, StatePairingInitMismatchRefuses) {
   EXPECT_NE(r.a_state_unpaired[0].find("(kind/init mismatch)"), std::string::npos) << r.a_state_unpaired[0];
 }
 
+// A WIDTH difference must NOT refuse the pair. The same state element does not
+// have the same declared width on both sides of a Verilog round trip: cgen
+// needs one extra bit to carry an unsigned magnitude, so a `u8` register comes
+// back as `reg [8:0]` against a golden `reg [7:0]`. Folding that into the pair
+// precondition refused every such pair, the flops got free independent power-on
+// symbols and the miter refuted at step 1 on the initial value alone -- a FALSE
+// REFUTED on byte-equivalent designs (measured on tests/equiv/mod_delay3).
+//
+// Sound because the miter crosses widths already: query.cpp shares ONE symbol
+// per cut at the MIN width and Encoder::seed_state extends it to each side with
+// SIGN_EXTEND/ZERO_EXTEND per that side's signedness. The high bits are derived,
+// not assumed equal.
+TEST(Semdiff, StatePairingWidthMismatchPairs) {
+  auto with_bits = [](const std::string& dir, const std::string& nm, int bits) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d", bits);
+    gio->add_output("q", bits);
+    auto g = gio->create_graph();
+    auto f = create_typed_node(*g, Ntype_op::Flop);
+    g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+    auto q = f.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, bits);
+    livehd::graph_util::set_pin_name(q, nm);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+  auto a = with_bits("lgdb_semdiff_wm_a", "ra", 8);
+  auto b = with_bits("lgdb_semdiff_wm_b", "xa", 9);  // renamed AND one bit wider
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(1U, r.state.full_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+}
+
+// ...but a MEMORY keeps its width in the identity. The shared state is a cvc5
+// ARRAY built from the exact `size x bits` shape and there is no extension path
+// for an array element, so two memories of different data width are genuinely
+// different state and must still refuse.
+TEST(Semdiff, StatePairingMemoryWidthMismatchRefuses) {
+  auto with_bits = [](const std::string& dir, const std::string& nm, int bits) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d", bits);
+    gio->add_output("q", bits);
+    auto g = gio->create_graph();
+    auto m = create_typed_node(*g, Ntype_op::Memory);
+    g->get_input_pin("d").connect_sink(m.create_sink_pin(4));
+    auto q = m.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, bits);
+    livehd::graph_util::set_pin_name(q, nm);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+  auto a = with_bits("lgdb_semdiff_mwm_a", "ma", 8);
+  auto b = with_bits("lgdb_semdiff_mwm_b", "mx", 9);
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(0U, r.state.full_pairs);
+}
+
 // Caller-supplied seed pairs (lec.match) are tier-1 anchors: the seeded pair
 // resolves without a signature, and the remaining renamed flop full-matches
 // against sharper (seed-anchored) signatures.

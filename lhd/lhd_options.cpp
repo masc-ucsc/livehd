@@ -599,6 +599,15 @@ Options parse_args(int argc, char** argv) {
       opts.sim_probe_to = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--break-when") {  // `sim`: first cycle a `SIG OP VALUE|SIG` condition holds
       opts.sim_break_when = need_value(a, i, argc, argv);
+    } else if (a == "--query") {  // `sim`: batched JSON query request — a path, `-` for stdin, or inline `{...}`
+      // need_value takes the NEXT argv verbatim, so `--query -` (stdin) survives.
+      // An empty value would silently read as "no query at all", so reject it.
+      opts.sim_query = need_value(a, i, argc, argv);
+      if (opts.sim_query.empty()) {
+        throw Lhd_error{"usage",
+                        "--query expects a file path, `-` for stdin, or an inline JSON object",
+                        "e.g. --query q.json, --query -, or --query '{\"schema_version\":1,\"kind\":\"sim_query\",...}'"};
+      }
     } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;

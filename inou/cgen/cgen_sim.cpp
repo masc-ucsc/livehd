@@ -972,7 +972,8 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // indices — stable now that graph construction is deterministic), per-pin
 // width/sign, plus the generation-affecting options and a generator version
 // (BUMP kSimGenVersion whenever the emitted C++ shape changes).
-static constexpr std::string_view kSimGenVersion = "simgen-2";  // 2: liveness-gated comb emission
+// 3: per-module <stem>.iface.json manifest + observable outputs/memories (2f-sim B0/B)
+static constexpr std::string_view kSimGenVersion = "simgen-3";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -1262,7 +1263,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     auto            it = gen_digests_.find(gname);
     std::error_code ec;
     if (it != gen_digests_.end() && it->second == hex && std::filesystem::exists(base + ".hpp", ec)
-        && std::filesystem::exists(base + ".cpp", ec)) {
+        && std::filesystem::exists(base + ".cpp", ec) && std::filesystem::exists(base + ".iface.json", ec)) {
       return;
     }
     gen_digests_[gname] = hex;  // persisted below, after a clean emission
@@ -1945,6 +1946,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // (`acc.total`). Keeping __in in the instance (not the driver) means a future
   // state copy / checkpoint captures the pokes too.
   hout->append("  In __in{};\n");
+  // 2f-sim B: the outputs this instance last computed. cycle() records them on
+  // the way out, so the query engine can observe an output at any sampled cycle
+  // WITHOUT a peek() (whose snapshot/restore is O(total design state) per call).
+  // DERIVED state: deliberately absent from dump_state/load_state and from
+  // design_hash — it is recomputed by the next cycle() and must not change the
+  // checkpoint layout or its compatibility hash. peek() does save/restore it, so
+  // a testbench output read stays free of side effects.
+  hout->append("  Out __last_out{};\n");
 
   // ---- VCD trace state (compile.sim.vcd): traces In, Out, and flop state of
   // EVERY module -- the root instance (the one the driver hands a __vcd_path)
@@ -2084,6 +2093,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // signal (flop / pipe stage / sync-read reg / input) by hierarchical name.
   hout->append("  void describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const;\n");
   hout->append("  void probe_signals(const std::string& _p, std::map<std::string, long>& _m) const;\n");
+  // 2f-sim B: the LOSSLESS observation surface the query engine reads. Same walk
+  // as probe_signals, but (a) values are full-width canonical hex instead of
+  // to_i64_low()'s silent low-64 truncation, and (b) module OUTPUTS are included,
+  // served from the last computed Out (recorded at the end of cycle(), so an
+  // output read costs nothing — never the O(total state) snapshot/restore of a
+  // peek()). `observe_mem` reads ONE committed memory word by member name.
+  hout->append("  void observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const;\n");
+  hout->append("  bool observe_mem(const std::string& _n, long _i, std::string& _o) const;\n");
   hout->append("};\n");
 
   // ---- VCD method definitions (source): __vcd_init (root-only entry) plus the
@@ -3303,6 +3320,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     return;
   }
 
+  fout->append("    __last_out = o;  // 2f-sim B: free output observation for the query engine\n");
   fout->append("    return o;\n}\n");
 
   // peek(): the outputs implied by the CURRENT (post-last-edge) state, with NO
@@ -3335,6 +3353,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   fout->append("    auto _pk_tick = __vcd_tick;\n");  // peek must not perturb the period counter
+  // 2f-sim B: a peek recomputes outputs, so it would otherwise overwrite the
+  // observation record with values from a cycle that never happened.
+  fout->append("    auto _pk_lastout = __last_out;\n");
   if (vcd_on) {
     fout->append("    auto _pk_vcd = std::move(__vcd); auto _pk_vp = __vcd_path; __vcd_path.clear();\n");
   }
@@ -3360,6 +3381,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   fout->append("    __vcd_tick = _pk_tick;\n");
+  fout->append("    __last_out = _pk_lastout;\n");
   if (vcd_on) {
     fout->append("    __vcd = std::move(_pk_vcd); __vcd_path = _pk_vp;\n");
   }
@@ -3602,6 +3624,182 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(absl::StrCat("  ", s.inst, ".probe_signals(_p + \"", s.inst, ".\", _m);\n"));
   }
   fout->append("}\n");
+
+  // ---- observe_signals / observe_mem: the LOSSLESS query surface (2f-sim B) ----
+  // Same hierarchical walk as probe_signals, with the two things the query engine
+  // needs that the legacy probe map cannot express:
+  //   * FULL-WIDTH values. `to_i64_low()` returns the raw low limb, so every
+  //     signal wider than 64 bits was silently truncated in --probe rows and in
+  //     --break-when comparisons. `to_hex(digits)` renders the whole vector, and
+  //     the digit count is pinned to ceil(bits/4) so the text is fixed-width and
+  //     a reader can recover the value without knowing the sign convention.
+  //   * OUTPUTS, served from __last_out (recorded by cycle()). Inputs keep their
+  //     historical `__in.` spelling here; the catalog publishes the clean port
+  //     name and carries this one as an alias.
+  fout->append("void ", mod, "::observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const {\n");
+  const auto hexdigits = [](int bits) { return std::to_string((std::max(1, bits) + 3) / 4); };
+  for (const auto& f : flops) {
+    for (const auto& s : f.stages) {
+      fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_hex(", hexdigits(f.bits), ");\n"));
+    }
+    fout->append(absl::StrCat("  _m[_p + \"", f.member, "\"] = ", f.member, ".to_hex(", hexdigits(f.bits), ");\n"));
+  }
+  for (const auto& m : mems) {
+    for (const auto& p : m.ports) {
+      if (p.rd && m.type == 1) {
+        fout->append(absl::StrCat("  _m[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_hex(",
+                                  hexdigits(m.bits), ");\n"));
+      }
+    }
+  }
+  for (const auto& io : ios) {
+    if (io.is_input) {
+      // Keyed by the CLEAN port name, which is what the catalog publishes and
+      // therefore what a query asks for. probe_signals keeps the historical
+      // `__in.<field>` spelling (pinned by lhd_sim_observe_test.sh) and the
+      // catalog carries it as an alias, but observe_signals is new and only the
+      // query engine reads it, so it has no legacy shape to preserve. Keying it
+      // the old way made every INPUT unqueryable: the catalog offered `acc.din`
+      // while the stream only held `acc.__in.din`, so a perfectly valid name
+      // came back "not observable".
+      fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __in.", io.field, ".to_hex(", hexdigits(io.bits), ");\n"));
+    } else {
+      fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __last_out.", io.field, ".to_hex(", hexdigits(io.bits),
+                                ");\n"));
+    }
+  }
+  for (const auto& s : subs) {
+    fout->append(absl::StrCat("  ", s.inst, ".observe_signals(_p + \"", s.inst, ".\", _m);\n"));
+  }
+  fout->append("}\n");
+
+  // One COMMITTED memory word by member name. `_n` is relative to this instance
+  // ("mem" here, "sub.mem" one level down), so the walk mirrors the catalog's
+  // dotted names. Staged same-cycle writes are transient between ticks by
+  // construction, so what is read here is exactly the entry array.
+  fout->append("bool ", mod, "::observe_mem(const std::string& _n, long _i, std::string& _o) const {\n");
+  for (const auto& m : mems) {
+    fout->append(absl::StrCat("  if (_n == \"", m.member, "\") {\n"));
+    fout->append(absl::StrCat("    if (_i < 0 || _i >= ", m.size, ") { return false; }\n"));
+    fout->append(absl::StrCat("    _o = ", m.member, "[static_cast<size_t>(_i)].to_hex(", hexdigits(m.bits), ");\n"));
+    fout->append("    return true;\n  }\n");
+  }
+  for (const auto& s : subs) {
+    fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, ".\") == 0) {\n"));
+    fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size() + 1, "), _i, _o);\n  }\n"));
+  }
+  fout->append("  return false;\n}\n");
+
+  // ---- <stem>.iface.json — the machine-readable module manifest (2f-sim B0) ----
+  // Replaces the historical TEXT SCRAPE of this module's generated .hpp
+  // (prp_sim.cpp's parse_hpp), which silently bit-rotted the day memories stopped
+  // being `std::array<Slop<...>>` members and became `hlop::Memory_*<...>`. One
+  // JSON object per module holds exactly what a testbench generator and the
+  // sim-query catalog need: IO with tuple leaves already flattened to their dotted
+  // C++/RTL path, state elements, memories (with the shape a word read needs), and
+  // sub-instances. Two widths are published per entry because they differ and both
+  // matter: `bits` is the INTERNAL Slop width that --list-signals has always
+  // reported, `declared_bits` is the source-declared width an agent sees in the
+  // Pyrope/Verilog. They diverge only for INTERNAL nets, which carry a sign slot
+  // above the magnitude — a `reg count:u8` is a Slop<9> declared 8. A PORT is
+  // declared at its nominal width (`value:u8` IS a Slop<8>) and a memory's data
+  // width comes straight from the cell, so for those the two widths are equal and
+  // the sign-slot adjustment must NOT be applied.
+  // Names here are cpp_id()/cpp_port_path() output (identifier chars plus '.' for
+  // tuple leaves), so no JSON string escaping is required.
+  {
+    auto jout = std::make_shared<File_output>(absl::StrCat(base, ".iface.json"));
+    // Internal-net width -> source-declared width (unsigned drops the sign slot).
+    const auto  decl_reg = [](int b, bool uns) { return uns ? std::max(1, b - 1) : b; };
+    std::string j;
+    absl::StrAppend(&j, "{\"schema_version\":1,\"kind\":\"sim_iface\",\"gen\":\"", kSimGenVersion, "\",\"module\":\"", mod,
+                    "\",\n");
+
+    // IO, in port_id order (the order the In/Out structs are emitted in).
+    absl::StrAppend(&j, " \"io\":[");
+    bool first = true;
+    for (const auto& io : ios) {
+      // Port signedness, following cgen_verilog's rule because the LGraph's own
+      // answer differs by direction. An INPUT pin is marked signed by
+      // CONVENTION ("cgen declares every port signed", upass_tolg's io_meta
+      // inputs loop, to compensate a to-positive Get_mask), so its attr says
+      // nothing about the source-declared sign — reading it made every `u8`
+      // input come back signed, which would render `dec` negative for any value
+      // above half range. The declared sign lives in LNAST io_meta, which this
+      // LGraph-level emitter cannot see, so inputs are published unsigned and
+      // the catalog does not claim otherwise. An OUTPUT has no such
+      // compensation: follow its DRIVER's sign, exactly as cgen_verilog does.
+      bool uns = true;
+      if (!io.is_input) {
+        auto pin = g->get_output_pin(io.raw);
+        if (!pin.is_invalid()) {
+          auto drv = get_driver(pin);
+          uns      = drv.is_invalid() ? is_unsign(pin) : is_unsign(drv);
+        }
+      }
+      absl::StrAppend(&j, first ? "" : ",\n      ", "{\"name\":\"", io.field, "\",\"dir\":\"", io.is_input ? "input" : "output",
+                      "\",\"bits\":", io.bits, ",\"declared_bits\":", io.bits, ",\"signed\":", uns ? "false" : "true", "}");
+      first = false;
+    }
+    absl::StrAppend(&j, "],\n");
+
+    // State: pipe stages precede their flop, matching describe_signals() order.
+    absl::StrAppend(&j, " \"regs\":[");
+    first = true;
+    for (const auto& f : flops) {
+      const bool uns = is_unsign(f.node.get_driver_pin(0));
+      for (const auto& s : f.stages) {
+        absl::StrAppend(&j, first ? "" : ",\n        ", "{\"name\":\"", s, "\",\"kind\":\"pipe\",\"bits\":", f.bits,
+                        ",\"declared_bits\":", decl_reg(f.bits, uns), ",\"signed\":", uns ? "false" : "true", "}");
+        first = false;
+      }
+      absl::StrAppend(&j, first ? "" : ",\n        ", "{\"name\":\"", f.member,
+                      "\",\"kind\":\"flop\",\"bits\":", f.bits, ",\"declared_bits\":", decl_reg(f.bits, uns),
+                      ",\"signed\":", uns ? "false" : "true", ",\"latch\":", f.is_latch ? "true" : "false", "}");
+      first = false;
+    }
+    absl::StrAppend(&j, "],\n");
+
+    // Memories: `rd_regs` are the sync-read output registers already carried by
+    // the catalog as kind "memrd"; `size`/`bits` are what a word read needs.
+    absl::StrAppend(&j, " \"mems\":[");
+    first = true;
+    for (const auto& m : mems) {
+      bool uns = true;
+      for (const auto& p : m.ports) {
+        if (p.rd && p.dout_pid >= 0) {
+          uns = is_unsign(m.node.get_driver_pin(static_cast<hhds::Port_id>(p.dout_pid)));
+          break;
+        }
+      }
+      std::string rds;
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          absl::StrAppend(&rds, rds.empty() ? "" : ",", "\"", m.member, "_q", p.rdidx, "\"");
+        }
+      }
+      absl::StrAppend(&j, first ? "" : ",\n        ", "{\"name\":\"", m.member, "\",\"bits\":", m.bits,
+                      ",\"declared_bits\":", m.bits, ",\"signed\":", uns ? "false" : "true",
+                      ",\"size\":", m.size, ",\"ordering\":\"",
+                      m.order == Mem::Order::fwd       ? "fwd"
+                      : m.order == Mem::Order::none    ? "none"
+                      : m.order == Mem::Order::program ? "program"
+                                                       : "old",
+                      "\",\"wensize\":", m.wensize, ",\"n_rd\":", m.n_rd, ",\"n_wr\":", m.n_wr,
+                      ",\"sync_read\":", m.type == 1 ? "true" : "false", ",\"rd_regs\":[", rds, "]}");
+      first = false;
+    }
+    absl::StrAppend(&j, "],\n");
+
+    absl::StrAppend(&j, " \"subs\":[");
+    first = true;
+    for (const auto& s : subs) {
+      absl::StrAppend(&j, first ? "" : ",\n        ", "{\"inst\":\"", s.inst, "\",\"module\":\"", s.callee_struct, "\"}");
+      first = false;
+    }
+    absl::StrAppend(&j, "]\n}\n");
+    jout->append(j);
+  }
 
   // Persist the (updated) generation digests only after a CLEAN emission — a
   // Stage-0 comb-loop failure must not record a digest that would make the

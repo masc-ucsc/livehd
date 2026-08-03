@@ -1334,7 +1334,11 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
-    for (const char* ext : {"hpp", "cpp"}) {
+    // `iface.json` is the per-module manifest prp_sim reads to learn the DUT
+    // interface (2f-sim B0). Checking it here turns a missing/failed manifest
+    // into a precise "cgen.sim did not produce X" instead of the downstream
+    // "no DUT modules found in <simdir>" that the driver generator would raise.
+    for (const char* ext : {"hpp", "cpp", "iface.json"}) {
       auto f = std::format("{}/{}.{}", odir, n, ext);
       if (::access(f.c_str(), R_OK) != 0) {
         throw Lhd_error{"internal", std::format("inou.cgen.sim did not produce {}", f), "check the step log in --workdir"};

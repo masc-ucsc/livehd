@@ -2,6 +2,8 @@
 
 #include "cgen_verilog.hpp"
 
+#include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
+
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -465,6 +467,27 @@ std::string Cgen_verilog::flat_module_name(std::string_view full) const {
   return std::string(pos == std::string_view::npos ? full : full.substr(pos + 1));
 }
 
+int32_t Cgen_verilog::decl_bits_of(const hhds::Pin_class& dpin) {
+  // The width the net was DECLARED with, which is NOT always bits_of: this must
+  // track add_to_pin2var exactly, because a part-select that reaches past the
+  // declared msb is invalid Verilog and slang rejects the regenerated .v.
+  //   * an UNSIGNED net whose driver is a Get_mask drops its always-0 sign slot
+  //     (`reg [bits-2:0]`), so its declared width is one less;
+  //   * a 1-bit net is declared as a SCALAR `reg` with no range at all, and a
+  //     scalar cannot be indexed ("scalar type cannot be indexed") -- callers
+  //     use a 1 here to mean "index-free, emit the bare name".
+  // 0 means "no declared net" (a constant or an invalid pin): the caller must
+  // fold instead of appending a select to the literal.
+  if (dpin.is_invalid() || is_const_pin(dpin)) {
+    return 0;
+  }
+  auto bits = bits_of(dpin);
+  if (is_unsign(dpin) && type_op_of(dpin.get_master_node()) == Ntype_op::Get_mask) {
+    --bits;
+  }
+  return bits;
+}
+
 bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
   if (dpin.is_invalid()) {
     return false;
@@ -486,8 +509,54 @@ bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
   // chained right shift `(a>>b)>>b` reads as unsigned at the outer SRA even
   // though the inner SRA preserves the signed `a`. Walk through the SRA chain.
   auto node = dpin.get_master_node();
-  if (!node.is_invalid() && type_op_of(node) == Ntype_op::SRA) {
+  if (node.is_invalid()) {
+    return false;
+  }
+  if (type_op_of(node) == Ntype_op::SRA) {
     return operand_reads_signed(get_driver(find_sink_pin(node, "a")));
+  }
+  // Same dropped hint, one op further out: a BITWISE combination is a
+  // width-preserving pass-through of its operands' values, so a signed value
+  // flowing into one still reads signed at the output. Walking SRA only left a
+  // hole that a Verilog ROUND TRIP walks straight into, because the widening
+  // pad this very function guards is ITSELF an Or: reading back
+  // `(11'sb0 | sa) << ua` gives SHL(a = Or(const 0, sa_signed)), the Or read
+  // unsigned, the caller took the `{N{1'b0}} |` branch, and the unsigned OR
+  // zero-extended a negative operand -- `sa = 3'sb100` (-4) emitted as 16'h0004
+  // instead of 16'hfffc. MEASURED end to end: our own emitted module returned 4
+  // where iverilog says 65532, on all of tests/equiv/signed_shift_widen.
+  //
+  // ANY operand, not ALL, matching the SRA arm above (which propagates from `a`
+  // alone): the question here is "does a signed value reach this pin", because
+  // the answer decides whether the WIDENING is a sign or a zero extension. A
+  // non-negative constant operand answers false and is transparent either way
+  // -- it zero- and sign-extends alike.
+  // Restricted to a pure WIDENING PAD -- an Or whose every other operand is a
+  // ZERO constant. That is exactly the shape this function's own caller emits
+  // (`$signed(N'sb0) | $signed(val)`), and a zero operand cannot change the
+  // value, so calling the result signed is just naming the sign it already has.
+  //
+  // Deliberately NOT every bitwise op, and not any Or: `And(val, MASK)` is the
+  // width mask cgen puts on every net read, and a masked value is non-negative
+  // by construction. Marking THAT signed made a later widening sign-extend it,
+  // which broke six tests (mem_comptime_init, bitrange_dyn_narrow, ...) --
+  // measured, then narrowed to this.
+  if (type_op_of(node) == Ntype_op::Or) {
+    bool saw_signed = false;
+    for (const auto& e : node.inp_edges()) {
+      if (is_const_pin(e.driver)) {
+        const auto c = hydrate_const(e.driver);
+        if (c.has_unknowns() || !c.is_known_false()) {
+          return false;  // a NON-zero constant operand: not a pad
+        }
+        continue;
+      }
+      if (!operand_reads_signed(e.driver)) {
+        return false;  // an unsigned data operand makes the whole Or unsigned
+      }
+      saw_signed = true;
+    }
+    return saw_signed;
   }
   return false;
 }
@@ -1774,13 +1843,38 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       }
     }
   } else if (op == Ntype_op::Sext) {
-    auto lhs      = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto a_dpin   = get_driver(find_sink_pin(node, "a"));
+    auto lhs      = get_expression(a_dpin);
     auto pos_dpin = get_driver(find_sink_pin(node, "b"));
     auto pos_node = pos_dpin.is_invalid() ? hhds::Node_class{} : pos_dpin.get_master_node();
     if (!pos_node.is_invalid() && is_type_const(pos_node)) {
       auto lpos = hydrate_const(pos_dpin);
       if (lpos.is_just_i64()) {
-        final_expr = absl::StrCat(lhs, "[", lpos.to_just_i64() - 1, ":0]");
+        // Keep bits [pos-1:0] and let the assignment context sign-extend. The
+        // select has to respect how the OPERAND was declared, not bits_of:
+        //   * a constant operand renders as a parenthesized literal, and
+        //     `(4'sh3)[0:0]` is not a legal Verilog select -- fold instead;
+        //   * a 1-bit operand is a SCALAR reg, and `x[0:0]` on it is rejected by
+        //     slang as "scalar type cannot be indexed" (this was live on the
+        //     vloghammer expression_00064 round trip: yosys read the regen .v
+        //     fine, so lgcheck passed while `lhd lec` could not even load it);
+        //   * an unsigned Get_mask net is declared a bit narrower than bits_of,
+        //     so a select up to bits_of-1 reads past the declared msb.
+        // A select that covers the whole declared width is a no-op either way.
+        const auto keep = lpos.to_just_i64();
+        const auto decl = decl_bits_of(a_dpin);
+        if (is_const_pin(a_dpin)) {
+          // The Sext CELL's `b` is the kept bit COUNT, while Dlop::sext_op takes
+          // the sign-bit POSITION (see upass_tolg's lower_sext) -- hence keep-1.
+          // The int overload is hlop-internal; the public one takes the position
+          // as a Dlop (same idiom as upass/bitwidth/wrap_sat.hpp).
+          final_expr = const_to_verilog(
+              *hydrate_const(a_dpin).sext_op(*Dlop::create_integer(static_cast<int>(keep) - 1)));
+        } else if (keep <= 0 || decl <= 1 || keep >= decl) {
+          final_expr = lhs;
+        } else {
+          final_expr = absl::StrCat(lhs, "[", keep - 1, ":0]");
+        }
       }
     }
     if (final_expr.empty()) {
@@ -2387,12 +2481,17 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     // DECLARED net — e.g. a `Get_mask` masking `clk & en` to 1 bit, whose wire
     // name carries cgen's `_u` suffix recorded in pin2var (pin_wire_name returns
     // the bare name, so `always @(posedge get_mask_16)` would miss the real
-    // `get_mask_16_u` net) — or a single-fanout node INLINED as an expression
-    // (a boolean `clk_b & gate` with no other consumer is never declared as a
-    // wire, so its bare name `and_28` is undeclared). get_expression resolves
-    // both (pin2var net name, else the pin2expr inline expression), giving
-    // `always @(posedge (clk_b & gate))`; a module-input clock falls through to
-    // its input name as before.
+    // `get_mask_16_u` net) — or a plain module-input clock, which falls through
+    // to its input name.
+    //
+    // What it must NEVER return here is an INLINE EXPRESSION. It used to: a
+    // single-fanout derived clock (`clk_b & gate` read only by this clock_pin)
+    // was left undeclared and emitted as `always @(posedge (clk_b & gate))`,
+    // which is legal Verilog that our own reader rejects (`unsupported-clock`,
+    // "the clock must be a plain signal") — cgen output LiveHD could not read
+    // back, and tests/equiv/mclk_derived failed on exactly that. create_locals'
+    // THIRD pass now force-declares every clock_pin driver, so the pin is in
+    // pin2var by the time we get here and get_expression yields a net name.
     // A Clock_cell must never reach Verilog emission (2f-latch M9: recognition
     // is scoped to the formal and sim pipelines, never the compile/emission
     // path). Guard it explicitly because the failure would otherwise be SILENT
@@ -2876,6 +2975,54 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
     add_to_pin2var(fout, amt_dpin, get_scaped_name(pin_wire_name(amt_dpin)), is_unsign(amt_dpin));
   }
+
+  // Third pass — a CLOCK must never be an inlined expression either.
+  //
+  // A clock lands in an EDGE EVENT CONTROL (`always @(posedge <x>)`) and in the
+  // cgen_memory_* wrapper's `.clk()` port. Verilog accepts an expression there,
+  // but OUR OWN front end does not: inou.slang's lower_ff_process takes only a
+  // plain NamedValue and hard-errors `unsupported-clock` ("the clock must be a
+  // plain signal") on anything else. So a DERIVED clock used once -- the shape
+  // `gclk = clk_b and gate` in tests/equiv/mclk_derived, whose only reader is
+  // the flop's clock_pin, hence fanout 1 -- was left undeclared by the first
+  // pass, parked in pin2expr, and emitted as `always @(posedge (clk_b & gate))`:
+  // Verilog that LiveHD could not read back. The memory paths are worse, since
+  // get_wire_or_const ignores pin2expr entirely and emits a BARE UNDECLARED
+  // name. Give the clock its own net; a hand-written golden spells it that way
+  // too (`wire gclk; assign gclk = clk_b & gate;`).
+  //
+  // Runs as its own pass so it sees the FINAL pin2var: a module-input clock, a
+  // flop-Q clock divider or a fanout>=2 clock is already declared above and is
+  // left alone.
+  for (auto node : graph->fast_class()) {
+    const auto op = type_op_of(node);
+    if (!is_type_register(node) && op != Ntype_op::Memory) {
+      continue;
+    }
+    for (const auto& e : node.inp_edges()) {
+      if (!str_tools::ends_with(Ntype::get_sink_name(op, e.sink.get_port_id()), "clock_pin")) {
+        continue;
+      }
+      auto clk_dpin = e.driver;
+      if (clk_dpin.is_invalid() || is_const_pin(clk_dpin) || pin2var.contains(clk_dpin.get_class_index())) {
+        continue;  // tied off, or already a declared net / module input
+      }
+      // Same hazard the second pass argues above: a pin parked in pin2expr has
+      // NO assignment emitter, so declaring it would mint a net nothing drives
+      // -- and get_expression prefers pin2var, so the flop would then clock off
+      // a dangling `x`. Leave those with their inline text.
+      if (pin2expr.contains(clk_dpin.get_class_index())) {
+        continue;
+      }
+      // A Clock_cell has no Verilog lowering at all and create_registers raises
+      // a LOUD fatal for it. Declaring one here would replace that fatal with a
+      // silent undriven net -- the dropped-clock-gate miscompile class.
+      if (type_op_of(clk_dpin.get_master_node()) == Ntype_op::Clock_cell) {
+        continue;
+      }
+      add_to_pin2var(fout, clk_dpin, get_scaped_name(pin_wire_name(clk_dpin)), is_unsign(clk_dpin));
+    }
+  }
 }
 
 void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
@@ -2888,6 +3035,27 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   ++nrunning;
 
   (void)verbose;
+
+  // Break a false WORD-level combinational loop through a packed wire, exactly
+  // as cgen_sim does before scheduling (inou/cgen/cgen_sim.cpp). A no-op unless
+  // a genuine word-level cycle exists; a real bit-level loop is never split.
+  //
+  // This writer emits the whole combinational cone as ONE always_comb of
+  // ordered BLOCKING assignments, sequenced by forward_class(). A packed word
+  // whose field is computed from a slice of ITSELF (`w[7:4]` from `w[3:0]`) is
+  // acyclic per BIT but cyclic per WORD, so no such order exists and the block
+  // reads a variable before the line that assigns it -- Verilog that is not
+  // combinational at all. Measured on tests/equiv/sim_loop_mux_arm: the emitted
+  // module differed from the golden on 512/512 input vectors, returning the
+  // PREVIOUS vector's value (verilator: ALWCOMBORDER, "not purely
+  // combinational").
+  //
+  // The dissolver already existed and already ran -- but only from pass.cprop
+  // and from cgen_sim, and the equiv harness compiles with `--recipe O0`, which
+  // skips cprop. So the same design emitted correctly at O1 and incorrectly at
+  // O0. Calling it here makes the Verilog writer self-sufficient rather than
+  // dependent on an optimization pass having run first.
+  livehd::graph_util::split_packed_selfref_wires(graph.get());
 
   pin2var.clear();
   pin2var_unsigned_.clear();

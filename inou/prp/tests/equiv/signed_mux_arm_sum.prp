@@ -1,0 +1,24 @@
+/*
+:name: signed_mux_arm_sum
+:type: equiv
+:verilog_top: signed_mux_arm_sum
+:pyrope_top: signed_mux_arm_sum
+*/
+//
+// Regression: a mux/ternary must inherit its ARMS' signedness.
+//
+// tolg's if/else merge ends in bind_result(), which stamps every result
+// UNSIGNED -- and an unsigned pin is DEFINED to carry an always-0 spare sign
+// bit. `c ? 4'sb1110 : s7` has two SIGNED arms, so that stamp is a lie, and
+// cgen faithfully emitted the merge as `reg [65:0] mux_N` (unsigned). One
+// unsigned operand turns the WHOLE enclosing Verilog expression unsigned, so
+// the signed `s1` beside it ZERO-extended: `(-(s1)) + (c ? -2 : s7)` came out
+// 2 where the golden says 6 (c=0, s1=-2, s7=4).
+//
+// Found in tmp/chimera vloghammer wideexpr_00093; this is its minimal
+// reduction. The merge is now stamped SIGNED whenever any arm can be negative.
+pub comb signed_mux_arm_sum::[timecheck=false](c:u1, s1:s2, s7:s8) -> (y:u16) {
+  y = 0ub????????????????
+  mut _mux_1:s16 = if c != 0 { -2 } else { s7#[0..=7]#sext[0..=7]#[0..=15]#sext[0..=15] }
+  y = ((0 - s1#[0..=1]#sext[0..=1]) + _mux_1)#[0..=15]
+}

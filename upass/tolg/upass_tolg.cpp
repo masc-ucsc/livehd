@@ -93,6 +93,24 @@ struct Val {
   return 0;
 }
 
+// Can the value on this pin be NEGATIVE?
+//
+// An UNSIGNED pin spends its top stored bit on an always-0 sign slot (`bits ==
+// mw + 1`), so by construction it cannot; a SIGNED pin is two's complement over
+// all its bits and can. A CONSTANT pin carries no signed hint at all -- the same
+// trap Cgen_verilog::operand_reads_signed documents -- so ask its VALUE instead
+// of its stamp, or a literal `-2` arm reads as non-negative.
+[[nodiscard]] bool pin_can_be_negative(const Pin& p) {
+  if (p.is_invalid()) {
+    return false;
+  }
+  if (livehd::graph_util::is_const_pin(p)) {
+    auto v = livehd::graph_util::hydrate_const(p);
+    return !v.has_unknowns() && v.is_negative();
+  }
+  return !is_unsign(p);
+}
+
 // Does this LNAST subtree hold an assert/assume/assert_always/cassert? (All four
 // share the `cassert` node type.) Used to warn when a callee carrying properties
 // is INSTANTIATED under a guard those properties will never see.
@@ -5003,6 +5021,24 @@ private:
     if (op == Ntype_op::Sum && !commutative && !first && opnd_idx >= 2) {
       set_sign(out);
     }
+    // OPEN (measured, NOT fixed): a BITWISE op drops its operands' sign the same
+    // way the Sum above did. `sa | 2'sb11` is -1, but bind_result stamps it
+    // unsigned -- an unsigned pin promises an always-0 top bit -- so widening to
+    // a 16-bit output ZERO-fills and the result reads 7 instead of 0xffff. cgen
+    // hides it for a BARE `sa | b` (its Get_mask path re-declares an undeclared
+    // operand signed); only the visit order behind a mux exposes it, exactly the
+    // order-dependence the Sum re-sign was fixed for. Minimal repro:
+    //     y16 = c ? (sa | 2'sb11) : (c ? sa : sb)      // sa,sb signed
+    //
+    // The obvious patch -- `set_sign(out)` when ANY operand can be negative --
+    // was tried here and REVERTED: it fixes that repro but MISCOMPILES 128 of
+    // 2048 vectors on tmp/chigen_fuzz/opfuzz.py's seed-7 depth-6 nest, because
+    // Verilog resolves a bitwise op UNSIGNED as soon as ONE operand is unsigned
+    // (a CONCAT is always unsigned, so `signed_expr ^ {a,b}` is unsigned) --
+    // the opposite of the ANY rule, and the reader does not always pre-insert
+    // the widening node that would make the stamp irrelevant. A correct fix has
+    // to carry the reader's resolved signedness down to the op, not re-derive it
+    // from the operand pins. Tracked by tests/equiv/signed_bitwise_mux_arm.
   }
 
   // LNAST sext(dst, a, b): reinterpret bit POSITION b of `a` as the sign
@@ -5730,6 +5766,16 @@ private:
       int32_t mw        = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
       int     n         = static_cast<int>(branches.size());
       int     last_cond = has_else ? n - 2 : n - 1;
+      // A merge is only as unsigned as its ARMS. bind_result stamps UNSIGNED
+      // unconditionally, which is a lie the moment one arm can go negative, and
+      // an unsigned pin is DEFINED to carry an always-0 spare sign bit -- so
+      // every consumer that widens the merge zero-fills a value that had to
+      // sign-extend. `c ? -2 : s7` came back as an unsigned net, cgen declared
+      // it `reg [65:0]`, and that turned the whole enclosing Verilog expression
+      // unsigned: `(-s1) + (c ? -2 : s7)` evaluated to 2 where the golden says
+      // 6 (vloghammer wideexpr_00093, confirmed against iverilog). Collect the
+      // sign over the same sources the width is collected over.
+      bool any_signed = pin_can_be_negative(cur) || pin_can_be_negative(pre);
       // Finalize the merged width BEFORE building the chain so every mux in it
       // (not only the outermost one bind_result stamps) carries it. An if/elif
       // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
@@ -5739,7 +5785,8 @@ private:
       for (int i = last_cond; i >= 0; --i) {
         auto wr = branches[i].writes.find(var);
         if (wr != branches[i].writes.end()) {
-          mw = std::max(mw, pin_mw_of(wr->second));
+          mw         = std::max(mw, pin_mw_of(wr->second));
+          any_signed = any_signed || pin_can_be_negative(wr->second);
         }
       }
       for (int i = last_cond; i >= 0; --i) {
@@ -5754,10 +5801,20 @@ private:
         cur = mux.create_driver_pin(0);
         if (i != 0) {  // inner mux; bind_result stamps the outermost (i==0) below
           set_bits(cur, mw + 1);
-          set_unsign(cur);
+          if (any_signed) {
+            set_sign(cur);
+          } else {
+            set_unsign(cur);
+          }
         }
       }
       bind_result(var, cur, mw);
+      if (any_signed) {
+        // Keep bind_result's mw+1 bits (the widest arm already fits, and a
+        // signed arm spends its own top bit on the sign) and only flip the
+        // stamp -- the same shape lower_op uses to re-sign a subtracting Sum.
+        set_sign(cur);
+      }
     }
   }
 
@@ -5840,11 +5897,17 @@ private:
       // sources only, then drive the none-of slot with a width-correct
       // don't-care.
       int32_t mw = mw_lookup(var);
+      // Same arm-signedness rule as the Mux chain in lower_if_merge: an
+      // unsigned stamp promises an always-0 top bit, so a negative arm has to
+      // re-sign the merge or every widening consumer zero-fills it.
+      bool any_signed = false;
       if (has_pre) {
-        mw = std::max(mw, pin_mw_of(pre));
+        mw         = std::max(mw, pin_mw_of(pre));
+        any_signed = any_signed || pin_can_be_negative(pre);
       }
       if (has_ev) {
-        mw = std::max(mw, pin_mw_of(else_val));
+        mw         = std::max(mw, pin_mw_of(else_val));
+        any_signed = any_signed || pin_can_be_negative(else_val);
       }
 
       auto hot = make_node(Ntype_op::Hotmux);
@@ -5854,7 +5917,8 @@ private:
         // A non-writing arm keeps the pre-match value; only real writes size.
         Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
         if (wr != branches[i].writes.end()) {
-          mw = std::max(mw, pin_mw_of(val));
+          mw         = std::max(mw, pin_mw_of(val));
+          any_signed = any_signed || pin_can_be_negative(val);
         }
         hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
       }
@@ -5863,7 +5927,11 @@ private:
       // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
       const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
       hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(none_val);
-      bind_result(var, hot.create_driver_pin(0), mw);
+      auto hot_out = hot.create_driver_pin(0);
+      bind_result(var, hot_out, mw);
+      if (any_signed) {
+        set_sign(hot_out);
+      }
     }
   }
 

@@ -241,8 +241,9 @@ struct State_cell {
   std::vector<std::pair<uint32_t, uint32_t>> reach_f;
   uint64_t              token = 0;    // nonzero = resolved (tier-1 seed or tier-2 pair)
   bool                  t1_pair = false, t1_group = false, t2_pair = false, ambiguous = false;
+  uint64_t              kind_nw = 0;         // `kind` WITHOUT the width term (see collect_state)
   bool                  kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
-                                             // kind fold (op/bits/init — the pair precondition)
+                                             // kind fold (op/init — the pair precondition)
 };
 
 struct State_side {
@@ -264,7 +265,6 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     c.key    = state_key(g, node);
     c.is_mem = op == Ntype_op::Memory;
     c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
-    c.kind   = hcombine(c.kind, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
     // COMMIT CLASS folds into the identity for Flop AND Latch (2f-latch M2),
     // mirroring the initial-value fold below. `posclk` means posedge-vs-negedge
     // on a flop and enable-active-high-vs-low on a latch; either way two cells
@@ -294,6 +294,33 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
         c.kind = hcombine(c.kind, hstr(gu::hydrate_const(size_d).serialize()));
       }
     }
+    // WIDTH is folded in LAST, and kept in a separate twin, because it is the
+    // one part of the pair precondition that is not an identity: the SAME state
+    // element legitimately has different declared widths on the two sides. cgen
+    // needs one extra bit to carry an unsigned magnitude, so a `u8` register
+    // round-tripped through Verilog comes back as `reg [8:0]` against the
+    // golden's `reg [7:0]`, and folding that into the identity refused EVERY
+    // such pair as a "kind/init mismatch" -- the flops then got free,
+    // independent power-on symbols and the miter refuted at step 1 on the
+    // initial value. Measured on tests/equiv/mod_delay3 and its whole family.
+    //
+    // Relaxing it is sound because the miter already crosses widths: query.cpp
+    // mints ONE shared symbol per cut at the MIN width of the two sides and
+    // Encoder::seed_state fits it to each side's local width with
+    // BITVECTOR_SIGN_EXTEND / BITVECTOR_ZERO_EXTEND according to that side's
+    // signedness (encode.cpp fit_to). The extra high bits are therefore not
+    // assumed equal -- they are derived, and if they are observable the miter
+    // still refutes.
+    //
+    // MEMORY is the exception and keeps width in its identity: the shared state
+    // is a cvc5 ARRAY sort built from the exact `size x bits` shape, and there
+    // is no extension path for an array element. Two memories of different data
+    // width are genuinely different state.
+    c.kind_nw = c.kind;
+    if (c.is_mem) {
+      c.kind_nw = hcombine(c.kind_nw, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
+    }
+    c.kind = hcombine(c.kind, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
     ss.index.emplace(node.get_class_index(), static_cast<uint32_t>(ss.cells.size()));
     ss.cells.push_back(std::move(c));
   }
@@ -582,10 +609,17 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
   };
   if (opts.state_pairing && has_unresolved(sa) && has_unresolved(sb)) {
     const uint32_t maxiter = std::max<uint32_t>(1, opts.synalign_maxiter);
+    // TWO PHASES. The strict phase keeps the declared width in the identity, so
+    // when both a same-width and a different-width candidate exist the
+    // same-width one is taken first and nothing that pairs today changes. Only
+    // the residue that STILL has no counterpart is then retried width-blind
+    // (see collect_state for why that is sound). Doing it the other way round
+    // would let a width-crossing pair win a slot from an exact one.
+    bool relaxed = false;
     for (uint32_t round = 1; round <= maxiter; ++round) {
       absl::flat_hash_map<uint64_t, std::vector<uint32_t>> asig, bsig;
       auto sig_of = [&](const State_side& ss, const State_cell& c) {
-        uint64_t h = hcombine(c.kind, rp_signature(ss, c, /*backward=*/true));
+        uint64_t h = hcombine(relaxed ? c.kind_nw : c.kind, rp_signature(ss, c, /*backward=*/true));
         return hcombine(h, rp_signature(ss, c, /*backward=*/false));
       };
       for (uint32_t i = 0; i < sa.cells.size(); ++i) {
@@ -641,6 +675,13 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       if (progress) {
         st.rounds = round;
       }
+      if (!progress && !relaxed && round < maxiter) {
+        // The strict phase converged. Anything still unresolved could not find a
+        // same-width counterpart; retry it width-blind before declaring it
+        // unpaired. This is the phase switch, not a terminal round.
+        relaxed = true;
+        continue;
+      }
       if (!progress || round == maxiter) {
         // Terminal round (converged, or capped by synalign_maxiter): cells
         // stuck in a both-sided but non-1:1 bucket are the AMBIGUOUS residue
@@ -667,6 +708,11 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         // "kind/init mismatch" instead of "no full match" (a renamed flop
         // whose reset value was also edited is this class, and the report is
         // the user's cue to check the reset).
+        // Structure-only probe: what would have matched if the pair
+        // precondition were dropped entirely. With width no longer in the
+        // identity for a flop, a `kind_clash` now means the op, the commit edge
+        // or the RESET VALUE genuinely differ -- which is what the report tells
+        // the user to go check.
         auto nokind_sig = [&](const State_side& ss, const State_cell& c) {
           return hcombine(rp_signature(ss, c, /*backward=*/true), rp_signature(ss, c, /*backward=*/false));
         };

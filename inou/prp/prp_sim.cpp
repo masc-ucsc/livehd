@@ -22,6 +22,7 @@
 
 #include "file_output.hpp"
 #include "prp_ast_facade.hpp"
+#include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
@@ -51,10 +52,23 @@ struct Dut {
   std::vector<int>         outputs_w;  // ...and their Slop<N> widths (parallel)
   std::vector<std::string> regs;     // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
   std::vector<int>         regs_w;     // ...and their Slop<N> widths (parallel)
-  std::vector<std::string> arrays;   // `std::array<Slop<N>, S> name{}` members (memories)
+  std::vector<std::string> arrays;   // memory members (hlop::Memory_*<...>)
   std::vector<int>         arrays_w;   // ...and their ELEMENT Slop<N> widths (parallel)
   std::vector<std::pair<std::string, std::string>> subs;  // sub-instance member -> struct class
-  bool                     is_child = false;  // this unit's hpp is #included by another unit (a sub-instance)
+  bool                     is_child = false;  // this unit is instantiated by another unit (a sub-instance)
+
+  // ---- 2f-sim B0/B: the rest of the manifest, for the query catalog ----------
+  // Parallel to the vectors above (same index = same signal), so the existing
+  // name/width lookups are untouched while the catalog gets what it needs.
+  std::vector<bool>        inputs_s, outputs_s, regs_s;    // signed?
+  std::vector<int>         inputs_dw, outputs_dw, regs_dw;  // source-DECLARED width
+  std::vector<std::string> regs_kind;                       // "flop" | "pipe"
+  std::vector<bool>        arrays_s;
+  std::vector<int>         arrays_dw, arrays_size;          // element declared width, entry count
+  std::vector<std::string> arrays_ordering;                 // old | fwd | program | none
+  // Sync-read output registers per memory (kind "memrd" in the catalog); the
+  // outer index is parallel to `arrays`.
+  std::vector<std::vector<std::string>> arrays_rd_regs;
 
   bool has_input(const std::string& f) const {
     return std::find(inputs.begin(), inputs.end(), f) != inputs.end();
@@ -81,141 +95,183 @@ struct Dut {
   int array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
 };
 
-// `Slop<N>` / `std::array<Slop<N>, S>` -> N, read from the `<` after the LAST
-// `Slop` on the line (the array form nests one). 0 when the line has no width.
-int slop_width_of(const std::string& line) {
-  auto p = line.rfind("Slop<");
-  if (p == std::string::npos) {
-    return 0;
-  }
-  return std::atoi(line.c_str() + p + 5);
-}
-
-// Parse a generated <unit>.hpp: the top struct name, its In{}/Out{} fields, and
-// the struct-scope `Slop<N> name{}` members (flops/pipe stages/regs) so the
-// testbench can peek/force internal state (`acc.total`).
-bool parse_hpp(const std::string& path, Dut& d) {
-  std::string text = slurp(path);
+// Read one cgen_sim <stem>.iface.json manifest into a Dut (2f-sim B0).
+//
+// This replaces a line-by-line TEXT SCRAPE of the generated header. That scrape
+// was not merely ugly, it was silently WRONG: its memory detector matched
+// `std::array<Slop<` long after cgen started emitting `hlop::Memory_*<...>`
+// members, so `d.arrays` had been empty for every design and the hierarchical
+// `acc.sub.mem[idx]` read path below was dead code nobody noticed. A generated
+// manifest cannot rot that way, because a shape change bumps `schema_version`
+// and this reader FAILS LOUDLY instead of returning an empty vector.
+//
+// `err` is set (and false returned) on any malformed/unsupported manifest.
+bool parse_iface(const std::string& path, Dut& d, std::string& err) {
+  const std::string text = slurp(path);
   if (text.empty()) {
+    err = "cannot read " + path;
     return false;
   }
-  std::istringstream iss(text);
-  std::string        line;
-  int                in_block = 0;  // 0 none, 1 In, 2 Out
-  bool               got_cls  = false;
-  size_t             group_start = 0;  // first leaf of the tuple port being parsed
-  while (std::getline(iss, line)) {
-    auto sw = line.find("struct ");
-    if (sw != std::string::npos) {
-      auto rest = line.substr(sw + 7);
-      auto sp   = rest.find_first_of(" {");
-      auto name = rest.substr(0, sp);
-      if (name.find(';') != std::string::npos) {
-        continue;  // a forward declaration (e.g. `struct Signal;`), not the DUT struct
-      }
-      if (name.empty() && in_block != 0) {
-        // an ANONYMOUS `struct {` inside In/Out opens a tuple port; remember
-        // where its leaves start so the `} <name>{};` close can prefix them
-        group_start = (in_block == 1 ? d.inputs : d.outputs).size();
+  rapidjson::Document doc;
+  doc.Parse(text.c_str());
+  if (doc.HasParseError() || !doc.IsObject()) {
+    err = path + ": malformed JSON manifest";
+    return false;
+  }
+  if (!doc.HasMember("schema_version") || !doc["schema_version"].IsInt() || doc["schema_version"].GetInt() != 1) {
+    err = path + ": unsupported iface manifest schema_version (expected 1); regenerate the sim dir";
+    return false;
+  }
+  if (!doc.HasMember("module") || !doc["module"].IsString()) {
+    err = path + ": iface manifest has no module name";
+    return false;
+  }
+  d.cls = doc["module"].GetString();
+
+  const auto str  = [](const rapidjson::Value& v, const char* k, const char* dflt = "") {
+    return v.HasMember(k) && v[k].IsString() ? v[k].GetString() : dflt;
+  };
+  const auto num  = [](const rapidjson::Value& v, const char* k, int dflt = 0) {
+    return v.HasMember(k) && v[k].IsInt() ? v[k].GetInt() : dflt;
+  };
+  const auto flag = [](const rapidjson::Value& v, const char* k, bool dflt = false) {
+    return v.HasMember(k) && v[k].IsBool() ? v[k].GetBool() : dflt;
+  };
+
+  if (doc.HasMember("io") && doc["io"].IsArray()) {
+    for (const auto& e : doc["io"].GetArray()) {
+      if (!e.IsObject()) {
         continue;
       }
-      if (name == "In") {
-        in_block = 1;
-        continue;
-      }
-      if (name == "Out") {
-        in_block = 2;
-        continue;
-      }
-      if (!got_cls) {
-        d.cls   = name;
-        got_cls = true;
-      }
-      continue;
+      const bool is_in = std::string_view(str(e, "dir")) == "input";
+      (is_in ? d.inputs : d.outputs).emplace_back(str(e, "name"));
+      (is_in ? d.inputs_w : d.outputs_w).push_back(num(e, "bits", 1));
+      (is_in ? d.inputs_dw : d.outputs_dw).push_back(num(e, "declared_bits", num(e, "bits", 1)));
+      (is_in ? d.inputs_s : d.outputs_s).push_back(flag(e, "signed"));
     }
-    if (in_block != 0) {
-      size_t nb = line.find_first_not_of(" \t");
-      if (nb != std::string::npos && line[nb] == '}') {
-        // `} name{};` closes a TUPLE port's nested struct (cgen mirrors a
-        // tuple/struct-packed port as a nested struct so the RTL path and the
-        // C++ path are the same text). Its leaves were buffered without a
-        // prefix; stamp the tuple name on them now. A bare `}` closes In/Out.
-        size_t b2 = line.find_first_not_of(" \t", nb + 1);
-        size_t e2 = b2 == std::string::npos ? b2 : line.find_first_of("{ \t;", b2);
-        if (b2 != std::string::npos && e2 != std::string::npos && e2 > b2) {
-          const std::string tname = line.substr(b2, e2 - b2);
-          auto&             dst   = (in_block == 1 ? d.inputs : d.outputs);
-          for (size_t k = group_start; k < dst.size(); ++k) {
-            dst[k] = tname + "." + dst[k];  // widths ride the parallel vector, so only the name is stamped
-          }
-          continue;
-        }
-        in_block = 0;
+  }
+  if (doc.HasMember("regs") && doc["regs"].IsArray()) {
+    for (const auto& e : doc["regs"].GetArray()) {
+      if (!e.IsObject()) {
         continue;
       }
-      // a field line: `    Slop<N> field{};`
-      auto br = line.find('>');
-      if (br != std::string::npos) {
-        auto after = line.substr(br + 1);
-        // trim
-        size_t b = after.find_first_not_of(" \t");
-        if (b == std::string::npos) {
-          continue;
-        }
-        size_t e = after.find_first_of("{ \t;", b);
-        auto   f = after.substr(b, e - b);
-        if (!f.empty()) {
-          (in_block == 1 ? d.inputs : d.outputs).push_back(f);
-          (in_block == 1 ? d.inputs_w : d.outputs_w).push_back(slop_width_of(line));
-        }
-      }
-    } else if (got_cls) {
-      // Memory member `  std::array<Slop<N>, S> name{};  // memory` and
-      // sub-instance member `  Cls name;  // sub instance` -- both feed the
-      // hierarchical `acc.sub.state[idx]` read path.
-      if (line.find("std::array<Slop<") != std::string::npos && line.find("// memory") != std::string::npos) {
-        auto gt = line.rfind('>');
-        auto b  = line.find_first_not_of(" \t", gt + 1);
-        auto e  = line.find_first_of("{ \t;", b);
-        if (b != std::string::npos && e != std::string::npos && e > b) {
-          d.arrays.push_back(line.substr(b, e - b));
-          d.arrays_w.push_back(slop_width_of(line));  // ELEMENT width (the inner Slop<N>)
-        }
+      d.regs.emplace_back(str(e, "name"));
+      d.regs_w.push_back(num(e, "bits", 1));
+      d.regs_dw.push_back(num(e, "declared_bits", num(e, "bits", 1)));
+      d.regs_s.push_back(flag(e, "signed"));
+      d.regs_kind.emplace_back(str(e, "kind", "flop"));
+    }
+  }
+  if (doc.HasMember("mems") && doc["mems"].IsArray()) {
+    for (const auto& e : doc["mems"].GetArray()) {
+      if (!e.IsObject()) {
         continue;
       }
-      if (line.find("// sub instance") != std::string::npos) {
-        std::istringstream ls(line);
-        std::string        cls, nm;
-        if (ls >> cls >> nm && !nm.empty()) {
-          if (nm.back() == ';') {
-            nm.pop_back();
+      d.arrays.emplace_back(str(e, "name"));
+      d.arrays_w.push_back(num(e, "bits", 1));
+      d.arrays_dw.push_back(num(e, "declared_bits", num(e, "bits", 1)));
+      d.arrays_s.push_back(flag(e, "signed"));
+      d.arrays_size.push_back(num(e, "size"));
+      d.arrays_ordering.emplace_back(str(e, "ordering", "old"));
+      std::vector<std::string> rds;
+      if (e.HasMember("rd_regs") && e["rd_regs"].IsArray()) {
+        for (const auto& r : e["rd_regs"].GetArray()) {
+          if (r.IsString()) {
+            rds.emplace_back(r.GetString());
           }
-          d.subs.emplace_back(nm, cls);
         }
-        continue;
       }
-      // struct-scope scalar member, e.g. `  Slop<32> total{};  // flop`. (Memories
-      // are `std::array<...>` and sub-instances/VCD state are other types, so the
-      // `Slop<` prefix selects exactly the readable/forceable flop-style regs.)
-      size_t nb = line.find_first_not_of(" \t");
-      if (nb != std::string::npos && line.compare(nb, 5, "Slop<") == 0) {
-        auto br = line.find('>');
-        if (br != std::string::npos) {
-          auto   after = line.substr(br + 1);
-          size_t b     = after.find_first_not_of(" \t");
-          if (b != std::string::npos) {
-            size_t e = after.find_first_of("{ \t;", b);
-            auto   f = after.substr(b, e - b);
-            if (!f.empty()) {
-              d.regs.push_back(f);
-              d.regs_w.push_back(slop_width_of(line));
-            }
-          }
-        }
+      d.arrays_rd_regs.push_back(std::move(rds));
+      // The sync-read output registers are ordinary readable state, exactly as
+      // describe_signals has always reported them (kind "memrd").
+      for (const auto& r : d.arrays_rd_regs.back()) {
+        d.regs.push_back(r);
+        d.regs_w.push_back(num(e, "bits", 1));
+        d.regs_dw.push_back(num(e, "declared_bits", num(e, "bits", 1)));
+        d.regs_s.push_back(flag(e, "signed"));
+        d.regs_kind.emplace_back("memrd");
       }
     }
   }
-  return got_cls;
+  if (doc.HasMember("subs") && doc["subs"].IsArray()) {
+    for (const auto& e : doc["subs"].GetArray()) {
+      if (e.IsObject()) {
+        d.subs.emplace_back(str(e, "inst"), str(e, "module"));
+      }
+    }
+  }
+  return !d.cls.empty();
+}
+
+
+// ---- 2f-sim B: the query CATALOG -------------------------------------------
+// One record per queryable signal. The catalog is STATIC — every name, kind,
+// width and hierarchy level is known while the driver is being generated — so a
+// `signals` query is answered without running anything, and the kernel can
+// resolve selectors (scope/glob/regex/kind) before the driver ever starts.
+struct Cat_sig {
+  std::string name;   // hierarchical, rooted at the testbench instance variable
+  std::string kind;   // flop | pipe | memrd | input | output | memory
+  std::string alias;  // legacy spelling, if any (inputs carry `__in.<field>`)
+  int         bits = 1, declared_bits = 1;
+  bool        is_signed = false;
+  int         size      = 0;  // memory entries (0 = not a memory)
+  std::string ordering;       // memory only
+};
+
+// Expand one instance into catalog records, depth-first through sub-instances.
+// ORDER IS THE CONTRACT: flops/pipes, memrd, inputs, outputs, memories, then
+// subs. The first four keep exactly the order cgen_sim's describe_signals() has
+// always emitted, which is what lets the legacy --list-signals/--probe lowering
+// stay byte-compatible while outputs and memories are appended after them.
+void expand_catalog(const Dut& d, const std::string& prefix, const std::map<std::string, const Dut*>& by_cls,
+                    std::vector<Cat_sig>& out) {
+  for (size_t i = 0; i < d.regs.size(); ++i) {
+    out.push_back({prefix + d.regs[i],
+                   i < d.regs_kind.size() ? d.regs_kind[i] : std::string{"flop"},
+                   "",
+                   d.regs_w[i],
+                   i < d.regs_dw.size() ? d.regs_dw[i] : d.regs_w[i],
+                   i < d.regs_s.size() ? static_cast<bool>(d.regs_s[i]) : false,
+                   0,
+                   ""});
+  }
+  for (size_t i = 0; i < d.inputs.size(); ++i) {
+    out.push_back({prefix + d.inputs[i],
+                   "input",
+                   prefix + "__in." + d.inputs[i],
+                   d.inputs_w[i],
+                   i < d.inputs_dw.size() ? d.inputs_dw[i] : d.inputs_w[i],
+                   i < d.inputs_s.size() ? static_cast<bool>(d.inputs_s[i]) : false,
+                   0,
+                   ""});
+  }
+  for (size_t i = 0; i < d.outputs.size(); ++i) {
+    out.push_back({prefix + d.outputs[i],
+                   "output",
+                   "",
+                   d.outputs_w[i],
+                   i < d.outputs_dw.size() ? d.outputs_dw[i] : d.outputs_w[i],
+                   i < d.outputs_s.size() ? static_cast<bool>(d.outputs_s[i]) : false,
+                   0,
+                   ""});
+  }
+  for (size_t i = 0; i < d.arrays.size(); ++i) {
+    out.push_back({prefix + d.arrays[i],
+                   "memory",
+                   "",
+                   d.arrays_w[i],
+                   i < d.arrays_dw.size() ? d.arrays_dw[i] : d.arrays_w[i],
+                   i < d.arrays_s.size() ? static_cast<bool>(d.arrays_s[i]) : false,
+                   i < d.arrays_size.size() ? d.arrays_size[i] : 0,
+                   i < d.arrays_ordering.size() ? d.arrays_ordering[i] : std::string{"old"}});
+  }
+  for (const auto& [inst, cls] : d.subs) {
+    auto it = by_cls.find(cls);
+    if (it != by_cls.end()) {
+      expand_catalog(*it->second, prefix + inst + ".", by_cls, out);
+    }
+  }
 }
 
 // DEBUG (PRP_SIM_DUMP=1): recursive s-expression dump of a test subtree.
@@ -586,6 +642,10 @@ bool is_valid_param_name(std::string_view n) {
 
 class Driver_gen {
 public:
+  // 2f-sim B: the DUT instances this test bound (`mut acc = M` -> var -> module
+  // key), read after emit_run_fn to expand the per-test query catalog.
+  const std::map<std::string, std::string>& instances() const { return inst_of_var; }
+
   Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir,
              const std::string& file)
       : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file) {
@@ -1113,6 +1173,16 @@ private:
       width(d.reg_width(fld));
       return var + "." + fld;
     }
+    // NOTE (2f-sim B0): a memory WORD is NOT readable here. `d.arrays` is now
+    // populated correctly from the iface manifest (it was empty for every design
+    // while the header scrape still matched `std::array<Slop<`), but a
+    // single-segment `acc.bank[2]` never reaches this resolver with its index
+    // attached — the subscript arrives as a separate expression node, so `fld`
+    // is just "bank". Only the DOTTED hierarchical branch above sees the
+    // brackets. Wiring the subscript through is an expression-emitter change,
+    // not a reflection one, and is deliberately out of scope here. The query API
+    // does not depend on it: `lhd sim --query` reads memory words through the
+    // generated observe_mem(), pinned by lhd/tests/lhd_sim_query_test.sh.
     fail("unknown field '" + fld + "' on instance '" + var + "' of module '" + inst_of_var.at(var) + "'");
     return {};
   }
@@ -2354,6 +2424,46 @@ private:
       << "; _dbg.break_state = _sn; }\n";
     o << ind << "  }\n";
     o << ind << "}\n";
+
+    // 2f-sim: record the query observation stream at the SAME post-step point
+    // (so a query and a --probe row of the same cycle can never disagree), but
+    // only inside the planned window. Sampling is bounded, never the run: the
+    // tick loop always finishes, so asserts still fire and the test verdict is
+    // exactly the one an unqueried run would produce.
+    // Counted for EVERY iteration, not just the sampled ones: `cycles_replayed`
+    // is what the answer cost, and in v1 that is always the whole run (a query
+    // batch never restarts from a checkpoint — see the run metadata's
+    // checkpoint_used, which is null for exactly that reason).
+    o << ind << "if (_q.on && !_ckpt.window_only) ++_q.replayed;\n";
+    o << ind << "if (_q.on && !_ckpt.window_only && (_q.from < 0 || " << clk << " >= _q.from) && (_q.to < 0 || " << clk
+      << " <= _q.to)) {\n";
+    o << ind << "  std::map<std::string, std::string> _qs;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "  " << var << ".observe_signals(\"" << var << ".\", _qs);\n";
+    }
+    // Store only what some query references. The transient map above is one
+    // build per sampled cycle and is freed immediately; the STORED stream is
+    // what grows as signals x cycles, so that is what gets bounded.
+    o << ind << "  std::map<std::string, std::string> _qk;\n";
+    o << ind << "  for (const auto& _n : _q.need) { auto _it = _qs.find(_n); if (_it != _qs.end()) _qk.emplace(_n, _it->second); }\n";
+    o << ind << "  _q.cyc.push_back(" << clk << "); _q.snap.push_back(std::move(_qk));\n";
+    // A memory WORD is read on demand at the cycle that asked for it: memories
+    // are excluded from the per-cycle snapshot on purpose (a whole-array dump
+    // per sample would dwarf the rest of the stream).
+    // An absolute memvalue is read at its own cycle; a FAILURE-RELATIVE one has
+    // no known cycle yet, so it is recorded at every sampled cycle and picked
+    // once the failing cycle is known. That is one word per cycle, not an array.
+    o << ind << "  for (auto& _qq : _q.qs) {\n";
+    o << ind << "    if (_qq.op != \"memvalue\") continue;\n";
+    o << ind << "    if (!_qq.c0_rel && _qq.c0 != " << clk << ") continue;\n";
+    o << ind << "    std::string _mv; bool _ok = false;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "    if (!_ok && _qq.sig.compare(0, " << (var.size() + 1) << ", \"" << var << ".\") == 0) _ok = " << var
+        << ".observe_mem(_qq.sig.substr(" << (var.size() + 1) << "), _qq.idx, _mv);\n";
+    }
+    o << ind << "    _q.memok[_qq.id] = _ok; if (_ok) _q.memval[_qq.id][" << clk << "] = _mv;\n";
+    o << ind << "  }\n";
+    o << ind << "}\n";
   }
 
   void gen_tick(std::ostringstream& o, TSNode n, int depth) {
@@ -2638,45 +2748,56 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
              std::vector<Test_info>& tests, std::string& err) {
-  // 1. read DUT interfaces from the cgen_sim headers in simdir
+  // 1. read DUT interfaces from the cgen_sim manifests in simdir (2f-sim B0).
+  // One <stem>.iface.json per emitted module; the matching <stem>.hpp is still
+  // the header the driver #includes, so the two names are kept side by side.
   std::map<std::string, Dut> duts;
   std::error_code            ec;
   for (auto& de : std::filesystem::directory_iterator(simdir, ec)) {
     if (!de.is_regular_file()) {
       continue;
     }
-    std::string fn = de.path().filename().string();
-    if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".hpp") {
+    std::string fn  = de.path().filename().string();
+    const auto  suf = std::string(".iface.json");
+    if (fn.size() <= suf.size() || fn.compare(fn.size() - suf.size(), suf.size(), suf) != 0) {
       continue;
     }
-    // Skip ONLY the generated driver itself, by exact name (no driver `.hpp` is
-    // ever emitted, but stay precise) — a prefix skip would also drop a real DUT
-    // unit from a `drv*.prp` source (cgen names units `<file_stem>.<module>.hpp`).
-    if (fn == std::string(kDriverBasename) + ".hpp" || fn == std::string(kDriverBasename) + ".cpp") {
-      continue;
+    const std::string stem = fn.substr(0, fn.size() - suf.size());
+    if (stem == std::string(kDriverBasename)) {
+      continue;  // the generated driver is not a DUT unit
     }
-    Dut d;
-    d.hpp = fn;
-    if (parse_hpp(de.path().string(), d)) {
-      duts[mod_of_hpp(fn)] = d;
+    Dut         d;
+    d.hpp = stem + ".hpp";
+    std::string perr;
+    if (parse_iface(de.path().string(), d, perr)) {
+      duts[mod_of_hpp(d.hpp)] = d;
+    } else if (!perr.empty()) {
+      // A manifest that exists but cannot be understood is a HARD error: silently
+      // skipping it is exactly the failure mode the old text scrape had.
+      err = perr;
+      return 1;
     }
   }
   if (duts.empty()) {
-    err = "no DUT modules found in " + simdir + " (the design produced no Slop units)";
+    err = "no DUT modules found in " + simdir
+          + " (no <module>.iface.json manifests; regenerate the sim dir with a current lhd)";
     return 1;
   }
-  // Mark CHILD units (their hpp is #included by another unit's hpp, i.e. they
-  // are sub-instances). rvalue_module's import-bound fallback then resolves an
+  // Mark CHILD units (this module is instantiated by another one). Taken
+  // straight from the manifests' sub lists rather than re-deriving it from
+  // #include text. rvalue_module's import-bound fallback then resolves an
   // lg=-renamed top entry (`const top = import("u.top")` where the emitted
   // module is `u_top`) to the unique ROOT of a multi-module closure.
-  for (auto& [k, d] : duts) {
-    std::ifstream     f(simdir + "/" + d.hpp);
-    std::stringstream ss;
-    ss << f.rdbuf();
-    const std::string txt = ss.str();
-    for (auto& [k2, d2] : duts) {
-      if (k2 != k && txt.find("\"" + d2.hpp + "\"") != std::string::npos) {
-        d2.is_child = true;
+  {
+    std::set<std::string> child_cls;
+    for (auto& [k, d] : duts) {
+      for (auto& [inst, cls] : d.subs) {
+        child_cls.insert(cls);
+      }
+    }
+    for (auto& [k, d] : duts) {
+      if (child_cls.count(d.cls)) {
+        d.is_child = true;
       }
     }
   }
@@ -2685,6 +2806,14 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // sources, the registry order, and the union of DUT headers used. State is
   // per-test (a fresh Driver_gen each time), so tests never contaminate one
   // another's locals/instances.
+  // 2f-sim B: `cls` -> Dut, so a sub-instance's callee struct name resolves while
+  // expanding the catalog (duts is keyed by the header stem, not the struct).
+  std::map<std::string, const Dut*> dut_by_cls;
+  for (const auto& [k, d] : duts) {
+    dut_by_cls[d.cls] = &d;
+  }
+  std::vector<std::pair<std::string, std::vector<Cat_sig>>> catalogs;  // per test, registry order
+
   std::ostringstream       fns;          // run-function bodies, registry order
   std::vector<std::string> fn_ids;       // run-function names, registry order
   std::set<std::string>    includes;     // DUT headers any test drives
@@ -2714,6 +2843,17 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
       return;
     }
     fn_ids.push_back(fn_id);
+    // 2f-sim B: this test's query catalog, expanded through its instance tree.
+    {
+      std::vector<Cat_sig> cat;
+      for (const auto& [var, m] : gen.instances()) {
+        auto it = duts.find(m);
+        if (it != duts.end()) {
+          expand_catalog(it->second, var + ".", dut_by_cls, cat);
+        }
+      }
+      catalogs.emplace_back(name, std::move(cat));
+    }
     tests.push_back(Test_info{name, std::move(pinfo)});
   });
   if (matched < 0) {
@@ -2813,6 +2953,177 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  bool active() const { return !probe.empty() || has_break; }\n"
        "};\n";
   o << "static _DbgState _dbg;\n";
+
+  // ---- 2f-sim: the query engine (--query-plan / --query-json) ---------------
+  // The kernel owns JSON: it validates the request, resolves every selector
+  // against sim_catalog.json, unions the batch's time ranges and writes a FLAT
+  // line-oriented plan. This driver therefore never parses JSON or a selector —
+  // it records the observation stream over the planned window and answers the
+  // already-resolved questions against it. Values travel as full-width canonical
+  // hex; the kernel re-attaches width/signedness from the catalog.
+  o << R"cpp(
+struct _QNode { std::string op, a, b, c; };  // one expression node, post-order
+struct _QQuery {
+  std::string id, op, sig;
+  long idx = -1, c0 = -1, c1 = -1;
+  // A cycle may be FAILURE-RELATIVE: `c0` then holds an offset from the cycle
+  // the test's first assert fired, resolved after the run (the kernel cannot
+  // know that cycle at plan time). This is what makes "the test failed, show me
+  // the state" one invocation instead of two.
+  bool c0_rel = false, c1_rel = false;
+  bool count_only = false, backward = false;
+  std::vector<std::string> sigs;    // resolved signal list (values/snapshot/diff)
+  std::vector<std::string> sample;  // extra signals to report at a find's hit
+  std::vector<_QNode>      expr;    // find predicate, post-order
+};
+struct _QState {
+  bool on = false;
+  long from = -1, to = -1, maxres = 1000;
+  std::string plan, out;
+  std::vector<_QQuery> qs;
+  // The recorded sample stream over [from,to]: one settled post-step snapshot
+  // per tick-body iteration, exactly the point --probe has always sampled.
+  std::vector<long>                                 cyc;
+  std::vector<std::map<std::string, std::string>>   snap;
+  // Only the signals some query actually references are STORED. The stream is
+  // the one thing here that grows as signals x cycles, and a batch usually asks
+  // about a handful of signals on a design that has thousands.
+  std::set<std::string>                             need;
+  // qid -> (cycle -> hex). A memory WORD is read inline during the run, so a
+  // failure-relative one has to be recorded at every sampled cycle (one word per
+  // cycle) and picked afterwards; an absolute one is recorded at its cycle only.
+  std::map<std::string, std::map<long, std::string>> memval;
+  std::map<std::string, bool>                        memok;
+  long ckpt_used = -1, replayed = 0, fail_cycle = -1;
+  bool multi_step = false;
+};
+static _QState _q;
+
+// Split on single spaces (no field ever contains one: names are identifiers
+// plus '.', values are hex, cycles are integers).
+static std::vector<std::string> _q_split(const std::string& _s) {
+  std::vector<std::string> _v; std::string _c;
+  for (char _ch : _s) { if (_ch == ' ') { if (!_c.empty()) { _v.push_back(_c); _c.clear(); } } else _c += _ch; }
+  if (!_c.empty()) _v.push_back(_c);
+  return _v;
+}
+// Compare two canonical hex strings as UNSIGNED magnitudes of arbitrary width.
+// Signed comparison is not attempted here: the kernel knows each operand's
+// signedness from the catalog and rejects a signed ordered compare it cannot
+// lower, rather than this driver guessing (the --break-when strtoull hole).
+static int _q_hexcmp(const std::string& _a, const std::string& _b) {
+  auto _trim = [](const std::string& _s) { size_t _i = 0; while (_i + 1 < _s.size() && _s[_i] == '0') ++_i; return _s.substr(_i); };
+  const std::string _x = _trim(_a), _y = _trim(_b);
+  if (_x.size() != _y.size()) return _x.size() < _y.size() ? -1 : 1;
+  return _x == _y ? 0 : (_x < _y ? -1 : 1);
+}
+// A plan cycle token is a plain integer, or `F<signed offset>` meaning "relative
+// to the cycle the first assert failed" (F+0 is the failing cycle itself).
+static long _q_cycle_tok(const std::string& _t, bool& _rel) {
+  if (!_t.empty() && _t[0] == 'F') {
+    _rel = true;
+    return std::strtol(_t.c_str() + 1, nullptr, 10);
+  }
+  _rel = false;
+  return std::strtol(_t.c_str(), nullptr, 10);
+}
+static bool _q_read_plan() {
+  std::ifstream _f(_q.plan);
+  if (!_f) { std::fprintf(stderr, "lhd sim: cannot read query plan %s\n", _q.plan.c_str()); return false; }
+  std::string _line;
+  while (std::getline(_f, _line)) {
+    auto _t = _q_split(_line);
+    if (_t.empty()) continue;
+    if (_t[0] == "V") { if (_t.size() < 2 || _t[1] != "1") { std::fprintf(stderr, "lhd sim: unsupported query plan version\n"); return false; } }
+    else if (_t[0] == "FROM" && _t.size() > 1) _q.from = std::strtol(_t[1].c_str(), nullptr, 10);
+    else if (_t[0] == "TO" && _t.size() > 1) _q.to = std::strtol(_t[1].c_str(), nullptr, 10);
+    else if (_t[0] == "MAXRES" && _t.size() > 1) _q.maxres = std::strtol(_t[1].c_str(), nullptr, 10);
+    else if (_t[0] == "Q" && _t.size() >= 3) {
+      _QQuery _qq; _qq.id = _t[1]; _qq.op = _t[2];
+      if (_qq.op == "value" && _t.size() >= 5) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); }
+      else if (_qq.op == "memvalue" && _t.size() >= 6) { _qq.sig = _t[3]; _qq.idx = std::strtol(_t[4].c_str(), nullptr, 10); _qq.c0 = _q_cycle_tok(_t[5], _qq.c0_rel); }
+      else if (_qq.op == "values" && _t.size() >= 4) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); }
+      else if (_qq.op == "changes" && _t.size() >= 7) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); _qq.count_only = _t[6] == "1"; }
+      else if (_qq.op == "next_change" && _t.size() >= 6) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); }
+      else if (_qq.op == "find" && _t.size() >= 6) { _qq.backward = _t[3] == "bwd"; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); }
+      else if (_qq.op == "snapshot" && _t.size() >= 4) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); }
+      else if (_qq.op == "diff" && _t.size() >= 5) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[4], _qq.c1_rel); }
+      if (!_qq.sig.empty()) _q.need.insert(_qq.sig);
+      _q.qs.push_back(std::move(_qq));
+    }
+    else if (_t[0] == "N" && _t.size() > 1) _q.need.insert(_t[1]);
+    else if (_t[0] == "G" && _t.size() > 1 && !_q.qs.empty()) { _q.qs.back().sigs.push_back(_t[1]); _q.need.insert(_t[1]); }
+    else if (_t[0] == "S" && _t.size() > 1 && !_q.qs.empty()) { _q.qs.back().sample.push_back(_t[1]); _q.need.insert(_t[1]); }
+    else if (_t[0] == "X" && _t.size() > 1 && !_q.qs.empty()) {
+      _QNode _n; _n.op = _t[1];
+      if (_t.size() > 2) _n.a = _t[2];
+      if (_t.size() > 3) _n.b = _t[3];
+      if (_t.size() > 4) _n.c = _t[4];
+      // Leaf nodes name signals: cmp/edge in `a`, cmp2's second operand in `c`.
+      if (_n.op == "cmp" || _n.op == "cmp2" || _n.op == "edge") _q.need.insert(_n.a);
+      if (_n.op == "cmp2") _q.need.insert(_n.c);
+      _q.qs.back().expr.push_back(_n);
+    }
+  }
+  return true;
+}
+// Resolve a query's cycle bounds, turning failure-relative offsets into absolute
+// cycles. False = the query asked about a failure that never happened.
+static bool _q_bounds(const _QQuery& _qq, long& _a, long& _b) {
+  _a = _qq.c0;
+  _b = _qq.c1;
+  if (!_qq.c0_rel && !_qq.c1_rel) {
+    return true;
+  }
+  if (_q.fail_cycle < 0) {
+    return false;
+  }
+  if (_qq.c0_rel) _a = _q.fail_cycle + _qq.c0;
+  if (_qq.c1_rel) _b = _q.fail_cycle + _qq.c1;
+  return true;
+}
+// Index of the recorded sample AT cycle c (-1 = that cycle was not sampled).
+static long _q_at(long _c) {
+  for (size_t _i = 0; _i < _q.cyc.size(); ++_i) if (_q.cyc[_i] == _c) return static_cast<long>(_i);
+  return -1;
+}
+static const std::string* _q_val(long _si, const std::string& _sig) {
+  if (_si < 0 || static_cast<size_t>(_si) >= _q.snap.size()) return nullptr;
+  auto _it = _q.snap[static_cast<size_t>(_si)].find(_sig);
+  return _it == _q.snap[static_cast<size_t>(_si)].end() ? nullptr : &_it->second;
+}
+// Evaluate a post-order predicate at sample index _si (a tiny stack machine).
+static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
+  std::vector<bool> _st;
+  for (const auto& _n : _e) {
+    if (_n.op == "cmp" || _n.op == "cmp2") {
+      const std::string* _a = _q_val(_si, _n.a);
+      std::string _bv;
+      if (_n.op == "cmp") _bv = _n.c;
+      else { const std::string* _b = _q_val(_si, _n.c); if (!_b) { _st.push_back(false); continue; } _bv = *_b; }
+      if (!_a) { _st.push_back(false); continue; }
+      const int _r = _q_hexcmp(*_a, _bv);
+      const std::string& _op = _n.b;
+      _st.push_back(_op == "==" ? _r == 0 : _op == "!=" ? _r != 0 : _op == "<" ? _r < 0
+                  : _op == "<=" ? _r <= 0 : _op == ">" ? _r > 0 : _op == ">=" ? _r >= 0 : false);
+    } else if (_n.op == "edge") {
+      const std::string* _cur = _q_val(_si, _n.a);
+      const std::string* _prv = _q_val(_si - 1, _n.a);
+      if (!_cur || !_prv) { _st.push_back(false); continue; }
+      const bool _c1 = _q_hexcmp(*_cur, "0") != 0, _p1 = _q_hexcmp(*_prv, "0") != 0;
+      _st.push_back(_n.b == "rising" ? (!_p1 && _c1) : _n.b == "falling" ? (_p1 && !_c1) : (*_cur != *_prv));
+    } else if (_n.op == "not") {
+      const bool _v = _st.empty() ? false : _st.back(); if (!_st.empty()) _st.pop_back(); _st.push_back(!_v);
+    } else if (_n.op == "all" || _n.op == "any") {
+      const long _cnt = std::strtol(_n.a.c_str(), nullptr, 10);
+      bool _acc = _n.op == "all";
+      for (long _k = 0; _k < _cnt && !_st.empty(); ++_k) { const bool _v = _st.back(); _st.pop_back(); _acc = _n.op == "all" ? (_acc && _v) : (_acc || _v); }
+      _st.push_back(_acc);
+    }
+  }
+  return _st.empty() ? false : _st.back();
+}
+)cpp";
   o << "static bool _dbg_cmp(long _a, const std::string& _op, long _b) {\n"
        "  if (_op == \">\") return _a > _b; if (_op == \"<\") return _a < _b;\n"
        "  if (_op == \">=\") return _a >= _b; if (_op == \"<=\") return _a <= _b;\n"
@@ -2970,6 +3281,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    else if (_key == \"--probe-to\") { _dbg.probe_to = _to_i64(\"probe-to\", _need()); }\n"
        "    else if (_key == \"--break-when\") { _dbg_parse_break(_need()); }\n"
        "    else if (_key == \"--debug-json\") { _dbg.out = _need(); }\n"
+       // 2f-sim: the kernel-planned query batch and where its answers go.
+       "    else if (_key == \"--query-plan\") { _q.plan = _need(); _q.on = true; }\n"
+       "    else if (_key == \"--query-json\") { _q.out = _need(); }\n"
        "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
        "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
        "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
@@ -2990,6 +3304,13 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    std::fprintf(stderr, \"lhd sim: --list-signals/--probe/--break-when need a single test; select one by name "
        "(`lhd sim file.prp <test>`) -- this run has %zu\\n\", _torun.size());\n"
        "    return 2;\n  }\n"
+       // A query batch answers ONE test's timeline for the same reason: the plan
+       // resolved its signals against that test's catalog.
+       "  if (_q.on && _torun.size() != 1) {\n"
+       "    std::fprintf(stderr, \"lhd sim: --query needs a single test; select one by name -- this run has %zu\\n\", "
+       "_torun.size());\n"
+       "    return 2;\n  }\n"
+       "  if (_q.on && !_q_read_plan()) { return 2; }\n"
        "  long _fail_tests = 0;\n"
        "  std::set<std::string> _consumed;\n"
        // A bare JSON array of per-test results, so `lhd sim` can embed it verbatim
@@ -3001,6 +3322,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    std::string _err; _Fail _ff;\n"
     << (vcd_on ? "    vcd::global_timestamp = 0;  // each test gets an independent VCD timeline (#0..)\n" : "")
     << "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+       // 2f-sim: the anchor a failure-relative query resolves against.
+       "    if (_ff.has) _q.fail_cycle = _ff.cycle;\n"
        "    const char* _status = (_f < 0) ? \"error\" : (_f > 0 ? \"fail\" : \"pass\");\n"
        "    if (_f < 0) { std::printf(\"FAIL %s (%s)\\n\", _t->name, _err.c_str()); ++_fail_tests; }\n"
        "    else if (_f > 0) {\n"
@@ -3097,8 +3420,156 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "      _dj += \"}\";\n"
        "    }\n"
        "    _dj += \"}\"; std::ofstream _dofs(_dbg.out); if (_dofs) _dofs << _dj << \"\\n\";\n"
-       "  }\n"
-       "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
+       "  }\n";
+
+  // ---- 2f-sim: evaluate the query batch and write its sidecar --------------
+  // Everything below runs AFTER the tick loop finished, against the recorded
+  // sample stream. That ordering is the verdict-neutrality rule made concrete:
+  // answering a query can never shorten a run, so the tests[] verdict and the
+  // process exit code are exactly what an unqueried invocation would produce.
+  o << R"cpp(
+  if (_q.on && !_q.out.empty()) {
+    auto _qhex = [](const std::string& _h) { std::string _s = "{\"hex\":\""; _s += _h; _s += "\"}"; return _s; };
+    std::string _j = "{\"schema_version\":1,\"kind\":\"sim_query_result\",\"run\":{";
+    _j += "\"samples\":" + std::to_string(_q.cyc.size());
+    _j += ",\"first_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.front());
+    _j += ",\"last_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.back());
+    _j += ",\"cycles_replayed\":" + std::to_string(_q.replayed);
+    _j += ",\"checkpoint_used\":" + (_q.ckpt_used < 0 ? std::string("null") : std::to_string(_q.ckpt_used));
+    _j += ",\"fail_cycle\":" + std::to_string(_q.fail_cycle);
+    _j += ",\"seed\":" + std::to_string(static_cast<long long>(_seed_used));
+    _j += ",\"rng_draws\":" + std::to_string(static_cast<long long>(hlop_random_draws()));
+    _j += ",\"phase\":\"post\"}";
+    _j += ",\"results\":[";
+    bool _qf = true;
+    for (const auto& _qq : _q.qs) {
+      if (!_qf) _j += ",\n  ";
+      _qf = false;
+      _j += "{\"id\":\"" + _json_esc(_qq.id) + "\"";
+      auto _fail = [&](const char* _cls, const std::string& _msg) {
+        _j += ",\"ok\":false,\"error\":{\"class\":\"" + std::string(_cls) + "\",\"message\":\"" + _json_esc(_msg) + "\"}}";
+      };
+      // Failure-relative bounds resolve here, where the failing cycle is known.
+      long _c0 = 0, _c1 = 0;
+      if (!_q_bounds(_qq, _c0, _c1)) {
+        _fail("invalid_range", "this query is relative to the first failing assert, but the test did not fail");
+        continue;
+      }
+      if (_qq.op == "value") {
+        const long _si = _q_at(_c0);
+        const std::string* _v = _q_val(_si, _qq.sig);
+        if (!_v) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled, or the signal is not observable");
+        else { _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\"" + _json_esc(_qq.sig) + "\",\"value\":" + _qhex(*_v) + "}"; }
+      } else if (_qq.op == "memvalue") {
+        auto _ok = _q.memok.find(_qq.id);
+        auto _mw = _q.memval.find(_qq.id);
+        const std::string* _wv = nullptr;
+        if (_mw != _q.memval.end()) { auto _at = _mw->second.find(_c0); if (_at != _mw->second.end()) _wv = &_at->second; }
+        if (_ok == _q.memok.end()) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+        else if (!_ok->second) _fail("invalid_range", "memory index " + std::to_string(_qq.idx) + " is out of range");
+        else if (_wv == nullptr) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+        else { _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\"" + _json_esc(_qq.sig) + "\",\"index\":" + std::to_string(_qq.idx) + ",\"value\":" + _qhex(*_wv) + "}"; }
+      } else if (_qq.op == "values" || _qq.op == "snapshot") {
+        const long _si = _q_at(_c0);
+        if (_si < 0) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+        else {
+          _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"values\":[";
+          long _n = 0; bool _f2 = true;
+          for (const auto& _s : _qq.sigs) {
+            if (_n >= _q.maxres) break;
+            const std::string* _v = _q_val(_si, _s);
+            if (!_v) continue;
+            if (!_f2) _j += ","; _f2 = false;
+            _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}"; ++_n;
+          }
+          _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
+          _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
+        }
+      } else if (_qq.op == "diff") {
+        const long _a = _q_at(_c0), _b = _q_at(_c1);
+        if (_a < 0 || _b < 0) _fail("invalid_range", "one endpoint cycle was not sampled");
+        else {
+          _j += ",\"ok\":true,\"from\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"to\":{\"cycle\":" + std::to_string(_c1) + ",\"phase\":\"post\"},\"diff\":[";
+          long _n = 0; bool _f2 = true;
+          for (const auto& _s : _qq.sigs) {
+            const std::string* _va = _q_val(_a, _s); const std::string* _vb = _q_val(_b, _s);
+            if (!_va || !_vb || *_va == *_vb) continue;
+            if (_n >= _q.maxres) break;
+            if (!_f2) _j += ","; _f2 = false;
+            _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"from_value\":" + _qhex(*_va) + ",\"to_value\":" + _qhex(*_vb) + "}"; ++_n;
+          }
+          _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
+          _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
+        }
+      } else if (_qq.op == "changes" || _qq.op == "next_change") {
+        // A change at sample c means sample(c) != sample(c-1): c is the FIRST
+        // observation of the new value, never a subcycle edge time.
+        const bool _next = _qq.op == "next_change";
+        long _lo = _c0, _hi = _c1, _count = 0;
+        // Name the signal at the RESULT level: the kernel enriches every value
+        // object from the catalog, and it can only do that if something on the
+        // record says which signal the hex belongs to. Without this the rows
+        // came back as bare {"hex":...} while every other op was enriched.
+        _j += ",\"ok\":true,\"signal\":\"" + _json_esc(_qq.sig) + "\",\"changes\":[";
+        bool _f2 = true; long _n = 0;
+        for (size_t _i = 1; _i < _q.cyc.size(); ++_i) {
+          const long _c = _q.cyc[_i];
+          if (_next ? (_c <= _lo) : (_lo >= 0 && _c < _lo)) continue;   // `after` is strictly exclusive
+          if (_hi >= 0 && _c > _hi) break;
+          auto _cur = _q.snap[_i].find(_qq.sig); auto _prv = _q.snap[_i - 1].find(_qq.sig);
+          if (_cur == _q.snap[_i].end() || _prv == _q.snap[_i - 1].end() || _cur->second == _prv->second) continue;
+          ++_count;
+          if (!_qq.count_only && _n < _q.maxres) {
+            if (!_f2) _j += ","; _f2 = false;
+            _j += "{\"cycle\":" + std::to_string(_c) + ",\"old\":" + _qhex(_prv->second) + ",\"new\":" + _qhex(_cur->second) + "}";
+            ++_n;
+          }
+          if (_next) break;
+        }
+        // The COUNT is reported even when the rows were capped: a truncated row
+        // list must never leave the caller unable to state how many there were.
+        _j += "],\"count\":" + std::to_string(_count);
+        _j += ",\"complete\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "false" : "true");
+        _j += ",\"truncated\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "true" : "false");
+        _j += ",\"searched\":{\"from\":" + std::to_string(_lo) + ",\"to\":" + std::to_string(_hi) + "}}";
+      } else if (_qq.op == "find") {
+        long _hit = -1;
+        for (size_t _i = 0; _i < _q.cyc.size(); ++_i) {
+          const long _c = _q.cyc[_i];
+          if (_c0 >= 0 && _c < _c0) continue;
+          if (_c1 >= 0 && _c > _c1) break;
+          if (!_q_eval(_qq.expr, static_cast<long>(_i))) continue;
+          _hit = _c;
+          if (!_qq.backward) break;   // backward = forward traversal keeping the LAST match
+        }
+        _j += ",\"ok\":true,\"found\":" + std::string(_hit < 0 ? "false" : "true");
+        if (_hit >= 0) {
+          _j += ",\"at\":{\"cycle\":" + std::to_string(_hit) + ",\"phase\":\"post\"}";
+          if (!_qq.sample.empty()) {
+            _j += ",\"sample\":["; bool _f3 = true;
+            const long _si = _q_at(_hit);
+            for (const auto& _s : _qq.sample) {
+              const std::string* _v = _q_val(_si, _s);
+              if (!_v) continue;
+              if (!_f3) _j += ","; _f3 = false;
+              _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}";
+            }
+            _j += "]";
+          }
+        }
+        _j += ",\"complete\":true,\"searched\":{\"from\":" + std::to_string(_c0) + ",\"to\":" + std::to_string(_c1) + "}}";
+      } else {
+        _fail("unsupported", "unknown query op '" + _qq.op + "'");
+      }
+    }
+    _j += "]}";
+    std::ofstream _qofs(_q.out);
+    if (!_qofs) std::fprintf(stderr, "lhd sim: warning: cannot write --query-json '%s'\n", _q.out.c_str());
+    else _qofs << _j << "\n";
+  }
+)cpp";
+
+  o << "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 
   // File_output, not a raw ofstream: it skips the write when the bytes are
@@ -3109,6 +3580,40 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   {
     File_output ofs(simdir + "/" + kDriverBasename + ".cpp");
     ofs.append(o.str());
+  }
+
+  // ---- sim_catalog.json: the per-test query catalog (2f-sim B) --------------
+  // Static by construction, so `lhd sim --query` can answer a `signals` request
+  // and resolve every scope/glob/regex/kind selector WITHOUT running the design.
+  // Written next to the driver so a --run-only invocation against a prebuilt
+  // workdir finds it too.
+  {
+    std::string j = "{\"schema_version\":1,\"kind\":\"sim_catalog\",\"tests\":{";
+    bool        first_test = true;
+    for (const auto& [tname, cat] : catalogs) {
+      j += first_test ? "" : ",";
+      first_test  = false;
+      j += "\n \"" + cpp_str_lit(tname) + "\":{\"signals\":[";
+      bool first = true;
+      for (const auto& s : cat) {
+        j += first ? "" : ",\n   ";
+        first = false;
+        j += "{\"name\":\"" + s.name + "\",\"kind\":\"" + s.kind + "\",\"bits\":" + std::to_string(s.bits)
+             + ",\"declared_bits\":" + std::to_string(s.declared_bits)
+             + ",\"signed\":" + (s.is_signed ? "true" : "false");
+        if (!s.alias.empty()) {
+          j += ",\"alias\":\"" + s.alias + "\"";
+        }
+        if (s.kind == "memory") {
+          j += ",\"size\":" + std::to_string(s.size) + ",\"ordering\":\"" + s.ordering + "\"";
+        }
+        j += "}";
+      }
+      j += "]}";
+    }
+    j += "}}\n";
+    File_output cfs(simdir + "/sim_catalog.json");
+    cfs.append(j);
   }
   return 0;
 }

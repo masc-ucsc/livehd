@@ -96,6 +96,10 @@ private:
   // signedness — but tolg's bind_result tags every op output unsigned, so a
   // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
   static bool operand_reads_signed(const hhds::Pin_class& dpin);
+  // Width the net for `dpin` was DECLARED with (see add_to_pin2var); 0 when
+  // there is no net (constant / invalid pin) and 1 when it is a scalar `reg`
+  // that cannot legally be indexed.
+  static int32_t decl_bits_of(const hhds::Pin_class& dpin);
 
   std::string build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
