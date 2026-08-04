@@ -2246,13 +2246,25 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (oid == output_cert_ids.end()) {
         continue;
       }
+      // An output can be driven directly by a SOURCE (constant / input / flop)
+      // instead of by a computed node — then its cert id is not in topo, there is
+      // no `_fv<id>`, and `hb` does not apply.  `evalGraph` leaves off-topo ids
+      // untouched, so rewrite with evalGraph_not_mem + that source's `_src` fact.
+      if (!topo_set.count(oid->second)) {
+        ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") "
+            << G << ".topo " << oid->second << " (by decide), " << base_name << "_src" << oid->second << " " << A
+            << "]\n";
+        continue;
+      }
       // φ at a topo id is `bvenc (fv<id> ..)` by defeq (BT.find on a literal key
       // reduces), so `rfl` closes it — never `simp [φ]`, which would materialize
       // the whole lookup structure into the proof term.
       ofs << "  rw [hb " << oid->second << " (by decide), show " << base_name << "_phi " << A << " "
           << oid->second << " = bvenc (" << base_name << "_fv" << oid->second << " " << A << ") from by rfl]\n";
     }
-    ofs << "  simp only [bv_to_bitvec_bvenc, bv_zext_id]\n\n";
+    // Outputs wider than their driver need bv_to_bitvec (bvenc x) = bv_zext x
+    // (same closer the _next flop-din path already uses).
+    ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n\n";
 
     // Sequential designs: _next_refines_fast (each flop din) and _step_refines_fast.
     if (sequential) {
@@ -2275,8 +2287,10 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d
               << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by rfl]\n";
         } else {
-          ofs << "  -- TODO(step5): flop din " << d << " is a source (off-topo); needs evalGraph-off-topo lemma\n";
-          ++seq_gaps;
+          // din driven directly by a source (constant / input / flop): off-topo, so
+          // evalGraph reads through to the source env (same as the output case).
+          ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") "
+              << G << ".topo " << d << " (by decide), " << base_name << "_src" << d << " " << A << "]\n";
         }
       }
       ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n";

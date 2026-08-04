@@ -166,15 +166,48 @@ a small per-design instantiation the emitter prints.
   checked in as a buildable, sorry-free reference.
 
 **Status:** the emitter generates a **sorry-free** bridge for DINO
-`SingleCycleCPU` (all 4772 nodes) and `add2` typechecks green.  The one open item
-is **scale of the single-file check**: DINO-in-one-file elaborates to ~28 GB and
-tens of minutes (per-declaration state for ~4772 theorems in one process — the
-defs are cheap, the proofs accumulate).  It is correct but heavy; the fix is
-**file-splitting / chunked checking** (bounded memory per compiled module),
-tracked under "Remaining Implementation Work" item 1.  Because this machine is a
-shared NFS server, always run the check as a good citizen, e.g.
-`LEAN_NUM_THREADS=8 taskset -c 0-7 nice -n 19 ionice -c 3 lake env lean <file>`
-(or a cgroup `systemd-run --user --scope -p CPUQuota=800%`).
+`SingleCycleCPU` (all 4772 nodes); `add2` typechecks green.  Full-file DINO now
+elaborates in **~26 min / ~13.5 GB** (see below); the last known gap is a closer
+lemma in `_comb_refines_fast` for outputs wider than their driver (fixed, being
+re-verified).  Because this machine is a shared NFS server, always run as a good
+citizen: `LEAN_NUM_THREADS=8 taskset -c 0-7 nice -n 19 ionice -c 3 lake env lean
+<file>`, and for long runs a detached `systemd-run --user -p CPUQuota=800%`
+service (a `--scope` dies with the launcher).
+
+### Scaling of the fast-view bridge (measured, DINO 4772 nodes)
+
+Two independent O(N²) traps had to be removed; both are now handled by the
+emitter.  **Representation of the graph lookups**, and **shape of the combiner**:
+
+| what | bad form | cost | good form | cost |
+|---|---|---|---|---|
+| `φ` / `sourceEnv` / `graphCert.nodes` | flat `if n = k` chain, `List.find?` (also: a balanced `if`-*tree*, which is no better — reducing it beta-substitutes the key across the whole N-node term) | O(N²), 47 h / 94 GB unfinished | `BT` **data** + recursive `BT.find`, values as input-independent closures → O(log N) per lookup | O(N) |
+| `<Top>_bridge_rec` combiner | `simp only [...] at hn` + `rcases hn with h │ h │ …` (N-way) + N bullets — an N-deep `Or.casesOn` whose motive carries the rest, plus N goal substitutions | > 3 h 56 m unfinished | term-mode right fold over `List.forall_mem_cons` | ~127 s |
+
+Full-file decomposition once both are fixed:
+
+| section | wall |
+|---|---|
+| head: 4772 `fv` defs + 3 BT trees + 4438 source facts + wf `native_decide`s | 181 s |
+| + first 200 recurrence theorems | 171 s (marginal ≈ 0) |
+| + all 4772 recurrence theorems | ~1457 s ← **now the dominant term** |
+| + combiner / `bridge_src` / `_refines_fast` | 1584 s total, 13.5 GB, exit 0 |
+
+Guidance for larger designs (CVA6): emit **BT-based lookups and a term-fold
+combiner** from the start — the monolithic forms are not merely slow, they do not
+finish.  Budget ≈ **26 min / 13.5 GB at 4772 nodes**; the remaining hot spot is
+the per-node recurrence suite (notably ~2093 `GetMask` `by decide` side
+conditions), so that is where the next win is.  Note Lean parallelizes *theorem
+bodies*, so a file drains to one core as stragglers finish — a single oversized
+declaration pins one thread and dominates wall time.
+
+Diagnosis tips that mattered (full write-up in `STEP5_BRIDGE_BUGS.md` and the
+`prove-cert-equivalence` skill): errors are reported **incrementally**, so
+`grep 'error:' <log>` at any time; but the log is **not** a progress signal
+(stdio block-buffers at 4096 bytes to a file, and Lean emits messages in file
+order, so one slow early declaration withholds all later output).  To find a slow
+declaration, **bisect the file into timed cumulative slices**; to tell "stuck" from
+"starved", read per-thread CPU in `/proc/<pid>/task/*/stat`.
 
 ## Remaining Implementation Work
 

@@ -157,4 +157,20 @@ theorem evalGraph_of_localAgree (G : GraphCert) (φ src : Nat → BV)
     (by intro n' hn' d hd hdnotin; exact hsrc n' hn' d hd hdnotin) n
   rw [this]; simp [hn]
 
+
+/-- `evalGraph` only updates ids in the topo list, so an id outside it reads through
+to the base environment.  Needed when a design output (or a flop din) is driven
+directly by a SOURCE (constant / input / flop) rather than by a computed node. -/
+theorem evalGraph_not_mem (G : GraphCert) (rho : Nat → BV) :
+    ∀ (ns : List Nat) (d : Nat), d ∉ ns → evalGraph ns G rho d = rho d := by
+  intro ns
+  induction ns generalizing rho with
+  | nil => intro d _; rfl
+  | cons n ns ih =>
+    intro d hd
+    simp only [List.mem_cons, not_or] at hd
+    show evalGraph ns G (envSet rho n (evalNode G rho n)) d = rho d
+    rw [ih _ d hd.2]
+    simp only [envSet, if_neg hd.1]
+
 end GraphRefine
