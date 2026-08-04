@@ -1522,6 +1522,46 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     return collapse_forward_for_pin(node, a_pin);
   }
 
+  // Rule 5 (WIDTH NO-OP): get_mask(a, 2^n-1) == a when `a` provably has no bit
+  // at or above n, so the mask clears nothing.
+  //
+  // An LGraph cell is an unbounded-precision integer op and `bits` is DERIVED
+  // metadata (pass/bitfuzz strips it and recomputes it), but tolg's bind_result
+  // stamps bits = magnitude+1 on every computed output. So an UNSIGNED computed
+  // pin of width W holds a value < 2^(W-1): if W-1 <= n the cell is pure
+  // overhead. On the dino CPU this is 344 of the 811 Get_mask cells that survive
+  // cprop today (42%) -- 256 with a narrow mask, 88 with a >64-bit one, which
+  // get_mask_range() handles uniformly.
+  //
+  // THREE conditions, each load-bearing:
+  //  * is_unsign(a) -- for a SIGNED `a` this mask is the to-positive coercion
+  //    (it clears the sign extension), so dropping it would read -3 as a large
+  //    positive. Rule 4 above is the signed counterpart.
+  //  * `a` is a COMBINATIONAL cell output -- only those carry bind_result's
+  //    magnitude+1 stamp. A graph-IO port's `bits` is the LITERAL bus width
+  //    (bitwidth.cpp:1588-1594), so W-1 understates it by one and an 8-bit port
+  //    with bit 7 set would be silently truncated. Memory/Sub/Flop outputs are
+  //    sized by their own declarations, not by bind_result, so they are out too.
+  //  * a LOW-CONTIGUOUS mask [0,n) -- a bit-extract mask that does not start at
+  //    bit 0 repositions bits and is never an identity.
+  if (!mask_const.is_negative() && !mask_const.has_unknowns()) {
+    auto [mb, me] = mask_const.get_mask_range();  // {-1,-1} = noncontiguous
+    if (mb == 0 && me > 0) {
+      auto       am        = a_pin.get_master_node();
+      const auto amo       = type_op_of(am);
+      const bool computed  = !am.is_invalid() && amo != Ntype_op::Invalid && amo <= Ntype_op::Hotmux
+                            && !is_const_pin(a_pin) && !is_graph_input_pin(a_pin);
+      const int  abits     = bits_of(a_pin);
+      if (computed && abits > 0 && livehd::graph_util::is_unsign(a_pin) && (abits - 1) <= me) {
+        if (collapse_forward_for_pin(node, a_pin)) {
+          return true;
+        }
+        // collapse refuses when a consumer's declared width disagrees; leave the
+        // cell in place rather than restamp somebody else's pin.
+      }
+    }
+  }
+
   auto a_master = a_pin.get_master_node();
   if (type_op_of(a_master) != Ntype_op::Set_mask) {
     // `a` is not a Set_mask writer, so the Set_mask path below cannot fire and
