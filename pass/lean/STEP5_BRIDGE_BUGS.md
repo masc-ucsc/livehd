@@ -13,9 +13,11 @@ issues in the op bridges; 6–8 are structural (combiner shape, source-driven
 outputs, an asymmetric closer).  All fixes are in the emitter
 (`pass_lean.cpp`) plus `OpBridge.lean` / `GraphRefine.lean`.
 
-Current measurement: full-file DINO **≈ 26 min / 13.5 GB, exit 0** once the
-lookups are BT-based and the combiner is a term fold (see the cost model at the
-end).
+**RESOLVED.** With all 8 fixes in, the emitter-generated DINO bridge typechecks
+end-to-end: **`exit 0`, 0 errors, 0 sorries, 1391 s (23.2 min), 13.3 GB** at 8
+cores (only 14 benign linter warnings from the Sext `first`-dispatch).  All three
+theorems — `_comb_refines_fast`, `_next_refines_fast`, `_step_refines_fast` — are
+proven for all 4772 nodes.
 
 Failing nodes are cited from the generated
 `SingleCycleCPU_Lgraph.lean` (bridge mode).
@@ -222,7 +224,7 @@ design; only timed slices of the real file predict a wall time.
 | head (defs + BT trees + 4438 source facts + wf) | 181 s |
 | + 200 recurrence theorems | 171 s (marginal ≈ 0) |
 | + all 4772 recurrence theorems | ~1457 s ← dominant |
-| + combiner / bridge_src / refines | **1584 s ≈ 26 min, 13.5 GB** |
+| + combiner / bridge_src / refines | **1391 s = 23.2 min, 13.3 GB, exit 0** |
 
 Note the per-node cost is **not uniform**: 200 theorems were free, 4772 cost ~21
 minutes — the expensive ones are the wide `GetMask` nodes with `by decide` side
