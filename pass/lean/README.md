@@ -200,13 +200,107 @@ conditions), so that is where the next win is.  Note Lean parallelizes *theorem
 bodies*, so a file drains to one core as stragglers finish — a single oversized
 declaration pins one thread and dominates wall time.
 
-Diagnosis tips that mattered (full write-up in `STEP5_BRIDGE_BUGS.md` and the
-`prove-cert-equivalence` skill): errors are reported **incrementally**, so
-`grep 'error:' <log>` at any time; but the log is **not** a progress signal
-(stdio block-buffers at 4096 bytes to a file, and Lean emits messages in file
-order, so one slow early declaration withholds all later output).  To find a slow
-declaration, **bisect the file into timed cumulative slices**; to tell "stuck" from
-"starved", read per-thread CPU in `/proc/<pid>/task/*/stat`.
+### Lessons learned (step 5)
+
+Getting DINO from "emitted" to "typechecked" took eight bug fixes and two
+algorithmic rewrites.  Full detail: **`STEP5_BRIDGE_BUGS.md`** (every bug, symptom
+→ root cause → fix) and **`.claude/skills/prove-cert-equivalence/SKILL.md`** (the
+reusable procedure).  The transferable parts:
+
+1. **Two independent O(N²) traps.** Graph lookups *and* the combiner (table
+   above).  Fixing one only exposes the other.
+2. **"0 sorries" ≠ "typechecks".** A sorry-free file can be full of proof holes,
+   and an O(N²) check hides them by never *reaching* the declarations that fail.
+   Every speedup exposed more bugs.  Only a full-file `exit 0` counts as done.
+3. **Constant spelling needs one source of truth.** The fast emitter
+   (`lit_const_at`) and the certificate leaf (`int_of_const` +
+   `CertBuild::source_leaf`) must produce *textually identical* constants — four
+   of the eight bugs were the same value spelled two ways (`0#w` vs
+   `BitVec.ofInt w 0`, `(1#w <<< w) - 1#w` vs the decimal, …).  Ops that erase the
+   const via `bv_zext` hide it; ops where the const **survives into the result**
+   (compares inside `decide`, MuxN branches, mask `&&&`) fail.  `lit_const_at` now
+   delegates to `int_of_const`, and **`pass/lean/scripts/const_parity.py`** guards
+   it — it flagged **4401 of 4772** nodes before the fix and **0** after, in
+   seconds, replacing a ~3 h discovery run.
+4. **Off-topo ids.** An output or flop din can be driven *directly* by a
+   constant/input/flop; its cert id is then a source, there is no `_fv<id>`, and
+   the `evalGraph_of_localAgree` fact does not apply.  Use
+   `GraphRefine.evalGraph_not_mem` (off-topo ids read through to the source env).
+5. **Diagnosing a slow check.** Errors are reported **incrementally**, so
+   `grep 'error:' <log>` at any time.  But the log is **not** a progress signal:
+   stdio block-buffers at 4096 bytes when stdout is a file (use `stdbuf -oL`), and
+   Lean emits messages in **file order**, so one slow early declaration withholds
+   all later output.  To find a slow declaration, **bisect the file into timed
+   cumulative slices**; to tell "one stuck declaration" from "starved by load",
+   read per-thread CPU in `/proc/<pid>/task/*/stat` (Lean parallelizes theorem
+   bodies, so a drained run means everything else already finished).
+6. **Estimating runtime.** Synthetic sweeps give the *exponent* — use them to
+   choose a representation.  Only timed slices of the **real** file give the
+   *constant*.  Synthetic-only estimates here were off by 10–50×.
+7. **Testing discipline.** A truncated probe is not a clean bill of health: one
+   probe reported "exit 0, 0 errors" while silently omitting the tail that held a
+   live bug.  Always state what a probe *excludes*; bugs cluster in the tail
+   (`bridge_src`, `_refines_fast`), which is also the first thing lost when a run
+   is killed — to test it cheaply, stub the combiner with `sorry`.  And do not run
+   several ~10 GB Lean instances concurrently: they OOM each other and the
+   failures look like results.
+
+### Applying this to CVA6 (plan)
+
+The DINO result gives a repeatable recipe.  Applying it to CVA6 is mostly a
+matter of *scope selection*, because the front-end reality constrains what can be
+lowered at all.  Background: `scripts/CVA6_SV2V_FILELIST_REFERENCE.md`.
+
+**Reality check — whole-core CVA6 is not reachable today.**  Both front-ends are
+blocked, in different places:
+- `sv2v --top=cva6` dies on `acc_dispatcher` (CV-X-IF is enabled in
+  `cv64a6_imafdc_sv39_hpdcache_wb`, so the accelerator cannot just be dropped);
+- the slang path gets past elaboration and then dies at
+  `pass/cprop/cprop.cpp:459` (a livehd-new EQ-fold bug).
+
+The reachable unit is a **subtree**: `sv2v --top=<module>` plus a one-line gate
+wrapper binding the config params (`scripts/cva6_module_wrappers/`).  `cva6_tlb`
+is already verified through that path (749 lines, 2 modules, exit 0).
+
+**Per-module pipeline** — identical to DINO, with the LEC gate still mandatory:
+
+```text
+sv2v subtree lowering → LEC gate (RTL ≡ LGraph) → pass.lean --set formal.lean.emit_fast_bridge=true
+    → static gates (seconds) → verification ladder → full typecheck
+```
+
+**Static gates first — they cost seconds and replace hours of discovery:**
+`sorries = 0`, `TODO(step5) = 0`, `pass/lean/scripts/const_parity.py` PASS, and all
+three `_refines_fast` theorems present.  Never start a long run without them.
+
+**Verification ladder:** `add2` → the 1-flop sequential design → **a module with an
+output driven directly by a constant** (this case is absent from add2 and cost us
+a 26-minute run to discover) → the target module.
+
+**Expected work per module, in the order it will surface:**
+- **New op bridges.** CVA6 reaches ops DINO never used — `Mult`, `Div`/`UDiv`/
+  `SDiv`, `SetMask`, wider `Sum` arities.  The emitter already flags an
+  unsupported op with a marked `sorry`, so the static gate catches it
+  immediately; each needs one `OpBridge` lemma in the established
+  `eval_op OP w [bvenc …] = bvenc (fast …)` shape.
+- **Memories are a hard blocker.** `emit_fast_bridge` is gated on
+  `memory_nodes.empty()`, so any module containing arrays is excluded until the
+  **verified memory certificate** (Phase 4 below) lands.  Choose memory-free
+  subtrees first and treat memory as its own milestone.
+- **Scale.** Reference point: 4772 nodes → 23 min / 13.3 GB with BT lookups and
+  the term-fold combiner.  Record the node count per module and compare.  For a
+  module much beyond ~5 k nodes the next lever is a **chunked combiner** (K lemmas
+  of ~64 nodes joined with `List.forall_mem_append`), which caps any single term
+  *and* restores parallelism across declarations — designed, but **not yet
+  validated at scale**.
+
+**Suggested order:** `cva6_tlb` (lowering already verified) → other
+accelerator-free, memory-free subtrees (decoder, ALU, branch unit, CSR logic) →
+progressively larger cones.  Whole-core only once the two front-end blockers above
+are fixed.
+
+**Keep a per-module record** (module, node count, wall, peak RSS, new op bridges
+added, blockers hit) so the cost model stays calibrated as designs grow.
 
 ## Remaining Implementation Work
 
