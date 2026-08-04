@@ -117,7 +117,7 @@ Measured on DINO (4772 nodes, ≤8 cores, same file otherwise):
 | head: 4772 `fv` defs + 3 BT trees + 4438 src-facts + wf | **181 s** |
 | + 200 rec theorems | 171 s (marginal ≈ 0) |
 | full file, **`rcases` combiner** | **> 3 h 56 m, never finished** |
-| full file, **term-fold combiner** | **1584 s ≈ 26 min, 13.5 GB, exit 0** |
+| full file, **term-fold combiner** | **1391 s = 23.2 min, 13.3 GB, exit 0, 0 errors** |
 
 The combiner is one declaration, so it is inherently **single-threaded** — the
 telltale signature is one thread with hours of CPU while the rest sleep (§3).
@@ -204,8 +204,8 @@ never-finishing depending on one declaration). Do this instead:
 
 | what | value |
 |---|---|
-| full-file wall | **1584 s ≈ 26 min** |
-| peak RSS | **13.5 GB** |
+| full-file wall | **1391 s = 23.2 min** (8 cores, exit 0, 0 errors) |
+| peak RSS | **13.3 GB** |
 | head (defs+trees+src-facts+wf) | 181 s |
 | marginal per rec theorem | ≈ 0 (200 rec ≈ free) |
 | dominant term | the combiner |

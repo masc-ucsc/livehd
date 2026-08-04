@@ -166,10 +166,9 @@ a small per-design instantiation the emitter prints.
   checked in as a buildable, sorry-free reference.
 
 **Status:** the emitter generates a **sorry-free** bridge for DINO
-`SingleCycleCPU` (all 4772 nodes); `add2` typechecks green.  Full-file DINO now
-elaborates in **~26 min / ~13.5 GB** (see below); the last known gap is a closer
-lemma in `_comb_refines_fast` for outputs wider than their driver (fixed, being
-re-verified).  Because this machine is a shared NFS server, always run as a good
+`SingleCycleCPU` (all 4772 nodes); `add2` typechecks green.  **The full 4772-node DINO bridge typechecks
+end-to-end: `exit 0`, 0 errors, 0 sorries, in 1391 s (23.2 min) / 13.3 GB at 8
+cores** — `_comb`, `_next` and `_step` all proven equal to the certificate model.  Because this machine is a shared NFS server, always run as a good
 citizen: `LEAN_NUM_THREADS=8 taskset -c 0-7 nice -n 19 ionice -c 3 lake env lean
 <file>`, and for long runs a detached `systemd-run --user -p CPUQuota=800%`
 service (a `--scope` dies with the launcher).
@@ -191,11 +190,11 @@ Full-file decomposition once both are fixed:
 | head: 4772 `fv` defs + 3 BT trees + 4438 source facts + wf `native_decide`s | 181 s |
 | + first 200 recurrence theorems | 171 s (marginal ≈ 0) |
 | + all 4772 recurrence theorems | ~1457 s ← **now the dominant term** |
-| + combiner / `bridge_src` / `_refines_fast` | 1584 s total, 13.5 GB, exit 0 |
+| + combiner / `bridge_src` / `_refines_fast` | **1391 s total (23.2 min), 13.3 GB, exit 0, 0 errors** |
 
 Guidance for larger designs (CVA6): emit **BT-based lookups and a term-fold
 combiner** from the start — the monolithic forms are not merely slow, they do not
-finish.  Budget ≈ **26 min / 13.5 GB at 4772 nodes**; the remaining hot spot is
+finish.  Budget ≈ **23 min / 13.3 GB at 4772 nodes**; the remaining hot spot is
 the per-node recurrence suite (notably ~2093 `GetMask` `by decide` side
 conditions), so that is where the next win is.  Note Lean parallelizes *theorem
 bodies*, so a file drains to one core as stragglers finish — a single oversized
