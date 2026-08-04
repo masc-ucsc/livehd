@@ -30,6 +30,17 @@ private:
   // ("in.a"), a flop member ("q"), or a combinational temp ("cg_3").
   absl::flat_hash_map<pin_key_t, std::string> pin2var;
   int                                          tmp_cnt = 0;
+  // Pins whose C++ variable is CANONICAL at its declared width: the value the
+  // word holds IS the exact mathematical value, correctly sign-extended. Only
+  // the combinational temps we emit ourselves qualify -- their producing op ran
+  // under the capacity invariant (bits = magnitude+1), so the result fits.
+  //
+  // BOUNDARY values do NOT qualify and must keep the declared-width
+  // re-interpretation `operand()` applies: a module input is filled from a
+  // testbench string (an s8 port can arrive holding 200, not -56), and memory
+  // reads / sub outputs are materialized elsewhere. Reading those bare made
+  // signed compares wrong -- caught by prp-simeq-rt_sat_s.
+  absl::flat_hash_set<pin_key_t> canonical_;
 
   // Stage 0 combinational-loop safety net. A sim module is ONE sequential
   // `cycle()` schedule, so a combinational cycle -- a real loop, or a FALSE loop
@@ -75,10 +86,26 @@ private:
   absl::flat_hash_set<hhds::Class_index> live_;
 
   // Resolve a driver pin to a Slop<target_bits> C++ EXPRESSION: a constant ->
-  // Slop<W>::from_pyrope("..."); otherwise the named value width-converted to W.
+  // Slop<W>::create_integer(N) when it fits an int64, else Slop<W>::from_pyrope("...");
+  // otherwise the named value width-converted to W.
   // sign_mode: 0 = per is_unsign(pin), +1 = force signed (Slop<W>{...}, sext),
   // -1 = force unsigned (.zext_to<W>(), zext).
   std::string operand(const hhds::Pin_class& dpin, int target_bits, int sign_mode = 0);
+  // Resolve a driver pin to a Slop expression AT ITS OWN WIDTH -- no width
+  // conversion at all. For the mixed-width Slop ops (Slop<W>::add_op(x, y) and
+  // friends), which accept operands of ANY width and materialize the result at
+  // W: the operand widths are template parameters DEDUCED from the argument
+  // types, so the emitter neither knows nor needs each variable's declared width.
+  //
+  // This is what makes the emission 1-to-1 -- one LGraph cell becomes one Slop
+  // call, with no invented per-operand conversion. An LGraph op is an
+  // unbounded-precision integer op and a pin's `bits` is derived metadata
+  // (pass/bitfuzz strips it and recomputes it), so a conversion that only
+  // re-states a width the value already satisfies is pure overhead.
+  //
+  // `fallback_bits` is used only for the shapes with no variable to name: an
+  // invalid pin, a constant, or an unresolved combinational cycle.
+  std::string raw_operand(const hhds::Pin_class& dpin, int fallback_bits);
   // The RHS Slop<wbits> expression for one combinational node.
   std::string node_expr(const hhds::Node_class& node, int wbits);
 

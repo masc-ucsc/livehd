@@ -2797,6 +2797,31 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
             if (inserted) {
               int bits2 = bits_of(dout);
+              // The whole-array read output (Ntype::Memory_readall_pid) carries the
+              // ENTIRE array -- size*bits, entry 0 in the low bits -- not one entry.
+              // bits_of() on that pin is the ELEMENT width, so declaring from it
+              // truncated the {data[size-1],...,data[0]} concat that process_memory
+              // drives down to entry 0, and every consumer of the bus (a whole-array
+              // `d = q` copy, then the per-entry update) then read garbage. LEC
+              // refuted comb_array_const_index_read on exactly this.
+              if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
+                int64_t mb = 0;
+                int64_t ms = 0;
+                for (const auto& e3 : node.inp_edges()) {
+                  if (!is_const_pin(e3.driver)) {
+                    continue;
+                  }
+                  auto nm = Ntype::get_sink_name(Ntype_op::Memory, e3.sink.get_port_id());
+                  if (nm == "bits") {
+                    mb = hydrate_const(e3.driver).to_just_i64();
+                  } else if (nm == "size") {
+                    ms = hydrate_const(e3.driver).to_just_i64();
+                  }
+                }
+                if (mb > 0 && ms > 0) {
+                  bits2 = static_cast<int>(mb * ms);
+                }
+              }
               if (bits2 <= 1) {
                 fout->append(is_array_mem ? "reg signed " : "wire signed ", name2, ";\n");
               } else {

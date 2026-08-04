@@ -186,8 +186,20 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     return absl::StrCat("Slop<", tw, ">::create_integer(0)");
   }
   if (is_const_pin(dpin)) {
-    // Exact via the shared pyrope codec (handles wide constants too).
-    return absl::StrCat("Slop<", tw, ">::from_pyrope(\"", hydrate_const(dpin).to_pyrope(), "\")");
+    const auto c = hydrate_const(dpin);
+    // Fast path -- the overwhelmingly common case. A plain Integer that fits an
+    // int64 emits as create_integer(N): a constexpr array fill the compiler
+    // always folds, versus from_pyrope's digit-by-digit parse (constexpr, but
+    // only actually evaluated at compile time when the compiler chooses to).
+    // Same bits by construction: both leave the value UNMASKED in base_[0] and
+    // sign-extend into the upper words, and is_just_i64() (<= 62 bits, no
+    // unknowns) guarantees the round-trip through int64 is exact.
+    if (c.is_integer() && c.is_just_i64()) {
+      return absl::StrCat("Slop<", tw, ">::create_integer(", c.to_just_i64(), ")");
+    }
+    // Exact via the shared pyrope codec: wide constants, unknown (`?`) bits, and
+    // the non-Integer types (Boolean/String/Nil) that create_integer would flatten.
+    return absl::StrCat("Slop<", tw, ">::from_pyrope(\"", c.to_pyrope(), "\")");
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -226,18 +238,55 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   return absl::StrCat("Slop<", tw, ">{", base, "}");  // signed sext via the hlop cross-width ctor
 }
 
+std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits) {
+  const std::string fw = std::to_string(fallback_bits);
+  if (dpin.is_invalid()) {
+    return absl::StrCat("Slop<", fw, ">::create_integer(0)");
+  }
+  if (is_const_pin(dpin)) {
+    const auto c = hydrate_const(dpin);
+    if (c.is_integer() && c.is_just_i64()) {
+      return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
+    }
+    return absl::StrCat("Slop<", fw, ">::from_pyrope(\"", c.to_pyrope(), "\")");
+  }
+  auto it = pin2var.find(dpin.get_class_index());
+  if (it == pin2var.end()) {
+    // Same unschedulable-comb-cycle guard as operand(): record it so
+    // do_from_graph() fails loudly instead of silently simulating 0.
+    cycle_unresolved_ = true;
+    if (cycle_first_label_.empty()) {
+      cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
+    }
+    return absl::StrCat("Slop<", fw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");
+  }
+  if (!canonical_.contains(dpin.get_class_index())) {
+    // A boundary value (module input, memory read, sub output) may hold a
+    // non-canonical word for its declared width, so it still needs the
+    // declared-width re-interpretation.
+    return operand(dpin, fallback_bits);
+  }
+  return it->second;  // BARE value -- the op deduces its width
+}
+
 std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   const auto op = type_op_of(node);
   const auto tw = std::to_string(wbits);
   auto       e  = sorted_inp(node);
 
+  // 1-to-1 fold: `Slop<W>::op(a, b, ...)` over operands read at their OWN widths.
+  // Left-associated to match the previous member-chain result exactly.
   auto fold = [&](const char* method) -> std::string {
     if (e.empty()) {
       return absl::StrCat("Slop<", tw, ">::create_integer(0)");
     }
-    std::string s = operand(e[0].driver, wbits);
+    std::string s = raw_operand(e[0].driver, wbits);
     for (size_t i = 1; i < e.size(); ++i) {
-      s = absl::StrCat(s, ".", method, "(", operand(e[i].driver, wbits), ")");
+      s = absl::StrCat("Slop<", tw, ">::", method, "(", s, ", ", raw_operand(e[i].driver, wbits), ")");
+    }
+    if (e.size() == 1) {
+      // A single operand still has to land at the node width.
+      return absl::StrCat("Slop<", tw, ">{", s, "}");
     }
     return s;
   };
@@ -323,22 +372,39 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         cw += 1;
       }
       const char* m = (op == Ntype_op::LT) ? "lt_op" : (op == Ntype_op::GT) ? "gt_op" : "eq_op";
-      // Slop's compare ops return a Bool whose true value is all-ones (-1); a bare
-      // zext_to<tw> would leave `tw` all-ones (e.g. 3 for a 2-bit consumer) instead
-      // of 1. Clamp to a single bit first so the boolean is 0/1 in any width.
-      return absl::StrCat(operand(e[0].driver, cw), ".", m, "(", operand(e[1].driver, cw), ").zext_to<1>().zext_to<", tw, ">()");
+      // 1-to-1: the mixed-width compare reads both operands at their own widths
+      // (sign-extending each into the compare, so a narrow signed operand still
+      // compares signed) and materializes a 0/1 MAGNITUDE at the node width.
+      // That replaces three emitted conversions -- two operand reads plus the
+      // `.zext_to<1>().zext_to<tw>()` clamp that existed only because the member
+      // form returns create_bool's all-ones (-1). The `cw += 1` headroom above is
+      // likewise unnecessary here: it existed only to force cw != operand width so
+      // the cross-width ctor would fire instead of the copy ctor.
+      return absl::StrCat("Slop<", tw, ">::", m, "(", raw_operand(e[0].driver, cw), ", ", raw_operand(e[1].driver, cw), ")");
     }
     case Ntype_op::SHL:
+    case Ntype_op::SRA: {
+      const bool is_shl = op == Ntype_op::SHL;
       if (e.size() < 2) {
-        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits);
+        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
+                         : operand(e[0].driver, wbits, is_shl ? 0 : /*signed=*/1);
       }
-      return absl::StrCat(operand(e[0].driver, wbits), ".shl_op(", operand(e[1].driver, wbits), ")");
-    case Ntype_op::SRA:
-      if (e.size() < 2) {
-        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, /*signed=*/1);
+      // A shift AMOUNT is a count, not a value in the datapath. When it is
+      // constant, hand the int64 overload the number directly instead of
+      // materializing a whole Slop<W> constant just to pass it (which, at
+      // W > 64, was a multi-word object built per shift).
+      if (is_const_pin(e[1].driver)) {
+        const auto amt = hydrate_const(e[1].driver);
+        if (amt.is_integer() && amt.is_just_i64() && amt.to_just_i64() >= 0) {
+          return absl::StrCat("Slop<", tw, ">::", is_shl ? "shl_op" : "sra_op", "(", raw_operand(e[0].driver, wbits), ", ",
+                              amt.to_just_i64(), ")");
+        }
       }
-      // arithmetic shift: the shifted operand must be read as signed
-      return absl::StrCat(operand(e[0].driver, wbits, /*signed=*/1), ".sra_op(", operand(e[1].driver, wbits), ")");
+      // Runtime amount: keep the member form (it reads amount.base_[0]).
+      // The shifted operand of an ARITHMETIC shift must be read as signed.
+      return absl::StrCat(operand(e[0].driver, wbits, is_shl ? 0 : /*signed=*/1), ".", is_shl ? "shl_op" : "sra_op", "(",
+                          operand(e[1].driver, wbits), ")");
+    }
     case Ntype_op::Get_mask: {
       // value (e[0]) + optional mask (e[1]). The unary form is the common tolg
       // width-adjust; lower it to a plain zext.
@@ -423,17 +489,31 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       const char* m   = (op == Ntype_op::Mux) ? "mux_op" : "hotmux_op";
       std::string sel = operand(e[0].driver, wbits);  // Slop<tw> selector
       if (op == Ntype_op::Mux) {
-        // A binary Mux selector is an INDEX (0..n-1). Slop encodes a boolean
-        // `true` as all-ones, which as a wide selector value falls outside
-        // [0,n) -> mux_op returns invalid and the mux never picks. Keep only
-        // the ceil(log2(n)) low index bits (then re-widen to tw): all-ones -> 1.
         size_t n_vals = e.size() - 1;
-        int    sel_w  = 1;
-        while ((static_cast<size_t>(1) << sel_w) < n_vals) {
-          ++sel_w;
-        }
-        if (sel_w < wbits) {
-          sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
+        if (n_vals == 2) {
+          // A 2-arm Mux selector is a CONDITION, not an index: ANY nonzero value
+          // selects arm 1. That matches cgen_verilog (`sel ? arm1 : arm0`, whose
+          // netlist `lhd lec` proves) and the LGraph model, where an `if` cone
+          // hands the Mux whatever the condition computed -- `a & 0x80` arrives
+          // as 128, not as 1.
+          //
+          // This used to truncate the selector to its low bit, to turn Slop's
+          // all-ones boolean (`create_bool(true)` == -1) into 1. That is correct
+          // ONLY for a value that is already 0/1: for any nonzero-but-EVEN
+          // condition the low bit is 0, so the mux silently took arm 0.
+          // `if a & 0x80 { y = 1 } else { y = 2 }` returned 2 for EVERY input.
+          // A nonzero test maps both forms right: -1 -> 1 and 128 -> 1.
+          sel = absl::StrCat("Slop<", tw, ">::create_integer((", sel, ").is_known_true() ? 1 : 0)");
+        } else {
+          // 3+ arms: the selector IS an index (0..n-1). Keep only the
+          // ceil(log2(n)) low index bits, then re-widen to tw.
+          int sel_w = 1;
+          while ((static_cast<size_t>(1) << sel_w) < n_vals) {
+            ++sel_w;
+          }
+          if (sel_w < wbits) {
+            sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
+          }
         }
       }
       return absl::StrCat("Slop<", tw, ">::", m, "(", sel, ", {", vals, "})");
@@ -2361,6 +2441,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(
         absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(n, wb), ";  // ", op_name(nop), " (mem-operand prefetch)\n"));
     pin2var[dp.get_class_index()] = var;
+    canonical_.insert(dp.get_class_index());   // node_expr result: canonical at its declared width
   };
   auto ensure_ready = [&](const hhds::Pin_class& drv) { ensure_ready_impl(ensure_ready_impl, drv); };
 
@@ -2549,6 +2630,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
     fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(node, wb), ";  // ", op_name(op), "\n"));
     pin2var[dpin.get_class_index()] = var;
+    canonical_.insert(dpin.get_class_index());  // node_expr result: canonical at its declared width
   }
 
   // Deferred Moore-sub calls: every comb value is bound now; the child call
