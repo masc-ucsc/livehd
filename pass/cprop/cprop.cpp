@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,9 +16,9 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
-#include "split_selfref.hpp"
 #include "pass_cprop.hpp"
 #include "perf_tracing.hpp"
+#include "split_selfref.hpp"
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_value_of;
@@ -70,6 +71,279 @@ using livehd::graph_util::setup_sink_by_name;
   auto master = spin.get_master_node();
   auto op     = type_op_of(master);
   return Ntype::get_sink_name(op, spin.get_port_id());
+}
+
+[[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid);
+
+struct Bool_condition {
+  hhds::Pin_class base;
+  bool            true_when_base = true;
+};
+
+[[nodiscard]] bool same_pin(const hhds::Pin_class& a, const hhds::Pin_class& b) {
+  return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
+}
+
+[[nodiscard]] std::optional<bool> const_truth(const hhds::Pin_class& p) {
+  if (p.is_invalid() || !is_const_pin(p)) {
+    return std::nullopt;
+  }
+  auto c = hydrate_const(p);
+  if (c.has_unknowns()) {
+    return std::nullopt;
+  }
+  return !c.is_known_zero();
+}
+
+// Reduce the boolean materializations emitted by tolg and by a slang round
+// trip: `s ? 1 : 0`, its inverse, and `x == 0` chains. This is deliberately a
+// structural decoder, not a general boolean-equivalence proof.
+[[nodiscard]] std::optional<Bool_condition> decode_bool_condition_impl(const hhds::Pin_class& p, int depth) {
+  if (p.is_invalid()) {
+    return std::nullopt;
+  }
+  if (depth >= 32 || is_const_pin(p) || is_graph_input_pin(p)) {
+    return Bool_condition{p, true};
+  }
+  auto n = p.get_master_node();
+  if (type_op_of(n) == Ntype_op::Mux) {
+    auto sel  = drv_at(n, 0);
+    auto arm0 = drv_at(n, 1);
+    auto arm1 = drv_at(n, 2);
+    auto v0   = const_truth(arm0);
+    auto v1   = const_truth(arm1);
+    if (!sel.is_invalid() && v0.has_value() && v1.has_value() && *v0 != *v1) {
+      auto result = decode_bool_condition_impl(sel, depth + 1);
+      if (result.has_value() && !*v1) {  // arm1 false, arm0 true => !selector
+        result->true_when_base = !result->true_when_base;
+      }
+      return result;
+    }
+  } else if (type_op_of(n) == Ntype_op::EQ) {
+    // The lowering spells truth tests as `(x == 0) == 0`; peel each equality
+    // against known zero and carry its inversion bit. EQ's `as` port is
+    // multi-driver, so inspect edges rather than drv_at().
+    hhds::Pin_class value;
+    int             zeros  = 0;
+    int             values = 0;
+    for (const auto& e : n.inp_edges()) {
+      auto truth = const_truth(e.driver);
+      if (truth.has_value() && !*truth) {
+        ++zeros;
+      } else {
+        value = e.driver;
+        ++values;
+      }
+    }
+    if (zeros == 1 && values == 1) {
+      auto result = decode_bool_condition_impl(value, depth + 1);
+      if (result.has_value()) {
+        result->true_when_base = !result->true_when_base;
+      }
+      return result;
+    }
+  }
+  return Bool_condition{p, true};
+}
+
+[[nodiscard]] std::optional<Bool_condition> decode_bool_condition(const hhds::Pin_class& p) {
+  return decode_bool_condition_impl(p, 0);
+}
+
+struct Hold_mux_match {
+  hhds::Node_class mux;
+  hhds::Pin_class  data;
+};
+
+[[nodiscard]] bool is_latch_hold_value(hhds::Pin_class p, const hhds::Pin_class& q) {
+  for (int depth = 0; depth < 16 && !p.is_invalid(); ++depth) {
+    if (same_pin(p, q)) {
+      return true;
+    }
+    if (is_const_pin(p) || is_graph_input_pin(p)) {
+      return false;
+    }
+    auto n  = p.get_master_node();
+    auto op = type_op_of(n);
+    if (op != Ntype_op::Get_mask && op != Ntype_op::Sext) {
+      return false;  // Q+1 and all other real feedback stay visible
+    }
+    p = drv_at(n, 0);  // value input; the remaining pins describe the coercion
+  }
+  return false;
+}
+
+// Find an enable-qualified `Q` hold mux anywhere in the latch's D cone. Slang
+// can wrap a generated hold mux in Get_mask/Sext nodes and then add another
+// hold mux while re-reading `always_latch`, so looking only at din's immediate
+// driver misses the nested form. A candidate must have a single consumer: its
+// disabled value is irrelevant only on this latch-D path, not to arbitrary
+// other observers of a shared mux.
+[[nodiscard]] std::optional<Hold_mux_match> find_latch_hold_mux(const hhds::Pin_class& start, const hhds::Pin_class& q,
+                                                                const Bool_condition& open) {
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Pin_class>           work{start};
+  int                                    visited = 0;
+  while (!work.empty() && visited++ < 256) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    auto n = p.get_master_node();
+    if (livehd::graph_util::is_type_register(n) || type_op_of(n) == Ntype_op::Sub) {
+      continue;
+    }
+    if (type_op_of(n) == Ntype_op::Mux) {
+      auto       sel  = drv_at(n, 0);
+      auto       arm0 = drv_at(n, 1);
+      auto       arm1 = drv_at(n, 2);
+      const bool q0   = is_latch_hold_value(arm0, q);
+      const bool q1   = is_latch_hold_value(arm1, q);
+      if (q0 != q1) {
+        auto selected = decode_bool_condition(sel);
+        if (selected.has_value()) {
+          if (!q0) {  // q on arm1 => data selected while selector is false
+            selected->true_when_base = !selected->true_when_base;
+          }
+          size_t consumers = 0;
+          for ([[maybe_unused]] const auto& out : n.out_edges()) {
+            ++consumers;
+          }
+          if (consumers == 1 && same_pin(selected->base, open.base) && selected->true_when_base == open.true_when_base) {
+            return Hold_mux_match{n, q0 ? arm1 : arm0};
+          }
+        }
+      }
+    }
+    for (const auto& e : n.inp_edges()) {
+      work.push_back(e.driver);
+    }
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool cone_reaches_q(const hhds::Pin_class& start, const hhds::Pin_class& q) {
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Pin_class>           work{start};
+  int                                    visited = 0;
+  while (!work.empty() && visited++ < 256) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    if (same_pin(p, q)) {
+      return true;
+    }
+    auto n = p.get_master_node();
+    if (livehd::graph_util::is_type_register(n) || type_op_of(n) == Ntype_op::Sub) {
+      continue;
+    }
+    for (const auto& e : n.inp_edges()) {
+      work.push_back(e.driver);
+    }
+  }
+  return false;
+}
+
+// Pair `gate ? 1 : data_enable` with a din override on the same gate. The
+// override branch must not reach Q, while the normal branch must contain the
+// hold path. This proves that the extra aggregate-enable cause is reset-like
+// priority logic and does not qualify normal latch data.
+[[nodiscard]] bool has_guarded_data_override(const hhds::Pin_class& din, const hhds::Pin_class& q, const Bool_condition& gate,
+                                             bool override_when_base) {
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Pin_class>           work{din};
+  int                                    visited = 0;
+  while (!work.empty() && visited++ < 256) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || is_const_pin(p) || is_graph_input_pin(p) || !seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    auto n = p.get_master_node();
+    if (livehd::graph_util::is_type_register(n) || type_op_of(n) == Ntype_op::Sub) {
+      continue;
+    }
+    if (type_op_of(n) == Ntype_op::Mux) {
+      auto selected = decode_bool_condition(drv_at(n, 0));
+      auto arm0     = drv_at(n, 1);
+      auto arm1     = drv_at(n, 2);
+      if (selected.has_value() && same_pin(selected->base, gate.base)) {
+        const bool override_on_sel1 = selected->true_when_base == override_when_base;
+        auto       override_arm     = override_on_sel1 ? arm1 : arm0;
+        auto       normal_arm       = override_on_sel1 ? arm0 : arm1;
+        if (!cone_reaches_q(override_arm, q) && cone_reaches_q(normal_arm, q)) {
+          return true;
+        }
+      }
+    }
+    for (const auto& e : n.inp_edges()) {
+      work.push_back(e.driver);
+    }
+  }
+  return false;
+}
+
+// Slang represents an async-reset latch's aggregate write-enable as
+// `reset ? 1 : data_enable`. Recover the normal data enable only when din has
+// the matching priority override. Reset value and priority remain untouched.
+[[nodiscard]] std::optional<Bool_condition> latch_data_open_condition(const hhds::Node_class& latch, const hhds::Pin_class& q,
+                                                                      const hhds::Pin_class& din, const hhds::Pin_class& enable) {
+  auto open = decode_bool_condition(enable);
+  if (!open.has_value() || !open->true_when_base || open->base.is_invalid() || is_const_pin(open->base)
+      || is_graph_input_pin(open->base)) {
+    return open;
+  }
+  auto mux = open->base.get_master_node();
+  if (type_op_of(mux) != Ntype_op::Mux) {
+    return open;
+  }
+  auto sel  = drv_at(mux, 0);
+  auto arm0 = drv_at(mux, 1);
+  auto arm1 = drv_at(mux, 2);
+  auto gate = decode_bool_condition(sel);
+  auto v0   = const_truth(arm0);
+  auto v1   = const_truth(arm1);
+  if (!gate.has_value()) {
+    return open;
+  }
+  const bool arm0_override = v0.has_value() && *v0;
+  const bool arm1_override = v1.has_value() && *v1;
+  if (arm0_override == arm1_override) {
+    return open;
+  }
+  const bool override_on_sel1   = arm1_override;
+  const bool override_when_base = override_on_sel1 ? gate->true_when_base : !gate->true_when_base;
+  if (!has_guarded_data_override(din, q, *gate, override_when_base)) {
+    return open;
+  }
+
+  // If a dedicated reset pin exists, require it to agree too. Older slang
+  // latch lowering lacks that pin; the paired data override above is then the
+  // sound structural evidence.
+  auto reset = livehd::graph_util::get_driver_of_sink_name(latch, "reset_pin");
+  if (!reset.is_invalid()) {
+    auto reset_active = decode_bool_condition(reset);
+    if (!reset_active.has_value()) {
+      return open;
+    }
+    auto negreset = livehd::graph_util::get_driver_of_sink_name(latch, "negreset");
+    if (!negreset.is_invalid()) {
+      auto negative = const_truth(negreset);
+      if (!negative.has_value()) {
+        return open;
+      }
+      if (*negative) {
+        reset_active->true_when_base = !reset_active->true_when_base;
+      }
+    }
+    if (!same_pin(gate->base, reset_active->base) || override_when_base != reset_active->true_when_base) {
+      return open;
+    }
+  }
+  return decode_bool_condition(override_on_sel1 ? arm0 : arm1);
 }
 
 // ---- packed-wire slice fold helpers ---------------------------------------
@@ -1331,6 +1605,92 @@ void Cprop::scalar_pass(hhds::Graph* g) {
   }
 }
 
+void Cprop::canonicalize_latch_holds(hhds::Graph* g) {
+  std::vector<hhds::Node_class> latches;
+  for (auto node : g->fast_class()) {
+    if (type_op_of(node) == Ntype_op::Latch) {
+      latches.push_back(node);
+    }
+  }
+
+  for (const auto& latch : latches) {
+    auto q      = latch.get_driver_pin(0);
+    auto din    = livehd::graph_util::get_driver_of_sink_name(latch, "din");
+    auto enable = livehd::graph_util::get_driver_of_sink_name(latch, "enable");
+
+    // An always-active latch has no opaque/holding phase and therefore no
+    // state: Q follows D combinationally. Pyrope now wires explicit enable=1
+    // for this case; keep accepting a missing enable as the historical/default
+    // spelling so old LGs and slang's fully-assigned nonblocking blocks also
+    // canonicalize. Runtime reset is deliberately excluded because replacing
+    // it requires preserving the reset-priority value mux.
+    bool always_open = enable.is_invalid();
+    if (!enable.is_invalid()) {
+      auto en_value = const_truth(enable);
+      if (en_value.has_value()) {
+        bool active_high = true;
+        auto posclk      = livehd::graph_util::get_driver_of_sink_name(latch, "posclk");
+        if (!posclk.is_invalid()) {
+          auto positive = const_truth(posclk);
+          if (!positive.has_value()) {
+            continue;
+          }
+          active_high = *positive;
+        }
+        always_open = *en_value == active_high;
+      }
+    }
+    auto reset = livehd::graph_util::get_driver_of_sink_name(latch, "reset_pin");
+    if (always_open && reset.is_invalid() && !q.is_invalid() && !din.is_invalid() && !cone_reaches_q(din, q)) {
+      for (const auto& out : q.out_edges()) {
+        din.connect_sink(out.sink);
+      }
+      latch.del_node();
+      continue;
+    }
+
+    auto open = latch_data_open_condition(latch, q, din, enable);
+    if (q.is_invalid() || din.is_invalid() || enable.is_invalid() || !open.has_value()) {
+      continue;
+    }
+    auto posclk = livehd::graph_util::get_driver_of_sink_name(latch, "posclk");
+    if (!posclk.is_invalid()) {
+      auto positive = const_truth(posclk);
+      if (!positive.has_value()) {
+        continue;  // dynamic/unknown polarity is not safe to simplify
+      }
+      if (!*positive) {
+        open->true_when_base = !open->true_when_base;
+      }
+    }
+
+    // Each rewrite removes one mux, including hold muxes nested under value
+    // shaping nodes. Re-read din every round because deleting the immediate
+    // driver reconnects the latch sink.
+    for (int depth = 0; depth < 64; ++depth) {
+      auto din_now = livehd::graph_util::get_driver_of_sink_name(latch, "din");
+      auto hit     = find_latch_hold_mux(din_now, q, *open);
+      if (!hit.has_value()) {
+        break;
+      }
+      for (const auto& out : hit->mux.out_edges()) {
+        hit->data.connect_sink(out.sink);
+      }
+      hit->mux.del_node();
+    }
+
+    // Collapse the usual boolean materialization on enable itself. Keep an
+    // inverted materialization intact; changing it requires moving inversion
+    // into posclk and is outside this deliberately narrow rewrite.
+    auto raw_enable = decode_bool_condition(enable);
+    if (raw_enable.has_value() && raw_enable->true_when_base && !same_pin(raw_enable->base, enable)) {
+      auto enable_sink = livehd::graph_util::find_sink_pin(latch, "enable");
+      enable_sink.del_sink();
+      raw_enable->base.connect_sink(enable_sink);
+    }
+  }
+}
+
 void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
     return;
@@ -1364,7 +1724,13 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // graphs that skip cprop); was sim-only, leaving lec unable to encode 442
   // XSCore defs.
   livehd::graph_util::split_packed_selfref_wires(current_graph);
+  canonicalize_latch_holds(current_graph);
   scalar_pass(current_graph);
+  // The front ends sometimes spell an unconditional latch write as a
+  // tautological enable cone (for example, a full case/default).  The scalar
+  // sweep above reduces that cone to a constant; revisit latches so the now
+  // explicit always-open cell becomes ordinary combinational logic too.
+  canonicalize_latch_holds(current_graph);
   current_graph = nullptr;
 
 #ifndef NDEBUG

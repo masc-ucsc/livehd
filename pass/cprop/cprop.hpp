@@ -46,6 +46,11 @@ protected:
 
   void bwd_del_node(hhds::Node_class& node);
 
+  // A latch already carries its write condition on `enable`.  Remove the
+  // redundant hold arm from `din = enable ? data : Q` before the ordinary
+  // scalar sweep, so downstream passes see the canonical `din = data` form.
+  void canonicalize_latch_holds(hhds::Graph* g);
+
   void scalar_pass(hhds::Graph* g);
 
 public:

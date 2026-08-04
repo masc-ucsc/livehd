@@ -1363,15 +1363,18 @@ private:
         mw_map_[name] = mw;
       }
 
-      // enable: still the seeded false const => never written (no enable);
-      // the true const => unconditionally written (no enable needed); any
-      // other pin is the OR-of-conditions mux chain.
+      // enable: still the seeded false const => never written. For a Flop, the
+      // true const needs no pin (unconditional edge update is the default).
+      // For a Latch it MUST remain explicit: enable=true means always
+      // transparent, which lets cprop recognize that the cell stores nothing
+      // and replace it with its combinational din. Any other pin is the
+      // OR-of-conditions mux chain.
       if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
         const auto en       = eit->second;
         const auto en_nid   = en.get_master_node().get_debug_nid();
         const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
         const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
-        if (!is_true && !is_false) {
+        if ((info.is_latch && is_true) || (!is_true && !is_false)) {
           setup_sink_by_name(flop, "enable").connect_driver(en);
         }
       }

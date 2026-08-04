@@ -1,10 +1,11 @@
 // Regression: an ALWAYS-TRANSPARENT latch emitted NOTHING -- output undriven.
 //
-// An `always @(*)` case with a `default` writes `o` on every path, so
-// upass.tolg wires no `enable` pin ("the true const => unconditionally written
-// (no enable needed)"). cgen's process_latch treated the absent pin as a
-// MALFORMED latch and returned early, leaving the Q -- here a module output --
-// with no driver at all: the netlist read X and LEC refuted it.
+// An `always @(*)` case with a `default` writes `o` on every path. The reader
+// may initially classify the nonblocking assignment as a latch, but cprop
+// folds its full-path write condition to enable=true and removes the
+// always-open cell. Historically cgen treated the missing enable as malformed,
+// leaving Q -- here a module output -- with no driver at all: the netlist read
+// X and LEC refuted it.
 //
 // The fix must also not spell it `always_latch`: a cell that stores nothing is
 // combinational, and yosys rejects an always_latch that infers no latch ("No

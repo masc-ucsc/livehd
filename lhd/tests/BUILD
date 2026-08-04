@@ -848,8 +848,9 @@ sh_test(
 # which is why the six live prp-equiv-latch_* pairs kept PROVING while the
 # emitter was broken: (1) `process_latch` read din/enable through
 # get_wire_or_const, so a fanout-1 enable came out as a bare UNDECLARED
-# identifier — reproducible ONLY through the yosys importer, since tolg's hold
-# mux keeps a Pyrope latch's enable at fanout >= 2; (2) the emission was
+# identifier — directly reproducible through the yosys importer; cprop now
+# removes tolg's redundant Pyrope hold mux, so the Pyrope half below also pins
+# the resulting fanout-1 enable and canonical RAW D + EN form; (2) emission was
 # `always @*` + blocking `=`, which our own slang reader reads back as plain
 # comb, so Verilog -> slang silently LOST the Latch cell. Both halves were
 # verified to fail on the pre-M1 emitter before landing.

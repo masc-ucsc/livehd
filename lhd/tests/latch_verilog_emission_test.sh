@@ -14,13 +14,10 @@
 #      Measured pre-fix: iverilog says "Unable to bind wire/reg/memory `eq_20'"
 #      and lgcheck REFUTES the round-trip, blaming the design for a bug in the
 #      emitter.
-#        CRITICAL: a Pyrope/slang latch CANNOT reproduce this. tolg bakes the
-#      hold mux into din (`din = cond ? d : q`), so the enable condition always
-#      has fanout >= 2 and always gets its own wire — which is precisely why the
-#      six live equiv pairs never caught the bug. Only the YOSYS importer, which
-#      wires RAW D + EN with no hold mux, leaves the enable at fanout 1. So this
-#      check must drive `--reader yosys-verilog`; running the same shape through
-#      the Pyrope front end passes either way and proves nothing.
+#        CRITICAL: the raw Yosys path is still the direct reproducer because it
+#      wires RAW D + EN. The Pyrope/slang path initially materializes
+#      `din = cond ? d : q`, but pass.cprop now canonicalizes that redundant hold
+#      arm back to RAW D + EN before emission (pinned below).
 #
 #   2. ROUND-TRIP THROUGH OUR OWN FRONT END. The old emission was `always @*`
 #      with BLOCKING `=`. yosys re-infers a latch from that (hence the passing
@@ -120,8 +117,20 @@ for shape in high low; do
   grep -q "always @\*" "$out" && fail "$shape: still emits the old blocking 'always @*' latch form"
   echo "ok: $shape emits always_latch"
 
-  # These shapes cannot reproduce bug 1 (see the header: the Pyrope hold mux
-  # keeps the enable at fanout >= 2), but the emission must still elaborate.
+  # cprop canonicalization: the latch enable already supplies the hold
+  # behavior, so its D input must be the real data, not `en ? data : Q`.
+  # Before this rewrite cgen emitted a data mux whose false arm read `l`, plus
+  # a second boolean mux on enable. Re-reading that RTL nested another hold mux
+  # around it and the latch-contract checker rejected ordinary latches as
+  # transparent self-updates.
+  grep -Eq 'if \([^)]*\) l <= get_mask_[[:alnum:]_]+;' "$out" \
+    || { cat "$out"; fail "$shape: cprop did not canonicalize latch D to raw data + enable"; }
+  grep -Eq 'mux_[[:alnum:]_]+[[:space:]]*=[[:space:]]*l;' "$out" \
+    && { cat "$out"; fail "$shape: emitted a redundant Q hold arm before the latch D input"; }
+  echo "ok: $shape uses canonical raw D + enable (no redundant hold mux)"
+
+  # The canonical Pyrope shape now has the same fanout-1 enable pressure as the
+  # raw importer, and must still elaborate.
   if [ $HAVE_IVERILOG -eq 1 ]; then
     iverilog -g2012 -o /dev/null "$out" 2>"$W/$shape.iv" \
       || { cat "$W/$shape.iv"; fail "$shape: iverilog -g2012 REJECTS the emitted verilog (undeclared inlined driver?)"; }
@@ -138,6 +147,26 @@ for shape in high low; do
     || { cat "$W/$shape.rt.prp"; fail "$shape: verilog -> slang LOST the Latch cell (it re-read as plain comb)"; }
   echo "ok: $shape survives verilog -> slang as a Latch"
 done
+
+# An explicit Pyrope latch written on every path is always transparent.  Tolg
+# keeps that fact as enable=true (rather than making a missing control pin look
+# accidental), and cprop removes the state cell after folding the enable.
+cat > "$W/transparent.prp" <<'EOF'
+pub mod transparent(sel:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  l = if sel { d } else { 0 }
+  q = l
+}
+EOF
+
+"$LHD" compile "$W/transparent.prp" --emit verilog:"$W/transparent.v" \
+  --workdir "$W/w_transparent" -q >"$W/transparent.log" 2>&1 \
+  || { tail -5 "$W/transparent.log"; fail "transparent: compile to verilog failed"; }
+grep -q "always_comb" "$W/transparent.v" \
+  || { cat "$W/transparent.v"; fail "transparent: emitted no combinational process"; }
+grep -q "always_latch" "$W/transparent.v" \
+  && { cat "$W/transparent.v"; fail "transparent: cprop retained a stateful latch for enable=true"; }
+echo "ok: enable=true Pyrope latch canonicalizes to combinational logic"
 
 if [ $HAVE_IVERILOG -eq 0 ]; then
   echo "note: iverilog not present — the undeclared-identifier check was SKIPPED (yosys cannot see that bug)"
