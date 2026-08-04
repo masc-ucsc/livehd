@@ -1307,7 +1307,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // no verdict is transferred. A digest/option change, a larger
       // formal.timeout, a prover change (salt), or --set formal.retry=all
       // re-attempts.
-      if (!retry_all && vcache->skip_unknown(ckey, o.timeout)) {
+      // base.timeout, NOT o.timeout: the ledger asks "did a run with THIS MUCH
+      // budget already fail here?", and the user's budget is base.timeout. The
+      // per-def o.timeout is `base.timeout - wall spent so far`, a SCHEDULING
+      // artifact -- so a def that dispatched 1s into the cold run recorded 119
+      // while its neighbour recorded 120, and on a warm run (everything ahead of
+      // it now a cache hit, spent~0) both ask for 120: the neighbour skips and it
+      // does not. Self-defeating, too -- the better the cache works, the more
+      // budget is left, the less the ledger fires. Measured on minion: 169/169
+      // verdicts hit, and one 127s def re-ground anyway on sub-second jitter.
+      if (!retry_all && vcache->skip_unknown(ckey, base.timeout)) {
         livehd::lec::Query_result ur;
         ur.verdict    = Verdict::Unknown;
         ur.engine     = "cache-skip";
@@ -1488,8 +1497,37 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     //    ~83s. An Unknown is a non-result, so re-spending the remaining budget flat can
     //    only add information — but adopt the flat run only if it actually SETTLES,
     //    else keep the collapsed detail so the report still names the boxes.
+    //
+    //    ...but NOT unconditionally, because it is the one retry that can cost more
+    //    than the whole rest of the run. Fire it only when it is WORTH it, on
+    //    either of two independent grounds:
+    //
+    //    (a) CHASING A CEX (`force_flat` non-empty = an escalation round absorbing
+    //        a child's known refutation). Here the flat miter is how the
+    //        counterexample is found at all: dino PipelinedDualIssueCPU stays
+    //        UNKNOWN collapsed and REFUTES flat.
+    //
+    //    (b) The collapsed attempt BARELY SPENT ITS BUDGET, so it did not fail for
+    //        want of solver time and the retry is cheap. That is the modelling
+    //        case, not the capacity one: a boxed child holding a LATCH makes
+    //        phase_sched decline ("normalizing across a module boundary is not
+    //        supported yet"), both engines return in ~0ms, and flattening the leaf
+    //        into the parent is exactly what makes it schedulable
+    //        (tests/lec_trust_test.sh: untrusted latch leaf must PROVE).
+    //
+    //    Neither holds for a def that burned its whole budget with every box a
+    //    discharged premise: there the retry is a pure gamble on solver luck.
+    //    minion `intpipe_csr_file` (16 boxed children, ALL proven inside 1.1s,
+    //    nothing refuted anywhere in the design) spent 45 MINUTES and 13.7 GB there
+    //    and still came back UNKNOWN, turning a 6.5s hierarchy into a 47-minute run.
     const bool refuted_under_collapse = r.verdict == Verdict::Refuted && !coll.empty();
-    const bool unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused;
+    // "Barely spent it": under a tenth of the per-query cap. A structural refusal
+    // returns in ~0ms, so this separates it from a genuine give-up without naming
+    // any single refusal reason -- and it scales with whatever formal.timeout is.
+    const long long cheap_ms = o.timeout > 0 ? static_cast<long long>(o.timeout) * 100 : 1000;
+    const bool      cheap_unknown = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
+    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
+                                     && (!force_flat[def_ix].empty() || cheap_unknown);
     if (refuted_under_collapse || unknown_under_collapse) {
       {
         std::lock_guard report_lock(report_mutex);
@@ -1587,7 +1625,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // Witness-CARRYING Unknowns are excluded: a partial-miter diff is a
         // potential discrepancy the exit policy escalates (hard fail) — it must
         // re-surface on every run, never be skipped.
-        vcache->note_unknown(ckey, {o.timeout, ms});
+        vcache->note_unknown(ckey, {base.timeout, ms});  // the RUN's budget; see skip_unknown above
       }
       if (pairs_from_hint && vcache != nullptr) {
         // Self-heal: the replayed pair hint validated but its solve did NOT
@@ -3093,6 +3131,10 @@ void lec_command(Options& opts, Result& res) {
   // deterministic rlimit tier owns the bound by itself, which is why the old
   // budget_mode knob is gone.
   o.min_timeout          = std::atoi(label("min_timeout", "1").c_str());
+  // Hard wall backstop on a forked proof worker, as a multiple of `timeout` (0 = off).
+  // `timeout` is cvc5 tlimit-per, which cannot preempt ONE long CaDiCaL solve -- the
+  // shape a flat box-free miter takes. See Lec_options::hard_timeout_mult.
+  o.hard_timeout_mult    = std::atoi(label("hard_timeout_mult", "3").c_str());
   o.spec_mining_timeout  = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
@@ -3424,6 +3466,15 @@ void lec_command(Options& opts, Result& res) {
   // it into the hierarchical driver (the default path).
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+    // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
+    // treats an unopenable path as "the cache is only ever a speedup" and
+    // returns silently -- so without this, every run stored to memory, wrote
+    // NOTHING, printed its in-memory `N stored` tally, and came back 0 hit(s)
+    // forever. The whole incremental tier (verdict cache, cone cache, Unknown
+    // ledger, strategy hint) was dead for exactly this reason: no command on
+    // the formal path creates --workdir, and only `save()` ever needed it to
+    // already exist.
+    ensure_dir(opts.workdir);
     vcache = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
     // Read side of the cone cache: hand the engine the whole PROVEN digest set
     // ONCE, by value. It rides the Lec_options copy into every forked worker,
@@ -4728,6 +4779,10 @@ void formal_verify_command(Options& opts, Result& res) {
   // disables it inside prove_properties. spec_mining_timeout (0=off): an INDEPENDENT
   // diagnosis budget that names the toxic obligation core of a timed-out run.
   o.min_timeout          = std::atoi(label("min_timeout", "1").c_str());
+  // Hard wall backstop on a forked proof worker, as a multiple of `timeout` (0 = off).
+  // `timeout` is cvc5 tlimit-per, which cannot preempt ONE long CaDiCaL solve -- the
+  // shape a flat box-free miter takes. See Lec_options::hard_timeout_mult.
+  o.hard_timeout_mult    = std::atoi(label("hard_timeout_mult", "3").c_str());
   o.spec_mining_timeout  = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.mine         = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
   // formal.stats: cvc5 solve-insight report; `--stats` is CLI sugar for the same
@@ -4739,6 +4794,15 @@ void formal_verify_command(Options& opts, Result& res) {
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+    // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
+    // treats an unopenable path as "the cache is only ever a speedup" and
+    // returns silently -- so without this, every run stored to memory, wrote
+    // NOTHING, printed its in-memory `N stored` tally, and came back 0 hit(s)
+    // forever. The whole incremental tier (verdict cache, cone cache, Unknown
+    // ledger, strategy hint) was dead for exactly this reason: no command on
+    // the formal path creates --workdir, and only `save()` ever needed it to
+    // already exist.
+    ensure_dir(opts.workdir);
     vcache                = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
     o.verify_cache_lookup = [&vcache](std::string_view key) { return vcache->lookup(std::string{key}).has_value(); };
     o.verify_cache_store  = [&vcache](std::string key) { vcache->insert(key, {"bmc", "serialized verify obligation UNSAT", 0}); };

@@ -276,3 +276,115 @@ Two ways the hierarchy can quietly violate this, both guarded:
   with a refuting block inlined, that block's counterexample is a diagnostic; it
   must be dropped before the run picks a fallback verdict, or a design that is
   equivalent reports `equiv_fail`.
+
+## 8. Incremental: the unit of work is the CONE, not the def
+
+**Status: §8.1 and §8.2 are implemented; §8.3 and §8.4 are the plan.** The
+per-cone cache exists and is correct; nothing above it is cone-granular yet.
+
+### 8.1 Why the def is the wrong unit
+
+One def, `minion intpipe_csr_file` (23 410 nodes of own body, 16 children, all
+proven inside 1.1 s):
+
+```
+ind:  cones 312/316 PROVEN (312 by abc in 1.9 s)   residue 4 -> decompose -> 2
+      total 7.5 s, and it NAMES the residue: {mem:2x49#0, mem:2x49#1,
+                                              nxt:reg_scause_pre}
+bmc:  no cones at all -- ONE checkSat over the whole def, unrolled 6 deep
+      total 126.7 s, Unknown, learns nothing
+```
+
+Induction localizes the failure to three obligations in seven seconds. BMC is
+then handed *the module* and re-attacks all 316 compare points monolithically,
+including the 312 ABC discharged in under two seconds. The residue is the
+question; the def is what gets asked. Everything else in that design — 169 defs,
+one of them with 18 collapsed children — costs 13 s combined.
+
+Collapsing is not the lever here: those 16 children are 18–2832 nodes against a
+23 410-node parent, so boxing them removes almost nothing. The def is already as
+small as boxing can make it.
+
+### 8.2 The cache is already per-cone
+
+`lec_store_cones` is deliberately **not** gated on the def's verdict:
+
+> a cone proof is per-OBLIGATION, so a def that ends Unknown because ONE cone is
+> hard still proved the others, and those stay valid forever (the digest is the
+> whole claim). The next run then re-attacks only the residue.
+
+A cone's key is `cone_digest(term)` — the canonical structure of the obligation
+itself, so it survives renaming, reordering, and any edit elsewhere in the def.
+That is what makes *partial* hits per module possible, which the def-pair verdict
+cache can never do.
+
+### 8.3 The algorithm
+
+```
+CACHE  : cone_digest -> PROVEN        # per-obligation; verdict-independent
+METHOD : def_name    -> method        # per-module; what WON here last time
+
+lec(T):
+    for each def D in subtree(T), in any order, all at once:   # §1, unchanged
+        solve_def(D)
+    discharge premises leaves-first                            # §1, unchanged
+
+solve_def(D):
+    if verdict_cache hits (digest D_ref, digest D_impl, opts):  return PROVEN
+    if semdiff(D_ref, D_impl) is a structural identity:         return PROVEN
+
+    cones   <- cut_at_state(D)              # one obligation per compare point
+    residue <- [c for c in cones if digest(c) not in CACHE]     # PARTIAL hit
+    if residue empty:                                           return PROVEN
+
+    for c in residue:                       # per CONE, not per def
+        for m in ladder(D):                 # stop at the first method that wins
+            if m.prove(c) is PROVEN:
+                CACHE.add(digest(c)); METHOD[D] <- m; break
+        else:
+            unresolved.add(c)
+
+    return PROVEN if unresolved empty else UNKNOWN(unresolved)
+
+ladder(D):                                  # ORDERING ONLY, never a verdict
+    yield METHOD[D]                         # last winner first: a small edit
+                                            # rarely changes which method wins
+    yield abc, ind, bmc, int_blast          # minus the one already yielded
+```
+
+Two properties carry the weight:
+
+- **A miss costs at most the old behaviour.** An unknown cone falls through the
+  whole ladder, which is what it does today anyway — so the worst case is the
+  current cost, and the common case is a hit.
+- **`METHOD[D]` is keyed by def NAME, not by digest**, so it survives the very
+  edit that invalidates the verdict cache. That is the case it exists for: the
+  digest misses, and the method that won last time still wins.
+
+### 8.4 What it must not do (see §7)
+
+- **Decomposing the induction STEP is sound**; every cone shares the antecedent
+  *(all cuts equal at t)*, so proving conjuncts separately is ordinary
+  conjunction-splitting. This is what ABC-subtract already relies on: an OR is
+  UNSAT iff every disjunct is.
+- **A per-cone BMC result is BOUNDED and from reset** — a different obligation.
+  "312 cones proven inductively (conditionally) + 3 cones bounded-proven" is
+  *not* a closed proof; it needs the bounded-PASS discipline §7 already applies
+  at def level. Aiming BMC at the residue as a **counterexample hunt** is
+  unconditionally safe and strictly cheaper.
+- **The cone cache must stay verdict-independent.** Gating it on the def's
+  verdict would throw away exactly the partial progress it exists to keep.
+
+### 8.5 Two bugs this area had
+
+- **The workdir was never created.** `Verdict_cache::save()` treats an unopenable
+  path as "the cache is only ever a speedup" and returns silently, and no command
+  on the formal path called `ensure_dir`. Every run stored to memory, wrote
+  nothing, printed its in-memory `N stored` tally, and came back `0 hit(s)`
+  forever — so the entire incremental tier (verdict cache, cone cache, Unknown
+  ledger, strategy hint) was dead. A gate that greps for the string `lec[cache]`
+  cannot catch this: the line prints with `0 hit(s)`. Assert HITS.
+- **An UNKNOWN def flattened every proven child** to re-enable the eager
+  bit-blaster. Inlining a proven child is never a proof obligation — UNSAT
+  through a box is already sound — so on a plain UNKNOWN it is a gamble with an
+  unbounded re-solve. It is worth it only while chasing a CEX (§3 escalation).

@@ -229,6 +229,27 @@ struct Lec_options {
   // `timeout + (unsettled units x min_timeout)` and the run always reports
   // target/actual/units/floored, so the overrun is never silent.
   int         min_timeout = 20;
+  // HARD wall backstop on a forked proof worker, as a multiple of `timeout`
+  // (0 = off, the pre-2026-08-03 behavior). `timeout` is armed as cvc5
+  // `tlimit-per`, which the ResourceManager can only check at a spendResource
+  // point — so it cannot preempt ONE long call. A flat (box-free) miter takes
+  // the eager bit-blaster path, where the whole query IS one CaDiCaL solve
+  // inside BVSolverBitblast::postCheck, and there the limit never fires:
+  // measured, dino PipelinedDualIssueCPU ran 71s of wall at `formal.timeout=5`
+  // (14x) and minion `intpipe_csr_file` ran past 45 MINUTES at 120s (>20x, at
+  // 13.7 GB RSS). Collapsed miters are unaffected — the lazy solver returns
+  // between checkSats, so their legs land within a few percent of the cap.
+  //
+  // The multiplier is NOT slack for one query: an isolated worker runs the
+  // whole ind->bmc ladder IN-PROCESS (`_isolated_worker`: no nested forks), so
+  // its LEGITIMATE wall is one `timeout` per leg. 3 covers the 2-leg auto
+  // ladder plus a margin; a single-engine worker simply never reaches it.
+  //
+  // Enforced by the PARENT (spawn_isolated_worker), which owns the child pid —
+  // the only place a runaway can actually be stopped. Killing a worker can only
+  // LOSE information, so the degrade is a witness-free Unknown, never a
+  // verdict: sound by construction, and it SAYS the backstop fired.
+  int         hard_timeout_mult = 3;
   // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
   // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
   // still-Unknown obligations is jointly toxic), and P3 invariant MINING. All

@@ -6317,9 +6317,15 @@ namespace {
 // (crash, memory-backstop / OOM kill, hard abort — never a normal verdict), and
 // `why` then decodes the wait status so the caller can say WHAT killed it
 // instead of a bare "no valid result".
+// `hard_killed` distinguishes the ONE cause the caller must not respond to by
+// retrying: the wall backstop below. Every other `died` cause (OOM, crash) is
+// worth splitting the ladder over; a query that ran out of TIME only runs out
+// again, twice, in two fresh workers.
 Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
-                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, bool& died, std::string& why) {
-  died = false;
+                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, bool& died, std::string& why,
+                                   bool& hard_killed) {
+  died        = false;
+  hard_killed = false;
   why.clear();
   const auto t0 = std::chrono::steady_clock::now();
   int        p[2];
@@ -6348,9 +6354,46 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     ::_exit(0);
   }
   ::close(p[1]);
+  // HARD wall backstop (Lec_options::hard_timeout_mult). cvc5's tlimit-per cannot
+  // preempt a single CaDiCaL solve, which is exactly what a flat box-free miter
+  // compiles to, so `timeout` is advisory on the one query shape that runs away.
+  // The parent owns the child pid and is therefore the only place the bound can
+  // actually be enforced: poll the result pipe with a deadline instead of blocking
+  // on read(), and SIGKILL the worker if it passes. A killed worker sends no
+  // serialized result, so it falls into the `died` path below and reports as an
+  // Unknown naming the backstop — never a verdict.
+  const long long hard_ms = (opts.timeout > 0 && opts.hard_timeout_mult > 0)
+                              ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult
+                              : 0;
+  bool            killed  = false;
   std::string blob;
   char        buf[8192];
   while (true) {
+    // `!killed` is load-bearing, not a tidiness guard: the deadline stays expired
+    // forever after it fires, so re-entering this branch would kill() in a spin
+    // instead of draining. Once the signal is sent the loop drops to the blocking
+    // read below, which sees EOF as soon as the dead child's write end closes.
+    if (hard_ms > 0 && !killed) {
+      const long long left = hard_ms - now_ms(t0);
+      if (left <= 0) {
+        // Past the backstop and the child still holds the pipe open: kill it and
+        // drain whatever it managed to write (a partial blob fails to
+        // deserialize, which is the same `died` path a crash takes).
+        ::kill(c, SIGKILL);
+        killed = true;
+        continue;
+      }
+      struct pollfd pfd {
+        p[0], POLLIN, 0
+      };
+      const int pr = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
+      if (pr == 0) {
+        continue;  // nothing yet; re-check the deadline
+      }
+      if (pr < 0 && errno == EINTR) {
+        continue;
+      }
+    }
     ssize_t n = ::read(p[0], buf, sizeof(buf));
     if (n > 0) {
       blob.append(buf, static_cast<size_t>(n));
@@ -6373,7 +6416,19 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
       if (const char* sn = strsignal(sig); sn != nullptr) {
         why += std::string(" (") + sn + ")";
       }
-      if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
+      if (killed) {
+        hard_killed = true;
+        // WE sent that SIGKILL: the wall backstop, not a crash or an OOM. Say so
+        // exactly, and name the knob — this is the ONE overrun cvc5's tlimit-per
+        // cannot report itself, so a vague "worker died" here would read as a
+        // host problem and send the reader hunting for memory.
+        why = std::format("exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
+                          "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+                          "miter compiles to — raise either knob, or 0 disables the backstop",
+                          static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
+                          opts.timeout,
+                          opts.hard_timeout_mult);
+      } else if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
         // The usual causes at these signals on a big flat def: the RLIMIT_AS
         // memory backstop (malloc fails -> abort / the OS kills), or a genuine
         // encoder crash. Either way the run must SAY so, not report a bare
@@ -6408,8 +6463,16 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
   bool         died = false;
   std::string  why;
-  Query_result r = spawn_isolated_worker(ref, impl, opts, sub_lib, died, why);
+  bool         hard_killed = false;
+  Query_result r           = spawn_isolated_worker(ref, impl, opts, sub_lib, died, why, hard_killed);
   if (!died) {
+    return r;
+  }
+  // A wall-backstop kill is NOT the memory story the per-engine split below is
+  // for: the ladder already had its full budget and blew through it, so the two
+  // retry workers would each draw a FRESH backstop and burn 2x more wall clock
+  // to reach the same Unknown. Report it and stop.
+  if (hard_killed) {
     return r;
   }
   // The auto ladder runs ind THEN bmc inside ONE worker process, so its peak
@@ -6428,7 +6491,8 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   oi.engine                   = "ind";
   bool         ind_died       = false;
   std::string  ind_why;
-  Query_result ri = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why);
+  bool         ind_killed = false;
+  Query_result ri         = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why, ind_killed);
   ri.engine       = "ind";
   if (ind_died) {
     ri.detail = "ind retry worker also died: " + ind_why;
@@ -6443,7 +6507,8 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   ob.engine             = "bmc";
   bool         bmc_died = false;
   std::string  bmc_why;
-  Query_result rb = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why);
+  bool         bmc_killed = false;
+  Query_result rb         = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why, bmc_killed);
   rb.engine       = "bmc";
   if (bmc_died) {
     rb.detail = "bmc retry worker also died: " + bmc_why;
