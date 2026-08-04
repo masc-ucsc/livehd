@@ -302,6 +302,36 @@ are fixed.
 **Keep a per-module record** (module, node count, wall, peak RSS, new op bridges
 added, blockers hit) so the cost model stays calibrated as designs grow.
 
+### Next benchmark after CVA6: CORE-ET / ETASP
+
+Once CVA6 modules are generating and proving certificate equivalence the way DINO
+does, the next target is **CORE-ET** (`/soe/czeng14/projects/core-et`) — the
+*CORE-ET Agentic Silicon Platform*, an OpenHW Group / Ainekko project whose RTL is
+an active translation of CORE-ET modules into **clean SystemVerilog** (464 `.sv`
+files under `hw/ip/<block>/rtl`, with `dv/` collateral alongside).
+
+Why it is a good next step:
+- **Already per-IP modular**, which is exactly the unit our pipeline works on — no
+  need for the `--top` + gate-wrapper surgery CVA6 requires to prune an
+  accelerator out of the cone.
+- **Clean SystemVerilog by construction**, so it should avoid the struct/config
+  resolution walls that block a whole-core CVA6 lowering (`sv2v` on
+  `acc_dispatcher`) — to be confirmed, not assumed.
+- Individual IP blocks are small enough to sit comfortably on the measured cost
+  curve (DINO's 4772 nodes ≈ 23 min / 13.4 GB is the reference).
+
+Same pipeline and same static gates as CVA6.  Work to scope first:
+- **Filelists.** No top-level `.f`/`.flist` was found; each block's compile set has
+  to be assembled (or generated from the Makefile/`mk/` infrastructure) before
+  `lhd compile verilog` can consume it.
+- **Pick memory-free leaf IP first.** `emit_fast_bridge` is still gated on
+  `memory_nodes.empty()`, so cache/array blocks (e.g. `minion/dcache`) wait on the
+  Phase 4 memory certificate.
+- **Floating point is a real scope question.** The tree contains VPU/FMA-style
+  blocks (e.g. `minion/vpu/.../txfmafrac`).  `OpBridge` currently covers **integer
+  `BitVec`** operators only; an FP datapath would need a substantially new bridge
+  layer, so treat FP blocks as a separate milestone rather than a next step.
+
 ## Remaining Implementation Work
 
 1. Port scalable certificate checking.
