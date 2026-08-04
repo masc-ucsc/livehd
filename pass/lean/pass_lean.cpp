@@ -2198,23 +2198,23 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         ++bridge_gaps;
       }
     }
-    // Thin combiner: dispatch each topo node to its standalone recurrence theorem.
+    // Combiner: collect the per-node recurrence theorems into `∀ n ∈ topo, ..`.
+    //
+    // TERM mode, as a right fold over `List.forall_mem_cons` — each node costs O(1).
+    // The obvious tactic version (`simp only [..] at hn` to turn membership into an
+    // N-way disjunction, then `rcases hn with h | h | ..` and one bullet per node)
+    // is quadratic and single-threaded: it builds an N-deep Or-elim case tree and
+    // re-substitutes the goal in every branch.  On DINO (4772 nodes) that one
+    // declaration alone ran for hours — longer than the whole rest of the file —
+    // while every other section measured ~3 minutes.
     ofs << "theorem " << base_name << "_bridge_rec " << P << " : ∀ n ∈ " << G << ".topo, "
-        << base_name << "_phi " << A << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n := by\n";
-    ofs << "  intro n hn\n";
-    ofs << "  simp only [" << G << ", List.mem_cons, List.not_mem_nil, or_false] at hn\n";
-    if (topo_ids.size() == 1) {
-      ofs << "  subst hn\n  exact " << base_name << "_rec" << topo_ids[0] << " " << A << "\n\n";
-    } else {
-      std::string pat;
-      for (size_t k = 0; k < topo_ids.size(); ++k) {
-        pat += (k == 0) ? "h" : " | h";
+        << base_name << "_phi " << A << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n :=\n";
+    {
+      std::string term = "List.forall_mem_nil _";
+      for (auto it = topo_ids.rbegin(); it != topo_ids.rend(); ++it) {
+        term = "List.forall_mem_cons.mpr ⟨" + base_name + "_rec" + std::to_string(*it) + " " + A + ", " + term + "⟩";
       }
-      ofs << "  rcases hn with " << pat << " <;> subst h\n";
-      for (const auto id : topo_ids) {
-        ofs << "  · exact " << base_name << "_rec" << id << " " << A << "\n";
-      }
-      ofs << "\n";
+      ofs << "  " << term << "\n\n";
     }
 
     // Source agreement: φ = sourceEnv off-topo.  With the BT-based φ this is one
