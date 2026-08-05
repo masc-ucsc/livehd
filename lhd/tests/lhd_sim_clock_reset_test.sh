@@ -2,13 +2,13 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # `lhd sim` instance/`step` model: a DUT is a persistent instance you poke
-# (`acc.x = v`), advance with `step`, and peek (`acc.y`); the clock is a synthetic
+# (`acc.x = v`), advance with `step`, and read (`acc.y`) through hoisted refs; the clock is a synthetic
 # VCD waveform driven by `step`, and reset is an ordinary poked input. `clock` is
 # the cycle index. This test drives only `lhd sim --setup-only` (no nested bazel /
 # host compiler) and asserts on the generated body + driver source + diagnostics:
 #   * the body traces a toggling clock, advances a period counter, and exposes the
 #     instance API (step()/__in/__out); reset is NOT a synthetic waveform;
-#   * the driver pokes inputs, steps the instance, and peeks the output;
+#   * the driver binds a ref per cell OUTSIDE the loop, drives, steps, reads;
 #   * a `tick` body with no `step`, >1 clock, an output poke, or an unknown field
 #     is rejected at setup with a clear message.
 
@@ -68,11 +68,20 @@ grep -q 'In __in{};'  "$HDR" || fail "no input latch __in on the instance"
 grep -q '__vv_rst'    "$HDR" "$BODY" && fail "reset must not be a synthetic waveform (it is a poked input now)"
 grep -q '__rst_ticks' "$HDR" "$BODY" && fail "the reset-window machinery must be gone"
 
-# the driver pokes inputs, steps the instance, and peeks the output (peek recompute)
-grep -q 'acc.step()'                  "$DRV" || fail "driver does not step the instance"
-grep -q 'acc.__in.enable'             "$DRV" || fail "driver does not poke the enable input"
-grep -q 'acc.__in.reset'              "$DRV" || fail "driver does not poke the reset input"
-grep -q 'acc.peek(acc.__in).value'    "$DRV" || fail "driver does not peek the output via recompute"
+# The driver binds each storage cell ONCE, as a reference hoisted above the tick
+# loop, then drives/reads it bare inside the loop. The hoist is the point of the
+# ref model: the old `acc.peek(acc.__in).value` ran a whole cycle() plus a
+# snapshot/restore of all design state on EVERY read, and a bound ref costs
+# nothing per cycle.
+grep -q 'acc.step()'                           "$DRV" || fail "driver does not step the instance"
+grep -q 'auto& __ref[0-9]* = acc.__in.enable;' "$DRV" || fail "driver does not bind a ref to the enable input"
+grep -q 'auto& __ref[0-9]* = acc.__in.reset;'  "$DRV" || fail "driver does not bind a ref to the reset input"
+grep -q 'auto& __ref[0-9]* = acc.__out.value;' "$DRV" || fail "driver does not bind a ref to the settled output"
+grep -q 'acc.peek('                            "$DRV" && fail "peek() is removed: an output read is a ref into __out"
+# ...and the bindings really are OUT of the tick loop (they precede its `for`)
+[ "$(grep -n 'auto& __ref[0-9]* = acc\.' "$DRV" | tail -1 | cut -d: -f1)" -lt \
+  "$(grep -n 'for (; clock <' "$DRV" | head -1 | cut -d: -f1)" ] \
+  || fail "ref bindings are not hoisted above the tick loop"
 # `clocks=(clock=1)` sets the VCD time ratio + the clock's name on the instance.
 # The ratio is a general EXPRESSION (it may name a test parameter), so it lowers
 # through Slop rather than as a bare C literal — match the value, not the shape.
@@ -108,8 +117,8 @@ expect_err '  tick 4 { acc.enable = true; v = acc.value }'           'must advan
 # user works around a limitation that no longer exists.
 expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'ONE loop counter'            'two clocks'
 expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'NOT a multi-clock limitation' 'two clocks (points at the supported form)'
-expect_err '  tick 4 { acc.value = 1; step }'                        'cannot poke output'          'poke an output'
-expect_err '  tick 4 { acc.nope = 1; step }'                         'unknown field'               'poke an unknown field'
+expect_err '  tick 4 { acc.value = 1; step }'                        'cannot drive output'         'drive an output'
+expect_err '  tick 4 { acc.nope = 1; step }'                         'unknown field'               'drive an unknown field'
 
 # the clock loop-var name must not collide with a param/local/instance (it would
 # silently shadow it inside the tick body)
@@ -149,4 +158,4 @@ EOF
 # the loop shape plus the count VALUE, not the literal spelling of the cast.
 grep -q 'for (long _s = 0; _s < (long)(.*"3"' "$W"/stepn/sim/drv.cpp || fail "step N did not emit a count loop"
 
-echo "PASS: lhd sim instance/step model (clock waveform, reset-as-input, poke/step/peek)"
+echo "PASS: lhd sim instance/step model (clock waveform, reset-as-input, hoisted sigref/regref)"

@@ -5,16 +5,38 @@
 // Simulation of all four same-cycle `ordering` modes, one memory each. Each
 // lowers to a distinct hlop::Memory_* type (hlop/memory.hpp), so this is the
 // end-to-end check that cgen.sim picks the right one and that the staged-write
-// protocol resolves as the cgen_memory_*.v wrapper does.
+// protocol commits as the cgen_memory_*.v wrapper does.
 //
 // Every memory is written at address `wa` with `wd` and read at the same
-// address, so every read is a collision:
+// address, so every read is an in-design collision resolved by its mode:
 //
 //   ordering="old"      -> the committed (previous-cycle) value
 //   ordering="fwd"      -> the new data, even though the read precedes the write
 //   ordering="program"  -> old before the write, new after it
 //   ordering="none"     -> UNDEFINED (a PRNG draw in Slop), so only the
 //                          NON-colliding address is asserted here
+//
+// WHAT THIS FIXTURE CAN AND CANNOT SEE (changed with the sigref/regref model).
+// A testbench read is a reference into the outputs `step` settled, and `step` is
+// settle -> commit -> settle. Both settles run with the SAME driven inputs, so
+// by the time a read can happen the write has committed and every mode reads the
+// same committed word: the four collision modes are indistinguishable from
+// outside the design. This fixture used to see the difference only because each
+// pre-`step` read was its own `peek()` — a fresh recompute against the
+// just-driven inputs, with no commit — and `peek` is gone.
+//
+// So the same-cycle COLLISION semantics is gated elsewhere, and more strongly:
+// prp-equiv-mem_ordering_{old,fwd,program,none} LEC each mode against a Verilog
+// golden, and prp-v2prp2v-mem_ordering_{old,fwd,program,none} round-trip it.
+// Do NOT re-add pre-`step` reads here to "restore" the distinction — they would
+// assert one-cycle-stale values, which is how this fixture failed when the model
+// changed.
+//
+// What is still checked here, and is worth checking: all four memory types
+// COMMIT correctly through cgen.sim, a non-colliding read is defined, and the
+// read-modify-write chain (a write whose data depends on an earlier read of the
+// same memory) simulates as legal hardware rather than being mis-scheduled as a
+// combinational cycle — the reason `m_rmw` is in this fixture at all.
 mod ord_sim(wa:u2, wd:u4, ra:u2) -> (o_old:u4@[0], f_pre:u4@[0], p_pre:u4@[0], p_post:u4@[0], n_clean:u4@[0], rmw_pre:u4@[0], rmw_post:u4@[0]) {
   reg m_old:[4]u4:[ordering="old"] = 0
   o_old      = m_old[wa]
@@ -57,13 +79,13 @@ test ord_sim.modes {
   mut rmw_b    = nil
 
   // Write address 1 every cycle with `clock`, and read the untouched address 2
-  // from the ordering="none" memory. The outputs are sampled BEFORE `step`: a
-  // read after the edge sees the array already holding this cycle's data, which
-  // makes "old" and "fwd" agree and hides the whole distinction.
+  // from the ordering="none" memory. The outputs are sampled AFTER `step` --
+  // the only placement that observes this iteration's drives (see the header).
   tick 6 {
     acc.wa  = 1
     acc.wd  = clock
     acc.ra  = 2
+    step
     old_v   = acc.o_old
     fwd_v   = acc.f_pre
     pre_v   = acc.p_pre
@@ -71,17 +93,21 @@ test ord_sim.modes {
     clean_v = acc.n_clean
     rmw_a   = acc.rmw_pre
     rmw_b   = acc.rmw_post
-    step
   }
 
-  // On the last iteration clock=5 is the data being written, while address 1
-  // still holds 4 (written when clock=4).
-  assert(fwd_v == 5, "ordering=fwd: a read before the write still sees the new data")
-  assert(post_v == 5, "ordering=program: the read AFTER the write sees it")
-  assert(old_v == 4, "ordering=old: the collision reads the committed value")
-  assert(pre_v == 4, "ordering=program: the read BEFORE the write does not see it")
+  // The last edge committed clock=5 into address 1 of every memory, so each of
+  // the four modes reads it back: post-commit they agree BY CONSTRUCTION, and
+  // asserting all four separately is what pins that every memory type actually
+  // committed (a mode whose write was dropped would read 4, or 0).
+  assert(old_v == 5, "ordering=old: the committed word is the last one written")
+  assert(fwd_v == 5, "ordering=fwd: committed")
+  assert(pre_v == 5, "ordering=program: committed")
+  assert(post_v == 5, "ordering=program: committed")
   assert(clean_v == 0, "ordering=none: a non-colliding address is still defined")
-  // m_rmw[1] increments once per cycle: after 5 committed cycles it holds 5.
-  assert(rmw_a == 5, "read-modify-write: the pre-write read is the committed value")
-  assert(rmw_b == 6, "read-modify-write: the post-write read forwards seen+1")
+  // m_rmw[1] increments once per cycle -- seen+1 written back each edge -- so
+  // after 6 committed cycles it holds 6. This is the read-modify-write chain:
+  // if it were mis-scheduled as a combinational cycle, or the read were resolved
+  // against the write it feeds, this would not count cleanly.
+  assert(rmw_a == 6, "read-modify-write: 6 edges, +1 per edge")
+  assert(rmw_b == 6, "read-modify-write: both reads see the same committed word")
 }

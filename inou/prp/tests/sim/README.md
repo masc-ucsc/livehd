@@ -21,7 +21,18 @@ Each file pairs a synthesizable design with one or more `test` blocks:
 * A test-local `mut` golden value, updated in lockstep inside the same loop,
   mirrors the design's next-state so the final `assert` is self-checking.
 
-`poke` / `peek` / `sigref` / `regref` are intentionally **not** used here yet.
+These fixtures use only bare dotted DUT access, which is sugar for an anonymous
+`sigref`/`regref` (the binding is hoisted out of the loop either way). The
+explicit spelling is exercised by `../fixme/testbench_step.prp`, which also
+covers the `"unit/field"` string form. `peek`/`poke` are **removed** — every read
+through them copied a value out of a freshly recomputed snapshot of the whole
+design, which is what a bound reference makes unnecessary.
+
+One consequence to keep in mind when writing a fixture: a read placed **above**
+the `step` observes what the previous `step` settled, not the inputs driven by
+the statements just above it. For a Moore output (a plain state read) that is the
+same value; for an output driven combinationally by an input this iteration
+writes, it is one cycle behind. Put such reads below the `step`.
 
 ## Examples
 

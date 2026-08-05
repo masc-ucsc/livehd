@@ -956,7 +956,12 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // width/sign, plus the generation-affecting options and a generator version
 // (BUMP kSimGenVersion whenever the emitted C++ shape changes).
 // 3: per-module <stem>.iface.json manifest + observable outputs/memories (2f-sim B0/B)
-static constexpr std::string_view kSimGenVersion = "simgen-3";
+// simgen-4: cycle() gained its trailing __settle() and peek() was removed. The
+// bump is not cosmetic -- this digest gates a per-module early return that skips
+// emission entirely, so a warm workdir would otherwise keep stale settle-only
+// .cpp files whose parent calls a peek() that no longer exists (a compile error
+// at best; at worst a stale child that commits at the other end of the period).
+static constexpr std::string_view kSimGenVersion = "simgen-4";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -1922,21 +1927,31 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   emit_io_block(false);
   hout->append("  };\n");
 
-  // Persistent input latch. The testbench pokes inputs (`acc.x = v` -> __in.x)
-  // and advances with `step()`. Outputs are read by recomputing from the current
-  // committed state (`acc.y` -> peek(__in).y -- correct before the first step
-  // too, unlike a cached snapshot); internal registers are read as plain members
-  // (`acc.total`). Keeping __in in the instance (not the driver) means a future
-  // state copy / checkpoint captures the pokes too.
+  // Persistent input latch. The testbench writes inputs through a ref
+  // (`acc.x = v` -> __in.x) and advances with `step()`; internal registers are
+  // plain members (`acc.total`) and outputs live in __out below. Keeping __in in
+  // the instance (not the driver) means a state copy / checkpoint captures the
+  // driven inputs too.
   hout->append("  In __in{};\n");
-  // 2f-sim B: the outputs this instance last computed. cycle() records them on
-  // the way out, so the query engine can observe an output at any sampled cycle
-  // WITHOUT a peek() (whose snapshot/restore is O(total design state) per call).
+  // 2f-sim B: the outputs this instance last computed DURING the period --
+  // recorded by cycle() before it commits, so it is the value the output drove
+  // while the period ran, computed from the state ENTERING the cycle. That is
+  // the contract the query engine publishes (09b-simquery "Outputs and state are
+  // one commit apart", `"sampled":"during_period"`), so it must stay pre-commit;
+  // __out below is the post-commit twin and the two are deliberately different.
   // DERIVED state: deliberately absent from dump_state/load_state and from
   // design_hash — it is recomputed by the next cycle() and must not change the
-  // checkpoint layout or its compatibility hash. peek() does save/restore it, so
-  // a testbench output read stays free of side effects.
+  // checkpoint layout or its compatibility hash.
   hout->append("  Out __last_out{};\n");
+  // The SETTLED outputs of the CURRENT committed state: what the design drives
+  // once this period's edge has been taken. __settle() recomputes it from the
+  // committed members, and cycle() calls __settle() on its way out, so a
+  // testbench read after `step` observes the post-edge value -- exactly what the
+  // old peek(__in) returned, but as a plain member a `sigref` can bind ONCE and
+  // hold for the whole run instead of an O(total design state) snapshot/restore
+  // per read. Also DERIVED: out of dump_state/load_state/design_hash for the
+  // same reason as __last_out (reset_cycle() re-settles it after a load).
+  hout->append("  Out __out{};\n");
 
   // ---- VCD trace state (compile.sim.vcd): traces In, Out, and flop state of
   // EVERY module -- the root instance (the one the driver hands a __vcd_path)
@@ -2057,12 +2072,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   hout->append("  void reset_cycle();\n");
   hout->append("  Out cycle(In in);\n");
-  // one clock edge: cycle() commits next-state (and dumps the pre-edge VCD
-  // sample), then peek() recomputes the outputs from the just-committed state so
-  // `acc.<out>` reads the POST-edge value. (peek saves/restores flops+mems and
-  // suppresses VCD, so it has no net effect besides refreshing __out.)
-  hout->append("  void step() { cycle(__in); }  // poke __in, then advance one clock\n");
-  hout->append("  Out peek(In in);  // outputs of the current committed state; restores state, no VCD\n");
+  // One clock edge is SETTLE -> COMMIT -> SETTLE, and cycle() is the whole of
+  // it: its body settles the comb cone from the pre-edge state (that is what
+  // computes both `o`/__last_out and every next-state), commits, and then calls
+  // __settle(in) to refresh __out from the just-committed state.
+  //
+  // The trailing settle is what makes a `sigref` possible, and it must NOT be
+  // hoisted to the front of the next cycle(): committing a next-state that was
+  // settled against the PREVIOUS period's `in` would make every driven input
+  // land one cycle late (`acc.reset = clock < 2` would reset cycles 1-2, not
+  // 0-1). Both settles are load-bearing and they settle against different state.
+  hout->append("  void step() { cycle(__in); }  // drive __in, then advance one clock\n");
+  hout->append(
+      "  void __settle(In in);  // recompute __out from the CURRENT committed state; no commit, no VCD, no state change\n");
   // Editable, name-keyed checkpoint (sim_checkpoint_debug_plan): flops/regs ->
   // the `_r` map keyed by the hierarchical `_p`+member name (pyrope literal),
   // memories -> one `<_dir>/<_p><member>.hex` file each, sub-instances recursed.
@@ -2281,13 +2303,85 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& s : subs) {
     fout->append("    ", s.inst, ".reset_cycle();\n");
   }
+  // Leave the design SETTLED at t=0. Every read a testbench makes before its
+  // first `step` -- and the docs use that shape (05-assert.md's `assert(x == 0)`
+  // ahead of any step) -- goes through __out, which would otherwise be
+  // default-zero rather than the outputs the reset state actually drives. Also
+  // covers load_state(): __out is derived, absent from the checkpoint, and this
+  // is what re-derives it after a restore.
+  fout->append("    __settle(__in);\n");
   fout->append("}\n");
 
-  // ---- cycle ----
-  // Reset is an ordinary input the testbench pokes into `in` (via step()/__in);
+  // ---- cycle() and __settle(): ONE emitter, run twice ----
+  // A clock period is settle -> commit -> settle. The body below IS the first
+  // settle plus the commit (it binds flop Q to the pre-edge member, walks the
+  // comb cone, then commits); running the SAME emitter with `settle` set drops
+  // every state-mutating statement and retargets the outputs at the `__out`
+  // member, which is the trailing settle. cycle() calls it as its last act.
+  //
+  // Emitting one body twice (rather than a hand-written second walker) is what
+  // keeps the two passes from drifting: the ordering rules here -- the false-loop
+  // pre-binds, the memory read/stage interleave, the on-demand operand cones --
+  // are subtle enough that a parallel implementation would rot. The settle pass
+  // is also restricted to the OUTPUT cone (`settle_cone` below), so it emits far
+  // less than the full body: next-state logic is exactly what it does not need.
+  //
+  // Reset is an ordinary input the testbench drives into `in` (via step()/__in);
   // no special override here. The flop next-state logic reads it through the
   // normal reset_pin path below.
-  fout->append(mod, "::Out ", mod, "::cycle(In in) {\n");
+  //
+  // Nodes the settle pass must emit: everything backward-reachable from an
+  // output driver, stopping at state elements (a flop Q is already a member).
+  // Memory and Sub nodes stay IN the set -- a memory read and a sub-instance
+  // output are emitted by their own node, not by ensure_ready(), so dropping
+  // them would leave the output cone unbound and operand() would quietly
+  // substitute a constant 0.
+  //
+  // Set while emitting __settle(): a sub-instance must be SETTLED (comb only),
+  // never cycled, or the trailing settle of every period would advance the whole
+  // sub-tree a second time.
+  bool                                   settle_mode = false;
+  absl::flat_hash_set<hhds::Class_index> settle_cone;
+  {
+    std::vector<hhds::Pin_class> work;
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        continue;
+      }
+      auto spin = g->get_output_pin(io.raw);
+      if (!spin.is_invalid()) {
+        work.push_back(get_driver(spin));
+      }
+    }
+    absl::flat_hash_set<pin_key_t> seen;
+    while (!work.empty()) {
+      auto p = work.back();
+      work.pop_back();
+      if (p.is_invalid() || is_const_pin(p) || !seen.insert(p.get_class_index()).second) {
+        continue;
+      }
+      auto n = p.get_master_node();
+      settle_cone.insert(n.get_class_index());
+      if (is_type_register(n)) {
+        continue;  // Q is a committed member; its din cone is next-state, not needed
+      }
+      for (const auto& e : n.inp_edges()) {
+        work.push_back(e.driver);
+      }
+    }
+  }
+
+  auto emit_period_body = [&](bool settle) -> bool {
+  settle_mode = settle;
+  if (settle) {
+    // Fresh binding environment: the settle pass reads the COMMITTED members,
+    // not the temporaries the cycle pass left behind.
+    pin2var.clear();
+    canonical_.clear();
+    fout->append("void ", mod, "::__settle(In in) {\n");
+  } else {
+    fout->append(mod, "::Out ", mod, "::cycle(In in) {\n");
+  }
   // map input ports and flop q outputs into pin2var
   for (const auto& io : ios) {
     if (!io.is_input) {
@@ -2376,13 +2470,25 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       mealy_prebound.insert(s.node.get_class_index());
     }
-    fout->append(absl::StrCat("    auto ",
-                              s.inst,
-                              "__pre = ",
-                              s.inst,
-                              s.negedge_only ? ".peek({});  // negedge-only sub: advance after the parent's rise\n"
-                              : moore        ? ".peek({});  // Moore sub: outputs from current state (call deferred)\n"
-                                             : ".peek({});  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
+    // The child's outputs for its CURRENT committed state are exactly what its
+    // own trailing settle left in `__out` -- which is what the old
+    // `peek({})` recomputed, at the price of snapshotting and restoring the
+    // whole child subtree. In the CYCLE pass this must be COPIED: the deferred
+    // `<inst>.cycle(...)` emitted after the walk refreshes `__out`, and these
+    // bindings have to keep reading the pre-call values. In the SETTLE pass
+    // nothing advances the child, so bind straight at the member; the only
+    // writer there is a Mealy sub's own `__settle`, and every pin bound here is
+    // a pure state read, which a settle does not change.
+    const std::string pre_base = settle ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__pre.");
+    if (!settle) {
+      fout->append(absl::StrCat("    auto ",
+                                s.inst,
+                                "__pre = ",
+                                s.inst,
+                                s.negedge_only ? ".__out;  // negedge-only sub: advance after the parent's rise\n"
+                                : moore        ? ".__out;  // Moore sub: outputs from current state (call deferred)\n"
+                                               : ".__out;  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
+    }
     // Bind only pins that EXIST (enumerated via the instance's out-edges): a
     // declared-but-unread output has no created pin, and hhds' name lookup
     // asserts on it (find_pin "requested pin was not created" -- the DataPath
@@ -2407,7 +2513,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // the callee's Out struct (a NESTED struct, see emit_io_block), so
         // mangling the dot to `_` here named a member that does not exist —
         // `no member named 'io_data_instruction' in 'StageReg_StageReg::Out'`.
-        pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__pre.", cpp_port_path(it->second));
+        pin2var[opin.get_class_index()] = absl::StrCat(pre_base, cpp_port_path(it->second));
       }
     }
   }
@@ -2471,11 +2577,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_port_path(d.name), " = ", operand(drv, wb), ";\n"));
       }
-      fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
+      // In settle mode the child is re-settled against the inputs just rebuilt
+      // from the parent's COMMITTED state, and its outputs are read from its
+      // own __out member. cycle() would advance it a second time in the period.
+      if (settle_mode) {
+        fout->append(absl::StrCat("    ", s.inst, ".__settle(", s.inst, "__i);\n"));
+      } else {
+        fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
+      }
+      const std::string sub_out = settle_mode ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__o.");
       for (const auto& d : sio->get_output_pin_decls()) {
         auto opin = find_driver_pin(node, d.name);
         if (!opin.is_invalid()) {
-          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_port_path(d.name));
+          pin2var[opin.get_class_index()] = absl::StrCat(sub_out, cpp_port_path(d.name));
         }
       }
       break;
@@ -2534,6 +2648,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // combinational SSA bindings, in dependency order
   for (auto node : g->forward_class()) {
     auto op = type_op_of(node);
+    // The settle pass only needs the OUTPUT cone. Everything else in this walk
+    // is next-state logic -- on a real design the large majority of it -- so
+    // this filter is what keeps the second emission from doubling the generated
+    // C++ (and with it the host clang++ time, which already dominates `lhd sim`).
+    if (settle && !settle_cone.contains(node.get_class_index())) {
+      continue;
+    }
     if (op == Ntype_op::Memory) {
       // Emit the read data (read-first: the current array) and register each
       // read port's dout driver pin so downstream nodes resolve. Writes commit
@@ -2566,6 +2687,25 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // read-modify-write -- would then look like a combinational cycle.
         int  staged        = 0;  // write ports staged so far, by ordinal
         auto stage_through = [&](int upto) {
+          // A settle runs AFTER the edge, so a REGISTERED memory's writes for
+          // this period are already in the array (mem.tick() committed them);
+          // re-staging them would duplicate the write-forwarding and leave
+          // pending slots behind. Post-commit, reading the committed array
+          // already reflects the write -- also the documented remote-reader rule
+          // (08-memories.md: "remote readers always see the last committed
+          // state").
+          //
+          // A COMBINATIONAL array is the opposite: it has no clock and no
+          // committed state, its contents ARE the writes made during the pass
+          // (which is why the walk re-seeds it to its init above), so the settle
+          // must stage them exactly as the cycle pass does. Skipping them left
+          // every read returning the re-seed value -- caught by
+          // prp-simeq-packed_assign, whose `mut g:[4]u4` is filled by four
+          // per-port writes and then runtime-indexed.
+          if (settle && m.registered()) {
+            staged = upto;
+            return;
+          }
           if (upto <= staged) {
             return;
           }
@@ -2720,11 +2860,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
 
   // Deferred Moore-sub calls: every comb value is bound now; the child call
-  // only advances the child's state (its outputs were pre-bound via peek()).
+  // only advances the child's state (its outputs were pre-bound from __out).
   // Inputs are bound from the instance's EXISTING sink edges (an unconnected
   // declared input has no created pin -- hhds asserts on a name lookup -- and
   // the In{} zero-init already models it as 0).
-  for (const auto* sp : deferred_moore) {
+  //
+  // Nothing to do in the settle pass: it never advances a child, and the
+  // pre-binding above already pointed these outputs straight at `<inst>.__out`.
+  for (const auto* sp : settle ? std::vector<const Sub*>{} : deferred_moore) {
     const auto& s    = *sp;
     auto        dsio = s.node.get_subnode_io();
     if (!dsio) {
@@ -2935,6 +3078,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // active-low latches to its staged value while building posedge next-state.
   // This is the L1/coincident-edge rule and is equivalent to Verilog's latch
   // transparency before the active event without requiring an event queue.
+  //
+  // The SETTLE pass skips this whole block. It computes next-state, and a settle
+  // has no next-state to compute; more importantly the windows rebind the
+  // reference clock pin to constants and invalidate operand cones around each
+  // one, which would corrupt the committed-state bindings the settle depends on.
+  // Skipping it also leaves every latch Q bound to its plain member (the
+  // end-of-period committed value), which is the right post-edge reading -- the
+  // `<q>_low` transparency binding is a within-period concern.
   bool              any_negedge    = false;
   const std::string ref_clock_name = clock_input_of(g);
   const auto        ref_clock_pin  = ref_clock_name.empty() ? hhds::Pin_class{} : g->get_input_pin(ref_clock_name);
@@ -2942,7 +3093,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // latch into `<q>_low`.  This works for both explicit active-low cells and a
   // source-level `if !clk` gate (whose cell polarity remains active-high).
   for (const auto& f : flops) {
-    if (!f.is_latch) {
+    if (settle || !f.is_latch) {
       continue;
     }
     for (const auto* port : flop_operand_ports) {
@@ -2960,7 +3111,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // result is the hold value, so a latch open in either half retains the last
   // transparent value and closes with the correct end-of-period state.
   for (const auto& f : flops) {
-    if (!f.is_latch) {
+    if (settle || !f.is_latch) {
       continue;
     }
     for (const auto* port : flop_operand_ports) {
@@ -2974,11 +3125,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     emit_flop_next(f, false, true);
   }
-  if (!ref_clock_pin.is_invalid()) {
+  if (!settle && !ref_clock_pin.is_invalid()) {
     pin2var[ref_clock_pin.get_class_index()] = absl::StrCat("in.", cpp_port_path(ref_clock_name));
   }
   for (const auto& f : flops) {
-    if (f.is_latch) {
+    if (!settle && f.is_latch) {
       auto qpin = f.node.get_driver_pin(0);
       if (!qpin.is_invalid()) {
         invalidate_downstream(qpin);
@@ -2987,6 +3138,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   for (const auto& f : flops) {
+    if (settle) {
+      break;  // no next-state in a settle
+    }
     if (!f.is_latch && f.posedge) {
       for (const auto* port : flop_operand_ports) {
         ensure_ready(get_driver(find_sink_pin(f.node, port)));
@@ -2997,8 +3151,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  // outputs (from current state)
-  fout->append("    Out o;\n");
+  // Outputs from the state this pass reads. In the CYCLE pass that is the
+  // PRE-edge state, and the result is the returned `o`/`__last_out` (what the
+  // output drove during the period). In the SETTLE pass it is the committed
+  // state, and the result lands directly in the `__out` member a `sigref` binds.
+  const std::string out_dst = settle ? "    __out." : "    o.";
+  if (!settle) {
+    fout->append("    Out o;\n");
+  }
   for (const auto& io : ios) {
     if (io.is_input) {
       continue;
@@ -3008,8 +3168,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (drv.is_invalid()) {
       fout->append("    // output ", io.field, " is undriven\n");
     } else {
-      fout->append("    o.", io.field, " = ", operand(drv, io.bits), ";\n");
+      fout->append(out_dst, io.field, " = ", operand(drv, io.bits), ";\n");
     }
+  }
+  // The settle pass ends here: everything below is state advance (VCD sample,
+  // memory commit, flop commit, the fall phase) and must happen exactly once
+  // per period, in the cycle pass.
+  if (settle) {
+    fout->append("}\n");
+    return true;
   }
 
   // VCD sample + dump (pre-commit, current-state values at this cycle's
@@ -3204,7 +3371,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 "twice. Flatten the instance for sim, or move the negedge element out of its fanout; tracked as "
                 "todo/livehd/2f-latch M5")
             .emit();
-        return;
+        return false;
       }
     }
     for (auto ci : stale) {
@@ -3214,8 +3381,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // A negedge-only child samples after the parent's rise.  Its current-state
     // outputs were pre-bound before the walk, but its state-advancing call is
     // delayed until now so inputs driven by parent posedge Qs are rebuilt from
-    // the just-committed members.  Re-peek after the call so a local negedge
-    // consumer sees the child's post-fall state in this same period.
+    // the just-committed members.  A local negedge consumer must see the child's
+    // POST-fall state in this same period, and it does so for free: the child's
+    // own cycle() ends with its trailing settle, so `<inst>.__out` already holds
+    // the outputs of the state it just committed. This used to need a second
+    // full peek() (a whole-subtree snapshot/restore) after the call.
+    // Bind the member directly -- unlike the pre-bind above, nothing runs after
+    // this point that would advance the child again, so no copy is needed.
     for (const auto* sp : deferred_fall) {
       const auto& s   = *sp;
       auto        sio = s.node.get_subnode_io();
@@ -3230,11 +3402,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append(absl::StrCat("    ", s.inst, "__fall_i.", cpp_port_path(d.name), " = ", operand(drv, wb), ";\n"));
       }
       fout->append(absl::StrCat("    ", s.inst, ".cycle(", s.inst, "__fall_i);\n"));
-      fout->append(absl::StrCat("    auto ", s.inst, "__fall_o = ", s.inst, ".peek(", s.inst, "__fall_i);\n"));
       for (const auto& d : sio->get_output_pin_decls()) {
         auto opin = find_driver_pin(s.node, d.name);
         if (!opin.is_invalid()) {
-          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__fall_o.", cpp_port_path(d.name));
+          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, ".__out.", cpp_port_path(d.name));
         }
       }
     }
@@ -3302,75 +3473,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             "clock_guards and any secondary clock) must be re-readied — tracked as todo/livehd/2f-latch M5")
         .emit();
     cycle_reported_ = true;
+    return false;
+  }
+
+  if (settle) {
+    fout->append("}\n");
+  } else {
+    fout->append("    __last_out = o;  // 2f-sim B: free output observation for the query engine\n");
+    // The trailing settle of the period: refresh __out from the state this
+    // cycle just committed, so a bound `sigref` reads the post-edge value with
+    // no snapshot/restore. Must come AFTER every commit and after __last_out
+    // (which is the pre-commit twin and must not be overwritten).
+    fout->append("    __settle(in);\n");
+    fout->append("    return o;\n}\n");
+  }
+  return true;
+  };
+  if (!emit_period_body(false)) {
     return;
   }
-
-  fout->append("    __last_out = o;  // 2f-sim B: free output observation for the query engine\n");
-  fout->append("    return o;\n}\n");
-
-  // peek(): the outputs implied by the CURRENT (post-last-edge) state, with NO
-  // net effect. It runs cycle() (which computes the outputs then advances) but
-  // snapshots and restores ALL state first -- flops, pipe stages, memories, AND
-  // sub-instances (a child's cycle() commits its own state, so children must be
-  // saved too or they double-advance) -- and suppresses VCD, so step() / an
-  // output peek observes the post-edge value without perturbing state or the
-  // waveform. (A non-copying save/restore is used because the VCD writer member
-  // is move-only; sub-instances are plain copyable structs.)
-  fout->append(mod, "::Out ", mod, "::peek(In in) {\n");
-  for (const auto& f : flops) {
-    fout->append(absl::StrCat("    auto _pk_", f.member, " = ", f.member, ";\n"));
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("    auto _pk_", s, " = ", s, ";\n"));
-    }
+  if (!emit_period_body(true)) {
+    return;
   }
-  for (const auto& m : mems) {
-    fout->append(absl::StrCat("    auto _pk_", m.member, " = ", m.member, ";\n"));
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("    auto _pk_", s.inst, " = ", s.inst, ";  // sub-instance snapshot\n"));
-  }
-  {
-    absl::flat_hash_set<std::string> emitted;
-    for (const auto& f : flops) {
-      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-        fout->append(absl::StrCat("    auto _pk_", f.prev_member, " = ", f.prev_member, ";\n"));
-      }
-    }
-  }
-  fout->append("    auto _pk_tick = __vcd_tick;\n");  // peek must not perturb the period counter
-  // 2f-sim B: a peek recomputes outputs, so it would otherwise overwrite the
-  // observation record with values from a cycle that never happened.
-  fout->append("    auto _pk_lastout = __last_out;\n");
-  if (vcd_on) {
-    fout->append("    auto _pk_vcd = std::move(__vcd); auto _pk_vp = __vcd_path; __vcd_path.clear();\n");
-  }
-  fout->append("    Out o = cycle(in);\n");
-  for (const auto& f : flops) {
-    fout->append(absl::StrCat("    ", f.member, " = _pk_", f.member, ";\n"));
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("    ", s, " = _pk_", s, ";\n"));
-    }
-  }
-  for (const auto& m : mems) {
-    fout->append(absl::StrCat("    ", m.member, " = _pk_", m.member, ";\n"));
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("    ", s.inst, " = _pk_", s.inst, ";\n"));
-  }
-  {
-    absl::flat_hash_set<std::string> emitted;
-    for (const auto& f : flops) {
-      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-        fout->append(absl::StrCat("    ", f.prev_member, " = _pk_", f.prev_member, ";\n"));
-      }
-    }
-  }
-  fout->append("    __vcd_tick = _pk_tick;\n");
-  fout->append("    __last_out = _pk_lastout;\n");
-  if (vcd_on) {
-    fout->append("    __vcd = std::move(_pk_vcd); __vcd_path = _pk_vp;\n");
-  }
-  fout->append("    return o;\n}\n");
 
   // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
   // literal); memories -> one editable `<_dir>/<_p><member>.hex` each; recurse

@@ -43,8 +43,11 @@ inline bool is_builtin_function(std::string_view name) {
       "wrap", "sat", "saturate",
       // concurrency / timing
       "spawn", "defer",
-      // testbench string-path probes (sim-only; handled by prp_sim, not tolg)
-      "peek", "poke",
+      // testbench storage references (sim-only; handled by prp_sim, not tolg).
+      // `sigref` binds a read-only window onto a cell, `regref` a writable one;
+      // they replaced `peek`/`poke`, whose every read copied a value out of a
+      // freshly recomputed snapshot of the whole design.
+      "sigref", "regref",
   };
   for (const auto n : names) {
     if (n == name) {

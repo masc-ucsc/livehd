@@ -2,11 +2,22 @@
 :name: testbench_step
 :type: simulation
 */
-// Remaining TBD: the string-path `peek("a/b")` / `poke("a/b", v)` accessors for
-// arbitrary hierarchical signals (docs/pyrope/09-verification.md, 15-tbd.md).
-// The instance/`step`/field-poke model below (mut dut = cnt; dut.en = true; step;
-// dut.v) runs today -- only the string-path `peek`/`poke` are unimplemented, so
-// this fails by design. Tagged `fixme` until the arbitrary-path probe lands.
+// String-path storage references: `sigref("a/b")` (read-only) and
+// `regref("a/b")` (writable), the arbitrary-hierarchy accessors from
+// docs/pyrope/09-verification.md. These replaced `peek`/`poke`, whose every
+// read copied a value out of a freshly recomputed snapshot of the whole design.
+// The instance/`step`/field-write model (mut dut = cnt; dut.en = true; step;
+// dut.v) is the same thing with the binding left anonymous.
+//
+// A ref is bound ONCE, outside any loop, and stays valid for the whole run --
+// that is the point of the construct, so this fixture binds before the first
+// `step` and reads the same name on both sides of two edges.
+//
+// `regref` on a REGISTER writes its `q`, which the design's own logic then sees
+// THIS cycle (the pre-commit settle reads it) before the edge overwrites q with
+// the computed `din` -- i.e. a one-shot next-state override, the semantics
+// 09-verification.md gives `poke`. That is why `c = 42` followed by one `step`
+// reads back 43 and not 42: the increment ran on the forced value.
 mod cnt(en:bool) -> (v:u8@[0]) {
   reg c:u8 = 0
   v = c
@@ -14,10 +25,14 @@ mod cnt(en:bool) -> (v:u8@[0]) {
 }
 test peek_poke_path {
   mut dut = cnt
+  mut c   = regref("cnt/c")      // writable window on the register, bound once
+  mut vv  = sigref("cnt/v")      // read-only window on the output
   dut.en = true
   step
-  assert(peek("cnt/c") == 1)     // string-path peek -- still TBD
-  poke("cnt/c", 42)              // string-path poke -- still TBD
+  assert(c == 1)
+  assert(vv == 1)                // the settled output agrees with the register
+  c = 42                         // drives q; the design increments it this cycle
   step
-  assert(peek("cnt/c") == 43)
+  assert(c == 43)
+  assert(vv == 43)
 }
