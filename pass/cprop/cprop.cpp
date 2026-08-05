@@ -1511,6 +1511,15 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       // A module port always reads SIGNED in the LGraph/cgen model; its
       // unsign attr (when present) is source-interface metadata, not a
       // value-range guarantee. Never bypass the to-positive wrapper here.
+      //
+      // Measured 2026-08-04: trusting is_unsign here removes ZERO cells anyway.
+      // The wrapper on a port CHANGES THE DECLARED WIDTH (a u8 port is 8 bits;
+      // its to-positive form is 9 -- magnitude 8 plus the sign slot the internal
+      // representation needs), so collapse_forward_for_pin refuses it on width
+      // grounds. That width change IS the semantic content of the cell: it
+      // re-expresses a literal-width unsigned PORT as the magnitude+1 signed
+      // form every internal net uses. It is a boundary conversion, not a
+      // redundant constraint.
       nonneg = false;
     } else {
       auto a_master = a_pin.get_master_node();

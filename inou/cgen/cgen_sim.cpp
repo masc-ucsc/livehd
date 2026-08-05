@@ -180,6 +180,24 @@ hhds::Pin_class Cgen_sim::find_driver_pin(const hhds::Node_class& node, std::str
   return {};
 }
 
+namespace {
+// Pyrope text for a constant, with any UNKNOWN bit forced to 0.
+//
+// Slop is a value type with no runtime unknowns, so the simulator has no way to
+// represent an `x`: a `?` bit is simulated as 0. Emitting the raw `0sb1????...`
+// form made the generated C++ carry a literal that from_pyrope cannot
+// constant-evaluate, which forced every wide constant through a runtime parse
+// (27.8% of simulation time on the dino CPU). Substituting the `?` up front
+// makes every emitted literal foldable at compile time.
+std::string sim_const_text(const Dlop& c) {
+  auto txt = c.to_pyrope();
+  if (c.has_unknowns()) {
+    std::replace(txt.begin(), txt.end(), '?', '0');
+  }
+  return txt;
+}
+}  // namespace
+
 std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int sign_mode) {
   const std::string tw = std::to_string(target_bits);
   if (dpin.is_invalid()) {
@@ -199,7 +217,12 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     }
     // Exact via the shared pyrope codec: wide constants, unknown (`?`) bits, and
     // the non-Integer types (Boolean/String/Nil) that create_integer would flatten.
-    return absl::StrCat("Slop<", tw, ">::from_pyrope(\"", c.to_pyrope(), "\")");
+    // Folded at COMPILE time via a constexpr local. As a plain sub-expression in
+    // a hot loop the compiler is free to keep from_pyrope's digit-by-digit parse
+    // at runtime -- and it did: 27.8% of simulation time on the dino CPU. This is
+    // only legal because sim_const_text() has already forced unknown bits to 0;
+    // a literal still carrying `?` is not constant-evaluable.
+    return absl::StrCat("([]{ constexpr auto _k = Slop<", tw, ">::from_pyrope(\"", sim_const_text(c), "\"); return _k; }())");
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -248,7 +271,7 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    return absl::StrCat("Slop<", fw, ">::from_pyrope(\"", c.to_pyrope(), "\")");
+    return absl::StrCat("([]{ constexpr auto _k = Slop<", fw, ">::from_pyrope(\"", sim_const_text(c), "\"); return _k; }())");
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -414,6 +437,61 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e.size() == 1) {
         return operand(e[0].driver, wbits, /*unsigned=*/-1);
       }
+      // FAST PATHS for the two mask shapes that dominate real designs. Both
+      // replace a call to Slop::get_mask_op -- which is a PER-BIT LOOP
+      // (bit_test + set for every selected bit, plus every bit up to
+      // get_bits() for a negative mask) -- with a single mask instruction.
+      // A profile of the dino CPU put 68.9% of simulation time inside
+      // get_mask_op and another 27.8% inside from_pyrope parsing the wide mask
+      // CONSTANTS it is called with, against 2.2% in the actual module bodies.
+      if (is_const_pin(e[1].driver)) {
+        const auto mv = hydrate_const(e[1].driver);
+        if (!mv.has_unknowns()) {
+          // (a) mask == -1 is the to-positive idiom. The value is read UNSIGNED
+          // (zext_to), which already yields a non-negative value, so making it
+          // positive is the identity -- as is the trailing trim. The whole
+          // `x.zext_to<W>().get_mask_op(-1).zext_to<W>()` sequence collapses to
+          // `x.zext_to<W>()`.
+          if (mv.is_just_i64() && mv.to_just_i64() == -1) {
+            return operand(e[0].driver, wbits, /*unsigned=*/-1);
+          }
+          // (b) a LOW-CONTIGUOUS mask 2^n-1 keeps the low n bits and zeroes the
+          // rest, packed LSB-first in place -- which is exactly what zext_to<n>
+          // does, in one masking step instead of n loop iterations. It also
+          // deletes the mask constant itself, so a >64-bit mask no longer costs
+          // a from_pyrope string parse per cycle.
+          //
+          // n == 1 needs no special case: the member form returns the signed -1
+          // for a lone selected bit and cgen clamps it with .zext_to<1>();
+          // zext_to<1> produces the same 0/1 directly.
+          //
+          // GUARDED to masks that stay INSIDE the value's declared width. A mask
+          // reaching past it (e.g. `(x#sext[..])#[0..=63]` on a narrower x)
+          // selects the value's SIGN bits, which the slow path below gets by
+          // reading the value per its declared sign; zext_to would read those
+          // positions as 0 instead. Dropping this guard breaks bitset_imm and
+          // bitset_nil.
+          if (!mv.is_negative()) {
+            auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
+            if (mb >= 0 && me > mb && me <= wbits_of(e[0].driver)) {
+              // get_mask packs the selected bits LSB-FIRST, so a contiguous run
+              // [mb,me) is exactly (x >> mb) & mask(me-mb) -- two instructions
+              // instead of an (me-mb)-iteration loop. mb == 0 is plain
+              // truncation; mb > 0 is a bit-slice `x[hi:lo]`, which every
+              // constant mask still reaching get_mask_op on the dino CPU is.
+              //
+              // The read is zero-extended to `me` first, so the value is
+              // non-negative and sra_op degenerates to a logical shift -- no
+              // sign bits can leak down into the extracted field.
+              auto expr = operand(e[0].driver, me, /*unsigned=*/-1);
+              if (mb > 0) {
+                expr = absl::StrCat(expr, ".sra_op(", mb, ")");
+              }
+              return absl::StrCat(expr, ".zext_to<", tw, ">()");
+            }
+          }
+        }
+      }
       int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
       // A constant mask can select bits ABOVE the value's declared width (e.g.
       // `b#[12..=15]` on a 9-bit `b`, reaching into the sign region). Widen the
@@ -430,6 +508,14 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       //    declared sign -- EXCEPT the mask==-1 "to positive" idiom stays unsigned.
       //  * A single selected bit makes get_mask_op return the SIGNED 1-bit value
       //    (-1 when set), so clamp the packed result to one bit -> magnitude 0/1.
+      //
+      // NOT converted to the mixed-width Slop<W>::get_mask_op. That call reads
+      // each operand at its own width and sign-extends internally, but the
+      // `operand(..., cw, -1)` below is a ZERO-extend: it masks the value to its
+      // declared width and clears everything above. The two differ for a negative
+      // value under the to-positive idiom, which broke 131 simeq goldens when
+      // tried. Converting this arm needs the mixed-width op to take the source's
+      // declared width into account, not just its storage sign.
       int  val_sign   = -1;
       bool single_bit = false;
       if (is_const_pin(e[1].driver)) {
