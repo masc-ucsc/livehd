@@ -51,6 +51,9 @@ protected:
   // scalar sweep, so downstream passes see the canonical `din = data` form.
   void canonicalize_latch_holds(hhds::Graph* g);
 
+  // Canonicalize Get_mask(x, ones[lo,hi)) with lo>0 into
+  // Get_mask(SRA(x,lo), 2^(hi-lo)-1). Must run AFTER scalar_pass.
+  void normalize_get_mask_slices(hhds::Graph* g);
   void scalar_pass(hhds::Graph* g);
 
 public:
