@@ -1318,6 +1318,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["vcd"] = v;
     } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
       labels["vcd_fake_delay"] = v;
+    } else if (k == "sim.flatten") {
+      labels["flatten"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path

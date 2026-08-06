@@ -92,7 +92,13 @@ module top(input [7:0] a1, input [7:0] b1, input [7:0] d1,
   subadd u2(.a(a2), .b(b2), .c(x1[7:0]), .d(d2), .x(x2), .y(o2));
 endmodule
 EOF
-expect_loop_error "$W/cross.v" top "cross-coupled false loop"
+# Stage 2: the mutual false loop is now RESOLVED too. `subadd` computes
+# x = a + b, so neither instance's `x` depends on its own `c` -- the cycle is an
+# artifact of simulating each Sub atomically, not a real path. cgen_sim's
+# false-loop breaker iterates to a fixpoint, so inlining u1 exposes u2 and both
+# go, leaving a flat DAG forward_class can order. (The detector used to stop at
+# the sibling instance, which is why this was an error.)
+expect_clean "$W/cross.v" top "cross-coupled mutual false loop (flattened)"
 
 # --- bug: GENUINE comb loop through a sub (must stay an error) ---
 cat > "$W/genuine.v" <<'EOF'

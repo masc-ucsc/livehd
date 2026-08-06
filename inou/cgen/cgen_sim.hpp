@@ -9,6 +9,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
+#include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
 #include "hhds/index.hpp"
 
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
@@ -113,14 +114,31 @@ private:
   std::string top;            // --top: only this module bakes the VCD path (avoids file collisions)
   bool        vcd_fakedelay;  // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
                               // false = plain edge-aligned updates (no X, no delay)
+  // --set sim.flatten=N: structurally inline a Sub whose callee body has <= N
+  // nodes into its parent before emitting. 0 = off. See flatten_small_subs().
+  int flatten_budget = 0;
+
+  // Bottom-up structural inline of every sub-instance that fits the budget.
+  // Returns the number of instances inlined out of `g`.
+  int flatten_small_subs(hhds::Graph* g);
+  // Node count of a def's body. Memoized: the same def is reached once per
+  // instantiation site and counting walks the whole graph.
+  int graph_node_count(hhds::Graph* g);
+
+  absl::flat_hash_map<hhds::Graph*, int> node_count_memo_;
+  absl::flat_hash_set<hhds::Graph*>      flatten_walked_;  // defs already recursed into
 
 public:
   // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
   // when the cone is not a foldable ICG (2f-latch M5).
-  static std::vector<hhds::Pin_class> icg_guards(const hhds::Node_class& flop, std::string_view clock_port);
+  // `clocks` is the design-wide clock-role analysis (the same `Design_clocks`
+  // pass/lec's phase schedule builds). nullptr falls back to the name test.
+  static std::vector<hhds::Pin_class> icg_guards(const hhds::Node_class& flop, std::string_view clock_port,
+                                                 const livehd::latch_contract::Design_clocks* clocks = nullptr);
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
-  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay)
+  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
+           int _flatten = 0)
       : odir(_odir), vcd_file(_vcd), top(_top),
-        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")) {}
+        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")), flatten_budget(_flatten) {}
 };

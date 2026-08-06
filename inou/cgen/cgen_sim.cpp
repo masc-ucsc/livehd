@@ -16,6 +16,8 @@
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"           // Ntype / Ntype_op
 #include "diag.hpp"           // livehd::diag::err — Stage 0 comb-loop safety net
+#include "inline_sub.hpp"     // //graph — sim.flatten structural inline of a small sub-instance
+#include "latch_contract.hpp"  // //graph — inline_clock_gate_cells (ICG gate -> local AND cone)
 #include "node_util.hpp"      // //graph:graph — livehd::graph_util::* helpers
 #include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
 #include "str_tools.hpp"      // str_tools::ends_with
@@ -473,7 +475,20 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           // bitset_nil.
           if (!mv.is_negative()) {
             auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
-            if (mb >= 0 && me > mb && me <= wbits_of(e[0].driver)) {
+            // ...and a mask that DOES reach past the width is still fine when the
+            // value is UNSIGNED: the positions above it select sign bits, which
+            // are all zero there, and a zero-extended read reproduces exactly
+            // that. Only a signed value needs the slow path's sign replication.
+            //
+            // This is not a corner case. dino's ImmediateGenerator and top level
+            // mask 4- and 15-bit intermediates with the 64-bit all-ones constant
+            // (a plain "keep the low 64 bits" produced by the Slop capacity
+            // invariant, bits = magnitude+1). Every one of those failed
+            // `me <= wbits` -- 64 <= 4 -- and fell into a 64-iteration bit loop
+            // that measured 47% of total simulation time, before AND after
+            // sim.flatten (flattening moves the call, it does not remove it).
+            const bool in_width = me <= wbits_of(e[0].driver);
+            if (mb >= 0 && me > mb && (in_width || is_unsign(e[0].driver))) {
               // get_mask packs the selected bits LSB-FIRST, so a contiguous run
               // [mb,me) is exactly (x >> mb) & mask(me-mb) -- two instructions
               // instead of an (me-mb)-iteration loop. mb == 0 is plain
@@ -956,12 +971,14 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // width/sign, plus the generation-affecting options and a generator version
 // (BUMP kSimGenVersion whenever the emitted C++ shape changes).
 // 3: per-module <stem>.iface.json manifest + observable outputs/memories (2f-sim B0/B)
-// simgen-4: cycle() gained its trailing __settle() and peek() was removed. The
+// simgen-5: next-state and the commit enable became persistent members (_din,
+// _cen) so the commit can be its own method. simgen-4: cycle() gained its
+// trailing __settle() and peek() was removed. The
 // bump is not cosmetic -- this digest gates a per-module early return that skips
 // emission entirely, so a warm workdir would otherwise keep stale settle-only
 // .cpp files whose parent calls a peek() that no longer exists (a compile error
 // at best; at worst a stale child that commits at the other end of the period).
-static constexpr std::string_view kSimGenVersion = "simgen-4";
+static constexpr std::string_view kSimGenVersion = "simgen-5";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -1091,7 +1108,8 @@ void Cgen_sim::save_gen_digests() {
 // in which case the caller must REFUSE rather than silently commit every tick.
 // Empty is therefore "cannot fold", never "no guard needed"; a plain
 // (ungated) clock never reaches here.
-std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Node_class& flop, std::string_view clock_port) {
+std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Node_class& flop, std::string_view clock_port,
+                                                 const livehd::latch_contract::Design_clocks* clocks) {
   std::vector<hhds::Pin_class> guards;
   auto                         clk_d = get_driver(find_sink_pin(flop, "clock_pin"));
   if (clk_d.is_invalid()) {
@@ -1125,16 +1143,40 @@ std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Node_class& flop, 
       }
       p = ge[0].driver;
     }
+    // A GENERATED clock -- a clock_cell output, or the reference clock aliased
+    // through an internal net (`clock = clk_i`, which minion's csr file does) --
+    // is not a graph input, so the name test below cannot see it. Ask the shared
+    // clock-role analysis first; it answers from the resolved clock cones.
+    //
+    // Measured on minion_top: 20 errors -> 19, `gated-clock-unsupported` 11 -> 9
+    // (one extra comb loop appears, hence the net of 1). Standalone
+    // intpipe_csr_file goes 2 errors -> 1, its gated-clock refusal gone.
+    //
+    // This is a PARTIAL answer, not the real step 1. is_clock() says yes for any
+    // clock root, including a generated one, so it cannot distinguish "the
+    // reference clock of the domain this flop commits in" from "some clock".
+    // The full fix is enable/divider on Commit_class -- see todo_sim_pipeline.md.
+    if (clocks != nullptr && clocks->is_clock(p)) {
+      saw_clock = true;
+      continue;
+    }
     if (!p.is_invalid() && livehd::graph_util::is_graph_input_pin(p)) {
       const auto pn = pin_name_of(p);
       // The reference clock, consumed by the tick itself. When the module has a
       // RESOLVED clock port, require an exact match. When it does not — which is
       // the normal case for an ICG design, because clock_input_of() only finds a
       // clock by looking for a flop wired STRAIGHT to an input, and here the only
-      // flop is wired to the gate — fall back to the conventional names, the same
-      // fallback clock_input_of() itself uses. A miss is fail-CLOSED (the caller
-      // refuses with a diagnostic), never a silent commit-every-tick.
-      if (!clock_port.empty() ? (pn == clock_port) : (pn == "clk" || pn == "clock")) {
+      // flop is wired to the gate — fall back to the conventional spelling. A
+      // miss is fail-CLOSED (the caller refuses with a diagnostic), never a
+      // silent commit-every-tick.
+      //
+      // Use the SHARED token-wise matcher, which is public precisely so every
+      // consumer has one notion of what a clock is named. Hardcoding
+      // `clk`/`clock` here refused minion outright: its ports are `clk_i`, so an
+      // ordinary `prim_clk_gate` ICG failed this test and was reported as "some
+      // other derived clock" — a naming gap masquerading as an unsupported
+      // shape, on 7 distinct flops.
+      if (!clock_port.empty() ? (pn == clock_port) : livehd::latch_contract::Design_clocks::name_looks_like_clock(pn)) {
         saw_clock = true;
         continue;
       }
@@ -1148,6 +1190,89 @@ std::vector<hhds::Pin_class> Cgen_sim::icg_guards(const hhds::Node_class& flop, 
     return {};
   }
   return guards;
+}
+
+// Node count of one def's body. Memoized: a def is reached once per
+// instantiation site, and counting is a full traversal.
+int Cgen_sim::graph_node_count(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  if (auto it = node_count_memo_.find(g); it != node_count_memo_.end()) {
+    return it->second;
+  }
+  int n = 0;
+  for ([[maybe_unused]] auto node : g->fast_class()) {
+    ++n;
+  }
+  node_count_memo_.emplace(g, n);
+  return n;
+}
+
+// sim.flatten=N: structurally inline every sub-instance whose callee body is
+// small enough, BOTTOM-UP.
+//
+// Children first, which is exactly what inline_sub_instance's single-level
+// contract asks for: by the time a def is inlined anywhere, its own small
+// children are already part of its body, so one pass absorbs a whole chain of
+// small leaves with no instantiation-context bookkeeping.
+//
+// The size test is on the callee body AFTER its own children were absorbed, so
+// the count that decides is the code actually about to be spliced in rather than
+// the pre-inline stub. That is what makes the budget mean "how much C++ am I
+// willing to duplicate per instantiation site".
+//
+// COST MODEL, because this knob is easy to misread: inlining removes a call, the
+// In/Out structs copied across it, and the port-boundary width adjusts — all
+// per-CYCLE savings — but it emits the body once per instantiation SITE, so
+// generated code and host C++ time grow with the instance COUNT. That is why the
+// default is 0, and why a blanket "flatten everything" is the wrong trade on a
+// large design even though it is the fastest per cycle.
+int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
+  if (g == nullptr || flatten_budget <= 0 || !flatten_walked_.insert(g).second) {
+    return 0;
+  }
+  int inlined = 0;
+  // Recurse first. Held as shared_ptrs so a child def stays alive while we walk
+  // it, independent of what happens to the instance node in this body.
+  std::vector<std::shared_ptr<hhds::Graph>> children;
+  for (auto n : g->fast_class()) {
+    if (type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    if (auto cg = n.get_subnode_graph()) {
+      children.push_back(cg);
+    }
+  }
+  for (const auto& cg : children) {
+    inlined += flatten_small_subs(cg.get());
+  }
+
+  // Snapshot the victims: inline_sub_instance deletes nodes and fast_class() is
+  // a live view over the node table.
+  std::vector<hhds::Node_class> victims;
+  for (auto n : g->fast_class()) {
+    if (type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    auto cg = n.get_subnode_graph();
+    if (!cg) {
+      continue;  // body-less black box (liberty cell / external IP): nothing to inline
+    }
+    if (graph_node_count(cg.get()) <= flatten_budget) {
+      victims.emplace_back(n);
+    }
+  }
+  for (const auto& v : victims) {
+    if (!livehd::graph_util::inline_sub_instance(g, v, "inou.cgen.sim")) {
+      // A partially inlined body is fatal, exactly as flatten treats it; the
+      // located diagnostic already came from inline_sub_instance.
+      return inlined;
+    }
+    node_count_memo_.erase(g);  // this body just grew
+    ++inlined;
+  }
+  return inlined;
 }
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
@@ -1173,10 +1298,116 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (!entity.empty() && entity.front() == '%') {
     return;
   }
+  // Bring an instantiated clock-gate cell's gate INTO this body — the same
+  // pre-step pass.single_edge and the formal commands run.
+  //
+  // An ICG arrives as a Sub (`prim_clk_gate`: a low-transparent latch capturing
+  // `en_i`, then `clk_o = clk_i & en_latch`), and while it stays a Sub it breaks
+  // sim codegen twice over. Its output is a clock this module's flops carry as
+  // `clock_pin`, which icg_guards() cannot fold because that matcher walks an
+  // AND cone in the LOCAL body and the gate is behind a call — so every such
+  // flop is refused as "a derived clock inou.cgen.sim cannot fold into a commit
+  // guard". And because a Sub is simulated atomically (all inputs -> all
+  // outputs), the perfectly ordinary feedback `clk_o -> flops -> en_i -> clk_o`
+  // reads as a combinational loop THROUGH the instance. Inlining the gate turns
+  // both into the local AND cone icg_guards already folds into a flop enable,
+  // which is the same treatment lec gives it.
+  if (const int ncg = livehd::latch_contract::inline_clock_gate_cells(g, "inou.cgen.sim"); ncg > 0) {
+    livehd::diag::info("inou.cgen.sim", "clock-gate-inlined", "progress")
+        .msg("`{}`: inlined {} clock-gate cell(s) so their gate folds into a flop enable", gname, ncg)
+        .emit();
+  }
+  // sim.flatten=N: absorb small sub-instances into this body first, so
+  // everything below — the digest, the schedule, the emission — sees the
+  // flattened graph. A no-op at the default N=0.
+  if (const int nin = flatten_small_subs(g); nin > 0) {
+    livehd::diag::info("inou.cgen.sim", "sim-flatten", "progress")
+        .msg("`{}`: inlined {} sub-instance(s) with <= {} nodes (sim.flatten)", gname, nin, flatten_budget)
+        .emit();
+  }
   // Break a false combinational loop through an ATOMIC pure-comb sub-instance by
   // inlining the offending instance into this graph before scheduling. A no-op
   // unless a stateless Sub's output feeds back into one of its own inputs.
   livehd::graph_util::flatten_false_loop_subs(g);
+  // ...and the STATEFUL remainder, which the pass above declines by design ("any
+  // Flop/Latch/Fflop/Memory anywhere makes inlining change state identity").
+  //
+  // A Sub is simulated atomically -- one call produces every output from every
+  // input -- so an output that feeds back, through parent logic, into one of the
+  // instance's own inputs has no valid single-pass order, even when the callee
+  // has no internal path between that pair. Two shapes already dissolve without
+  // inlining: a MOORE callee (every output a pure state read, so the whole call
+  // defers) and a MEALY callee whose FED-BACK outputs are all state reads (those
+  // pre-bind and the call orders normally). What is left needs the callee
+  // evaluated in pieces, and inlining is how to get that -- exactly what the
+  // refusal's own hint has always advised ("flatten this instance for sim").
+  //
+  // The state-identity cost is real but bounded: inline_sub_instance prefixes
+  // cloned names with the instance (`u_dcache.foo`), so checkpoint and
+  // --list-signals names stay hierarchical. Paying it beats refusing the design.
+  {
+    auto state_only_of = [&](const hhds::Node_class& m, uint32_t pid) -> bool {
+      auto cg = m.get_subnode_graph();
+      auto sio = m.get_subnode_io();
+      if (!cg || !sio) {
+        return false;
+      }
+      if (callee_is_moore(cg, sio)) {
+        return true;
+      }
+      return callee_state_only_outputs(cg, sio).contains(pid);
+    };
+    int broken = 0;
+    // Inlining one offender can expose another (a loop threading through two
+    // instances), so iterate to a fixpoint; the bound is the instance count.
+    for (int round = 0; round < 64; ++round) {
+      std::vector<hhds::Node_class> victims;
+      for (auto n : g->fast_class()) {
+        if (type_op_of(n) != Ntype_op::Sub) {
+          continue;
+        }
+        auto cg  = n.get_subnode_graph();
+        auto sio = n.get_subnode_io();
+        if (!cg || !sio) {
+          continue;  // body-less black box: nothing to inline
+        }
+        auto fed_back = sub_false_loop_output_pids(n, state_only_of);
+        if (fed_back.empty() || callee_is_moore(cg, sio)) {
+          continue;  // not on a false loop, or the whole call defers instead
+        }
+        const auto state_only = callee_state_only_outputs(cg, sio);
+        bool       all_state  = true;
+        for (auto pid : fed_back) {
+          if (!state_only.contains(pid)) {
+            all_state = false;
+            break;
+          }
+        }
+        if (!all_state) {
+          victims.push_back(n);
+        }
+      }
+      if (victims.empty()) {
+        break;
+      }
+      for (const auto& v : victims) {
+        if (!livehd::graph_util::inline_sub_instance(g, v, "inou.cgen.sim")) {
+          break;
+        }
+        ++broken;
+      }
+    }
+    if (broken > 0) {
+      livehd::diag::info("inou.cgen.sim", "false-loop-inlined", "progress")
+          .msg("`{}`: inlined {} sub-instance(s) to break a false combinational loop through them", gname, broken)
+          .emit();
+    }
+  }
+  // The shared clock-role analysis -- the same `Design_clocks` that pass/lec's
+  // phase schedule and pass.single_edge build. Built AFTER the inlining
+  // pre-steps above, which change the graph.
+  const livehd::latch_contract::Design_clocks design_clocks(g, /*hier=*/false);
+
   // Break a false WORD-level combinational loop through a packed wire: redirect
   // each constant Get_mask slice-read of an `Or`-of-disjoint-ranges net to the one
   // operand that drives the read range. A no-op unless a genuine word-level cycle
@@ -1370,7 +1601,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // we cannot fold is refused. Refusing matters: sim would otherwise commit
       // the flop every tick with the gate as dead code, which is a silent
       // miscompile, not a slowdown.
-      if (!icg_guards(node, clock_port).empty()) {
+      if (!icg_guards(node, clock_port, &design_clocks).empty()) {
         clock_nets.insert("\x01implicit");  // folded: commits on the reference clock, qualified
         continue;
       }
@@ -1449,7 +1680,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     Flop f{node, cpp_id(wire_name(qpin)), wbits_of(qpin), depth, {}, true, type_op_of(node) == Ntype_op::Latch, false, {}, {}, {}};
     const std::string ref_clock = clock_input_of(g);
-    f.clock_guards              = icg_guards(node, ref_clock);
+    f.clock_guards              = icg_guards(node, ref_clock, &design_clocks);
     // SECONDARY CLOCK (2f-latch M6): a clock_pin wired to a graph input that is
     // NOT the module's reference clock. One tick is one period of the REFERENCE
     // clock, so a second clock cannot also tick once per call — it is a signal
@@ -1838,12 +2069,42 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append("};  // ordering=\"program\": writes preceding each read port\n");
   }
 
+  // Does this module have a FALL half at all? Only then is `eval_negedge`
+  // emitted and called — dino has none, so it keeps exactly one pass per tick.
+  bool has_fall = false;
+  for (const auto& f : flops) {
+    if (!f.is_latch && !f.posedge) {
+      has_fall = true;
+    }
+  }
+  for (const auto& s : subs) {
+    if (s.negedge_only) {
+      has_fall = true;
+    }
+  }
+
   hout->append("struct ", mod, " {\n");
+  // Each state element carries its Q and, alongside it, the D it will take at
+  // the next edge (`_din`) plus the boolean saying whether that edge fires for
+  // it (`_cen`). Both are DERIVED: the settle recomputes them from Q and the
+  // inputs every period, so they are deliberately absent from
+  // dump_state/load_state/design_hash (reset_cycle()'s trailing settle
+  // re-derives them after a checkpoint load).
+  //
+  // They are members rather than settle-locals because the settle and the
+  // commit are separate methods: the commit runs with NO combinational value in
+  // scope, so anything it needs — the next value, the ICG enable, a secondary
+  // clock's edge test — has to have been computed and parked by the settle.
   for (const auto& f : flops) {
     for (const auto& s : f.stages) {
       hout->append("  Slop<", std::to_string(f.bits), "> ", s, "{};  // pipe stage\n");
+      hout->append("  Slop<", std::to_string(f.bits), "> ", s, "_din{};  // ...its next value\n");
     }
     hout->append("  Slop<", std::to_string(f.bits), "> ", f.member, "{};  // flop\n");
+    hout->append("  Slop<", std::to_string(f.bits), "> ", f.member, "_din{};  // ...its next value\n");
+    if (!f.clock_guards.empty() || !f.sec_clock.is_invalid()) {
+      hout->append("  bool ", f.member, "_cen = true;  // ...and whether its edge fires this period\n");
+    }
   }
   // Previous-value bit per SECONDARY clock net (2f-latch M6), deduped: every
   // flop on the same net shares one, which is also what makes them commit
@@ -2071,7 +2332,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append("  void __vcd_dump_data(vcd::VCDWriter* __w, bool __pos, bool __root);\n");
   }
   hout->append("  void reset_cycle();\n");
-  hout->append("  Out cycle(In in);\n");
+  // The two halves of a tick, each callable on its own so a PARENT can order a
+  // child's phases (a negedge consumer in the parent needs the child's fall to
+  // have happened, but not its rise a second time). `eval_negedge` is emitted
+  // only for a module that has negedge state -- dino has none, so it runs one
+  // pass per tick exactly as before.
+  hout->append("  void eval_posedge(In in);  // rise: comb from pre-edge state, then commit posedge state\n");
+  if (has_fall) {
+    hout->append("  void eval_negedge(In in);  // fall: the negedge cones, re-read post-rise, then commit them\n");
+  }
   // One clock edge is SETTLE -> COMMIT -> SETTLE, and cycle() is the whole of
   // it: its body settles the comb cone from the pre-edge state (that is what
   // computes both `o`/__last_out and every next-state), commits, and then calls
@@ -2082,6 +2351,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // settled against the PREVIOUS period's `in` would make every driven input
   // land one cycle late (`acc.reset = clock < 2` would reset cycles 1-2, not
   // 0-1). Both settles are load-bearing and they settle against different state.
+  hout->append("  Out cycle(In in) {  // one clock period\n");
+  hout->append("    eval_posedge(in);\n");
+  if (has_fall) {
+    hout->append("    eval_negedge(in);\n");
+  }
+  hout->append("    __settle(in);  // refresh __out so a bound sigref reads the post-edge value\n");
+  hout->append("    return __last_out;  // the during-period outputs the rise recorded\n");
+  hout->append("  }\n");
   hout->append("  void step() { cycle(__in); }  // drive __in, then advance one clock\n");
   hout->append(
       "  void __settle(In in);  // recompute __out from the CURRENT committed state; no commit, no VCD, no state change\n");
@@ -2341,6 +2618,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // never cycled, or the trailing settle of every period would advance the whole
   // sub-tree a second time.
   bool                                   settle_mode = false;
+  // The three emissions of one clock period. Rise and Fall are the two halves of
+  // the tick; Settle is the trailing comb refresh that keeps `__out` (and any
+  // `sigref` bound to it) current. A module with no negedge state emits no Fall
+  // at all, so dino stays exactly one pass per tick.
+  enum class Pass { Rise, Fall, Settle };
   absl::flat_hash_set<hhds::Class_index> settle_cone;
   {
     std::vector<hhds::Pin_class> work;
@@ -2371,16 +2653,70 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  auto emit_period_body = [&](bool settle) -> bool {
-  settle_mode = settle;
-  if (settle) {
-    // Fresh binding environment: the settle pass reads the COMMITTED members,
-    // not the temporaries the cycle pass left behind.
+  // Every operand port a state element's next-value/guard emission reads.
+  static constexpr std::array<const char*, 4> flop_operand_ports{"din", "enable", "reset_pin", "initial"};
+
+  // Nodes the FALL pass must emit: everything backward-reachable from a negedge
+  // element's operands, stopping at state (whose Q is the just-committed
+  // member). Same shape as `settle_cone` — it is what keeps the fall from
+  // re-emitting the whole body when it only needs the negedge cones.
+  absl::flat_hash_set<hhds::Class_index> fall_cone;
+  if (has_fall) {
+    std::vector<hhds::Pin_class> work;
+    for (const auto& f : flops) {
+      if (f.posedge) {
+        continue;
+      }
+      for (const auto* port : flop_operand_ports) {
+        work.push_back(get_driver(find_sink_pin(f.node, port)));
+      }
+    }
+    absl::flat_hash_set<pin_key_t> seen;
+    while (!work.empty()) {
+      auto pp = work.back();
+      work.pop_back();
+      if (pp.is_invalid() || is_const_pin(pp) || !seen.insert(pp.get_class_index()).second) {
+        continue;
+      }
+      auto n = pp.get_master_node();
+      fall_cone.insert(n.get_class_index());
+      if (is_type_register(n)) {
+        continue;
+      }
+      for (const auto& e : n.inp_edges()) {
+        work.push_back(e.driver);
+      }
+    }
+    for (const auto& s : subs) {
+      if (s.negedge_only) {
+        fall_cone.insert(s.node.get_class_index());
+      }
+    }
+  }
+
+  auto emit_period_body = [&](Pass pass_) -> bool {
+  const bool settle = pass_ == Pass::Settle;
+  const bool fall   = pass_ == Pass::Fall;
+  // `settle_mode` means "do NOT advance a child" -- true for the fall as well as
+  // the settle. A sub-instance already ran its whole `cycle()` (both halves plus
+  // its own trailing settle) during this module's RISE, so all the fall needs
+  // from it is its outputs re-evaluated against the inputs the rise just
+  // committed: a comb re-settle, not a second advance. That is precisely what
+  // the old `negedge-through-instance` refusal existed to prevent, and why it
+  // can now be lifted -- before the settle/commit split there was no way to ask
+  // a child for its outputs without also stepping it.
+  settle_mode       = settle || fall;
+  if (pass_ != Pass::Rise) {
+    // Fresh binding environment. The settle reads the COMMITTED members rather
+    // than the temporaries the rise left behind; the fall likewise starts from
+    // the state the rise just committed, which is what makes its half-cycle
+    // handover fall out of an ordinary walk instead of the invalidate/re-ready
+    // dance a single monolithic body needed.
     pin2var.clear();
     canonical_.clear();
-    fout->append("void ", mod, "::__settle(In in) {\n");
+    fout->append("void ", mod, "::", settle ? "__settle" : "eval_negedge", "(In in) {\n");
   } else {
-    fout->append(mod, "::Out ", mod, "::cycle(In in) {\n");
+    fout->append("void ", mod, "::eval_posedge(In in) {\n");
   }
   // map input ports and flop q outputs into pin2var
   for (const auto& io : ios) {
@@ -2655,6 +2991,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (settle && !settle_cone.contains(node.get_class_index())) {
       continue;
     }
+    // Same idea for the fall half: it needs only the cones feeding negedge
+    // state, re-read from the members the rise just committed.
+    if (fall && !fall_cone.contains(node.get_class_index())) {
+      continue;
+    }
     if (op == Ntype_op::Memory) {
       // Emit the read data (read-first: the current array) and register each
       // read port's dout driver pin so downstream nodes resolve. Writes commit
@@ -2867,7 +3208,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   //
   // Nothing to do in the settle pass: it never advances a child, and the
   // pre-binding above already pointed these outputs straight at `<inst>.__out`.
-  for (const auto* sp : settle ? std::vector<const Sub*>{} : deferred_moore) {
+  for (const auto* sp : (pass_ == Pass::Rise) ? deferred_moore : std::vector<const Sub*>{}) {
     const auto& s    = *sp;
     auto        dsio = s.node.get_subnode_io();
     if (!dsio) {
@@ -2930,7 +3271,37 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   //
   // A design with no negedge flop skips the fall re-evaluation; latches still
   // use the low/high window pair and memories remain in the rise phase.
-  auto emit_flop_next = [&](const Flop& f, bool latch_low = false, bool latch_high = false) {
+  // Park the commit enable, for the same reason `_din` is parked: the ICG guard
+  // operands and a secondary clock's level are combinational, and the commit
+  // method cannot read them.
+  //
+  // The edge test compares against the PRE-TICK level, so EVERY flop's `_cen` --
+  // negedge ones included -- is emitted in the RISE pass, before `prev_member`
+  // is advanced. That is what preserves the rule both phases depend on: updating
+  // the prev bit between the phases made every secondary negedge test compare
+  // `cur` against itself and miss the edge permanently.
+  auto emit_commit_enable = [&](const Flop& f) {
+    if (f.clock_guards.empty() && f.sec_clock.is_invalid()) {
+      return;  // ungated, on the reference clock: commits every tick
+    }
+    std::string cen;
+    for (const auto& gp : f.clock_guards) {
+      absl::StrAppend(&cen, cen.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
+    }
+    if (!f.sec_clock.is_invalid()) {
+      const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
+      absl::StrAppend(&cen,
+                      cen.empty() ? "" : " && ",
+                      f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")")
+                                : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
+    }
+    fout->append("    ", f.member, "_cen = ", cen, ";\n");
+  };
+
+  // `with_cen == false` emits ONLY the next value and leaves `_cen` alone. The
+  // fall pass needs exactly that: its `_din` is computed from the POST-rise
+  // state, but its commit enable was already computed in the rise pass.
+  auto emit_flop_next = [&](const Flop& f, bool latch_low = false, bool latch_high = false, bool with_cen = true) {
     auto din      = get_driver(find_sink_pin(f.node, "din"));
     auto rstp     = get_driver(find_sink_pin(f.node, "reset_pin"));
     auto initp    = get_driver(find_sink_pin(f.node, "initial"));
@@ -2969,17 +3340,25 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::string core = etest.empty() ? value_in : absl::StrCat("(", etest, " ? ", value_in, " : ", hold, ")");
       return rtest.empty() ? core : absl::StrCat("(", rtest, " ? ", rstval, " : ", core, ")");
     };
-    auto              next_name = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_next"); };
+    // `_din` is a MEMBER (the commit runs in a separate method and has no
+    // combinational value in scope, so the next value has to be parked here);
+    // `_low`, the latch's low-window staging, stays a settle-local because it is
+    // produced and consumed entirely inside this pass.
+    auto              next_name = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_din"); };
     auto              hold_name = [&](const std::string& base) { return latch_high ? absl::StrCat(base, "_low") : base; };
+    const char*       decl      = latch_low ? "auto " : "";
     const std::string din_expr  = din.is_invalid() ? f.member : operand(din, f.bits);
     if (f.depth <= 1) {
-      fout->append("    auto ", next_name(f.member), " = ", next_of(din_expr, hold_name(f.member)), ";\n");
+      fout->append("    ", decl, next_name(f.member), " = ", next_of(din_expr, hold_name(f.member)), ";\n");
     } else {
-      fout->append("    auto ", next_name(f.stages[0]), " = ", next_of(din_expr, hold_name(f.stages[0])), ";\n");
+      fout->append("    ", decl, next_name(f.stages[0]), " = ", next_of(din_expr, hold_name(f.stages[0])), ";\n");
       for (size_t i = 1; i < f.stages.size(); ++i) {
-        fout->append("    auto ", next_name(f.stages[i]), " = ", next_of(f.stages[i - 1], hold_name(f.stages[i])), ";\n");
+        fout->append("    ", decl, next_name(f.stages[i]), " = ", next_of(f.stages[i - 1], hold_name(f.stages[i])), ";\n");
       }
-      fout->append("    auto ", next_name(f.member), " = ", next_of(f.stages.back(), hold_name(f.member)), ";\n");
+      fout->append("    ", decl, next_name(f.member), " = ", next_of(f.stages.back(), hold_name(f.member)), ";\n");
+    }
+    if (with_cen && !latch_low) {
+      emit_commit_enable(f);
     }
   };
 
@@ -2988,43 +3367,32 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // has to be re-readied there — readying only `din` left a latch-qualified
   // enable unbound and operand() substituted a silent constant 0 into the
   // commit guard. (`negreset` is absent: it is only ever read as a constant.)
-  static constexpr std::array<const char*, 4> flop_operand_ports{"din", "enable", "reset_pin", "initial"};
 
   // Commit one state element's next value under its ICG gate and/or its
   // secondary clock's edge. BOTH phases use this: a gated or secondary-clocked
   // flop needs the same guard whichever edge it commits on.
+  // Pure member moves: everything combinational this needs was parked by the
+  // settle (see emit_flop_next). That is what lets the commit be its own method.
+  //
+  // ICG fold (2f-latch M5): a gated flop commits only in ticks where its gate's
+  // enable terms are true; without it the gate is DEAD CODE and the flop loads
+  // every tick regardless — a silently wrong waveform. SECONDARY clock (M6): a
+  // flop on a different net commits only on a detected EDGE of it, which is why
+  // the shared prev bit is updated once per tick rather than per phase — two
+  // clocks whose edges land in the same tick then both sample pre-edge values,
+  // which is what IEEE 1800 requires for coincident edges. Both are folded into
+  // `_cen`.
   auto commit_state = [&](const auto& f) {
-    // ICG fold: a gated flop commits only in ticks where its gate's enable
-    // terms are true. Without this the gate is DEAD CODE and the flop loads
-    // every tick regardless — a silently wrong waveform (2f-latch M5).
-    std::string guard;
-    for (const auto& gp : f.clock_guards) {
-      absl::StrAppend(&guard, guard.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
-    }
-    // SECONDARY clock (2f-latch M6): commit only on a detected EDGE of this
-    // flop's own clock net. One tick is one period of the REFERENCE clock, so a
-    // second clock cannot also tick once per call — it is a signal the
-    // testbench drives, and an edge is a level change between ticks. All flops
-    // on one net share the prev bit, so they commit together; and because every
-    // secondary commit reads PRE-TICK state, two clocks whose edges land in the
-    // same tick both sample pre-edge values, which is what IEEE 1800 requires
-    // for coincident edges.
-    if (!f.sec_clock.is_invalid()) {
-      const std::string cur = absl::StrCat("(", operand(f.sec_clock, 1), ").is_known_true()");
-      absl::StrAppend(
-          &guard,
-          guard.empty() ? "" : " && ",
-          f.posedge ? absl::StrCat("(", cur, " && !", f.prev_member, ")") : absl::StrCat("(!", cur, " && ", f.prev_member, ")"));
-    }
-    const std::string ind = guard.empty() ? "    " : "      ";
-    if (!guard.empty()) {
-      fout->append("    if (", guard, ") {  // gated clock: commit only when the ICG enable is high\n");
+    const bool        guarded = !f.clock_guards.empty() || !f.sec_clock.is_invalid();
+    const std::string ind     = guarded ? "      " : "    ";
+    if (guarded) {
+      fout->append("    if (", f.member, "_cen) {  // gated/secondary clock: commit only when its edge fires\n");
     }
     for (const auto& s : f.stages) {
-      fout->append(ind, s, " = ", s, "_next;\n");
+      fout->append(ind, s, " = ", s, "_din;\n");
     }
-    fout->append(ind, f.member, " = ", f.member, f.posedge ? "_next;\n" : "_next;  // negedge: commits at the FALL\n");
-    if (!guard.empty()) {
+    fout->append(ind, f.member, " = ", f.member, f.posedge ? "_din;\n" : "_din;  // negedge: commits at the FALL\n");
+    if (guarded) {
       fout->append("    }\n");
     }
   };
@@ -3093,7 +3461,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // latch into `<q>_low`.  This works for both explicit active-low cells and a
   // source-level `if !clk` gate (whose cell polarity remains active-high).
   for (const auto& f : flops) {
-    if (settle || !f.is_latch) {
+    if (pass_ != Pass::Rise || !f.is_latch) {
       continue;
     }
     for (const auto* port : flop_operand_ports) {
@@ -3111,7 +3479,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // result is the hold value, so a latch open in either half retains the last
   // transparent value and closes with the correct end-of-period state.
   for (const auto& f : flops) {
-    if (settle || !f.is_latch) {
+    if (pass_ != Pass::Rise || !f.is_latch) {
       continue;
     }
     for (const auto* port : flop_operand_ports) {
@@ -3125,11 +3493,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     emit_flop_next(f, false, true);
   }
-  if (!settle && !ref_clock_pin.is_invalid()) {
+  if (pass_ == Pass::Rise && !ref_clock_pin.is_invalid()) {
     pin2var[ref_clock_pin.get_class_index()] = absl::StrCat("in.", cpp_port_path(ref_clock_name));
   }
   for (const auto& f : flops) {
-    if (!settle && f.is_latch) {
+    if (pass_ == Pass::Rise && f.is_latch) {
       auto qpin = f.node.get_driver_pin(0);
       if (!qpin.is_invalid()) {
         invalidate_downstream(qpin);
@@ -3138,8 +3506,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   for (const auto& f : flops) {
-    if (settle) {
-      break;  // no next-state in a settle
+    if (pass_ != Pass::Rise) {
+      break;  // the rise owns posedge next-state; the fall emits its own below
     }
     if (!f.is_latch && f.posedge) {
       for (const auto* port : flop_operand_ports) {
@@ -3148,6 +3516,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       emit_flop_next(f);
     } else if (!f.is_latch && !f.posedge) {
       any_negedge = true;
+      // Its `_din` belongs to the fall pass (post-rise state), but its `_cen`
+      // belongs HERE — see emit_commit_enable: every phase's edge test must read
+      // the same pre-tick secondary-clock level, and the prev bit advances at
+      // the end of this pass.
+      for (const auto& gp : f.clock_guards) {
+        ensure_ready(gp);
+      }
+      ensure_ready(f.sec_clock);
+      emit_commit_enable(f);
     }
   }
 
@@ -3155,30 +3532,37 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // PRE-edge state, and the result is the returned `o`/`__last_out` (what the
   // output drove during the period). In the SETTLE pass it is the committed
   // state, and the result lands directly in the `__out` member a `sigref` binds.
+  // (The FALL pass drives no outputs: `__last_out` is the during-period value
+  // the rise recorded, and `__out` is refreshed by the trailing settle.)
   const std::string out_dst = settle ? "    __out." : "    o.";
-  if (!settle) {
-    fout->append("    Out o;\n");
-  }
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      continue;
+  if (!fall) {
+    if (!settle) {
+      fout->append("    Out o;\n");
     }
-    auto spin = g->get_output_pin(io.raw);
-    auto drv  = spin.is_invalid() ? hhds::Pin_class{} : get_driver(spin);
-    if (drv.is_invalid()) {
-      fout->append("    // output ", io.field, " is undriven\n");
-    } else {
-      fout->append(out_dst, io.field, " = ", operand(drv, io.bits), ";\n");
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        continue;
+      }
+      auto spin = g->get_output_pin(io.raw);
+      auto drv  = spin.is_invalid() ? hhds::Pin_class{} : get_driver(spin);
+      if (drv.is_invalid()) {
+        fout->append("    // output ", io.field, " is undriven\n");
+      } else {
+        fout->append(out_dst, io.field, " = ", operand(drv, io.bits), ";\n");
+      }
     }
   }
   // The settle pass ends here: everything below is state advance (VCD sample,
   // memory commit, flop commit, the fall phase) and must happen exactly once
-  // per period, in the cycle pass.
+  // per period.
   if (settle) {
     fout->append("}\n");
     return true;
   }
 
+  // Everything from here to the posedge commit is the RISE half: it advances
+  // state and must happen exactly once per period.
+  if (!fall) {
   // VCD sample + dump (pre-commit, current-state values at this cycle's
   // timestamp). EVERY traced instance snapshots its values here -- a sub's
   // cycle() runs mid-way through its parent's comb walk, so by the parent's
@@ -3314,70 +3698,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     commit_state(f);
   }
+  }  // end of the rise half
 
-  // PHASE 2 (the fall): negedge state, evaluated AFTER the rise committed.
+  // THE FALL half: negedge state, evaluated AFTER the rise committed.
   //
-  // Anything reachable from a posedge flop's Q has a stale binding now — its
-  // pin2var entry names a temporary computed from the PRE-rise members. Drop
-  // those bindings so ensure_ready() re-emits the cone into fresh temporaries;
-  // a flop's Q is bound directly to its C++ member, so the re-emitted
-  // expressions read the just-committed values with no extra plumbing.
-  //
-  // A Sub instance in that cone is REFUSED rather than re-emitted: emit_sub_call
-  // advances the child's state, so re-running it inside one tick would
-  // double-advance it. That is a silent wrong answer, so it fails closed.
-  if (any_negedge || !deferred_fall.empty()) {
-    absl::flat_hash_set<hhds::Class_index> stale;
-    {
-      std::vector<hhds::Pin_class> work;
-      for (const auto& f : flops) {
-        if (f.posedge) {
-          work.push_back(f.node.get_driver_pin(0));
-        }
-      }
-      absl::flat_hash_set<hhds::Class_index> seen;
-      bool                                   hit_sub = false;
-      while (!work.empty()) {
-        auto p = work.back();
-        work.pop_back();
-        if (p.is_invalid() || !seen.insert(p.get_class_index()).second) {
-          continue;
-        }
-        for (const auto& e : p.out_edges()) {
-          auto sn = e.sink.get_master_node();
-          if (type_op_of(sn) == Ntype_op::Sub) {
-            if (!fall_deferred.contains(sn.get_class_index())) {
-              hit_sub = true;
-            }
-            continue;
-          }
-          if (is_type_register(sn) || Ntype::has_multiple_driver_pins(type_op_of(sn))) {
-            continue;  // stop at state / multi-driver cells
-          }
-          auto dp = sn.get_driver_pin(0);
-          if (dp.is_invalid()) {
-            continue;
-          }
-          stale.insert(dp.get_class_index());
-          work.push_back(dp);
-        }
-      }
-      if (hit_sub) {
-        livehd::diag::err("inou.cgen.sim", "negedge-through-instance", "unsupported")
-            .msg("module `{}` has a NEGEDGE state element whose data crosses a sub-instance in the same tick", gname)
-            .hint(
-                "the half-cycle (rise-then-fall) transfer re-evaluates the combinational region after the rise, but a "
-                "sub-instance call also ADVANCES the child's state — re-running it inside one tick would advance it "
-                "twice. Flatten the instance for sim, or move the negedge element out of its fanout; tracked as "
-                "todo/livehd/2f-latch M5")
-            .emit();
-        return false;
-      }
-    }
-    for (auto ci : stale) {
-      pin2var.erase(ci);
-      prefetch_seen.erase(ci);
-    }
+  // This is now its own method with a fresh binding environment, so the old
+  // invalidate/re-ready dance is gone: every flop Q was bound in the prologue to
+  // its just-committed member, and the walk above re-emitted the fall cone from
+  // there. Data crossing a SUB-INSTANCE is no longer refused either — the child
+  // ran its whole cycle() during the rise, so `settle_mode` has the walk ask it
+  // for a comb re-settle (`sub.__settle`) rather than a second advance, which is
+  // exactly what the `negedge-through-instance` refusal existed to prevent.
+  if (fall) {
+    (void)any_negedge;
     // A negedge-only child samples after the parent's rise.  Its current-state
     // outputs were pre-bound before the walk, but its state-advancing call is
     // delayed until now so inputs driven by parent posedge Qs are rebuilt from
@@ -3432,7 +3765,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (f.posedge) {
         continue;
       }
-      emit_flop_next(f);
+      // `_din` only: `_cen` was computed in the rise pass, against the pre-tick
+      // secondary-clock level both phases must observe.
+      emit_flop_next(f, /*latch_low=*/false, /*latch_high=*/false, /*with_cen=*/false);
     }
     for (const auto& f : flops) {
       if (f.posedge) {
@@ -3442,11 +3777,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  // Secondary-clock levels for the NEXT tick's edge detection.  Both the
-  // rise and fall guards must observe the same PRE-TICK level.  Updating this
-  // between the two phases made every secondary negedge test compare `cur`
-  // against itself and therefore miss the edge permanently.
-  {
+  // Secondary-clock levels for the NEXT tick's edge detection. Both phases'
+  // guards must observe the same PRE-TICK level -- updating this between them
+  // made every secondary negedge test compare `cur` against itself and miss the
+  // edge permanently. That still holds now the phases are separate methods: the
+  // fall reads no level at all (emit_commit_enable parked every `_cen`, negedge
+  // ones included, back in the rise), so advancing the bit at the end of the
+  // RISE is safe and, unlike the fall, always runs.
+  if (!fall) {
     absl::flat_hash_set<std::string> done;
     for (const auto& f : flops) {
       if (f.prev_member.empty() || !done.insert(f.prev_member).second) {
@@ -3476,23 +3814,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     return false;
   }
 
-  if (settle) {
-    fout->append("}\n");
-  } else {
+  if (!fall) {
+    // The during-period outputs, recorded before any commit -- the value the
+    // query engine publishes as `"sampled":"during_period"`.
     fout->append("    __last_out = o;  // 2f-sim B: free output observation for the query engine\n");
-    // The trailing settle of the period: refresh __out from the state this
-    // cycle just committed, so a bound `sigref` reads the post-edge value with
-    // no snapshot/restore. Must come AFTER every commit and after __last_out
-    // (which is the pre-commit twin and must not be overwritten).
-    fout->append("    __settle(in);\n");
-    fout->append("    return o;\n}\n");
   }
+  fout->append("}\n");
   return true;
   };
-  if (!emit_period_body(false)) {
+  if (!emit_period_body(Pass::Rise)) {
     return;
   }
-  if (!emit_period_body(true)) {
+  if (has_fall && !emit_period_body(Pass::Fall)) {
+    return;
+  }
+  if (!emit_period_body(Pass::Settle)) {
     return;
   }
 

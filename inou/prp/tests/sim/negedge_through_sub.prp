@@ -1,0 +1,57 @@
+/*
+:name: negedge_through_sub
+:type: simulation
+*/
+// A PARENT negedge flop whose data crosses a SUB-INSTANCE — the exact shape
+// `inou.cgen.sim` used to refuse with `negedge-through-instance`.
+//
+// WHY IT WAS REFUSED. The two halves of a tick used to be one monolithic
+// `cycle()` body: the fall re-evaluated the combinational region after the rise
+// by dropping the pin2var bindings reachable from a posedge Q and re-emitting
+// them. Re-emitting a Sub in that cone meant calling `child.cycle()` a second
+// time, which ADVANCES the child's state — so the pass failed closed rather than
+// double-advance it silently.
+//
+// WHY IT WORKS NOW. A period is three methods (eval_posedge / eval_negedge /
+// __settle). The child already ran its whole `cycle()` during the parent's rise,
+// so the fall only needs its outputs re-evaluated against the inputs the rise
+// just committed — `child.__settle(...)`, a comb re-settle with no advance.
+// There is no longer any way for the fall to step a child twice.
+//
+// THE VALUE THIS PINS. `thru` is pure combinational, so the half-cycle transfer
+// must land IN THE SAME PERIOD: at the rise `a` takes `d`; at the fall `n`
+// samples `t == a` reading the POST-rise `a`. So `qn == qp` on every tick after
+// the first. If the fall ever went back to reading pre-rise bindings, `qn` would
+// lag `qp` by a full period — the silent full-cycle-lag failure that
+// hier_sim_negedge_sub.prp records for the child-side twin of this bug.
+comb thru(x:u8) -> (y:u8) { y = x }
+
+pub mod ptop(d:u8) -> (qp:u8@[1], qn:u8@[2]) {
+  reg a:u8 = 0
+  a  = d
+  qp = a
+  mut t = thru(x=a)
+  reg n:u8:[posclk=false] = 0
+  n  = t
+  qn = n
+}
+
+test ptop.halfcycle {
+  mut acc  = ptop
+  mut bad  = 0
+  mut seen = 0
+  tick 8 {
+    acc.d = 11 + (17 * clock)
+    step
+    // CONTROL: qp is the parent's own posedge stage, correct independently of
+    // the fall phase — so a failure below is specifically the negedge timing.
+    if clock >= 1 {
+      seen = seen + 1
+      if acc.qn != acc.qp {
+        bad = bad + 1
+      }
+    }
+  }
+  assert(seen == 7, "the comparison actually ran (guards against a vacuous pass)")
+  assert(bad == 0, "a parent negedge flop fed THROUGH an instance samples the same period's posedge Q")
+}

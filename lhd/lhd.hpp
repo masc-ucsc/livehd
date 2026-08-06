@@ -295,6 +295,14 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
      "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
+    {"flatten", "0", Sim_set_option::Kind::non_neg_num,
+     "N — structurally inline a sub-instance into its parent when the callee's body has <= N nodes, applied "
+     "bottom-up so a def's own small children are absorbed before it is itself considered. 0 (the default) keeps "
+     "every instance as its own C++ struct reached through a cycle()/__settle() call. Inlining removes that call, "
+     "the In/Out structs copied across it, and the port-boundary width adjusts — but emits the body once per "
+     "instantiation SITE, so generated code and host C++ time grow with the instance count while simulation time "
+     "falls. A large N (e.g. 999999) flattens the whole hierarchy, which is the wrong trade on a big design; small "
+     "leaves are where it pays"},
     {"ninja", "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
