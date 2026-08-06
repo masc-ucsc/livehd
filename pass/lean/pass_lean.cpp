@@ -1547,6 +1547,13 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // Generated bridge proofs share one normalizer simp-set across nodes; not
     // every lemma fires on every node, which is expected (not a defect).
     ofs << "set_option linter.unusedSimpArgs false\n";
+    // Per-node `first | <fast path> | <fallback>` dispatches (GetMask all-ones,
+    // Sext full-vs-truncate) leave the losing branch unelaborated by design, so
+    // these two linters fire once per branch.  With one dispatch per GetMask node
+    // that is ~2 warnings x ~1800 nodes on a CVA6 module -- pure noise that
+    // buries real diagnostics in the log.  Silence them in bridge output only.
+    ofs << "set_option linter.unreachableTactic false\n";
+    ofs << "set_option linter.unusedTactic false\n";
   }
   ofs << "\n";
   ofs << "set_option maxRecDepth 1000000\n";
@@ -2104,6 +2111,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       // Sext dispatches between two lemmas at proof time (see below).
       bool sext_mode = false;
       std::string sext_a, sext_amt;
+      // GetMask with a constant all-ones mask also dispatches at proof time.
+      bool getmask_allones_mode = false;
+      std::string getmask_allones_call;
       // Post-bridge closer simp set; the default unfolds the node def + normalizes
       // constant Int spellings.  `ofInt_zero_eq` reconciles the fast model's zero
       // literal `0#w` with the cert source leaf `BitVec.ofInt w 0` for ops where a
@@ -2116,6 +2126,39 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         // GetMask nodes that env bloat dominates memory (tens of GB).  `decide`
         // evaluates the (small, concrete) mask-length check with no env artifact.
         bridge_call = "getmask_bridge' _ _ (by decide)";
+        // Fast path for the ALL-ONES mask.  LiveHD spells a zero-extend as
+        // `Get_mask(a, -1)`, so in practice every GetMask node carries the -1
+        // sentinel (measured: 2093/2093 on DINO, 1802/1802 on cva6_tlb_gate).
+        // The generic side condition `(mask_indices M).length <= b` is then a
+        // kernel reduction of `(List.range mw).filter ..`, i.e. work LINEAR in
+        // the mask width (measured ~0.29 ms/bit: 19.5/38/66/146 ms per node at
+        // mw = 65/129/257/513).  `getmask_bridge_allones_ofNat` replaces it with
+        // a `Nat` literal comparison `mw <= b` (width-independent, ~free).
+        //
+        // This is worth only ~2% of a full DINO run, so it is NOT the lever for
+        // the ~280 ms/node recurrence cost -- it is here because it removes the
+        // one width-dependent term, which is what would otherwise grow on wide
+        // designs (a 4096-bit cache-line node would cost ~1.2 s on its own).
+        //
+        // Recognition is by EXACT cert-leaf spelling, matching how the lemma is
+        // stated: `int_of_const` renders -1 as `(-Int.ofNat 1)`.  Emitted below
+        // as `first | <allones> | <generic>`, so if that spelling ever drifts the
+        // generic bridge still closes the goal and we only lose the speedup
+        // (silent-mismatch-on-drift is the failure mode behind 4 of the 8
+        // historical step-5 bugs).
+        if (info.deps.size() == 2) {
+          const uint32_t mdep = info.deps[1];
+          const auto     mit  = cert_build.source_leaf.find(mdep);
+          if (mit != cert_build.source_leaf.end()) {
+            const uint32_t mw = width_of(mdep);
+            const std::string expect = "BitVec.ofInt " + std::to_string(mw) + " ((-Int.ofNat 1))";
+            if (mit->second == expect && mw <= info.width) {
+              getmask_allones_mode = true;
+              getmask_allones_call = "@getmask_bridge_allones_ofNat " + std::to_string(width_of(info.deps[0])) + " "
+                                     + std::to_string(mw) + " " + std::to_string(info.width) + " _ (by decide)";
+            }
+          }
+        }
       } else if (info.op_expr == "LGraphOp.Op_Sum 2" && info.deps.size() == 2) {
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
@@ -2186,6 +2229,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           ofs << "  | rw [" << srcfacts << "sext_bridge " << sext_a << " " << sext_amt << " (by decide)]\n";
           ofs << "  | rw [" << srcfacts << "sext_bridge_low " << sext_a << " " << sext_amt
               << " (by decide) (by decide)]\n";
+        } else if (getmask_allones_mode) {
+          // All-ones fast path first, generic bridge as the drift fallback.
+          ofs << "  first\n";
+          ofs << "  | rw [" << srcfacts << getmask_allones_call << "]\n";
+          ofs << "  | rw [" << srcfacts << bridge_call << "]\n";
         } else {
           ofs << "  rw [" << srcfacts << bridge_call << "]\n";
         }
