@@ -20,8 +20,8 @@ this closes RTL ⇔ certificate.
 
 Repo: `livehd-new`. Emitter: `pass/lean/pass_lean.cpp`. Lean support:
 `formal/lean/LeanSemanticPrimitives/Translation/{GraphRefine,OpBridge,LGraphModel}.lean`.
-Knob: `--set formal.lean.emit_fast_bridge=true` (default off). Reference proof:
-`Add2BridgeExample.lean`. Bug log: `pass/lean/STEP5_BRIDGE_BUGS.md`.
+Knob: `--set formal.lean.emit_fast_bridge=true` (default off). Op census gate:
+`pass/lean/scripts/op_census.py`. Bug log: `pass/lean/STEP5_BRIDGE_BUGS.md`.
 
 ## 1. Architecture (three pieces)
 
@@ -251,17 +251,21 @@ herring — it is not what chunk imports need).
 
 ## 7. Verification ladder (cheapest first)
 
-1. Each new op bridge, proven in isolation against its `eval_op` form.
-2. **Static gates** (seconds): `pass/lean/scripts/const_parity.py` (every const
-   dep's cert leaf spelling appears verbatim in the consumer's fast body), plus
-   `grep -c sorry` and `grep -c 'TODO(step5)'`.
-3. `add2` full bridge (`Add2BridgeExample.lean`) — the smallest complete design.
-4. A minimal 1-flop sequential design — validates `_next`/`_step`.
-5. **A design with an output (and a flop din) driven DIRECTLY by a constant** —
-   covers the off-topo/source path of §3. *This case is missing from add2 and the
-   1-flop design, which is exactly why that bug survived to a 26-minute run.*
-6. A synthetic N-sweep — compares representations (exponent only, see §4).
-7. The real design, run to completion under the cap.
+1. Each new op bridge, proven in isolation against its `eval_op` form, with an
+   `example` of its emitter-facing use committed next to it in `OpBridge.lean`
+   (so `lake build ..OpBridge` checks lemma and usage together).
+2. **Static gates** (seconds): `pass/lean/scripts/op_census.py` (every `(op, arity)`
+   in the design is handled by the dispatch) and
+   `pass/lean/scripts/const_parity.py` (every const dep's cert leaf spelling
+   appears verbatim in the consumer's fast body), plus `grep -c sorry` and
+   `grep -c 'TODO(step5)'`.
+3. A minimal 1-flop sequential design — validates `_next`/`_step`.
+4. **A design with an output (and a flop din) driven DIRECTLY by a constant** —
+   covers the off-topo/source path of §3. *This case is missing from the tiny
+   combinational designs and the 1-flop design, which is exactly why that bug
+   survived to a 26-minute run.*
+5. A synthetic N-sweep — compares representations (exponent only, see §4).
+6. The real design, run to completion under the cap.
 
 ### Testing discipline (learned the hard way)
 

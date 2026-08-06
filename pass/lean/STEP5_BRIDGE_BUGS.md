@@ -227,8 +227,24 @@ design; only timed slices of the real file predict a wall time.
 | + combiner / bridge_src / refines | **1391 s = 23.2 min, 13.3 GB, exit 0** |
 
 Note the per-node cost is **not uniform**: 200 theorems were free, 4772 cost ~21
-minutes — the expensive ones are the wide `GetMask` nodes with `by decide` side
-conditions (~2093 of them).  That is the next optimization target.
+minutes ⇒ **≈280 ms per recurrence theorem**.
+
+**Correction (measured 2026-08-04).**  This document previously blamed the wide
+`GetMask` `by decide` side conditions (~2093 of them) and called them the next
+optimization target.  An isolated benchmark says otherwise: that `decide` costs
+19.5 / 38 / 66 / 146 ms per node at mask width 65 / 129 / 257 / 513 — i.e.
+**linear** in mask width (≈0.29 ms/bit), not quadratic — which totals only ≈20 s
+across DINO's entire GetMask population, ~1.5 % of the 1391 s run.  The
+closed-form all-ones replacement (`mask_indices_length_ofInt_neg_one`) is
+width-independent and free, so it is worth keeping — it removes the only
+width-dependent term in the per-node proof, which matters as designs widen — but
+it is **not** the lever.  The ~280 ms/node lives in the rest of the per-node proof
+(the `show` defeq resolution and the per-node `rw` / `simp only [fv, closer]`).
+Measured table: `README.md`, "Where the per-node 280 ms is NOT going".
+
+**Lesson, a second instance of the one below.**  The superseded runtime estimate
+was an unmeasured *magnitude*; this was an unmeasured *attribution*.  Same rule:
+benchmark the component in isolation before naming it the bottleneck.
 
 **Estimation rule learned here:** synthetic sweeps give the *exponent* (they told
 us monolithic ≈ N^1.8 vs data-tree ≈ N^1.0, which chose the design); only timed

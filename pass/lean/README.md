@@ -162,11 +162,12 @@ a small per-design instantiation the emitter prints.
   requires `mathlib @ v4.31.0`; fetch oleans once with `lake exe cache get`.
   `OpBridge` is NOT imported by the package root (non-bridge output stays
   Mathlib-free); the emitter adds the import only to bridge-enabled files.
-  `.../Translation/Add2BridgeExample.lean` is the emitter's actual `add2` output,
-  checked in as a buildable, sorry-free reference.
+  Each bridge lemma carries an `example` of its intended use in `OpBridge.lean`
+  itself, so `lake build LeanSemanticPrimitives.Translation.OpBridge` checks the
+  library and its usage together and the check cannot drift from the lemma.
 
 **Status:** the emitter generates a **sorry-free** bridge for DINO
-`SingleCycleCPU` (all 4772 nodes); `add2` typechecks green.  **The full 4772-node DINO bridge typechecks
+`SingleCycleCPU` (all 4772 nodes).  **The full 4772-node DINO bridge typechecks
 end-to-end: `exit 0`, 0 errors, 0 sorries, in 1391 s (23.2 min) / 13.3 GB at 8
 cores** — `_comb`, `_next` and `_step` all proven equal to the certificate model.  Because this machine is a shared NFS server, always run as a good
 citizen: `LEAN_NUM_THREADS=8 taskset -c 0-7 nice -n 19 ionice -c 3 lake env lean
@@ -194,11 +195,63 @@ Full-file decomposition once both are fixed:
 
 Guidance for larger designs (CVA6): emit **BT-based lookups and a term-fold
 combiner** from the start — the monolithic forms are not merely slow, they do not
-finish.  Budget ≈ **23 min / 13.3 GB at 4772 nodes**; the remaining hot spot is
-the per-node recurrence suite (notably ~2093 `GetMask` `by decide` side
-conditions), so that is where the next win is.  Note Lean parallelizes *theorem
-bodies*, so a file drains to one core as stragglers finish — a single oversized
-declaration pins one thread and dominates wall time.
+finish.  Budget ≈ **23 min / 13.3 GB at 4772 nodes**.  The remaining hot spot is
+the per-node recurrence suite (~1276 s / 4572 theorems ⇒ **≈280 ms per node**).
+Note Lean parallelizes *theorem bodies*, so a file drains to one core as
+stragglers finish — a single oversized declaration pins one thread and dominates
+wall time.
+
+#### Where the per-node 280 ms is NOT going: the `GetMask` `by decide` (measured)
+
+This README previously named the ~2093 `GetMask` `by decide` side conditions as
+the next win.  **Measured, that is wrong** — they are ~2 % of the run.  Isolated
+benchmark, 20 side conditions per point, Mathlib-import baseline **5.85 s /
+6.6 GB** subtracted (`LEAN_NUM_THREADS=4`, 4 cores):
+
+| mask width | `by decide` (`(mask_indices M).length ≤ b`) | closed form (`mask_indices_length_ofInt_neg_one`) |
+|---|---|---|
+| 65  | 19.5 ms/node | 4.0 ms/node |
+| 129 | 38 ms/node   | — |
+| 257 | 66 ms/node   | — |
+| 513 | 146 ms/node  | **~0 (below noise)** |
+
+So `decide` here is **≈ linear in mask width** (≈0.29 ms/bit), *not* quadratic,
+and the closed form is width-independent.  Scaled over the real GetMask width
+distributions that totals only ≈ **20 s** for DINO (2093 nodes, ≤127 bits) and
+≈ **29 s** for `cva6_tlb_gate` (1802 nodes, 114 of them at 257–576 bits).
+
+Conclusion: keep the closed-form all-ones path — it is free, strictly less work at
+every width, and it removes the only *width-dependent* term in the per-node proof,
+which matters as designs get wider (a hypothetical 4096-bit cache-line node would
+cost ~1.2 s on its own under `decide`).  But it is **not** the lever for the
+280 ms; that budget is dominated by the rest of the per-node proof (`show` defeq
+resolution plus the per-node `rw` / `simp only [fv, closer]`), which is where the
+next measurement should go.
+
+**Wired** (`OpBridge.getmask_bridge_allones_ofNat`, emitted from the `Op_GetMask`
+arm of the bridge dispatch).  Notes:
+- The emitter recognises the fast path by **exact cert-leaf spelling**
+  (`int_of_const` renders -1 as `(-Int.ofNat 1)`) and emits
+  `first | <all-ones> | getmask_bridge'`, so a future spelling drift degrades to
+  the old cost instead of silently failing — coupling a lemma to emitted text is
+  the failure mode behind 4 of the 8 bugs in `STEP5_BRIDGE_BUGS.md`.
+- Because that dispatch makes the losing branch unelaborated, bridge output now
+  also sets `linter.unreachableTactic`/`linter.unusedTactic` false (otherwise
+  ~2 warnings × ~1800 GetMask nodes bury real diagnostics).  `op_census.py`
+  therefore reports **`emitted on fast path : N / M all-ones nodes`** so the
+  emitter's choice stays visible; to confirm Lean *takes* the branch, re-run with
+  `linter.unreachableTactic` on and check the generic branch reports unreachable.
+- Verified on `simple_add` through the real emitter: fast path chosen 2/2, the
+  generic branch reported unreachable, `exit 0`, 0 sorries.
+
+**Pre-flight check this added** (`op_census.py`, hard FAIL): both GetMask lemmas
+need `(mask_indices M).length ≤ out_width`, which for an all-ones mask *is* the
+mask width.  A Get_mask that **truncates** (source wider than output) therefore
+gets a mask wider than its output, making that side condition **false** — the
+generic `by decide` would be deciding a false proposition and the node could not
+close by either lemma.  This is latent, not introduced by the fast path; it is
+simply absent from DINO.  Measured absent from `cva6_tlb_gate` too: all **1802**
+GetMask sites have `mask_w ≤ out_w` and none truncate.
 
 ### Lessons learned (step 5)
 
@@ -270,12 +323,14 @@ sv2v subtree lowering → LEC gate (RTL ≡ LGraph) → pass.lean --set formal.l
 ```
 
 **Static gates first — they cost seconds and replace hours of discovery:**
-`sorries = 0`, `TODO(step5) = 0`, `pass/lean/scripts/const_parity.py` PASS, and all
-three `_refines_fast` theorems present.  Never start a long run without them.
+`pass/lean/scripts/op_census.py` PASS (every `(op, arity)` in the design is handled
+by the step-5 dispatch), `pass/lean/scripts/const_parity.py` PASS, `sorries = 0`,
+`TODO(step5) = 0`, and all three `_refines_fast` theorems present.  Never start a
+long run without them.
 
-**Verification ladder:** `add2` → the 1-flop sequential design → **a module with an
-output driven directly by a constant** (this case is absent from add2 and cost us
-a 26-minute run to discover) → the target module.
+**Verification ladder:** the 1-flop sequential design → **a module with an output
+driven directly by a constant** (this case is absent from the tiny combinational
+designs and cost us a 26-minute run to discover) → the target module.
 
 **Expected work per module, in the order it will surface:**
 - **New op bridges.** CVA6 reaches ops DINO never used — `Mult`, `Div`/`UDiv`/

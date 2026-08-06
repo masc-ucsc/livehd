@@ -746,6 +746,81 @@ theorem getmask_bridge' {aw mw b : Nat} (X : BitVec aw) (M : BitVec mw)
     eval_op LGraphOp.Op_GetMask b [bvenc X, bvenc M] = bvenc (sem_get_mask X M : BitVec b) :=
   getmask_bridge X M hb
 
+--------------------------------------------------------------------------------
+-- All-ones GetMask fast path.
+--
+-- LiveHD spells a zero-extend as `Get_mask(a, -1)`, so in practice EVERY GetMask
+-- node in a real design carries the all-ones sentinel mask (measured: 2093/2093
+-- on DINO SingleCycleCPU, 1802/1802 on cva6_tlb_gate).  The generic
+-- `getmask_bridge'` side condition `(mask_indices M).length ≤ b` is then
+-- discharged `by decide`, which kernel-reduces `(List.range mw).filter ..` --
+-- work LINEAR in the mask width (measured ≈0.29 ms/bit: 19.5/38/66/146 ms per
+-- node at mw = 65/129/257/513).
+--
+-- These lemmas replace that with a closed form whose side condition is a `Nat`
+-- literal comparison `mw ≤ b`, i.e. width-independent (measured: below noise at
+-- mw = 513).  It is not the dominant term in a full-file check (~2 % on DINO),
+-- but it is free and it removes the only width-dependent term in the per-node
+-- proof, which is what would otherwise grow on wider designs.
+--------------------------------------------------------------------------------
+
+/-- The emitted all-ones mask constant is `BitVec.allOnes`.  (The emitter spells the
+sentinel as `BitVec.ofInt w (-Int.ofNat 1)`; `-Int.ofNat 1` is `(-1 : Int)`.) -/
+theorem ofInt_neg_one_eq_allOnes (w : Nat) :
+    (BitVec.ofInt w (-1) : BitVec w) = BitVec.allOnes w := by
+  rw [BitVec.ofInt_neg, ← BitVec.neg_one_eq_allOnes]
+  congr 1
+
+/-- An all-ones mask selects every source bit, so the index list is the full range.
+Proven once, for symbolic `mw` -- no per-node kernel reduction. -/
+theorem mask_indices_length_allOnes (mw : Nat) :
+    (mask_indices (BitVec.allOnes mw)).length = mw := by
+  unfold mask_indices
+  rw [List.filter_eq_self.mpr, List.length_range]
+  intro i hi
+  simp [List.mem_range.mp hi]
+
+theorem mask_indices_length_ofInt_neg_one (mw : Nat) :
+    (mask_indices (BitVec.ofInt mw (-1))).length = mw := by
+  rw [ofInt_neg_one_eq_allOnes]
+  exact mask_indices_length_allOnes mw
+
+/-- **All-ones GetMask bridge** -- the emitter-facing form.  The side condition is
+`mw ≤ b` on `Nat` literals, so `by decide` on it is O(1) in the mask width. -/
+theorem getmask_bridge_allones {aw mw b : Nat} (X : BitVec aw) (hb : mw ≤ b) :
+    eval_op LGraphOp.Op_GetMask b [bvenc X, bvenc (BitVec.ofInt mw (-1))]
+      = bvenc (sem_get_mask X (BitVec.ofInt mw (-1)) : BitVec b) :=
+  getmask_bridge' X _ (by rw [mask_indices_length_ofInt_neg_one]; exact hb)
+
+/-- Same as `getmask_bridge_allones`, stated at the **exact constant spelling the
+emitter prints**: `int_of_const` renders the integer -1 as `(-Int.ofNat 1)`, which
+is defeq to `(-1 : Int)` but not syntactically equal, so a generated `rw` needs
+this form to match.  Coupling a lemma statement to emitted text is the failure
+mode behind 4 of the 8 historical step-5 bugs, so the emitter wraps its use in
+`first | <this> | getmask_bridge'`: if the spelling ever drifts, the generic
+bridge still closes the goal and we only lose the speedup. -/
+theorem getmask_bridge_allones_ofNat {aw mw b : Nat} (X : BitVec aw) (hb : mw ≤ b) :
+    eval_op LGraphOp.Op_GetMask b [bvenc X, bvenc (BitVec.ofInt mw (-Int.ofNat 1))]
+      = bvenc (sem_get_mask X (BitVec.ofInt mw (-Int.ofNat 1)) : BitVec b) := by
+  have h : ((-Int.ofNat 1 : Int)) = -1 := by norm_num
+  rw [h]
+  exact getmask_bridge_allones X hb
+
+/-- Emitter-facing usage checks, in the exact form the per-node recurrence emits
+(`@`-applied literal widths so the `by decide` side goal is on concrete `Nat`s).
+Kept here so `lake build ..OpBridge` checks lemma and use together. -/
+example (X : BitVec 9) :
+    eval_op LGraphOp.Op_GetMask 10 [bvenc X, bvenc (BitVec.ofInt 10 ((-Int.ofNat 1)))]
+      = bvenc (sem_get_mask X (BitVec.ofInt 10 ((-Int.ofNat 1))) : BitVec 10) :=
+  @getmask_bridge_allones_ofNat 9 10 10 X (by decide)
+
+/-- Same, at a CVA6-scale width (the ALU reaches 576 bits): confirms the side
+condition stays a `Nat` literal comparison rather than a mask-width reduction. -/
+example (X : BitVec 512) :
+    eval_op LGraphOp.Op_GetMask 513 [bvenc X, bvenc (BitVec.ofInt 513 ((-Int.ofNat 1)))]
+      = bvenc (sem_get_mask X (BitVec.ofInt 513 ((-Int.ofNat 1))) : BitVec 513) :=
+  @getmask_bridge_allones_ofNat 512 513 513 X (by decide)
+
 
 /-- `max`-width EQ bridge: fixes the compare width to `max wa wb` so it is
 determined by the operands (the emitter uses `max(pin widths)`), avoiding a free

@@ -17,6 +17,14 @@ LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"
 RUN_LEAN="${RUN_LEAN:-false}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
+# Step-5 fast-view bridge (<Top>_comb/_next/_step = _cert).  Default off, matching
+# the pass default, because a bridge-enabled file is much more expensive to
+# typecheck.  Requires EMIT_CERT=true and a memory-free module.
+EMIT_FAST_BRIDGE="${LEAN_EMIT_FAST_BRIDGE:-false}"
+CERT_WF="${LEAN_CERT_WF:-skip}"
+# Good-citizen caps for the Lean typecheck (this box is an NFS server).
+LEAN_JOBS="${LEAN_JOBS:-8}"
+LEAN_CPUSET="${LEAN_CPUSET:-0-7}"
 BENDER="${BENDER:-}"
 if [[ -z "$BENDER" ]]; then
   if command -v bender >/dev/null 2>&1; then
@@ -118,7 +126,14 @@ fi
   echo "OUT=$OUT"
   echo "RUN_LEAN=$RUN_LEAN"
   echo "LEAN_EMIT_CERT=$EMIT_CERT"
+  echo "LEAN_EMIT_FAST_BRIDGE=$EMIT_FAST_BRIDGE"
+  echo "LEAN_CERT_WF=$CERT_WF"
 } > "$LOG_DIR/preflight.log"
+
+if [[ "$EMIT_FAST_BRIDGE" == "true" && "$EMIT_CERT" != "true" ]]; then
+  echo "FATAL: LEAN_EMIT_FAST_BRIDGE=true requires LEAN_EMIT_CERT=true" >&2
+  exit 2
+fi
 
 set +e
 "$LHD" compile verilog \
@@ -135,6 +150,8 @@ set +e
   --set formal.lean.strict=true \
   --set formal.lean.normalize=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
+  --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
+  --set formal.lean.cert_wf="$CERT_WF" \
   --set formal.lean.max_width=1048576 \
   -- \
   "${SLANG_FLAGS[@]}" \
@@ -148,13 +165,56 @@ if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
 
+generated="$LEAN_DIR/${TOP}_Lgraph.lean"
+
+# ---------------------------------------------------------------------------
+# Static gates (seconds).  These run BEFORE any typecheck: they cost nothing and
+# replace hours of discovery.  See pass/lean/README.md "Static gates first".
+# ---------------------------------------------------------------------------
+gate_status=0
+if [[ -r "$generated" ]]; then
+  {
+    echo "== op census =="
+    python3 "$LIVEHD_ROOT/pass/lean/scripts/op_census.py" "$generated" || gate_status=1
+    if [[ "$EMIT_FAST_BRIDGE" == "true" ]]; then
+      echo "== const parity =="
+      python3 "$LIVEHD_ROOT/pass/lean/scripts/const_parity.py" "$generated" || gate_status=1
+      echo "== sorry / TODO(step5) =="
+      n_sorry="$(grep -c '\bsorry\b' "$generated" || true)"
+      n_todo="$(grep -c 'TODO(step5)' "$generated" || true)"
+      echo "sorry=$n_sorry TODO(step5)=$n_todo"
+      [[ "$n_sorry" == "0" && "$n_todo" == "0" ]] || gate_status=1
+      echo "== _refines_fast theorems =="
+      grep -oE '^theorem [A-Za-z0-9_]+_(comb|next|step)_refines_fast' "$generated" || true
+      # _comb is always required; _next/_step only for a sequential design.
+      grep -q "_comb_refines_fast" "$generated" || gate_status=1
+    fi
+    echo "gate_status=$gate_status"
+  } > "$LOG_DIR/static_gates.log" 2>&1
+  echo "Static gates: $LOG_DIR/static_gates.log (gate_status=$gate_status)"
+  tail -40 "$LOG_DIR/static_gates.log" || true
+fi
+if [[ "$gate_status" -ne 0 ]]; then
+  echo "FATAL: static gates failed; not starting a typecheck" >&2
+  exit 3
+fi
+
 if [[ "$RUN_LEAN" == "true" ]]; then
-  generated="$LEAN_DIR/${TOP}_Lgraph.lean"
   [[ -r "$generated" ]] || { echo "FATAL: missing generated Lean file: $generated" >&2; exit 2; }
+  # Good-citizen caps: this box is an NFS server, an unbounded Lean starves it.
+  set +e
   (
     cd "$LIVEHD_ROOT/formal/lean"
-    "$LAKE" env lean "$generated"
+    LEAN_NUM_THREADS="$LEAN_JOBS" taskset -c "$LEAN_CPUSET" nice -n 19 ionice -c 3 \
+      /usr/bin/time -f 'lean wall=%e s peak_rss=%M KB' \
+      "$LAKE" env lean "$generated"
   ) > "$LOG_DIR/lean_typecheck.log" 2>&1
+  lean_status=$?
+  set -e
+  echo "lean exit=$lean_status" >> "$LOG_DIR/lean_typecheck.log"
+  echo "lean typecheck exit: $lean_status"
+  grep -E 'error:|wall=' "$LOG_DIR/lean_typecheck.log" | head -40 || true
+  [[ "$lean_status" -eq 0 ]] || exit "$lean_status"
 fi
 
 echo "Generated CVA6 module Lean files: $LEAN_DIR"
