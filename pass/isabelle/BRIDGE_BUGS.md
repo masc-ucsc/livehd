@@ -144,3 +144,43 @@ sides are different types) but **width agreement**: for every node and every ope
 the width used in the fast body must equal the width the certificate dep was
 materialized at. That is a static, seconds-long check, and it is exactly the invariant
 all four bugs above violated.
+
+---
+
+## Measured baseline: DINO SingleCycleCPU after the Phase 0 fixes (2026-08-06)
+
+Regenerated with the fixed emitter and built via
+`scripts/run_dino_lgraph_isabelle.sh`, Isabelle2025-2, `threads=8`,
+`parallel_proofs=1`.  Both sessions **exit 0**.
+
+| session | wall | cpu | factor |
+|---|---|---|---|
+| `DINO-Lgraph-SingleCycle-Model` | 7 m 24 s | 23 m 02 s | 3.11 |
+| `DINO-Lgraph-SingleCycle-Cert`  | 4 m 56 s | 8 m 54 s  | 1.81 |
+
+Certificate: 4772 nodes.  Op census: GetMask 2093, And 803, SRA 714, SHL 644,
+Const 204, EQ 172, MuxN 150, Or 111, Ror 27, Not 26, Sext 10, Sum 7, MuxBool 6,
+ULT 4, SLT 4, Xor 1.
+
+**Where the time goes** (from `isabelle build -v`, max observed per command):
+
+| command | line | theory | seconds |
+|---|---|---|---|
+| `definition` | 123  | `SingleCycleCPU_comb` | **107** |
+| `definition` | 4900 | `SingleCycleCPU_next` | **83** |
+| `local_setup` | 155 | — | 35 |
+| `export_code` | 1406 | — | 21 |
+
+Two monolithic `definition` commands account for ~190 s of the model build.
+Each is a *single declaration*, so each is inherently single-threaded no matter
+what `threads` is set to — the 3.11 parallelism factor comes from everything
+else.  This is the quantified form of the known defect: `emit_let_chain` puts
+the entire graph in one `let`, and `_next` re-emits the whole chain.  Splitting
+node values into per-node `definition`s removes both the cost and the
+serialization, and is a prerequisite for the bridge anyway (the per-node
+recurrence lemmas need to name each node's value).
+
+For contrast, the pre-fix 2026-06-05 run measured `Model` at 3 m 50 s with
+`parallel_proofs = 0`, `threads = 1`, factor 1.00.  The wall time rose because
+the Get_mask masks are now materialized at the source width instead of 1 bit, so
+the terms are genuinely larger — that is the fix working, not a regression.
