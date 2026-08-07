@@ -1,0 +1,22 @@
+/*
+:name: wire_partial_overlap
+:type: error
+:error: more than one driver
+*/
+
+// 2c-wire — the bit-range exemption is about DISJOINTNESS, not about the write
+// being partial. `w#[0..=3] = a; w#[4..=7] = b` is one net assembled from two
+// fields and is legal; two writes that land on the SAME lane are a genuine
+// double-drive, and upass.tolg chains them on one din accumulator, so the later
+// write silently wins over the shared bits. Checking only "is any write a whole
+// store?" let this compile clean and drop `a` with no diagnostic.
+//
+// `w#[2..=5]` then `w#[4..=5]`: PARTIALLY overlapping, so neither write covers
+// the other — the shape a lane-union test catches and a per-write shape test
+// cannot.
+comb t(a:u2, b:u4) -> (o:u8) {
+  wire w:u8 = nil   // locate_error_here
+  w#[2..=5] = b
+  w#[4..=5] = a
+  o = w
+}
