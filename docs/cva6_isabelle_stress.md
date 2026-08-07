@@ -109,10 +109,10 @@ cd /mada/users/czeng14/projects/livehd-new
   --result-json "$OUT/logs/lhd_compile_result.json" \
   --emit-dir lg:"$OUT/lgdb" \
   --emit-dir isabelle:"$OUT/isabelle" \
-  --set isabelle.strict=true \
-  --set isabelle.normalize=true \
+  --set formal.isabelle.strict=true \
+  --set formal.isabelle.normalize=true \
   --set yosys.setundef=zero \
-  --set isabelle.cert_wf=skip
+  --set formal.isabelle.cert_wf=skip
 ```
 
 The old `yosys-slang` stress scripts are now fallback/debug paths only. They

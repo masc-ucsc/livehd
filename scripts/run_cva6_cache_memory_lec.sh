@@ -139,10 +139,10 @@ EOF
       --set yosys.filelist_file="$filelist" \
       --set yosys.setundef=zero \
       --set yosys.memory_mode="$YOSYS_MEMORY_MODE" \
-      --set isabelle.strict=true \
-      --set isabelle.normalize=true \
-      --set isabelle.max_width=1048576 \
-      --set isabelle.cert_wf="$ISABELLE_CERT_WF" \
+      --set formal.isabelle.strict=true \
+      --set formal.isabelle.normalize=true \
+      --set formal.isabelle.max_width=1048576 \
+      --set formal.isabelle.cert_wf="$ISABELLE_CERT_WF" \
       -- \
       --ignore-assertions
   ) > "$logs/lhd_compile.log" 2>&1
