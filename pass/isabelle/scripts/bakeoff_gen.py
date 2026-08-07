@@ -51,9 +51,82 @@ def bst(pairs, val):
     return f"(BT.Nd {k} ({v}) {lo} {hi})"
 
 
+
+def e2e(n):
+    recs = " ".join(f"rec{k}[symmetric]" for k in range(1, n + 1))
+    nds  = " ".join(f"nodes_at{k}" for k in range(1, n + 1))
+    return f"""
+section \\<open>end-to-end: close the certificate bridge\\<close>
+
+lemma word_of_bv_bvenc [simp]:
+  "(word_of_int (bv_uint (bvenc (y :: 'w::len word))) :: 'w word) = y"
+  by (simp add: word_of_int_uint)
+
+lemma wf_distinct: "distinct topo_list"
+  by (simp add: topo_list_def)
+
+lemma wf_some: "\\<forall>m \\<in> set topo_list. nodes G m \\<noteq> None"
+  by (simp del: One_nat_def add: topo_list_def G_def)
+
+lemma wf_dep: "dep_ordered G topo_list"
+  by (rule dep_ordered_acc_sound[where S = "{{100000}}"])
+     (simp_all del: One_nat_def add: topo_list_def G_def deps_of_def wf_distinct)
+
+lemma combiner: "\\<forall>m \\<in> set topo_list. phi m = eval_node G phi m"
+  by (simp del: One_nat_def add: topo_list_def {recs})
+
+text \\<open>The off-topo side condition must NOT be proved by deciding
+  membership per dependency -- that is N deps against an N-element set literal.
+  Prove once that the tree's keys are exactly the topo list, so phi falls through
+  to the source env for every off-topo id at a stroke.\\<close>
+
+fun bt_keys :: "'a BT \\<Rightarrow> nat list" where
+  "bt_keys BT.Lf = []"
+| "bt_keys (BT.Nd k _ lo hi) = k # (bt_keys lo @ bt_keys hi)"
+
+lemma bt_find_eq_none: "d \\<notin> set (bt_keys t) \\<Longrightarrow> bt_find t d = None"
+  by (induct t) auto
+
+lemma phi_keys_sub: "set (bt_keys phi_tree) \\<subseteq> set topo_list"
+  by (simp add: phi_tree_def topo_list_def)
+
+lemma phi_fall: "d \\<notin> set topo_list \\<Longrightarrow> phi d = src_env d"
+proof -
+  assume d: "d \\<notin> set topo_list"
+  then have "d \\<notin> set (bt_keys phi_tree)" using phi_keys_sub by blast
+  then have "bt_find phi_tree d = None" by (rule bt_find_eq_none)
+  then show ?thesis by (simp add: phi_def)
+qed
+
+lemma src_agree:
+  "\\<forall>m \\<in> set topo_list. \\<forall>d \\<in> set (deps_of G m).
+      d \\<notin> set topo_list \\<longrightarrow> src_env d = phi d"
+proof (intro ballI impI)
+  fix m d assume d: "d \\<notin> set topo_list"
+  show "src_env d = phi d" using phi_fall[OF d] by simp
+qed
+
+theorem bridge:
+  "\\<forall>m \\<in> set topo_list. eval_graph topo_list G src_env m = phi m"
+  by (rule eval_graph_of_local_agree_all[OF wf_dep wf_some combiner src_agree])
+
+text \\<open>The shape outputs_from_cert produces: read the last node out of the
+  evaluated certificate and get the fast model's value back.\\<close>
+
+theorem comb_refines_fast:
+  "(word_of_int (bv_uint (eval_graph topo_list G src_env {n})) :: {W} word) = fv{n}"
+proof -
+  have memN: "{n} \\<in> set topo_list" by (simp add: topo_list_def)
+  have e: "eval_graph topo_list G src_env {n} = phi {n}"
+    using bridge memN by blast
+  show ?thesis unfolding e by simp
+qed
+"""
+
 def gen(cand, n):
     parts = [f"""theory Bake
   imports "LGraph-Translation-Correctness.Translation_OpBridge"
+          "LGraph-Translation-Correctness.Translation_GraphRefine"
 begin
 
 lemma not{W}: "bv_not {W} (bvenc (a::{W} word)) = bvenc (Bit_Operations.not a)"
@@ -182,6 +255,8 @@ definition G :: graph_cert where
     for k in range(1, n + 1):
         parts.append(f'\nlemma rec{k}: "phi {k} = eval_node G phi {k}"\n{proof(k)}')
 
+    if cand == "eqns":
+        parts.append(e2e(n))
     parts.append("\n\nend\n")
     return "".join(parts)
 
