@@ -358,3 +358,92 @@ the quadratic is driven by per-theory context size, splitting the N recurrence
 lemmas across K theories should give ≈ N²/K. Isabelle's session/theory structure
 makes that natural, and it is the analogue of the chunked-combiner lever Lean
 recorded but never validated at scale.
+
+---
+
+## The certificate bridge closes end-to-end (synthetic) — and where the cost is
+
+`bakeoff_gen.py eqns N` now emits a **complete** bridge, not just the per-node
+lemmas: `rec_k` (×N) → `combiner` → `wf_distinct`/`wf_some`/`wf_dep` →
+`src_agree` → `bridge` (Piece B applied) → `comb_refines_fast`, the last being
+`word_of_int (bv_uint (eval_graph … n)) = fv_n`, exactly the shape
+`outputs_from_cert` produces. **This is the first time the chain has closed in
+Isabelle.**
+
+### The per-node lemmas were never the bottleneck
+
+End-to-end vs per-node-only, `eqns`, threads=4:
+
+| N | per-node only | end-to-end (v1) | end-to-end (v2, after fix) |
+|---|---|---|---|
+| 100 | 14 s | 26 s | 17 s |
+| 200 | 26 s | 99 s | 38 s |
+| 400 | 69 s | 580 s | **124 s** |
+| 800 | 249 s | — | 539 s |
+
+At N=400 the per-node lemmas were 69 s of 580 s. **All the earlier
+representation work was measuring the wrong term.**
+
+### Fix 1 — `src_agree` was 86 % of the build
+
+It proved `∀m ∈ set topo. ∀d ∈ set (deps_of G m). d ∉ set topo ⟶ …` by deciding
+`d ∉ set topo_list` **per dependency against an N-element set literal**:
+491 s of 580 s at N=400.
+
+Replaced with the keys-subset route — prove `set (bt_keys phi_tree) ⊆ set topo_list`
+**once**, then `bt_find_eq_none` yields `phi d = src_env d` for every off-topo `d`
+with no enumeration. **4.7× at N=400; the DINO extrapolation drops from ~112 h to
+~7.6 h.**
+
+Note this is precisely what Piece B's own docstring already prescribed (Lean's
+`bridge_src` = `BT.find_eq_none` + `keys_sub`). The cost was not discovering the
+technique — it was not following the note.
+
+### Remaining: four lemmas, one systemic pathology
+
+Per-command CPU at N=800 (`isabelle build -c -v`):
+
+| lemma | CPU | why |
+|---|---|---|
+| `wf_dep` | 292.6 s | `dep_ordered_acc` threads a growing `insert`-set through N steps |
+| `wf_some` | 192.4 s | N membership checks against an N-element set literal |
+| `combiner` | 190.4 s | N simp rules against an N-conjunct goal |
+| `phi_keys_sub` | 121.2 s | subset of two N-element set literals |
+
+Exponent still climbs (1.46 → 1.85 → **2.17** at 400→800), so ≈ 7.6 h at 4912
+nodes. **Every one of these is the same shape**: a lemma quantifying over
+`set topo_list` discharged by `simp`, which unfolds an N-element literal and does
+N-fold rewriting.
+
+**The split that matters:** `wf_dep`, `wf_some` and `phi_keys_sub` are *ground
+decidable facts about concrete data* — nothing symbolic. They belong in the code
+generator (`by eval` / `code_simp`), where compiled ML does in milliseconds what
+`simp` does in minutes. Only `combiner` is genuinely symbolic (it mentions `phi`,
+`eval_node`, `bvenc` of word values) and needs the structural fold — the Isabelle
+analogue of Lean's term-mode `List.forall_mem_cons` right fold.
+
+Caveat on `eval`: `livehd-proof/translation-correctness/README.md` records a
+whole-graph `by eval` on `graph_cert_wf_bool` consuming hours and hundreds of GB.
+That was `deps_before` with O(N²) list appends. The predicates here are cheaper,
+but measure before trusting it.
+
+### Proof-shape rules for Piece C (each cost a build round)
+
+- **The combiner needs `rec_k[symmetric]`.** Forward, `rec_k : phi k = eval_node G phi k`
+  rewrites `phi k` the wrong way and collides with the `phi_at_k` lookup rule,
+  which has the same LHS. Forward-stated, the combiner does not close.
+- **Never let `simp` instantiate `eval_graph`.** `using bridge by (simp add: topo_list_def)`
+  expanded the fold into a nested chain of function updates — the O(N²) blowup,
+  visible in the goal. Use `have memN: "n ∈ set topo_list"`, `using bridge memN by blast`,
+  then `unfolding` that equation.
+- **`blast` on the bounded-∀ side condition HANGS** (400 s timeout at N=5, no
+  error). Use `intro ballI impI` plus a named instantiation.
+- **`auto` will not chain the off-topo argument** (`d ∉ topo` + `keys ⊆ topo` ⟹
+  `d ∉ keys` ⟹ `bt_find = None`); four explicit Isar steps are instant.
+- **Ask for subset, not equality**, on the keys fact: the BST is preorder and the
+  topo list ascending, so set equality of the two literals is far more expensive
+  and is not needed.
+- **`Translation_OpBridge` does not import `Translation_GraphRefine`.** Pieces A
+  and B are siblings; emitted theories must import both.
+- **Isabelle caches by content digest.** A timing run on unchanged content
+  silently reports *nothing*. Always `-c` when measuring.
