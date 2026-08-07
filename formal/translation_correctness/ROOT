@@ -3,6 +3,7 @@ session "LGraph-Translation-Correctness" = "DINO_Semantic_Primitives_Test" +
   theories
     Translation_LGraph_Model
     Translation_GraphRefine
+    Translation_OpBridge
     Translation_Certificate_Evaluator
     Translation_Op_Lemmas
     Translation_Combinational

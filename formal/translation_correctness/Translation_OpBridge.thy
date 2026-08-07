@@ -5,50 +5,11 @@ theory Translation_OpBridge
 begin
 
 text \<open>
-  WORK IN PROGRESS --- deliberately NOT listed in this session's ROOT.
-
-  Everything below the encoding section is unverified.  Do not add this theory
-  to ROOT until it builds; including it makes the whole session hang, not fail.
-
-  Bisected state (Isabelle2025-2, threads=4), each step measured in isolation:
-
-  \<^item> @{const bvenc}, \<open>bv_width_bvenc\<close>,
-    \<open>bv_uint_bvenc\<close>, \<open>bvenc_word_of_int\<close> --- all check,
-    ~2 s.
-  \<^item> \<open>bvenc_ucast\<close> --- \<^bold>\<open>HANGS\<close> (killed at
-    400 s; the session otherwise builds in ~40 s).  It hangs both as
-    \<open>by (simp add: bvenc_def bv_resize_def mk_bv_def ucast_eq
-    uint_word_of_int)\<close> and when restructured to isolate
-    \<open>by (simp add: ucast_eq)\<close> on the single subgoal
-    \<open>(ucast x :: 'b word) = word_of_int (uint x)\<close>, so the loop is
-    \<open>ucast_eq\<close> under \<open>simp\<close>, not an interaction between
-    lemmas.  Next step is to find the right \<open>uint (ucast _)\<close>
-    rewrite (candidates: \<open>unsigned_ucast_eq\<close>,
-    \<open>uint_up_ucast\<close>, \<open>take_bit\<close>-based forms) rather
-    than routing through \<open>ucast_eq\<close>, and to prove it by
-    \<open>word_eqI\<close>/transfer instead of \<open>simp\<close>.
-  \<^item> Everything after that (bit correspondence, \<open>pack_bits\<close>,
-    the bitwise family, constants, the examples) is written but has never been
-    checked, because the hang blocks the file.
-
-  \<open>bvenc_ucast\<close> is load-bearing, not incidental: it is the identity
-  \<open>fast ucast = certificate bv_resize\<close>, which is what every
-  width-polymorphic bridge below rewrites with.  It has to land first.
-
-  Lesson worth keeping (the Isabelle version of a documented Lean one): a
-  looping \<open>simp\<close> presents as a \<^emph>\<open>hang\<close>, and an
-  unfinished theory listed in ROOT hangs every downstream build --- including
-  probes meant to isolate it.  The first bisection attempt here measured
-  nothing for 10 minutes because the probe session's parent still listed this
-  theory.  Bisect with the suspect theory removed from ROOT.
-\<close>
-
-text \<open>
   Piece A of the certificate-equivalence bridge: per-operator lemmas relating the
   certificate evaluator @{const eval_op} (untyped @{typ bv}) to the fast model's
   native word operations (@{typ "'w::len word"}).
 
-  The encoding is @{const bvenc} below.  Isabelle's word widths are types, so
+  The encoding is \<open>bvenc\<close> below.  Isabelle's word widths are types, so
   type-class polymorphism over \<^class>\<open>len\<close> gives the same uniformity
   Lean gets from a term-indexed \<open>BitVec w\<close>: one lemma per operator
   covers every width.
@@ -64,7 +25,7 @@ text \<open>
     an explicit resize --- they cannot assume operands already share a type.
 
   \<^item> That resize is exactly @{const bv_resize}: see
-    @{thm [source] bvenc_ucast}.  \<open>ucast\<close> on the fast side and
+    \<open>bvenc_ucast\<close> below.  \<open>ucast\<close> on the fast side and
     @{const bv_resize} on the certificate side are the same operation under the
     encoding, which is what lets a per-node proof discharge by rewriting.
 \<close>
@@ -84,7 +45,12 @@ lemma bv_uint_bvenc [simp]:
 
 lemma bvenc_inject:
   "bvenc (x :: 'w::len word) = bvenc (y :: 'w word) \<longleftrightarrow> x = y"
-  by (auto simp: bvenc_def)
+proof
+  assume "bvenc x = bvenc y"
+  then have "uint x = uint y" by (simp add: bvenc_def)
+  then have "word_of_int (uint x) = (word_of_int (uint y) :: 'w word)" by simp
+  then show "x = y" by (simp add: word_of_int_uint)
+qed simp
 
 text \<open>
   The two normalization lemmas the per-node proofs live on.
@@ -94,9 +60,37 @@ lemma bvenc_word_of_int:
   "bvenc (word_of_int v :: 'w::len word) = mk_bv LENGTH('w) v"
   by (simp add: bvenc_def mk_bv_def uint_word_of_int)
 
+text \<open>
+  \<^bold>\<open>Do not add \<open>ucast_eq\<close> to a simp set.\<close>
+  \<open>ucast\<close>, \<open>uint\<close> and \<open>unat\<close> are all
+  abbreviations for the same constant \<open>unsigned\<close>, differing only in
+  the result type.  So \<open>ucast_eq : ucast ?w = word_of_int (uint ?w)\<close>
+  is really \<open>unsigned ?w = word_of_int (unsigned ?w)\<close> --- a rule
+  whose right-hand side re-introduces the head constant its left-hand side
+  matches, with the result type schematic.  Measured: adding it to a simp set
+  does not terminate (killed at 400 s), while plain \<open>simp\<close> proves
+  the same goal, and \<open>rule ucast_eq\<close> closes it instantly.
+
+  Use \<open>unsigned_ucast_eq\<close> instead.  It states the composite
+  directly --- \<open>unsigned (ucast ?w) = take_bit LENGTH(?'c) (unsigned ?w)\<close>
+  --- so its right-hand side does not re-introduce a \<open>ucast\<close> under
+  an \<open>unsigned\<close>.  Note \<open>find_theorems\<close> on the pattern
+  \<open>uint (ucast _)\<close> reports \<^emph>\<open>zero\<close> matches for
+  exactly the same reason the loop exists: both are \<open>unsigned\<close>, so
+  the pattern does not say what it looks like it says.  Search by name.
+\<close>
+
 lemma bvenc_ucast:
   "bvenc (ucast (x :: 'a::len word) :: 'b::len word) = bv_resize LENGTH('b) (bvenc x)"
-  by (simp add: bvenc_def bv_resize_def mk_bv_def ucast_eq uint_word_of_int)
+proof -
+  have "bvenc (ucast x :: 'b word) = BV LENGTH('b) (take_bit LENGTH('b) (uint x))"
+    by (simp add: bvenc_def unsigned_ucast_eq)
+  also have "\<dots> = mk_bv LENGTH('b) (uint x)"
+    by (simp add: mk_bv_def take_bit_eq_mod)
+  also have "\<dots> = bv_resize LENGTH('b) (bvenc x)"
+    by (simp add: bv_resize_def)
+  finally show ?thesis .
+qed
 
 lemma mk_bv_uint [simp]:
   "mk_bv LENGTH('w) (uint (x :: 'w::len word)) = bvenc x"
@@ -113,12 +107,9 @@ text \<open>
 lemma bv_bit_bvenc [simp]:
   "bv_bit (bvenc (x :: 'w::len word)) i = bit x i"
 proof -
-  have "bv_bit (bvenc x) i = bit (nat (uint x)) i"
-    by (simp add: bv_bit_def)
-  also have "\<dots> = bit (unat x) i"
-    by (simp add: unsigned_def)
-  also have "\<dots> = bit x i"
-    by (simp add: bit_unat_iff)
+  have u: "nat (uint x) = unat x" by (simp add: unsigned_def)
+  have "bv_bit (bvenc x) i = bit (unat x) i" by (simp add: bv_bit_def u)
+  also have "\<dots> = bit x i" by (simp add: bit_unsigned_iff)
   finally show ?thesis .
 qed
 
@@ -168,8 +159,8 @@ proof -
   also have "\<dots> = take_bit LENGTH('w) (uint z)"
     by (rule pack_bits_take_bit)
   also have "\<dots> = uint z"
-    by (simp add: take_bit_int_eq_self uint_lt2p)
-  finally show ?thesis by simp
+    by (simp add: take_bit_eq_mod uint_lt2p)
+  finally show ?thesis by (simp add: bvenc_def mk_bv_def uint_lt2p)
 qed
 
 section \<open>Bitwise operators\<close>
@@ -239,24 +230,25 @@ text \<open>
 \<close>
 
 lemma example_and_node:
-  fixes a :: "7 word" and b :: "9 word"
-  shows "eval_op Op_And 5 [bvenc a, bvenc b]
-           = bvenc (Bit_Operations.and (ucast a :: 5 word) (ucast b))"
+  fixes a :: "'a::len word" and b :: "'b::len word"
+  shows "eval_op Op_And LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (Bit_Operations.and (ucast a :: 'w::len word) (ucast b))"
 proof -
-  have "eval_op Op_And 5 [bvenc a, bvenc b]
-          = bv_bitwise 5 (\<and>) (bvenc b) (bv_resize 5 (bvenc a))"
+  have "eval_op Op_And LENGTH('w) [bvenc a, bvenc b]
+          = bv_bitwise LENGTH('w) (\<and>) (bvenc b) (bv_resize LENGTH('w) (bvenc a))"
     by simp
-  also have "\<dots> = bv_bitwise 5 (\<and>) (bvenc b) (bvenc (ucast a :: 5 word))"
+  also have "\<dots> = bv_bitwise LENGTH('w) (\<and>) (bvenc b) (bvenc (ucast a :: 'w word))"
     by (simp add: bvenc_ucast)
-  also have "\<dots> = bvenc (Bit_Operations.and (ucast b :: 5 word) (ucast (ucast a :: 5 word)))"
-    by (rule and2_bridge[where 'w = 5])
-  also have "\<dots> = bvenc (Bit_Operations.and (ucast a :: 5 word) (ucast b))"
-    by (simp add: ac_simps)
+  also have "\<dots> = bvenc (Bit_Operations.and (ucast b :: 'w word)
+                                (ucast (ucast a :: 'w word) :: 'w word))"
+    by (rule and2_bridge)
+  also have "\<dots> = bvenc (Bit_Operations.and (ucast a :: 'w word) (ucast b))"
+    by (simp add: ucast_id ac_simps)
   finally show ?thesis .
 qed
 
 lemma example_const_node:
   "eval_op (Op_Const 12) 6 [] = bvenc (word_of_int 12 :: 6 word)"
-  by (rule const_bridge[where 'w = 6])
+  by (simp add: bvenc_def mk_bv_def)
 
 end

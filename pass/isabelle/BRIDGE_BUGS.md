@@ -184,3 +184,52 @@ For contrast, the pre-fix 2026-06-05 run measured `Model` at 3 m 50 s with
 `parallel_proofs = 0`, `threads = 1`, factor 1.00.  The wall time rose because
 the Get_mask masks are now materialized at the source width instead of 1 bit, so
 the terms are genuinely larger — that is the fix working, not a regression.
+
+---
+
+## Bug 5 — `ucast_eq` in a simp set does not terminate (proof-engineering, not emitter)
+
+Not an emitter bug, but it cost a session and the diagnosis is reusable.
+
+- **Symptom:** `bvenc_ucast` — the identity *fast `ucast` = certificate
+  `bv_resize`*, which every width-polymorphic bridge lemma rewrites with —
+  never finished. Killed at 400 s in a session that otherwise builds in ~35 s.
+  A looping `simp` presents as a **hang**, not a failure.
+- **Measured**, with each candidate tactic run under an ML `Timeout.apply` so one
+  hang could not block the rest:
+
+  | goal / tactic | result |
+  |---|---|
+  | `ucast x = word_of_int (uint x)` by `rule ucast_eq` | OK |
+  | same by `simp add: ucast_eq` | **TIMEOUT** |
+  | same by **plain `simp`** (no `ucast_eq`) | OK |
+  | `bvenc (ucast x) = bv_resize _ (bvenc x)`, full set incl. `ucast_eq` | **TIMEOUT** |
+  | same set **minus** `ucast_eq` | FAIL (residual goal — not a hang) |
+
+- **Root cause:** `ucast`, `uint` and `unat` are all abbreviations for the *same*
+  constant `unsigned`, differing only in the result type. So
+  `ucast_eq : ucast ?w = word_of_int (uint ?w)` is really
+  `unsigned ?w = word_of_int (unsigned ?w)` — a rewrite whose right-hand side
+  re-introduces the head constant its left-hand side matches, with the result
+  type schematic. The default simp set also carries
+  `word_of_int_uint : word_of_int (uint ?w) = ?w`, which rewrites the other way.
+- **Fix:** use `unsigned_ucast_eq : unsigned (ucast ?w) = take_bit LENGTH('c) (unsigned ?w)`.
+  It states the composite directly, so its RHS does not re-introduce a `ucast`
+  under an `unsigned`. Proof becomes three small calculational steps and checks
+  in ~2 s.
+- **Second trap, same root cause:** `find_theorems` on the pattern
+  `uint (ucast _)` returns **zero** matches — because both are `unsigned`, the
+  pattern does not mean what it appears to mean. The lemma has to be found by
+  **name** (`Find_Theorems.Name "unsigned_ucast"`), not by pattern.
+- **Third trap:** `rule and2_bridge` fails against a goal with a *numeral* width
+  (`bv_bitwise 5 ...`) because `LENGTH(?'w)` cannot unify with the literal `5`.
+  State per-node lemmas with symbolic `LENGTH('w)`, which is the shape the
+  emitter needs anyway.
+
+**Method note.** The first bisection attempt measured nothing for 10 minutes
+because the probe session's *parent* still listed the hanging theory in its ROOT.
+Remove a suspect theory from ROOT before bisecting, and prefer an ML harness with
+`Timeout.apply` over one-tactic-per-build: it tests every candidate in a single
+~6 s run and cannot be blocked by a hang. Note also that `writeln` from an ML
+block does **not** surface in a batch `isabelle build` log — use `error` to force
+diagnostic output out.
