@@ -323,6 +323,149 @@ lemma sgt_bridge:
            = bvenc (if sint b < sint a then (1::'w::len word) else 0)"
   by (simp add: mk_bv_bool_bridge bv_sint_bvenc)
 
+lemma mk_bv_zero_bvenc: "mk_bv LENGTH('w) 0 = bvenc (0 :: 'w::len word)"
+  by (simp add: mk_bv_def bvenc_def)
+
+lemma bv_bit_mk_bv_zero [simp]: "bv_bit (mk_bv w 0) i = False"
+  by (simp add: bv_bit_def mk_bv_def)
+
+lemma bv_bitwise_zero_right:
+  assumes f0: "\<And>p. f p False = p"
+  shows "bv_bitwise LENGTH('w) f (bvenc (a :: 'a::len word)) (mk_bv LENGTH('w) 0)
+           = bvenc (ucast a :: 'w::len word)"
+  by (simp add: bv_bitwise_def f0, rule mk_bv_pack_bits_eq_bvenc, simp add: bit_ucast_iff)
+
+section \<open>eval_op-level wrappers\<close>
+
+lemma and2_op_bridge:
+  fixes a :: "'a::len word" and b :: "'b::len word"
+  shows "eval_op Op_And LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (Bit_Operations.and (ucast a :: 'w::len word) (ucast b))"
+proof -
+  have "eval_op Op_And LENGTH('w) [bvenc a, bvenc b]
+          = bv_bitwise LENGTH('w) (\<and>) (bvenc b) (bvenc (ucast a :: 'w word))"
+    by (simp add: bvenc_ucast)
+  also have "\<dots> = bvenc (Bit_Operations.and (ucast b :: 'w word)
+                              (ucast (ucast a :: 'w word) :: 'w word))"
+    by (rule and2_bridge)
+  finally show ?thesis by (simp add: ucast_id ac_simps)
+qed
+
+lemma not1_op_bridge:
+  fixes a :: "'a::len word"
+  shows "eval_op Op_Not LENGTH('w) [bvenc a]
+           = bvenc (Bit_Operations.not (ucast a :: 'w::len word))"
+  by (simp add: not_bridge)
+
+lemma xor2_op_bridge:
+  fixes a :: "'a::len word" and b :: "'b::len word"
+  shows "eval_op Op_Xor LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (Bit_Operations.xor (ucast b :: 'w::len word) (ucast a))"
+proof -
+  have "eval_op Op_Xor LENGTH('w) [bvenc a, bvenc b]
+          = bv_bitwise LENGTH('w) (\<lambda>x y. x \<noteq> y) (bvenc b)
+              (bvenc (ucast a :: 'w word))"
+    by (simp add: bv_bitwise_zero_right)
+  also have "\<dots> = bvenc (Bit_Operations.xor (ucast b :: 'w word)
+                              (ucast (ucast a :: 'w word) :: 'w word))"
+    by (rule xor2_bridge)
+  finally show ?thesis by (simp add: ucast_id)
+qed
+
+section \<open>n-ary Or : DINO reaches arity 55\<close>
+
+lemma orn_fold:
+  fixes z :: "'w::len word"
+  shows "fold (bv_bitwise LENGTH('w) (\<or>)) (map bvenc xs) (bvenc z)
+           = bvenc (foldl (\<lambda>acc x. Bit_Operations.or acc (ucast x)) z xs :: 'w word)"
+proof (induct xs arbitrary: z)
+  case Nil
+  show ?case by simp
+next
+  case (Cons x xs)
+  have "bv_bitwise LENGTH('w) (\<or>) (bvenc x) (bvenc z)
+          = bvenc (Bit_Operations.or (ucast x :: 'w word) (ucast z :: 'w word))"
+    by (rule or2_bridge)
+  also have "\<dots> = bvenc (Bit_Operations.or z (ucast x) :: 'w word)"
+    by (simp add: ucast_id ac_simps)
+  finally show ?case using Cons.hyps by simp
+qed
+
+lemma orn_bridge:
+  "fold (bv_bitwise LENGTH('w) (\<or>)) (map bvenc xs) (mk_bv LENGTH('w) 0)
+     = bvenc (foldl (\<lambda>acc x. Bit_Operations.or acc (ucast x)) 0 xs :: 'w::len word)"
+  by (simp add: mk_bv_zero_bvenc orn_fold)
+
+section \<open>Ror : DINO arity is 1, not 2\<close>
+
+lemma ror1_bridge:
+  fixes a :: "'a::len word"
+  shows "eval_op Op_Ror LENGTH('w) [bvenc a]
+           = bvenc (if a \<noteq> 0 then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge)
+
+
+section \<open>SRA and SHL\<close>
+
+lemma nat_uint_unat [simp]: "nat (uint (x :: 'a::len word)) = unat x"
+  by (simp add: unsigned_def)
+
+lemma bv_bit_mk_bv:
+  assumes "0 \<le> v" and "i < w"
+  shows "bv_bit (mk_bv w v) i = bit v i"
+  using assms by (simp add: bv_bit_def mk_bv_def bit_nat_iff bit_take_bit_iff
+                            take_bit_eq_mod[symmetric])
+
+lemma bv_bitwise_zero_right':
+  assumes f0: "\<And>p. f p False = p"
+  assumes v0: "0 \<le> v"
+  shows "bv_bitwise LENGTH('w::len) f (mk_bv LENGTH('w) v) (mk_bv LENGTH('w) 0)
+           = mk_bv LENGTH('w) (pack_bits LENGTH('w) (bit v))"
+proof -
+  have "pack_bits LENGTH('w)
+          (\<lambda>i. f (bv_bit (mk_bv LENGTH('w) v) i) (bv_bit (mk_bv LENGTH('w) 0) i))
+        = pack_bits LENGTH('w) (bit v)"
+    by (rule pack_bits_cong) (simp add: f0 bv_bit_mk_bv v0)
+  then show ?thesis by (simp add: bv_bitwise_def)
+qed
+
+lemma sra_bridge:
+  fixes x :: "'v::len word" and n :: "'n::len word"
+  assumes wle: "LENGTH('w::len) \<le> LENGTH('v)"
+  shows "eval_op Op_SRA LENGTH('w) [bvenc x, bvenc n]
+           = bvenc (ucast (sem_sra x n) :: 'w word)"
+proof -
+  have dvd: "(2::int) ^ LENGTH('w) dvd 2 ^ LENGTH('v)"
+    using wle by (rule le_imp_power_dvd)
+  have "eval_op Op_SRA LENGTH('w) [bvenc x, bvenc n]
+          = mk_bv LENGTH('w) (sint x div 2 ^ unat n)"
+    by (simp add: bv_sra_def bv_sint_bvenc)
+  also have "\<dots> = bvenc (ucast (sem_sra x n) :: 'w word)"
+    by (simp add: sem_sra_def bvenc_ucast bvenc_word_of_int bv_resize_def
+                  mk_bv_def mod_mod_cancel dvd)
+  finally show ?thesis .
+qed
+
+lemma shl_bridge:
+  fixes a :: "'a::len word" and b :: "'b::len word"
+  shows "eval_op Op_SHL LENGTH('w::len) [bvenc a, bvenc b]
+           = bvenc (push_bit (unat b) (ucast a :: 'w word))"
+proof -
+  have nn: "0 \<le> uint a * 2 ^ unat b" by simp
+  have "eval_op Op_SHL LENGTH('w) [bvenc a, bvenc b]
+          = bv_bitwise LENGTH('w) (\<or>)
+              (mk_bv LENGTH('w) (uint a * 2 ^ unat b)) (mk_bv LENGTH('w) 0)"
+    by simp
+  also have "\<dots> = mk_bv LENGTH('w) (pack_bits LENGTH('w) (bit (uint a * 2 ^ unat b)))"
+    by (rule bv_bitwise_zero_right'[where f = "(\<or>)"]) (simp_all add: nn)
+  also have "\<dots> = bvenc (push_bit (unat b) (ucast a :: 'w word))"
+    by (rule mk_bv_pack_bits_eq_bvenc)
+       (auto simp: push_bit_eq_mult[symmetric] bit_push_bit_iff bit_ucast_iff
+                   bit_uint_iff
+             dest: bit_imp_le_length)
+  finally show ?thesis .
+qed
+
 section \<open>Sanity examples\<close>
 
 text \<open>
