@@ -167,13 +167,13 @@ a small per-design instantiation the emitter prints.
   library and its usage together and the check cannot drift from the lemma.
 
 **Status:** the emitter generates a **sorry-free** bridge for all three DINO
-variants; two are proven end-to-end.
+variants, and **all three are proven end-to-end**.
 
 | design | nodes | wall | peak RSS | result |
 |---|---|---|---|---|
 | `SingleCycleCPU` | 4,772 | 23.2 min | 13.3 GB | **proven** — `exit 0`, 0 errors, 0 sorries (8 cores) |
 | `PipelinedCPU` | 5,061 | 27.7 min | 14.9 GB | **proven** — `exit 0`, 0 errors, 0 sorries (4 cores) |
-| `PipelinedDualIssueCPU` | 10,740 | 84.7 min | 29.6 GB | 10,739 nodes prove; **1 node fails** — see Bug 9 in `STEP5_BRIDGE_BUGS.md` |
+| `PipelinedDualIssueCPU` | 10,740 | 57.4 min | 29.6 GB | **proven** — `exit 0`, 0 errors, 0 sorries (4 cores) |
 
 For the proven designs `_comb`, `_next` and `_step` are all shown equal to the
 certificate model.  Two things worth noting:
@@ -182,6 +182,13 @@ certificate model.  Two things worth noting:
   eight bugs fixed while closing `SingleCycleCPU` generalized to two previously
   unseen designs, with no new proof holes and no new operator bridges required.
   `PipelinedCPU` proved clean on the first attempt.
+- **Bug 9 (binary `Or`) was found and fixed here.** `Op_Or` was the only operator
+  the emitter dispatched without an arity guard, so a 2-input `Or` still took the
+  n-ary `List.foldl` bridge; unfolding that fold sent the kernel into *unbounded*
+  recursion on one node whose operands were 5 `fv` levels deep.  Routing binary
+  `Or` to the existing fold-free `or_bridge` (as And/Xor/Sum already were) fixed it
+  **and made the proofs faster** — DualIssue went 84.7 min (failing) → 57.4 min
+  (proven) on the same cores.  See `STEP5_BRIDGE_BUGS.md`.
 - **Scope of the claim.** These prove *fast model ⇔ certificate* for the RTL in
   `generated/rtl_lgraph_equiv_latest/lec/refs/<Top>_ref.sv`.  Those pipelined refs
   date from 2026-06-05 and may predate the register-file bypass fix (the
