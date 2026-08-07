@@ -1080,7 +1080,17 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         } else {
           op_expr = "Op_EQ";
         }
-        uint32_t dep_w = w;
+        // Operand width per op family, mirroring emit_node_expr exactly:
+        //   And/Or/Xor : every operand is ucast to the node width w.
+        //   EQ         : every operand is ucast to the widest operand.
+        //   Ror        : each operand keeps ITS OWN width. The fast model tests
+        //                `(operand) \<noteq> 0` at full width, and denote_op
+        //                Op_Ror tests bv_nonzero per dep -- but a Ror node has
+        //                w = 1, so materializing the deps at w would truncate
+        //                every operand to bit 0 and flip the result for any
+        //                operand whose only set bits are above bit 0.
+        const bool is_ror = node_op(node) == Ntype_op::Ror;
+        uint32_t   dep_w  = w;
         if (node_op(node) == Ntype_op::EQ) {
           dep_w = 1;
           for (const auto& e : inp_edges_ordered(node)) {
@@ -1088,7 +1098,7 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
           }
         }
         for (const auto& e : inp_edges_ordered(node)) {
-          deps.push_back(cert_dep_id(ctx, build, e.driver, dep_w));
+          deps.push_back(cert_dep_id(ctx, build, e.driver, is_ror ? pin_width(ctx, e.driver, node) : dep_w));
         }
         break;
       }
@@ -1148,7 +1158,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         op_expr = "Op_SHL";
         deps.push_back(cert_dep_id(ctx, build, a, w));
         for (auto& b : bs) {
-          deps.push_back(cert_dep_id(ctx, build, b, pin_width(ctx, b, node)));
+          // Mirror shift_amount_expr_at in the fast model: a constant shift
+          // amount is widened to hold its value, so the cert dep must be too
+          // (SRA and Sext do the same).
+          uint32_t shl_amount_w = pin_width(ctx, b, node);
+          if (pin_is_const(b)) {
+            shl_amount_w = std::max<uint32_t>(shl_amount_w, minimal_unsigned_const_width(pin_const_value(b)));
+          }
+          deps.push_back(cert_dep_id(ctx, build, b, shl_amount_w));
         }
         break;
       }
@@ -1238,8 +1255,16 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         if (!have_a || !have_b) {
           fatal(ctx, "Sext node n_" + std::to_string(node_id(node)) + " missing a/b.");
         }
+        // Mirror the fast model's amount widening (emit_node_expr, Sext arm): a
+        // constant sign position on a narrow pin must not be truncated, or the
+        // certificate evaluates Op_Sext at a different amount than the fast
+        // model and the two can never be proven equal.
+        uint32_t sext_amount_w = pin_width(ctx, b, node);
+        if (pin_is_const(b)) {
+          sext_amount_w = std::max<uint32_t>(sext_amount_w, minimal_unsigned_const_width(pin_const_value(b)));
+        }
         op_expr = "Op_Sext";
-        deps    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, b, pin_width(ctx, b, node))};
+        deps    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, b, sext_amount_w)};
         break;
       }
 
@@ -2218,10 +2243,18 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w    = pin_width(ctx, a, node);
+      uint32_t src_w = pin_width(ctx, a, node);
+      // The sign position is a VALUE, not a bit slice. LiveHD routinely gives a
+      // constant amount a 1-bit pin, and `unat (32 :: 1 word) = 0` silently
+      // turns the sign-extend into a no-op. Widen the amount to hold its value,
+      // exactly as SHL/SRA already do; cert_node_expr mirrors this widening so
+      // the fast model and the certificate read the same amount.
       uint32_t amount_w = pin_width(ctx, b, node);
-      return "((word_of_int (signed_take_bit (unat (" + driver_expr_at(ctx, b, amount_w) + ")) (uint " + ucast_pin_at(ctx, a, src_w)
-             + "))) " + ty_word(w) + ")";
+      if (pin_is_const(b)) {
+        amount_w = std::max<uint32_t>(amount_w, minimal_unsigned_const_width(pin_const_value(b)));
+      }
+      return "((word_of_int (signed_take_bit (unat (" + shift_amount_expr_at(ctx, b, amount_w) + ")) (uint "
+             + ucast_pin_at(ctx, a, src_w) + "))) " + ty_word(w) + ")";
     }
 
     case Ntype_op::Get_mask: {

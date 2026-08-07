@@ -1,0 +1,146 @@
+# pass.isabelle certificate-equivalence bridge — bug log
+
+The Isabelle counterpart of `pass/lean/STEP5_BRIDGE_BUGS.md`, written **as bugs are
+found**, not after.
+
+Goal: prove `<Top>_comb / _next / _step` (the fast `'w word` model) equal to the
+evaluated graph certificate, for DINO `SingleCycleCPU`. Background and the full plan
+live alongside `pass/lean/README.md`, `pass/lean/STEP5_BRIDGE_BUGS.md`, and
+`.claude/skills/prove-cert-equivalence/SKILL.md`.
+
+---
+
+## The dominant bug class: fast/cert operand-width disagreement
+
+Every certificate dep is materialized at an explicit width via
+`cert_dep_id(ctx, build, pin, W_cert)`. The fast model independently casts the same
+operand via `ucast_pin_at(ctx, pin, W_fast)` / `driver_expr_at` /
+`shift_amount_expr_at`. **If `W_cert != W_fast` for any operand, the two models
+evaluate different values and no bridge lemma can ever close that node.**
+
+Nothing checks this today, and nothing *could* have noticed it before the bridge
+existed: `pass/isabelle/TODO:43-48` records the general trap — when the fast model and
+the certificate share the same defect, `model = certificate` still holds and only the
+LEC gate (RTL ≡ LGraph) can catch it. The corollary is the opposite failure: when they
+diverge, nothing catches it until the bridge is attempted.
+
+This is the Isabelle analogue of Lean's constant-spelling class (4 of its 8 bugs).
+It differs in mechanism — Isabelle's fast literals are `'w word` terms and its
+certificate literals are `int`, so they can never be *textually* identical the way
+Lean's `BitVec` ones were made to be. The invariant to enforce is not textual
+identity but **width agreement, operand by operand**.
+
+### Audit of every op arm (2026-08-06)
+
+`cert_node_expr` vs `emit_node_expr`, operand by operand:
+
+| op | fast operand width | cert dep width | verdict |
+|---|---|---|---|
+| `Sum` | `w` | `w` | ok |
+| `Mult` | `w` | `w` | ok |
+| `Div` | `w`, `w` | `w`, `w` | ok |
+| `And`/`Or`/`Xor` | `w` | `dep_w = w` | ok |
+| `Ror` | **`pin_width(driver)`** per operand | **`dep_w = w` (= 1)** | **BUG 4** |
+| `Not` | `w` | `w` | ok |
+| `LT`/`GT` | `cmp_w = max(wa,wb)` | `cmp_w` | ok |
+| `EQ` | `eq_w = max` over drivers | `dep_w = max(1, max)` | ok (`pin_width >= 1`) |
+| `SHL` | a `w`; b widened by `shift_amount_expr_at` | a `w`; b **`pin_width`** | **BUG 3** |
+| `SRA` | a `pin_width(a)`; b widened | a `pin_width(a)`; b widened | ok |
+| `Mux` | sel `sel_w`; options `w` | sel `sel_w`; options `w` | ok |
+| `Sext` | a `pin_width(a)`; b **`pin_width`** | a `pin_width(a)`; b **`pin_width`** | **BUG 2** |
+| `Get_mask` | a `src_w`; mask `max(pin_w, src_w)` | a `gm_src_w`; mask `gm_mask_w` | ok (BUG 1, already fixed) |
+| `Set_mask` | a `w`; mask/value `pin_width` | a `w`; mask/value `pin_width` | ok — but see note |
+
+---
+
+## Bug 1 — `Get_mask(a, -1)` all-ones mask at 1 bit — **already fixed in HEAD**
+
+`sem_get_mask x m` scans `[0..<LENGTH('m)]`, so a 1-bit mask selects only bit 0.
+LiveHD's canonical zext idiom is `Get_mask(a, -1)` (`pass/cprop/cprop.cpp:852`), and
+the front-end collapses the `-1` sentinel's pin width to 1.
+
+Full analysis with a worked `add2` example (`a=5, b=3` yielded `y=2` instead of `8`)
+is in `bug_fix/Get_mask in pass.Isabelle` and `pass/isabelle/TODO`.
+
+**Status: fixed before this effort began.** Both sides widen to
+`max(pin_width(mask), src_w)`. Verified present in the current tree at the fast site
+(`emit_node_expr`, `Get_mask` arm) and the cert site (`cert_node_expr`, `Get_mask` arm).
+
+Note for future readers: `generated/dino_lgraph_isabelle_livehd_new_20260605/` predates
+the fix, so **all 3710 of its `sem_get_mask` sites still show a 1-bit `-1` mask**. That
+artifact is not evidence about the current emitter — regenerate before drawing
+conclusions from it.
+
+## Bug 2 — `Sext` amount truncated to its pin width
+
+- **Where:** `emit_node_expr` `Sext` arm (fast) and `cert_node_expr` `Sext` arm (cert).
+- **Symptom:** the fast model emitted
+  `word_of_int (signed_take_bit (unat ((32 :: 1 word))) (uint …))`. `unat (32 :: 1 word)`
+  is **0**, so `signed_take_bit 0` silently turns the sign-extend into a no-op. The
+  certificate independently materialized the amount dep at the same 1-bit pin width,
+  so `mk_bv 1 32 = 0` there too.
+- **Root cause:** the sign position is a *value*, not a bit slice, but both sides used
+  `pin_width(b)`. `SHL`/`SRA` already had the widening treatment
+  (`shift_amount_expr_at` + `minimal_unsigned_const_width`); `Sext` was missed.
+- **Fix:** widen a constant amount to `max(pin_width, minimal_unsigned_const_width(v))`
+  on **both** sides, and switch the fast side from `driver_expr_at` to
+  `shift_amount_expr_at`.
+- **Provenance:** the fast half of this fix exists on the unmerged branch
+  `fix/isabelle-get-mask-sext-width` (commit `396845fea`); `git merge-base
+  --is-ancestor` confirms it never reached this branch. Reapplied here, plus the cert
+  half.
+
+## Bug 3 — `SHL` shift amount widened in the fast model but not in the certificate
+
+- **Where:** `cert_node_expr` `SHL` arm.
+- **Symptom:** the fast model calls `shift_amount_expr_at(ctx, b, bw)`, which widens a
+  **constant** amount internally to `max(bw, minimal_unsigned_const_width(v))`. The
+  certificate pushed `cert_dep_id(..., pin_width(ctx, b, node))` — unwidened. For any
+  constant shift amount that does not fit its pin width, cert and fast read different
+  amounts.
+- **Why it survived:** `SRA` got the widening in its cert arm and `SHL` did not. The
+  asymmetry is invisible without a bridge, exactly like Lean's asymmetric-closer Bug 8.
+- **Fix:** mirror `shift_amount_expr_at`'s widening in the `SHL` cert arm.
+
+## Bug 4 — `Ror` certificate deps truncated to 1 bit
+
+- **Where:** `cert_node_expr`, the shared `And/Or/Xor/Ror/EQ` arm.
+- **Symptom:** the arm computed one `dep_w` for all five ops (`dep_w = w`, overridden to
+  the widest operand only for `EQ`) and materialized every dep at it. A `Ror` node has
+  **`w = 1`** (reduce-OR; `simple_op_cert_wf_bool` in `Translation_LGraph_Model.thy`
+  even asserts `w = 1`), so every operand was truncated to its bit 0.
+- **Concrete divergence:** operand `= 0b10`. Fast model emits
+  `(driver_expr_at … ew) \<noteq> 0` at the operand's **full** width → `0b10 ≠ 0` =
+  `True`. Certificate materializes the dep at width 1 → `0b0`, and
+  `denote_op Op_Ror` computes `list_ex bv_nonzero [BV 1 0]` = `False`. **Opposite
+  results** for any operand whose set bits are all above bit 0.
+- **Root cause:** `Ror` is the one op in that group whose operand width is unrelated to
+  its output width; folding it into the shared `dep_w` was wrong.
+- **Fix:** in the `Ror` case use `pin_width(ctx, e.driver, node)` per operand, matching
+  the fast model.
+
+---
+
+## Open / noted, not yet acted on
+
+- **`Set_mask` and the `-1` sentinel.** Fast and cert agree (both use
+  `pin_width(mask)`), so the *bridge* is provable. But if LiveHD emits
+  `Set_mask(a, -1, v)` the same 1-bit-sentinel reasoning as Bug 1 applies and the
+  emitted semantics would be wrong against RTL. That is an LEC-gate concern, not a
+  certificate-equivalence one. Confirm whether DINO contains any `Set_mask` node before
+  spending effort here.
+- **`Rem` and `Clock_cell` have no certificate op** and are absent from both
+  `cert_node_expr` and `emit_node_expr` switches, so they fall through to
+  `default: throw Emit_error("internal: unhandled Ntype_op …")`. They do not occur in
+  DINO, but this should become a clean unsupported-op diagnostic rather than an
+  "internal" error.
+- **`<T>_cert_all_ids_distinct` is a permanent `sorry`** (chunked mode), so today's
+  `graph_cert_wf` is `sorry`-tainted even on a "successful" run.
+
+## Guard to build (Phase 5)
+
+A `const_parity.py` analogue for Isabelle should not check textual spelling (the two
+sides are different types) but **width agreement**: for every node and every operand,
+the width used in the fast body must equal the width the certificate dep was
+materialized at. That is a static, seconds-long check, and it is exactly the invariant
+all four bugs above violated.
