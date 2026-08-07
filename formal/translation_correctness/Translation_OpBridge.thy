@@ -222,6 +222,107 @@ lemma const_bridge:
   "eval_op (Op_Const c) LENGTH('w) [] = bvenc (word_of_int c :: 'w::len word)"
   by (simp add: bvenc_word_of_int)
 
+section \<open>Word helpers\<close>
+
+lemma uint_eq_iff_word:
+  "(uint (x :: 'w::len word) = uint y) = (x = y)"
+proof
+  assume "uint x = uint y"
+  then have "word_of_int (uint x) = (word_of_int (uint y) :: 'w word)" by simp
+  then show "x = y" by (simp add: word_of_int_uint)
+qed simp
+
+lemma bv_nonzero_bvenc [simp]:
+  "bv_nonzero (bvenc (x :: 'w::len word)) \<longleftrightarrow> x \<noteq> 0"
+  by (simp add: bv_nonzero_def uint_0_iff)
+
+lemma mk_bv_bool_bridge:
+  "mk_bv LENGTH('w) (if P then 1 else 0) = bvenc (if P then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_def bvenc_def)
+
+lemma ror2_bridge:
+  fixes a :: "'a::len word" and b :: "'b::len word"
+  shows "eval_op Op_Ror LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if a \<noteq> 0 \<or> b \<noteq> 0 then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge)
+
+lemma muxbool_bridge:
+  fixes s :: "'s::len word" and f :: "'f::len word" and t :: "'t::len word"
+  shows "eval_op Op_MuxBool LENGTH('w) [bvenc s, bvenc f, bvenc t]
+           = bvenc (if s \<noteq> 0 then (ucast t :: 'w::len word) else ucast f)"
+  by (simp add: bvenc_ucast)
+
+lemma ult_bridge:
+  fixes a :: "'a::len word" and b :: "'a::len word"
+  shows "eval_op Op_ULT LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if a < b then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge word_less_def)
+
+lemma ugt_bridge:
+  fixes a :: "'a::len word" and b :: "'a::len word"
+  shows "eval_op Op_UGT LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if b < a then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge word_less_def)
+
+lemma eq2_bridge:
+  fixes a :: "'a::len word" and b :: "'a::len word"
+  shows "eval_op Op_EQ LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if b = a then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge uint_eq_iff_word)
+
+lemma sum2_bridge:
+  fixes a :: "'w::len word" and b :: "'w::len word"
+  shows "eval_op (Op_Sum 2) LENGTH('w) [bvenc a, bvenc b] = bvenc (a + b)"
+  by (simp add: bvenc_def mk_bv_def uint_word_ariths)
+
+lemma sub_bridge:
+  fixes a :: "'w::len word" and b :: "'w::len word"
+  shows "eval_op (Op_Sum 1) LENGTH('w) [bvenc a, bvenc b] = bvenc (a - b)"
+  by (simp add: bvenc_def mk_bv_def uint_word_ariths)
+
+lemma bv_sint_bvenc:
+  "bv_sint (bvenc (x :: 'w::len word)) = sint x"
+proof -
+  obtain n where wn: "LENGTH('w) = Suc n"
+    using len_gt_0[where 'a='w] by (cases "LENGTH('w)") auto
+  let ?u = "uint x"
+  have u0: "0 \<le> ?u" by simp
+  have uw: "?u < 2 ^ Suc n" using uint_lt2p[of x] wn by simp
+  have sx: "sint x = (?u + 2 ^ n) mod 2 ^ Suc n - 2 ^ n"
+    by (simp add: sint_uint signed_take_bit_eq_take_bit_shift take_bit_eq_mod wn)
+  show ?thesis
+  proof (cases "?u < 2 ^ n")
+    case True
+    then have "(?u + 2 ^ n) mod 2 ^ Suc n = ?u + 2 ^ n" using u0 by simp
+    then show ?thesis using sx True by (simp add: bv_sint_def wn)
+  next
+    case False
+    have pw: "(2::int) ^ Suc n = 2 * 2 ^ n" by simp
+    have pn: "(0::int) < 2 ^ n" by simp
+    from False have ge: "(2::int) ^ n \<le> ?u" by simp
+    have lt: "?u - 2 ^ n < 2 * 2 ^ n" using uw[unfolded pw] pn by linarith
+    have sx': "sint x = (?u + 2 ^ n) mod (2 * 2 ^ n) - 2 ^ n"
+      using sx unfolding pw .
+    have "(?u + 2 ^ n) mod (2 * 2 ^ n) = (?u - 2 ^ n) mod (2 * 2 ^ n)"
+      by (simp add: mod_eq_dvd_iff)
+    also have "\<dots> = ?u - 2 ^ n" using ge lt by simp
+    finally have m2: "(?u + 2 ^ n) mod (2 * 2 ^ n) = ?u - 2 ^ n" .
+    show ?thesis using sx' m2 False by (simp add: bv_sint_def wn)
+  qed
+qed
+
+lemma slt_bridge:
+  fixes a :: "'a::len word" and b :: "'a::len word"
+  shows "eval_op Op_SLT LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if sint a < sint b then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge bv_sint_bvenc)
+
+lemma sgt_bridge:
+  fixes a :: "'a::len word" and b :: "'a::len word"
+  shows "eval_op Op_SGT LENGTH('w) [bvenc a, bvenc b]
+           = bvenc (if sint b < sint a then (1::'w::len word) else 0)"
+  by (simp add: mk_bv_bool_bridge bv_sint_bvenc)
+
 section \<open>Sanity examples\<close>
 
 text \<open>
