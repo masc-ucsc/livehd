@@ -233,9 +233,9 @@ SV2V_ARGS+=("scripts/cva6_module_wrappers/cva6_tlb_gate.sv")
   --result-json "$OUT/e2e/result.json" \
   --emit-dir lg:"$OUT/e2e/lgdb" \
   --emit-dir isabelle:"$OUT/e2e/isabelle" \
-  --set isabelle.strict=true \
-  --set isabelle.normalize=true \
-  --set isabelle.cert_wf=skip
+  --set formal.isabelle.strict=true \
+  --set formal.isabelle.normalize=true \
+  --set formal.isabelle.cert_wf=skip
 ```
 
 **Verified results (SV39 TLB, this machine):**

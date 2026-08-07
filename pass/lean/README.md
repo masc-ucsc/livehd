@@ -35,7 +35,7 @@ brew install elan
     `<Top>_next_cert`, and `<Top>_step_cert` definitions;
   - definitional certificate-model bridge theorems for the cert-based model;
   - `evalGraphCorrectForCert` instantiations over the emitted certificate.
-- Certificate emission can be disabled with `--set lean.emit_cert=false` for
+- Certificate emission can be disabled with `--set formal.lean.emit_cert=false` for
   model-only scaling gates.
 
 Verified:
@@ -443,7 +443,7 @@ bazel build //lhd:lhd
 ## Node bit-width cap (`max_width`)
 
 The pass emits the typed fast model as `BitVec w` at each node's real (finite)
-width `w`.  `--set lean.max_width=N` caps `w`; the **default is 1024**.  That
+width `w`.  `--set formal.lean.max_width=N` caps `w`; the **default is 1024**.  That
 default is a pass-level *proof-tractability* guard, **not** a LiveHD limit
 (LiveHD's `bits` attribute is a finite `int32`, i.e. widths up to ~2^31), and it
 exists only because `native_decide` / `by eval` blow up on very wide words.
@@ -452,7 +452,7 @@ To accept whatever finite width a node carries — matching LiveHD's own
 finite-but-unbounded widths — pass `0` or `unlimited`:
 
 ```bash
---set lean.max_width=0            # or: unlimited / inf / none
+--set formal.lean.max_width=0            # or: unlimited / inf / none
 ```
 
 Notes:
@@ -464,7 +464,7 @@ Notes:
   width-agnostic reasoning vehicle.
 - `w == 0` (an unsized node) is still a hard error even under `unlimited` —
   unsized is not the same as unlimited.
-- `pass.isabelle` has the identical knob: `--set isabelle.max_width=0`.
+- `pass.isabelle` has the identical knob: `--set formal.isabelle.max_width=0`.
 
 ## Smoke Test
 
