@@ -363,17 +363,40 @@ cc_direct_headers(
     visibility = ["//visibility:private"],
 )
 
-# SILENT-SIM-BUG regressions (fixed 2026-08-02). Each fixture is a
-# 4-tick run whose asserts capture the CORRECT end-of-tick values (taken from
-# Icarus on the netlist LiveHD itself emits), and each fails TODAY on a shape
-# `lhd sim` gets wrong with NO diagnostic -- reports 0 errors and hands back
-# wrong numbers. Every one also carries CONTROL asserts that pass, so a failure
-# is always attributable to the named bug rather than to a dead testbench.
+# KNOWN-FAILING sim fixtures (tagged `fixme`, which .bazelrc's
+# `--test_tag_filters -fixme` excludes from `bazel test`).
 #
-# They are live tests now. Keep the list for the target-generating expression
-# below and for future independently diagnosed trackers; an entry here is a
-# known failure and must be removed as part of its fix.
-_SIM_FIXME = []
+# Each is a real design whose asserts capture the CORRECT end-of-tick values --
+# taken from Icarus on the netlist LiveHD itself emits, so a fixture going green
+# means the sim agrees with LiveHD's own Verilog rather than with a
+# hand-derivation -- and each carries CONTROL asserts that pass today, so a
+# failure is always attributable to the named bug rather than to a dead
+# testbench. An entry here is a known failure and must be removed as part of its
+# fix.
+#
+# The current occupants are todo_sim_pipeline.md's Phase-0 anchors, each written
+# WITH its algorithm step so the step has a value-checking regression to land
+# against.
+# 2026-08-06: emptied. The five occupants all went green in one session —
+# slice_ring_through_sub / shift_or_pack_ring (try_slice_read grew the
+# And/SRA/identity-wrapper consumer idioms + slice_operand's Set_mask arm),
+# whole_array_in_split_callee (port_reach joins write cones of an UNCLOCKED
+# memory), neg_flop_in_callee_ring (negedge-only callees on a ring take the
+# group path, atomic advance in the parent's fall), and
+# chained_clock_gates_mixed_phase (icg_guards' fall_commit flavour + the latch
+# high window reading earlier latches' `_din`). Kept as an empty list so the
+# next known-failing fixture has a place to land.
+_SIM_FIXME = [
+    # REFUSAL, found 2026-08-06 by differential fuzzing against Icarus. A clock
+    # gate folds or is refused according to the NAME of the port carrying the
+    # clock: `clk`/`clock`/`clk_i`/`clk2` fold, `gclk`/`gin`/`myclk`/`ck`/`clkin`
+    # are refused. The fixture instantiates two children with BYTE-IDENTICAL
+    # bodies, both handed the parent's own reference clock, differing only in
+    # port spelling. In-design controls prove a non-blessed name is fine when
+    # used DIRECTLY as a clock (only gating one is refused) and that the same
+    # gate body on a `clk`-named port folds.
+    "gate_on_named_clock_port",
+]
 
 [
     sh_test(
@@ -394,6 +417,38 @@ _SIM_FIXME = []
         tags = ["fixme"] if prp_file.split("/")[-1].split(".")[0] in _SIM_FIXME else [],
     )
     for prp_file in glob(["tests/sim/*.prp"])
+]
+
+# VERILATOR DIFFERENTIALS. A `tests/sim/` fixture that also carries
+# `:verilator: <name>_vtb.cpp` gets a second target that emits its Verilog
+# (`inou.cgen.verilog`, NOT `inou.cgen.sim`) and runs the hand-written C++ twin
+# under Verilator. The pairing is BY FILE NAME: `tests/sim/verilator/<x>_vtb.cpp`
+# pairs with `tests/sim/<x>.prp`, which is what lets bazel find them at load time.
+#
+# These are the tests that say "`lhd sim` refuses this and the design is fine" —
+# so they are NOT in _SIM_FIXME even when their `prp-sim-` twin is. A machine
+# without verilator SKIPS (prpvsim.py), it does not fail.
+[
+    sh_test(
+        name = "prp-vsim-%s" % twin.split("/")[-1][:-len("_vtb.cpp")],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/sim/%s.prp)" % twin.split("/")[-1][:-len("_vtb.cpp")],
+            "--mode",
+            "vsim",
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpvsim.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/sim/%s.prp" % twin.split("/")[-1][:-len("_vtb.cpp")],
+            "//inou/prp:%s" % twin,
+            "//lhd",
+        ],
+        tags = ["verilator"],
+    )
+    for twin in glob(["tests/sim/verilator/*_vtb.cpp"])
 ]
 
 # `:type: verify` fixtures (tests/verify/): the harness drives `lhd formal
@@ -733,7 +788,8 @@ _V2PRP2V_NATIVE_FIXME = [
     "latch_rule_b",
     "dual_async_set_reset",
     "reg_clock_from_logic",
-    "negative_array_index",
+    # negative_array_index PROMOTED out (2026-08-06): prp-v2prp2v-negative_array_index
+    # passes — the round trip proves against the golden.
     "blocking_ff_state",
     # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
     # an ascending vector lowers to a negative shift), so neither leg can run.
@@ -828,7 +884,7 @@ _V2PRP2V_VERILOG_FIXME = [
     "latch_rule_b",
     "dual_async_set_reset",
     "reg_clock_from_logic",
-    "negative_array_index",
+    # negative_array_index PROMOTED out (2026-08-06): the round trip proves.
     "blocking_ff_state",
     # The five LEC-REFUTED trackers. This is the only direction that catches
     # them: they COMPILE clean both ways, so the native Pyrope check trivially

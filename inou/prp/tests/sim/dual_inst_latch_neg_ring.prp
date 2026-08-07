@@ -1,0 +1,150 @@
+/*
+:name: dual_inst_latch_neg_ring
+:type: simulation
+*/
+
+// The same definition instantiated TWICE -- one instance inside a false ring,
+// one outside it -- with an ACTIVE-LOW transparent latch closing the ring and a
+// NEGEDGE flop sampling its output. Three properties in one design that
+// `hier_latch_split_ring.prp` and `latch_sub_split_ring.prp` do not reach:
+//
+//  1. RE-SETTLE AFTER A CALLER-SIDE LATCH COMMITS, not a callee split. The
+//     latch `lo` is state OWNED BY THE CALLER, so `ba` is a plain Q read that is
+//     available before either call and the ORDERING ring dissolves on its own --
+//     the emitter calls both instances atomically (verified in the emitted
+//     `duotop.cpp`: two plain `cycle()` calls, no `__settle_g<N>`). That makes
+//     this the complement of `hier_latch_split_ring.prp`, where the ring is
+//     closed by pure comb and the callee genuinely must be split. What can still
+//     go wrong here is the VALUE: `lo` commits during the period, so every
+//     consumer of `ba` -- including the output of an INSTANCE -- has to be
+//     recomputed against the post-commit latch, in the negedge pass and in the
+//     final settle. An emitter that binds `ea2` once from the pre-edge Q reports
+//     the previous period's `rb` on every open cycle and is right on every
+//     closed one.
+//  2. TWO INSTANCES OF ONE DEFINITION. `u_b` sits outside the ring entirely, so
+//     `ctl` is exactly the value that goes wrong if the looped instance disturbs
+//     the clean one, or if the two are confused for each other.
+//  3. THE OTHER LATCH POLARITY. `lo` is transparent while `glow` is LOW, the
+//     flavour every ICG enable latch and every master half of a master/slave
+//     pair uses. The companion fixtures both use the active-high flavour.
+//  4. A NEGEDGE FLOP DOWNSTREAM OF THE RING. `nf` samples at the falling edge,
+//     so it must observe `ea2` AFTER the rise settled the latch -- the same
+//     half-cycle transfer `negedge_through_sub.prp` pins, but here the value
+//     crossing the boundary is the one the ring produced. `nq == rb` on every
+//     cycle; a fall that re-reads pre-rise bindings lags a full period.
+//
+//     ea1 = f + n  ->  lo (transparent while !glow)  ->  ba  ->  duo.j1  ->  ea2
+//
+// The bit-level DAG is acyclic -- `e1` reads only {i1,i2} and `e2` only {j1,j2}
+// -- so the ring is false at every instant, open latch or closed.
+//
+// The latch enable is a top-level INPUT. A latch enable driven by a FLOP is
+// sampled PRE-edge by `lhd sim` and POST-edge by real hardware; that one-cycle
+// divergence is a separate issue and folding it in would make a failure here
+// ambiguous.
+//
+// GOLDENS -- hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter), end-of-period sampling after both edges:
+//
+//     c   : 0    1    2    3    4    5    6    7
+//     ra  : 13   15   17   19   21   23   25   27
+//     rb  : 28   48   64   80   132  168  192  252
+//     nq  : 28   48   64   80   132  168  192  252
+//     ctl : 47   63   81   101  123  147  173  201
+//
+// `glow` is high (latch CLOSED) at c=2/3/6: `rb` keeps moving there only
+// because `gsel` still moves, while the latched `ba` holds -- 16 through
+// c=1..3 and 24 through c=5..6. `ra` and `ctl` move every cycle.
+
+// Two INDEPENDENT output cones. Instantiated twice below.
+mod duo::[timecheck=false](i1:u8, i2:u8, j1:u8, j2:u8)
+                        -> (e1:u16@[], e2:u16@[]) {
+  e1 = i1 + i2      // cone {i1, i2}
+  e2 = j1 * j2      // cone {j1, j2}
+}
+
+// `::[timecheck=false]` + `@[]` outputs: upass.tolg treats a Sub as ONE atomic
+// node in its acyclicity check, so an instance-level ring is refused there
+// before any backend sees it. Same annotations minion's generated Pyrope uses.
+pub mod duotop::[timecheck=false](f:u8, gsel:u8, n:u8, glow:bool)
+     -> (ra:u16@[], rb:u16@[], nq:u16@[], ctl:u32@[]) {
+  // INSTANCE A -- inside the ring. The result is kept as a named instance
+  // result (not destructured) because the SAME definition is instantiated again
+  // below and both sites need distinct local names for `e1`/`e2`.
+  wire ba:u8 = nil
+  mut ia = duo(i1=f, i2=n, j1=ba, j2=gsel)
+  wire ea1:u16 = nil
+  wire ea2:u16 = nil
+  ea1 = ia.e1
+  ea2 = ia.e2
+
+  // THE FALSE EDGE, through an ACTIVE-LOW transparent latch: the caller feeds
+  // the first cone's output into the input the second cone needs. `lo`'s data
+  // never depends on `lo`, so this is not a real loop.
+  reg lo:u8:[latch=true] = 0
+  if !glow {
+    lo = (ea1 + 1) & 0xFF
+  }
+  ba = lo
+
+  ra = ea1
+  rb = ea2
+
+  // INSTANCE B -- SAME definition, no ring at all. The control.
+  mut ib = duo(i1=n, i2=gsel, j1=f, j2=n)
+  ctl = ib.e1 + ib.e2
+
+  // A NEGEDGE flop sampling the ring output: the fall must see the value the
+  // rise settled, so `nq` tracks `rb` in the SAME period.
+  reg nf:u16:[posclk=false] = 0
+  nf = ea2
+  nq = nf
+}
+
+test duotop.two_instances_one_ring {
+  mut acc  = duotop
+  mut seen = 0
+  mut bad_ra   = 0
+  mut bad_rb   = 0
+  mut bad_nq   = 0
+  mut bad_ctl  = 0
+  mut g_lo:u16 = 0             // the active-low latch's state, across ticks
+  tick 8 {
+    mut fv:u8   = 4 + clock
+    mut gv:u8   = 2 + clock
+    mut nv:u8   = 9 + clock
+    mut lowv:bool = (clock == 2) or (clock == 3) or (clock == 6)
+    acc.glow = lowv
+    acc.f    = fv
+    acc.gsel = gv
+    acc.n    = nv
+    step
+    // The golden, in the only order that exists: instance A's first cone, then
+    // the caller's latch, then instance A's second cone.
+    mut g_ea1:u16 = fv + nv
+    if not lowv {
+      g_lo = (g_ea1 + 1) & 0xFF
+    }
+    mut g_ea2:u16 = g_lo * gv
+    mut g_ctl:u32 = (nv + gv) + (fv * nv)
+
+    seen = seen + 1
+    if acc.ra != g_ea1 {
+      bad_ra = bad_ra + 1
+    }
+    if acc.rb != g_ea2 {
+      bad_rb = bad_rb + 1
+    }
+    if acc.nq != g_ea2 {
+      bad_nq = bad_nq + 1
+    }
+    if acc.ctl != g_ctl {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 8, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ra == 0, "CONTROL: the looped instance's cone that FEEDS the ring is correct")
+  assert(bad_ctl == 0, "CONTROL: the SECOND instance of the same definition, outside the ring, is untouched")
+  assert(bad_rb == 0, "the cone fed through the ACTIVE-LOW latch sees the real value")
+  assert(bad_nq == 0, "the negedge flop samples the ring output from the SAME period")
+}

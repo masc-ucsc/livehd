@@ -1,0 +1,141 @@
+/*
+:name: hier_latch_split_ring
+:type: simulation
+*/
+
+// A false combinational ring that enters the SAME instance THREE times, with a
+// transparent latch as the third hop. This is the shape `todo_sim_pipeline.md`
+// step 5 exists for, one step harder than `comb_false_loop_sub.prp`: there the
+// caller re-entered the callee once, here the dependency chain is
+//
+//     x,y -> lane.o1 -> back -> lane.c -> lane.o2 -> hold -> lz -> lane.e -> lane.o3
+//
+// so an atomic all-inputs/one-call/all-outputs schedule cannot exist. `lane`
+// has to be split into at least three independently callable pieces and
+// interleaved with the caller's own logic. The bit-level DAG has NO cycle:
+// `o1` reads only {a,b}, `o2` only {c,d}, `o3` only {e}.
+//
+// WHY THE LATCH IS THE INTERESTING HOP. `hold` is a state element, so a
+// scheduler is entitled to treat it as a loop break and read its Q up front.
+// That is sound for ORDERING but not for VALUES: `hold` is TRANSPARENT while
+// `lat_en` is high, so within one period the data really does flow
+// o2 -> hold -> lz -> o3. Reading the pre-edge Q and stopping there leaves
+// `ring3` a full period stale, silently. Cycles 0/1/4 (open) and 2/3/5/6/7
+// (closed) both appear below, so a model that always breaks and a model that
+// never breaks each get some cycles wrong.
+//
+// The latch enable is a top-level INPUT on purpose. A latch enable driven by a
+// FLOP is sampled PRE-edge by `lhd sim` and POST-edge by real hardware -- a
+// one-cycle divergence that has nothing to do with this test, and folding it in
+// here would make a failure ambiguous. `lat_en` as an input keeps the latch
+// fully transparent and makes sim and Icarus agree by construction.
+//
+// GOLDENS -- hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter), end-of-period sampling after both edges:
+//
+//     c    : 0   1   2   3   4   5   6   7
+//     sum  : 30  33  36  39  42  45  48  51
+//     xr   : 36  35  46  37  56  63  50  49
+//     ring3: 40  39  39  39  60  60  60  60
+//     ctl  : 15  17  19  21  23  25  27  29
+//
+// `ring3` holding at 39 through c=2..3 and at 60 through c=5..7 is the latch
+// closing; `xr` still moving on those cycles is the proof the ring itself is
+// live. The Icarus testbench assigns `lat_en` BEFORE the data inputs: a
+// transparent latch closes when its enable falls, and assigning data first
+// would race the new data through the still-open latch.
+
+// Three INDEPENDENT output cones in one definition. No output reads another
+// output's inputs, so a correct schedule always exists.
+mod lane::[timecheck=false](a:u8, b:u8, c:u8, d:u8, e:u8)
+                         -> (o1:u16@[], o2:u16@[], o3:u16@[]) {
+  o1 = a + b      // cone {a, b}
+  o2 = c ^ d      // cone {c, d}
+  o3 = e + 1      // cone {e}
+}
+
+// `::[timecheck=false]` + `@[]` outputs: upass.tolg's own acyclicity check
+// treats a Sub as ONE atomic node, so an instance-level ring is refused there
+// before any backend ever sees it. Opting out of the sigma-timing check is what
+// lets this design reach the emitter at all. minion's generated Pyrope carries
+// exactly these two annotations for exactly this reason.
+pub mod ltop::[timecheck=false](x:u8, y:u8, z:u8, w:u8, lat_en:bool)
+     -> (sum:u16@[], xr:u16@[], ring3:u16@[], ctl:u16@[]) {
+  wire back:u8 = nil
+  wire lz:u8   = nil
+  mut (o1, o2, o3) = lane(a=x, b=y, c=back, d=w, e=lz)
+
+  // FALSE EDGE 1 (always combinational): the caller feeds o1 into the input o2
+  // needs. o1 does not depend on `c`, so this is not a real loop.
+  back = (o1 + z) & 0xFF
+
+  // FALSE EDGE 2 (combinational only while the latch is OPEN): o2 into the
+  // input o3 needs. `hold`'s data never depends on `hold`, so still no loop.
+  reg hold:u8:[latch=true] = 0
+  if lat_en {
+    hold = (o2 + 3) & 0xFF
+  }
+  lz = hold
+
+  sum   = o1
+  xr    = o2
+  ring3 = o3
+
+  // CONTROL: an ordinary flop touching neither ring, so a failure above is
+  // attributable to the ring rather than to a dead testbench.
+  reg cr:u8 = 0
+  cr  = (x + w) & 0xFF
+  ctl = cr
+}
+
+test ltop.latch_extends_the_false_ring {
+  mut acc  = ltop
+  mut seen = 0
+  mut bad_ctl  = 0
+  mut bad_sum  = 0
+  mut bad_xr   = 0
+  mut bad_ring = 0
+  mut g_hold:u16 = 0            // the latch's state, carried across ticks
+  tick 8 {
+    mut xv:u8    = 10 + clock
+    mut yv:u8    = 20 + (clock * 2)
+    mut zv:u8    = 3 + clock
+    mut wv:u8    = 5 + clock
+    mut env:bool = (clock == 0) or (clock == 1) or (clock == 4)
+    acc.lat_en = env
+    acc.x = xv
+    acc.y = yv
+    acc.z = zv
+    acc.w = wv
+    step
+    // The golden, evaluated in the only order that exists: o1, then the
+    // caller's back edge, then o2, then the latch, then o3.
+    mut g_o1:u16   = xv + yv
+    mut g_back:u16 = (g_o1 + zv) & 0xFF
+    mut g_o2:u16   = g_back ^ wv
+    if env {
+      g_hold = (g_o2 + 3) & 0xFF
+    }
+    mut g_o3:u16 = g_hold + 1
+    mut g_ctl:u16 = (xv + wv) & 0xFF
+
+    seen = seen + 1
+    if acc.ctl != g_ctl {
+      bad_ctl = bad_ctl + 1
+    }
+    if acc.sum != g_o1 {
+      bad_sum = bad_sum + 1
+    }
+    if acc.xr != g_o2 {
+      bad_xr = bad_xr + 1
+    }
+    if acc.ring3 != g_o3 {
+      bad_ring = bad_ring + 1
+    }
+  }
+  assert(seen == 8, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the plain flop outside both rings loads every tick")
+  assert(bad_sum == 0, "CONTROL: the callee cone feeding the ring is correct")
+  assert(bad_xr == 0, "the cone fed by the caller's comb back edge sees the real value")
+  assert(bad_ring == 0, "the cone fed THROUGH the transparent latch tracks it in the SAME period")
+}

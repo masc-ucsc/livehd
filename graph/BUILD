@@ -22,6 +22,7 @@ cc_library(
         "latch_contract.cpp",
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
+        "port_reach.cpp",
         "split_selfref.cpp",
     ],
     hdrs = [
@@ -32,6 +33,7 @@ cc_library(
         "latch_contract.hpp",
         "inline_sub.hpp",
         "node_util.hpp",
+        "port_reach.hpp",
         "split_selfref.hpp",
     ],
     copts = COPTS,

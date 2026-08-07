@@ -1,0 +1,92 @@
+/*
+:name: packed_update_chain
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 1 — CHAINED PACKED BIT-RANGE WRITES, and in
+// particular the `wire`-declared variant, which is the one class where the
+// front-ends manufactured a `foo = set_mask(foo, …)` SELF-REFERENCE.
+//
+// WHY THE WIRE CLASS WAS SPECIAL. Every other packed-update carrier already
+// produced a fresh dpin per write: `mut` is SSA-versioned, and a `reg` threads
+// each write onto the din accumulator (and the flop breaks the ring anyway). A
+// `wire` was exempt from both — SSA skips it, and upass.tolg's declare records
+// the passthrough-Or's OUTPUT under the wire's name so reads are
+// position-independent. So the FIRST partial write took that buffer output as
+// its set_mask base while finalize_wires() connected the chain's result back to
+// the same buffer's INPUT: a ring, reported as `upass.tolg: combinational loop`
+// with no hint that the loop was manufactured rather than written.
+//
+// THE FIX (upass/tolg set_mask_base): a wire with no din accumulator yet seeds
+// the chain with the nil `0sb?` base, exactly as an undriven `mut` scalar does —
+// the covered lanes overwrite it, the uncovered ones stay honestly unknown.
+// Front-end-agnostic and at manufacture time, so slang's dst==base emission is
+// covered too.
+//
+// THE VALUES THIS PINS. Assembling one word out of three disjoint lanes must
+// give the same result through a `wire` as through a `mut` AND as through the
+// testbench's own arithmetic — all three are checked, because wire==mut alone
+// would pass if both were wrong in the same way. `ctl` is a plain register that
+// never touches a set_mask, so a failure below is specifically the packed
+// assembly.
+pub mod packer(a:u4, b:u4, c:u4) -> (wq:u12@[1], mq:u12@[1], ctl:u4@[1]) {
+  // THE CLASS UNDER TEST: a net ASSEMBLED from three disjoint bit fields. Each
+  // write refines the same single driver (the Verilog `assign w[3:0]=a; assign
+  // w[7:4]=b;` shape), so this is one driver, not three.
+  wire w:u12 = nil
+  w#[0..=3]  = a
+  w#[4..=7]  = b
+  w#[8..=11] = c
+
+  // CONTROL CARRIER: the identical assembly through a `mut`, which SSA already
+  // made acyclic. It has always worked, so a divergence between wq and mq is
+  // the wire lowering and nothing else.
+  mut m:u12 = 0
+  m#[0..=3]  = a
+  m#[4..=7]  = b
+  m#[8..=11] = c
+
+  reg rw:u12 = 0
+  reg rm:u12 = 0
+  reg rc:u4  = 0
+  rw  = w
+  rm  = m
+  rc  = a
+  wq  = rw
+  mq  = rm
+  ctl = rc
+}
+
+test packer.wire_and_mut_assemble_alike {
+  mut acc  = packer
+  mut seen = 0
+  mut bad_pair = 0
+  mut bad_wire = 0
+  mut bad_ctl  = 0
+  tick 8 {
+    mut av:u4 = clock & 0xF
+    mut bv:u4 = (clock + 5) & 0xF
+    mut cv:u4 = (clock * 3) & 0xF
+    acc.a = av
+    acc.b = bv
+    acc.c = cv
+    step
+    // The registers land this period's assembled word, so compare against the
+    // word the testbench packs itself from the same three inputs.
+    mut golden = av + (bv << 4) + (cv << 8)
+    seen = seen + 1
+    if acc.wq != acc.mq {
+      bad_pair = bad_pair + 1
+    }
+    if acc.wq != golden {
+      bad_wire = bad_wire + 1
+    }
+    if acc.ctl != av {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 8, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: a plain register with no packed update is correct")
+  assert(bad_pair == 0, "a `wire` assembled from bit-range writes matches the `mut` assembly")
+  assert(bad_wire == 0, "a `wire` assembled from bit-range writes holds the packed word")
+}

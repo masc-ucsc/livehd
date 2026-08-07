@@ -210,13 +210,7 @@ std::string_view illegal_clock_op(hhds::Pin_class d) {
       // shaping), a state element (a divider): all legal or handled later.
       default                : return {};
     }
-    hhds::Pin_class a;
-    for (const auto& e : n.inp_edges()) {
-      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-        a = e.driver;
-      }
-    }
-    d = a;
+    d = livehd::graph_util::first_value_driver(n);
   }
   return {};
 }
@@ -4872,11 +4866,29 @@ private:
   // the branch. It refuted `minion_dcache_replay_queue`; the shape is a
   // conditional partial write, which is why the unconditional form and a plain
   // identifier both looked fine.
+  //
+  // 2c-wire — a `wire` needs the SAME 0sb? seed, but the test above can never
+  // fire for one: lower_wire_declare records the passthrough-Or OUTPUT under
+  // the wire's name (so reads are position independent), so a wire is ALWAYS
+  // in pin_map_. Taking leaf(val) there seeded the chain with the wire's own
+  // buffer output while finalize_wires() connects the chain's result back to
+  // that buffer's INPUT — a manufactured combinational RING (`upass.tolg:
+  // combinational loop`), the one class of self-referential set_mask chain the
+  // frontends still produced. The uncovered bits of a wire assembled from
+  // bit-range writes are undriven exactly like the mut case, so seed 0sb? at
+  // the wire's DECLARED width and let the covered lanes overwrite it. Only the
+  // FIRST partial write reaches here: lower_set_mask prefers the din
+  // accumulator once one exists, so a chain still accumulates, and a wire with
+  // a whole-value driver already recorded keeps that value as its base.
   [[nodiscard]] Val set_mask_base(const Lnast_nid& val) {
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
-      const std::string name{canon_io_name(lnast_->get_name(val))};
+      const std::string raw{lnast_->get_name(val)};
+      const std::string name{canon_io_name(raw)};
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
         return {nil_pin(), 1};
+      }
+      if (auto wit = wire_info_.find(raw); wit != wire_info_.end() && !pin_map_.contains(din_key(raw))) {
+        return {nil_pin(), wit->second.decl_mw > 0 ? wit->second.decl_mw : 1};
       }
     }
     return leaf(val);

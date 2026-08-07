@@ -591,6 +591,27 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   return !find_sink_pin(node, name).is_invalid();
 }
 
+// Driver of the input edge with the LOWEST SINK port id — the VALUE operand of
+// a single-value wrapper cell (Not / Get_mask / Sext / passthrough Or), skipping
+// the mask / amount operands that sit on higher sink pids. The comparison must
+// be sink-pid against sink-pid: the once-common inline version compared the
+// candidate's sink pid against the current pick's DRIVER pid (a Sub output pid,
+// a const node's pid — unrelated numbering), so on a two-operand Get_mask it
+// could follow the MASK CONSTANT instead of the value and silently stop a
+// clock-cone walk one hop early.
+[[nodiscard]] inline hhds::Pin_class first_value_driver(const hhds::Node_class& node) {
+  hhds::Pin_class a;
+  uint32_t        best = 0;
+  for (const auto& e : node.inp_edges()) {
+    const auto sp = static_cast<uint32_t>(e.sink.get_port_id());
+    if (a.is_invalid() || sp < best) {
+      a    = e.driver;
+      best = sp;
+    }
+  }
+  return a;
+}
+
 // Returns the (single) driver pin feeding a named sink. If the sink is
 // unconnected, returns an invalid pin. The multi-driver sinks (those where
 // Ntype::is_sink_single_driver is false -- the 's'-suffixed "as"/"bs" pins)

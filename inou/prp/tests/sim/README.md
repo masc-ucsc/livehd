@@ -12,9 +12,13 @@ Each file pairs a synthesizable design with one or more `test` blocks:
   (`const v = dut(in=val)`). The call drives this cycle's inputs and returns
   this cycle's output. A one-time call made *before* the loop does **not**
   re-evaluate, so the call belongs in the loop body.
-* `tick N { ... }` runs `N` cycles, advancing **one clock per iteration**.
-  Do **not** put a `step` inside a `tick` -- that would advance a second clock.
-  `tick { ... break }` runs until a runtime condition (with `N` as a watchdog).
+* `tick N { ... }` runs `N` cycles. The body **must contain a `step`** — that
+  `step` *is* the clock edge, and the runner hard-fails a `tick` body without
+  one ("a `tick` body must advance the clock with `step`",
+  `inou/prp/prp_sim.cpp`). Everything above the `step`
+  drives this cycle's inputs; everything below it observes what the `step`
+  settled. `tick { ... break }` runs until a runtime condition (with `N` as a
+  watchdog).
 * The per-cycle output is captured into an outer `mut` (declared before the
   loop); the end-of-sim `assert` checks that captured value. Test-local `mut`s
   persist across cycles.

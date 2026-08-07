@@ -707,6 +707,44 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           }
         }
       }
+    } else if (op == Ntype_op::Set_mask) {
+      // A Set_mask rewrites ONLY the bits inside its own constant lane, so a
+      // slice resolves to exactly ONE source: the base `a` when disjoint from
+      // the lane, the written `value` when contained in it. This is the same
+      // pair of rules cprop applies while walking a Set_mask `a`-chain
+      // (pass/cprop/cprop.cpp) — ported here so an O0 graph, which never runs
+      // cprop, can dissolve the packed field-write chain too.
+      //
+      // The chain is what manufactures the false loop: `c.f0 = …; c.f1 = …`
+      // on one packed net lowers to Set_mask(Set_mask(base,…),…), and a read
+      // of f0 binds to the LAST version — so if f1's value depends on that
+      // read the word-level graph closes a cycle the bit-level DAG does not
+      // have. Walking the slice down to the version that wrote its own lane is
+      // what the per-leaf (flattened) form would have given for free.
+      auto md = drv_at(m, 2);
+      if (!md.is_invalid() && gu::is_const_pin(md)) {
+        auto mc = gu::hydrate_const(md);
+        if (!mc.has_unknowns() && mc.is_positive()) {
+          auto [a, b] = mc.get_mask_range();  // {-1,-1} = noncontiguous
+          if (a >= 0 && b > a) {
+            if (hi <= a || lo >= b) {
+              res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // disjoint lane: `a` is untouched here
+            } else if (lo >= a && hi <= b) {
+              // Contained in the lane: the slice reads back exactly what
+              // `value` put there, LSB-aligned to the lane's low bit. Guard on
+              // a bounded NON-NEGATIVE footprint — that is what makes the two
+              // forms agree ABOVE `value`'s significant width (Get_mask reads
+              // 0 there, and a zero-extended `value` is what the lane holds).
+              auto vd = drv_at(m, 4);
+              if (!vd.is_invalid() && footprint(footprint, vd, 0).first >= 0) {
+                res = self(self, vd, lo - a, hi - a, depth + 1);
+              }
+            }
+            // A slice STRADDLING the lane boundary would need a concat of two
+            // sources; leave it unresolved rather than grow the graph here.
+          }
+        }
+      }
     }
     if (split_dbg && res.is_invalid()) {
       std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", op_name(op), lo, hi, depth);
@@ -900,6 +938,72 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   return total;
 }
 
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out) {
+  namespace gu = livehd::graph_util;
+  auto comb    = [strict](const hhds::Node_class& n) {
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+      return false;
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+      return false;  // true state cuts in both models
+    }
+    if (op == Ntype_op::Memory || op == Ntype_op::Sub) {
+      return strict;
+    }
+    return true;
+  };
+  std::vector<hhds::Node_class>                                        nodes;
+  absl::flat_hash_map<hhds::Node_class, int>                           indeg;
+  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
+  for (auto n : g->fast_class()) {
+    if (comb(n)) {
+      nodes.push_back(n);
+      indeg.try_emplace(n, 0);
+    }
+  }
+  for (auto& n : nodes) {
+    for (auto e : n.inp_edges()) {
+      auto d = e.driver;
+      if (d.is_invalid() || gu::is_const_pin(d)) {
+        continue;
+      }
+      auto m = d.get_master_node();
+      if (!comb(m) || !indeg.contains(m)) {
+        continue;  // the `contains` guard also drops boundary masters fast_class never lists
+      }
+      ++indeg[n];
+      succ[m].push_back(n);
+    }
+  }
+  std::vector<hhds::Node_class> q;
+  for (auto& [n, d] : indeg) {
+    if (d == 0) {
+      q.push_back(n);
+    }
+  }
+  absl::flat_hash_set<hhds::Node_class> removed;
+  while (!q.empty()) {
+    auto n = q.back();
+    q.pop_back();
+    removed.insert(n);
+    auto it = succ.find(n);
+    if (it == succ.end()) {
+      continue;
+    }
+    for (auto& sx : it->second) {
+      if (--indeg[sx] == 0) {
+        q.push_back(sx);
+      }
+    }
+  }
+  for (auto& n : nodes) {
+    if (!removed.contains(n)) {
+      out.insert(n);
+    }
+  }
+}
+
 int flatten_false_loop_subs(hhds::Graph* g) {
   namespace gu = livehd::graph_util;  // the lambdas below qualify with it
 
@@ -937,6 +1041,18 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 
   // A Sub S is on a false loop iff a backward COMB walk from one of its input
   // drivers reaches S's own output (stopping at any other state/loop_last).
+  //
+  // The walk STOPS at every other Sub, deliberately. A ring that closes only
+  // through two or three DIFFERENT instances is unschedulable for a consumer
+  // whose model makes a comb callee ONE ATOMIC node — but that consumer is no
+  // longer this one. `inou.cgen.sim` dissolves those rings by CALLEE
+  // PARTITIONING now (per-output-group `__settle_g<k>` methods, the 2026-08-06
+  // ruling) and does not call this at all; the sole caller left is
+  // `inou.cgen.verilog`, where an instance is not atomic and the ring is not a
+  // scheduling problem. Traversing through instances there inlines whole
+  // multi-instance rings out of the emitted netlist AND — since this rewrites
+  // in place — out of the shared library graph, which silently breaks the
+  // hierarchical boundaries hier-LEC pairing and semdiff's sub-cutpoints key on.
   auto on_false_loop = [&](const hhds::Node_class& s) {
     absl::flat_hash_set<hhds::Node_class> seen;
     std::vector<hhds::Pin_class>          stk;

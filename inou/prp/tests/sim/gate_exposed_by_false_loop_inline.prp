@@ -1,0 +1,92 @@
+/*
+:name: gate_exposed_by_false_loop_inline
+:type: simulation
+*/
+
+// minion's txfma_top shape in miniature: a STATEFUL callee that BOTH sits on a
+// false loop through the caller AND holds a clock-gate CELL inside its body.
+//
+// THE ORDERING TRAP THIS PINS. cgen_sim's pre-steps used to run in one line:
+// gate-cell inlining once, then the false-loop inliners. Here the false-loop
+// inliner MUST flatten `gated_echo` (its fed-back `echo` is a comb passthrough,
+// not a state read, so no pre-binding can dissolve the ring) — and that inline
+// drops `gcell`, a gate Sub, into the caller AFTER gate inlining already ran.
+// The flop it clocks then refused as `gated-clock-unsupported` even though the
+// same cell folds fine when it starts out local. txfma_top hits this at scale:
+// the frac pipeline's 13 stage gates arrive only when the false-loop inliner
+// pulls txfmafrac's body in. The pre-steps now iterate together to a fixpoint.
+//
+// THE VALUES (hand-derived; every step is a plain add):
+//   echo = a + 1 combinationally; back = echo + 3; the gated flop loads `back`
+//   at an ENABLED rise and holds otherwise. With a = 10 + clock and the enable
+//   open at c0, c1, c4: q_cnt = 14, 15, 15, 15, 18, 18. ctl = a every cycle.
+
+// The gate CELL: transparent-low enable latch feeding the AND — prim_clk_gate's
+// shape, one definition away from the state it gates.
+mod gcell(clk:bool, en:bool) -> (g:bool@[]) {
+  reg enl:bool:[latch=true]
+  if !clk {
+    enl = en
+  }
+  g = clk and enl
+}
+
+// The stateful callee. `echo` is a pure comb passthrough of `x` (the fed-back
+// output, NOT a state read); `y` only feeds the gated register.
+mod gated_echo::[timecheck=false](clk:bool, en:bool, x:u8, y:u8) -> (echo:u8@[], cnt:u8@[]) {
+  echo = x + 1
+  wire g:bool = nil
+  g = gcell(clk=clk, en=en)
+  reg f:u8:[clock_pin=ref g] = 0
+  f   = y
+  cnt = f
+}
+
+pub mod gexp::[timecheck=false](clk:bool, en:bool, a:u8) -> (q_echo:u8@[], q_cnt:u8@[], ctl:u8@[]) {
+  // The ring: echo -> back -> y. FALSE, because echo's cone inside the callee
+  // is {x} and y only feeds state — but `echo` is not a state read, so the
+  // ONLY repair on offer is inlining the callee, gate cell and all.
+  wire back:u8 = nil
+  mut (echo, cnt) = gated_echo(clk=clk, en=en, x=a, y=back)
+  back   = (echo + 3) & 0xFF
+  q_echo = echo
+  q_cnt  = cnt
+
+  // CONTROL: a flop on the UNGATED reference clock.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = a
+  ctl = c
+}
+
+test gexp.inlined_callee_gate_still_folds {
+  mut acc  = gexp
+  mut seen = 0
+  mut bad_echo = 0
+  mut bad_cnt  = 0
+  mut bad_ctl  = 0
+  mut golden:u8 = 0
+  tick 6 {
+    // c0,c1 open -> load; c2,c3 closed -> HOLD; c4 reopens -> load; c5 holds.
+    acc.en = (clock <= 1) or (clock == 4)
+    mut av:u8 = 10 + clock
+    acc.a = av
+    step
+    if (clock <= 1) or (clock == 4) {
+      golden = av + 4
+    }
+    seen = seen + 1
+    if acc.q_echo != (av + 1) {
+      bad_echo = bad_echo + 1
+    }
+    if acc.q_cnt != golden {
+      bad_cnt = bad_cnt + 1
+    }
+    if acc.ctl != av {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_echo == 0, "the fed-back comb passthrough is correct after the inline")
+  assert(bad_cnt == 0, "the gate cell EXPOSED by the false-loop inline still folds into the commit guard")
+}

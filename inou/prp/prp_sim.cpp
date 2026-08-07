@@ -1673,6 +1673,35 @@ private:
         }
         return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
       }
+      // A WIDTH CAST used as a value: `u1(clock >= 4)`, `u8(x + 1)`. Without
+      // this arm the call fell through to the flat operand/operator walker,
+      // which saw [identifier, tuple] and reported the useless "unsupported
+      // expression form in test: (clock >= 4)" — the exact spelling minion's
+      // and vpu's own testbenches use to derive a reset from the tick counter.
+      // Test values are built non-negative (see compare()), so the cast is a
+      // zext/truncation to the named width; a SIGNED cast keeps failing loudly
+      // rather than silently zero-extending.
+      {
+        TSNode      fn   = field(n, "function");
+        std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
+        if (fnnm.size() >= 2 && (fnnm[0] == 'u' || fnnm[0] == 's')
+            && std::all_of(fnnm.begin() + 1, fnnm.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+          if (fnnm[0] == 's') {
+            fail("signed width-cast '" + fnnm + "' in a test expression: test values are unsigned; cast in the DUT instead");
+          }
+          TSNode args = field(n, "argument");
+          if (ts_node_is_null(args) || ts_node_named_child_count(args) != 1) {
+            fail("width-cast '" + fnnm + "' needs exactly one argument");
+          }
+          const int w = std::stoi(fnnm.substr(1));
+          if (w <= 0 || w > 512) {
+            fail("width-cast '" + fnnm + "' is outside the supported 1..512 range");
+          }
+          const Val a = eval(ts_node_named_child(args, 0));
+          const Val s = to_slop(a);
+          return slop_val("(" + at_width(s, w) + ")", w);
+        }
+      }
     }
     if (t == "dot_expression") {
       std::string base, fld;

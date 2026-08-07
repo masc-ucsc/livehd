@@ -1,0 +1,120 @@
+/*
+:name: mem_ring_state_only_sub
+:type: simulation
+*/
+
+// minion's vpu_ctrl mask/trans ring in miniature: a memory's ASYNC read address
+// comes from a MEALY callee's STATE-ONLY output, while the callee's other input
+// is fed from the memory's dout. In the atomic-call model that is a word-level
+// cycle — memory -> back -> callee -> sel -> memory — with no comb cycle in the
+// hardware at all: `sel` is a flop read, so it is available BEFORE the call.
+//
+// WHY THE OLD MACHINERY MISSED IT. The direct fed-back walk
+// (`sub_false_loop_output_pids`) stops at a Memory — correctly, for the
+// question it answers — so a ring that THREADS THROUGH the memory reports
+// `fed_back` empty for the very instance whose state-only output would break
+// it; and the callee is Mealy (`echo` is a comb passthrough), so the
+// whole-callee Moore deferral declines too. The repair is the same argument
+// per-output: ANY sub the schedule sees on a word-level cycle pre-binds its
+// state-only outputs. vpu_ctrl's `trans.ex_trans_thread_id_o` (a flop read
+// addressing `mask.ex_mask_rf_q[thread]`) is this exact shape at scale.
+//
+// THE VALUES (hand-derived, END-OF-TICK observation — what Icarus prints at
+// the end of the period). The WRITE lands at the edge with the PRE-edge `sel`
+// (flip of the previous tick); the observed `rd` is the post-edge comb read,
+// `m_after_edge[flip(c)]`: c0 rd=11 (m[0], just written), c2/c3 rd=22 (m[1]),
+// c4/c5 rd=11 (m[0] again after flip drops). c1 reads the never-written slot
+// and is deliberately NOT checked. echo = rd + 1 combinationally throughout.
+
+mod picker::[timecheck=false](sel_next:u1, gate:u8) -> (sel:u1@[], echo:u8@[]) {
+  reg s:u1 = 0
+  sel  = s          // STATE-ONLY: read the FLOP q (before the write below —
+                    // Pyrope read-after-write would see sel_next combinationally)
+  s    = sel_next
+  echo = gate + 1   // comb in->out: the callee is MEALY, so no whole-Moore deferral
+}
+
+pub mod memring::[timecheck=false](d:u8, we:bool, flip:u1) -> (rd:u8@[], q_echo:u8@[], ctl:u8@[]) {
+  wire back:u8 = nil
+  mut (sel, echo) = picker(sel_next=flip, gate=back)
+
+  reg m:[2]u8 = nil
+  if we {
+    m[sel] = d
+  }
+  rd   = m[sel]       // async read addressed by the callee's state-only output
+  back = rd           // ...and the dout feeds the callee's Mealy input: the ring
+
+  q_echo = echo
+
+  // CONTROL: an ordinary flop, so a failure above is specifically the ring.
+  reg c:u8 = 0
+  c   = d
+  ctl = c
+}
+
+test memring.state_only_output_breaks_the_memory_ring {
+  mut acc  = memring
+  mut seen = 0
+  mut bad_rd   = 0
+  mut bad_echo = 0
+  mut bad_ctl  = 0
+  tick 6 {
+    // c0 write 11 @0; c1 read @0; c2 write 22 @1 (sel flopped to 1 at c1's
+    // edge); c3 read @1; c4 read @1 (flip already low, sel flips at the edge);
+    // c5 read @0.
+    mut fv:u1   = 0
+    mut wv:bool = false
+    mut dv:u8   = 0
+    if clock == 0 {
+      wv = true
+      dv = 11
+    } elif clock == 1 {
+      fv = 1
+    } elif clock == 2 {
+      fv = 1
+      wv = true
+      dv = 22
+    } elif clock == 3 {
+      fv = 1
+    }
+    acc.flip = fv
+    acc.we   = wv
+    acc.d    = dv
+    step
+    seen = seen + 1
+    mut golden:u8 = 0
+    mut check:bool = false
+    if clock == 0 {
+      golden = 11
+      check  = true
+    } elif clock == 2 {
+      golden = 22
+      check  = true
+    } elif clock == 3 {
+      golden = 22
+      check  = true
+    } elif clock == 4 {
+      golden = 11
+      check  = true
+    } elif clock == 5 {
+      golden = 11
+      check  = true
+    }
+    if check {
+      if acc.rd != golden {
+        bad_rd = bad_rd + 1
+      }
+      if acc.q_echo != (golden + 1) {
+        bad_echo = bad_echo + 1
+      }
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the plain flop loads every tick")
+  assert(bad_rd == 0, "the pre-bound state-only `sel` addressed the memory correctly")
+  assert(bad_echo == 0, "the Mealy passthrough fed by the memory dout is correct")
+}

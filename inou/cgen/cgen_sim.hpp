@@ -7,6 +7,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
@@ -129,16 +130,108 @@ private:
   absl::flat_hash_set<hhds::Graph*>      flatten_walked_;  // defs already recursed into
 
 public:
+  // Per-output-group callee partitioning — the no-inlining answer to a false
+  // combinational loop through an atomic instance (2026-08-06 ruling). A
+  // definition instantiated on a word-level cycle emits, IN ITS OWN C++, one
+  // `__settle_g<k>(In)` method per GROUP of outputs sharing the same comb
+  // input-support; the parent calls exactly the group a demanded output needs,
+  // as soon as that group's inputs are bound, and defers the single atomic
+  // `cycle()` state advance to the end of the pass. No body is ever cloned:
+  // eight instances of one def stay one emitted class, and the emitted TU size
+  // stays proportional to the DEFINITION, not to the instance tree (the
+  // inliner it replaces produced a 77MB minion_top.cpp).
+  struct Split_group {
+    // One OUTPUT (or output SLICE) this group computes. len == 0 means the
+    // whole port; len > 0 is a bit range [lo, lo+len) with `leaf` the driver
+    // of that range (a concat leaf, or — when `shifted` — a sliced callee's
+    // whole-bundle output pin the range must be shifted out of). Slices are
+    // the 2026-08-06 bit-level ruling: refine only under loop pressure —
+    // slices sharing one support signature merge back into a single group,
+    // so an un-conflicted port keeps exactly one group.
+    struct Out {
+      uint32_t        pid = 0;
+      uint32_t        lo  = 0;
+      uint32_t        len = 0;
+      hhds::Pin_class leaf;
+      bool            shifted = false;
+    };
+    std::vector<Out> outs;
+    // Support atom: what the group's cones read of one input. len == 0 means
+    // the whole port; len > 0 a bit range — the parent then fills only those
+    // bits of the callee's In field, which is what lets two packed buses
+    // exchange disjoint fields in the same cycle without a false cycle.
+    struct In_atom {
+      uint32_t pid = 0;
+      uint32_t lo  = 0;
+      uint32_t len = 0;
+    };
+    std::vector<In_atom> support;
+
+    [[nodiscard]] bool covers_out(uint32_t pid) const {
+      for (const auto& o : outs) {
+        if (o.pid == pid) {
+          return true;
+        }
+      }
+      return false;
+    }
+    [[nodiscard]] bool sliced() const {
+      for (const auto& o : outs) {
+        if (o.len != 0) {
+          return true;
+        }
+      }
+      return false;
+    }
+  };
+  using Split_map = absl::node_hash_map<const hhds::Graph*, std::vector<Split_group>>;
+
   // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
   // when the cone is not a foldable ICG (2f-latch M5).
   // `clocks` is the design-wide clock-role analysis (the same `Design_clocks`
-  // pass/lec's phase schedule builds). nullptr falls back to the name test.
-  static std::vector<hhds::Pin_class> icg_guards(const hhds::Node_class& flop, std::string_view clock_port,
-                                                 const livehd::latch_contract::Design_clocks* clocks = nullptr);
+  // pass/lec's phase schedule builds); it is required (nullptr = cannot fold).
+  //
+  // Takes the CLOCK DRIVER, not the state element: a Memory's clock arrives on
+  // a per-port `clock_pin` sink rather than on the Flop-shaped one, and a
+  // memory on a gated clock is the same question with the same answer.
+  //
+  // `fall_commit` (optional) is how a caller OPTS IN to the ACTIVE-LOW gate
+  // flavour: an inverted reference (`~clk & en`) gates the FALLING edge, so
+  // its guards are only foldable by an endpoint that can commit in the fall
+  // sub-tick (a flop; the sim has a fall pass). When the caller passes the
+  // out-param and the cone is inverted, the guards are returned with
+  // *fall_commit = true — INCLUDING the enables of any inner (non-inverted)
+  // gate the inverted reference rides on: the fall edge of a gated clock
+  // exists only in periods where the inner gate was open, so dropping the
+  // inner enable commits on periods with no pulse at all
+  // (tests/sim/chained_clock_gates_mixed_phase.prp, row c5). A null
+  // `fall_commit` keeps the historical refusal (memories, tick-guard words).
+  static std::vector<hhds::Pin_class> icg_guards(const hhds::Pin_class& clock_driver, std::string_view clock_port,
+                                                 const livehd::latch_contract::Design_clocks* clocks      = nullptr,
+                                                 bool*                                        fall_commit = nullptr);
+
+  // A clock cone that is an IDENTITY wrapper around a plain clock net (`clk & 1`,
+  // `clk == 1`, a width mask) rather than a gate: no guard needed, and no
+  // refusal owed. Distinguishes "not gated" from "gated in a way I cannot fold",
+  // which an empty `icg_guards` result conflates.
+  static bool plain_clock_cone(const hhds::Pin_class&                        clock_driver,
+                               const livehd::latch_contract::Design_clocks& clocks);
+
+  // Every STRUCTURAL rewrite the emitter makes to a body (the clock-gate-cell
+  // fold, the sim.flatten absorb, the packed self-ref wire split). Idempotent:
+  // the first call per graph does the work, later ones return immediately.
+  // A caller that MEASURES bodies before emitting (to_cgen_sim's partition
+  // pre-scan holds pin handles into callees) must drive this over the whole
+  // library first, or it measures a graph the emission then rewrites.
+  void prepare_graph(const std::shared_ptr<hhds::Graph>& graph);
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
-           int _flatten = 0)
+           int _flatten = 0, const Split_map* _splits = nullptr)
       : odir(_odir), vcd_file(_vcd), top(_top),
-        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")), flatten_budget(_flatten) {}
+        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")), flatten_budget(_flatten),
+        splits_(_splits) {}
+
+private:
+  const Split_map* splits_ = nullptr;  // built once per pass run by to_cgen_sim
 };

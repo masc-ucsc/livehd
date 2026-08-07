@@ -1,0 +1,122 @@
+/*
+:name: hier_gate_port
+:type: simulation
+:verilator: hier_gate_port_vtb.cpp
+:vtop: hgp
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 1 anchor) — A CLOCK GATE OUTPUT CROSSING A
+// MODULE BOUNDARY AS A PORT, in BOTH directions.
+//
+// WHY BOTH DIRECTIONS. cgen_sim answers "is this a gated clock?" locally, on
+// the flop's own graph, and its only concession to hierarchy is
+// `inline_clock_gate_cells` — a same-graph pre-step whose two halves must both
+// be in the SAME definition. So each direction fails for its own reason:
+//
+//   DOWN (gate in the parent, gclk is a child's clock PORT): the child's flop
+//   sees a graph INPUT as its clock, with the And that produced it in another
+//   definition entirely.
+//   UP (gate in a child, its output clocks parent state): the parent's flop
+//   sees a Sub OUTPUT as its clock, with the And inside the callee.
+//
+// Minion has at least five such sites (prim_mul_div.sv:94, vpu_lane_tima.sv:65,
+// minion_dcache_reduce.sv:307, tensor_load:260, csr_file:478), which is why the
+// plan replaces the local answer with the hierarchy-aware analysis the formal
+// kernel already runs (`materialize_clock_cells` + the clock forest) instead of
+// widening the local matcher a fourth time.
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits for this hierarchy
+// (en changed while clk is low): qdown = qup = 5, 6, 6, 6, 88; ctl = d.
+// The two directions agree cycle for cycle, which is the point: a gate does not
+// mean something different depending on which side of a port it sits on.
+//
+// STATUS: LIVE since 2026-08-06. The two directions needed different repairs,
+// and only one of them had ever announced itself:
+//   UP   refused with `gated-clock-unsupported` — a Sub output is not a clock
+//        cone the module can decode. Fixed by letting `inline_clock_gate_cells`
+//        recognize a STATE-FREE gate cell, not only one holding an enable latch
+//        (inlining a state-free callee cannot change state identity, which is
+//        the whole reason the latch test was conservative).
+//   DOWN was SILENT — `gclk` is an ordinary graph input, so the child treated it
+//        as its own reference clock and committed every tick while the parent's
+//        gate became dead code. Fixed by giving every clock INPUT port a
+//        companion `<field>__tick` guard in the child's `In`, defaulted true,
+//        which a gating parent drives with the enable conjunction.
+// The UP refusal used to abort the run first, which is the only reason the DOWN
+// row was never seen as a wrong number. `prp-vsim-hier_gate_port` runs the same
+// design under Verilator, so both rows are corroborated independently.
+comb gmaker(clk:bool, en:bool) -> (g:bool) {
+  g = clk and en
+}
+
+mod gchild(gclk:bool, d:u8) -> (o:u8@[1]) {
+  reg f:u8:[clock_pin=ref gclk] = 0
+  f = d
+  o = f
+}
+
+pub mod hgp(clk:bool, en:bool, d:u8) -> (qdown:u8@[1], qup:u8@[1], ctl:u8@[1]) {
+  // DOWN — the gate lives HERE and its output is the child's clock port.
+  wire gp:bool = nil
+  gp = clk and en
+  stage[1] cd = gchild(gclk=gp, d=d)
+  qdown = cd
+
+  // UP — the gate lives in a CALLEE and its output clocks state in this module.
+  wire gu:bool = nil
+  gu = gmaker(clk=clk, en=en)
+  reg fu:u8:[clock_pin=ref gu] = 0
+  fu  = d
+  qup = fu
+
+  // CONTROL: a flop on the UNGATED reference clock, so a failure above is
+  // specifically the port-crossing gate.
+  reg c:u8 = 0
+  c   = d
+  ctl = c
+}
+
+test hgp.a_gate_means_the_same_thing_across_a_port {
+  mut acc  = hgp
+  mut seen = 0
+  mut bad_down = 0
+  mut bad_up   = 0
+  mut bad_ctl  = 0
+  tick 5 {
+    // c0,c1 open -> load; c2,c3 closed -> HOLD; c4 reopens -> load.
+    acc.en = (clock <= 1) or (clock == 4)
+    mut dv:u8 = 5
+    if clock == 1 {
+      dv = 6
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    } elif clock == 4 {
+      dv = 88
+    }
+    acc.d = dv
+    step
+    mut golden:u8 = 5
+    if clock >= 1 {
+      golden = 6
+    }
+    if clock == 4 {
+      golden = 88
+    }
+    seen = seen + 1
+    if acc.qdown != golden {
+      bad_down = bad_down + 1
+    }
+    if acc.qup != golden {
+      bad_up = bad_up + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 5, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_down == 0, "a gate in the PARENT gates a child's state through its clock port")
+  assert(bad_up == 0, "a gate in a CHILD gates the parent's state through its output port")
+}

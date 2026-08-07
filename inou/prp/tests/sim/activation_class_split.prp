@@ -1,0 +1,101 @@
+/*
+:name: activation_class_split
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 3 anchor) — TWO ACTIVATION CLASSES ON ONE
+// CLOCK EDGE, plus logic that belongs to NEITHER.
+//
+// WHY `Commit_class::key()` IS NOT A COLOUR. `fa` and `fb` commit on the same
+// root clock and the same edge, so they share a commit class — the identity
+// formal pairing uses. But they are enabled by DIFFERENT gates, so they must
+// not share a partition: step 3 colours by ACTIVATION class (commit class PLUS
+// the sampled guard identities), which is what makes step 5's `if (<enable>)`
+// sinking a partition-level property instead of a per-node test.
+//
+// WHY `shared` IS HERE. `(d * 3)` is read by both guarded cones AND by the
+// ungated control flop, so it is exclusive to neither class and must land in an
+// UNCLASSED partition. `ctl` is the observable consequence: it must keep
+// updating on c3 and c5, where BOTH gates are closed. A colouring that pulled
+// the shared cone into one of the guarded partitions — or an `if (enable)` sink
+// that swallowed it — freezes `ctl` on exactly those two ticks, and nothing
+// else in the design notices.
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits (enables changed while
+// clk is low; `shared = 3*d`, `fa = shared+1`, `fb = shared+2`):
+//   qa  = 16, 19, 19, 19, 28, 28
+//   qb  = 17, 17, 23, 23, 29, 29
+//   ctl = 15, 18, 21, 24, 27, 30
+//
+// STATUS: LIVE on arrival (2026-08-05) — two flat gates on one reference clock
+// were already inside the single-`And` fold's reach, which is worth knowing:
+// what the fold could NOT do was a chain, a memory, or a hierarchy crossing.
+// The ctl row is what step 3's colouring and step 5's `if (enable)` sinking
+// must not break afterwards; it is the one an over-eager sink gets wrong.
+pub mod actsplit(clk:bool, ea:bool, eb:bool, d:u8) -> (qa:u8@[1], qb:u8@[1], ctl:u8@[1]) {
+  // SHARED, unclassed logic: read by both guarded cones and by the control.
+  mut shared:u8 = (d * 3) & 0xFF
+
+  // ACTIVATION CLASS A.
+  wire ga:bool = nil
+  ga = clk and ea
+  reg fa:u8:[clock_pin=ref ga] = 0
+  fa = (shared + 1) & 0xFF
+  qa = fa
+
+  // ACTIVATION CLASS B — same root clock, same edge, DIFFERENT enable.
+  wire gb:bool = nil
+  gb = clk and eb
+  reg fb:u8:[clock_pin=ref gb] = 0
+  fb = (shared + 2) & 0xFF
+  qb = fb
+
+  // CONTROL / unclassed consumer: proves `shared` is still evaluated on the
+  // ticks where both gates are closed.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = shared
+  ctl = c
+}
+
+test actsplit.two_classes_one_edge {
+  mut acc  = actsplit
+  mut seen = 0
+  mut bad_a   = 0
+  mut bad_b   = 0
+  mut bad_ctl = 0
+  mut ga_v:u8 = 0
+  mut gb_v:u8 = 0
+  tick 6 {
+    // c0 both open; c1 only A; c2 only B; c3 NEITHER; c4 both; c5 NEITHER.
+    mut eav = (clock == 0) or (clock == 1) or (clock == 4)
+    mut ebv = (clock == 0) or (clock == 2) or (clock == 4)
+    mut dv:u8 = 5 + clock
+    acc.ea = eav
+    acc.eb = ebv
+    acc.d  = dv
+    step
+    mut sh:u8 = (dv * 3) & 0xFF
+    if eav {
+      ga_v = (sh + 1) & 0xFF
+    }
+    if ebv {
+      gb_v = (sh + 2) & 0xFF
+    }
+    seen = seen + 1
+    if acc.qa != ga_v {
+      bad_a = bad_a + 1
+    }
+    if acc.qb != gb_v {
+      bad_b = bad_b + 1
+    }
+    // The unclassed cone runs on EVERY tick, including c3/c5 where both
+    // activation classes are inactive.
+    if acc.ctl != sh {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "logic SHARED across activation classes still runs when every class is inactive")
+  assert(bad_a == 0, "activation class A commits on its own enable")
+  assert(bad_b == 0, "activation class B commits on its own enable, independently of A")
+}

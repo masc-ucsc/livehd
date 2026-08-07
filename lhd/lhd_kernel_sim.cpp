@@ -1456,7 +1456,34 @@ void sim_command(Options& opts, Result& res) {
   if (sources.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
-  const std::string file       = sources.back();
+  // The LAST source is the primary, test-containing file by convention — but
+  // accept either order: when the last source holds no `test` block and an
+  // earlier positional does, that one is the testbench
+  // (`lhd sim tb.prp dut.prp` behaves the same as `lhd sim dut.prp tb.prp`).
+  std::string file = sources.back();
+  if (sources.size() > 1) {
+    std::vector<prp_sim::Test_info> probe;
+    std::string                     perr;
+    // A non-zero return means the probe FAILED to read/parse the file — which
+    // is the user's error and must surface, not a reason to go looking for a
+    // testbench elsewhere. Only "parsed fine, holds no `test` block" is the
+    // reorder signal; swallowing the failure ran a different file's self-test
+    // and reported success while the real testbench never ran.
+    const int rc = prp_sim::list_tests(file, "", probe, perr);
+    if (rc != 0) {
+      throw Lhd_error{"usage", perr.empty() ? std::format("cannot read `{}`", file) : perr, ""};
+    }
+    if (probe.empty()) {
+      for (auto it = std::next(sources.rbegin()); it != sources.rend(); ++it) {
+        probe.clear();
+        perr.clear();
+        if (prp_sim::list_tests(*it, "", probe, perr) == 0 && !probe.empty()) {
+          file = *it;
+          break;
+        }
+      }
+    }
+  }
   const bool        setup_only = opts.sim_setup_only;
   const bool        run_only   = opts.sim_run_only;
   const bool        list_only  = opts.list_tests;

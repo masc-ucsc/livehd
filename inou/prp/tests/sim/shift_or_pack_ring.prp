@@ -1,0 +1,136 @@
+/*
+:name: shift_or_pack_ring
+:type: simulation
+*/
+
+// ONE input port, ONE output port, and a false ring between them. The callee's
+// two independent cones are disassembled from `i` by SLICE READS and
+// reassembled into `o` by SHIFT+OR -- there is no bit-range write anywhere, and
+// no second port to split on.
+//
+//     o[15:0]  = f(i[7:0])          caller: i[7:0]  = x
+//     o[31:16] = g(i[15:8])                 i[15:8] = h(o[7:0])
+//
+// so the real dataflow is x -> o[15:0] -> i[15:8] -> o[31:16], a chain, and the
+// only cycle is in the whole-word view. verilator lints the equivalent Verilog
+// with no circular-logic diagnostic and Icarus simulates it to the goldens
+// below. `lhd sim` refuses:
+//
+//     module `shift_or_pack_ring.packtop` has a combinational loop the
+//     single-pass sim schedule cannot order: `sub_28:u_packer_o_2`
+//     (a combinational-cycle back-edge) was read before it could be computed
+//
+// WHY THIS IS STRICTLY HARDER THAN `slice_ring_through_sub`. That fixture also
+// packs two cones into one output, but it has TWO input ports and builds the
+// output with bit-range writes, so a splitter that understood `set_mask` and
+// split on the input side could still cut it. Here neither escape exists:
+//
+//   * ONE input port and ONE output port, so ANY port-granularity split -- on
+//     either side -- yields exactly one group, by construction. Port-level
+//     partitioning cannot express the answer no matter how it is ordered.
+//   * The output is assembled by `(p_hi << 16) | p_lo` and the input taken
+//     apart by slice reads, so recovering the slice structure means tracking
+//     bit-level dataflow through a shift and an or -- not reading it off a
+//     `set_mask` chain.
+//
+// This is the ordinary packed-bus idiom (one wide request word carrying
+// independent fields), so it is worth being explicit that the obstacle is the
+// GRAIN of the split, not the syntax used to build the word.
+//
+// THE CONTROL IS IN THE DESIGN. `loc` is the identical ring -- same shifts,
+// same masks, same arithmetic -- written inline with no instance at all, and it
+// is CORRECT today (verified standalone before being baked in here). So this
+// fixture says "the instance boundary is what cannot be cut", not "shift/or
+// packing is broken". In hardware `out == loc` on every cycle, which is the
+// whole bug in one comparison.
+//
+// GOLDENS -- hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter):
+//
+//     c   : 0        1        2        3        4        5
+//     x   : 10       11       12       13       14       15
+//     out : 2752542  2949153  3145764  3342375  3538986  3735597
+//
+// (o[15:0] = 3x, o[31:16] = ((3x & 0xFF) + 5 + 7).)
+
+// ONE input, ONE output. Two independent cones inside.
+mod packer::[timecheck=false](i:u16) -> (o:u32@[]) {
+  wire lo_in:u8 = nil
+  wire hi_in:u8 = nil
+  lo_in = i#[0..=7]
+  hi_in = i#[8..=15]
+  wire p_lo:u16 = nil
+  wire p_hi:u16 = nil
+  p_lo = (lo_in * 3) & 0xFFFF     // cone {i[7:0]}  -> lands in o[15:0]
+  p_hi = (hi_in + 7) & 0xFFFF     // cone {i[15:8]} -> lands in o[31:16]
+  o = (p_hi << 16) | p_lo         // SHIFT+OR assembly, not a bit-range write
+}
+
+pub mod packtop::[timecheck=false](x:u8, d:u8) -> (out:u32@[], loc:u32@[],
+                                                   ctl:u16@[]) {
+  // THE RING: the caller feeds the callee's LOW output slice back into the
+  // input its HIGH output slice reads. Neither slice depends on itself.
+  wire iw:u16 = nil
+  mut o = packer(i=iw)
+  iw#[0..=7]  = x
+  iw#[8..=15] = (o#[0..=7] + 5) & 0xFF
+  out = o
+
+  // CONTROL: the identical ring with NO instance in it. Correct today.
+  wire liw:u16 = nil
+  wire lo:u32  = nil
+  wire l_lo:u16 = nil
+  wire l_hi:u16 = nil
+  l_lo = ((liw#[0..=7]) * 3) & 0xFFFF
+  l_hi = ((liw#[8..=15]) + 7) & 0xFFFF
+  lo   = (l_hi << 16) | l_lo
+  liw#[0..=7]  = x
+  liw#[8..=15] = (lo#[0..=7] + 5) & 0xFF
+  loc = lo
+
+  // CONTROL: an ordinary flop, so a failure is never a dead testbench.
+  reg cr:u8 = 0
+  cr  = d
+  ctl = cr
+}
+
+test packtop.one_port_in_one_port_out_slice_cones {
+  mut acc  = packtop
+  mut seen = 0
+  mut bad_ctl   = 0
+  mut bad_loc   = 0
+  mut bad_out   = 0
+  mut bad_agree = 0
+  tick 6 {
+    mut xv:u8 = 10 + clock
+    mut dv:u8 = 40 + clock
+    acc.x = xv
+    acc.d = dv
+    step
+    // Golden, in the only order that exists: the low cone, then the caller's
+    // back edge, then the high cone.
+    mut g_lo:u32  = (xv * 3) & 0xFFFF
+    mut g_ihi:u32 = ((g_lo & 0xFF) + 5) & 0xFF
+    mut g_hi:u32  = (g_ihi + 7) & 0xFFFF
+    mut g_out:u32 = (g_hi * 65536) + g_lo
+
+    seen = seen + 1
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+    if acc.loc != g_out {
+      bad_loc = bad_loc + 1
+    }
+    if acc.out != g_out {
+      bad_out = bad_out + 1
+    }
+    if acc.out != acc.loc {
+      bad_agree = bad_agree + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the plain flop loads every tick")
+  assert(bad_loc == 0, "CONTROL: the SAME shift/or ring written locally is correct")
+  assert(bad_agree == 0, "the ring through a one-in/one-out instance equals the local one")
+  assert(bad_out == 0, "a single output port's independent bit cones are scheduled separately")
+}

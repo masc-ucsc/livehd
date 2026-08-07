@@ -1,0 +1,114 @@
+/*
+:name: slice_ring_through_sub
+:type: simulation
+*/
+
+// A ring that closes through DIFFERENT BIT SLICES of one wide callee output is
+// refused, even though the identical ring written LOCALLY compiles and runs.
+// Found by differential fuzzing against Icarus, 2026-08-06.
+//
+//     x -> bus[7:0] -> fb -> pack.b -> bus[15:8]
+//
+// `bus[7:0]` reads only {a} and `bus[15:8]` only {b}, so at the SLICE level the
+// dataflow is acyclic; only the whole-word view has a cycle. verilator lints
+// the equivalent Verilog with no circular-logic warning, and Icarus simulates
+// it to the goldens below. `lhd sim` refuses:
+//
+//     module `slice_ring_through_sub.slicering` has a combinational loop the
+//     single-pass sim schedule cannot order: `sub_28:u_pack_bus_0`
+//     (a combinational-cycle back-edge) was read before it could be computed
+//
+// WHY THIS IS THE NEXT PARTITION STEP AND NOT A NEW CLASS. cgen.sim already
+// splits a callee by OUTPUT: `hier_latch_split_ring.prp` gets `lane` cut into
+// `__settle_g0/g1/g2` so the caller can interleave. The unit of that split is a
+// whole output port, so a definition whose two independent cones land in two
+// SLICES of ONE port has exactly one group and cannot be cut -- the
+// packed-bus/`req`-`resp`-in-one-word shape that real designs use constantly.
+//
+// THE CONTROL IS IN THE DESIGN. `ctl` is the SAME ring with the SAME arithmetic
+// written inline, with no instance in it at all -- the `wire` packed-update
+// self-reference class that `packed_update_chain.prp` covers. It compiles and
+// is correct, which is what makes this fixture a statement about the INSTANCE
+// BOUNDARY rather than about slice handling in general. In hardware `o` and
+// `ctl` are the same number on every cycle, so `o == ctl` is the whole bug in
+// one comparison.
+//
+// GOLDENS -- hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter), end-of-period sampling after both edges:
+//
+//     c   : 0      1      2      3      4      5
+//     x   : 10     11     12     13     14     15
+//     o   : 21515  21772  18957  19214  18447  18704
+//
+// (bus[7:0] = x+1, fb = x+4, bus[15:8] = (x+4)^0x5A.)
+
+// Two independent cones landing in two SLICES of ONE output port.
+mod pack::[timecheck=false](a:u8, b:u8) -> (bus:u16@[]) {
+  wire w:u16 = nil
+  w#[0..=7]  = (a + 1) & 0xFF     // low slice: cone {a}
+  w#[8..=15] = b ^ 0x5A           // high slice: cone {b}
+  bus = w
+}
+
+pub mod slicering::[timecheck=false](x:u8, d:u8) -> (o:u16@[], ctl:u16@[],
+                                                     tick_ok:u16@[]) {
+  // THE SLICE RING: the caller feeds the LOW slice back into the input the
+  // HIGH slice needs. No slice depends on itself.
+  wire fb:u8 = nil
+  mut bus = pack(a=x, b=fb)
+  fb = (bus#[0..=7] + 3) & 0xFF
+  o  = bus
+
+  // CONTROL: the identical ring with NO instance -- a local `wire` whose two
+  // slices are written from each other. This shape already works.
+  wire lw:u16 = nil
+  lw#[0..=7]  = (x + 1) & 0xFF
+  lw#[8..=15] = ((lw#[0..=7] + 3) & 0xFF) ^ 0x5A
+  ctl = lw
+
+  // CONTROL: an ordinary flop, so a failure is never a dead testbench.
+  reg cr:u8 = 0
+  cr      = d
+  tick_ok = cr
+}
+
+test slicering.slice_cones_split_across_an_instance {
+  mut acc  = slicering
+  mut seen = 0
+  mut bad_ctl  = 0
+  mut bad_o    = 0
+  mut bad_tick = 0
+  mut bad_agree = 0
+  tick 6 {
+    mut xv:u8 = 10 + clock
+    mut dv:u8 = 40 + clock
+    acc.x = xv
+    acc.d = dv
+    step
+    // Golden, in the only order that exists: low slice, then the caller's back
+    // edge, then the high slice.
+    mut g_lo:u16 = (xv + 1) & 0xFF
+    mut g_fb:u16 = (g_lo + 3) & 0xFF
+    mut g_hi:u16 = g_fb ^ 0x5A
+    mut g_bus:u16 = (g_hi * 256) + g_lo
+
+    seen = seen + 1
+    if acc.tick_ok != dv {
+      bad_tick = bad_tick + 1
+    }
+    if acc.ctl != g_bus {
+      bad_ctl = bad_ctl + 1
+    }
+    if acc.o != g_bus {
+      bad_o = bad_o + 1
+    }
+    if acc.o != acc.ctl {
+      bad_agree = bad_agree + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_tick == 0, "CONTROL: the plain flop loads every tick")
+  assert(bad_ctl == 0, "CONTROL: the SAME slice ring written locally, with no instance, is correct")
+  assert(bad_agree == 0, "the slice ring through an instance equals the local one")
+  assert(bad_o == 0, "each output SLICE is scheduled on its own cone across the instance")
+}

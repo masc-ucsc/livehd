@@ -3,8 +3,14 @@
 #include "inou_cgen.hpp"
 
 #include <charconv>
+#include <array>
+#include <map>
+#include <tuple>
 
 #include "cgen_sim.hpp"
+#include "node_util.hpp"
+#include "port_reach.hpp"
+#include "split_selfref.hpp"
 #include "cgen_verilog.hpp"
 #include "diag.hpp"  // livehd::diag::err — flag-value validation
 #include "file_utils.hpp"
@@ -144,13 +150,146 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
   }
 
+  // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,
+  // BEFORE the pre-scan below measures anything. The pre-scan holds Pin_class
+  // handles into callee bodies, and the rewrites delete nodes and rewire edges
+  // in exactly those bodies — measuring first would hand the emitter class
+  // indices that no longer mean what was measured.
+  {
+    Cgen_sim prep(dir, vcd_out, top, fakedelay, flatten_budget);
+    for (const auto& g : var.graphs) {
+      if (g) {
+        prep.prepare_graph(g);
+      }
+    }
+  }
+
+  // PRE-SCAN for callee partitioning: any definition instantiated on a
+  // word-level cycle (a Sub the single-pass schedule sees on a strict-model
+  // cycle in SOME parent) emits per-output-group `__settle_g<k>` methods so
+  // the parent can evaluate it in pieces instead of inlining it. Groups are
+  // outputs sharing the same comb input-support, from the hierarchical
+  // port-reach summaries; support-free outputs stay on the cheaper prebind
+  // path and get no group.
+  Cgen_sim::Split_map splits;
+  {
+    livehd::port_reach::Cache                                        reach;
+    absl::node_hash_map<const hhds::Graph*, std::shared_ptr<hhds::Graph>> need;
+    absl::flat_hash_set<hhds::Node_class>                            cyc;
+    for (const auto& g : var.graphs) {
+      if (!g) {
+        continue;
+      }
+      cyc.clear();
+      livehd::graph_util::word_level_cycle_nodes(g.get(), /*strict=*/true, cyc);
+      for (const auto& n : cyc) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+          continue;
+        }
+        if (auto cg = n.get_subnode_graph(); cg) {
+          need.emplace(cg.get(), cg);
+        }
+      }
+    }
+    for (const auto& [ptr, sp] : need) {
+      const auto& dr = reach.of(sp);
+      // signature (sorted support atoms) -> group under construction
+      std::map<std::vector<std::array<uint32_t, 3>>, Cgen_sim::Split_group> by_sig;
+      auto add_entry = [&](Cgen_sim::Split_group::Out out, const std::vector<std::array<uint32_t, 3>>& sig) {
+        auto& grp = by_sig[sig];
+        if (grp.support.empty() && !sig.empty()) {
+          for (const auto& a : sig) {
+            grp.support.push_back({a[0], a[1], a[2]});
+          }
+        }
+        grp.outs.push_back(std::move(out));
+      };
+      const bool noslice = ::getenv("LIVEHD_SIM_NOSLICE") != nullptr;  // bisect aid
+      for (const auto& [opid, ins] : dr.out2ins) {
+        if (auto sit = dr.out_slices.find(opid); !noslice && sit != dr.out_slices.end()) {
+          // SLICED output. If every slice is input-independent the whole port
+          // stays on the prebind path; a MIXED output puts ALL its slices into
+          // groups (the whole-pin value is then assembled from the exports).
+          bool any_dep = false;
+          for (const auto& sl : sit->second) {
+            if (!sl.ins.empty()) {
+              any_dep = true;
+              break;
+            }
+          }
+          if (!any_dep) {
+            continue;  // registry-verified state-only, slice-confirmed
+          }
+          for (const auto& sl : sit->second) {
+            std::vector<std::array<uint32_t, 3>> sig;
+            for (const auto& a : sl.ins) {
+              sig.push_back({a.pid, a.lo, a.len});
+            }
+            std::sort(sig.begin(), sig.end());
+            sig.erase(std::unique(sig.begin(), sig.end()), sig.end());
+            // `shifted` is per SLICE and comes from port_reach, which is the
+            // only place that knows which arm produced it: a decided-once-per-
+            // port guess mis-reads a concat that happens to replicate one
+            // instance output into two fields.
+            add_entry({opid, sl.lo, sl.len, sl.leaf, sl.shifted}, sig);
+          }
+          continue;
+        }
+        if (ins.empty()) {
+          continue;  // state-only output: the prebind path owns it
+        }
+        std::vector<std::array<uint32_t, 3>> sig;
+        for (const uint32_t ipid : ins) {
+          sig.push_back({ipid, 0, 0});
+        }
+        std::sort(sig.begin(), sig.end());
+        add_entry({opid, 0, 0, {}, false}, sig);
+      }
+      std::vector<Cgen_sim::Split_group> groups;
+      for (auto& [sig, grp] : by_sig) {
+        std::sort(grp.outs.begin(), grp.outs.end(), [](const auto& a, const auto& b) {
+          return std::tie(a.pid, a.lo) < std::tie(b.pid, b.lo);
+        });
+        groups.push_back(std::move(grp));
+      }
+      if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
+        auto cio = sp->get_io();
+        absl::flat_hash_map<uint32_t, std::string> in_names, out_names;
+        if (cio) {
+          for (const auto& d : cio->get_input_pin_decls()) in_names[d.port_id] = d.name;
+          for (const auto& d : cio->get_output_pin_decls()) out_names[d.port_id] = d.name;
+        }
+        std::string dbg = std::string("[splitdbg] ") + std::string(sp->get_name()) + ": " + std::to_string(groups.size()) + " group(s)\n";
+        for (size_t gi2 = 0; gi2 < groups.size(); ++gi2) {
+          dbg += "  g" + std::to_string(gi2) + " outs:";
+          for (const auto& o : groups[gi2].outs) {
+            dbg += " " + (out_names.contains(o.pid) ? out_names[o.pid] : std::to_string(o.pid));
+            if (o.len != 0) {
+              dbg += "[" + std::to_string(o.lo + o.len - 1) + ":" + std::to_string(o.lo) + "]";
+            }
+          }
+          dbg += " <- ins:";
+          for (const auto& a : groups[gi2].support) {
+            dbg += " " + (in_names.contains(a.pid) ? in_names[a.pid] : std::to_string(a.pid));
+            if (a.len != 0) {
+              dbg += "[" + std::to_string(a.lo + a.len - 1) + ":" + std::to_string(a.lo) + "]";
+            }
+          }
+          dbg += "\n";
+        }
+        std::fputs(dbg.c_str(), stderr);
+      }
+      splits.emplace(ptr, std::move(groups));
+    }
+  }
+
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
   for (const auto& g : var.graphs) {
     if (!g) {
       continue;
     }
-    Cgen_sim p(dir, vcd_out, top, fakedelay, flatten_budget);
+    Cgen_sim p(dir, vcd_out, top, fakedelay, flatten_budget, &splits);
     p.do_from_graph(g);
   }
 }

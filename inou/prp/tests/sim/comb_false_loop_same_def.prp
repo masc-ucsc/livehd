@@ -1,0 +1,103 @@
+/*
+:name: comb_false_loop_same_def
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 4 anchor) — ONE definition, TWO instances,
+// only ONE of them inside a false loop.
+//
+// WHY THIS SHAPE EXISTS. Step 4 rules that the emitted partition boundaries are
+// PER DEFINITION (a def emits the UNION of the boundaries any site needs) while
+// the SCHEDULE stays per instance. This fixture is the smallest design where
+// those two grains disagree: `sfree` runs with all four inputs available and may
+// call the callee's partitions back to back, while `sloop` needs the o1
+// partition, then the caller's `back`, then the o2 partition. If the boundaries
+// were computed per INSTANCE the shared def would need two bodies; if the
+// SCHEDULE were per definition the free instance would be forced through the
+// looped instance's interleave.
+//
+// The values are the property: both instances must agree with an evaluation
+// order that respects each one's own wiring, and `sum_free`/`sum_loop` are the
+// controls (the o1 cone never participates in the loop at either site).
+//
+//
+// WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
+// node-level acyclicity check BEFORE any backend, and a `Sub` is an ordinary
+// node in that check's SCC scan (upass_tolg.cpp:6545) — so an instance-level
+// ring is refused there, and `--emit verilog` fails identically to `lhd sim`.
+// Opting out of the σ-timing check is what lets the design reach the emitter,
+// which is the only way this fixture can be what it is for: a VALUE test, and
+// a Verilator differential. It is not a trick — minion's own generated Pyrope
+// carries exactly these two annotations for exactly this reason.
+// STATUS: LIVE since 2026-08-05. Both sites are correct today via the inliner,
+// which duplicates the callee body per site — the cost step 4 exists to remove.
+// The values are what must survive the move to shared per-definition partitions
+// with per-instance scheduling.
+comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+  o1 = a + b      // cone {a, b} only
+  o2 = c * d      // cone {c, d} only
+}
+
+pub mod twosite::[timecheck=false](a:u8, b:u8, d:u8, bump:u8, fc:u8)
+             -> (sum_loop:u16@[], prod_loop:u16@[], sum_free:u16@[], prod_free:u16@[]) {
+  // SITE 1 — the caller closes a ring around the instance.
+  wire back:u8 = nil
+  mut (o1, o2) = split(a=a, b=b, c=back, d=d)
+  back = (o1 + bump) & 0xFF
+
+  // SITE 2 — the SAME definition with every input available up front. No ring
+  // here, so this site must not inherit site 1's interleave.
+  mut (fo1=o1, fo2=o2) = split(a=b, b=a, c=fc, d=d)
+
+  reg rsl:u16 = 0
+  reg rpl:u16 = 0
+  reg rsf:u16 = 0
+  reg rpf:u16 = 0
+  rsl = o1
+  rpl = o2
+  rsf = fo1
+  rpf = fo2
+  sum_loop  = rsl
+  prod_loop = rpl
+  sum_free  = rsf
+  prod_free = rpf
+}
+
+test twosite.both_sites_agree {
+  mut acc  = twosite
+  mut seen = 0
+  mut bad_loop = 0
+  mut bad_free = 0
+  mut bad_ctl  = 0
+  tick 6 {
+    mut av:u8    = 10 + clock
+    mut bv:u8    = 20 + (clock * 2)
+    mut dv:u8    = 3 + clock
+    mut bumpv:u8 = 7
+    mut fcv:u8   = 4 + clock
+    acc.a    = av
+    acc.b    = bv
+    acc.d    = dv
+    acc.bump = bumpv
+    acc.fc   = fcv
+    step
+    mut g_o1:u16   = av + bv
+    mut g_back:u8  = (g_o1 + bumpv) & 0xFF
+    mut g_o2:u16   = g_back * dv
+    mut g_fo2:u16  = fcv * dv
+    seen = seen + 1
+    if acc.prod_loop != g_o2 {
+      bad_loop = bad_loop + 1
+    }
+    if acc.prod_free != g_fo2 {
+      bad_free = bad_free + 1
+    }
+    if (acc.sum_loop != g_o1) or (acc.sum_free != g_o1) {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the o1 cone is outside the loop at BOTH sites")
+  assert(bad_loop == 0, "the looped instance sees the caller's back edge")
+  assert(bad_free == 0, "the loop-free instance of the same def is not disturbed by the other site")
+}

@@ -504,7 +504,7 @@ void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
     throw Lhd_error{"usage",
-                    "pass requires a subcommand: color <alg> | partition | abc | opentimer | liberty gensim | semdiff",
+                    "pass requires a subcommand: color <alg> | partition | abc | opentimer | liberty gensim | semdiff | analyze",
                     "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
@@ -771,10 +771,29 @@ void pass_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_out->path);
       res.outputs.push_back(lg_out->path);
     }
+  } else if (sub == "analyze") {
+    // READ-ONLY diagnosis. Deliberately emits no lg: — it exists to survey a
+    // design the transforming passes REFUSE, and it never fails fast, so a
+    // single invocation reports every finding in every definition.
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+      throw Lhd_error{"usage",
+                      std::format("pass analyze does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
+                      "analyze reports findings as JSONL on stdout; it transforms nothing"};
+    }
+    Eprp_var::Eprp_dict labels;
+    set_top_label(opts, var, labels, "pass.analyze");
+    merge_sets(opts, "pass.analyze", labels);
+    run_step("pass.analyze", var, labels, opts, res);
   } else {
     throw Lhd_error{"usage",
                     std::format("unknown pass subcommand '{}'", sub),
-                    "use: color <alg> | partition | single_edge | abc | opentimer | formal | liberty gensim | semdiff"};
+                    "use: color <alg> | partition | single_edge | abc | opentimer | formal | liberty gensim | semdiff "
+                    "| analyze"};
   }
 }
 

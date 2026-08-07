@@ -169,13 +169,7 @@ static Clock_cell_use clock_cell_on(hhds::Pin_class p) {
     if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask && op != Ntype_op::Sext) {
       return r;
     }
-    hhds::Pin_class a;
-    for (const auto& e : n.inp_edges()) {
-      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-        a = e.driver;
-      }
-    }
-    p = a;
+    p = gu::first_value_driver(n);
   }
   return r;
 }

@@ -176,12 +176,7 @@ Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
     if (op == Ntype_op::Get_mask || op == Ntype_op::Sext) {
       // Width / sign adjust wrappers tolg puts on a typed port read: identity
       // for phase purposes. Follow the VALUE operand (port 'a'/first edge).
-      hhds::Pin_class a;
-      for (const auto& e : n.inp_edges()) {
-        if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-          a = e.driver;
-        }
-      }
+      auto a = gu::first_value_driver(n);
       if (a.is_invalid()) {
         break;
       }
@@ -489,13 +484,63 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
       if (gu::type_op_of(dn) != Ntype_op::Get_mask && gu::type_op_of(dn) != Ntype_op::Sext) {
         break;
       }
-      hhds::Pin_class a;
-      for (const auto& e : dn.inp_edges()) {
-        if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-          a = e.driver;
+      d = gu::first_value_driver(dn);
+    }
+  }
+  // ...AND the pins that drive a CHILD's clock PORT. A gate whose output crosses
+  // into a sub-instance is just as much a clock driver as one wired to a local
+  // flop — it is simply one definition away — and collecting only the local case
+  // left minion's whole vpu/txfma cone with an unfoldable gate.
+  for (auto n : g->fast_class()) {
+    if (gu::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    auto cdef = n.get_subnode_graph();
+    if (!cdef) {
+      continue;
+    }
+    auto cio = cdef->get_io();
+    if (!cio) {
+      continue;
+    }
+    // The child's input ports some state element inside it clocks on.
+    absl::flat_hash_set<uint32_t> clk_pids;
+    for (const auto& cd : cio->get_input_pin_decls()) {
+      auto cport = cdef->get_input_pin(cd.name);
+      if (cport.is_invalid()) {
+        continue;
+      }
+      for (auto cn : cdef->fast_class()) {
+        const auto cop = gu::type_op_of(cn);
+        if (cop != Ntype_op::Flop && cop != Ntype_op::Fflop && cop != Ntype_op::Memory && cop != Ntype_op::Latch) {
+          continue;
+        }
+        auto ccd = gu::get_driver_of_sink_name(cn, "clock_pin");
+        if (!ccd.is_invalid() && ccd.get_class_index() == cport.get_class_index()) {
+          clk_pids.insert(static_cast<uint32_t>(cd.port_id));
+          break;
         }
       }
-      d = a;
+    }
+    if (clk_pids.empty()) {
+      continue;
+    }
+    for (const auto& e : n.inp_edges()) {
+      if (!clk_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
+        continue;
+      }
+      auto d = e.driver;
+      for (int hops = 0; hops < 8 && !d.is_invalid(); ++hops) {
+        if (gu::is_graph_input_pin(d) || gu::is_const_pin(d)) {
+          break;
+        }
+        auto dn = d.get_master_node();
+        clock_drivers.insert(dn.get_class_index());
+        if (gu::type_op_of(dn) != Ntype_op::Get_mask && gu::type_op_of(dn) != Ntype_op::Sext) {
+          break;
+        }
+        d = gu::first_value_driver(dn);
+      }
     }
   }
   if (clock_drivers.empty()) {
@@ -524,27 +569,74 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
     if (is_boxed && is_boxed(def.get())) {
       continue;
     }
+    // A gate cell is recognized either by holding the enable LATCH (the real
+    // ICG, prim_clk_gate) or by being entirely STATE-FREE. The second arm
+    // matters because a plain `assign clk_o = clk_i & en;` wrapper is a clock
+    // gate too, and refusing it left the flop it clocks with an unfoldable
+    // "derived clock" for want of a latch nobody wrote. Inlining a state-free
+    // callee cannot change state identity — the whole reason the latch test was
+    // conservative — so the added arm carries none of that risk.
     bool has_latch = false;
+    bool state_free = true;
     for (auto dn : def->fast_class()) {
-      if (gu::type_op_of(dn) == Ntype_op::Latch) {
+      const auto dop = gu::type_op_of(dn);
+      if (dop == Ntype_op::Latch) {
         has_latch = true;
-        break;
+      }
+      if (dop == Ntype_op::Latch || dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Memory
+          || dop == Ntype_op::Sub) {
+        state_free = false;  // a nested Sub is opaque here: treat it as state
       }
     }
-    if (has_latch) {
+    if (has_latch || state_free) {
       cells.push_back(n);
     }
   }
   int done = 0;
   for (const auto& c : cells) {  // never mutate while iterating fast_class
-    if (gu::inline_sub_instance(g, c, from_pass)) {
+    const bool ok = gu::inline_sub_instance(g, c, from_pass);
+    if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
+      std::fprintf(stderr, "[icgdbg] %s: inline cell %s -> %s\n", std::string{g->get_name()}.c_str(),
+                   gu::debug_name(c).c_str(), ok ? "ok" : "FAILED");
+    }
+    if (ok) {
       ++done;
     }
   }
   return done;
 }
 
+namespace {
+// A GATE CHAIN is walked one cell at a time, each contributing its own enable.
+// The bound is a runaway guard, not a design limit: a clock cone is
+// structurally allowed to be cyclic (nothing type-checks it), and minion's
+// deepest real chain — `cgate_txfma` -> `txfma_top` -> a per-stage re-gate — is
+// three cells.
+constexpr int kMaxGateChain = 16;
+
+[[nodiscard]] std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks,
+                                                     int depth);
+[[nodiscard]] std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks,
+                                                        int depth);
+
+// Absorb an inner cell's cone into `outer_cone`: the chain's clock is the INNER
+// cell's clock (recursively, the chain's root) and the guards ACCUMULATE — a
+// flop behind `gate(gate(clk, e0), e1)` commits only when e0 AND e1 are true.
+// `outer_inverted` is the inversion picked up between the two cells.
+void absorb_chain(Icg_cone& outer_cone, const Icg_cone& inner, bool outer_inverted) {
+  outer_cone.clock          = inner.clock;
+  outer_cone.clock_inverted = inner.clock_inverted != outer_inverted;
+  outer_cone.div            = inner.div;  // v1 refuses div != 1 at every lowering
+  outer_cone.enables.insert(outer_cone.enables.end(), inner.enables.begin(), inner.enables.end());
+}
+}  // namespace
+
 std::optional<Icg_cone> resolve_icg(const hhds::Pin_class& clock_pin, const Design_clocks& clocks) {
+  return resolve_icg_depth(clock_pin, clocks, 0);
+}
+
+namespace {
+std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth) {
   if (clock_pin.is_invalid() || gu::is_const_pin(clock_pin) || gu::is_graph_input_pin(clock_pin)) {
     return std::nullopt;
   }
@@ -582,9 +674,25 @@ std::optional<Icg_cone> resolve_icg(const hhds::Pin_class& clock_pin, const Desi
       // `~clk & en` gates the FALLING edge; an inversion on the way down to the
       // And (a latch's `Mux(cone,0,1)` shaping, or an explicit `!`) flips it too.
       icg.clock_inverted = ph.inverted != outer.inverted;
-    } else {
-      icg.enables.push_back(e.driver);
+      continue;
     }
+    // A GATE ON AN ALREADY GATED CLOCK. `is_clock` cannot see this operand as a
+    // clock — only nets a flop actually clocks on (plus a conventionally named
+    // input) are roots, and an intermediate gate output is neither — so before
+    // 2026-08-05 the inner gate was filed as an ENABLE, the cone came out with
+    // ZERO clock operands, and the whole chain was refused as "some other
+    // derived clock". minion's VPU lane cascades three of these
+    // (`cgate_txfma` -> `txfma_top` -> a per-stage re-gate), which is why the
+    // recursion lives HERE, in the shared recognizer, rather than in any one
+    // consumer's private matcher.
+    if (depth < kMaxGateChain) {
+      if (auto inner = clock_op_depth(e.driver, clocks, depth + 1)) {
+        ++n_clock;
+        absorb_chain(icg, *inner, outer.inverted);
+        continue;
+      }
+    }
+    icg.enables.push_back(e.driver);
   }
   // EXACTLY ONE clock operand, and at least one non-constant enable. Zero clock
   // operands means we could not tell which is the clock; more than one means the
@@ -597,6 +705,7 @@ std::optional<Icg_cone> resolve_icg(const hhds::Pin_class& clock_pin, const Desi
   }
   return icg;
 }
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // 2f-latch M9 — Clock_cell: recognition and materialization.
@@ -631,20 +740,42 @@ std::optional<Icg_cone> clock_cell_cone(const hhds::Node_class& n, const Design_
 }
 
 std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Design_clocks& clocks) {
+  return clock_op_depth(clock_pin, clocks, 0);
+}
+
+namespace {
+std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth) {
   if (clock_pin.is_invalid()) {
     return std::nullopt;
   }
   // A materialized cell wins: once the gate is a Clock_cell the And cone that
   // produced it is gone, and reading the cell is exact rather than a re-match.
-  const Phase outer = resolve_phase(clock_pin);
+  // `stop_at_clock_cell` is what keeps a CHAIN visible: the default walk
+  // canonicalizes straight through a cell to its reference clock, which is the
+  // right answer for a commit CLASS but silently discards the inner cell's
+  // enable — and an enable dropped from a guard is a commit that should not
+  // have happened.
+  const Phase outer = resolve_phase(clock_pin, /*stop_at_clock_cell=*/true);
   if (!outer.net.is_invalid() && !gu::is_graph_input_pin(outer.net) && !gu::is_const_pin(outer.net)) {
     if (auto c = clock_cell_cone(outer.net.get_master_node(), clocks)) {
       c->clock_inverted = c->clock_inverted != outer.inverted;
+      // A cell whose clk_ref is ITSELF a clock operation: absorb it, so a
+      // chain contributes one guard per cell.
+      if (depth < kMaxGateChain) {
+        if (const auto ref = gu::get_driver_of_sink_name(outer.net.get_master_node(), "clk_ref"); !ref.is_invalid()) {
+          if (auto inner = clock_op_depth(ref, clocks, depth + 1)) {
+            Icg_cone chained = *c;  // keeps this cell's own enable
+            absorb_chain(chained, *inner, outer.inverted);
+            return chained;
+          }
+        }
+      }
       return c;
     }
   }
-  return resolve_icg(clock_pin, clocks);
+  return resolve_icg_depth(clock_pin, clocks, depth);
 }
+}  // namespace
 
 std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
   if (def == nullptr) {
@@ -855,13 +986,7 @@ hhds::Pin_class walk_to_graph_input(hhds::Pin_class p) {
     if (op != Ntype_op::Get_mask && op != Ntype_op::Sext && op != Ntype_op::Set_mask) {
       return {};
     }
-    hhds::Pin_class a;
-    for (const auto& e : n.inp_edges()) {
-      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-        a = e.driver;
-      }
-    }
-    p = a;
+    p = gu::first_value_driver(n);
   }
   return {};
 }
@@ -953,13 +1078,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
       if (dop != Ntype_op::Get_mask && dop != Ntype_op::Sext && dop != Ntype_op::Set_mask) {
         break;
       }
-      hhds::Pin_class a;
-      for (const auto& e : dn.inp_edges()) {
-        if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-          a = e.driver;
-        }
-      }
-      d = a;
+      d = gu::first_value_driver(dn);
     }
   };
   for (auto n : g->fast_class()) {

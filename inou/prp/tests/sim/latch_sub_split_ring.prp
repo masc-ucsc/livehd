@@ -1,0 +1,146 @@
+/*
+:name: latch_sub_split_ring
+:type: simulation
+*/
+
+// The false ring closes across TWO module boundaries and the transparent latch
+// lives in the DEEPEST callee. Companion to `hier_latch_split_ring.prp`, which
+// keeps the latch in the caller; this one moves the state that must not be
+// prematurely cut down into a definition the caller cannot see inside.
+//
+//     a,b -> leaf.s1 -> mid.t1 -> ring -> mid.m3 -> leaf.r -> lat -> leaf.s2 -> mid.t2
+//
+// Both `mid` and `leaf` are entered TWICE per period, in dependency order, so
+// neither can be scheduled as one atomic call. The bit-level DAG is acyclic:
+// `s1` reads only {p,q} and `s2` only {r}.
+//
+// WHY THIS IS THE HARDER TWIN. `leaf` OWNS the state, so the two workarounds
+// available to a caller-side latch are both gone. Inlining the callee to break
+// the ring has to copy a state element per site (the machinery
+// `comb_false_loop_stateful_sub.prp` pins), and pre-binding the callee's output
+// as if it were a plain state read is WRONG here: while `g` is high `s2` is a
+// combinational function of `r`, which the caller drives this period. A model
+// that pre-binds `s2` reports the previous period's value on every open cycle
+// and is right on every closed one -- see c=1/2/5 versus the rest below.
+//
+// The gate is a top-level INPUT routed down through `mid` unchanged. A latch
+// enable driven by a FLOP is sampled PRE-edge by `lhd sim` and POST-edge by
+// real hardware; that one-cycle divergence is a separate issue and folding it
+// in would make a failure here ambiguous.
+//
+// GOLDENS -- hand-written Icarus twin (all three modules retyped from this
+// source, never LiveHD's emitter), end-of-period sampling after both edges:
+//
+//     c    : 0   1   2   3   4   5   6   7
+//     up   : 37  41  45  49  53  57  61  65
+//     down : 0   45  50  50  50  65  65  65
+//     ctl  : 25  41  45  45  33  33  61  61
+//
+// `down` starts at the latch's reset value because `g` is low at c=0, tracks
+// `ring` on the open cycles 1/2/5, and holds elsewhere. `up` moves on every
+// cycle, so a stuck `down` cannot be blamed on dead stimulus.
+//
+// WHAT THIS FIXTURE IS ACTUALLY GUARDING -- the per-definition output-cone
+// split has to compose THROUGH A NESTED SUB-INSTANCE. `mid` needs the same
+// treatment `hier_latch_split_ring.prp` gets (`t1` from {m1,m2}, `t2` from
+// {m3}, emitted as separate `__settle_g<N>` entries so the caller can compute
+// `ring` between them), but `mid` is not a leaf: it instantiates `leaf`, so
+// splitting it requires the inner Sub to contribute ITS out-port -> in-ports
+// summary to the outer one. If that composition is missing, `mid` stays atomic
+// and cgen.sim refuses the design outright:
+//
+//     module `latch_sub_split_ring.midtop` has a combinational loop the
+//     single-pass sim schedule cannot order: `sub_32:u_mid_t1_0`
+//     (a combinational-cycle back-edge) was read before it could be computed
+//
+// That is not hypothetical -- a build of `inou.cgen.sim` from earlier on
+// 2026-08-06 refused exactly this, while a two-level variant of the SAME design
+// (the middle module deleted, ring and stimulus unchanged) passed and printed
+// the `up`/`down` goldens tabulated above. So the latch is not the obstacle and
+// neither is the ring: the nested instance is the whole content of this test,
+// and the two-level companion fixture is the control that stays green either
+// way. Green as of 2026-08-06.
+
+// LEAF -- two independent cones, the second behind a transparent latch.
+mod leaf::[timecheck=false](p:u8, q:u8, r:u8, g:bool)
+                         -> (s1:u16@[], s2:u16@[]) {
+  s1 = p + q                 // cone {p, q}: pure comb, feeds the caller's ring
+  reg lat:u8:[latch=true] = 0
+  if g {
+    lat = (r + 1) & 0xFF     // cone {r}: transparent while `g`, held otherwise
+  }
+  s2 = lat
+}
+
+// MID -- passes the ring through to `leaf` and adds state of its own.
+mod mid::[timecheck=false](m1:u8, m2:u8, m3:u8, g:bool)
+                        -> (t1:u16@[], t2:u16@[], t3:u16@[]) {
+  mut (s1, s2) = leaf(p=m1, q=m2, r=m3, g=g)
+  t1 = s1
+  t2 = s2
+  // CONTROL state, one level down: an ordinary flop on inputs that never enter
+  // the ring, so a failure above is attributable to the ring.
+  reg h:u8 = 0
+  h  = (m1 ^ m2) & 0xFF
+  t3 = h
+}
+
+// `::[timecheck=false]` + `@[]` outputs: upass.tolg treats a Sub as ONE atomic
+// node in its acyclicity check, so an instance-level ring is refused there
+// before any backend sees it. Same annotations minion's generated Pyrope uses.
+pub mod midtop::[timecheck=false](a:u8, b:u8, k:u8, g:bool)
+     -> (up:u16@[], down:u16@[], ctl:u16@[]) {
+  wire ring:u8 = nil
+  mut (t1, t2, t3) = mid(m1=a, m2=b, m3=ring, g=g)
+
+  // THE FALSE EDGE, two boundaries deep: the caller feeds `mid`'s first output
+  // back into the input `mid`'s second output needs.
+  ring = (t1 + k) & 0xFF
+
+  up   = t1
+  down = t2
+  ctl  = t3
+}
+
+test midtop.latch_in_the_deepest_callee {
+  mut acc  = midtop
+  mut seen = 0
+  mut bad_up   = 0
+  mut bad_down = 0
+  mut bad_ctl  = 0
+  mut g_lat:u16 = 0             // the leaf latch's state, carried across ticks
+  tick 8 {
+    mut av:u8   = 7 + clock
+    mut bv:u8   = 30 + (clock * 3)
+    mut kv:u8   = 2 + clock
+    mut gv:bool = (clock == 1) or (clock == 2) or (clock == 5)
+    acc.g = gv
+    acc.a = av
+    acc.b = bv
+    acc.k = kv
+    step
+    // The golden, in the only order that exists: leaf's first cone, then the
+    // caller's ring, then leaf's latched second cone.
+    mut g_s1:u16   = av + bv
+    mut g_ring:u16 = (g_s1 + kv) & 0xFF
+    if gv {
+      g_lat = (g_ring + 1) & 0xFF
+    }
+    mut g_ctl:u16 = (av ^ bv) & 0xFF
+
+    seen = seen + 1
+    if acc.up != g_s1 {
+      bad_up = bad_up + 1
+    }
+    if acc.down != g_lat {
+      bad_down = bad_down + 1
+    }
+    if acc.ctl != g_ctl {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 8, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_up == 0, "CONTROL: the callee cone that FEEDS the ring is correct")
+  assert(bad_ctl == 0, "CONTROL: the mid-level flop outside the ring loads every tick")
+  assert(bad_down == 0, "the latched cone two boundaries down tracks the ring in the SAME period")
+}

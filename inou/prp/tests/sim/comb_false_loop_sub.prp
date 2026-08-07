@@ -1,0 +1,96 @@
+/*
+:name: comb_false_loop_sub
+:type: simulation
+:verilator: comb_false_loop_sub_vtb.cpp
+:vtop: ftop
+*/
+
+// todo_sim_pipeline.md Phase 0 — the CANONICAL false combinational loop through
+// a pure-comb sub-instance, as a `tests/sim/` testbench that checks the VALUES.
+//
+// THE SHAPE. `split` is two independent cones in one callee: `o1 = a + b` reads
+// only {a,b}, `o2 = c * d` reads only {c,d}. The caller closes a ring OUTSIDE
+// the instance — `o1 -> c -> o2` — so at the INSTANCE level it is
+// Sub -> adder -> Sub, a cycle, while the bit-level DAG has none.
+//
+// WHY A VALUE TEST AND NOT A REFUSAL TEST. This shape lives today only in
+// lhd/tests/cgen_sim_comb_loop_test.sh, which checks that the design COMPILES,
+// and in the equivalence fixtures. "No refusal" is the weaker half of the
+// claim: the failure mode this class actually produced was a SILENT one — the
+// fed-back input emitted as a literal 0 — so the value is the property worth
+// pinning. `c` here is deliberately not a constant, so a dropped back edge
+// shows up as a wrong `prod`, not as a coincidence.
+//
+// It passes today through cgen_sim's stopgap (`flatten_false_loop_subs` inlines
+// the single pure-comb callee before scheduling). Step 5 of the plan replaces
+// that with per-partition callee methods — this fixture is what proves the
+// replacement keeps the same numbers, and `sum` is the control that stays
+// correct either way.
+//
+// WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
+// node-level acyclicity check BEFORE any backend, and a `Sub` is an ordinary
+// node in that check's SCC scan (upass_tolg.cpp:6545) — so an instance-level
+// ring is refused there and `--emit verilog` fails identically to `lhd sim`.
+// Opting out of the σ-timing check is what lets the design reach the emitter,
+// which is the only way this fixture can be what it is for. It is not a trick:
+// minion's own generated Pyrope carries exactly these two annotations, for
+// exactly this reason.
+//
+// STATUS: LIVE since 2026-08-05, carried by cgen_sim's STOPGAP —
+// `flatten_false_loop_subs` inlines the callee before scheduling. That is
+// exactly why the VALUES are checked here: step 5 replaces the inliner with
+// per-partition callee methods, and this fixture is what proves the replacement
+// keeps the same numbers.
+comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+  o1 = a + b      // cone {a, b} only
+  o2 = c * d      // cone {c, d} only
+}
+
+pub mod ftop::[timecheck=false](a:u8, b:u8, d:u8, bump:u8) -> (sum:u16@[], prod:u16@[]) {
+  wire back:u8 = nil
+  mut (o1, o2) = split(a=a, b=b, c=back, d=d)
+  // THE FALSE EDGE: the caller feeds o1 back into the input o2 needs. o1 does
+  // not depend on `c`, so a correct schedule exists — it just is not the
+  // all-inputs-then-all-outputs atomic call.
+  back = (o1 + bump) & 0xFF
+
+  reg rs:u16 = 0
+  reg rp:u16 = 0
+  rs   = o1
+  rp   = o2
+  sum  = rs
+  prod = rp
+}
+
+test ftop.false_loop_values {
+  mut acc  = ftop
+  mut seen = 0
+  mut bad_sum  = 0
+  mut bad_prod = 0
+  tick 6 {
+    mut av:u8   = 10 + clock
+    mut bv:u8   = 20 + (clock * 2)
+    mut dv:u8   = 3 + clock
+    mut bumpv:u8 = 7
+    acc.a    = av
+    acc.b    = bv
+    acc.d    = dv
+    acc.bump = bumpv
+    step
+    // Golden, evaluated in the only order that exists: o1 first, then the
+    // caller's `back`, then o2.
+    mut g_o1:u16 = av + bv
+    mut g_back:u8 = (g_o1 + bumpv) & 0xFF
+    mut g_o2:u16 = g_back * dv
+    seen = seen + 1
+    if acc.sum != g_o1 {
+      bad_sum = bad_sum + 1
+    }
+    if acc.prod != g_o2 {
+      bad_prod = bad_prod + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_sum == 0, "CONTROL: the cone OUTSIDE the false loop is correct")
+  assert(bad_prod == 0, "the cone fed by the caller's back edge sees the real value, not a dropped 0")
+}

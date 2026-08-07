@@ -1,0 +1,83 @@
+/*
+:name: comb_false_loop_shared_logic
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 5 anchor) — two callee outputs that SHARE
+// an internal fanout cone, while only ONE of them participates in caller
+// feedback.
+//
+// WHY THIS SHAPE EXISTS. Step 5's partition ABI says a shared value has ONE
+// owner and must survive ACROSS partition calls: `mid` here is read by both
+// outputs, so it cannot live as a C++ local inside whichever partition method
+// runs first. The naive repairs both show up as wrong numbers rather than as a
+// refusal — recomputing `mid` in the second partition is only invisible while
+// it is cheap and pure, and dropping it emits a 0.
+//
+// The caller closes the ring on `o2` only, so `o1` (and therefore `mid`) is
+// ready before the back edge exists. That is exactly the ordering a per-
+// partition schedule must find and an atomic call cannot.
+//
+//
+// WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
+// node-level acyclicity check BEFORE any backend, and a `Sub` is an ordinary
+// node in that check's SCC scan (upass_tolg.cpp:6545) — so an instance-level
+// ring is refused there, and `--emit verilog` fails identically to `lhd sim`.
+// Opting out of the σ-timing check is what lets the design reach the emitter,
+// which is the only way this fixture can be what it is for: a VALUE test, and
+// a Verilator differential. It is not a trick — minion's own generated Pyrope
+// carries exactly these two annotations for exactly this reason.
+// STATUS: LIVE since 2026-08-05 via the inliner, which sidesteps the question by
+// making `mid` an ordinary local. Step 5 has to answer it for real — ONE owner
+// for a value that crosses two partition calls — and this fixture is the
+// regression that says whether it did.
+comb sharer(a:u8, b:u8, c:u8) -> (o1:u16, o2:u16) {
+  // ONE shared cone read by BOTH outputs.
+  mut mid:u16 = (a + b) & 0xFF
+  o1 = mid + 1
+  o2 = mid + c    // ... and this one also depends on the caller's back edge
+}
+
+pub mod shtop::[timecheck=false](a:u8, b:u8, bump:u8) -> (q1:u16@[], q2:u16@[]) {
+  wire back:u8 = nil
+  mut (o1, o2) = sharer(a=a, b=b, c=back)
+  // THE FALSE EDGE: only o2 depends on it. o1 and the shared `mid` do not.
+  back = (o1 + bump) & 0xFF
+
+  reg r1:u16 = 0
+  reg r2:u16 = 0
+  r1 = o1
+  r2 = o2
+  q1 = r1
+  q2 = r2
+}
+
+test shtop.shared_cone_survives_the_partition_boundary {
+  mut acc  = shtop
+  mut seen = 0
+  mut bad_ctl = 0
+  mut bad_fed = 0
+  tick 6 {
+    mut av:u8    = 10 + clock
+    mut bv:u8    = 20 + (clock * 2)
+    mut bumpv:u8 = 7
+    acc.a    = av
+    acc.b    = bv
+    acc.bump = bumpv
+    step
+    mut g_mid:u16  = (av + bv) & 0xFF
+    mut g_o1:u16   = g_mid + 1
+    mut g_back:u8  = (g_o1 + bumpv) & 0xFF
+    mut g_o2:u16   = g_mid + g_back
+    seen = seen + 1
+    if acc.q1 != g_o1 {
+      bad_ctl = bad_ctl + 1
+    }
+    if acc.q2 != g_o2 {
+      bad_fed = bad_fed + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the output outside the feedback is correct")
+  assert(bad_fed == 0, "the shared internal cone reaches the fed-back output with ONE owner")
+}

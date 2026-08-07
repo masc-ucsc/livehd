@@ -1,0 +1,89 @@
+/*
+:name: comb_false_loop_stateful_sub
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 5 anchor) — the false-loop shape through a
+// callee that ALSO OWNS STATE. This is the variant that proves the current
+// workaround has to go, not just be relaxed.
+//
+// WHY IT IS THE HARD ONE. cgen_sim's stopgap for a false loop through an
+// instance is to INLINE the callee (`flatten_false_loop_subs`), and the
+// stateful case needs a fixpoint inliner that copies the whole body per site —
+// state identity and all. The alternative hack, marking a stateful Sub as a
+// loop break, is worse and silent: the boundary "breaks" the ring by feeding a
+// BOGUS value into the flop's next state, so the comb passthrough looks right
+// while the registered output is wrong ONE CYCLE LATER (the failure mode
+// inou/cgen/tests/comb_loop/var_b_stateful_passthru.v records).
+//
+// Step 5 dissolves it with no duplication at all: the caller invokes the
+// callee's `o1` partition, computes `back`, then invokes the `o2` partition,
+// and the callee's flop stays exactly one flop.
+//
+// THE VALUES. `acc` is the callee's own register, so `q_state` is a full period
+// behind `q_pass` — and it is fed BY the back edge, which is what makes a
+// bogus-value break visible instead of harmless. `q_pass` is the control: it
+// does not depend on the back edge at all.
+//
+//
+// WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
+// node-level acyclicity check BEFORE any backend, and a `Sub` is an ordinary
+// node in that check's SCC scan (upass_tolg.cpp:6545) — so an instance-level
+// ring is refused there, and `--emit verilog` fails identically to `lhd sim`.
+// Opting out of the σ-timing check is what lets the design reach the emitter,
+// which is the only way this fixture can be what it is for: a VALUE test, and
+// a Verilator differential. It is not a trick — minion's own generated Pyrope
+// carries exactly these two annotations for exactly this reason.
+// STATUS: LIVE since 2026-08-05, carried by the STATEFUL fixpoint inliner
+// (cgen_sim.cpp:1332-1405), which copies the whole callee body per site, state
+// and all — the machinery step 5 deletes. This is the sharpest of the four: it
+// passes today only because of the thing the plan is trying to remove.
+mod statesplit::[timecheck=false](a:u8, b:u8, c:u8) -> (o1:u16@[], o2:u16@[]) {
+  o1 = a + b        // pure comb passthrough, cone {a,b}
+  reg acc:u16 = 0
+  acc = c + 1       // state fed ONLY by the caller's back edge
+  o2  = acc
+}
+
+pub mod sttop::[timecheck=false](a:u8, b:u8, bump:u8) -> (q_pass:u16@[], q_state:u16@[]) {
+  wire back:u8 = nil
+  mut (o1, o2) = statesplit(a=a, b=b, c=back)
+  back = (o1 + bump) & 0xFF
+
+  reg rp:u16 = 0
+  rp     = o1
+  q_pass = rp
+  q_state = o2
+}
+
+test sttop.stateful_callee_keeps_one_state {
+  mut acc  = sttop
+  mut seen = 0
+  mut bad_ctl   = 0
+  mut bad_state = 0
+  mut prev_back:u16 = 0
+  tick 6 {
+    mut av:u8    = 10 + clock
+    mut bv:u8    = 20 + (clock * 2)
+    mut bumpv:u8 = 7
+    acc.a    = av
+    acc.b    = bv
+    acc.bump = bumpv
+    step
+    mut g_o1:u16  = av + bv
+    mut g_back:u16 = (g_o1 + bumpv) & 0xFF
+    seen = seen + 1
+    if acc.q_pass != g_o1 {
+      bad_ctl = bad_ctl + 1
+    }
+    // The callee's register loaded `back + 1` at THIS rise, so it reads back as
+    // this period's value — the same-period relationship a bogus break destroys.
+    if acc.q_state != (g_back + 1) {
+      bad_state = bad_state + 1
+    }
+    prev_back = g_back
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the callee's pure passthrough is correct")
+  assert(bad_state == 0, "the callee's own register latched the REAL back-edge value")
+}

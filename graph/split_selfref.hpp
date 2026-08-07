@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::graph_util {
@@ -35,5 +36,15 @@ int split_packed_selfref_wires(hhds::Graph* g);
 // 299/300 vectors wrong at O0, 0/300 at O1, from the SAME source).
 // Returns the number of instances inlined.
 int flatten_false_loop_subs(hhds::Graph* g);
+
+// The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
+//
+// `strict` picks the scheduling model. FALSE cuts a `Sub` call and a `Memory`
+// read (both are boundaries to an event-driven simulator, and to the splitter
+// above). TRUE treats them as ordinary nodes, which is what `inou.cgen.sim`'s
+// single-pass `forward_class` walk does — so a node reported under `strict` but
+// not otherwise is on a cycle the SCHEDULE manufactures rather than one the
+// design has. Registers always cut: a q is last period's value.
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out);
 
 }  // namespace livehd::graph_util

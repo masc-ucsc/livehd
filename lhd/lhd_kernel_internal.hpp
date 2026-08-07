@@ -112,6 +112,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {            "formal",          "pass.lec",     Set_pass::List::common},
     {        "formal.lec",          "pass.lec",     Set_pass::List::specific},
     {      "pass.semdiff",      "pass.semdiff",     Set_pass::List::all},
+    {      "pass.analyze",      "pass.analyze",     Set_pass::List::all},
 };
 
 struct Ir_inputs {

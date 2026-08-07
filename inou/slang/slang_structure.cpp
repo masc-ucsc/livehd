@@ -2455,9 +2455,6 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
   bool has_field = false;
   for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
     const auto& fct = f.getType().getCanonicalType();
-    if (fct.isPackedUnion()) {
-      return false;  // union field — still deferred (overlapping lanes have no leaf identity)
-    }
     // A NESTED packed struct is flattened RECURSIVELY into dotted leaves
     // (`req.read_en`), so a field access lowers identically at every depth.
     // It used to disqualify the WHOLE port, which kept it a packed word — and
@@ -2474,20 +2471,21 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
       has_field = true;
       continue;
     }
-    if (!fct.isIntegral()) {
+    if (!fct.isIntegral() || fct.getBitWidth() == 0) {
       return false;
     }
-    if (fct.isPackedArray()) {
-      // A plain packed VECTOR (`logic [7:0]`, element = 1-bit scalar) is fine;
-      // a multi-dim packed array / array-of-anything-wider field is not.
-      const auto* et = fct.getArrayElementType();
-      if (et == nullptr || et->getBitWidth() != 1) {
-        return false;
-      }
-    }
-    if (fct.getBitWidth() == 0) {
-      return false;
-    }
+    // Every other integral field is ONE leaf, wide or narrow. That now
+    // includes a multi-dim packed array, a packed array-of-struct, and a
+    // packed union: each rides as a single WIDE leaf (its flat bit width) —
+    // in-leaf selects stay field-relative slices and partial writes splice
+    // via emit_bundle_port_rmw's per-leaf set_mask, so no new lowering is
+    // needed. The point of NOT demoting the whole port over one such field:
+    // a packed port is one pid, and writing field X while reading a DISJOINT
+    // field Y then looks like a same-cycle self-loop — the false ring that
+    // refused lhdsuite minion's id_vpu_ctrl / dcache_ctrl_resp buses. A leaf
+    // with interior structure (union lanes, struct elements) keeps ONE pid;
+    // if a ring threads through disjoint bits INSIDE it, the sim's bit-level
+    // slice groups (graph/port_reach) take over from there.
     has_field = true;
   }
   return has_field;
@@ -4744,6 +4742,77 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   size_t                                           n_outputs_total = 0;
   bool                                             any_bundle_out  = false;
 
+  // Route bits between two leaf tilings of the SAME packed layout WITHOUT a
+  // whole-struct reassembly. The two sides can differ in GRAIN — a bundle
+  // PORT flattens recursively (`ctrl.req.thread_id`) while a leaf-split
+  // struct VAR splits at top level (`ctrl.req` is one leaf) — but both tile
+  // the same bit space, so every target field is either tiled exactly by
+  // CONTAINED source leaves or is a slice of ONE CONTAINING source leaf.
+  // Plans first, emits only on a fully routable mapping (returns false
+  // otherwise, with nothing emitted — callers fall back to the flat path).
+  // The exact-cover same-sign case passes the value through untouched: the
+  // common leaf-to-leaf connect emits ZERO shift/or/mask glue, which is what
+  // keeps disjoint fields on separate nets end-to-end (a packed reassembly
+  // between two instances unions every field's cone into one node — the
+  // false same-cycle ring that refused lhdsuite minion's core<->dcache and
+  // core<->vpu control buses).
+  auto map_leaves = [&](const std::vector<Struct_info::Field>&                                       tgt,
+                        const std::vector<Struct_info::Field>&                                       src,
+                        const std::function<std::string(const Struct_info::Field&)>&                 read_src,
+                        const std::function<void(const Struct_info::Field&, const std::string&)>&    emit_tgt) -> bool {
+    std::vector<std::vector<const Struct_info::Field*>> tiled(tgt.size());
+    std::vector<const Struct_info::Field*>              container(tgt.size(), nullptr);
+    for (size_t i = 0; i < tgt.size(); ++i) {
+      const auto& tf   = tgt[i];
+      int64_t     sum  = 0;
+      for (const auto& sf : src) {
+        if (sf.off >= tf.off && sf.off + sf.bits <= tf.off + tf.bits) {
+          tiled[i].push_back(&sf);
+          sum += sf.bits;
+        }
+      }
+      if (sum == tf.bits && !tiled[i].empty()) {
+        continue;
+      }
+      tiled[i].clear();
+      for (const auto& sf : src) {
+        if (tf.off >= sf.off && tf.off + tf.bits <= sf.off + sf.bits) {
+          container[i] = &sf;
+          break;
+        }
+      }
+      if (container[i] == nullptr) {
+        return false;  // grains cross a boundary: not routable leaf-wise
+      }
+    }
+    for (size_t i = 0; i < tgt.size(); ++i) {
+      const auto& tf = tgt[i];
+      if (tiled[i].size() == 1 && tiled[i][0]->off == tf.off && tiled[i][0]->bits == tf.bits
+          && tiled[i][0]->is_signed == tf.is_signed) {
+        emit_tgt(tf, read_src(*tiled[i][0]));  // pure alias — no glue
+        continue;
+      }
+      std::string v;
+      if (!tiled[i].empty()) {
+        for (const auto* sf : tiled[i]) {
+          auto sv = to_pattern(to_int_value(read_src(*sf)), sf->bits, sf->is_signed);
+          if (sf->off != tf.off) {
+            sv = builder_.create_shl_stmts(sv, std::to_string(sf->off - tf.off));
+          }
+          v = v.empty() ? sv : builder_.create_bit_or_stmts({v, sv});
+        }
+      } else {
+        auto sv = to_pattern(to_int_value(read_src(*container[i])), container[i]->bits, container[i]->is_signed);
+        v       = extract_field(sv, tf.off - container[i]->off, tf.bits);
+      }
+      if (tf.is_signed) {
+        v = builder_.create_sext_stmts(v, std::to_string(tf.bits - 1));
+      }
+      emit_tgt(tf, v);
+    }
+    return true;
+  };
+
   // M7: an input connection to a child BUNDLE port passes ONE NAMED ACTUAL PER
   // LEAF — `store(ref "<port>.<leaf>", v)` on the func_call — exactly mirroring
   // the bundle OUTPUT side below, which already binds each leaf by its dotted
@@ -4762,20 +4831,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   //
   // expr == nullptr is the unconnected-input x per field.
   auto build_bundle_actual = [&](const slang::ast::PortSymbol& bport, const slang::ast::Expression* aexpr) -> void {
-    auto pfields    = struct_port_fields(bport.getType());
-    auto same_shape = [&](const std::vector<Struct_info::Field>& of) {
-      if (of.size() != pfields.size()) {
-        return false;
-      }
-      for (size_t i = 0; i < pfields.size(); ++i) {
-        if (of[i].name != pfields[i].name || of[i].off != pfields[i].off || of[i].bits != pfields[i].bits
-            || of[i].is_signed != pfields[i].is_signed) {
-          return false;
-        }
-      }
-      return true;
-    };
-    bool done = false;
+    auto pfields = struct_port_fields(bport.getType());
+    bool done    = false;
     if (aexpr == nullptr) {  // unconnected bundle input: every field reads x
       for (const auto& f : pfields) {
         in_args.emplace_back(
@@ -4788,28 +4845,35 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       while (pe->kind == ExpressionKind::Conversion) {
         pe = &pe->as<slang::ast::ConversionExpression>().operand();
       }
-      if (pe->kind == ExpressionKind::NamedValue) {
-        const auto& asym = pe->as<slang::ast::NamedValueExpression>().symbol;
-        if (const auto* bsi = bundle_port_of(asym)) {
-          if (same_shape(bsi->fields)) {  // (b) the parent's OWN bundle port: per-leaf reads
-            auto aname = bundle_port_body_base(asym);
-            for (const auto& f : pfields) {
-              in_args.emplace_back(absl::StrCat(bport.name, ".", f.name), read_leaf(absl::StrCat(aname, ".", f.name)));
-            }
-            done = true;
-          }
+      // A peeled Conversion may change the flat WIDTH (packed casts are
+      // bit-pattern-preserving, so equal width means offsets line up); the
+      // leaf routing below is offset-based, so gate on width equality.
+      if (pe->kind == ExpressionKind::NamedValue
+          && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(bport.getType()).bits) {
+        const auto& asym     = pe->as<slang::ast::NamedValueExpression>().symbol;
+        auto        emit_arg = [&](const Struct_info::Field& tf, const std::string& v) {
+          in_args.emplace_back(absl::StrCat(bport.name, ".", tf.name), v);
+        };
+        if (const auto* bsi = bundle_port_of(asym)) {  // (b) the parent's OWN bundle port: per-leaf reads
+          const auto afields = bsi->fields;  // copy: builder calls can rehash the map
+          auto       aname   = bundle_port_body_base(asym);
+          done               = map_leaves(
+              pfields, afields, [&](const Struct_info::Field& sf) { return read_leaf(absl::StrCat(aname, ".", sf.name)); },
+              emit_arg);
         } else if (is_scalar_struct_var(asym)) {  // (a) a local bundle struct var: per-leaf reads
           if (!declared_.contains(&asym)) {
             declare_value_symbol(asym, /*force_reg=*/false);
           }
-          if (auto it = struct_var_info_.find(&asym); it != struct_var_info_.end() && same_shape(it->second.fields)) {
+          if (auto it = struct_var_info_.find(&asym); it != struct_var_info_.end()) {
             const bool a_is_tuple = it->second.is_tuple;
+            const auto afields    = it->second.fields;  // copy: builder calls can rehash the map
             auto       aname      = lname_of(asym);
-            for (const auto& f : pfields) {
-              in_args.emplace_back(absl::StrCat(bport.name, ".", f.name),
-                                   a_is_tuple ? read_struct_field_get(aname, f.name) : read_leaf(absl::StrCat(aname, ".", f.name)));
-            }
-            done = true;
+            done                  = map_leaves(
+                pfields, afields,
+                [&](const Struct_info::Field& sf) {
+                  return a_is_tuple ? read_struct_field_get(aname, sf.name) : read_leaf(absl::StrCat(aname, ".", sf.name));
+                },
+                emit_arg);
           }
         }
       }
@@ -4917,10 +4981,69 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   for (const auto& oc : outs) {
     if (oc.bundle) {
       // M7: read each leaf via ONE tuple_get with the DOTTED name (the form
-      // tolg matches via its quoted-string path), reassemble the flat value in
-      // packed order, and route through assign_to (which re-splits onto a
-      // bundle-var target's leaves when applicable).
-      auto        pfields = struct_port_fields(oc.port->getType());
+      // tolg matches via its quoted-string path). When the actual is itself a
+      // leaf-carrying target (the parent's own bundle port, or a leaf-split
+      // struct var), route LEAF-TO-LEAF via map_leaves — the flat
+      // reassemble-then-resplit below unions every child output's cone into
+      // one Or node, which reads back as "every field depends on every
+      // input" and manufactures false same-cycle rings between instances
+      // (minion's intpipe<->dcache control bus). The flat path remains as
+      // the general fallback (width-changing conversions, exotic actuals).
+      auto pfields       = struct_port_fields(oc.port->getType());
+      auto read_out_leaf = [&](const Struct_info::Field& f) {
+        auto tg = builder_.add_child(Lnast_ntype::create_tuple_get());
+        auto t  = builder_.create_lnast_tmp();
+        ln.add_child(tg, Lnast_node::create_ref(t));
+        ln.add_child(tg, Lnast_node::create_ref(result));
+        ln.add_child(tg, Lnast_node::create_const(absl::StrCat(oc.port->name, ".", f.name)));
+        return t;
+      };
+      {
+        const slang::ast::Expression* pe = oc.expr;
+        while (pe->kind == ExpressionKind::Conversion) {
+          pe = &pe->as<slang::ast::ConversionExpression>().operand();
+        }
+        bool routed = false;
+        if (pe->kind == ExpressionKind::NamedValue
+            && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(oc.port->getType()).bits) {
+          const auto& asym  = pe->as<slang::ast::NamedValueExpression>().symbol;
+          bool        noted = false;
+          auto        note_once = [&]() {
+            if (!noted) {
+              note_write(asym, current_assign_nonblocking_, oc.expr->sourceRange.start());
+              noted = true;
+            }
+          };
+          if (const auto* bsi = bundle_port_of(asym)) {
+            const auto afields = bsi->fields;  // copy: builder calls can rehash the map
+            auto       base    = bundle_port_body_base(asym);
+            routed             = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
+              note_once();
+              emit_leaf_store(absl::StrCat(base, ".", tf.name), v);
+            });
+          } else if (is_scalar_struct_var(asym)) {
+            if (!declared_.contains(&asym)) {
+              declare_value_symbol(asym, /*force_reg=*/false);
+            }
+            if (auto it = struct_var_info_.find(&asym); it != struct_var_info_.end()) {
+              const bool a_is_tuple = it->second.is_tuple;
+              const auto afields    = it->second.fields;  // copy: builder calls can rehash the map
+              auto       aname      = lname_of(asym);
+              routed                = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
+                note_once();
+                if (a_is_tuple) {
+                  emit_struct_field_set(aname, tf.name, v);
+                } else {
+                  emit_leaf_store(absl::StrCat(aname, ".", tf.name), v);
+                }
+              });
+            }
+          }
+        }
+        if (routed) {
+          continue;
+        }
+      }
       std::string acc;
       for (const auto& f : pfields) {
         auto tg = builder_.add_child(Lnast_ntype::create_tuple_get());

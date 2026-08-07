@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-simqa — WaveformQA external benchmark harness</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-simqa</strong> WaveformQA external benchmark harness for the sim query API</h1>
+
+<p>Evaluate the <a class="xref" href="2f-sim.html">2f-sim</a> query API against
+  <a href="https://arxiv.org/abs/2607.20638">WaveformQA: Benchmarking LLM Temporal
+  Reasoning on Digital Waveforms</a> (Liu, Cummings, Vadlamudi; abridged version in
+  IEEE ICLAD 2026 — cite the venue as the durable reference). WaveformQA supplies 360
+  questions with programmatically generated ground truth across eight categories × three
+  subcategories, over 13 VCD traces from five open-source RISC-V cores (PicoRV32 338
+  signals, DarkRISCV 394, SERV 957, biRISC-V 1,642–2,295 across its four traces, Ibex
+  4,185), with windows extracted at five transition thresholds (5,000 / 7,000 / 15,000 /
+  30,000 / 60,000 — five discrete sizes, not a continuum). Workloads are custom
+  firmware per core: fibonacci, CoreMark, bubblesort, Dhrystone, simulated with Icarus
+  Verilog or Verilator.</p>
+
+<p>This is a <strong>benchmark harness, not a product gate</strong>: 2f-sim ships on its
+  own subtasks plus its internal engine-oracle smoke. The benchmark target is
+  <strong>agent plus tool</strong>, not an agent reading a raw waveform: for every
+  question, the coding agent gets the natural-language question, the
+  <code>signals</code> result, and the v1 query schema; it emits JSON queries, invokes
+  <code>lhd sim --query</code>, and returns the final answer, with the complete
+  query/tool transcript retained.</p>
+
+<h2>Artifact status — BLOCKED (checked 2026-08-02)</h2>
+
+<ul>
+<li>The paper's cited code/data repository,
+  <code>github.com/tenstorrent/waveformqa</code>, returns 404 (verified
+  unauthenticated and via authenticated <code>gh api</code>); no mirror exists on
+  GitHub or Hugging Face. The published questions, ground truth, VCDs, event-time JSON
+  and the question generator are all unavailable.</li>
+<li>No dataset license exists anywhere yet — the paper carries only IEEE text copyright
+  plus the arXiv preprint license. <strong>Gating rule: do NOT vendor WaveformQA
+  questions, answers, traces or generator code into any LiveHD repo until the upstream
+  repository publishes an explicit license permitting redistribution.</strong> When it
+  appears, the harness fetches by pinned URL + checksum into a gitignored cache at run
+  time; if no acceptable license ever appears, the harness runs only on internally
+  generated question sets.</li>
+<li>What is independently available today: RTL for all five cores
+  (YosysHQ/picorv32 ISC, darklife/darkriscv BSD-3-Clause, olofk/serv ISC,
+  ultraembedded/biriscv Apache-2.0, lowRISC/ibex Apache-2.0) — pin those repos now.
+  The matching firmware images and exact simulation setups live only in the unreleased
+  repo, so exact trace equivalence cannot be checked until it ships; the paper does
+  describe the event-time JSON format (Appendix VI-A) and the generator method
+  (select signal, sample time point, compute answer from trace, f-string template)
+  well enough to reimplement.</li>
+<li>Fallback ladder while blocked: (a) reimplement the generator and the event-time
+  JSON converter from the paper's descriptions, producing WaveformQA-<em>style</em>
+  questions with the same 24-subcategory stratification, labeled
+  <em>reimplemented-baseline</em> (not directly comparable to published numbers);
+  (b) swap in the published artifacts at a pinned commit with checksums when
+  released. Nothing downstream may be worded or built as unconditional on the
+  artifact.</li>
+</ul>
+
+<h2>Layer ordering — adapter first</h2>
+
+<p>Build the <strong>VCD-replay adapter first</strong>. It is harness-only: it
+  implements the same <code>sim_query</code> request/result contract over a parsed VCD
+  file, so engine-oracle and query-synthesis scoring can run on published (or
+  regenerated) traces without re-simulation, and it doubles as the coverage
+  classifier's oracle (below). 2f-sim's "no VCD parser as a prerequisite" boundary
+  constrains the shipped query engine, not this harness. Adapter-scored results are
+  labeled <em>semantics-only</em>; only real <code>lhd sim</code> re-simulation
+  produces the speed/cost numbers (checkpoint selection, replay time), and that track
+  is staged as the stretch layer.</p>
+
+<h2>Coverage manifest — mechanical, frozen</h2>
+
+<p>WaveformQA is an event-time benchmark while v1 observes one settled post-step value
+  per cycle, so the full published score is <strong>not</strong> a valid acceptance
+  number without qualification. Classification is a TOOL, not a judgment call: it
+  emits a checked-in manifest of
+  <code>question_id → {class, reason_code, referenced_signals, mechanical_rule | manual_override+rationale}</code>.
+  Mechanical rules:</p>
+
+<ul>
+<li>A referenced signal absent from the query catalog (or unmappable, below) →
+  <strong>extension-required</strong>.</li>
+<li>Signal mapped AND the cycle-sampled transition sequence over the question's window
+  equals the event-time sequence (checked via the adapter) → eligible for coverage;
+  answered by one canonical query → <strong>V1-native</strong>; by a composed
+  sequence → <strong>V1-composable</strong> (measure excess calls/rows as an
+  API-efficiency signal).</li>
+<li>Transitions hidden between post-step samples, physical-time period/frequency,
+  subcycle glitches, true four-state behavior →
+  <strong>extension-required</strong>, with the missing capability recorded; never
+  dropped, never counted as ordinary wrong answers.</li>
+</ul>
+
+<p>The final arbiter of "covered" is the engine-oracle layer itself: a question is
+  covered iff a reviewed canonical query sequence reproduces the ground truth; if no
+  reviewer can write one, it is extension-required. The manifest is frozen before any
+  agent run; changing it afterwards requires a new benchmark version number —
+  otherwise "accuracy on covered questions" is not a stable metric. Because v1
+  catalogs only state elements, ports and memory words, initial coverage may be a
+  minority of the 360 questions and some subcategories may be empty:
+  <strong>publish the per-subcategory covered/total counts including zeros</strong> —
+  the coverage number is a headline result, not a failure. Canonical query sequences
+  are required only for subcategories with at least one covered question. If
+  physical-time conversion is to be agent-doable, the query response's run metadata
+  must first grow a timebase field (today the only cycle-to-time mapping is the VCD
+  period-10 convention); until then those questions stay extension-required.</p>
+
+<h2>Re-simulation track — staged, with named prerequisites</h2>
+
+<p>Regenerating the cores as real <code>lhd sim</code> workloads is the stretch layer,
+  staged by frontend risk: <strong>Stage 1 is PicoRV32 only</strong> (plain
+  Verilog-2001, smallest, ISC) with a reconstructed firmware build, as the feasibility
+  spike; DarkRISCV and SERV follow; Ibex and biRISC-V (heavy SystemVerilog, far beyond
+  the current 31-fixture sim scale) are explicitly stretch. Two prerequisite
+  deliverables the plan names because nothing existing covers them:</p>
+
+<ul>
+<li><strong>Memory preload.</strong> There is no mechanism today for loading firmware
+  into a simulated memory — pokes are port-only. Deliver one: e.g.
+  <code>sim.meminit=&lt;mem&gt;=&lt;file.hex&gt;</code> reusing the checkpoint
+  <code>$readmemh</code> codec, or documented initial-checkpoint injection.</li>
+<li><strong>Signal-name mapping.</strong> A published-VCD-name → catalog-name map per
+  core, with a reported mapping-coverage percentage. lhd names can be synthetic
+  (<code>memory_60</code>), carry <code>__in.</code> aliases, or lose flattened comb
+  scopes; an unmappable signal is a distinct setup-failure class
+  (<code>unmapped-signal</code>), not extension-required.</li>
+</ul>
+
+<p>Trace equivalence is defined concretely: per mapped signal, the cycle-sampled value
+  sequence over a declared window must match the reference VCD's values at the
+  corresponding sample times; publish the compared window and mismatch count. A
+  non-equivalent regenerated trace is a setup failure, not an agent error.</p>
+
+<h2>Evaluation layers and metrics</h2>
+
+<ol>
+<li><strong>Artifact gate.</strong> Pin the artifact commit + checksums and record its
+  license — currently blocked (see Artifact status); do not sequence layers 2–5
+  behind it. Until then layers 2–4 run on the reimplemented question set and/or the
+  adapter over regenerated traces.</li>
+<li><strong>Engine oracle.</strong> Translate each covered question to a reviewed
+  canonical query sequence and require exact reproduction of ground truth. Isolates
+  API semantics and simulator correctness from model behavior. (The hermetic CI
+  version of this layer — internal fixtures, no LLM — lives in 2f-sim subtask F.)</li>
+<li><strong>Query synthesis.</strong> Score whether the agent emits valid queries,
+  selects correct signals/time bounds and reaches the canonical answer. Keep
+  query-schema, unknown-signal, wrong-signal and wrong-order failures separate from
+  final arithmetic mistakes.</li>
+<li><strong>End-to-end agent answer.</strong> Exact/normalized accuracy for all eight
+  categories, binned a priori by the five transition thresholds × five cores (13
+  traces) — never an invented continuum. Report aggregate accuracy, accuracy among
+  completed runs, and incomplete/resource-limited runs separately.</li>
+<li><strong>Speed and cost.</strong> Agent planning time, tool calls, input/output
+  tokens, simulator setup/build time, checkpoint selected, cycles replayed, query
+  execution time, result bytes, peak RSS; median/p95 per category. This layer
+  requires the re-simulation track — adapter runs are semantics-only.</li>
+</ol>
+
+<p>Baselines: the paper's raw-VCD prompt, its event-time JSON prompt, and
+  agent-generated <code>lhd sim</code> queries. The first two depend on unreleased
+  artifacts — while blocked, reconstruct them from the paper's descriptions and label
+  results reimplemented-baseline. Bound the cost: baselines run on the covered subset
+  plus a stated stratified sample (up to N per subcategory), a declared trial count,
+  and a single pinned model for the headline table; full-matrix runs are optional
+  deep-dives. Pin the agent model/version, prompts, query schema, sampling policy,
+  context limit, temperature/seed and maximum tool calls; keep per-question
+  transcripts (keyed on <code>run_id</code> + <code>query_hash</code>) and run repeated
+  trials when nondeterministic. Because the public benchmark may enter model training
+  data, also generate held-out questions and trace windows with the same
+  stratification (generator: published when released, reimplemented until then).</p>
+
+<h2>Relationship to existing tasks</h2>
+
+<ul>
+<li><a class="xref" href="2f-sim.html">2f-sim</a> — the product API this harness
+  evaluates; its subtask F engine-oracle smoke is the hermetic CI cousin of layer 2.
+  Evidence gathered here (excess calls per category, extension-required clusters)
+  feeds 2f-sim's post-v1 protocol extensions; it does not overturn v1's explicit
+  cycle/post boundary.</li>
+<li><a class="xref" href="5f.html">5f</a> — owns benchmark contracts; may promote a
+  stable smoke subset and performance thresholds after this harness is calibrated.
+  Any CI subset must be engine-oracle only (no LLM, no network, subject to the
+  sibling-header skip pattern).</li>
+<li><a class="xref" href="4e.html">4e</a> — a future indexed trace store would change
+  layer 5's cost profile for repeated historical queries; measure with and without if
+  it lands.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+
+<ul class="subtasks">
+<li><strong>A — VCD-replay adapter.</strong> Harness-only implementation of the
+  <code>sim_query</code> contract over a parsed VCD; also the coverage classifier's
+  sampled-vs-event-time oracle.</li>
+<li><strong>B — reimplemented question generator + event-time converter.</strong> From
+  the paper's descriptions; same 24-subcategory stratification; labeled
+  reimplemented until the artifact ships.</li>
+<li><strong>C — coverage manifest tool.</strong> Mechanical classification, frozen
+  pre-registration, per-subcategory counts including zeros.</li>
+<li><strong>D — canonical query sequences + engine-oracle runs</strong> for every
+  non-empty subcategory, against the adapter first.</li>
+<li><strong>E — agent harness.</strong> Query-synthesis and end-to-end layers, three
+  baselines, bounded sampling, transcript retention.</li>
+<li><strong>F — re-simulation track.</strong> Memory preload + signal-name mapping
+  prerequisites, then PicoRV32 spike, then remaining cores by stage; trace-equivalence
+  reports; layer-5 speed/cost numbers.</li>
+<li><strong>G — artifact swap-in.</strong> When the upstream repo publishes: pin
+  commit + checksums, record the license, re-run layers on the published questions,
+  and report reimplemented-vs-published deltas.</li>
+</ul>
+
+<h2>Acceptance</h2>
+
+<ul>
+<li>The adapter answers the engine-oracle layer exactly on a regenerated or published
+  trace, and the coverage manifest is frozen, mechanical, and published with
+  per-subcategory denominators including zeros.</li>
+<li>Query-synthesis and end-to-end reports decompose failures (setup-failed,
+  unmapped-signal, unsupported/extension-required, context-exceeded, invalid-query,
+  resource-limited, wrong-answer) without silently dropping any class.</li>
+<li>The PicoRV32 re-simulation spike either produces a trace-equivalence report
+  (window, mismatch count, mapping coverage) or a named blocker; speed/cost numbers
+  are published only from re-simulated runs.</li>
+<li>No WaveformQA-derived content is vendored into any LiveHD repo before an explicit
+  upstream license permits it.</li>
+</ul>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

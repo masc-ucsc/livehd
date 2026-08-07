@@ -67,6 +67,11 @@ build:prof --linkopt -pg
 #build:prof --cxxopt -ftest-coverage
 #build:prof --linkopt -ftest-coverage
 
+# Verilator is an OUTSIDE point of comparison (the `prp-vsim-*` differentials
+# emit a fixture's Verilog and run its C++ twin under it), not something this
+# repo ships. bazel's test PATH does not carry homebrew/apt install prefixes, so
+# pass $VERILATOR through; without it those targets SKIP rather than fail.
+test --test_env=VERILATOR
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 # benchmark tests are timing contracts; instrumented binaries can't meet them
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme,-benchmark"

@@ -844,6 +844,15 @@ class PrpRunner:
                 from prpsim import run_simulation
                 rc = run_simulation(self, tmp_dir, test)
                 continue
+            if mode == 'vsim':
+                # The VERILATOR DIFFERENTIAL for a `tests/sim/` fixture: emit the
+                # design's Verilog and run its hand-written C++ twin under
+                # verilator. Deliberately a separate mode rather than a step of
+                # `simulation`, because the fixtures worth running it on are the
+                # ones `lhd sim` REFUSES — the two must be able to disagree.
+                from prpvsim import run_verilator_diff
+                rc = run_verilator_diff(self, tmp_dir, test)
+                continue
             if mode == 'verify':
                 rc = self.run_verify(tmp_dir, test)
                 continue
