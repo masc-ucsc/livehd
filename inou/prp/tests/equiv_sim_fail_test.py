@@ -111,7 +111,7 @@ def gen_driver(simdir, top):
         "  dut.reset_cycle();",
         "  std::ofstream out(outdir + \"/outputs.txt\");",
         "  for (long cycle = 0; cycle < cycles; ++cycle) {",
-        f"    {cls}::In in;",
+        f"    auto& in = dut.__in;  // ports are members",
     ]
     for name, width in ins:
         if name == "reset":
@@ -123,7 +123,7 @@ def gen_driver(simdir, top):
         else:
             lines.append(f"    in.{name} = stim<{width}>(cycle, {salt(name)}ULL);")
     lines += [
-        "    auto o = dut.cycle(in);",
+        "    ++dut.__gen; auto o = dut.cycle();",
         "    if (cycle == cycles - 1) { out << cycle;",
     ]
     for name, _ in outs:

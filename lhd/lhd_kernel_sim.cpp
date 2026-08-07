@@ -1464,13 +1464,17 @@ void sim_command(Options& opts, Result& res) {
   if (sources.size() > 1) {
     std::vector<prp_sim::Test_info> probe;
     std::string                     perr;
-    // A non-zero return means the probe FAILED to read/parse the file — which
-    // is the user's error and must surface, not a reason to go looking for a
-    // testbench elsewhere. Only "parsed fine, holds no `test` block" is the
-    // reorder signal; swallowing the failure ran a different file's self-test
-    // and reported success while the real testbench never ran.
-    const int rc = prp_sim::list_tests(file, "", probe, perr);
-    if (rc != 0) {
+    // A non-zero return means the probe FAILED — but list_tests conflates two
+    // failures under rc=1: a real read/parse error (the user's problem, must
+    // surface) and "parsed fine, holds no `test` block" (the REORDER SIGNAL —
+    // the last positional is the DUT, `lhd sim tb.prp dut.prp`). Telling them
+    // apart by the message keeps genuine errors loud while making both
+    // argument orders work; treating both as fatal made tb-first invocations
+    // die with "no test blocks found in <dut>.prp" before the reorder scan
+    // ever ran.
+    const int  rc            = prp_sim::list_tests(file, "", probe, perr);
+    const bool last_testless = rc != 0 && perr.rfind("no test blocks found", 0) == 0;
+    if (rc != 0 && !last_testless) {
       throw Lhd_error{"usage", perr.empty() ? std::format("cannot read `{}`", file) : perr, ""};
     }
     if (probe.empty()) {

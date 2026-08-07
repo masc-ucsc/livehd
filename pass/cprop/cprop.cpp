@@ -1560,6 +1560,18 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       const auto amo       = type_op_of(am);
       const bool computed  = !am.is_invalid() && amo != Ntype_op::Invalid && amo <= Ntype_op::Hotmux
                             && !is_const_pin(a_pin) && !is_graph_input_pin(a_pin);
+      // NO flop/Memory/Sub-source arm, by MEASUREMENT (2026-08-06): a
+      // "physical width" variant (unsigned such pin holds < 2^bits, so
+      // bits <= n clears nothing) was implemented, passed the whole suite,
+      // and fired ZERO times on both dino and minion — every candidate is
+      // width-refused by collapse_forward_for_pin below, because a Get_mask
+      // on a state/boundary pin exists precisely to convert the literal
+      // width to the magnitude+1 form (bits differ by construction; the
+      // width change IS the cell, same verdict as Rule 4's port note).
+      // Its C++ cost is representation-level and cgen_sim's low-mask fast
+      // path already lands it in one conversion; do not re-add the arm
+      // without first making the collapse width-shrink-tolerant AND proving
+      // that against LEC.
       const int  abits     = bits_of(a_pin);
       if (computed && abits > 0 && livehd::graph_util::is_unsign(a_pin) && (abits - 1) <= me) {
         if (collapse_forward_for_pin(node, a_pin)) {

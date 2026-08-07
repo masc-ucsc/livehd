@@ -88,10 +88,10 @@ iv_lines = [l for l in iv.stdout.splitlines() if re.fullmatch(r"[01xz ]+", l)]
 # ---- Slop C++ driver ----
 drv = ['#include "%s"' % hdr, "#include <cstdio>", "int main(){", f"  {struct} dut; dut.reset_cycle();"]
 for v in vecs:
-    drv.append(f"  {{ {struct}::In in;")
+    drv.append("  {")
     for n, b in data_ins:
-        drv.append(f"    in.{n} = Slop<{b}>::create_integer({v[n]}LL);")
-    drv.append("    auto o = dut.cycle(in);")
+        drv.append(f"    dut.__in.{n} = Slop<{b}>::create_integer({v[n]}LL);")
+    drv.append("    ++dut.__gen; auto o = dut.cycle();")
     for n, b in outs:
         drv.append(f'    for(int i={b-1};i>=0;--i) putchar(o.{n}.bit_test(i)?\'1\':\'0\');  putchar(\' \');')
     drv.append("    putchar('\\n'); }")
