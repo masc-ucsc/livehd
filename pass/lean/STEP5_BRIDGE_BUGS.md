@@ -7,17 +7,23 @@ combiner) and every run was killed unfinished (worst: **2 d 8 h / 94 GB**).  Eac
 time the check got fast enough to reach further into the file, it exposed more
 real proof bugs.  **"0 sorries" ≠ "typechecks".**
 
-This document records **8 bugs** found this way, the fix for each, and the
+This document records **9 bugs** found this way, the fix for each, and the
 measured cost model.  Bugs 1–3 and 5 are constant-spelling / side-condition
 issues in the op bridges; 6–8 are structural (combiner shape, source-driven
-outputs, an asymmetric closer).  All fixes are in the emitter
-(`pass_lean.cpp`) plus `OpBridge.lean` / `GraphRefine.lean`.
+outputs, an asymmetric closer); 9 is an arity-dispatch gap that only bites at
+scale.  All fixes are in the emitter (`pass_lean.cpp`) plus `OpBridge.lean` /
+`GraphRefine.lean`.
 
-**RESOLVED.** With all 8 fixes in, the emitter-generated DINO bridge typechecks
-end-to-end: **`exit 0`, 0 errors, 0 sorries, 1391 s (23.2 min), 13.3 GB** at 8
-cores (only 14 benign linter warnings from the Sext `first`-dispatch).  All three
-theorems — `_comb_refines_fast`, `_next_refines_fast`, `_step_refines_fast` — are
-proven for all 4772 nodes.
+**RESOLVED.** With all 9 fixes in, **all three DINO variants** typecheck
+end-to-end — `exit 0`, 0 errors, 0 sorries, `_comb`/`_next`/`_step` all proven:
+
+| design | nodes | wall | peak RSS |
+|---|---|---|---|
+| `SingleCycleCPU` | 4,772 | 25.2 min (2 cores) | 13.3 GB |
+| `PipelinedCPU` | 5,061 | 26.8 min (2 cores) | 14.9 GB |
+| `PipelinedDualIssueCPU` | 10,740 | 57.4 min (4 cores) | 29.6 GB |
+
+(The only log output is benign linter warnings from the Sext `first`-dispatch.)
 
 Failing nodes are cited from the generated
 `SingleCycleCPU_Lgraph.lean` (bridge mode).
@@ -250,3 +256,69 @@ benchmark the component in isolation before naming it the bottleneck.
 us monolithic ≈ N^1.8 vs data-tree ≈ N^1.0, which chose the design); only timed
 slices of the **real** file give the *constant*.  Estimating DINO from synthetic
 alone was off by 10–50×.
+
+---
+
+## Bug 9 — n-ary `Or` closer sends the kernel into unbounded recursion
+
+- **Symptom:** `PipelinedDualIssueCPU_rec3632` (`Op_Or`, width 1, deps
+  `[12976, 12980]`) fails with `(kernel) deep recursion detected`.  Exactly **1 of
+  10,740** nodes; the other 10,739 and the whole tail prove fine.
+- **Root cause:** `Op_Or` was the **only** operator the emitter dispatched without
+  an arity guard.  `Op_And`, `Op_Xor` and `Op_Sum 2` all fall back to their binary
+  bridge at `deps.size() == 2`; `Op_Or` always used the n-ary `orn_bv_bridge`,
+  whose closer must unfold a `List.foldl`
+  (`List.foldl_cons/nil`, `bv_to_bitvec_bvenc_zext`, `BitVec.zero_or`).  That
+  unfolding rewrites through the operand terms, and when the operands are
+  themselves computed nodes several `fv` levels deep the kernel recursion is
+  **unbounded**.
+- **Discriminator that cracked it:** node `3624` is structurally identical
+  (`Op_Or`, out_w 1, operands 2 and 2) and **passes**.  The difference is operand
+  depth, not shape:
+  ```
+  fv3624 PASSES: fv12968 = sem_get_mask s.st_pipeA_ex_mem_x2e_reg_taken ..   -- chain depth 1
+  fv3632 FAILS : fv12976 = sem_get_mask (fv3576 i s) ..                      -- chain depth 5
+  ```
+- **Fix:** dispatch binary `Or` to the existing fold-free `or_bridge`, mirroring
+  And/Xor/Sum.  Its RHS `bvenc (bv_zext a ||| bv_zext b)` matches the emitted fast
+  def syntactically, so the default closer suffices and no fold is introduced.
+  Genuinely n-ary `Or` keeps `orn_bv_bridge`.
+
+### How it was found (four hypotheses falsified first)
+
+| hypothesis | how it was killed |
+|---|---|
+| the 10,740-deep term-fold combiner | error at line 68,067; combiner at 105,001 — and the combiner **typechecked fine**, retiring that scale risk |
+| `phiTree` depth | depth 16 and balanced; if it were the cause **all** nodes would fail, not one |
+| kernel **stack size** | `--tstack=262144` (256 MB, 32× default) fails identically ⇒ recursion is *unbounded*, not merely deep.  (`maxRecDepth` is irrelevant: it governs the elaborator, this is the kernel.) |
+| the op/width shape | 526 `Op_Or` nodes, 482 of them narrowing; only this one fails |
+
+Then **staged execution** of the same proof localized the tactic — each variant is
+the identical file with the proof truncated:
+
+| variant | proof | result |
+|---|---|---|
+| A | `show` + `sorry` | 717 s, **passes** |
+| B | `show; rw [orn_bv_bridge]` + `sorry` | 1010 s, **passes** |
+| C | full (`+ closer simp only [...]`) | **deep recursion** |
+| D | `show; rw [or_bridge]; simp` (the fix) | **663 s, passes** |
+
+So the `show` defeq and the bridge rewrite are both innocent; the closer is the
+culprit — and the fold-free proof is also **34 % faster** than the failing one.
+
+### Measured effect
+
+The fix moves 610 nodes across the three DINO designs off the fold
+(134 / 142 / 334 for SingleCycle / Pipelined / DualIssue) and makes them cheaper:
+
+| design | before fix | after fix |
+|---|---|---|
+| SingleCycleCPU | 23.2 min (8 cores) | 25.2 min (**2 cores**), exit 0 |
+| PipelinedCPU | 27.7 min (4 cores) | 26.8 min (**2 cores**), exit 0 |
+
+Both re-proved with no regression on a quarter/half the cores.
+
+**Lesson:** an n-ary bridge that is *correct* at arity 2 can still be *unusable* at
+arity 2, because its closer has to unfold machinery the binary bridge never
+introduces.  Give every n-ary op a binary fast path, and audit the dispatch table
+for ops that lack one.

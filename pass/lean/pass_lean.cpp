@@ -2163,6 +2163,25 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
         bridge_call = "and_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 2) {
+        // Binary Or takes the binary bridge, exactly as And/Xor/Sum do above.
+        //
+        // The n-ary `orn_bv_bridge` below is correct for arity 2 as well, but its
+        // closer has to unfold a `List.foldl` (`List.foldl_cons/nil`,
+        // `bv_to_bitvec_bvenc_zext`, `BitVec.zero_or`), and that rewriting can send
+        // the kernel into UNBOUNDED recursion when the operands are themselves
+        // computed nodes several `fv` levels deep: on PipelinedDualIssueCPU node
+        // 3632 (operand chain depth 5) it produced "(kernel) deep recursion
+        // detected", while its structurally identical twin 3624 — whose operands
+        // bottom out immediately at flop state — was fine.  Localized by running
+        // the proof in stages: `show` alone and `show; rw [orn_bv_bridge]` both
+        // succeed, only the closer fails; and `--tstack=262144` does NOT help, so
+        // it is unbounded rather than merely deep.
+        //
+        // `or_bridge`'s RHS `bvenc (bv_zext a ||| bv_zext b)` matches the emitted
+        // fast def syntactically, so the default closer suffices and no fold is
+        // ever introduced.
+        bridge_call = "or_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Or") {
         // n-ary Or over the certificate BV list (any arity, mixed widths).
         bridge_call = "orn_bv_bridge";
