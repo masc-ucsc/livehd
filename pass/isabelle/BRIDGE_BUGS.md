@@ -273,3 +273,88 @@ path to stay affordable. No such special case is needed in Isabelle.
   first, so writing nine candidate lemmas and reading all the failures in one 6 s
   build beats one lemma per round. Batches 1 and 3 passed first try; 2 and 4 took
   three and four rounds, each round shrinking to a single named residual.
+
+---
+
+## Phase 1 — φ / lookup representation bake-off (measured 2026-08-06)
+
+Harness: `pass/isabelle/scripts/bakeoff_gen.py`. Generates a synthetic chain of N
+nodes (node k = `Op_Not`(node k-1), all 8-bit) and proves the real per-node shape
+`phi k = eval_node G phi k` for each, which forces one `nodes` lookup plus one
+`phi` lookup per dependency. The op cost is held constant so only the lookup
+representation varies. Isabelle2025-2, `threads=4`, wall seconds.
+
+| N | `flat` | `bt` | `eqns` |
+|---|---|---|---|
+| 100 | 56 | 15 | 14 |
+| 200 | 450 | 28 | 26 |
+| 400 | ≥900 (capped) | 78 | 69 |
+| 800 | — | 294 | 249 |
+
+Per-doubling exponent (marginal, minus ~5 s session startup):
+
+| N→N | `flat` | `bt` | `eqns` |
+|---|---|---|---|
+| 100→200 | **3.13** | 1.20 | 1.22 |
+| 200→400 | — | 1.67 | 1.61 |
+| 400→800 | — | **1.99** | **1.93** |
+
+- **`flat`** — `nodes_of_list` (= `map_of` over a list literal) plus a nested
+  `if`-chain `phi`: **the shape the emitter produces today**, and it measures
+  ≈ N³. Not merely slow — unusable. Extrapolating cubic to 4912 nodes is a
+  refusal, not an estimate.
+- **`bt`** — the direct port of Lean's fix (balanced `BT` datatype + recursive
+  `bt_find`). Far better than `flat`, but the exponent climbs to ~2.
+- **`eqns`** — `BT` definition, but N lookup rules (`phi_at_k`, `nodes_at_k`)
+  derived **once**, so the per-node recurrence proofs never unfold a tree.
+  ~15 % faster than `bt`, **asymptotically identical**.
+
+### Why Lean's O(N) does not transfer
+
+Lean's BT win is *not* about comparison count — Lean measured a balanced
+`if`-**tree** as still O(N²). The win is that the tree is *data* navigated by
+kernel **defeq** inside a `show`, so the O(N) tree term never enters the goal.
+Isabelle's `simp` must rewrite with `phi_tree_def` to reduce `bt_find`, putting
+the whole tree literal into each goal. `eqns` relocates that cost (one unfold per
+derived rule, O(N²) to establish, O(1) to use) rather than removing it.
+
+Conclusion: **~N² is the floor for a `simp`-based per-node proof here.**
+Extrapolating `eqns` from N=800 at N² gives ≈ 2.5 h at 4912 nodes for this
+synthetic; the real design will be a multiple of that.
+
+### Dead ends, established
+
+- **`fun` with N numeral equations is impossible.** Isabelle rejects it:
+  *"Non-constructor pattern not allowed in sequential mode."* Numerals are not
+  constructor patterns, so the "make the lookup rules free by making them the
+  definition" route does not exist.
+- Lean's defeq-in-a-`show` resolution has no Isabelle analogue (above).
+
+### Three matching traps, all silent
+
+Each presents as "the proof doesn't close" with no hint at the cause:
+
+1. **`ucast_eq` in a simp set does not terminate** (Bug 5 above).
+2. **`[where 'w = 8]` silently fails to apply; `[where 'w = "8"]` works.** Type
+   instantiation needs the quotes.
+3. **`One_nat_def` denormalizes numerals.** `simp` rewrites `phi 1` into
+   `phi (Suc 0)`, so a rule stated as `phi 1 = …` stops firing. Fix:
+   `simp del: One_nat_def`. **Any** emitter strategy keyed on numeric node ids is
+   exposed to this — build it into the emitted proofs from the start.
+
+Also: `eval_op` unfolds via its own simp rules before an `eval_op`-level bridge
+can match, so a per-node proof must use the lower-level bridge (`bv_not`, …) or
+do the `eval_node` step with an explicit `rw`. This is the Isabelle counterpart of
+Lean's "resolve deps by defeq in a `show`, never `simp [phi]`".
+
+### Recommendation
+
+Take **`eqns`**: same asymptotics as `bt`, better constant, and its per-node
+proofs are plain rule applications, which are far easier to emit and debug than
+tree-navigation `simp` calls.
+
+**Next lever to measure before committing to a wall-clock budget: chunking.** If
+the quadratic is driven by per-theory context size, splitting the N recurrence
+lemmas across K theories should give ≈ N²/K. Isabelle's session/theory structure
+makes that natural, and it is the analogue of the chunked-combiner lever Lean
+recorded but never validated at scale.
