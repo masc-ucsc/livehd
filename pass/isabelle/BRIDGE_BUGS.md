@@ -233,3 +233,43 @@ Remove a suspect theory from ROOT before bisecting, and prefer an ML harness wit
 ~6 s run and cannot be blocked by a hang. Note also that `writeln` from an ML
 block does **not** surface in a batch `isabelle build` log — use `error` to force
 diagnostic output out.
+
+---
+
+## Piece A complete (2026-08-06)
+
+`Translation_OpBridge.thy`: 51 lemmas, no `sorry`/`oops`, session builds in 32 s.
+`op_census.py` reports **100 % of 4912 DINO SingleCycleCPU certificate nodes,
+25/25 (op, arity) pairs**.
+
+Two side conditions are deliberate and gated, not oversights:
+
+- **`sext_bridge_eq_width` requires `amount = out_width`.** The certificate keeps
+  `n` bits (sign bit at `n-1`); the fast model's `signed_take_bit n` keeps `n+1`.
+  They agree only because the result is truncated to the output width. Every DINO
+  `Sext` satisfies it (measured: amount 32/64/1 against out_w 32/64/1), and the
+  census gate hard-FAILs on any that does not — so a widening `Sext` becomes a
+  build failure rather than a silent model/certificate divergence.
+- **`sra_bridge` requires `out_width \<le> operand_width`.** `sem_sra` returns a word
+  of the *operand's* width and the fast model then `ucast`s, so a wider output
+  would zero-extend where the certificate sign-extends.
+
+**`GetMask` was cheaper here than in Lean.** The bridge is symbolic in the mask,
+so `mask_indices` is never evaluated in a per-node proof — unlike Lean, where the
+generic path ran a `by decide` per node and needed a closed-form all-ones fast
+path to stay affordable. No such special case is needed in Isabelle.
+
+### Proof-engineering notes
+
+- `is` is an Isar keyword. `(induct "is")` does not parse, and the resulting
+  *syntax* errors are reported against later line numbers, which reads like a
+  proof failure somewhere else. Name list variables `js`.
+- A lemma whose only type-variable occurrence is inside `LENGTH('w)` needs the
+  sort spelled out (`LENGTH('w::len)`); it cannot be inferred.
+- `rule L[OF f0 nn]` on a lemma with a higher-order assumption
+  (`\<And>p. ?f p False = p`) fails with `OF: multiple unifiers`. Instantiate the
+  function explicitly: `rule L[where f = "(\<or>)"]`.
+- Batching pays. Isabelle reports *every* failing proof in a theory, not just the
+  first, so writing nine candidate lemmas and reading all the failures in one 6 s
+  build beats one lemma per round. Batches 1 and 3 passed first try; 2 and 4 took
+  three and four rounds, each round shrinking to a single named residual.

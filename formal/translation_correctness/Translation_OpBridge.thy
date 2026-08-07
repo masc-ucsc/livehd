@@ -466,6 +466,134 @@ proof -
   finally show ?thesis .
 qed
 
+lemma muxn2_bridge:
+  fixes s :: "'s::len word" and c0 :: "'a::len word" and c1 :: "'b::len word"
+  shows "eval_op Op_MuxN LENGTH('w::len) [bvenc s, bvenc c0, bvenc c1]
+           = bvenc (if unat s = 0 then (ucast c0 :: 'w word)
+                    else if unat s = 1 then ucast c1 else 0)"
+proof (cases "unat s")
+  case 0
+  then show ?thesis by (simp add: bvenc_ucast)
+next
+  case (Suc k)
+  then show ?thesis
+    by (cases k) (simp_all add: bvenc_ucast mk_bv_zero_bvenc)
+qed
+
+lemma sext_bridge_eq_width:
+  fixes a :: "'a::len word" and amt :: "'n::len word"
+  assumes amt_w: "unat amt = LENGTH('w::len)"
+  shows "eval_op Op_Sext LENGTH('w) [bvenc a, bvenc amt]
+           = bvenc (word_of_int (signed_take_bit (unat amt) (uint a)) :: 'w word)"
+proof -
+  have pos: "(0::int) < 2 ^ LENGTH('w)" by simp
+  have cert: "eval_op Op_Sext LENGTH('w) [bvenc a, bvenc amt]
+                = mk_bv LENGTH('w) (uint a)"
+    using amt_w by (simp add: mk_bv_def Let_def mod_mod_trivial
+                              mod_diff_eq)
+  have fast: "bvenc (word_of_int (signed_take_bit (unat amt) (uint a)) :: 'w word)
+                = mk_bv LENGTH('w) (uint a)"
+    using amt_w
+    by (simp add: bvenc_word_of_int mk_bv_def signed_take_bit_eq_take_bit_minus
+                  take_bit_eq_mod mod_mod_cancel)
+  show ?thesis using cert fast by simp
+qed
+
+
+section \<open>GetMask\<close>
+
+lemma mask_indices_bvenc [simp]:
+  "mask_indices_bv (bvenc (m :: 'm::len word)) = mask_indices m"
+  by (simp add: mask_indices_bv_def mask_indices_def)
+
+lemma bit_pack_low_lt:
+  "bit (pack_low x js :: 'b::len word) k \<Longrightarrow> k < length js"
+proof (induct js arbitrary: k)
+  case Nil then show ?case by simp
+next
+  case (Cons i js)
+  from Cons.prems show ?case
+    by (auto simp: bit_or_iff bit_push_bit_iff bit_1_iff split: if_splits
+             dest!: Cons.hyps)
+qed
+
+lemma uint_pack_low_lt:
+  assumes "length js \<le> LENGTH('b)"
+  shows "uint (pack_low x js :: 'b::len word) < 2 ^ length js"
+proof -
+  have tb: "take_bit (length js) (pack_low x js :: 'b word) = pack_low x js"
+    by (rule bit_eqI) (auto simp: bit_take_bit_iff dest: bit_pack_low_lt)
+  have "uint (pack_low x js :: 'b word)
+          = uint (take_bit (length js) (pack_low x js :: 'b word))"
+    using tb by simp
+  also have "\<dots> = take_bit (length js) (uint (pack_low x js :: 'b word))"
+    by (simp add: unsigned_take_bit_eq)
+  finally have eq: "uint (pack_low x js :: 'b word)
+                      = uint (pack_low x js :: 'b word) mod 2 ^ length js"
+    by (simp add: take_bit_eq_mod)
+  have b: "uint (pack_low x js :: 'b word) mod 2 ^ length js < 2 ^ length js"
+    by (rule pos_mod_bound) simp
+  show ?thesis using eq b by simp
+qed
+
+lemma pack_low_bridge_uint:
+  "length js \<le> LENGTH('b) \<Longrightarrow>
+     pack_low_bv (bvenc x) js = uint (pack_low x js :: 'b::len word)"
+proof (induct js)
+  case Nil then show ?case by simp
+next
+  case (Cons i js)
+  have lt: "length js < LENGTH('b)" using Cons.prems by simp
+  have ih: "pack_low_bv (bvenc x) js = uint (pack_low x js :: 'b word)"
+    using Cons.hyps Cons.prems by simp
+  have bnd: "uint (pack_low x js :: 'b word) < 2 ^ length js"
+    using Cons.prems by (simp add: uint_pack_low_lt)
+  have disj: "\<And>k. \<not> bit (push_bit (length js)
+                          (if bit x i then 1 else 0) :: 'b word) k
+                  \<or> \<not> bit (pack_low x js :: 'b word) k"
+    by (auto simp: bit_push_bit_iff bit_1_iff dest: bit_pack_low_lt)
+  have add: "(pack_low x (i # js) :: 'b word)
+               = push_bit (length js) (if bit x i then 1 else 0) + pack_low x js"
+    using disj by (simp add: disjunctive_add)
+  have push: "uint ((2 :: 'b word) ^ length js) = 2 ^ length js"
+  proof -
+    have "uint ((2 :: 'b word) ^ length js) = 2 ^ length js mod 2 ^ LENGTH('b)"
+      by (simp flip: uint_word_of_int)
+    also have "\<dots> = 2 ^ length js"
+      using lt by (simp add: mod_pos_pos_trivial)
+    finally show ?thesis .
+  qed
+  have pw: "2 * (2::int) ^ length js \<le> 2 ^ LENGTH('b)"
+  proof -
+    have "2 * (2::int) ^ length js = 2 ^ Suc (length js)" by simp
+    also have "\<dots> \<le> 2 ^ LENGTH('b)"
+      using lt by (intro power_increasing) auto
+    finally show ?thesis .
+  qed
+  have nov: "2 ^ length js + uint (pack_low x js :: 'b word) < 2 ^ LENGTH('b)"
+    using bnd pw by linarith
+  show ?case
+    using lt ih bnd add push nov
+    by (simp add: uint_word_ariths take_bit_eq_mod mod_pos_pos_trivial)
+qed
+
+lemma getmask_bridge:
+  fixes x :: "'a::len word" and m :: "'m::len word"
+  assumes fits: "length (mask_indices m) \<le> LENGTH('w::len)"
+  shows "eval_op Op_GetMask LENGTH('w) [bvenc x, bvenc m]
+           = bvenc (sem_get_mask x m :: 'w word)"
+proof -
+  have "eval_op Op_GetMask LENGTH('w) [bvenc x, bvenc m]
+          = mk_bv LENGTH('w) (pack_low_bv (bvenc x) (rev (mask_indices m)))"
+    by (simp add: bv_get_mask_def)
+  also have "\<dots> = mk_bv LENGTH('w)
+                      (uint (pack_low x (rev (mask_indices m)) :: 'w word))"
+    using fits by (simp add: pack_low_bridge_uint)
+  also have "\<dots> = bvenc (sem_get_mask x m :: 'w word)"
+    by (simp add: sem_get_mask_def)
+  finally show ?thesis .
+qed
+
 section \<open>Sanity examples\<close>
 
 text \<open>
