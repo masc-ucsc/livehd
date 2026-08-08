@@ -359,6 +359,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `break` in an unrolled for-loop = the priority-select idiom. Proven EQUIVALENT
+# to the hand-written if/else-if chain by LEC, so a dropped guard or an
+# off-by-one break point refutes rather than passing review.
+sh_test(
+    name = "lhd_sv_loop_break_test",
+    size = "large",
+    srcs = ["lhd_sv_loop_break_test.sh"],
+    data = ["//lhd"],
+)
+
 # F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
 # induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
 # per-obligation merge takes bmc-first's deep reachable refute, and auto never

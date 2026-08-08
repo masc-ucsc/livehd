@@ -132,6 +132,10 @@ private:
   // stateless `mut`, i.e. the whole register vanished. Filled by
   // collect_blocking_ff_state, refused by lower_ff_process.
   absl::flat_hash_set<const slang::ast::Symbol*>              blocking_ff_state_;
+  // Stack of `broken` flag lnames, innermost unrolled loop last. A loop whose
+  // body contains a `break` guards each iteration on its flag and the break
+  // raises it; loops without one push nothing and lower exactly as before.
+  std::vector<std::string>                                    break_flags_;
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   absl::flat_hash_set<const slang::ast::Symbol*>              declared_;   // declare stmt already emitted

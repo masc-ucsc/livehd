@@ -148,8 +148,23 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       return;
     }
     case StatementKind::Break:
+      // Inside an unrolled loop whose body contains a break, the loop set up a
+      // `broken` flag and guards every iteration on it (see lower_for_loop);
+      // the break itself just raises the flag. It sits wherever it was written
+      // — typically an `if` arm — so the raise inherits that condition, which
+      // is exactly the priority-select semantics ("first match wins").
+      if (!break_flags_.empty()) {
+        builder_.create_assign_stmts(break_flags_.back(), "1");
+        return;
+      }
+      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+                       std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
+      return;
     case StatementKind::Continue:
-      // Only reachable outside an unrolled-loop/function context here.
+      // `continue` skips the REST of one iteration, which needs a per-iteration
+      // flag rather than the loop-wide one break uses. Not implemented yet —
+      // refuse rather than lower it as a break, which would silently drop every
+      // later iteration.
       emit_unsupported(stmt.sourceRange, "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
@@ -557,6 +572,25 @@ bool Slang_context::unroll_tick(const slang::ast::Statement& stmt) {
   return false;
 }
 
+namespace {
+// Does this statement subtree contain a `break` that binds to THIS loop? A
+// nested loop's body is skipped: a break in there belongs to the inner loop.
+bool subtree_has_break(const slang::ast::Statement& stmt) {
+  bool found = false;
+  auto v     = slang::ast::makeVisitor(
+      [&](auto& visitor, const slang::ast::BreakStatement&) {
+        found = true;
+        (void)visitor;
+      },
+      [&](auto&, const slang::ast::ForLoopStatement&) {},        // inner loop owns its breaks
+      [&](auto&, const slang::ast::WhileLoopStatement&) {},
+      [&](auto&, const slang::ast::RepeatLoopStatement&) {},
+      [&](auto&, const slang::ast::ForeachLoopStatement&) {});
+  stmt.visit(v);
+  return found;
+}
+}  // namespace
+
 void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
   if (!eval_ctx_) {
     emit_unsupported(stmt.sourceRange, "unsupported-loop", "for loop outside an evaluable context");
@@ -605,6 +639,18 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     }
   }
 
+  // A `break` in the body (the priority-select idiom: `if (req[i]) break;`)
+  // needs a runtime flag, since which iteration wins is not comptime. Only set
+  // one up when the body actually has a break, so every other loop keeps its
+  // previous emission byte for byte.
+  std::string brk_flag;
+  if (subtree_has_break(stmt.body)) {
+    brk_flag = fresh_local("brk");
+    builder_.create_declare_stmts(brk_flag, "mut", "", "");
+    builder_.create_assign_stmts(brk_flag, "0");
+    break_flags_.push_back(brk_flag);
+  }
+
   while (true) {
     if (stmt.stopExpr != nullptr) {
       auto cv = try_eval(*stmt.stopExpr);
@@ -624,7 +670,20 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       break;
     }
 
-    lower_statement(stmt.body);
+    if (brk_flag.empty()) {
+      lower_statement(stmt.body);
+    } else {
+      // `if (not broken) { <body> }` — an iteration after the break is taken
+      // must not write anything. Assignments are last-wins in program order, so
+      // without the guard every later iteration would overwrite the winner.
+      auto guard = builder_.create_eq_stmts(brk_flag, "0");
+      auto if_id = builder_.create_if_stmt(false);
+      builder_.add_if_cond(if_id, guard);
+      auto arm = builder_.add_if_stmts(if_id);
+      builder_.push_stmts(arm);
+      lower_statement(stmt.body);
+      builder_.pop_stmts();
+    }
 
     bool stepped = true;
     for (const auto* se : stmt.steps) {
@@ -641,6 +700,10 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       emit_error(stmt.sourceRange, "loop-no-progress", "comptime", "for loop without condition or step cannot unroll");
       break;
     }
+  }
+
+  if (!brk_flag.empty()) {
+    break_flags_.pop_back();
   }
 
   for (const auto* lv : locals) {
