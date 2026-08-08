@@ -447,3 +447,66 @@ but measure before trusting it.
   and B are siblings; emitted theories must import both.
 - **Isabelle caches by content digest.** A timing run on unchanged content
   silently reports *nothing*. Always `-c` when measuring.
+
+---
+
+## Ground facts belong in the code generator — measured, and it is not the lever
+
+`wf_some`, `wf_dep` and `phi_keys_sub` are *ground decidable facts about concrete
+data*. Moved from `simp` to `by eval`, each with a one-line `list_all_iff` bridge
+back to the `∀…∈set…` form Piece B expects:
+
+```isabelle
+lemma wf_some_ev: "list_all (\<lambda>m. nodes_fn m \<noteq> None) topo_list"  by eval
+lemma wf_dep:     "dep_ordered G topo_list"                                by eval
+lemma phi_keys_sub_ev:
+  "list_all (\<lambda>k. k \<in> set topo_list) (bt_keys phi_tree)"          by eval
+```
+
+| N | pre-`eval` | post-`eval` | gain |
+|---|---|---|---|
+| 200 | 38 s | 33 s | 1.15× |
+| 400 | 124 s | 103 s | 1.20× |
+| 800 | 539 s | 430 s | 1.25× |
+
+**Exponent essentially unchanged: 2.17 → 2.12** (DINO extrapolation 7.6 h → 5.5 h).
+
+Worth recording as a mistake in reasoning: the per-command profile showed these
+four lemmas holding ~800 s of CPU at N=800, so removing three looked like the
+lever. It was not. The *earlier* per-node-only sweep was already ≈ N^1.9 at
+400→800, **before any of these lemmas existed** — so the quadratic never lived
+there. Trimming a large constant off a quadratic that lives elsewhere buys a
+constant, and that is all it bought. A per-command profile ranks *current* cost;
+it does not tell you which term sets the exponent. Fit the exponent of each
+component separately before choosing what to fix.
+
+Side benefit: `wf_dep` no longer needs `dep_ordered_acc_sound`. That accumulator
+lemma exists to avoid `dep_ordered`'s quadratic suffix scan in *symbolic* proof;
+once the fact is decided in the code generator the scan is ~12 M cheap membership
+tests in compiled ML. The lemma stays in the library for symbolic use, but the
+generated path does not need it.
+
+Also: the feared `by eval` blow-up did not materialize. `livehd-proof`'s README
+records a whole-graph `by eval` consuming hours and hundreds of GB, but that was
+`deps_before` with O(N²) *list appends*; these predicates are cheap.
+
+### Where the quadratic actually is
+
+**The N derived lookup lemmas.** Each `phi_at_k` / `nodes_at_k` unfolds an O(N)
+tree literal into its goal, so establishing the rule set is O(N²). The `bt`
+candidate has the same cost paid per *use* instead of per *derivation* — which is
+why `bt` and `eqns` measured within 15 % of each other.
+
+The general shape: **any representation where resolving a lookup requires the
+O(N) definition body to enter a goal is O(N) per node, hence O(N²) overall.**
+Escaping it needs the lookup resolved *without* the body — which is what the code
+generator does, but the payloads here (`bvenc fv_k`) are symbolic terms, so `eval`
+cannot reach them. Lean escapes via kernel defeq on a shared tree value; Isabelle
+has no equivalent.
+
+Options not yet measured: chunk the tree into K subtrees so each unfold is O(N/K)
+(≈ N²/K total); or split the recurrence lemmas across K theories. Both are the
+same lever in different clothing, and both are chunking.
+
+Current honest budget for a DINO-scale Isabelle certificate proof: **≈ 5.5 h**,
+exponent ≈ 2.1.

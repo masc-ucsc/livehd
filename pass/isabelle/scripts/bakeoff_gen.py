@@ -65,12 +65,14 @@ lemma word_of_bv_bvenc [simp]:
 lemma wf_distinct: "distinct topo_list"
   by (simp add: topo_list_def)
 
+lemma wf_some_ev: "list_all (\\<lambda>m. nodes_fn m \\<noteq> None) topo_list"
+  by eval
+
 lemma wf_some: "\\<forall>m \\<in> set topo_list. nodes G m \\<noteq> None"
-  by (simp del: One_nat_def add: topo_list_def G_def)
+  using wf_some_ev by (simp add: G_def list_all_iff)
 
 lemma wf_dep: "dep_ordered G topo_list"
-  by (rule dep_ordered_acc_sound[where S = "{{100000}}"])
-     (simp_all del: One_nat_def add: topo_list_def G_def deps_of_def wf_distinct)
+  by eval
 
 lemma combiner: "\\<forall>m \\<in> set topo_list. phi m = eval_node G phi m"
   by (simp del: One_nat_def add: topo_list_def {recs})
@@ -87,8 +89,11 @@ fun bt_keys :: "'a BT \\<Rightarrow> nat list" where
 lemma bt_find_eq_none: "d \\<notin> set (bt_keys t) \\<Longrightarrow> bt_find t d = None"
   by (induct t) auto
 
+lemma phi_keys_sub_ev: "list_all (\\<lambda>k. k \\<in> set topo_list) (bt_keys phi_tree)"
+  by eval
+
 lemma phi_keys_sub: "set (bt_keys phi_tree) \\<subseteq> set topo_list"
-  by (simp add: phi_tree_def topo_list_def)
+  using phi_keys_sub_ev by (simp add: list_all_iff subset_eq)
 
 lemma phi_fall: "d \\<notin> set topo_list \\<Longrightarrow> phi d = src_env d"
 proof -
