@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: array_store_stale_rhs
 :pyrope_top: array_store_stale_rhs
+:state_pair_gap: mems=0/1
 */
 // TRACKER — SILENT MISCOMPILE in tolg's array-element store (lhdsuite
 // array_problem.md). This moved here from tests/fixme/ (compile-only, which

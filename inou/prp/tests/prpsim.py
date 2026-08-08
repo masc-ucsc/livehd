@@ -95,7 +95,13 @@ def run_simulation(runner, tmp_dir, test):
 
     sim_args = _parse_args(test)
 
-    setup = [runner.lhd, 'sim', prp, '--setup-only', '--workdir', simroot, '-q']
+    # `:set:` must reach the SIM lowering too. run_simulation builds its command
+    # from scratch rather than composing on lhd_upass, so without this a fixture
+    # that sets e.g. `upass.roll=true` would assert a rolled graph elsewhere and
+    # still SIMULATE the default (unrolled) lowering.
+    extra = runner._extra_sets(test)
+
+    setup = [runner.lhd, 'sim', prp, '--setup-only', '--workdir', simroot, '-q'] + extra
     proc  = subprocess.Popen(setup, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         log, _ = proc.communicate()
@@ -120,7 +126,7 @@ def run_simulation(runner, tmp_dir, test):
         # No header runfiles (manual run): let `lhd sim` host-compile the existing
         # setup itself (it finds the sibling ../hlop / ../iassert headers).
         print('{} - simulation - (no header runfiles; lhd sim host-compile fallback)'.format(name))
-        cmd  = [runner.lhd, 'sim', prp, '--run-only', '--workdir', simroot]
+        cmd  = [runner.lhd, 'sim', prp, '--run-only', '--workdir', simroot] + extra
         for k, v in sim_args:
             cmd += ['--arg', '{}={}'.format(k, v)]
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

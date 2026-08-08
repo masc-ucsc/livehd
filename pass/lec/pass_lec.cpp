@@ -8,6 +8,7 @@
 
 #include "diag.hpp"
 #include "query.hpp"
+#include "replica_expand.hpp"
 #include "str_tools.hpp"
 
 using namespace livehd;
@@ -263,6 +264,14 @@ void Pass_lec::setup() {
 }
 
 void Pass_lec::lec(Eprp_var& var) {
+  // A replicated Sub denotes `count` occurrences; this pass walks a Sub as ONE
+  // physical instance, so expand before it looks at anything (see
+  // graph/replica_expand.hpp). Without this a rolled `lg:` input compares (or
+  // measures) count-1 replicas that are not there.
+  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.lec")) {
+    return;
+  }
+
   if (var.graphs.size() < 2) {
     livehd::diag::err("pass.lec", "lec-needs-pair", "internal")
         .msg("pass.lec needs two designs (ref, impl); got {} graph(s)", var.graphs.size())

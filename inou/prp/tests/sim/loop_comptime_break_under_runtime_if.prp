@@ -1,0 +1,45 @@
+/*
+:name: loop_comptime_break_under_runtime_if
+:type: simulation
+*/
+// A COMPTIME `break` (`i == 3`) inside a loop that is itself nested in a
+// RUNTIME `if`. Unrolling handles this fine — the break condition folds — and
+// the enclosing runtime guard is irrelevant to it.
+//
+// Regression fixture for the `loop-runtime-break` diagnostic: an early version
+// keyed on "is any active scope uncertain", which is true here because of the
+// enclosing `if c`, and rejected this valid program. The check compares the
+// uncertain-scope count against the count at loop-iteration entry instead, so
+// only uncertainty the BODY introduces counts.
+
+mod loop_comptime_break_under_runtime_if(c:bool, x:u8) -> (z:u12@[0]) {
+  mut acc:u12 = 0
+  if c {
+    for i in 0..<8 {
+      if i == 3 { break }
+      acc = acc + x
+    }
+  }
+  z = acc
+}
+
+test loop_comptime_break_under_runtime_if.guarded {
+  mut dut = loop_comptime_break_under_runtime_if
+
+  tick 2 {
+    dut.x = 5
+    if clock == 0 {
+      dut.c = true
+    } else {
+      dut.c = false
+    }
+
+    step
+
+    if clock == 0 {
+      assert(dut.z == 15, "three iterations run before the comptime break: 3*5")
+    } else {
+      assert(dut.z == 0, "the runtime guard skips the whole loop")
+    }
+  }
+}

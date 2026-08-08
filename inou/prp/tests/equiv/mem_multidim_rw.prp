@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_multidim_rw.md
 :pyrope_top: md
+:name_match_only: false
 */
 
 // 2f-mem_multidim — a [2][4] reg memory with runtime indices on both the

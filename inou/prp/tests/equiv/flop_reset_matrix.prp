@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: flop_reset_matrix.matrix
 :pyrope_top: matrix
+:state_pair_gap: regs=4/6
 */
 
 // Full (posedge/negedge clock) x (posedge/negedge/sync reset) flop matrix,

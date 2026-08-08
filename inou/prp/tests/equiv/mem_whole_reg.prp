@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_whole_reg.regarr
 :pyrope_top: regarr
+:state_pair_gap: mems=0/1
 */
 
 // REGISTERED whole-array: the whole `arr` is registered from one bus each cycle

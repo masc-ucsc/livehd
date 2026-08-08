@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: latch_reset.lrst8
 :pyrope_top: lrst8
+:state_pair_gap: regs=0/1
 */
 
 // todo/livehd/2f-latch M7 — a latch with a RESET value.

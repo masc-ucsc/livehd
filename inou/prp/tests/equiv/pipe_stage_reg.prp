@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: pipe_stage_reg.split
 :pyrope_top: split
+:state_pair_gap: regs=0/1
 */
 
 // 2d-reg — the 06c `split` analog: an unconditional feedforward write makes

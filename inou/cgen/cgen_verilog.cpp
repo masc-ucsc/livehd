@@ -2,6 +2,7 @@
 
 #include "cgen_verilog.hpp"
 
+#include "replica_expand.hpp"
 #include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
 
 #include <algorithm>
@@ -2179,6 +2180,12 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     first_arg = false;
 
     const auto name = get_scaped_name(e.name);
+    // A port OWNS its spelling: reserve it before anything else can be handed
+    // the same one. Instance names in particular are source-derived now (the
+    // LHS variable of the call), and `out = add(…)` on a module whose output is
+    // `out` would otherwise emit `add out(…)` beside `output reg out` — an
+    // illegal redefinition rather than a de-collided `out_cgen1`.
+    declared_name_counts.insert({name, 1});
 
     // Prefer the concrete HHDS pin width when present. Some imported GraphIO
     // declarations can retain stale placeholder widths, while the graph pin
@@ -2787,15 +2794,27 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
           }
           for (const auto& e2 : node.out_edges()) {
-            auto dout            = node.create_driver_pin(e2.driver.get_port_id());
+            auto dout = node.create_driver_pin(e2.driver.get_port_id());
+            // Claim the slot FIRST (like the Sub branch below): get_unique_decl_name
+            // permanently reserves the name it returns, so computing it for a pin
+            // already bound would burn a `_cgenN` counter on a name never declared.
+            if (pin2var.contains(dout.get_class_index())) {
+              continue;
+            }
             // Escape the FULL derived name as one unit: a memory instance name
             // can carry verilog-special chars (e.g. the '.' of a flattened
             // hierarchical name), so escaping iname first and then appending
             // "_dout_N" would drop the suffix past the escaped id's terminating
             // space (`\u_fifo.mem _dout_1`), which yosys cannot parse.
-            auto name2           = get_scaped_name(absl::StrCat(default_instance_name(node), "_dout_", e2.driver.get_port_id()));
-            auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
-            if (inserted) {
+            // De-collide: two same-named Memory instances in one body (flattening,
+            // or the occurrences a replica expansion produces) derive the SAME
+            // `<iname>_dout_<pid>`, and declaring it twice is an illegal
+            // re-declaration. reserve_instance_names only pre-seeds the bare
+            // instance name, not these derivatives.
+            auto name2 = get_unique_decl_name(
+                get_scaped_name(absl::StrCat(default_instance_name(node), "_dout_", e2.driver.get_port_id())));
+            pin2var.insert({dout.get_class_index(), name2});
+            {
               int bits2 = bits_of(dout);
               // The whole-array read output (Ntype::Memory_readall_pid) carries the
               // ENTIRE array -- size*bits, entry 0 in the low bits -- not one entry.
@@ -2846,9 +2865,16 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // (illegal — `Incompatible re-declaration of wire`; also an instance
           // output cannot legally drive an `output reg`). create_outputs then
           // emits `<port> = <iname>_o<pid>;` like any other driver.
-          auto name2           = get_scaped_name(absl::StrCat(default_instance_name(node), "_o", dpin2.get_port_id()));
-          auto [it2, inserted] = pin2var.insert({cdpin.get_class_index(), name2});
-          if (inserted) {
+          // De-collide: `default_instance_name` is the instance's NAME when it
+          // has one, so two same-named instances (a generate loop, or the
+          // occurrences an `upass.roll` expansion produces) would otherwise
+          // declare and drive one shared net per port instead of one each.
+          // Claim the slot FIRST: get_unique_decl_name permanently reserves the
+          // name it hands back, so computing it for a pin another site already
+          // bound would burn a `_cgenN` counter on a name never declared.
+          if (!pin2var.contains(cdpin.get_class_index())) {
+            auto name2 = get_unique_decl_name(get_scaped_name(absl::StrCat(default_instance_name(node), "_o", dpin2.get_port_id())));
+            pin2var.insert({cdpin.get_class_index(), name2});
             int bits2 = bits_of(cdpin);
             if (bits2 <= 1) {
               fout->append("wire signed ", name2, ";\n");
@@ -3088,6 +3114,14 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Break a false comb loop through a pure-comb sub-instance FIRST (a cycle
   // crossing an instance boundary is invisible to the word-level splitter
   // below), then the packed-wire one. Same pair, same order, as cgen_sim.
+  // A replicated Sub (upass.roll) denotes `count` occurrences that this
+  // emitter has no compact form for, and flatten_false_loop_subs below would
+  // dissolve a comb-bodied one into a SINGLE instance, silently dropping
+  // count-1 replicas. Expand first: the result is the same graph the source
+  // unroll produces, so every downstream spelling is unchanged.
+  if (livehd::graph_util::expand_replicated_subs(graph.get(), "inou.cgen.verilog") < 0) {
+    return;
+  }
   livehd::graph_util::flatten_false_loop_subs(graph.get());
   livehd::graph_util::split_packed_selfref_wires(graph.get());
 

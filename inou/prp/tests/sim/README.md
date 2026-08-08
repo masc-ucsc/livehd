@@ -49,6 +49,28 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `test_args.prp`   | adder                  | `adder.params`                          | `test name(params)` + `--arg`, default/required/override |
 | `tick_comptime_survives.prp` | passthru    | 2 blocks                                | what stays **comptime** across a `tick` (see below) |
 | `tick_comptime_opaque.prp`   | up-counter  | 7 blocks                                | what a `tick` must make **opaque** (see below) |
+| `loop_cond_sub_break.prp` | conditional add/xor lanes | `loop_cond_sub_break.branch_vectors` | source `for`, pre-call `break`, runtime-conditional Sub calls, runtime `tick` break |
+| `loop_cond_break_no_sub.prp` | conditional reduction | `loop_cond_break_no_sub.branch_vectors` | source `for`, post-write `break`, no Sub calls, runtime `tick` break |
+| `loop_roll_carry.prp` | accumulator over a lifted body | `loop_roll_carry.accumulates` | a ROLLED loop (`compile.upass.roll=true`): one replicated `Sub`, asserted by `:expect_instances:` |
+| `loop_roll_carry_unrolled.prp` | same source, rolling off | `loop_roll_carry_unrolled.accumulates` | the other half of the rolled-vs-unrolled differential — same values, six instances |
+| `loop_roll_cond_write.prp` | conditionally-written carry | `loop_roll_cond_write.conditional_carry` | rolled; pins the carry-classification hazard (a variable written on only some paths is still a carry) |
+| `loop_comptime_break_under_runtime_if.prp` | guarded loop with a comptime break | `loop_comptime_break_under_runtime_if.guarded` | regression for `loop-runtime-break`: an enclosing RUNTIME `if` must not make a comptime `break` illegal |
+
+## Header tags used by these fixtures
+
+- `:set: k=v [k=v ...]` — extra `--set` flags for every mode this fixture runs,
+  the sim lowering included. Use the FULLY-QUALIFIED option name
+  (`compile.upass.roll=true`): `lhd compile` accepts the short `upass.roll`
+  form but `lhd sim` rejects it, so a short-form fixture would silently
+  simulate the default lowering while asserting the other one.
+- `:expect_instances: name=count [...]` — asserts how many `Sub` (instance)
+  nodes the design has, counted on the LGRAPH (`lhd tool grep kind=sub lg:`)
+  rather than on emitted Verilog or C++, whose de-collision spellings
+  (`_cgen2` / `__i2`) differ. `*` is the total, and a name ending in `*` is a
+  prefix glob — `stage_li*=6` says "six replicas of one source call site"
+  without pinning six literal `_li<ordinal>` names. This is what makes a
+  "the loop stayed rolled" claim testable: without it a silent fall back to
+  unrolling still passes every value assertion.
 
 ## `tick` and constant propagation
 

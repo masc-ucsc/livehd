@@ -36,6 +36,7 @@
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "taskflow/taskflow.hpp"
+#include "replica_expand.hpp"
 
 namespace lhd {
 
@@ -394,6 +395,18 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                                   std::vector<std::pair<std::string, int64_t>>* cvc5_hot = nullptr) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
+
+  // A replicated Sub (compile.upass.roll) denotes `count` occurrences. Every
+  // walk below — def pairing, the encoder, box correspondence — treats a Sub as
+  // ONE physical instance, so a compact node would be compared as a single
+  // replica: measured `z ref=4 impl=1` on a 4-iteration accumulator, i.e. a
+  // wrong verdict from a design that is in fact equivalent. Expand both sides
+  // first (design M5). Note this must sit HERE and not only in Pass_lec::lec —
+  // `lhd lec` reaches the hierarchical driver directly.
+  if (!gu::expand_replicated_subs_all(ref_var.graphs, "pass.lec")
+      || !gu::expand_replicated_subs_all(impl_var.graphs, "pass.lec")) {
+    return {};
+  }
 
   // key -> def graph (case-sensitive, LiveHD/Pyrope name policy). A def's FULL
   // graph name embeds its front-end namespace (Pyrope "file.entity" vs slang's
@@ -3484,6 +3497,21 @@ void lec_command(Options& opts, Result& res) {
     o._cone_cache = vcache->cone_digests();
   }
 
+  // A replicated Sub (compile.upass.roll) denotes `count` occurrences, and NO
+  // encoder below is occurrence-aware. This sits above the hier/flat branch on
+  // purpose: the flat path (`formal.lec.hier=false`) calls prove_equal on the
+  // raw graphs, so a compact node there is compared as a single replica —
+  // REFUTED with a bogus counterexample against an unrolled reference, or
+  // PROVEN when both sides are rolled and count-1 replicas were never encoded.
+  // (lec_hierarchical repeats the call; it is a no-op scan once expanded.)
+  if (!livehd::graph_util::expand_replicated_subs_all(ref_var.graphs, "pass.lec")
+      || !livehd::graph_util::expand_replicated_subs_all(impl_var.graphs, "pass.lec")) {
+    throw Lhd_error{"unsupported",
+                    "lec: a replicated instance could not be expanded",
+                    "the diagnostic above names the instance; recompile the design without compile.upass.roll to work "
+                    "around it"};
+  }
+
   livehd::lec::Query_result r;
   // formal.stats: per-def (name, conflicts) ranking, filled by the hierarchical
   // driver only (the flat path is one def, so the totals already say it all).
@@ -4833,6 +4861,20 @@ void formal_verify_command(Options& opts, Result& res) {
     }
   }
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
+
+  // A replicated Sub (compile.upass.roll) denotes `count` occurrences, and
+  // prove_properties walks a Sub as ONE physical instance — an assert inside a
+  // rolled loop body would be discharged for a single replica and the run would
+  // print PROVEN for a design where it fails on replicas 1..count-1. Same
+  // expansion `lhd lec` does; placed BEFORE edge normalization so the
+  // normalizer, the monitors and the verdict cache all see the real occurrences.
+  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.formal")
+      || !livehd::graph_util::expand_replicated_subs_all(sub_lib_keep, "pass.formal")) {
+    throw Lhd_error{"unsupported",
+                    std::format("formal verify refused '{}': a replicated instance could not be expanded", g->get_name()),
+                    "the diagnostic above names the instance; recompile the design without compile.upass.roll to work "
+                    "around it"};
+  }
 
   // ── 2f-latch M8: EDGE NORMALIZATION ───────────────────────────────────────
   // Rewrite latches and negedge state into posedge flops before the encoder

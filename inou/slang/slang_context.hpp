@@ -675,7 +675,13 @@ private:
   static std::string                  const_text(const slang::SVInt& svint);
 
   // ── naming + reads ─────────────────────────────────────────────────────────
-  std::string lname_of(const slang::ast::Symbol& sym);
+  std::string        lname_of(const slang::ast::Symbol& sym);
+  // One raw SV identifier -> the LNAST ref spelling: whitespace folded away and
+  // the result backtick-quoted when it is not a plain identifier. NO uniquing —
+  // for a name that is already unique in its own namespace (an INSTANCE name,
+  // which lname_of's signal namespace must not renumber). An ordinary name
+  // comes back unchanged, so only escaped identifiers see any effect.
+  static std::string ref_name_of_raw(std::string_view raw);
 
   // ── provenance + diagnostics (all through the slang_loc seam) ─────────────
   hhds::SourceId mint_loc(slang::SourceRange range);

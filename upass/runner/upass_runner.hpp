@@ -382,6 +382,34 @@ protected:
   // mutated) value back into the slot. Returns false if the fuel/depth guard
   // tripped (caller stops iterating).
   bool walk_loop_iteration(const std::function<void()>& emit_binds, const std::function<void()>& emit_post = {});
+  // RAII bracket around one comptime unroll: bumps loop_depth_ and opens an
+  // iteration-ordinal level. `next_iteration()` advances the ordinal. Restores
+  // both on scope exit, which the `while` unroller relies on — several of its
+  // exits go through loop_fail (a throw).
+  class Unroll_scope {
+  public:
+    explicit Unroll_scope(uPass_runner& r) : r_(r) {
+      ++r_.loop_depth_;
+      r_.loop_iter_ordinals_.push_back(0);
+    }
+    Unroll_scope(const Unroll_scope&)            = delete;
+    Unroll_scope& operator=(const Unroll_scope&) = delete;
+    ~Unroll_scope() {
+      --r_.loop_depth_;
+      r_.loop_iter_ordinals_.pop_back();
+    }
+    void next_iteration() { ++r_.loop_iter_ordinals_.back(); }
+
+  private:
+    uPass_runner& r_;
+  };
+  // `_li<ordinal>` per enclosing unroll, "" outside one. Stamped on the calls
+  // an unrolled body emits so their instances stay distinguishable.
+  [[nodiscard]] std::string loop_inst_suffix() const;
+  // Append the reserved `__inst_suffix` actual to the func_call just emitted
+  // into staging (cursor-free: it works on `staging_parent`). No-op unless the
+  // callee is one tolg lowers to a Sub instance.
+  void stamp_loop_inst_suffix(std::string_view callee);
   // Emit a per-iteration tuple pick `dst = src[index_text]` as a scratch
   // tuple_get run through the walk (so try_resolve_tuple_get / constprop
   // resolve it). index_text is the pyrope field literal ("0","1",… or "'name'").
@@ -844,6 +872,15 @@ protected:
   // start of each iteration (walk_loop_iteration).
   bool                                          loop_continue_hit_{false};
   int                                           loop_depth_{0};
+  // 0-based iteration ordinal of every unroll currently in flight (outermost
+  // first), maintained alongside loop_depth_. `loop_inst_suffix()` renders it as
+  // the `_li<ordinal>` tag stamped on the instances a body copy creates: one
+  // source `mod` call inside `for i in 0..<8` is EIGHT physical instances, and
+  // without the tag all eight carry the same source-derived name. cgen would
+  // then de-collide them itself as `x`, `x_cgen1`, … — a spelling that neither
+  // starts at 0 nor says which iteration an instance came from, and that
+  // renumbers as soon as an unrelated instance is added.
+  std::vector<uint64_t>                         loop_iter_ordinals_;
   std::shared_ptr<hhds::Forest>                 scratch_forest_;
   // Callee bodies currently being spliced (innermost last). Re-entering one
   // means recursion — bailed to the evaluator until Phase D adds fuel.
@@ -894,6 +931,72 @@ protected:
   // per-run total-splice cap for exponential fan-out.
   static constexpr std::size_t                  kInlineMaxDepth = 256;
   std::size_t                                   inline_budget_{200000};
+
+  // compile.upass.roll — lift an eligible comptime range-loop body into one
+  // generated definition and emit a single replicated instance instead of
+  // unrolling. Default OFF: rolling is opt-in until the LEC/formal paths
+  // handle a replicated Sub natively rather than by expansion.
+  bool     roll_enabled_{false};
+  uint64_t roll_cap_{1024};
+  // Per-unit counter making each lifted definition's name unique (the dedup in
+  // specialized_emitted_ / pass_upass is BY NAME and silently DROPS a second
+  // definition that collides).
+  uint64_t roll_seq_{0};
+
+  // Uncertain-scope count at the current loop iteration's entry. A `break`
+  // reached with MORE uncertain scopes active than this is guarded by a runtime
+  // condition the unroller cannot resolve; the same count means its guard is
+  // comptime and unrolling handles it (a comptime break nested inside a runtime
+  // `if` around the whole loop must NOT be rejected).
+  std::size_t loop_uncertain_base_{0};
+
+  // ── loop rolling (todo_loop_cond_sub.md M4) ─────────────────────────
+  //
+  // What lifting a loop body needs to know. Free variables of the body split
+  // into three classes; anything declared inside the body is local and gets no
+  // boundary port:
+  //   index      — the iteration variable, one input port
+  //   invariant  — read, never written: one input port
+  //   carry      — WRITTEN (whether or not it is also read): an input + an
+  //                output port plus a descriptor mapping, so ordinal r+1 reads
+  //                ordinal r's value
+  //
+  // A written-but-never-read variable is deliberately classified as a carry
+  // too, even though the doc allows a cheaper "final-only" port. Carrying it
+  // costs one unused input and is unconditionally correct; getting the
+  // distinction wrong is exactly the silent miscompile the design warns about
+  // (a conditionally-written value read on a later iteration), and the runner
+  // has no predicated form to decide it on.
+  struct Loop_roll_plan {
+    int64_t     first = 0;
+    int64_t     step  = 1;
+    uint64_t    count = 0;
+    std::string ivar;     // index port name == the iteration variable
+    std::string mangled;  // lifted definition name
+    std::string inst;     // instance name for the replicated Sub
+
+    std::vector<std::string>                    invariants;
+    std::vector<std::string>                    carries;
+    absl::flat_hash_map<std::string, Spec_port> types;  // boundary name -> declared type
+  };
+
+  // Suffixes for the two compiler-owned ports a carry needs. The body is copied
+  // VERBATIM, so a carry keeps its own name inside the body as an ordinary
+  // `mut` local seeded from the input port and written back to the output port.
+  static constexpr std::string_view kCarryInSuffix  = "__carry_in";
+  static constexpr std::string_view kCarryOutSuffix = "__carry_out";
+
+  // Analysis only: decides whether this range loop can roll and fills `out`.
+  // Returns false (with a debug-log reason) to fall back to unrolling.
+  bool plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
+                      Loop_roll_plan& out);
+
+  // Builds the lifted definition: io ports from the plan, the body copied
+  // verbatim between a carry-seeding prologue and a carry-writeback epilogue.
+  std::shared_ptr<Lnast> lift_loop_body(const Lnast_nid& body_stmts, const Loop_roll_plan& plan);
+
+  // Emits the single replicated call plus the per-carry read-backs.
+  void emit_rolled_loop_call(const Loop_roll_plan& plan);
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is

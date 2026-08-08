@@ -281,13 +281,20 @@ std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {
 
 // Escaped Verilog identifiers (`\a[0] `) carry non-identifier characters;
 // the LNAST ref-text contract wants those backtick-quoted (the form
-// prp2lnast emits). Two characters cannot ride even INSIDE the quotes:
-// whitespace (the dump tokenizer splits on it) and '.' (the builder's
-// bundle-path split treats it as a field separator) - map both to '_'
-// BEFORE uniquing so distinct raws that sanitize alike still get suffixes.
+// prp2lnast emits). WHITESPACE cannot ride even inside the quotes (the dump
+// tokenizer splits on it), so map it to '_' BEFORE uniquing — that way two
+// distinct raws that sanitize alike still get uniquing suffixes.
+//
+// '.' is deliberately NOT sanitized. It used to be, because the bundle-path
+// split read it as a field separator; `bundle_key::find_top_dot` now skips
+// dots inside `` `…` `` and quote_if_needed below quotes any name carrying
+// one. Folding it to '_' cost the RTL spelling for no remaining reason:
+// `\mem.a` reached the LGraph as `mem_a`, so a design compared against the
+// Pyrope that generated it (whose detupled memory IS `mem.a`) lost every
+// state name pair and fell back to structural matching.
 static std::string sanitize_name(std::string name) {
   for (auto& c : name) {
-    if (std::isspace(static_cast<unsigned char>(c)) || c == '.') {
+    if (std::isspace(static_cast<unsigned char>(c))) {
       c = '_';
     }
   }
@@ -307,6 +314,8 @@ static std::string quote_if_needed(std::string name) {
   }
   return plain ? name : absl::StrCat("`", name, "`");
 }
+
+std::string Slang_context::ref_name_of_raw(std::string_view raw) { return quote_if_needed(sanitize_name(std::string(raw))); }
 
 std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
   auto it = sym_lname_.find(&sym);

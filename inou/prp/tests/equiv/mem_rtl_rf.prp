@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_rtl_rf.rtlmem
 :pyrope_top: rtlmem
+:state_pair_gap: mems=0/1
 */
 
 // 1a-mem — __memory(cfg) RTL instantiation (08-memories.md), cfg vocabulary

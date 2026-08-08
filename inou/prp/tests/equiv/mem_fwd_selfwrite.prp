@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_fwd_selfwrite.rf
 :pyrope_top: rf
+:state_pair_gap: mems=0/1
 */
 
 // MEMORY vs FLOP-ARRAY+MUX, with a FORWARDING read of a SELF-WRITTEN array.

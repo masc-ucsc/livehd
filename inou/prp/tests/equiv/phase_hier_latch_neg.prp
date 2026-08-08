@@ -4,6 +4,7 @@
 :verilog_top: phase_hier_latch_neg
 :pyrope_top: phase_hier_latch_neg
 :equiv_engine: cvc5
+:state_pair_gap: regs=0/1
 */
 
 // Normalized Pyrope side of a hierarchical active-high latch + negedge flop.

@@ -26,6 +26,7 @@
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
+#include "replica_expand.hpp"
 
 using namespace livehd::graph_util;  // type_op_of, node_color_of, is_const_pin, ...
 using livehd::color::is_partitionable;
@@ -1643,6 +1644,14 @@ livehd::partition::Flatten_mode livehd::partition::parse_flatten_mode(std::strin
 }
 
 void Pass_partition::partition(Eprp_var& var) {
+  // A replicated Sub denotes `count` occurrences; Flattener::create_nodes
+  // splices a design Sub's callee exactly ONCE and its attribute allowlist does
+  // not carry the descriptor, so a compact node would be partitioned (and
+  // area-counted) as a single replica. Expand first.
+  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.partition")) {
+    return;
+  }
+
   auto top = std::string{var.get("top", "")};
   auto out = std::string{var.get("out", "")};
   bool dbg = var.get("debug_color", "false") != "false" && var.get("debug_color", "false") != "0";

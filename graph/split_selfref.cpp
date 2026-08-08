@@ -11,6 +11,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "replica_desc.hpp"
 #include "cell.hpp"       // Ntype / Ntype_op
 #include "diag.hpp"       // livehd::diag::warn (non-silent cap diagnostic)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
@@ -1005,6 +1006,9 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
 }
 
 int flatten_false_loop_subs(hhds::Graph* g) {
+  // A replicated Sub is never a false-loop target: dissolving one keeps a
+  // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
+  // Consumers expand it explicitly instead (graph/replica_expand.hpp).
   namespace gu = livehd::graph_util;  // the lambdas below qualify with it
 
   // The whole CLOSURE must be state-free: nested comb Subs are fine (the clone
@@ -1093,6 +1097,9 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
+      if (gu::is_replicated_sub(node)) {
+        continue;  // count occurrences, not one — inlining here drops count-1 replicas
+      }
       if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
         continue;
       }
@@ -1127,6 +1134,12 @@ int flatten_false_loop_subs(hhds::Graph* g) {
           // a nested comb Sub is re-instantiated in g as an ordinary child
           // instance (the closure check above guarantees it is state-free)
           neo.set_subnode(cn.get_subnode_io());
+          // ... unless it is REPLICATED, in which case the descriptor is part of
+          // its identity: a clone without it is one occurrence where `count`
+          // belong, and no later expansion can tell.
+          if (auto a = cn.attr(livehd::attrs::replica_desc); a.has()) {
+            neo.attr(livehd::attrs::replica_desc).set(std::string{a.get()});
+          }
         }
         if (gu::has_name(cn)) {
           neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(cn)});

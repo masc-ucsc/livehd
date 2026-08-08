@@ -276,6 +276,12 @@ constexpr std::string_view call_spread_arg_marker = "__spread_arg";
 // `store(__inst_name, const "X")` actual; gather_actuals consumes it (never an
 // argument) and try_inline uses it as the hierarchical-prefix level.
 constexpr std::string_view call_inst_name_marker = "__inst_name";
+// Loop-iteration tag the unroller stamps on every call it emits from inside an
+// unrolled body (`store(__inst_suffix, const "_li3")`, one `_li<ordinal>` per
+// enclosing loop). tolg appends it to whatever instance name it derives, so the
+// N body copies of one source call site are `<name>_li0`..`<name>_liN-1`
+// instead of N instances all spelling the source name.
+constexpr std::string_view call_inst_suffix_marker = "__inst_suffix";
 
 // Collect the NON-temporary variables that the `while` CONDITION reads
 // (transitively). `cond_ref` is the while's child-0 ref name; we trace its
@@ -401,6 +407,21 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   if (auto it = options.find("inline"); it != options.end()) {
     const auto& v     = it->second;
     inlining_enabled_ = !(v == "false" || v == "0" || v == "no" || v == "off");
+  }
+
+  // compile.upass.roll=true: keep an eligible comptime range loop rolled (lift
+  // the body into one generated definition + a single replicated instance)
+  // rather than emitting one body copy per iteration.
+  if (auto it = options.find("roll"); it != options.end()) {
+    const auto& v = it->second;
+    roll_enabled_ = !(v.empty() || v == "false" || v == "0" || v == "no" || v == "off");
+  }
+  if (auto it = options.find("roll_cap"); it != options.end()) {
+    uint64_t    cap = 0;
+    const auto& v   = it->second;
+    if (std::from_chars(v.data(), v.data() + v.size(), cap).ec == std::errc{} && cap > 0) {
+      roll_cap_ = cap;
+    }
   }
 
   for (const auto& name : resolved) {
@@ -1149,7 +1170,9 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     return;
   }
   const auto op_ntype = lm->current_type();
+  const bool is_call  = Lnast_ntype::is_func_call(op_ntype);
   emit_push(op_ntype);  // carries the SourceId (general carry)
+  std::string call_callee;  // child 1 of a func_call — read while walking it below
 
   // A `declare`/`type_spec` whose type slot (child 1) is a named-type
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
@@ -1163,6 +1186,9 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     do {
       const bool is_type_slot = (idx == 1 && type_slot_at_1);
       const bool is_lhs       = ((idx == 0) && !fold_all) || is_type_slot;
+      if (is_call && idx == 1) {
+        call_callee = std::string(lm->current_raw_text());  // callee id — never frame-renamed
+      }
       if (is_type_slot && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref
           && emit_scalar_named_type_slot(lm->current_text())) {
         // scalar named-type ref concretized to a prim_type — nothing else to emit
@@ -1196,7 +1222,49 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     lm->move_to_parent();
   }
 
+  // A call that reaches the materialized tree becomes a Sub INSTANCE (an
+  // inlined one never gets here — the splice consumed it). Inside an unrolled
+  // body each copy of that one source call site is a SEPARATE instance, so tag
+  // it with the iteration ordinal while we still know it; tolg appends the tag
+  // to whatever instance name it derives.
+  if (is_call && !loop_iter_ordinals_.empty()) {
+    stamp_loop_inst_suffix(call_callee);
+  }
+
   emit_pop();
+}
+
+void uPass_runner::stamp_loop_inst_suffix(std::string_view callee) {
+  // Only a call tolg lowers to a Sub is tagged. A builtin (`__memory`) reads a
+  // closed argument vocabulary and an unresolved callee binds positionally, so
+  // an extra marker store there is an unknown-argument error, not a name.
+  std::string name(callee);
+  if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
+    name = name.substr(1, name.size() - 2);  // an import-bound callee folds to a quoted string
+  }
+  bool becomes_instance = name.starts_with("lg:");
+  if (!becomes_instance) {
+    auto       c     = lookup_callee(name);
+    const auto k     = c ? c->get_lambda_kind() : std::string_view{};
+    becomes_instance = (k == "mod" || k == "pipe" || k == "fluid" || k == "comb");
+  }
+  if (!becomes_instance) {
+    return;
+  }
+  // Already tagged: this is a re-emit of a call the unroller stamped on an
+  // earlier run (emit_named_instance_call re-walks its own output).
+  for (auto c : staging->children(staging_parent)) {
+    if (!Lnast_ntype::is_store(staging->get_type(c))) {
+      continue;
+    }
+    auto k = staging->get_first_child(c);
+    if (!k.is_invalid() && staging->get_name(k) == call_inst_suffix_marker) {
+      return;
+    }
+  }
+  auto st = staging->add_child(staging_parent, Lnast_ntype::create_store());
+  staging->add_child(st, Lnast_node::create_ref(std::string(call_inst_suffix_marker)));
+  staging->add_child(st, Lnast_node::create_const(loop_inst_suffix()));
 }
 
 // ── Pass dispatch ─────────────────────────────────────────────────────────────
@@ -5041,6 +5109,498 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   return clone;
 }
 
+// ── loop rolling (todo_loop_cond_sub.md M4) ─────────────────────────
+
+namespace {
+
+// A `store` whose child 0 names something STRUCTURAL rather than a variable.
+// Two shapes lower to the same `store(ref(key), value)` a plain assignment
+// does, and both are labels, not writes:
+//   * a NAMED ACTUAL — `f(x=d)` and the reserved `f::[name=inst]` sit directly
+//     under a func_call, so reading them as writes turns `__inst_name` into a
+//     loop carry;
+//   * a TUPLE-LITERAL FIELD — `(x=i, y=1)` lowers to
+//     `tuple_add(%tmp, store(ref("x"), …), store(ref("y"), …))`
+//     (prp2lnast.cpp), so its FIELD NAMES would be read as written variables.
+//     A field named after an enclosing io port then becomes a "carry" whose
+//     lifted `__carry_out` is assigned back onto a module port.
+// Same rule Lnast_manager::is_tuple_field_key/is_call_arg_key apply when they
+// decline to inline-rename these refs.
+bool makes_store_keys(const Lnast& ln, const Lnast_nid& nid) {
+  const auto t = ln.get_type(nid);
+  return Lnast_ntype::is_func_call(t) || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_tuple_concat(t);
+}
+
+// Free-variable collection over a loop body. One walk classifies every NON-tmp
+// name as read / written / declared-local. Key stores (see above) are neither.
+struct Body_vars {
+  absl::flat_hash_set<std::string> read;
+  absl::flat_hash_set<std::string> written;
+  absl::flat_hash_set<std::string> declared;
+};
+
+void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_keys, Body_vars& out) {
+  if (nid.is_invalid()) {
+    return;
+  }
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_func_def(t)) {
+    return;  // a nested lambda has its own scope
+  }
+  const bool is_call    = Lnast_ntype::is_func_call(t);
+  const bool is_store   = Lnast_ntype::is_store(t);
+  const bool is_declare = Lnast_ntype::is_declare(t);
+  // Child 0 of a defining statement names its target, not a read.
+  const bool defines = is_store || is_declare || is_call || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
+                       || Lnast_ntype::is_tuple_get(t);
+
+  const auto target = ln.get_first_child(nid);
+  const auto target_name
+      = (!target.is_invalid() && Lnast_ntype::is_ref(ln.get_type(target))) ? ln.get_name(target) : std::string_view{};
+  if (!target_name.empty() && !prp_is_tmp_name(target_name)) {
+    if (is_declare) {
+      out.declared.emplace(target_name);
+    } else if (is_store && !parent_makes_keys) {
+      out.written.emplace(target_name);  // a store under a call/tuple is a key
+    }
+  }
+
+  const bool child_keys = makes_store_keys(ln, nid);
+  int        idx        = 0;
+  for (auto c : ln.children(nid)) {
+    const bool skip = (defines && idx == 0) || (is_call && idx == 1);  // target, callee
+    if (!skip && Lnast_ntype::is_ref(ln.get_type(c))) {
+      const auto nm = ln.get_name(c);
+      if (!nm.empty() && !prp_is_tmp_name(nm)) {
+        out.read.emplace(nm);
+      }
+    }
+    collect_body_vars(ln, c, child_keys, out);
+    ++idx;
+  }
+}
+
+// The storage-class token of `name`'s declaration (`mut`, `reg`, `const`, ...),
+// or empty when the name is not declared in this tree. Shape:
+//   declare( ref(name), <type>, const(<class>) [, const(init)] )
+std::string decl_storage_class(const Lnast& ln, const Lnast_nid& nid, std::string_view name) {
+  if (nid.is_invalid()) {
+    return {};
+  }
+  if (Lnast_ntype::is_declare(ln.get_type(nid))) {
+    auto tgt = ln.get_first_child(nid);
+    if (!tgt.is_invalid() && Lnast_ntype::is_ref(ln.get_type(tgt)) && ln.get_name(tgt) == name) {
+      for (auto c : ln.children(nid)) {
+        if (Lnast_ntype::is_const(ln.get_type(c))) {
+          const auto txt = ln.get_name(c);
+          if (txt == "reg" || txt == "mut" || txt == "const" || txt == "var") {
+            return std::string(txt);
+          }
+        }
+      }
+    }
+  }
+  for (auto c : ln.children(nid)) {
+    // A nested lambda has its own scope — collect_body_vars stops there too, so
+    // letting the search descend would let an unrelated `mut acc` inside a
+    // nested comb decide the register guard for the module's own `reg acc`.
+    if (Lnast_ntype::is_func_def(ln.get_type(c))) {
+      continue;
+    }
+    if (auto r = decl_storage_class(ln, c, name); !r.empty()) {
+      return r;
+    }
+  }
+  return {};
+}
+
+// True when some `store` OUTSIDE `skip` (the loop body) writes `name`. A carry
+// needs a value entering the loop; a variable written ONLY inside the body has
+// none, and the emitted initial actual would reference an undriven name.
+//
+// A KEY store is not a write (see makes_store_keys). That exemption is what
+// makes this guard mean anything for a module port: an io declaration is
+// `io -> tuple_add -> store(ref(name), const(nil), <type>)`, the same shape,
+// so without it EVERY port name answered true and the refusal never fired for
+// `-> (z:u12)` written only inside the loop.
+bool written_outside(const Lnast& ln, const Lnast_nid& nid, const Lnast_nid& skip, std::string_view name,
+                     bool parent_makes_keys = false) {
+  if (nid.is_invalid() || nid == skip) {
+    return false;
+  }
+  if (!parent_makes_keys && Lnast_ntype::is_store(ln.get_type(nid))) {
+    auto tgt = ln.get_first_child(nid);
+    if (!tgt.is_invalid() && Lnast_ntype::is_ref(ln.get_type(tgt)) && ln.get_name(tgt) == name) {
+      return true;
+    }
+  }
+  const bool child_keys = makes_store_keys(ln, nid);
+  for (auto c : ln.children(nid)) {
+    if (Lnast_ntype::is_func_def(ln.get_type(c))) {
+      continue;  // a nested lambda's writes are not this scope's (see decl_storage_class)
+    }
+    if (written_outside(ln, c, skip, name, child_keys)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// True when the subtree holds a `break` or `continue`. Both are refused by the
+// MVP roller: their rolled semantics is the per-replica activation chain
+// (`next_active`, design rule 13), which does not exist yet. Unrolling still
+// handles a comptime break, so refusing here only costs the compact form.
+bool subtree_has_loop_control(const Lnast& ln, const Lnast_nid& nid) {
+  if (nid.is_invalid()) {
+    return false;
+  }
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_func_def(t)) {
+    return false;
+  }
+  if (Lnast_ntype::is_func_break(t) || Lnast_ntype::is_func_continue(t)) {
+    return true;
+  }
+  for (auto c : ln.children(nid)) {
+    if (subtree_has_loop_control(ln, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
+                                  Loop_roll_plan& out) {
+  const auto refuse = [&](std::string_view why) {
+    std::print("uPass - roll declined for `for {}`: {}\n", ivar, why);
+    return false;
+  };
+  if (step <= 0) {
+    return refuse("non-positive step");
+  }
+  if (hi < lo) {
+    return refuse("empty range");  // zero-count rolling is legal but pointless
+  }
+  const auto span  = static_cast<uint64_t>(hi - lo);
+  const auto count = span / static_cast<uint64_t>(step) + 1;
+  if (count > roll_cap_) {
+    return refuse("trip count above upass.roll_cap");
+  }
+
+  // Inside an inlined frame the two halves of this transform disagree about
+  // spelling: `ivar` came from current_text(), so it is the frame-renamed
+  // `<tag>i`, while collect_body_vars reads and copy_subtree_into COPIES raw
+  // LNAST names. The lifted definition would declare a `<tag>i` port the copied
+  // body never mentions, the raw `i` would be classified as a loop invariant,
+  // and emit_rolled_loop_call binds its actuals in a scratch tree pushed with an
+  // EMPTY tag — so the carry initial value would read the enclosing module's
+  // `acc` instead of the frame's `<tag>acc`. Unrolling handles this shape.
+  if (lm->in_inline_frame()) {
+    return refuse("the loop is inside an inlined frame (its names are frame-renamed, the copied body's are raw)");
+  }
+
+  const auto& ln = *lm->get_lnast();
+  if (subtree_has_loop_control(ln, body_stmts)) {
+    return refuse("body contains `break`/`continue` (needs the activation chain)");
+  }
+
+  Body_vars vars;
+  collect_body_vars(ln, body_stmts, /*parent_is_call=*/false, vars);
+  const auto& written  = vars.written;
+  const auto& read     = vars.read;
+  const auto& declared = vars.declared;
+
+  out.first = lo;
+  out.step  = step;
+  out.count = count;
+  out.ivar  = ivar;
+
+  // Declared-in-body names are local; the iteration variable is the index.
+  const auto is_local = [&](const std::string& n) { return declared.contains(n) || n == ivar; };
+
+  for (const auto& n : written) {
+    if (is_local(n)) {
+      continue;
+    }
+    out.carries.emplace_back(n);
+  }
+  for (const auto& n : read) {
+    if (is_local(n) || written.contains(n)) {
+      continue;
+    }
+    out.invariants.emplace_back(n);
+  }
+  // Deterministic port order: the lifted definition's interface must not depend
+  // on hash iteration order, or two compiles of the same source disagree.
+  std::ranges::sort(out.carries);
+  std::ranges::sort(out.invariants);
+
+  // Boundary types. These io declarations are the ONLY width carrier in the
+  // default O1 recipe (pass.bitwidth is O2-only and set_subgraph_boundary_bw
+  // re-reads outputs), so a name with no declared type cannot roll.
+  const auto& encl_io   = lm->get_lnast()->io_meta();
+  const auto  encl_input = [&](const std::string& nm) -> const Lnast_io_entry* {
+    for (const auto& ce : encl_io.inputs) {
+      if (ce.name == nm) {
+        return &ce;
+      }
+    }
+    return nullptr;
+  };
+  const auto type_of = [&](const std::string& n, Spec_port& sp) {
+    // A NAMED type (`type W = u12; mut acc:W`) must resolve to a RANGE here: the
+    // lifted definition is a separate module that cannot see the caller's type
+    // alias, so emitting `ref(W)` as the port type yields a 1-bit port and
+    // silently truncates the carry. Prefer the declared range; refuse if the
+    // name only has an alias.
+    if (auto dt = try_decl_type(n); dt && (dt->range_max || dt->range_min)) {
+      sp = Spec_port{.inject = true, .max = dt->range_max, .min = dt->range_min};
+      return true;
+    }
+    // A free variable that is an INPUT of the enclosing definition carries its
+    // width on the io declaration rather than in a body `declare`.
+    if (const auto* ci = encl_input(n); ci != nullptr && (ci->bits > 0 || ci->kind == Io_kind::boolean)) {
+      if (ci->kind == Io_kind::boolean) {
+        sp = Spec_port{.inject = true, .max = *Dlop::from_pyrope("1"), .min = *Dlop::from_pyrope("0")};
+      } else if (ci->is_signed) {
+        sp = Spec_port{.inject = true,
+                       .max    = upass::signed_max_from_bits(ci->bits),
+                       .min    = upass::signed_min_from_bits(ci->bits)};
+      } else {
+        sp = Spec_port{.inject = true, .max = upass::unsigned_max_from_bits(ci->bits), .min = *Dlop::from_pyrope("0")};
+      }
+      return true;
+    }
+    // NOTE an inferred BOOLEAN is deliberately NOT accepted here. `mut ok =
+    // false` looks like a safe 1-bit boundary, but a Pyrope `true` is
+    // all-ones, and a lifted `bool` port round-trips through the callee
+    // boundary at a width the carry chain then re-reads inconsistently
+    // (measured: an rca `carry` chain lowers to a 2-bit output feeding a 1-bit
+    // input, and the last occurrence's net is referenced but never declared).
+    // Refusing keeps the loop on the unroll path, which is correct; supporting
+    // it needs the boolean boundary width pinned first.
+    //
+    // Inferring from the VALUE is also unsound in general for integers: a
+    // `mut acc = 0` accumulator widens as the loop runs, so typing the
+    // boundary from its seed would silently truncate (design rule 11).
+    return false;
+  };
+  for (const auto& n : out.carries) {
+    // A register declared OUTSIDE and written inside the loop is legal Pyrope
+    // and perfectly meaningful — unrolled, each iteration just reads Q and
+    // rewrites D. Rolling it is what is blocked: the lifted body is a `mod`, so
+    // it would have to take the register BY REFERENCE (`ref acc`) to write the
+    // real flop rather than a copy of its value. `ref` is comb-only today —
+    // prp2lnast.cpp:4504-4513 rejects a `ref` parameter on a `mod` outright —
+    // so there is no way to express it. Lifting it as an ordinary value carry
+    // instead turned the flop's next state into the identity (it held its reset
+    // value forever), which is why this refuses rather than mis-lowers.
+    //
+    // TBD: lift this refusal once `ref` on a `mod` boundary exists. That is an
+    // independent Pyrope feature, not part of this proposal.
+    if (decl_storage_class(ln, ln.get_root(), n) == "reg") {
+      return refuse(std::format(
+          "`{}` is a register declared outside the loop; rolling would need to pass it as `ref {}`, "
+          "and `ref` on a `mod` boundary is not supported yet (TBD)",
+          n,
+          n));
+    }
+    // A variable written ONLY inside the loop is a "final-only" result in the
+    // design's terms, not a carry: there is no value entering ordinal 0, so the
+    // emitted initial actual would reference an undriven name (tolg then blames
+    // the whole `for`, far from the cause). The MVP carries everything, so it
+    // cannot express this shape.
+    if (!written_outside(ln, ln.get_root(), body_stmts, n)) {
+      return refuse(std::format("`{}` is written only inside the loop (no value enters ordinal 0)", n));
+    }
+    Spec_port sp;
+    if (!type_of(n, sp)) {
+      return refuse(std::format("carried variable `{}` has no declared type", n));
+    }
+    out.types[n] = sp;
+  }
+  for (const auto& n : out.invariants) {
+    Spec_port sp;
+    if (!type_of(n, sp)) {
+      return refuse(std::format("loop-invariant `{}` has no declared type", n));
+    }
+    out.types[n] = sp;
+  }
+
+  // The index port is signed and wide enough for every generated value (the
+  // realized Verilog localparam is signed, so a minimal unsigned width would
+  // wrap the top ordinal).
+  // The realized boundary is SIGNED (cgen prints `input signed [W-1:0]`), so
+  // the declared range must be a signed one wide enough for the extreme index.
+  // Declaring `[0, 7]` yields a 3-bit port that cannot hold 7 once it is read
+  // as signed — design rule 7 (a 0..=15 domain needs 5 signed bits, not 4).
+  const int64_t last = lo + static_cast<int64_t>(count - 1) * step;
+  {
+    // Two's-complement width, sign bit included, of the extreme generated index.
+    const auto sbits = [](int64_t v) {
+      if (v == 0) {
+        return 1;
+      }
+      if (v > 0) {
+        int b = 1;
+        for (; v != 0; v >>= 1) {
+          ++b;
+        }
+        return b;
+      }
+      int b = 2;
+      while (b < 64 && v < -(static_cast<int64_t>(1) << (b - 1))) {
+        ++b;
+      }
+      return b;
+    };
+    const int w     = std::max(sbits(lo), sbits(last));
+    out.types[ivar] = Spec_port{.inject = true,
+                                .max    = upass::signed_max_from_bits(w),
+                                .min    = upass::signed_min_from_bits(w)};
+  }
+
+  // A compiler-owned port name must not collide with a source variable.
+  for (const auto& n : out.carries) {
+    if (n.ends_with(kCarryInSuffix) || n.ends_with(kCarryOutSuffix)) {
+      return refuse(std::format("variable `{}` collides with a reserved carry port suffix", n));
+    }
+  }
+  return true;
+}
+
+std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts, const Loop_roll_plan& plan) {
+  const auto& src   = lm->get_lnast();
+  auto        body  = std::make_shared<Lnast>(plan.mangled);
+  auto        root  = body->set_root(Lnast_ntype::create_top());
+  if (const auto id = src->get_srcid(body_stmts); id != hhds::SourceId_invalid) {
+    body->set_srcid(root, body->source_locator().import_from(src->source_locator(), id));
+  }
+  body->set_lambda_kind("mod");  // may hold state and may instantiate other mods
+  body->set_template(false);
+
+  // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
+  const auto add_port = [&](const Lnast_nid& parent, const std::string& name, const Spec_port& p, bool is_output) {
+    auto st = body->add_child(parent, Lnast_ntype::create_store());
+    body->add_child(st, Lnast_node::create_ref(name));
+    body->add_child(st, Lnast_node::create_const("nil"));
+    if (!p.type_name.empty()) {
+      body->add_child(st, Lnast_node::create_ref(p.type_name));
+    } else {
+      auto pt = body->add_child(st, Lnast_ntype::create_prim_type_int());
+      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+    }
+    if (is_output) {
+      auto stg = body->add_child(st, Lnast_ntype::create_stages());
+      body->add_child(stg, Lnast_node::create_const("0"));
+      body->add_child(stg, Lnast_node::create_const("0"));
+    }
+  };
+
+  auto io_n = body->add_child(root, Lnast_ntype::create_io());
+  auto ins  = body->add_child(io_n, Lnast_ntype::create_tuple_add());
+  add_port(ins, plan.ivar, plan.types.at(plan.ivar), false);
+  for (const auto& n : plan.invariants) {
+    add_port(ins, n, plan.types.at(n), false);
+  }
+  for (const auto& n : plan.carries) {
+    add_port(ins, n + std::string(kCarryInSuffix), plan.types.at(n), false);
+  }
+  auto outs = body->add_child(io_n, Lnast_ntype::create_tuple_add());
+  for (const auto& n : plan.carries) {
+    add_port(outs, n + std::string(kCarryOutSuffix), plan.types.at(n), true);
+  }
+
+  auto stmts = body->add_child(root, Lnast_ntype::create_stmts());
+
+  // Prologue: seed each carry as an ordinary `mut` local from its input port,
+  // so the copied body's reads and writes of that name need no substitution.
+  for (const auto& n : plan.carries) {
+    const auto& p   = plan.types.at(n);
+    auto        dcl = body->add_child(stmts, Lnast_ntype::create_declare());
+    body->add_child(dcl, Lnast_node::create_ref(n));
+    if (!p.type_name.empty()) {
+      body->add_child(dcl, Lnast_node::create_ref(p.type_name));
+    } else {
+      auto pt = body->add_child(dcl, Lnast_ntype::create_prim_type_int());
+      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+    }
+    body->add_child(dcl, Lnast_node::create_const("mut"));
+
+    auto seed = body->add_child(stmts, Lnast_ntype::create_store());
+    body->add_child(seed, Lnast_node::create_ref(n));
+    body->add_child(seed, Lnast_node::create_ref(n + std::string(kCarryInSuffix)));
+  }
+
+  // The loop body verbatim — `for` is an SSA scope barrier, so its names are
+  // raw source names and the port names above were chosen to match them.
+  for (auto c : src->children(body_stmts)) {
+    copy_subtree_into(src, c, body, stmts, nullptr);
+  }
+
+  // Epilogue: publish each carry on its output port.
+  for (const auto& n : plan.carries) {
+    auto wb = body->add_child(stmts, Lnast_ntype::create_store());
+    body->add_child(wb, Lnast_node::create_ref(n + std::string(kCarryOutSuffix)));
+    body->add_child(wb, Lnast_node::create_ref(n));
+  }
+  return body;
+}
+
+void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan) {
+  // Actuals: invariants and carry initial values by name, plus the descriptor
+  // markers tolg turns into the node's Replica_desc. The markers ride the same
+  // reserved-actual channel `__inst_name` already uses.
+  std::vector<std::pair<std::string, Lnast_node>> actuals;
+  for (const auto& n : plan.invariants) {
+    actuals.emplace_back(n, Lnast_node::create_ref(n));
+  }
+  for (const auto& n : plan.carries) {
+    actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref(n));
+  }
+  actuals.emplace_back("__replica",
+                       Lnast_node::create_const(std::format("first={};step={};count={}", plan.first, plan.step, plan.count)));
+  actuals.emplace_back("__replica_index", Lnast_node::create_const(plan.ivar));
+  {
+    std::string carry_spec;
+    for (const auto& n : plan.carries) {
+      if (!carry_spec.empty()) {
+        carry_spec += ",";
+      }
+      carry_spec += n + std::string(kCarryOutSuffix) + ">" + n + std::string(kCarryInSuffix);
+    }
+    if (!carry_spec.empty()) {
+      actuals.emplace_back("__replica_carry", Lnast_node::create_const(carry_spec));
+    }
+  }
+
+  const auto dst = std::string("%") + plan.inst + "_r";
+  emit_named_instance_call(dst, plan.mangled, plan.inst, actuals);
+
+  // Read each carried result back into the source variable, so statements after
+  // the loop see the value after `count` applications.
+  //
+  // This goes through emit_inline_tuple_pick (a scratch fragment re-walked by
+  // process_lnast), NOT a raw emit into staging: the runner is a comptime
+  // interpreter, and a raw emit would leave the symbol table still holding the
+  // variable's PRE-LOOP constant. A later `q = packed` would then fold to that
+  // stale value — the loop's whole result silently replaced by its seed.
+  for (const auto& n : plan.carries) {
+    emit_inline_tuple_pick(n, dst, n + std::string(kCarryOutSuffix));
+    // ...and drop the variable's stale comptime value. The pick emits the read
+    // but its source is an instance-result temp the varmap knows nothing about,
+    // so nothing clears the constant the variable held BEFORE the loop. This is
+    // the same "runtime-divergent, so invalidate" treatment an uncertain if-arm
+    // gets on scope exit (Symbol_table::leave_scope): the value is a real
+    // runtime wire now, not nil and not its seed.
+    (void)symbol_table_.set(n, Bundle::invalid_lconst);
+  }
+}
+
 void uPass_runner::emit_named_instance_call(const std::string& dst, const std::string& callee_ref,
                                             const std::string& inst_name,
                                             const std::vector<std::pair<std::string, Lnast_node>>& actuals) {
@@ -5820,6 +6380,13 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
         lm->restore_cursor(here);
         continue;
       }
+      // Loop-iteration tag stamped by a previous unroll (emit_op_with_fold).
+      // Consumed like `__inst_name` — it is a naming marker, never an actual —
+      // and re-added by the emitter, so it need not be carried here.
+      if (a.key == call_inst_suffix_marker) {
+        lm->restore_cursor(here);
+        continue;
+      }
       // Explicit generic binding — consumed here, never an actual. The value
       // ref is frame-renamed text, so current_text(), not raw. A NAMED bind
       // (`f<T=u8>`, todo 3g C) carries the target generic name in a trailing
@@ -6511,6 +7078,14 @@ void uPass_runner::emit_inline_declare_typed(const std::string& name, const std:
   lm->pop_source();
 }
 
+std::string uPass_runner::loop_inst_suffix() const {
+  std::string s;
+  for (const auto ordinal : loop_iter_ordinals_) {
+    s += std::format("_li{}", ordinal);
+  }
+  return s;
+}
+
 bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, const std::function<void()>& emit_post) {
   // Precondition: the read cursor is on the loop body `stmts` node.
   if (inline_budget_ == 0 || loop_depth_ > static_cast<int>(kInlineMaxDepth)) {
@@ -6529,6 +7104,11 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
   emit_binds();
 
   loop_continue_hit_ = false;  // fresh per iteration (a `continue` skips only this one)
+  // Uncertainty the BODY introduces is what makes a `break` data dependent;
+  // uncertainty the loop is merely nested inside does not. Snapshot the base so
+  // the break check below compares against scopes entered since this point.
+  const auto saved_uncertain_base = loop_uncertain_base_;
+  loop_uncertain_base_            = symbol_table_.uncertain_scope_count();
   if (lm->move_to_child()) {
     do {
       process_lnast();
@@ -6538,6 +7118,8 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
     } while (lm->move_to_sibling());
     lm->move_to_parent();
   }
+
+  loop_uncertain_base_ = saved_uncertain_base;
 
   if (emit_post) {
     emit_post();  // `for i in ref d` write-back: still inside this iteration's scope
@@ -6613,9 +7195,30 @@ void uPass_runner::unroll_for() {
     if (step < 1) {
       step = 1;  // non-positive step is a comptime error (process_func_call); avoid a hang here
     }
+    // ROLL: keep the loop as one replicated instance instead of emitting one
+    // body copy per iteration (compile.upass.roll). Declines back to unrolling
+    // whenever the body is not eligible, so this is purely additive.
+    if (roll_enabled_) {
+      to_body();
+      const auto     body_nid = lm->get_current_nid();
+      Loop_roll_plan plan;
+      lm->restore_cursor(for_bm);
+      if (plan_loop_roll(body_nid, tagged_i, lo, hi, step, plan)) {
+        plan.inst    = std::format("u_loop_{}", roll_seq_);
+        plan.mangled = std::format("{}.__loop{}", lm->get_lnast()->get_top_module_name(), roll_seq_);
+        ++roll_seq_;
+        if (specialized_emitted_.insert(plan.mangled).second) {
+          new_lnasts.push_back(lift_loop_body(body_nid, plan));
+        }
+        emit_rolled_loop_call(plan);
+        lm->restore_cursor(for_bm);
+        return;
+      }
+    }
+
     const bool saved_break = loop_break_hit_;
     loop_break_hit_        = false;
-    ++loop_depth_;
+    Unroll_scope unroll(*this);  // ++loop_depth_ + iteration-ordinal level, both undone on return
     for (int64_t v = lo; v <= hi; v += step) {
       to_body();
       if (!walk_loop_iteration([&]() { emit_inline_binding(tagged_i, Lnast_node::create_const(std::to_string(v))); })) {
@@ -6624,8 +7227,8 @@ void uPass_runner::unroll_for() {
       if (loop_break_hit_) {
         break;
       }
+      unroll.next_iteration();
     }
-    --loop_depth_;
     loop_break_hit_    = saved_break;
     loop_continue_hit_ = false;  // a `continue` never escapes the loop
     lm->restore_cursor(for_bm);
@@ -6653,8 +7256,8 @@ void uPass_runner::unroll_for() {
   if (shape) {
     const bool saved_break = loop_break_hit_;
     loop_break_hit_        = false;
-    ++loop_depth_;
-    int64_t pos = 0;
+    Unroll_scope unroll(*this);  // ++loop_depth_ + iteration-ordinal level, both undone on return
+    int64_t      pos = 0;
     for (const auto& [key, is_pos] : *shape) {
       to_body();
       const std::string index_text = is_pos ? key : ("'" + key + "'");
@@ -6709,9 +7312,9 @@ void uPass_runner::unroll_for() {
       if (loop_break_hit_) {
         break;
       }
+      unroll.next_iteration();
       ++pos;
     }
-    --loop_depth_;
     loop_break_hit_    = saved_break;
     loop_continue_hit_ = false;  // a `continue` never escapes the loop
     lm->restore_cursor(for_bm);
@@ -6806,7 +7409,7 @@ void uPass_runner::unroll_while() {
 
   const bool saved_break = loop_break_hit_;
   loop_break_hit_        = false;
-  ++loop_depth_;
+  Unroll_scope unroll(*this);  // ++loop_depth_ + iteration-ordinal level, undone on return AND on loop_fail's throw
   // Per-loop unroll cap. State-repeat (below) catches a frozen/cyclic condition
   // in O(1) iterations, but a DIVERGENT loop whose condition variable keeps
   // changing yet never reaches the exit (`while c != 10 { c -= 1 }` from below)
@@ -6821,7 +7424,6 @@ void uPass_runner::unroll_while() {
     lm->restore_cursor(while_bm);  // cursor on the while node — the scope where the condition folds
 
     if (++loop_iters > kMaxLoopUnroll) {
-      --loop_depth_;
       loop_break_hit_ = saved_break;
       loop_fail(while_span(),
                 "loop-unbounded",
@@ -6849,7 +7451,6 @@ void uPass_runner::unroll_while() {
         sig.push_back(';');
       }
       if (all_known && !seen_states.insert(sig).second) {
-        --loop_depth_;
         loop_break_hit_ = saved_break;
         lm->restore_cursor(while_bm);  // try_fold_ref above may have moved the cursor; reset for the span
         loop_fail(while_span(),
@@ -6867,7 +7468,6 @@ void uPass_runner::unroll_while() {
       // (e.g. an unbounded counter that never satisfies the exit). Pyrope loops
       // must be comptime-bounded, so this is a build error rather than a silent
       // partial unroll.
-      --loop_depth_;
       loop_break_hit_ = saved_break;
       lm->restore_cursor(while_bm);
       loop_fail(while_span(),
@@ -6878,8 +7478,8 @@ void uPass_runner::unroll_while() {
     if (loop_break_hit_) {
       break;
     }
+    unroll.next_iteration();
   }
-  --loop_depth_;
   loop_break_hit_    = saved_break;
   loop_continue_hit_ = false;  // a `continue` never escapes the loop
   lm->restore_cursor(while_bm);  // leave cursor on the while-node
@@ -7738,6 +8338,20 @@ void uPass_runner::process_lnast() {
     case Ntype::Lnast_ntype_func_break:
       dispatch_to_passes(&upass::uPass::process_func_break);
       if (loop_depth_ > 0) {
+        // A `break` under a RUNTIME condition cannot be resolved by unrolling:
+        // process_lnast walks an unknown-condition arm like any other, so
+        // reaching the break here would set loop_break_hit_ unconditionally and
+        // abandon the rest of THIS iteration plus every later one — silently
+        // compiling `for i in 0..<8 { if runtime {break}; acc += 1 }` to
+        // `acc == 0`. Refuse instead of miscompiling. The rolled form lowers
+        // this to the per-replica activation chain (`next_active`, see
+        // todo_loop_cond_sub.md rule 13); until then it is unsupported.
+        if (symbol_table_.uncertain_scope_count() > loop_uncertain_base_) {
+          loop_fail(lm->get_lnast()->span_of(lm->get_current_nid()),
+                    "loop-runtime-break",
+                    "`break` under a runtime condition inside a comptime loop is not supported",
+                    "make the break condition comptime, or restructure the loop so the exit is not data dependent");
+        }
         loop_break_hit_ = true;  // checked by unroll_for/unroll_while after the iteration
       } else {
         emit_subtree_verbatim();
@@ -7749,6 +8363,18 @@ void uPass_runner::process_lnast() {
     case Ntype::Lnast_ntype_func_continue:
       dispatch_to_passes(&upass::uPass::process_func_continue);
       if (loop_depth_ > 0) {
+        // Same miscompile as the runtime `break` above, and worse: the flag is
+        // re-armed every iteration, so `for i in 0..<8 { if runtime {continue};
+        // acc += 1 }` abandons the rest of EVERY iteration and compiles to
+        // `acc == 0` — including the inputs where no `continue` is taken.
+        // Refuse until the rolled form's activation chain (`next_active`, see
+        // todo_loop_cond_sub.md rule 13) can express it.
+        if (symbol_table_.uncertain_scope_count() > loop_uncertain_base_) {
+          loop_fail(lm->get_lnast()->span_of(lm->get_current_nid()),
+                    "loop-runtime-continue",
+                    "`continue` under a runtime condition inside a comptime loop is not supported",
+                    "make the continue condition comptime, or restructure the loop so the skip is not data dependent");
+        }
         loop_continue_hit_ = true;
       } else {
         emit_subtree_verbatim();

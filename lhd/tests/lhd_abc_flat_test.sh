@@ -95,7 +95,12 @@ run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set abc.library
 run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
 run compile lg:"$D2/net" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
 run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
-grep -hq "holder.*\.r " "$D2/netv/"*.v || fail "hierarchical flop name lost in the flat netlist (expected a '<inst>.r' register)"
+# `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
+# so the preserved hierarchical flop is `a.r` / `b.r` — one multi-bit reg each.
+for inst in a b; do
+  grep -hqE "^reg \\[[0-9]+:0\\] \\\\${inst}\\.r " "$D2/netv/"*.v \
+    || fail "hierarchical flop name lost in the flat netlist (expected a multi-bit '${inst}.r' register): $(grep -hE '^reg ' "$D2/netv/"*.v | head -40)"
+done
 ! grep -hq "__rinit\|__r[0-9]" "$D2/netv/"*.v || fail "anonymous __rinit/__r flop leaked (original register names must survive)"
 ! grep -hq "DFFx1 " "$D2/netv/"*.v || fail "an init-carrying register was mapped to a DFF cell (power-on init would be lost)"
 cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"

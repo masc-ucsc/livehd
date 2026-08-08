@@ -1,0 +1,58 @@
+/*
+:name: loop_roll_carry
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: u_loop_0=1 stage=1 *=2
+*/
+// A source `for` loop kept ROLLED (`compile.upass.roll=true`, todo_loop_cond_sub.md M4):
+// the body is lifted into one generated definition and the loop becomes a
+// single replicated `Sub`, so the graph is O(1) in the trip count instead of
+// O(6).
+//
+// `:expect_instances:` is what makes this fixture mean anything — without it a
+// silent fall back to unrolling would still pass the value assertions. Two
+// instances is the whole design: `u_loop_0` (the replicated node) in the top,
+// and the one `stage` call inside the lifted body.
+//
+// Its twin `loop_roll_carry_unrolled.prp` is the SAME source with rolling off.
+// Both must produce the same value: that pair is the rolled-vs-unrolled
+// differential the representation change has to survive.
+
+mod acc_step(idx:u4, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
+  acc_out = acc_in + x + idx
+}
+
+mod loop_roll_carry(x:u8) -> (total:u16@[0]) {
+  mut acc:u16 = 0
+  for i in 0..<6 {
+    const t = acc_step::[name=stage](idx=i, x=x, acc_in=acc)
+    acc = t
+  }
+  total = acc
+}
+
+test loop_roll_carry.accumulates {
+  mut dut = loop_roll_carry
+
+  tick 3 {
+    if clock == 0 {
+      dut.x = 3
+    } elif clock == 1 {
+      dut.x = 0
+    } else {
+      dut.x = 7
+    }
+
+    step
+
+    // Six applications of `acc += x + i`, i = 0..5, so the loop value is
+    // 6*x + (0+1+2+3+4+5) = 6*x + 15.
+    if clock == 0 {
+      assert(dut.total == 33, "6*3 + 15")
+    } elif clock == 1 {
+      assert(dut.total == 15, "the index contribution alone")
+    } else {
+      assert(dut.total == 57, "6*7 + 15")
+    }
+  }
+}

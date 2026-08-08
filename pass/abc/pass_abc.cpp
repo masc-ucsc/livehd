@@ -20,6 +20,7 @@
 #include "mem_lower.hpp"
 #include "node_util.hpp"
 #include "pass_partition.hpp"
+#include "replica_expand.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -276,6 +277,14 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) {
+  // A replicated Sub denotes `count` occurrences; this pass walks a Sub as ONE
+  // physical instance, so expand before it looks at anything (see
+  // graph/replica_expand.hpp). Without this a rolled design is measured/mapped
+  // as a single replica.
+  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.abc")) {
+    return;
+  }
+
   auto top     = std::string{var.get("top", "")};
   auto out     = std::string{var.get("out", "")};
   auto library = std::string{var.get("library", "")};

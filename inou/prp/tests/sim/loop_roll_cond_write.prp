@@ -1,0 +1,51 @@
+/*
+:name: loop_roll_cond_write
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: *=1
+*/
+// A ROLLED loop whose carry is written CONDITIONALLY. This is the shape the
+// design doc calls out as the classification hazard (todo_loop_cond_sub.md, the
+// lifting table): a variable written on only some paths of an iteration is
+// still live across iterations, so it must be lifted as a CARRY — an input and
+// an output plus the ordinal-to-ordinal mapping. Classifying it as a
+// write-only "final-only" result instead would drop every iteration but the
+// last, and would do so silently.
+//
+// The roller sidesteps the judgement call by making EVERY outer variable the
+// body writes a carry, conditionally or not. This fixture is what keeps that
+// true.
+//
+// One instance total: the lifted body holds only arithmetic, so the whole
+// design is the single replicated node.
+
+mod loop_roll_cond_write(x:u8, c:bool) -> (z:u12@[0]) {
+  mut acc:u12 = 0
+  for i in 0..<4 {
+    if c {
+      acc = acc + x
+    }
+  }
+  z = acc
+}
+
+test loop_roll_cond_write.conditional_carry {
+  mut dut = loop_roll_cond_write
+
+  tick 2 {
+    dut.x = 5
+    if clock == 0 {
+      dut.c = true
+    } else {
+      dut.c = false
+    }
+
+    step
+
+    if clock == 0 {
+      assert(dut.z == 20, "four conditional accumulations of 5")
+    } else {
+      assert(dut.z == 0, "the carry must hold when no iteration writes it")
+    }
+  }
+}

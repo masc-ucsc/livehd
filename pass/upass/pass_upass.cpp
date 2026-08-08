@@ -152,6 +152,15 @@ void Pass_upass::setup() {
                         "O2 compile recipe sets it true to flatten. (stateful `mod`/`pipe`, recursive, `ref`/var-arg, "
                         "and template combs always stay as instances/inline regardless.)",
                         "false");
+  m1.add_label_optional("roll",
+                        "true|false: keep an eligible comptime range loop ROLLED — lift its body to one generated "
+                        "definition and emit a single replicated instance (see todo_loop_cond_sub.md) instead of "
+                        "unrolling one copy per iteration. Default FALSE while the LEC/formal paths still expand it.",
+                        "false");
+  m1.add_label_optional("roll_cap",
+                        "roll: maximum replica count still eligible to roll; a larger trip count falls back to "
+                        "unrolling (default 1024)",
+                        "1024");
   register_pass(m1);
 }
 
@@ -195,6 +204,8 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("import_defer");
   capture_opt("inline");  // compile.upass.inline=false -> runner emits comb instances instead of inlining
   capture_opt("dce");     // dce:mark -> runner skips the post-DCE staging rebuild (lg-only flows)
+  capture_opt("roll");    // upass.roll=true -> lift an eligible range-loop body and emit one replicated instance
+  capture_opt("roll_cap");
 
   if (!upass_order.empty()) {
     return;

@@ -248,7 +248,9 @@ public:
   // A caller that MEASURES bodies before emitting (to_cgen_sim's partition
   // pre-scan holds pin handles into callees) must drive this over the whole
   // library first, or it measures a graph the emission then rewrites.
-  void prepare_graph(const std::shared_ptr<hhds::Graph>& graph);
+  // Returns false when the body cannot be prepared (an unexpandable replicated
+  // instance); a diagnostic is emitted and the graph must NOT be emitted.
+  bool prepare_graph(const std::shared_ptr<hhds::Graph>& graph);
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,

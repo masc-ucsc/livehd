@@ -1,0 +1,66 @@
+/*
+:name: loop_cond_sub_break
+:type: simulation
+:expect_instances: add_lane_li*=6 xor_lane_li*=6 *=12
+*/
+// A source `for` loop that is unrolled today and is eligible for the compact
+// replicated-Sub representation described by todo_loop_cond_sub.md.  The two
+// calls are in opposite runtime arms, so exactly one result contributes at
+// each ordinal.  The comptime break is before the calls and makes the final two
+// source iterations unreachable.
+
+mod add_term(x:u8, ordinal:u4) -> (term:u9@[0]) {
+  term = x + ordinal
+}
+
+mod xor_term(x:u8, ordinal:u4) -> (term:u9@[0]) {
+  term = x ^ ordinal
+}
+
+mod loop_cond_sub_break(x:u8, choose_add:u8) -> (total:u12@[0]) {
+  mut acc:u12 = 0
+  for ordinal in 0..<8 {
+    if ordinal == 6 { break }
+
+    if choose_add#[ordinal] {
+      const term = add_term::[name=add_lane](x=x, ordinal=ordinal)
+      acc = acc + term
+    } else {
+      const term = xor_term::[name=xor_lane](x=x, ordinal=ordinal)
+      acc = acc + term
+    }
+  }
+  total = acc
+}
+
+test loop_cond_sub_break.branch_vectors {
+  mut dut       = loop_cond_sub_break
+  mut got_final = 0
+
+  tick 10 {  // watchdog; the runtime break below ends this after vector 3
+    dut.x = 10
+    if clock == 0 {
+      dut.choose_add = 0x3f
+    } elif clock == 1 {
+      dut.choose_add = 0
+    } else {
+      dut.choose_add = 0x15
+    }
+
+    step
+    got_final = dut.total
+
+    // Check every evaluated vector as well as the final captured value.
+    if clock == 0 {
+      assert(dut.total == 75, "six conditional add_term calls must sum to 75")
+    } elif clock == 1 {
+      assert(dut.total == 67, "six conditional xor_term calls must sum to 67")
+    } else {
+      assert(dut.total == 71, "alternating conditional callees must sum to 71")
+    }
+
+    if clock == 2 { break }
+  }
+
+  assert(got_final == 71, "the final conditional-call vector must be retained")
+}

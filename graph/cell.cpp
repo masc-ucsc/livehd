@@ -31,6 +31,7 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
     hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
     hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
+    hhds::register_attr_tag<livehd::attrs::replica_desc_t>("livehd::attrs::replica_desc");
     hhds::register_attr_tag<livehd::attrs::time_range_t>("livehd::attrs::time_range");
     hhds::register_attr_tag<livehd::attrs::pending_time_t>("livehd::attrs::pending_time");
   }

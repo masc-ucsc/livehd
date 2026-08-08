@@ -158,8 +158,11 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   {
     Cgen_sim prep(dir, vcd_out, top, fakedelay, flatten_budget);
     for (const auto& g : var.graphs) {
-      if (g) {
-        prep.prepare_graph(g);
+      // A body that cannot be prepared cannot be emitted correctly (the
+      // diagnostic came from prepare_graph): stop the whole emission rather
+      // than write a partial design whose remaining modules look fine.
+      if (g && !prep.prepare_graph(g)) {
+        return;
       }
     }
   }

@@ -1,0 +1,53 @@
+/*
+:name: loop_cond_break_no_sub
+:type: simulation
+:expect_instances: *=0
+*/
+// Control fixture for loop lifting: the loop has conditional carry updates and
+// a break, but no Sub call.  Unlike loop_cond_sub_break, the break is after the
+// current ordinal's write, so ordinal 5 contributes and ordinals 6/7 do not.
+
+mod loop_cond_break_no_sub(seed:u8, weighted:u8) -> (total:u12@[0]) {
+  mut acc:u12 = seed
+  for ordinal in 0..<8 {
+    if weighted#[ordinal] {
+      acc = acc + ordinal + 1
+    } else {
+      acc = acc + 1
+    }
+
+    if ordinal == 5 { break }
+  }
+  total = acc
+}
+
+test loop_cond_break_no_sub.branch_vectors {
+  mut dut       = loop_cond_break_no_sub
+  mut got_final = 0
+
+  tick 10 {  // watchdog; the runtime break below ends this after vector 3
+    dut.seed = 7
+    if clock == 0 {
+      dut.weighted = 0
+    } elif clock == 1 {
+      dut.weighted = 0x3f
+    } else {
+      dut.weighted = 0x15
+    }
+
+    step
+    got_final = dut.total
+
+    if clock == 0 {
+      assert(dut.total == 13, "six unweighted iterations add one each")
+    } elif clock == 1 {
+      assert(dut.total == 28, "six weighted iterations add 1+2+3+4+5+6")
+    } else {
+      assert(dut.total == 19, "mixed conditional updates must preserve the carry")
+    }
+
+    if clock == 2 { break }
+  }
+
+  assert(got_final == 19, "the final no-Sub loop result must be retained")
+}

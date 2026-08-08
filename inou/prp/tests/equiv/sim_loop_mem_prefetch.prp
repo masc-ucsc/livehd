@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: sim_loop_mem_prefetch
 :pyrope_top: sim_loop_mem_prefetch
+:state_pair_gap: mems=0/1
 */
 
 // Repro for the BusyTable_1/Dispatch `lhd sim` SIGSEGV category (class C).

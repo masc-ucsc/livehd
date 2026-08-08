@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: latch_enable_hold.latch8
 :pyrope_top: latch8
+:name_match_only: false
 */
 
 // Rewritten 2026-07-20 (2f-latch M0 retriage) from the pre-latch-support shape

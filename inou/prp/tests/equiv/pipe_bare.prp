@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: pipe_bare.bare
 :pyrope_top: bare
+:name_match_only: false
 */
 
 // Bare `pipe`: unconstrained latency, stages(1,0) — the effective minimum is

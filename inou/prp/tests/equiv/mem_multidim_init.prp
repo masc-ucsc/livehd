@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_multidim_init.mdi
 :pyrope_top: mdi
+:name_match_only: false
 */
 
 // 2f-mem_multidim — nested tuple init contents flatten row-major:

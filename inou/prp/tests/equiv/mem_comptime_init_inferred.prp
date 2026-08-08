@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_comptime_init_inferred.mcii
 :pyrope_top: mcii
+:state_pair_gap: mems=1/2
 */
 
 // 2f-mem_comptime_init — the INFERRED form: a reg with no array type whose

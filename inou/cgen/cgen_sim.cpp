@@ -20,7 +20,8 @@
 #include "diag.hpp"           // livehd::diag::err — Stage 0 comb-loop safety net
 #include "inline_sub.hpp"     // //graph — sim.flatten structural inline of a small sub-instance
 #include "latch_contract.hpp"  // //graph — inline_clock_gate_cells (ICG gate -> local AND cone)
-#include "node_util.hpp"      // //graph:graph — livehd::graph_util::* helpers
+#include "node_util.hpp"
+#include "replica_expand.hpp"  // //graph — expand a rolled loop back to its occurrences
 #include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
 #include "str_tools.hpp"      // str_tools::ends_with
 
@@ -1592,12 +1593,12 @@ int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
 // here deletes nodes or rewires edges in those same bodies — so a pre-scan
 // interleaved with the rewrites hands the emitter class indices that no longer
 // mean what the scan measured. Run once per graph, before any measuring.
-void Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
+bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hhds::Graph* g      = graph.get();
   const auto   gname  = std::string{graph->get_name()};
   const auto   entity = gname.substr(gname.rfind('.') + 1);
   if (!entity.empty() && entity.front() == '%') {
-    return;  // a `test` block: never emitted, so never rewritten (see do_from_graph)
+    return true;  // a `test` block: never emitted, so never rewritten (see do_from_graph)
   }
   // EXACTLY ONCE per body. `flatten_small_subs` is not idempotent — inlining a
   // callee exposes ITS children as direct instances, and a second pass would
@@ -1606,9 +1607,11 @@ void Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // invocation): the emitter builds a fresh Cgen_sim per graph. The map holds
   // a STRONG reference so a freed graph's address can never be reused by a
   // later one and read back as "already prepared".
-  static absl::flat_hash_map<const hhds::Graph*, std::shared_ptr<hhds::Graph>> prepared;
-  if (!prepared.try_emplace(g, graph).second) {
-    return;
+  // The bool is whether preparation SUCCEEDED: a second call must report the
+  // first one's failure rather than answering "already prepared, all good".
+  static absl::flat_hash_map<const hhds::Graph*, std::pair<std::shared_ptr<hhds::Graph>, bool>> prepared;
+  if (auto [pit, fresh] = prepared.try_emplace(g, graph, false); !fresh) {
+    return pit->second.second;
   }
   // Bring an instantiated clock-gate cell's gate INTO this body — the same
   // pre-step pass.single_edge and the formal commands run.
@@ -1624,6 +1627,16 @@ void Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // reads as a combinational loop THROUGH the instance. Inlining the gate turns
   // both into the local AND cone icg_guards already folds into a flop enable,
   // which is the same treatment lec gives it.
+  // Expand a replicated Sub before any structural rewrite sees it. The compact
+  // runtime loop (design M3) is a later optimization; expanding keeps the
+  // rolled front end CORRECT today, at the unrolled form's code size.
+  // A failure here leaves a body that is NOT emittable (see expand_one: the
+  // refusal is atomic, so the compact node is still standing for `count`
+  // occurrences). Report it up so do_from_graph refuses to emit rather than
+  // generating a simulator with one lane where the design has `count`.
+  if (livehd::graph_util::expand_replicated_subs(g, "inou.cgen.sim") < 0) {
+    return false;
+  }
   // sim.flatten=N: absorb small sub-instances into this body first, so
   // everything below — the digest, the schedule, the emission — sees the
   // flattened graph. A no-op at the default N=0.
@@ -1662,6 +1675,8 @@ void Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // operand that drives the read range. A no-op unless a genuine word-level cycle
   // exists; a real bit-level loop is never split (still fails loudly below).
   livehd::graph_util::split_packed_selfref_wires(g);
+  prepared.at(g).second = true;  // re-looked-up: the steps above may have inserted
+  return true;
 }
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
@@ -1690,8 +1705,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Every structural rewrite this emitter makes ran in prepare_graph(), which
   // to_cgen_sim drives over the WHOLE library before it measures anything.
   // Calling it here too keeps a standalone Cgen_sim user correct; it is a
-  // no-op on an already-prepared graph.
-  prepare_graph(graph);
+  // no-op on an already-prepared graph. A refusal (an unexpandable replicated
+  // instance) means this body cannot be emitted correctly — stop, the located
+  // diagnostic already came from prepare_graph.
+  if (!prepare_graph(graph)) {
+    return;
+  }
   // The shared clock-role analysis -- the same `Design_clocks` that pass/lec's
   // phase schedule and pass.single_edge build. Built AFTER the rewrites above,
   // which change the graph.
@@ -2109,6 +2128,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Every consumer (calls, checkpoint, iface.json, VCD hierarchy) reads the
   // stored member string, so the suffix is consistent everywhere.
   absl::flat_hash_set<std::string> used_member_names;
+  // A PORT name is claimed before any of them. Ports are struct fields too, and
+  // the emitted `cycle()` builds a local `Out <port>` on top of that — so a sub
+  // instance named after the port it drives (`o = subcnt(en=en)`, whose
+  // instance name is now the LHS variable) shadows the member and the body
+  // reads `o.__gen` off the Out struct. Reserving here demotes the collider to
+  // `<port>__i2` instead.
+  if (gio) {
+    for (const auto& d : gio->get_input_pin_decls()) {
+      used_member_names.insert(cpp_id(d.name));
+    }
+    for (const auto& d : gio->get_output_pin_decls()) {
+      used_member_names.insert(cpp_id(d.name));
+    }
+  }
   auto unique_member = [&used_member_names](std::string base) -> std::string {
     if (base.empty()) {
       base = "u";
@@ -5406,10 +5439,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // state, and the result lands directly in the `__out` member a `sigref` binds.
   // (The FALL pass drives no outputs: `__last_out` is the during-period value
   // the rise recorded, and `__out` is refreshed by the trailing settle.)
-  const std::string out_dst = settle ? "    __out." : "    o.";
+  // `__o` (not `o`): every other identifier this emitter mints is `__`-prefixed
+  // precisely so a source-derived struct member can never shadow it. A bare `o`
+  // broke that — a sub instance named `o` (the LHS variable of `mut o =
+  // packer(…)`) put a local `Out o` on top of the member, and every `o.<...>`
+  // in the pass after it resolved to the output struct.
+  const std::string out_dst = settle ? "    __out." : "    __o.";
   if (!fall) {
     if (!settle) {
-      fout->append("    Out o;\n");
+      fout->append("    Out __o;\n");
     }
     for (const auto& io : ios) {
       if (io.is_input) {
@@ -5807,7 +5845,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (!fall) {
     // The during-period outputs, recorded before any commit -- the value the
     // query engine publishes as `"sampled":"during_period"`.
-    fout->append("    __last_out = o;  // 2f-sim B: free output observation for the query engine\n");
+    fout->append("    __last_out = __o;  // 2f-sim B: free output observation for the query engine\n");
   }
   if (!gate_done.empty()) {
     // TRANSITIVE change propagation: my direct-kids sum only sees children's

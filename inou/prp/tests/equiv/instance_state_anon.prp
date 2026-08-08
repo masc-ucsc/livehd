@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: instance_state_anon.top
 :pyrope_top: top
+:state_pair_gap: regs=0/1
 */
 
 // Hierarchical-LEC flat-confirmation backstop guard. Same stateful lanes as

@@ -4964,7 +4964,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // call dst is the instance name). This is what `get_hier_name()` reports as
   // the Verilog-style hierarchy component. Fall back to a temp for an unnamed
   // instance.
-  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : std::string(inst.name);
+  // `ref_name_of_raw`, not the raw name: an ESCAPED instance id (`\mem.a` — the
+  // spelling cgen emits for a detupled memory's wrapper) carries a '.', which an
+  // unquoted LNAST ref reads as a bundle FIELD PATH; the symbol table asserts on
+  // a dotted var long before tolg gets to name the Sub. Ordinary names are
+  // returned unchanged.
+  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : Slang_context::ref_name_of_raw(inst.name);
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {
@@ -5153,7 +5158,12 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   auto& ln = *builder_.lnast;
   set_pending_loc(inst.location);
   auto fcall_idx = builder_.add_child(Lnast_ntype::create_func_call());
-  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : std::string(inst.name);
+  // `ref_name_of_raw`, not the raw name: an ESCAPED instance id (`\mem.a` — the
+  // spelling cgen emits for a detupled memory's wrapper) carries a '.', which an
+  // unquoted LNAST ref reads as a bundle FIELD PATH; the symbol table asserts on
+  // a dotted var long before tolg gets to name the Sub. Ordinary names are
+  // returned unchanged.
+  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : Slang_context::ref_name_of_raw(inst.name);
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {

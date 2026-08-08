@@ -3,6 +3,7 @@
 :type: equiv_slang
 :verilog_top: packed_assign.pa
 :pyrope_top: pa
+:state_pair_gap: mems=0/1
 */
 
 // Correct Pyrope reference for packed_assign.v -- a packed 2-D array built with

@@ -12,6 +12,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
+#include "replica_desc.hpp"
 
 namespace livehd::graph_util {
 
@@ -73,6 +74,13 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   }
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
+  }
+  // A replicated Sub NESTED in the body being inlined must keep its descriptor:
+  // the clone is a fresh node, and dropping the attribute demotes `count`
+  // occurrences to one ordinary instance that no later expansion can recover.
+  // (The instance being inlined is refused outright — see run().)
+  if (auto a = orig.attr(livehd::attrs::replica_desc); a.has()) {
+    neo.attr(livehd::attrs::replica_desc).set(std::string{a.get()});
   }
 }
 
@@ -228,6 +236,19 @@ void Sub_inliner::rewire_instance_outputs() {
 }
 
 bool Sub_inliner::run() {
+  // A replicated Sub denotes `count` occurrences (graph/replica_desc.hpp).
+  // Inlining it would splice ONE body copy and delete the node, silently
+  // dropping count-1 replicas. Refuse — WITH a diagnostic: every caller treats
+  // a false return as a hard failure whose message came from here (pass.color
+  // bails out of coloring entirely), so a silent false aborts the run with no
+  // output at all.
+  if (is_replicated_sub(inst_)) {
+    livehd::diag::err(from_pass_, "inline-replicated-sub", "unsupported")
+        .msg("inline: instance '{}' is a replicated Sub (it stands for several occurrences)", default_instance_name(inst_))
+        .hint("expand it first — livehd::graph_util::expand_replicated_subs (graph/replica_expand.hpp)")
+        .emit();
+    return false;
+  }
   auto cg = inst_.get_subnode_graph();
   if (!cg) {
     livehd::diag::err(from_pass_, "inline-no-body", "internal")

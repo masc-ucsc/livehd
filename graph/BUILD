@@ -23,6 +23,8 @@ cc_library(
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
         "port_reach.cpp",
+        "replica_desc.cpp",
+        "replica_expand.cpp",
         "split_selfref.cpp",
     ],
     hdrs = [
@@ -34,6 +36,8 @@ cc_library(
         "inline_sub.hpp",
         "node_util.hpp",
         "port_reach.hpp",
+        "replica_desc.hpp",
+        "replica_expand.hpp",
         "split_selfref.hpp",
     ],
     copts = COPTS,
@@ -59,4 +63,6 @@ cc_library(
     "node_count_test",
     "ge_weight_smoke",
     "latch_contract_test",
+    "replica_desc_test",
+    "replica_expand_test",
 ]]

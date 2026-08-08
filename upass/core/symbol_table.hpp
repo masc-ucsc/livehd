@@ -92,6 +92,22 @@ public:
     return false;
   }
 
+  // How many active scopes are uncertain. `in_uncertain_scope` alone cannot
+  // answer "is THIS statement's guard runtime", only "is anything enclosing it
+  // runtime" — a comptime `break` inside a comptime `if` nested in a runtime
+  // `if` reads as uncertain either way. A caller that snapshots this count at a
+  // known point (e.g. loop-iteration entry) and compares later sees only the
+  // scopes entered SINCE.
+  [[nodiscard]] std::size_t uncertain_scope_count() const {
+    std::size_t n = 0;
+    for (const auto* s : stack) {
+      if (s->uncertain_cond) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
   // True when `var` is declared in an ENCLOSING scope (not the innermost
   // active one) — i.e. writing it here mutates an outer variable from inside a
   // nested block (`if true { acc = … }`, a loop iteration). Such a write is NOT

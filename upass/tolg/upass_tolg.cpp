@@ -19,6 +19,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
 #include "cell.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -26,6 +28,7 @@
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "replica_desc.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 
 namespace {
@@ -3910,6 +3913,79 @@ private:
     record(name, q, v.mw);
   }
 
+  // True when `nid`'s subtree names `ref`. Used to bound the LHS search below:
+  // once the call's result temp has been consumed by anything else, a later
+  // store of that temp is no longer "the variable this call binds to".
+  bool subtree_reads_ref(const Lnast_nid& nid, std::string_view ref) const {
+    if (nid.is_invalid()) {
+      return false;
+    }
+    if (Lnast_ntype::is_ref(lnast_->get_type(nid)) && lnast_->get_name(nid) == ref) {
+      return true;
+    }
+    for (auto c : lnast_->children(nid)) {
+      if (subtree_reads_ref(c, ref)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // The source variable a temp-dst call result is copied into, or "" when the
+  // result is consumed by an expression instead (a multi-output instance read
+  // through `tuple_get`, an inline `f(g(x))`, ...). A declared binding
+  // (`const lane_q = lane(…)`, `var q = Mod(…)`) lowers to a temp dst plus a
+  // following `store(lane_q, %t)`, so without this the instance loses the name
+  // the source gave it and falls back to `u_<callee>_<temp>` — while the very
+  // same call written `lane_q = lane(…)` keeps it. Scanning stops at the first
+  // statement that reads the temp for any other purpose.
+  std::string lhs_var_of_temp_dst(const Lnast_nid& call, std::string_view dst_txt) const {
+    // The copy-out is emitted right behind the call (at most a `declare` in
+    // between), so a handful of statements is all this ever needs to look at.
+    // The bound also keeps a call whose result is UNUSED — nothing ever reads
+    // the temp, so the scan has no natural stop — from walking the rest of the
+    // module once per such call.
+    int budget = 8;
+    for (auto s = lnast_->get_sibling_next(call); !s.is_invalid() && budget-- > 0; s = lnast_->get_sibling_next(s)) {
+      if (Lnast_ntype::is_store(lnast_->get_type(s))) {
+        auto tgt = lnast_->get_first_child(s);
+        auto src = tgt.is_invalid() ? Lnast_nid{} : lnast_->get_sibling_next(tgt);
+        if (!src.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(src)) && lnast_->get_name(src) == dst_txt
+            && lnast_->get_sibling_next(src).is_invalid()) {
+          std::string v(lnast_->get_name(tgt));
+          if (auto p = v.find("___ssa_"); p != std::string::npos) {
+            v.resize(p);
+          }
+          // A dotted store (`t.f = %tmp`) names a tuple field, not an instance.
+          if (v.empty() || v.front() == '%' || v.find('.') != std::string::npos) {
+            return {};
+          }
+          // A PORT of the enclosing module is not an instance binding. `y =
+          // add1(…)` says where the result goes, not what to call the box, and
+          // taking it would give the instance the port's own spelling — which
+          // both backends must then rename anyway (Verilog: an instance beside
+          // `output reg y`; sim: a struct member beside the `Out` field). Fall
+          // through to the synthesized name.
+          for (const auto& e : lnast_->io_meta().inputs) {
+            if (e.name == v) {
+              return {};
+            }
+          }
+          for (const auto& e : lnast_->io_meta().outputs) {
+            if (e.name == v) {
+              return {};
+            }
+          }
+          return v;
+        }
+      }
+      if (subtree_reads_ref(s, dst_txt)) {
+        return {};
+      }
+    }
+    return {};
+  }
+
   // func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub
   // instance of the callee's graph. Args are positional refs/consts (mapped
   // to the callee's io_meta input order) or named store(argname, value)
@@ -4093,25 +4169,33 @@ private:
     sub.set_subnode(gio);
     {
       // Name the Sub by its RTL INSTANCE name so hhds get_hier_name() yields
-      // the Verilog-style hierarchy (foo.bar.xx). A real (non-temp) dst is the
-      // instance name (Pyrope `id_ex = Mod(...)`; slang now passes inst.name as
-      // the dst). Strip an SSA suffix. Only an anonymous/temp dst falls back to
-      // the synthesized unique `u_<module>_<id>` name.
-      // A call-site `name=` (reserved `__inst_name` actual) takes precedence
-      // over the dst-derived name — the explicit instance/hierarchy name.
+      // the Verilog-style hierarchy (foo.bar.xx). The name is the LHS VARIABLE
+      // the call result binds to (Pyrope `id_ex = Mod(...)`; slang passes
+      // inst.name as the dst) — either the dst itself, or, when the dst is a
+      // compiler temp, the variable the very next statement copies it into
+      // (`const lane_q = lane(…)` lowers to `fcall(%t, lane, …)` +
+      // `store(lane_q, %t)`). Strip an SSA suffix. Only a call whose result
+      // never lands in a source variable falls back to the synthesized unique
+      // `u_<module>_<id>` name. A call-site `name=` (reserved `__inst_name`
+      // actual) takes precedence over both — it IS the explicit instance name,
+      // so spelling `Mod::[name=x]` on `x = Mod(…)` is redundant, not required.
       std::string callsite_inst;
+      std::string callsite_suffix;
       for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
         if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
           continue;
         }
         auto an = lnast_->get_first_child(a);
-        if (an.is_invalid() || lnast_->get_name(an) != "__inst_name") {
+        if (an.is_invalid()) {
+          continue;
+        }
+        const auto key = lnast_->get_name(an);
+        if (key != "__inst_name" && key != "__inst_suffix") {
           continue;
         }
         if (auto v = lnast_->get_sibling_next(an); !v.is_invalid()) {
-          callsite_inst = std::string(lnast_->get_name(v));
+          (key == "__inst_name" ? callsite_inst : callsite_suffix) = std::string(lnast_->get_name(v));
         }
-        break;
       }
       std::string dst_txt(lnast_->get_name(dst));
       // A `%`-prefixed compiler temp (1-char prefix); strip the `%` when
@@ -4122,13 +4206,114 @@ private:
       if (auto p = inst_name.find("___ssa_"); p != std::string::npos) {
         inst_name = inst_name.substr(0, p);
       }
+      if (is_tmp) {
+        inst_name = lhs_var_of_temp_dst(nid, dst_txt);
+      }
       if (!callsite_inst.empty()) {
-        sub.set_name(callsite_inst);
-      } else if (!is_tmp && !inst_name.empty()) {
-        sub.set_name(inst_name);
+        sub.set_name(callsite_inst + callsite_suffix);
+      } else if (!inst_name.empty()) {
+        sub.set_name(inst_name + callsite_suffix);
       } else {
         std::string suffix = is_tmp ? dst_txt.substr(1) : dst_txt;
-        sub.set_name("u_" + callee_name + "_" + suffix);
+        sub.set_name("u_" + callee_name + "_" + suffix + callsite_suffix);
+      }
+    }
+
+    // Replication descriptor (upass.roll). The roller passes the domain, the
+    // index PORT NAME and the carry mapping as reserved named actuals; port
+    // names are resolved to pids here, where the callee GraphIO is known. A
+    // malformed marker is a hard error: silently dropping it would turn a
+    // rolled loop into a single instance, i.e. drop count-1 replicas.
+    // Set when this call is replicated: the role-marked index input is supplied
+    // per OCCURRENCE by realization, so it is legitimately unconnected here.
+    std::string replica_index_port;
+    {
+      std::string dom_txt, idx_port, carry_txt;
+      for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
+        if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
+          continue;
+        }
+        auto k = lnast_->get_first_child(a);
+        if (k.is_invalid()) {
+          continue;
+        }
+        const auto kn = lnast_->get_name(k);
+        auto       v  = lnast_->get_sibling_next(k);
+        if (v.is_invalid()) {
+          continue;
+        }
+        if (kn == "__replica") {
+          dom_txt = std::string(lnast_->get_name(v));
+        } else if (kn == "__replica_index") {
+          idx_port = std::string(lnast_->get_name(v));
+        } else if (kn == "__replica_carry") {
+          carry_txt = std::string(lnast_->get_name(v));
+        }
+      }
+      if (!dom_txt.empty()) {
+        // Pids live on the callee GraphIO (the LNAST io entry carries no pid).
+        const auto pid_of_input = [&](const std::string& nm) -> std::optional<hhds::Port_id> {
+          for (const auto& d : gio->get_input_pin_decls()) {
+            if (d.name == nm) {
+              return d.port_id;
+            }
+          }
+          return std::nullopt;
+        };
+        const auto pid_of_output = [&](const std::string& nm) -> std::optional<hhds::Port_id> {
+          for (const auto& d : gio->get_output_pin_decls()) {
+            if (d.name == nm) {
+              return d.port_id;
+            }
+          }
+          return std::nullopt;
+        };
+
+        livehd::graph_util::Replica_desc desc;
+        // `first=..;step=..;count=..`
+        for (const auto& field : absl::StrSplit(dom_txt, ';', absl::SkipEmpty())) {
+          const std::pair<std::string_view, std::string_view> kv = absl::StrSplit(field, absl::MaxSplits('=', 1));
+          int64_t                                             iv = 0;
+          if (!absl::SimpleAtoi(kv.second, &iv)) {
+            error_here("upass.tolg: malformed replication marker `{}` on call to '{}'", field, callee_full);
+            return;
+          }
+          if (kv.first == "first") {
+            desc.first = iv;
+          } else if (kv.first == "step") {
+            desc.step = iv;
+          } else if (kv.first == "count") {
+            desc.count = static_cast<uint64_t>(iv);
+          } else {
+            error_here("upass.tolg: unknown replication marker `{}` on call to '{}'", kv.first, callee_full);
+            return;
+          }
+        }
+        if (!idx_port.empty()) {
+          replica_index_port = idx_port;
+          desc.index_input   = pid_of_input(idx_port);
+          if (!desc.index_input) {
+            error_here("upass.tolg: replicated call to '{}' names index port '{}', which is not a callee input",
+                       callee_full,
+                       idx_port);
+            return;
+          }
+        }
+        for (const auto& item : absl::StrSplit(carry_txt, ',', absl::SkipEmpty())) {
+          const std::pair<std::string_view, std::string_view> oi = absl::StrSplit(item, absl::MaxSplits('>', 1));
+          auto out_pid = pid_of_output(std::string(oi.first));
+          auto in_pid  = pid_of_input(std::string(oi.second));
+          if (!out_pid || !in_pid) {
+            error_here("upass.tolg: replicated call to '{}' declares carry `{}` whose ports do not exist", callee_full, item);
+            return;
+          }
+          desc.carries.emplace_back(livehd::graph_util::Replica_carry{*in_pid, *out_pid});
+        }
+        if (auto why = desc.validate(); !why.empty()) {
+          error_here("upass.tolg: replicated call to '{}' has an invalid descriptor: {}", callee_full, why);
+          return;
+        }
+        livehd::graph_util::set_replica_desc(sub, desc);
       }
     }
 
@@ -4163,9 +4348,17 @@ private:
         if (pname == "__ufcs_arg" && (cio.inputs.empty() || cio.inputs[0].name != "self")) {
           continue;
         }
-        // Reserved call-site instance name — already consumed for sub.set_name
-        // above; never a callee port (don't bind, don't count toward arity).
-        if (pname == "__inst_name") {
+        // Reserved call-site instance name / loop-iteration suffix — already
+        // consumed for sub.set_name above; never a callee port (don't bind,
+        // don't count toward arity).
+        if (pname == "__inst_name" || pname == "__inst_suffix") {
+          continue;
+        }
+        // Reserved replication markers (upass.roll): the loop roller emits the
+        // descriptor's domain, its index port and its carry mapping as named
+        // actuals, exactly like `__inst_name`. They are consumed below into the
+        // node's Replica_desc; none of them is a callee port.
+        if (pname == "__replica" || pname == "__replica_index" || pname == "__replica_carry") {
           continue;
         }
       } else {
@@ -4210,6 +4403,12 @@ private:
     // count would miss that).
     for (const auto& ie : cio.inputs) {
       if (bound_ports.count(ie.name) == 0) {
+        // A replicated instance's index input carries a different value per
+        // ordinal, so realization (not the parent graph) drives it. That is the
+        // ONLY input a call may leave unconnected.
+        if (!replica_index_port.empty() && ie.name == replica_index_port) {
+          continue;
+        }
         error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, ie.name);
         return;
       }

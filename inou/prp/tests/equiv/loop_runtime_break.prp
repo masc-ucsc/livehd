@@ -1,0 +1,31 @@
+/*
+:name: loop_runtime_break
+:type: equiv
+:verilog_top: loop_runtime_break.top
+:pyrope_top: top
+*/
+// A `break` whose condition is only known at RUNTIME is LEGAL Pyrope: the loop
+// bound is still comptime, so the hardware is the priority structure the golden
+// spells out — iteration `i` contributes iff no earlier iteration's condition
+// held. Same shape as `if cond { <mod call> }`, which is what the conditional
+// replicated Sub (todo_loop_cond_sub.md rule 13, the per-replica `next_active`
+// chain) exists to express.
+//
+// It is NOT implemented yet on either path: the default unroll path refuses it
+// (`loop-runtime-break`, added because walking the unknown-condition arm used
+// to abandon the rest of iteration 0 and every later one, silently compiling
+// this to `total = 0`), and the roller declines any body holding loop control.
+// This fixture states the CORRECT answer, so it fails until one of them can
+// produce it — a refusal is progress over the old miscompile, not the goal.
+//
+// A COMPTIME break (`if i == 5 { break }`) already works — see
+// tests/sim/loop_cond_break_no_sub.prp.
+
+pub mod top(stop:u8) -> (total:u12@[0]) {
+  mut acc:u12 = 0
+  for i in 0..<8 {
+    if stop#[i] { break }
+    acc = acc + 1
+  }
+  total = acc
+}

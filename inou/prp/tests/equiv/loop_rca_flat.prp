@@ -1,0 +1,30 @@
+/*
+:name: loop_rca_flat
+:type: equiv
+:verilog_top: loop_rca_flat.top
+:pyrope_top: top
+:expect_instances: rca_li*=8 *=8
+*/
+// Eight preserved one-bit RCA calls inside a source loop.  The golden is a
+// single flat `+`, intentionally providing no child hierarchy to pair.  This is
+// the virtual-expansion/flattening case for compact replicated Subs.
+
+mod rca_bit(a:bool, b:bool, cin:bool) -> (result:u10@[0]) {
+  const sum  = a ^ b ^ cin
+  const cout = (a & b) | (a & cin) | (b & cin)
+  result = sum | (cout << 9)  // very weird in-band signal, BUT correct
+}
+
+pub mod top(a:u8, b:u8) -> (sum:u9@[0]) {
+  mut carry = false
+  mut result:u9 = 0
+
+  for bit in 0..<8 {
+    const lane = rca_bit::[name=rca](a=a#[bit], b=b#[bit], cin=carry)
+    result = result | ((lane & 1) << bit)
+    carry = (lane & 0x200) != 0
+  }
+
+  if carry { result = result | 0x100 }
+  sum = result
+}
