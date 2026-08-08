@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: comb_array_const_index_read
 :pyrope_top: top
-:state_pair_gap: mems=1/2
 */
 
 // Pyrope twin: the comb array `d` is copied out of `q` entry by entry with

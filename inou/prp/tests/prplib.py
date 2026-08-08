@@ -974,30 +974,66 @@ class PrpRunner:
     # spelling is load-bearing: hierarchical LEC pairs boxes by name, VCD diffs
     # and checkpoints are name-keyed, and a structural pairing degrades to
     # Unknown the moment two flops look alike. So the pair is also diffed
-    # structurally and every register/memory must find its counterpart — by NAME
-    # unless the fixture says otherwise.
+    # structurally and every register/memory must find a counterpart — by NAME,
+    # or by STRUCTURE when the fixture sets `:name_match_only: false`.
+    #
+    # There is NO header tag for "this one does not match". A pair whose state
+    # finds no counterpart at all FAILS, and the known-broken ones are carried by
+    # the bazel `fixme` tag on their own `prp-statematch-*` target (BUILD's
+    # _STATEMATCH_FIXME) — the repo's one convention for "red, and we know it".
+    # A per-fixture header tag would have made them green, which is exactly the
+    # silence this check exists to break.
 
     _SEMDIFF_STAT_RE = re.compile(
         r'ref (\d+)/(\d+) paired .*?impl (\d+)/(\d+).*?by name (\d+), by structure (\d+)')
 
     @staticmethod
-    def _parse_state_pair_gap(spec):
-        """`:state_pair_gap: regs=0/4 mems=1/2` -> ({kind: (paired, total)}, err)."""
-        gap = {}
-        for tok in (spec or '').split():
-            m = re.fullmatch(r'(regs|mems)=(\d+)/(\d+)', tok)
-            if not m:
-                return None, 'bad :state_pair_gap: token {!r} (want regs=A/B or mems=A/B)'.format(tok)
-            gap[m[1]] = (int(m[2]), int(m[3]))
-        return gap, None
+    def _resolve_lg_entity(lgdir, want, stem):
+        """`want` as this library spells it, or '' when it has no such entity.
+
+        A library.txt lists `graph_io <hash> <entity>`; the entity is normally
+        `<file-stem>.<module>` while the header tag carries the bare module name.
+        """
+        if not want:
+            return ''
+        want = want.strip()
+        names = []
+        try:
+            with open(os.path.join(lgdir, 'library.txt')) as f:
+                for line in f:
+                    tok = line.split()
+                    if len(tok) >= 3 and tok[0] == 'graph_io':
+                        names.append(tok[2])
+        except OSError:
+            return ''
+        for cand in (want, '{}.{}'.format(stem, want)):
+            if cand in names:
+                return cand
+        return ''
+
+    @staticmethod
+    def _first_error_message(log):
+        """The first `severity=error` message in an lhd JSONL log, or ''."""
+        for line in log.decode('utf-8', 'ignore').splitlines():
+            line = line.strip()
+            if not line.startswith('{'):
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get('severity') == 'error':
+                return '{} — {}'.format(rec.get('code', '?'), rec.get('message', ''))
+        return ''
 
     def _semdiff_state_stats(self, tmp_dir, test, workdir):
         """Compile both sides of an equiv pair to lg: and diff them.
 
         Returns ({kind: {...}}, err). `err` non-None means the pair could not be
-        measured at all (a golden the reader cannot lower, say) — the caller
-        reports that as a SKIP, not a failure: the equiv proof itself runs
-        through yosys/lgcheck and does not need this lowering.
+        measured at all — a side the reader will not lower. That is a FAILURE,
+        not a skip: the equiv proof itself goes through yosys/lgcheck and can
+        stay green while `lhd compile` refuses the very same file, which is
+        precisely the kind of hole this check exists to expose.
         """
         prp  = test.params['files'][0]
         gold = os.path.splitext(prp)[0] + '.v'
@@ -1011,7 +1047,10 @@ class PrpRunner:
         # is exactly the shape slang REFUSES, so reading it the wrong way turns a
         # measurable pair into a skip.
         gold_reader = (test.params.get('lec_reader') or '').strip()
-        base = [self.lhd, 'compile', '-q']
+        # No `-q`: the log is captured and only printed on failure, and the
+        # quiet flag suppresses the very JSONL diagnostics that say WHY a side
+        # would not lower.
+        base = [self.lhd, 'compile']
         runs = [(base + [prp] + self._extra_sets(test)
                  + (['--set', 'upass.reset_style=' + test.params['reset_style']]
                     if 'reset_style' in test.params else [])
@@ -1022,15 +1061,28 @@ class PrpRunner:
             proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             log, _ = proc.communicate()
             if proc.returncode != 0:
-                return None, '{} could not be lowered to lg: ({})'.format(
-                    os.path.basename(cmd[3] if cmd[3] != '-q' else cmd[4]), proc.returncode)
+                src = next((a for a in cmd if a.endswith('.prp') or a.endswith('.v')), '?')
+                why = self._first_error_message(log)
+                return None, '`lhd compile {}` failed (rc={}){}'.format(
+                    os.path.basename(src), proc.returncode, ': ' + why if why else '')
 
+        # Tops are resolved against each library's OWN entity list before being
+        # passed. `:pyrope_top:`/`:verilog_top:` name the MODULES lgcheck
+        # compares, which is not always how the lg: entity is spelled (`top` vs
+        # the entity `mod_varargs_csa.top`), and handing semdiff a name it has to
+        # guess at lands in its `top-entity-fallback` path — which ABORTS on some
+        # libraries (`raw_hash_set.h: operator-> called on end() iterator`, seen
+        # on generic_mod). An unresolvable top is simply omitted; semdiff's hier
+        # sweep then pairs the defs by name on its own.
         cmd = [self.lhd, 'pass', 'semdiff', '--stats', '--ref', 'lg:' + lg_ref, '--impl', 'lg:' + lg_impl,
                '--workdir', os.path.join(workdir, 'w_diff')]
-        if 'pyrope_top' in test.params:
-            cmd += ['--ref-top', test.params['pyrope_top']]
-        if 'verilog_top' in test.params:
-            cmd += ['--impl-top', test.params['verilog_top']]
+        stem = os.path.splitext(os.path.basename(prp))[0]
+        for flag, lgdir, want in (('--ref-top', lg_ref, test.params.get('pyrope_top')),
+                                  ('--impl-top', lg_impl, test.params.get('verilog_top'))):
+            top = self._resolve_lg_entity(os.path.join(tmp_dir, lgdir) if not os.path.isabs(lgdir) else lgdir,
+                                          want, stem)
+            if top:
+                cmd += [flag, top]
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         log, _ = proc.communicate()
         if proc.returncode != 0:
@@ -1051,23 +1103,21 @@ class PrpRunner:
         return got, None
 
     def check_state_match(self, tmp_dir, test):
-        """`:name_match_only:` / `:state_pair_gap:` — state-name correspondence.
+        """`:name_match_only:` — state-name correspondence for an equiv pair.
 
-        Runs on every equiv pair. A design with no registers and no memories has
-        nothing to correspond, and passes without saying anything.
+        Every ref-side register and memory must find a counterpart: by NAME, or
+        by STRUCTURE when the fixture sets `:name_match_only: false`. Anything
+        less FAILS — including a side `lhd compile` will not lower. A design with
+        no registers and no memories has nothing to correspond and passes
+        without saying anything.
         """
-        if not ({'equiv', 'equiv_slang'} & set(test.params['type'])):
-            return 0
         name = test.params['name']
         prp  = test.params['files'][0]
         gold = os.path.splitext(prp)[0] + '.v'
         if not os.path.exists(gold if os.path.isabs(gold) else os.path.join(tmp_dir, gold)):
-            return 0  # run_equiv already failed on the missing golden
-
-        gap, gerr = self._parse_state_pair_gap(test.params.get('state_pair_gap'))
-        if gap is None:
-            print('{} - state_match - failed: {}'.format(name, gerr))
+            print('{} - state_match - failed: no golden {}'.format(name, gold))
             return 1
+
         # Default TRUE: name correspondence is the goal, so a pair that only
         # matches structurally has to say so in its header rather than drift
         # there silently.
@@ -1078,29 +1128,23 @@ class PrpRunner:
         os.makedirs(workdir, exist_ok=True)
         got, err = self._semdiff_state_stats(tmp_dir, test, workdir)
         if got is None:
-            print('{} - state_match - skipped ({})'.format(name, err))
-            return 0
+            print('{} - state_match - failed: {}'.format(name, err))
+            return 1
 
         if all(got.get(k, {}).get('total', 0) == 0 for k in ('regs', 'mems')):
             return 0  # combinational both sides — nothing to correspond
 
         bad = []
         for kind in ('regs', 'mems'):
-            s = got.get(kind)
-            if s is None or (s['total'] == 0 and kind not in gap):
+            st = got.get(kind)
+            if st is None or st['total'] == 0:
                 continue
-            if kind in gap:
-                if (s['paired'], s['total']) != gap[kind]:
-                    bad.append('{}: :state_pair_gap: says {}/{}, measured {}/{} — the gap moved, '
-                               'update (or drop) the tag'.format(kind, gap[kind][0], gap[kind][1],
-                                                                 s['paired'], s['total']))
-                continue
-            if s['paired'] != s['total']:
-                bad.append('{}: only {}/{} ref element(s) paired with the golden'.format(
-                    kind, s['paired'], s['total']))
-            elif name_only and s['by_struct'] != 0:
+            if st['paired'] != st['total']:
+                bad.append('{}: only {}/{} ref element(s) found a counterpart in the golden '
+                           '(golden has {})'.format(kind, st['paired'], st['total'], st['impl_total']))
+            elif name_only and st['by_struct'] != 0:
                 bad.append('{}: {} of {} pair(s) matched by STRUCTURE, not by name (set '
-                           ':name_match_only: false to accept that)'.format(kind, s['by_struct'], s['total']))
+                           ':name_match_only: false to accept that)'.format(kind, st['by_struct'], st['total']))
         if bad:
             print('{} - state_match - failed:'.format(name))
             for b in bad:
@@ -1138,6 +1182,15 @@ class PrpRunner:
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)
+                continue
+            if mode == 'statematch':
+                # Its own `--mode`, driven by its own `prp-statematch-*` target,
+                # deliberately NOT a post-check of `equiv`: a pair can be
+                # PROVEN equivalent and still spell its state differently, and
+                # folding the two together would mean tagging the whole pair
+                # `fixme` — dropping a live equivalence proof — every time the
+                # naming is the only thing wrong.
+                rc = self.check_state_match(tmp_dir, test)
                 continue
             if mode == 'equiv_slang':
                 rc = self.run_equiv_slang(tmp_dir, test)
@@ -1196,7 +1249,5 @@ class PrpRunner:
         # serves the sim and equiv fixtures alike.
         if rc == 0:
             rc = self.check_expect_instances(tmp_dir, test)
-        if rc == 0:
-            rc = self.check_state_match(tmp_dir, test)
 
         return rc

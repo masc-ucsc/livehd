@@ -1,10 +1,14 @@
 /*
 :name: latch_rule_a
-:type: equiv
-:verilog_top: latch_rule_a
-:pyrope_top: latch_rule_a
+:type: error
+:tolg: 1
+:error: rule A, self-timed gate
 */
 //
+// Latch-contract REFUSAL tracker (rule A, self-timed gate). Moved out of
+// tests/equiv 2026-08-08: there is no equivalence to check, the module does
+// not compile — so it belongs in the errors tier, where the refusal itself is
+// the assertion.
 // FIXME tracker -- latch contract rule A (self-timed gate).
 // `always @(d) if (d != state) state = d;` infers a level-sensitive latch whose
 // ENABLE cone reads the latch's own Q, so graph/latch_contract.cpp rejects it: the

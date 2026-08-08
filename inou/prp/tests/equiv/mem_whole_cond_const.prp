@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_whole_cond_const.condconst
 :pyrope_top: condconst
-:state_pair_gap: mems=0/1
 */
 
 // CONDITIONAL whole-array CONST stores to a REGISTERED array: a clear-all arm

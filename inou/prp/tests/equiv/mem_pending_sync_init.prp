@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_pending_sync_init.syncinit
 :pyrope_top: syncinit
-:state_pair_gap: mems=0/1
 */
 
 // Different init but still going thought the memory, so still 1 flop q@[1] between inputs and outputs

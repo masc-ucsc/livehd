@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_rom.romtest
 :pyrope_top: romtest
-:state_pair_gap: mems=0/1
 */
 
 // 1a-mem — a const array read at a runtime index is a ROM: the same type=2

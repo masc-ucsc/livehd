@@ -1,10 +1,13 @@
 /*
 :name: reg_clock_from_logic
-:type: equiv
-:verilog_top: reg_clock_from_logic
-:pyrope_top: reg_clock_from_logic
+:type: error
+:tolg: 1
+:error: not a clock operation
 */
 //
+// Clock-whitelist REFUSAL tracker. Moved out of tests/equiv 2026-08-08: there
+// is no equivalence to check, the module does not compile — so it belongs in
+// the errors tier, where the refusal itself is the assertion.
 // FIXME tracker -- a flop clocked by a data-merging op.
 // `wire gclk = clk ^ inv; always @(posedge gclk)` is the standard programmable-
 // polarity clock idiom (Xilinx RAM128X1D uses exactly it; an AES core hits the same

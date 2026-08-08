@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_comptime_init.mci
 :pyrope_top: mci
-:state_pair_gap: mems=1/2
 */
 
 // 2f-mem_comptime_init — a reg-array initializer that is a COMPTIME-COMPUTED

@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: pipe_varargs_add.top
 :pyrope_top: top
-:state_pair_gap: regs=0/1
 */
 
 // Task 1p/2u follow-on — the `pipe` analog of varargs_add: a var-arg `pipe`

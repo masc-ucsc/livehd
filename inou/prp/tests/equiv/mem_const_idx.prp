@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_const_idx.cidx
 :pyrope_top: cidx
-:state_pair_gap: mems=0/1
 */
 
 // 1a-mem — comptime indices still become Memory ports (an array-typed reg is

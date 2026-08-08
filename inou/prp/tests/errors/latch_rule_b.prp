@@ -1,3 +1,14 @@
+/*
+:name: latch_rule_b
+:type: error
+:tolg: 1
+:error: rule B, transparent self-update
+*/
+//
+// Latch-contract REFUSAL tracker (rule B, transparent self-update). Moved out
+// of tests/equiv 2026-08-08: there is no equivalence to check, the module does
+// not compile — so it belongs in the errors tier, where the refusal itself is
+// the assertion.
 // FIXME tracker -- latch contract rule B, and it is a DOUBLE FALSE POSITIVE.
 // A `case` with no `default:` makes the slang reader infer a LATCH, ignoring that
 // the items are EXHAUSTIVE over the selector (a 1-bit `sel` with both `1'b0` and
@@ -17,16 +28,16 @@
 // correctly given the netlist it is handed. A real fix needs BOTH halves; fixing
 // only the case-coverage half leaves the genuinely-incomplete-case latches
 // (e.g. the corpus StateMachine.v `case({ld,ce})` blocks) still rejected.
-module latch_rule_b (
-    input            sel,
-    input      [3:0] a,
-    input      [3:0] b,
-    output reg [3:0] q
-);
-  always @(*) begin
-    case (sel)
-      1'b0: q = a;
-      1'b1: q = b;
-    endcase
-  end
-endmodule
+pub mod latch_rule_b::[timecheck=false](sel:u1, a:u4, b:u4) -> (q:u4@[]) {
+  reg q:u4:[latch=true]
+  match sel {
+    == 0 {
+      q = a
+    }
+    == 1 {
+      q = b
+    }
+    else {
+    }
+  }
+}

@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: arr_comb_tmp
 :pyrope_top: arr_comb_tmp
-:state_pair_gap: mems=0/1
 */
 // A blocking temp feeding a comb-array store (`t = d; arr[0] = t`).
 //

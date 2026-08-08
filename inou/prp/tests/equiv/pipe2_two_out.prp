@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: pipe2_two_out.two
 :pyrope_top: two
-:state_pair_gap: regs=0/2
 */
 
 // Two outputs: BOTH land at exactly N=2 (each gets its own output flop).

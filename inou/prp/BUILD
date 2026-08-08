@@ -553,10 +553,12 @@ _SIM_FIXME = [
             # signed_bitwise_mux_arm (2026-08-02): a bitwise op's result loses
             # its operands' sign, so the forward direction refutes too.
             "tests/equiv/signed_bitwise_mux_arm.prp",
-            "tests/equiv/latch_rule_a.prp",
-            "tests/equiv/latch_rule_b.prp",
+            # latch_rule_a / latch_rule_b / reg_clock_from_logic MOVED to
+            # tests/errors/ (2026-08-08): all three are COMPILE REFUSALS (latch
+            # contract rules A and B; the tolg clock whitelist), so there is no
+            # equivalence to check and an equiv target could only ever be a
+            # fixme placeholder. The errors tier asserts the refusal itself.
             "tests/equiv/dual_async_set_reset.prp",
-            "tests/equiv/reg_clock_from_logic.prp",
             "tests/equiv/mem_write_during_reset.prp",
             "tests/equiv/async_mem_reset_demoted.prp",
             "tests/equiv/reg_decl_init_dropped.prp",
@@ -620,6 +622,97 @@ _SIM_FIXME = [
     )
 ]
 
+# ── state-name correspondence (`prp-statematch-*`) ───────────────────────────
+#
+# `pass semdiff --stats` over each equiv pair's two lg: libraries: every ref-side
+# register and memory must find a counterpart, BY NAME unless the fixture header
+# says `:name_match_only: false`. Equivalence and naming are separate claims — a
+# pair can be PROVEN equivalent and still spell its state differently — so this
+# is its OWN target rather than a post-check of `prp-equiv-*`. Folding them
+# together would mean `fixme`-ing a live equivalence proof every time only the
+# naming is wrong.
+#
+# See tests/equiv/README.md for the four gap classes and how to read the output.
+_STATEMATCH_FIXME = [
+    "arr2d_dyn_sel",                 # mems: only 0/1 paired
+    "arr_comb_mux_const",            # mems: only 0/1 paired
+    "arr_comb_tmp",                  # mems: only 0/1 paired
+    "array_store_stale_rhs",         # mems: only 0/1 paired
+    "comb_array_const_index_read",   # mems: only 1/2 paired
+    "dual_async_set_reset",          # `lhd compile` refuses the .v (attr-conflict: two async rungs on one Q slot)
+    "flop_reset_matrix",             # regs: only 4/6 paired
+    "instance_state_anon",           # regs: only 0/1 paired
+    "instance_state_order",          # regs: only 0/1 paired
+    "latch_reset",                   # regs: only 0/1 paired
+    "loop_runtime_break",            # `lhd compile` refuses the .prp (loop-runtime-break, interim)
+    "mem_comptime_init",             # mems: only 1/2 paired
+    "mem_comptime_init_inferred",    # mems: only 1/2 paired
+    "mem_const_idx",                 # mems: only 0/1 paired
+    "mem_fwd_selfwrite",             # mems: only 0/1 paired
+    "mem_mut_array",                 # mems: only 0/1 paired
+    "mem_pending_reset_restore",     # mems: only 0/1 paired
+    "mem_pending_sync_init",         # mems: only 0/1 paired
+    "mem_rom",                       # mems: only 0/1 paired
+    "mem_rtl_rf",                    # mems: only 0/1 paired
+    "mem_whole_coexist",             # mems: only 0/1 paired
+    "mem_whole_comb",                # mems: only 0/1 paired
+    "mem_whole_cond_const",          # mems: only 0/1 paired
+    "mem_whole_reg",                 # mems: only 0/1 paired
+    "mod_call_mod",                  # regs: only 0/1 paired
+    "mod_call_pipe2",                # regs: only 1/2 paired
+    "mod_mul_add",                   # regs: only 0/4 paired
+    "mod_template",                  # regs: only 0/1 paired
+    "packed_assign",                 # mems: only 0/1 paired
+    "partsel_oob_ascending",         # `lhd compile` refuses the .v (negative-shift)
+    "phase_hier_latch_neg",          # regs: only 0/1 paired
+    "phase_two_clock_ports",         # regs: only 0/2 paired
+    "pipe2_two_out",                 # regs: only 0/2 paired
+    "pipe3_mul",                     # regs: only 0/1 paired
+    "pipe_range",                    # regs: only 0/1 paired
+    "pipe_stage_reg",                # regs: only 0/1 paired
+    "pipe_state_acc",                # regs: only 1/2 paired
+    "pipe_varargs_add",              # regs: only 0/1 paired
+    "reg_delay_init",                # regs: only 0/1 paired
+    "reg_tuple_reset",               # regs: only 0/2 paired
+    "sim_loop_mem_prefetch",         # mems: only 0/1 paired
+    "sim_sub_mealy_feedback",        # regs: only 0/1 paired
+    "sim_sub_stateful_feedback",     # regs: only 0/1 paired
+    "struct_top_port",               # regs: only 0/1 paired
+    "wire_reg",                      # regs: only 0/1 paired
+]
+
+[
+    sh_test(
+        name = "prp-statematch-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+            "--mode",
+            "statematch",
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
+            "//lhd",
+        ],
+        tags = ["fixme"] if (
+            prp_file.split("/")[-1].split(".")[0] in _STATEMATCH_FIXME
+        ) else [],
+    )
+    for prp_file in glob(
+        ["tests/equiv/*.prp"],
+        exclude = [
+            # generated differential-sim testbenches, not equiv pairs
+            "tests/equiv/*_tb.prp",
+            # no header, no golden .v
+            "tests/equiv/accum.prp",
+        ],
+    )
+]
+
 # signed_one_bit_cmp's standalone tracker target was DELETED (2026-08-02): the
 # miscompile is fixed and the pair is back in the equiv glob above. The target
 # also never actually carried the `fixme` tag its comment claimed, so it had been
@@ -678,8 +771,9 @@ _SIM_FIXME = [
         # set costs well under a second. Every one FAILS today -- run them with
         #   bazel test //inou/prp:prp-equiv-latch_rule_b --test_tag_filters=
         # The root cause is written at the top of each .v/.prp pair.
-        "latch_rule_a",          # self-timed gate: enable reads its own Q
-        "latch_rule_b",          # exhaustive `case` mis-inferred as a latch (21 corpus files)
+        # latch_rule_a / latch_rule_b MOVED to tests/errors/ (2026-08-08) — a
+        # compile REFUSAL has no equivalence to check, so the errors tier
+        # asserts the diagnostic instead of a fixme equiv placeholder.
         "dual_async_set_reset",  # a flop needs TWO async rungs; the cell has one slot
         # The three pure prp_writer trackers were all PROMOTED out (2026-07-29) --
         # writer_undefined_mux (undeclared `_mux_N`), tolg_field_read_zero (the
@@ -687,7 +781,7 @@ _SIM_FIXME = [
         # writer_bad_char (module names were not backtick-escaped). Each proves in
         # all three directions now; the writer half of the last two is pinned as a
         # TEXT gate by //pass/prp_writer:prp_writer_decl_emit_test.sh.
-        "reg_clock_from_logic",  # `clk ^ inv` clock rejected by tolg's whitelist
+        # reg_clock_from_logic MOVED to tests/errors/ (2026-08-08), same reason.
         # LEC-REFUTED categories (these COMPILE clean -- the miscompile is silent):
         "mem_write_during_reset",   # memory write not gated by the async reset
         "async_mem_reset_demoted",  # async reset OF a memory demoted to sync
@@ -784,10 +878,10 @@ _V2PRP2V_NATIVE_FIXME = [
     # (writer_undefined_mux), no longer drops a hoisted nested `mut`'s type and
     # comptime init (tolg_field_read_zero), and backtick-escapes module names
     # (writer_bad_char). All three re-parse and this direction proves for each.
-    "latch_rule_a",
-    "latch_rule_b",
+    # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
+    # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
+    # target for them.
     "dual_async_set_reset",
-    "reg_clock_from_logic",
     # negative_array_index PROMOTED out (2026-08-06): prp-v2prp2v-negative_array_index
     # passes — the round trip proves against the golden.
     "blocking_ff_state",
@@ -880,10 +974,10 @@ _V2PRP2V_VERILOG_FIXME = [
     # signal names always did. Each pair's header states the root cause; the
     # writer half of the last two is pinned as a TEXT gate by
     # //pass/prp_writer:prp_writer_decl_emit_test.sh.
-    "latch_rule_a",
-    "latch_rule_b",
+    # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
+    # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
+    # target for them.
     "dual_async_set_reset",
-    "reg_clock_from_logic",
     # negative_array_index PROMOTED out (2026-08-06): the round trip proves.
     "blocking_ff_state",
     # The five LEC-REFUTED trackers. This is the only direction that catches

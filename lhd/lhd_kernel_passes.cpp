@@ -290,17 +290,23 @@ void semdiff_command(Options& opts, Result& res) {
       }
       absl::flat_hash_map<std::string, int>   mark;
       std::function<void(const std::string&)> dfs = [&](const std::string& n) {
-        int& m = mark[n];
-        if (m != 0) {
+        // NO reference or iterator into `mark` may be held across the recursion:
+        // the recursive calls insert, and absl::flat_hash_map invalidates every
+        // one of them on rehash. This used to hold `int& m = mark[n]` and write
+        // the done-marker through it AFTER recursing, which scribbled on
+        // whatever the rehash had moved into that slot — a scoped def then
+        // surfaced with a truncated name and the sweep aborted on the resulting
+        // end() deref (generic_mod, mod_varargs_csa under --top/--ref-top).
+        if (auto it = mark.find(n); it != mark.end() && it->second != 0) {
           return;
         }
-        m = 1;
+        mark[n] = 1;
         if (auto it = children.find(n); it != children.end()) {
           for (const auto& c : it->second) {
-            dfs(c);
+            dfs(c);  // `children` is not written here, so ITS iterator stays valid
           }
         }
-        m = 2;
+        mark[n] = 2;
         scope.push_back(n);
       };
       dfs(top_key);
@@ -330,6 +336,15 @@ void semdiff_command(Options& opts, Result& res) {
     for (const auto& name : scope) {
       auto rit = ref_by_name.find(name);
       auto iit = impl_by_name.find(name);
+      if (rit == ref_by_name.end()) {
+        // Defensive: every `->second` below used to assume the scope DFS could
+        // only ever push names that are ref keys. When that assumption broke
+        // (see the dfs `mark` note above) the symptom was an absl end()-deref
+        // ABORT with no message, which is far harder to chase than a diagnostic.
+        throw Lhd_error{"internal",
+                        std::format("pass semdiff: scoped def '{}' has no ref graph", name),
+                        "the --top/--ref-top name resolved to a def the sweep cannot address"};
+      }
       if (iit == impl_by_name.end()) {
         // One-sided def: its state is unpairable by construction — count it so
         // the aggregate totals stay honest.

@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: arr2d_dyn_sel.sel2d
 :pyrope_top: sel2d
-:state_pair_gap: mems=0/1
 */
 
 // Pyrope reference for arr2d_dyn_sel.v: a runtime-indexed read of a 4-entry

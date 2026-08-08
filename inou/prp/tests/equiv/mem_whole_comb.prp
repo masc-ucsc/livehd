@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_whole_comb.combarr
 :pyrope_top: combarr
-:state_pair_gap: mems=0/1
 */
 
 // Pure COMBINATIONAL whole-array: the whole `arr` is written from one bus

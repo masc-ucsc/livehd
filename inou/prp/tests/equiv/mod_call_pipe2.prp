@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mod_call_pipe2.top
 :pyrope_top: top
-:state_pair_gap: regs=1/2
 */
 
 pipe[1..=10] mul(a:u16, b:u16) -> (c:u32) { c = a * b }

@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: struct_top_port
 :pyrope_top: struct_top_port
-:state_pair_gap: regs=0/1
 */
 // Pyrope twin of a design whose TOP interface is a packed struct. The corpus
 // had no such golden — every other struct pair keeps its struct on an INTERNAL

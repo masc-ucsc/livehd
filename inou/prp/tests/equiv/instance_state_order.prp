@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: instance_state_order.top
 :pyrope_top: top
-:state_pair_gap: regs=0/1
 */
 
 // Hierarchical-LEC STATEFUL box-instance pairing guard (the sequential

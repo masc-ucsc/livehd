@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: arr_comb_mux_const
 :pyrope_top: arr_comb_mux_const
-:state_pair_gap: mems=0/1
 */
 // TRACKER — an UNDRIVEN element of an UNPACKED array is modelled as FREE rather
 // than as a DON'T-CARE, so lec refutes a pair that is equivalent by intent.

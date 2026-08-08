@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: reg_tuple_reset.rtr
 :pyrope_top: rtr
-:state_pair_gap: regs=0/2
 */
 
 // A tuple-typed register `reg bank:(x:u8,y:u4) = (20,3)` is lowered by

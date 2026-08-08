@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: mem_mut_array.mutarr
 :pyrope_top: mutarr
-:state_pair_gap: mems=0/1
 */
 
 // 1a-mem — a runtime-indexed mut array is NOT a memory (no cross-cycle

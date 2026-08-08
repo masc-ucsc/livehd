@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: pipe3_mul.mul
 :pyrope_top: mul
-:state_pair_gap: regs=0/1
 */
 
 // The 06c-pipelining.md canonical fixed-latency pipe: every result arrives

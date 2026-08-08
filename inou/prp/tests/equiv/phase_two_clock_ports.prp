@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: phase_two_clock_ports
 :pyrope_top: phase_two_clock_ports
-:state_pair_gap: regs=0/2
 */
 
 // Flat twin of the golden's two-clock-port cell. Both of the cell's clock ports

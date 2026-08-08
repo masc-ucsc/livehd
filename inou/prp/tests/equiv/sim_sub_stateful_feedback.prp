@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: sim_sub_stateful_feedback_top
 :pyrope_top: top
-:state_pair_gap: regs=0/1
 */
 
 // FALSE combinational loop through a STATEFUL sub-instance (XiangShan
