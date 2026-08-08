@@ -10,10 +10,8 @@
 #include <format>
 #include <functional>
 
-#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Statement.h"
 #include "slang/ast/expressions/CallExpression.h"
-#include "slang/ast/symbols/AttributeSymbol.h"
 #include "slang_context.hpp"
 
 using slang::ast::StatementKind;
@@ -279,43 +277,25 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
     }
   }
 
-  // to_int_value: a case ITEM may lower to a boolean (`case (1'b1) a || b:` --
-  // the one-hot idiom every Verilog CPU uses), while the selector is an integer.
-  // Verilog compares 1-bit values here; Pyrope's `==` has no implicit bool/int
-  // conversion, so without this the arm dies as `type-mismatch-eq` ("<const>:
-  // integer vs %N:boolean"). Integers pass through unchanged, so this is a no-op
-  // for the ordinary `case (x) 3:` shape. Same idiom as the `inside` operator
-  // (slang_expr.cpp).
-  return builder_.create_eq_stmts(sel, to_int_value(lower_rvalue(item)));
+  return builder_.create_eq_stmts(sel, lower_rvalue(item));
 }
 
 void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   using slang::ast::CaseStatementCondition;
   using slang::ast::UniquePriorityCheck;
 
-  auto si = tinfo(*stmt.expr.type);
-  // to_int_value for the mirror shape `case (a || b) 1'b1:` — a boolean selector
-  // against integer items. No-op when the selector is already an integer.
-  auto sel = to_int_value(lower_rvalue(stmt.expr));
+  auto si  = tinfo(*stmt.expr.type);
+  auto sel = lower_rvalue(stmt.expr);
 
   // Decide if/unique_if. unique/unique0 declare the arms disjoint; plain
   // `case` with all-constant pairwise-disjoint items is provably disjoint and
   // also lowers to unique_if (-> one Hotmux). Anything else keeps priority
   // (first-match) semantics as a flat if/elif chain.
-  //
-  // The const scan below ALSO answers "do the arms cover every selector value"
-  // (see `exhaustive`), which a plain `case (sel1b) 1'b0: … 1'b1: …` does even
-  // with no default — so it runs unconditionally, not only when `unique` is
-  // still undecided.
-  const bool unique_declared = stmt.check == UniquePriorityCheck::Unique || stmt.check == UniquePriorityCheck::Unique0;
-  bool       unique          = unique_declared;
-  bool       exhaustive      = false;
-  {
+  bool unique = stmt.check == UniquePriorityCheck::Unique || stmt.check == UniquePriorityCheck::Unique0;
+  if (!unique) {
     std::vector<std::pair<uint64_t, uint64_t>> seen;  // (mask, value-under-mask)
     bool                                       all_const = true;
     bool                                       disjoint  = true;
-    bool                                       all_exact = true;  // no wildcard bits in any item
-    uint64_t                                   n_items   = 0;
     for (const auto& group : stmt.items) {
       for (const auto* item : group.expressions) {
         auto cv = try_eval(*item);
@@ -349,10 +329,6 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
             break;
           }
         }
-        if (mask != ~0ULL) {
-          all_exact = false;  // wildcard bits: this item covers a value RANGE, not one value
-        }
-        ++n_items;
         seen.emplace_back(mask, val);
         if (!disjoint) {
           break;
@@ -362,15 +338,7 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
         break;
       }
     }
-    unique = unique_declared || (all_const && disjoint);
-    // Exhaustive: every arm is one exact constant, the arms are pairwise
-    // distinct, and there are as many of them as the selector has values. Then
-    // the missing `default` is UNREACHABLE, so an else assigning don't-care is
-    // behavior-preserving — and it stops an `always @*` from inferring a latch
-    // (picorv32: `case (reg_op1[1]) 1'b0: … 1'b1: …` inside a full_case arm).
-    // The width cap keeps 1ULL << bits well-defined and the count sane.
-    exhaustive = all_const && disjoint && all_exact && si.bits > 0 && si.bits < 20
-                 && n_items == (1ULL << static_cast<unsigned>(si.bits));
+    unique = all_const && disjoint;
   }
 
   // Pre-compute every arm's match condition BEFORE the if node. A `uif`
@@ -411,91 +379,10 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
     builder_.push_stmts(else_stmts);
     lower_statement(*stmt.defaultCase);
     builder_.pop_stmts();
-  } else if (has_full_case_attr(stmt) || exhaustive) {
-    emit_full_case_else(stmt, if_nid);
   } else if (unique) {
     // unique_if requires the else arm; an empty one keeps prior values.
     builder_.add_if_stmts(if_nid);
   }
-}
-
-bool Slang_context::has_full_case_attr(const slang::ast::Statement& stmt) const {
-  if (body_ == nullptr) {
-    return false;
-  }
-  for (const auto* attr : body_->getCompilation().getAttributes(stmt)) {
-    // `(* full_case *)` is the bare-name form (value 1); `(* full_case = 0 *)`
-    // explicitly opts out, so honor the value when one is given.
-    if (attr->name == "full_case") {
-      auto cv = attr->getValue();
-      return !cv.isInteger() || cv.isTrue();
-    }
-  }
-  return false;
-}
-
-namespace {
-// The variables a case arm writes. Same shape as slang_structure.cpp's
-// Write_collector (file-local there); only the write SET matters here, so
-// blocking/nonblocking are not split. Insertion ORDER is kept: the emitted
-// else arm must be deterministic (//inou/slang:slang_emit_determinism).
-struct Fullcase_write_collector : public slang::ast::ASTVisitor<Fullcase_write_collector, slang::ast::VisitFlags::AllGood> {
-  std::vector<const slang::ast::ValueSymbol*>         order;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> seen;
-
-  void note(const slang::ast::Expression& lhs) {
-    if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
-      for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
-        note(*op);
-      }
-      return;
-    }
-    const auto* e = &lhs;
-    while (true) {
-      if (e->kind == slang::ast::ExpressionKind::ElementSelect) {
-        e = &e->as<slang::ast::ElementSelectExpression>().value();
-      } else if (e->kind == slang::ast::ExpressionKind::RangeSelect) {
-        e = &e->as<slang::ast::RangeSelectExpression>().value();
-      } else if (e->kind == slang::ast::ExpressionKind::MemberAccess) {
-        e = &e->as<slang::ast::MemberAccessExpression>().value();
-      } else {
-        break;
-      }
-    }
-    if (e->kind != slang::ast::ExpressionKind::NamedValue) {
-      return;
-    }
-    const auto* sym = &e->as<slang::ast::NamedValueExpression>().symbol;
-    if (seen.insert(sym).second) {
-      order.emplace_back(sym);
-    }
-  }
-
-  void handle(const slang::ast::AssignmentExpression& expr) {
-    note(expr.left());
-    visitDefault(expr);
-  }
-};
-}  // namespace
-
-void Slang_context::emit_full_case_else(const slang::ast::CaseStatement& stmt, const Lnast_nid& if_nid) {
-  Fullcase_write_collector wc;
-  for (const auto& group : stmt.items) {
-    group.stmt->visit(wc);
-  }
-
-  auto else_stmts = builder_.add_if_stmts(if_nid);
-  builder_.push_stmts(else_stmts);
-  for (const auto* sym : wc.order) {
-    // Width-matched unknown: `0ub????`. A bare `0ub?` would be one bit wide and
-    // the assignment would narrow the variable.
-    auto ti = tinfo(sym->getType());
-    if (ti.bits <= 0) {
-      continue;  // non-integral (real/string/...): nothing sensible to don't-care
-    }
-    builder_.create_assign_stmts(lname_of(*sym), absl::StrCat("0ub", std::string(static_cast<size_t>(ti.bits), '?')));
-  }
-  builder_.pop_stmts();
 }
 
 bool Slang_context::unroll_tick(const slang::ast::Statement& stmt) {

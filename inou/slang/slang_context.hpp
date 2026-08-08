@@ -431,14 +431,6 @@ private:
   void lower_statement(const slang::ast::Statement& stmt);
   void lower_conditional(const slang::ast::ConditionalStatement& stmt);
   void lower_case(const slang::ast::CaseStatement& stmt);
-  // `(* full_case *)`: the arms are DECLARED exhaustive, so an uncovered
-  // selector value is a DON'T CARE, not "hold the previous value". Unhonored,
-  // an incompletely-assigned `always @*` infers a latch whose Q feeds its own D
-  // (picorv32's `case (mem_wordsize)` covers 0/1/2 of a 2-bit selector), which
-  // the latch contract then rejects. emit_full_case_else synthesizes the else
-  // arm the attribute implies: every variable the arms write gets `0ub???`.
-  bool has_full_case_attr(const slang::ast::Statement& stmt) const;
-  void emit_full_case_else(const slang::ast::CaseStatement& stmt, const Lnast_nid& if_nid);
   struct Tinfo;  // fwd (defined below)
   std::string case_item_match(const std::string& sel, const Tinfo& si, const slang::ast::Expression& item,
                               slang::ast::CaseStatementCondition cond_kind);
