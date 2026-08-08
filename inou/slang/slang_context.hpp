@@ -430,6 +430,11 @@ private:
   // ── statements (slang_stmt.cpp) ────────────────────────────────────────────
   void lower_statement(const slang::ast::Statement& stmt);
   void lower_conditional(const slang::ast::ConditionalStatement& stmt);
+  // SystemVerilog immediate assert/assume -> the same LNAST `cassert` node a
+  // Pyrope `assert` emits (tolg makes it an `fproperty` Sub). Dropping these,
+  // as the reader used to, makes a design whose properties are all immediate
+  // asserts verify as "no obligations found" — proving nothing at exit 0.
+  void lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt);
   void lower_case(const slang::ast::CaseStatement& stmt);
   // `(* full_case *)`: the arms are DECLARED exhaustive, so an uncovered
   // selector value is a DON'T CARE, not "hold the previous value". Unhonored,

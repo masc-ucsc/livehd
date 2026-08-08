@@ -348,6 +348,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# SystemVerilog IMMEDIATE assert/assume become design obligations (the same
+# LNAST cassert -> fproperty path a Pyrope `assert` takes). These used to be
+# dropped silently, so a design whose properties are all immediate asserts
+# verified as "no obligations found" -- proving nothing at exit 0.
+sh_test(
+    name = "lhd_sv_immediate_assert_test",
+    size = "large",
+    srcs = ["lhd_sv_immediate_assert_test.sh"],
+    data = ["//lhd"],
+)
+
 # F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
 # induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
 # per-obligation merge takes bmc-first's deep reachable refute, and auto never

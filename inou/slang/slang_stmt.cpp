@@ -111,7 +111,7 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       return;
     }
     case StatementKind::ImmediateAssertion:
-      // synthesis ignores immediate assertions (a cassert lowering can come later)
+      lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>());
       return;
     case StatementKind::ConcurrentAssertion:
       emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "concurrent assertion ignored (synthesis semantics)");
@@ -158,6 +158,53 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
                        std::string("statement kind '") + std::string(slang::ast::toString(stmt.kind))
                            + "' is not supported by --reader slang yet");
   }
+}
+
+// A SystemVerilog IMMEDIATE assertion becomes a design obligation, the same
+// LNAST `cassert` node a Pyrope `assert` produces — tolg materializes it as an
+// `fproperty` Sub, pass.formal proves what it can and cgen emits a runtime
+// check for the rest.
+//
+// This used to be dropped on the floor ("synthesis ignores immediate
+// assertions"), silently: a design whose every property was an immediate assert
+// verified as `no assert/assert_always obligations found` — a run that proves
+// nothing while exiting 0. riscv-formal's generated checks are exactly that
+// shape (48 immediate asserts in one testbench), so the drop was the difference
+// between checking a RISC-V core and checking nothing.
+//
+// `assume` is a hypothesis (prove-then-use, per the fcore contract), so it
+// carries the `__fkind__assume` sentinel the Pyrope front-end uses. `cover` is
+// a coverage COUNT, not an obligation, and there is nothing to prove — it stays
+// ignored, but says so.
+void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt) {
+  using slang::ast::AssertionKind;
+
+  if (stmt.assertionKind == AssertionKind::CoverProperty || stmt.assertionKind == AssertionKind::CoverSequence) {
+    emit_warning(stmt.sourceRange, "cover-ignored", "unsupported", "immediate cover is a count, not an obligation — ignored");
+    return;
+  }
+  // A DEFERRED assertion (`assert #0` / `assert final`) fires in the observed/
+  // final simulation region, after glitches settle. That is a simulation-time
+  // semantics this static obligation cannot reproduce, so refuse it rather than
+  // prove something subtly different.
+  if (stmt.isDeferred) {
+    emit_warning(stmt.sourceRange, "deferred-assertion-ignored", "unsupported",
+                 "deferred assertion (#0 / final) has simulation-region semantics — ignored");
+    return;
+  }
+
+  set_pending_loc(stmt.sourceRange);
+  // `booleanize`: pyrope keeps bool and int apart and a cassert condition is a
+  // bool, but `assert(flag)` over a 1-bit net lowers to an integer.
+  auto cond = booleanize(lower_rvalue(stmt.cond));
+  auto idx  = builder_.add_child(Lnast_ntype::create_cassert());
+  builder_.add_value_child_pub(idx, cond);
+  if (stmt.assertionKind == AssertionKind::Assume) {
+    // UNQUOTED sentinel, matching prp2lnast: a user message is always a string
+    // const, so this can never collide with one.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+  }
+  clear_pending_loc();
 }
 
 void Slang_context::lower_conditional(const slang::ast::ConditionalStatement& stmt) {
