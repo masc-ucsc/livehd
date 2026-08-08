@@ -7625,6 +7625,19 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
                                                       ? pick_split_signal(design, opts.split, 8)
                                                       : Split_pick{};
 
+  // Per-cycle snapshot for `past(x, n)` monitor binds: the terms this cycle
+  // asserted, kept so a later cycle can name them. Holds handles to terms the
+  // solver already owns — no re-encoding, and nothing is added unless a monitor
+  // actually carries a delayed bind.
+  struct Mon_cycle {
+    Io_name_map<Val> inputs;
+    Io_name_map<Val> outputs;
+    Io_name_map<Val> state;
+  };
+  std::vector<Mon_cycle> mon_hist;
+  mon_hist.reserve(static_cast<size_t>(total_cyc));
+  std::vector<bool> mon_hist_noted(monitors != nullptr ? monitors->size() : 0, false);
+
   for (int cyc = 0; cyc < total_cyc; ++cyc) {
     const bool checking = phase_run ? (cyc >= reset_hold) : true;
 
@@ -7870,33 +7883,59 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     };
     process_props(e, /*occ_base=*/0, nullptr);
 
+    // HISTORY for `past(x, n)` binds: keep this cycle's input symbols, outputs
+    // and (pre-transition) state so a delayed bind can name the very term that
+    // was asserted `n` cycles ago. Cheap — these are handles to terms the
+    // solver already holds, not new encodings.
+    mon_hist.push_back(Mon_cycle{sh, e.outputs, state});
+
     // Formal-block monitors: encode each with its inputs bound to THIS cycle's
     // design signals (current state / this cycle's input symbols / this cycle's
-    // outputs), then run its obligations through the identical machinery.
+    // outputs), then run its obligations through the identical machinery. A
+    // bind with `delay > 0` reaches back into mon_hist instead (`past`).
     for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
       const Monitor& mon = (*monitors)[mi];
       if (mon.graph == nullptr) {
+        continue;
+      }
+      // Not enough history yet: this cycle cannot witness the property at all,
+      // so SKIP it rather than bind an unconstrained symbol (which would invent
+      // history and can only produce spurious counterexamples). Disclosed once
+      // per monitor in the verdict detail.
+      int max_delay = 0;
+      for (const auto& b : mon.binds) {
+        max_delay = std::max(max_delay, b.delay);
+      }
+      if (cyc < max_delay) {
+        if (!mon_hist_noted[mi]) {
+          mon_hist_noted[mi]  = true;
+          res.detail         += "; monitor '" + mon.block + "' needs " + std::to_string(max_delay)
+                        + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
+        }
         continue;
       }
       Io_name_map<Val> msh;
       bool             bind_ok = true;
       for (const auto& b : mon.binds) {
         const Val* v = nullptr;
+        // `past(x, n)`: resolve against the cycle n steps back. mon_hist was
+        // just extended with this cycle, so index from its END.
+        const Mon_cycle& src_cyc = mon_hist[mon_hist.size() - 1 - static_cast<size_t>(b.delay)];
         switch (b.src) {
           case Monitor::Bind::Src::input: {
-            if (auto it = sh.find(b.key); it != sh.end()) {
+            if (auto it = src_cyc.inputs.find(b.key); it != src_cyc.inputs.end()) {
               v = &it->second;
             }
             break;
           }
           case Monitor::Bind::Src::output: {
-            if (auto it = e.outputs.find(b.key); it != e.outputs.end()) {
+            if (auto it = src_cyc.outputs.find(b.key); it != src_cyc.outputs.end()) {
               v = &it->second;
             }
             break;
           }
           case Monitor::Bind::Src::state: {
-            if (auto it = state.find(b.key); it != state.end()) {
+            if (auto it = src_cyc.state.find(b.key); it != src_cyc.state.end()) {
               v = &it->second;
             }
             break;

@@ -277,13 +277,19 @@ new_git_repository(
     shallow_since = "1554534526 -1000",
 )
 
+# povik/yosys-slang was RENAMED to povik/sv-elab. GitHub names an
+# /archive/<sha>.zip root directory after the repo's CURRENT name, so the SAME
+# commit now arrives as `sv-elab-<sha>/` with different archive bytes: the old
+# url/sha256/strip_prefix fail every FRESH fetch ("Checksum was 5759fda... but
+# wanted e3cde28..."), while a warm bazel cache never notices. Same commit as
+# before — contents verified byte-identical to upstream 7cdd147.
 http_archive(
    name = "yosys_slang",
    urls = [
-     "https://github.com/povik/yosys-slang/archive/7cdd147a6dd14e8f57cd321df8be377c04c9b31f.zip"
+     "https://github.com/povik/sv-elab/archive/7cdd147a6dd14e8f57cd321df8be377c04c9b31f.zip"
    ],
-   sha256 = "e3cde284d2465b5c435ad4ce897c58eb08ca607b5549e4fca255f566f372bcf3",
-   strip_prefix = "yosys-slang-7cdd147a6dd14e8f57cd321df8be377c04c9b31f",
+   sha256 = "5759fda34036d3644683c55912b556533a5f24d4b3e0c2c85c7dc5b9552a79a9",
+   strip_prefix = "sv-elab-7cdd147a6dd14e8f57cd321df8be377c04c9b31f",
    build_file = "//packages:yosys_slang.BUILD",
    patches = ["//packages:yosys_slang.patch"],
 )

@@ -876,6 +876,17 @@ struct Monitor {
     std::string ident;  // monitor input port
     Src         src = Src::state;
     std::string key;    // input/output port name, or the canon flop-state key
+    // HISTORY sample: bind to the signal's value `delay` cycles EARLIER
+    // (`past(x, delay)`), not this cycle's. 0 = the current cycle, the ordinary
+    // case. The monitor itself stays COMBINATIONAL — a flop inside it would be
+    // a fresh free symbol per step and silently refute tautologies, which is
+    // why the CLI refuses a stateful property. History is resolved by the
+    // ENGINE instead: prove_properties keeps each cycle's inputs/outputs/state
+    // and indexes the unroll, so the term is the very one asserted at cycle
+    // `cyc - delay`. An obligation is SKIPPED for cycles with cyc < delay
+    // (there is no such history yet) rather than binding a free symbol, which
+    // would manufacture counterexamples out of unconstrained history.
+    int delay = 0;
   };
   std::vector<Bind> binds;
   // Generated-source line -> original "file:line" (fproperty locs point into
