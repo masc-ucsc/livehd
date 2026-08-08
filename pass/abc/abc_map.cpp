@@ -1544,11 +1544,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         res = arith::build_shr(ops, av, bv, fill);
       }
-      // result = low out_w bits of the cw-wide shift; the spare bit(s) above the
-      // magnitude width are 0 (an unsigned result is non-negative). A signed
-      // result has out_w == bits_of so there are no spare bits to fill.
+      // result = low out_w bits of the cw-wide shift. The bit(s) above the
+      // magnitude width follow the RESULT's sign, which Verilog takes from the
+      // LEFT operand (the amount never counts): the LEC's SRA arm carries
+      // `out_signed |= a.is_signed` and sign-extends the W-bit result into a
+      // wider consumer/port, and cgen emits `$signed(a) >>> n`, which
+      // sign-fills. tolg's bind_result stamps the pin unsigned even for an
+      // arithmetic shift, so the "spare" slot is NOT always 0 -- padding it
+      // with const0 zero-extended a negative result (abc_mathops __c5: c = -8,
+      // n = 0 read 8 instead of 24 on the 5-bit region boundary). Replicate
+      // the top kept bit for a signed operand; a logical shift still pads 0.
+      Abc_Obj_t* pad = abc_const_bit(false);
+      if (a_sign && out_w > 0 && out_w <= static_cast<int>(res.size())) {
+        pad = res[out_w - 1];
+      }
       for (int b = 0; b < out_bits; ++b) {
-        slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : abc_const_bit(false);
+        slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : pad;
       }
     } else if (op == Ntype_op::Mult) {
       // n-ary product of every input driver (all on pid 0), at width out_bits

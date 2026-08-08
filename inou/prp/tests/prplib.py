@@ -517,8 +517,15 @@ class PrpRunner:
         # independent oracle is the v2prp2v original-Verilog leg plus
         # lhd/tests/single_edge_four_classes_test.sh (Icarus on source vs
         # normalized netlists).
+        # Optional `:lec_reader: yosys-verilog` header: read this pair through
+        # the yosys front end for OUR lec leg. For goldens that --reader slang
+        # deliberately fail-closes on (e.g. blocking_ff_state's
+        # `blocking-ff-state` refusal, whose own hint names this reader): the
+        # refusal stays pinned by lhd/tests/blocking_ff_state_test.sh and the
+        # fixme-tagged v2prp2v legs; the engine must still PROVE here.
+        lec_reader = (test.params.get('lec_reader') or '').strip() or 'slang'
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
-                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
+                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', lec_reader,
                    '--workdir', os.path.join(odir, 'w_lec')]
         lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:

@@ -100,9 +100,20 @@ cat "$W"/v_src/*.v > "$W/src.v"
 sed 's/^module icgf(/module icgf_n(/' "$W"/v_norm/*.v > "$W/norm.v"
 
 grep -q "always_latch"      "$W/src.v"  || fail "the SOURCE emission lost its enable latch"
-grep -qE "posedge \(clk"    "$W/src.v"  || fail "the SOURCE emission lost its gated clock"
+# The gated clock may be emitted inline (`posedge (clk & enl)`) or, since cgen
+# force-declares every clock_pin driver (so its own reader can read the output
+# back), as a NAMED net: `and_40 = clk & enl;` + `always @(posedge and_40)`.
+if ! grep -qE "posedge \(clk" "$W/src.v"; then
+  src_gclk="$(sed -n 's/^always @(posedge  *\([A-Za-z_][A-Za-z0-9_.]*\).*$/\1/p' "$W/src.v" | head -1)"
+  [ -n "$src_gclk" ] && [ "$src_gclk" != "clk" ] \
+    && grep -qE "(^| )${src_gclk} = \(?clk &" "$W/src.v" \
+    || fail "the SOURCE emission lost its gated clock"
+fi
 grep -q "always_latch"      "$W/norm.v" && fail "the NORMALIZED emission still holds the enable latch"
-grep -qE "posedge \(clk &"  "$W/norm.v" && fail "the NORMALIZED emission still holds a gated clock"
+# A regressed fold would keep a DERIVED clock (spelled `posedge <net>` since the
+# named-net emission, never `posedge (clk &`): the only posedge allowed is clk.
+grep -E "always @\(posedge" "$W/norm.v" | grep -vE "posedge clk[ )]" | grep -q . \
+  && fail "the NORMALIZED emission still holds a gated (or derived) clock"
 echo "ok: the normalized netlist has a plain posedge flop with an enable"
 
 # ---- lhd lec: real verdicts, both directions --------------------------------

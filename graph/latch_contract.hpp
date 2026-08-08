@@ -234,10 +234,12 @@ struct Icg_def_match {
 [[nodiscard]] int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
                                           const std::function<bool(const hhds::Graph*)>& is_boxed = {});
 
-// The value a latch passes THROUGH while its window is open: the arm of tolg's
-// hold mux (`gate ? d : q`) that is not the latch's own Q. Invalid when `n` is
-// not a latch or carries no hold mux (the raw yosys D/EN shape, where `din` is
-// already the transparent value).
+// The value a latch passes THROUGH while its window is open. Peels tolg's hold
+// mux (`gate ? d : q`) when `din` still carries one; once
+// cprop::canonicalize_latch_holds has stripped it (the open condition moves to
+// `enable`), `din` -- a graph input, a const, or a residual value mux with no
+// Q arm -- IS the through-value and is returned as-is. Invalid only when `n`
+// is not a latch or a hold mux has no non-Q arm (fail closed).
 [[nodiscard]] hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n);
 
 // Inline every instance whose output drives a state element's `clock_pin` and

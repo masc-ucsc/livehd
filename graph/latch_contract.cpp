@@ -439,22 +439,37 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   }
   auto q   = n.get_driver_pin(0);
   auto din = gu::get_driver_of_sink_name(n, "din");
-  if (q.is_invalid() || din.is_invalid() || gu::is_const_pin(din) || gu::is_graph_input_pin(din)) {
+  if (q.is_invalid() || din.is_invalid()) {
     return {};
   }
-  auto mux = din.get_master_node();
-  if (gu::type_op_of(mux) != Ntype_op::Mux) {
-    return {};
-  }
-  for (const auto& e : mux.inp_edges()) {
-    if (e.sink.get_port_id() == 0) {
-      continue;  // the selector is the gate, not an arm
+  if (!gu::is_const_pin(din) && !gu::is_graph_input_pin(din)) {
+    auto mux = din.get_master_node();
+    if (gu::type_op_of(mux) == Ntype_op::Mux) {
+      // tolg's hold-mux shape (`gate ? d : q`): the mux must be peeled, because
+      // its condition reads the clock and, evaluated AT the sampling edge,
+      // selects the stale Q. A mux with no Q arm is a genuine VALUE mux and
+      // falls through: it is the through-value itself.
+      bool            has_q_arm = false;
+      hhds::Pin_class other;
+      for (const auto& e : mux.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          continue;  // the selector is the gate, not an arm
+        }
+        if (!e.driver.is_invalid() && e.driver.get_class_index() == q.get_class_index()) {
+          has_q_arm = true;
+        } else if (other.is_invalid()) {
+          other = e.driver;
+        }
+      }
+      if (has_q_arm) {
+        return other;  // invalid `other` fails closed, as before
+      }
     }
-    if (!e.driver.is_invalid() && e.driver.get_class_index() != q.get_class_index()) {
-      return e.driver;
-    }
   }
-  return {};
+  // After cprop::canonicalize_latch_holds the hold mux is stripped and the open
+  // condition lives on `enable`, so din -- including a graph input, a const, a
+  // Get_mask, or a residual value mux -- IS the value the latch passes through.
+  return din;
 }
 
 int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
