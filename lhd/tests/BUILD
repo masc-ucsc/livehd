@@ -337,6 +337,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `past(x, n)` in a formal block: the first temporal operator. History is
+# resolved by the ENGINE indexing the unroll (Monitor::Bind::delay), so the
+# monitor stays combinational and the "property holds STATE" refusal must not
+# fire; cycles without enough history behind them are skipped and DISCLOSED.
+sh_test(
+    name = "lhd_formal_past_test",
+    size = "large",
+    srcs = ["lhd_formal_past_test.sh"],
+    data = ["//lhd"],
+)
+
 # F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
 # induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
 # per-obligation merge takes bmc-first's deep reachable refute, and auto never

@@ -6,6 +6,7 @@
 #include <fnmatch.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -5039,6 +5040,166 @@ void formal_verify_command(Options& opts, Result& res) {
           }
           return nullptr;
         };
+        // `past(x, N)` -> a HISTORY port. The property text arrives with signal
+        // paths already rewritten to `__p_*` idents, so a use reads
+        // `past(__p_req, 2)`; turn each distinct (ident, N) into its own monitor
+        // input `__p_req__past2` bound to the SAME design signal with delay=N,
+        // and rewrite the text to name that port. The monitor therefore stays a
+        // pure combinational function of its ports — the stateless contract
+        // below is preserved — and the engine resolves the delay by indexing the
+        // unroll. Local copies: the rewritten text feeds both the generated
+        // monitor and the witness-replay embedding further down.
+        auto blk_inputs = blk.inputs;
+        auto blk_stmts  = blk.stmts;
+        {
+          auto idx_of = [&](std::string_view id) -> const livehd::formal_blocks::Input* {
+            for (const auto& in : blk_inputs) {
+              if (in.ident == id) {
+                return &in;
+              }
+            }
+            return nullptr;
+          };
+          // Ensure a history port for (base, n) exists; returns its ident.
+          auto hist_port = [&](const livehd::formal_blocks::Input& base, int n) -> std::string {
+            if (n <= 0) {
+              return base.ident;  // depth 0 IS the current value
+            }
+            std::string hid = std::format("{}__past{}", base.ident, n);
+            if (idx_of(hid) == nullptr) {
+              livehd::formal_blocks::Input hin;
+              hin.ident = hid;
+              hin.path  = base.path;
+              hin.delay = n;
+              blk_inputs.push_back(std::move(hin));
+            }
+            return hid;
+          };
+          auto trim = [](std::string s) {
+            while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.front())) != 0)) {
+              s.erase(s.begin());
+            }
+            while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.back())) != 0)) {
+              s.pop_back();
+            }
+            return s;
+          };
+          // The temporal vocabulary, all of it depth-1 history except `past`
+          // itself. Ports are integers (a 1-bit signal is u1), so a truth test
+          // is `!= 0` — pyrope keeps bool and int apart, and `and` is
+          // boolean-only, so each operand is a comparison.
+          struct Top {
+            std::string_view name;
+            int              nargs;
+          };
+          static constexpr std::array<Top, 5> kTemporal{
+              {{"past", 2}, {"rose", 1}, {"fell", 1}, {"stable", 1}, {"changed", 1}}};
+
+          for (auto& st : blk_stmts) {
+            // Scan OUTSIDE string literals: an obligation's message is part of
+            // the statement text, so `assert(..., "past(x, 0) is x")` would
+            // otherwise be read as a call and rejected for naming no signal.
+            bool in_str = false;
+            for (size_t pos = 0; pos < st.text.size();) {
+              const char c = st.text[pos];
+              if (in_str && c == '\\') {
+                pos += 2;  // escaped char inside the message
+                continue;
+              }
+              if (c == '"') {
+                in_str = !in_str;
+                ++pos;
+                continue;
+              }
+              if (in_str) {
+                ++pos;
+                continue;
+              }
+              const Top* op = nullptr;
+              for (const auto& t : kTemporal) {
+                if (st.text.compare(pos, t.name.size(), t.name) == 0 && pos + t.name.size() < st.text.size()
+                    && st.text[pos + t.name.size()] == '(') {
+                  op = &t;
+                  break;
+                }
+              }
+              // Only a bare call, not the tail of a longer identifier.
+              if (op == nullptr
+                  || (pos > 0 && (std::isalnum(static_cast<unsigned char>(st.text[pos - 1])) != 0 || st.text[pos - 1] == '_'))) {
+                ++pos;
+                continue;
+              }
+              // Balanced scan: `past(rose(x), 1)` must not stop at rose's `)`.
+              // Such a nesting is refused below (these take a SIGNAL, not an
+              // expression), but the diagnosis has to name the real call.
+              const size_t open  = pos + op->name.size();
+              size_t       close = std::string::npos;
+              for (size_t i = open, depth = 0; i < st.text.size(); ++i) {
+                if (st.text[i] == '(') {
+                  ++depth;
+                } else if (st.text[i] == ')' && --depth == 0) {
+                  close = i;
+                  break;
+                }
+              }
+              if (close == std::string::npos) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': unterminated `{}(` in a property", blk.name, op->name),
+                                "temporal operators take one signal, e.g. rose(x) or past(x, 2)"};
+              }
+              const std::string inner = st.text.substr(open + 1, close - open - 1);
+              const auto        comma = inner.find(',');
+              const std::string arg   = trim(comma == std::string::npos ? inner : inner.substr(0, comma));
+              const std::string cnt   = comma == std::string::npos ? std::string{} : trim(inner.substr(comma + 1));
+              if ((op->nargs == 2) != (comma != std::string::npos)) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': `{}` takes {} argument(s)", blk.name, op->name, op->nargs),
+                                "past(x, 2) samples 2 cycles back; rose/fell/stable/changed take just the signal"};
+              }
+              int n = 1;
+              if (op->nargs == 2) {
+                if (cnt.empty() || cnt.find_first_not_of("0123456789") != std::string::npos) {
+                  throw Lhd_error{
+                      "usage",
+                      std::format("formal block '{}': past() depth '{}' is not a literal cycle count", blk.name, cnt),
+                      "write past(x, 2) — the depth must be a compile-time number"};
+                }
+                n = std::stoi(cnt);
+              }
+              const auto* base = idx_of(arg);
+              if (base == nullptr) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': `{}` argument must be one signal the block names, got '{}'",
+                                            blk.name,
+                                            op->name,
+                                            arg),
+                                "rose(acc.req) / past(acc.req, 2) are supported; an expression like rose(a and b) is not"};
+              }
+              // COPY the base ident first: hist_port may push a new history port
+              // into blk_inputs, and that reallocation invalidates `base`.
+              const std::string base_ident = base->ident;
+              const std::string p1         = hist_port(*base, n);
+              std::string       repl;
+              if (op->name == "past") {
+                repl = p1;
+              } else if (op->name == "rose") {
+                repl = std::format("(({} == 0) and ({} != 0))", p1, base_ident);
+              } else if (op->name == "fell") {
+                repl = std::format("(({} != 0) and ({} == 0))", p1, base_ident);
+              } else if (op->name == "stable") {
+                repl = std::format("({} == {})", base_ident, p1);
+              } else {  // changed
+                repl = std::format("({} != {})", base_ident, p1);
+              }
+              st.text.replace(pos, close - pos + 1, repl);
+              if (p1 != base_ident) {
+                st.idents.push_back(p1);
+              }
+              pos += repl.size();
+            }
+          }
+        }
+
         // Port list + widths from the FIRST context (same module def => same
         // widths in every instance); binds built per instance below.
         livehd::lec::Monitor mon;
@@ -5048,9 +5209,10 @@ void formal_verify_command(Options& opts, Result& res) {
         // N instances share one assume set while a sibling block never sees it.
         mon.scope = blk.name;
         std::string ports;
-        for (const auto& in : blk.inputs) {
+        for (const auto& in : blk_inputs) {
           livehd::lec::Monitor::Bind b;
           b.ident      = in.ident;
+          b.delay      = in.delay;
           const Sig* s = resolve(in.path, inst_prefixes.front(), b);
           if (s == nullptr) {
             throw Lhd_error{
@@ -5081,7 +5243,7 @@ void formal_verify_command(Options& opts, Result& res) {
         // obligation — checked as an assert before it is ever used.
         std::string src      = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
         int         gen_line = 2;
-        for (const auto& st : blk.stmts) {
+        for (const auto& st : blk_stmts) {
           std::string one = st.text;
           std::replace(one.begin(), one.end(), '\n', ' ');  // keep 1 stmt : 1 line for the remap
           std::string callee;
@@ -5164,7 +5326,7 @@ void formal_verify_command(Options& opts, Result& res) {
             // must re-fire — embed it AS an assert. The `assume_nocheck*`
             // spellings are free constraints by user fiat: never refuted, and
             // re-checking one in the replay would fail by design.
-            for (const auto& st : blk.stmts) {
+            for (const auto& st : blk_stmts) {
               std::string callee;
               for (char ch : st.text) {
                 if ((std::isalnum(static_cast<unsigned char>(ch)) == 0) && ch != '_') {
@@ -5184,9 +5346,9 @@ void formal_verify_command(Options& opts, Result& res) {
               // blk.inputs arrives sorted ASCENDING by ident. Substituting the
               // short one first rewrites the head of the long one and silently
               // yields `_dut.io_result` where the design has `_dut.io.result`.
-              std::vector<const decltype(blk.inputs)::value_type*> bins;
-              bins.reserve(blk.inputs.size());
-              for (const auto& bin : blk.inputs) {
+              std::vector<const decltype(blk_inputs)::value_type*> bins;
+              bins.reserve(blk_inputs.size());
+              for (const auto& bin : blk_inputs) {
                 bins.push_back(&bin);
               }
               std::sort(bins.begin(), bins.end(), [](const auto* a, const auto* b) {
@@ -5215,7 +5377,7 @@ void formal_verify_command(Options& opts, Result& res) {
           if (!prefix.empty()) {
             im.block = blk.name + "@" + prefix;
             im.binds.clear();
-            for (const auto& in : blk.inputs) {
+            for (const auto& in : blk_inputs) {
               livehd::lec::Monitor::Bind b;
               b.ident      = in.ident;
               const Sig* s = resolve(in.path, prefix, b);
