@@ -423,6 +423,47 @@ int int_literal_bits(const std::string& lit) {
   return bits;
 }
 
+// Integer value of a literal `int_literal_bits` already measured, when it fits
+// an int64 and is unambiguously non-negative. `bits` is that measurement, so
+// the literal is scanned once by the caller and once here.
+//
+// Deliberately NOT `strtoll(…, 0)`: Pyrope's `_decimal_number` grammar makes a
+// leading zero DECIMAL (`010` is ten, and from_pyrope agrees), while base 0
+// reads it as octal 8 and stops `0789` at the invalid '8'. `0sb…` is excluded
+// because a signed binary literal can be negative (`0sb11` is -1), and a `?`
+// unknown bit has no integer value at all.
+bool int_literal_value(const std::string& lit, int bits, long long* out) {
+  if (bits < 0 || bits >= 63) {
+    return false;
+  }
+  unsigned long long v = 0;
+  if (lit.size() > 2 && lit[0] == '0' && lit[1] == 'u' && lit[2] == 'b') {
+    for (size_t k = 3; k < lit.size(); ++k) {
+      if (lit[k] != '0' && lit[k] != '1') {
+        return false;  // a `?` unknown bit
+      }
+      v = (v << 1) | static_cast<unsigned long long>(lit[k] - '0');
+    }
+  } else if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
+    for (size_t k = 2; k < lit.size(); ++k) {
+      const char* dig = std::strchr("0123456789abcdef", std::tolower(static_cast<unsigned char>(lit[k])));
+      if (dig == nullptr) {
+        return false;
+      }
+      v = (v << 4) | static_cast<unsigned long long>(dig - "0123456789abcdef");
+    }
+  } else {
+    for (char c : lit) {
+      if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
+        return false;
+      }
+      v = v * 10 + static_cast<unsigned long long>(c - '0');  // DECIMAL: `010` is ten
+    }
+  }
+  *out = static_cast<long long>(v);
+  return true;
+}
+
 // Signed Slop width for an integer literal: its value bits plus a sign bit, so
 // a positive constant stays positive in the signed testbench plane. 0 when the
 // literal cannot be measured (caller falls back).
@@ -1597,10 +1638,33 @@ private:
     if (w == 0) {
       return long_val(lit);
     }
-    Val v = slop_val("Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\")", w);
-    if (const int b = int_literal_bits(lit); b >= 0 && b < 63) {
+    // A bare `from_pyrope("...")` sub-expression is NOT folded at compile
+    // time just because the codec is constexpr — the tb loop re-parsed "1"
+    // digit-by-digit EVERY CYCLE (Slop<1>/<2>::from_pyrope measured 2.5% of
+    // dino simulation, the same lesson cgen_sim's operand() learned at
+    // 27.8%). So: create_integer (always folded) for every spelling
+    // int_literal_value decodes to a non-negative int64 — plain decimal, 0x
+    // hex, 0ub binary; anything wider, or a `0sb…` whose value can be
+    // negative, goes through a constexpr local, which FORCES the fold; and a
+    // `?`-carrying literal, which is not constant-evaluable, keeps the plain
+    // call (rare, and never in a hot poke).
+    //
+    // Only the create_integer arm claims `has_lit`: const_of would otherwise
+    // fold a bit-select bound to a value the literal does not have.
+    //
+    // `w` is int_literal_bits + 1 (the w == 0 case returned above), so the
+    // measurement is reused rather than re-scanned.
+    long long n = 0;
+    Val       v;
+    if (int_literal_value(lit, w - 1, &n)) {
+      v         = slop_val("Slop<" + std::to_string(w) + ">::create_integer(" + std::to_string(n) + ")", w);
       v.has_lit = true;
-      v.lit     = std::strtoll(lit.c_str(), nullptr, 0);  // measured to fit: a shift amount
+      v.lit     = n;  // measured to fit: a shift amount
+    } else if (lit.find('?') == std::string::npos) {
+      v = slop_val("([]{ constexpr auto _k = Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\"); return _k; }())",
+                   w);
+    } else {
+      v = slop_val("Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\")", w);
     }
     return v;
   }

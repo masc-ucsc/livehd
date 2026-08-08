@@ -89,7 +89,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "42129d25eea5d0f00374d9a79560584b8e4199fb",  # "allow to call through slops for faster simulation": slop identical()/slop_update() + memory change-reporting tick()/apply_update() (change-gated sim emission)
+    commit = "4e50c91b30bf14ebbbd77bd03f88e56b64363f20",  # "optimize bitsize code generation" (on top of "allow to call through slops for faster simulation": slop identical()/slop_update() + memory change-reporting tick()/apply_update() for change-gated sim emission)
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:

@@ -85,7 +85,11 @@ grep -q 'acc.peek('                            "$DRV" && fail "peek() is removed
 # `clocks=(clock=1)` sets the VCD time ratio + the clock's name on the instance.
 # The ratio is a general EXPRESSION (it may name a test parameter), so it lowers
 # through Slop rather than as a bare C literal — match the value, not the shape.
-grep -q '__clk_ratio = (unsigned)(.*"1"' "$DRV" || fail "driver did not set the clock ratio to 1"
+# A small decimal literal ALWAYS lowers as create_integer(N) now (literal_val),
+# and the per-cycle from_pyrope("1") parse it replaced measured 2.5% of dino
+# simulation — so pin the emitted form, not just the value, or that cost can
+# come back green.
+grep -q '__clk_ratio = (unsigned)(.*create_integer(1)' "$DRV" || fail "driver did not set the clock ratio to 1"
 grep -q '__clk_name = "clock"'           "$DRV" || fail "driver did not set the clock name"
 
 # ---- error cases rejected at setup -------------------------------------------
@@ -155,7 +159,7 @@ EOF
 "$LHD" sim "$W/stepn.prp" --setup-only --workdir "$W/stepn" -q >/dev/null 2>&1 \
   || fail "step N failed to set up"
 # The bound is a general expression (same lowering as the clock ratio), so match
-# the loop shape plus the count VALUE, not the literal spelling of the cast.
-grep -q 'for (long _s = 0; _s < (long)(.*"3"' "$W"/stepn/sim/drv.cpp || fail "step N did not emit a count loop"
+# the loop shape plus the folded count — see the __clk_ratio check above.
+grep -q 'for (long _s = 0; _s < (long)(.*create_integer(3)' "$W"/stepn/sim/drv.cpp || fail "step N did not emit a count loop"
 
 echo "PASS: lhd sim instance/step model (clock waveform, reset-as-input, hoisted sigref/regref)"

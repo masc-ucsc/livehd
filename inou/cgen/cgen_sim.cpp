@@ -325,6 +325,35 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
   return it->second;  // BARE value -- the op deduces its width
 }
 
+// Can a Get_mask WIDTH-ADJUST of `drv` to `wbits` be dropped and the source
+// passed through RAW? Two conditions, both necessary:
+//
+//   UNSIGNED — the value is already non-negative, so making it positive and
+//   the trailing trim are both the identity. A signed source keeps the
+//   unsigned read: to-positive of a negative value must mask.
+//
+//   NOT WIDER than the node — raw_operand's contract is that the string it
+//   hands out is exact AT ITS DECLARED WIDTH, and the ops it feeds are
+//   width-templated, so they take the operand at the source's own width. A
+//   source wider than `wbits` still holds live bits above the node's declared
+//   width, and dropping the adjust would let them into a downstream eq_op /
+//   and_op / fold that the `.zext_to<wbits>()` read had masked them out of.
+//   Narrower is fine: the value is exact and non-negative, so every later
+//   landing (zext read, or the sign-extending cross-width ctor) reproduces it.
+bool Cgen_sim::raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits) {
+  if (!is_unsign(drv)) {
+    return false;
+  }
+  const int sw = wbits_of(drv);
+  if (sw > wbits) {
+    return false;
+  }
+  if (sw < wbits) {
+    sub_width_expr_ = true;  // the caller's temp declaration must brace-init
+  }
+  return true;
+}
+
 std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   const auto op = type_op_of(node);
   const auto tw = std::to_string(wbits);
@@ -468,6 +497,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
       if (e.size() == 1) {
+        if (raw_width_adjust_ok(e[0].driver, wbits)) {
+          return raw_operand(e[0].driver, wbits);
+        }
         return operand(e[0].driver, wbits, /*unsigned=*/-1);
       }
       // FAST PATHS for the two mask shapes that dominate real designs. Both
@@ -486,6 +518,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           // `x.zext_to<W>().get_mask_op(-1).zext_to<W>()` sequence collapses to
           // `x.zext_to<W>()`.
           if (mv.is_just_i64() && mv.to_just_i64() == -1) {
+            if (raw_width_adjust_ok(e[0].driver, wbits)) {  // same raw pass-through as the unary arm above
+              return raw_operand(e[0].driver, wbits);
+            }
             return operand(e[0].driver, wbits, /*unsigned=*/-1);
           }
           // (b) a LOW-CONTIGUOUS mask 2^n-1 keeps the low n bits and zeroes the
@@ -624,6 +659,34 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e.size() < 3) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
+      const size_t n_vals = e.size() - 1;
+      if (op == Ntype_op::Mux && n_vals == 2) {
+        // A 2-arm Mux selector is a CONDITION, not an index: ANY nonzero value
+        // selects arm 1. That matches cgen_verilog (`sel ? arm1 : arm0`, whose
+        // netlist `lhd lec` proves) and the LGraph model, where an `if` cone
+        // hands the Mux whatever the condition computed -- `a & 0x80` arrives
+        // as 128, not as 1 (a low-bit truncation here silently took arm 0 for
+        // any nonzero-but-even condition; the nonzero test maps both the
+        // all-ones boolean and 128 to 1).
+        //
+        // Emitted as a C++ TERNARY with the selector read RAW at its own
+        // width. Two costs die at once: the old form materialized the
+        // selector at the RESULT width plus a second result-width 0/1 Slop
+        // (two wide temporaries of pure ceremony — the largest zext
+        // population in the dino emission), and ANY call-based mux
+        // evaluates BOTH arms eagerly — with single-use forestation the
+        // arms are whole inlined expression trees, so lazy arm evaluation
+        // is the point, exactly like cgen_verilog's `sel ? a : b`. Both
+        // arm strings come from operand(..., wbits), which always lands
+        // them at Slop<tw>, so the ternary's types agree.
+        //
+        // Returned BEFORE the arm list / selector below are built: with
+        // forestation each arm is a whole inlined tree, and the call form's
+        // `vals` + result-width `sel` would be built and thrown away for every
+        // one of the 2-arm muxes that dominate a real design.
+        return absl::StrCat("((", raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1)),
+                            ").is_known_true() ? ", operand(e[2].driver, wbits), " : ", operand(e[1].driver, wbits), ")");
+      }
       std::string vals;
       for (size_t i = 1; i < e.size(); ++i) {
         if (!vals.empty()) {
@@ -631,42 +694,19 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         }
         vals += operand(e[i].driver, wbits);
       }
-      const char* m   = (op == Ntype_op::Mux) ? "mux_op" : "hotmux_op";
       std::string sel = operand(e[0].driver, wbits);  // Slop<tw> selector
       if (op == Ntype_op::Mux) {
-        size_t n_vals = e.size() - 1;
-        if (n_vals == 2) {
-          // A 2-arm Mux selector is a CONDITION, not an index: ANY nonzero value
-          // selects arm 1. That matches cgen_verilog (`sel ? arm1 : arm0`, whose
-          // netlist `lhd lec` proves) and the LGraph model, where an `if` cone
-          // hands the Mux whatever the condition computed -- `a & 0x80` arrives
-          // as 128, not as 1 (a low-bit truncation here silently took arm 0 for
-          // any nonzero-but-even condition; the nonzero test maps both the
-          // all-ones boolean and 128 to 1).
-          //
-          // Emitted via the INT-INDEX mux_op overload with the selector read
-          // RAW at its own width: the old form materialized the selector at
-          // the RESULT width (a multi-word Slop for a 66-bit mux), asked
-          // is_known_true(), then built a SECOND result-width Slop holding
-          // 0/1 just so the Slop-selector overload could re-derive the index.
-          // Two wide temporaries per mux, both pure ceremony -- measured as
-          // the single largest zext population in the dino emission (126+
-          // sites at width 66 alone).
-          return absl::StrCat("Slop<", tw, ">::", m, "((", raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1)),
-                              ").is_known_true() ? 1 : 0, {", vals, "})");
-        } else {
-          // 3+ arms: the selector IS an index (0..n-1). Keep only the
-          // ceil(log2(n)) low index bits, then re-widen to tw.
-          int sel_w = 1;
-          while ((static_cast<size_t>(1) << sel_w) < n_vals) {
-            ++sel_w;
-          }
-          if (sel_w < wbits) {
-            sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
-          }
+        // 3+ arms: the selector IS an index (0..n-1). Keep only the
+        // ceil(log2(n)) low index bits, then re-widen to tw.
+        int sel_w = 1;
+        while ((static_cast<size_t>(1) << sel_w) < n_vals) {
+          ++sel_w;
+        }
+        if (sel_w < wbits) {
+          sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
         }
       }
-      return absl::StrCat("Slop<", tw, ">::", m, "(", sel, ", {", vals, "})");
+      return absl::StrCat("Slop<", tw, ">::", (op == Ntype_op::Mux) ? "mux_op" : "hotmux_op", "(", sel, ", {", vals, "})");
     }
     case Ntype_op::Clock_cell:
       // FAIL CLOSED, never fall into the pass-through below. A Clock_cell's
@@ -1143,7 +1183,11 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // included) and FORWARDED at call sites, composing with local gate folds.
 // simgen-9: callee partitioning — per-output-group `__settle_g<k>` methods on
 // split defs, group-scheduled parents, and NO false-loop inlining.
-static constexpr std::string_view kSimGenVersion = "simgen-10";
+// simgen-11: single-use forestation (a fan-out-1 comb node binds as a pasted
+// expression, not a `cg_N` temp), 2-arm muxes as a lazy C++ ternary, guarded
+// next-state and lazy write staging on gated state, and the Get_mask raw
+// width-adjust pass-through.
+static constexpr std::string_view kSimGenVersion = "simgen-11";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -3404,6 +3448,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // dance a single monolithic body needed.
     pin2var.clear();
     canonical_.clear();
+    seq_volatile_.clear();
     if (active_group != nullptr) {
       fout->append("void ", mod, "::__settle_g", std::to_string(active_group_idx), "() {\n");
     } else {
@@ -3914,6 +3959,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           auto dout = node.create_driver_pin(static_cast<hhds::Port_id>(p.dout_pid));
           if (m.type == 1) {
             pin2var[dout.get_class_index()] = absl::StrCat(m.member, "_q", std::to_string(p.rdidx));
+            seq_volatile_.insert(dout.get_class_index());  // slop_update'd mid-sequential-section
           } else {
             // Latency-0 read: the memory resolves its own ordering mode against
             // the writes staged above, exactly as the cgen_memory wrapper's
@@ -4700,6 +4746,64 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   };
 
+  // Bind one combinational node's value. SINGLE-FANOUT nodes bind as a
+  // parenthesized EXPRESSION instead of a named temp — the consumer inlines
+  // the whole tree, the intermediate Slop is never materialized, and the
+  // conversions that existed only to LAND the value in a typed variable go
+  // with it (the host compiler then keeps the tree in registers). Everything
+  // pasted is pure, every referenced name is an SSA temp / member / __in
+  // field that is never reassigned within the pass, and pin2var is
+  // pass-local, so an expression string means the same thing at any later
+  // paste point — the same reasoning that lets `inst.__out.f` bindings work.
+  // The one class of name that DOES get rewritten mid-emission is a
+  // latency-1 memory read register (see seq_volatile_), so a cone reading one
+  // materializes instead; that also ends the taint for its own consumers,
+  // which is why testing the DIRECT drivers is enough.
+  //
+  // A node with fan-out > 1 (or a huge tree, or under LIVEHD_SIM_NOINLINE for
+  // debuggability) still materializes, with `= expr` so the hlop cross-width
+  // ctor's EXPLICIT keyword keeps its job: a node_expr that does not land at
+  // the declared width fails the build instead of silently truncating and
+  // sign-extending. `sub_width_expr_` opts a declaration into brace-init for
+  // the one arm that deliberately returns a narrower expression (the Get_mask
+  // raw pass-through), where the value is an unsigned canonical whose top
+  // stored bit is clear, so the ctor's sign-extend equals the zext.
+  const bool forest_ok = ::getenv("LIVEHD_SIM_NOINLINE") == nullptr;
+  auto       bind_comb = [&](const hhds::Node_class& n, const hhds::Pin_class& dp, const char* tag) {
+    sub_width_expr_ = false;
+    const int   wb  = wbits_of(dp);
+    std::string ex  = node_expr(n, wb);
+
+    bool frozen = false;  // reads a name the sequential section rewrites
+    for (const auto& ie : n.inp_edges()) {
+      if (!ie.driver.is_invalid() && seq_volatile_.contains(ie.driver.get_class_index())) {
+        frozen = true;
+        break;
+      }
+    }
+    if (forest_ok && !frozen && ex.size() <= 4000) {
+      int nout = 0;
+      for (const auto& oe : n.out_edges()) {
+        (void)oe;
+        if (++nout > 1) {
+          break;
+        }
+      }
+      if (nout == 1) {
+        pin2var[dp.get_class_index()] = absl::StrCat("(", ex, ")");
+        canonical_.insert(dp.get_class_index());
+        return;
+      }
+    }
+    auto        var  = absl::StrCat("cg_", std::to_string(tmp_cnt++));
+    const char* open = sub_width_expr_ ? "{" : " = ";
+    const char* shut = sub_width_expr_ ? "};" : ";";
+    fout->append(
+        absl::StrCat("    Slop<", wb, "> ", var, open, ex, shut, "  // ", op_name(type_op_of(n)), tag, "\n"));
+    pin2var[dp.get_class_index()] = var;
+    canonical_.insert(dp.get_class_index());  // node_expr result: canonical at its declared width
+  };
+
   absl::flat_hash_set<pin_key_t> prefetch_seen;
   auto                           ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
     if (drv.is_invalid() || is_const_pin(drv)) {
@@ -4768,12 +4872,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (pin2var.contains(dp.get_class_index())) {
       return;
     }
-    int  wb  = wbits_of(dp);
-    auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-    fout->append(
-        absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(n, wb), ";  // ", op_name(nop), " (mem-operand prefetch)\n"));
-    pin2var[dp.get_class_index()] = var;
-    canonical_.insert(dp.get_class_index());   // node_expr result: canonical at its declared width
+    bind_comb(n, dp, " (mem-operand prefetch)");
   };
   auto ensure_ready = [&](const hhds::Pin_class& drv) { ensure_ready_impl(ensure_ready_impl, drv); };
   ensure_ready_fn   = ensure_ready;
@@ -4866,11 +4965,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (auto e : node.inp_edges()) {
       ensure_ready(e.driver);
     }
-    int  wb  = wbits_of(dpin);
-    auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-    fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(node, wb), ";  // ", op_name(op), "\n"));
-    pin2var[dpin.get_class_index()] = var;
-    canonical_.insert(dpin.get_class_index());  // node_expr result: canonical at its declared width
+    bind_comb(node, dpin, "");
   }
 
   // Deferred Moore-sub calls: every comb value is bound now; the child call
@@ -4982,6 +5077,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (f.gate_fall && pass_ == Pass::Rise) {
       return;  // fall-gated: its guards are sampled POST-rise, in the fall pass
     }
+    // The guard and secondary-clock cones are NOT in flop_operand_ports, so no
+    // caller readies them on the flop's behalf. Doing it here covers every
+    // path into `_cen` — an unready cone would otherwise reach operand() as
+    // `0 /*UNRESOLVED-CYCLE*/` and the flop would silently never load.
+    for (const auto& gp : f.clock_guards) {
+      ensure_ready_fn(gp);
+    }
+    ensure_ready_fn(f.sec_clock);
     std::string cen;
     for (const auto& gp : f.clock_guards) {
       absl::StrAppend(&cen, cen.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
@@ -5045,6 +5148,32 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     auto              next_name = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_din"); };
     auto              hold_name = [&](const std::string& base) { return latch_high ? absl::StrCat(base, "_low") : base; };
     const char*       decl      = latch_low ? "auto " : "";
+    // LAZY GUARDED NEXT-STATE: a gated flop whose commit will not fire this
+    // period does not need its `_din` computed at all — and with single-use
+    // forestation the din EXPRESSION carries the flop's whole exclusive comb
+    // chain, so a closed gate skips that entire cone. The guard wraps the
+    // COMPUTE-phase assignment only; the two-phase structure stays (every din
+    // still reads PRE-commit neighbor state — sinking the expression into the
+    // commit itself would read post-commit values). `_cen` therefore emits
+    // BEFORE the din block here instead of after. Latch windows keep their
+    // unconditional evaluation (transparency semantics), and VCD builds keep
+    // the eager form (an X-window dump reads dins the gate would skip).
+    const bool lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty()
+                            && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
+                            && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
+    std::string gcond;
+    if (lazy_guard) {
+      if (with_cen) {
+        emit_commit_enable(f);  // readies its own guard/secondary-clock cones
+      }
+      if (!f.clock_guards.empty() || !f.sec_clock.is_invalid()) {
+        gcond = absl::StrCat(f.member, "_cen");
+      }
+      if (!f.tick_field.empty()) {
+        absl::StrAppend(&gcond, gcond.empty() ? "" : " && ", "__in.", f.tick_field, "__tick");
+      }
+      fout->append("    if (", gcond, ") {  // gated: skip the whole next-state cone when the edge cannot fire\n");
+    }
     const std::string din_expr  = din.is_invalid() ? f.member : operand(din, f.bits);
     if (f.depth <= 1) {
       fout->append("    ", decl, next_name(f.member), " = ", next_of(din_expr, hold_name(f.member)), ";\n");
@@ -5055,7 +5184,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       fout->append("    ", decl, next_name(f.member), " = ", next_of(f.stages.back(), hold_name(f.member)), ";\n");
     }
-    if (with_cen && !latch_low) {
+    if (lazy_guard) {
+      fout->append("    }\n");
+    } else if (with_cen && !latch_low) {
       emit_commit_enable(f);
     }
   };
@@ -5263,11 +5394,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // Its `_din` belongs to the fall pass (post-rise state), but its `_cen`
       // belongs HERE — see emit_commit_enable: every phase's edge test must read
       // the same pre-tick secondary-clock level, and the prev bit advances at
-      // the end of this pass.
-      for (const auto& gp : f.clock_guards) {
-        ensure_ready(gp);
-      }
-      ensure_ready(f.sec_clock);
+      // the end of this pass. (emit_commit_enable readies the guard and
+      // secondary-clock cones itself.)
       emit_commit_enable(f);
     }
   }
@@ -5434,6 +5562,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (m.is_whole() && !m.registered()) {
       continue;  // combinational whole-array: contents applied in the combinational section
     }
+    // LAZY WRITE STAGING: evaluate the (cheap, shared) write-enable first; a
+    // known-false enable skips the address and data cones entirely — with
+    // forestation those are whole inlined expressions, so a gated / idle write
+    // port costs one boolean test.
+    //
+    // The skip is NOT free on its own: `stage_write` opens with `p.clear()`,
+    // which is what CANCELS a write this port already staged eagerly from the
+    // combinational section (stage_through, for a latency-0 read's program-order
+    // resolution). Skipping the call would leave that entry live and `tick()`
+    // would commit it. `clear_pending()` up front restores the invariant the
+    // eager form got for free — every visited port's pending state is
+    // re-established from THIS cycle's enable — so the skip is once again
+    // behavior-identical. The ports the loop skips below (reads, invalid
+    // addr/din, const-false enable) are exactly the ones stage_through skips
+    // too, so nothing that was meant to survive is dropped.
+    const bool lazy_wr = vcd_file.empty() && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr;
+    bool       cleared = false;
     for (const auto& p : m.ports) {
       if (p.rd || p.addr.is_invalid() || p.din.is_invalid()) {
         continue;
@@ -5441,17 +5586,33 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (!p.enable.is_invalid() && is_const_pin(p.enable) && hydrate_const(p.enable).is_known_false()) {
         continue;
       }
-      fout->append(absl::StrCat("    ",
-                                m.member,
-                                ".stage_write<",
-                                p.wridx,
-                                ">(",
-                                emit_wen(m, p),
-                                ", ",
-                                operand(p.addr, std::max(1, bits_of(p.addr))),
-                                ", ",
-                                operand(p.din, m.bits),
-                                ");\n"));
+      if (lazy_wr) {
+        if (!cleared) {
+          fout->append(absl::StrCat("    ", m.member, ".clear_pending();  // a skipped stage_write must still cancel\n"));
+          cleared = true;
+        }
+        fout->append(absl::StrCat("    { auto _w = ", emit_wen(m, p), "; if (!_w.is_known_false()) ",
+                                  m.member,
+                                  ".stage_write<",
+                                  p.wridx,
+                                  ">(_w, ",
+                                  operand(p.addr, std::max(1, bits_of(p.addr))),
+                                  ", ",
+                                  operand(p.din, m.bits),
+                                  "); }\n"));
+      } else {
+        fout->append(absl::StrCat("    ",
+                                  m.member,
+                                  ".stage_write<",
+                                  p.wridx,
+                                  ">(",
+                                  emit_wen(m, p),
+                                  ", ",
+                                  operand(p.addr, std::max(1, bits_of(p.addr))),
+                                  ", ",
+                                  operand(p.din, m.bits),
+                                  ");\n"));
+      }
     }
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1 && !p.addr.is_invalid()) {

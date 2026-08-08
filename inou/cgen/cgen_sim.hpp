@@ -44,6 +44,30 @@ private:
   // signed compares wrong -- caught by prp-simeq-rt_sat_s.
   absl::flat_hash_set<pin_key_t> canonical_;
 
+  // Pins whose C++ name is REWRITTEN by the sequential section, mid-stream:
+  // a latency-1 memory read register (`<mem>_q<n>`), which the memory block
+  // slop_update()s before the LATER memories and the flops are emitted.
+  //
+  // Single-use forestation pastes a comb node's expression at its consumer
+  // instead of freezing it in a temp, which is only sound while every name in
+  // that expression means the same thing at the paste point. A cone reading a
+  // read register does not qualify -- pasted into a following memory's
+  // address/data or into a flop `_din`, it would sample the just-updated value
+  // and the design would read/write one cycle early -- so bind_comb
+  // MATERIALIZES those cones in the combinational section, exactly as it did
+  // before forestation. Materializing also ENDS the taint: the temp is frozen,
+  // so its own consumers may forest freely.
+  absl::flat_hash_set<pin_key_t> seq_volatile_;
+
+  // Set by node_expr() when the expression it returns is NARROWER than the
+  // width it was asked for -- only the Get_mask raw pass-through does that, and
+  // only for an unsigned canonical source (top stored bit clear, so a
+  // sign-extending landing equals the zext the mask would have produced).
+  // bind_comb reads it to pick brace-init for exactly those declarations and
+  // keep `= expr` -- i.e. the EXPLICIT cross-width ctor's build-time width
+  // check -- everywhere else.
+  bool sub_width_expr_ = false;
+
   // Stage 0 combinational-loop safety net. A sim module is ONE sequential
   // `cycle()` schedule, so a combinational cycle -- a real loop, or a FALSE loop
   // through an atomic Sub call (sub output feeds back through parent comb logic
@@ -109,6 +133,7 @@ private:
   // invalid pin, a constant, or an unresolved combinational cycle.
   std::string raw_operand(const hhds::Pin_class& dpin, int fallback_bits);
   // The RHS Slop<wbits> expression for one combinational node.
+  bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
   std::string node_expr(const hhds::Node_class& node, int wbits);
 
   std::string vcd_file;       // --set compile.sim.vcd=FILE ("" = no VCD)

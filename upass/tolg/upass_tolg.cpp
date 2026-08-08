@@ -715,7 +715,7 @@ private:
     } else if (N::is_mult(t)) {
       lower_op(nid, Ntype_op::Mult, true, OpW::mul);
     } else if (N::is_bit_and(t) || N::is_log_and(t)) {
-      lower_op(nid, Ntype_op::And, true, OpW::maxw);
+      lower_op(nid, Ntype_op::And, true, OpW::andw);
     } else if (N::is_bit_or(t) || N::is_log_or(t)) {
       lower_op(nid, Ntype_op::Or, true, OpW::maxw);
     } else if (N::is_bit_xor(t)) {
@@ -4991,7 +4991,7 @@ private:
     record(dst_name, drv, res_mw);
   }
 
-  enum class OpW { add, mul, maxw, firstw, boolw, shlw };
+  enum class OpW { add, mul, maxw, andw, firstw, boolw, shlw };
 
   // n-ary op: child0 = dst, children 1..N = operands. Commutative ops feed all
   // operands into sink "a"; positional binary ops use "a" then "b".
@@ -5001,25 +5001,57 @@ private:
       return;
     }
     auto    node      = make_node(op);
-    int32_t max_mw    = 0;
-    int32_t sum_mw    = 0;
-    int32_t first_mw  = 0;
-    int32_t second_mw = 0;   // shift-amount magnitude width (shlw)
-    int64_t shl_amt   = -1;  // shift-amount value when constant (shlw); <0 = dynamic
-    bool    first     = true;
-    int     opnd_idx  = 0;
+    int32_t max_mw        = 0;
+    int32_t sum_mw        = 0;
+    int32_t min_nonneg_mw = 0;      // andw: narrowest NON-NEGATIVE operand...
+    bool    any_nonneg    = false;  // ...which is only meaningful once this is set (mw 0 is legal)
+    int32_t first_mw      = 0;
+    int32_t second_mw     = 0;   // shift-amount magnitude width (shlw)
+    int64_t shl_amt       = -1;  // shift-amount value when constant (shlw); <0 = dynamic
+    bool    first         = true;
+    int     opnd_idx      = 0;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       auto v  = leaf(c);
       max_mw  = std::max(max_mw, v.mw);
       sum_mw += v.mw;
+      if (wmode == OpW::andw && Lnast_ntype::is_const(lnast_->get_type(c))) {
+        // A bitwise AND is bounded by its NARROWEST NON-NEGATIVE operand: `x & m`
+        // can only keep bits that `m` has set, so the result never exceeds m --
+        // whatever x is, and however wide.
+        //
+        // Only a NON-NEGATIVE operand bounds it. A negative one is an infinite
+        // run of leading ones (`x & -2` keeps every bit of x but bit 0), so its
+        // magnitude width bounds nothing and `min` there would truncate.
+        //
+        // CONSTANTS ONLY, deliberately. A non-const operand's `is_unsign` stamp
+        // is NOT a proof of non-negativity: bind_result stamps every computed op
+        // unsigned, and the OPEN note at the end of this function records that a
+        // BITWISE op over signed operands is stamped unsigned while its value is
+        // negative (`sa ^ sb` can be -1). Narrowing an AND to such an operand's
+        // magnitude width truncates the OTHER operand -- `(-1) & w` must be w,
+        // but a 5-bit stamp keeps only w's low 5 bits, a silent miscompile that
+        // OpW::maxw did not have. Trusting the stamp measured just 1.1 points
+        // better on minion (-16.2% vs -15.1% of op words); the win is dominated
+        // by the constant masks, which are exact.
+        //
+        // The value comes from the const PIN leaf() already created, not from a
+        // second Dlop::from_pyrope of the same literal text.
+        const auto cv = livehd::graph_util::hydrate_const(v.pin);
+        if (cv.is_numeric() && !cv.is_negative() && (!any_nonneg || v.mw < min_nonneg_mw)) {
+          min_nonneg_mw = v.mw;
+          any_nonneg    = true;
+        }
+      }
       if (first) {
         first_mw = v.mw;
       } else if (second_mw == 0) {
         second_mw = v.mw;
         if (Lnast_ntype::is_const(lnast_->get_type(c))) {
-          auto cv = Dlop::from_pyrope(lnast_->get_name(c));
-          if (cv->is_just_i64()) {
-            shl_amt = cv->to_just_i64();
+          // Read back the const pin leaf() built, rather than re-parsing the
+          // same literal text a second time.
+          const auto cv = livehd::graph_util::hydrate_const(v.pin);
+          if (cv.is_just_i64()) {
+            shl_amt = cv.to_just_i64();
           }
         }
       }
@@ -5045,6 +5077,9 @@ private:
       case OpW::add   : mw = static_cast<int32_t>(max_mw + 1); break;
       case OpW::mul   : mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
       case OpW::maxw  : mw = max_mw; break;
+      // AND narrows: bounded by the narrowest non-negative operand when there is
+      // one, else (no operand proven non-negative) it keeps the widest.
+      case OpW::andw  : mw = any_nonneg ? min_nonneg_mw : max_mw; break;
       case OpW::firstw: mw = first_mw; break;
       case OpW::boolw : mw = 1; break;
       case OpW::shlw  : {
