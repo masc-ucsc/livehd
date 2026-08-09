@@ -161,6 +161,8 @@ Pass_isabelle::Pass_isabelle(const Eprp_var& var) : Pass("pass.isabelle", var) {
   strict           = (s == "false") ? false : true;
   auto n           = var.get("normalize");
   normalize        = (n == "false") ? false : true;
+  auto efb         = var.get("emit_fast_bridge");
+  emit_fast_bridge = (efb == "true") ? true : false;
   top              = std::string(var.get("top"));
   cert_wf          = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
@@ -201,6 +203,9 @@ void Pass_isabelle::setup() {
   m1.add_label_optional("top", "Top module name (informational only)");
   m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.isabelle.strict wins)", "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
+  m1.add_label_optional("emit_fast_bridge",
+                        "true|false. Emit the fast-view bridge (<Top>_comb = evaluated certificate). Non-memory designs only.",
+                        "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
@@ -347,19 +352,6 @@ std::string lit_const_decimal(const Dlop& v, uint32_t w) {
   return "((word_of_int " + isabelle_int_literal(v.to_decimal_string()) + ") :: " + std::to_string(w) + " word)";
 }
 
-std::string cert_op_tag_from_expr(const std::string& expr) {
-  const std::string marker = "op = ";
-  auto              pos    = expr.find(marker);
-  if (pos == std::string::npos) {
-    return "unknown";
-  }
-  pos      += marker.size();
-  auto end  = expr.find_first_of(" ,", pos);
-  if (end == std::string::npos) {
-    return expr.substr(pos);
-  }
-  return expr.substr(pos, end - pos);
-}
 
 std::string chunk_op_summary(const std::vector<std::string>& tags, size_t begin, size_t end) {
   std::map<std::string, size_t> counts;
@@ -1005,8 +997,19 @@ std::string cert_const_pin_expr(const Ctx& ctx, const Node_pin& pin, uint32_t sy
   return oss.str();
 }
 
+// Structured form of one emitted node_cert record.  The fast-view bridge needs
+// (nid, op, width, deps) per node to print its recurrence lemma; recovering that
+// by re-parsing the rendered Isabelle text (as cert_op_tag_from_expr did) is
+// fragile.  Mirrors CertNodeInfo in pass/lean/pass_lean.cpp.
+struct Cert_node_info {
+  uint32_t              nid = 0;
+  std::string           op_expr;  // e.g. "Op_And", "Op_Const (- 1)"
+  uint32_t              width = 0;
+  std::vector<uint32_t> deps;
+};
+
 std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, const std::string& forced_op = "",
-                           const std::vector<uint32_t>& forced_deps = {}) {
+                           const std::vector<uint32_t>& forced_deps = {}, Cert_node_info* info = nullptr) {
   uint32_t w = 0;
   if (node_is_const(node)) {
     w = raw_node_width(node);
@@ -1331,6 +1334,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
     }
   }
 
+  if (info != nullptr) {
+    info->nid     = node_id(node);
+    info->op_expr = op_expr;
+    info->width   = w;
+    info->deps    = deps;
+  }
+
   std::ostringstream oss;
   oss << "\\<lparr>nid = " << node_id(node) << ", op = " << op_expr << ", width = " << w << ", deps = " << nat_list(deps)
       << "\\<rparr>";
@@ -1413,17 +1423,22 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   const std::string next_name        = ctx.top_name + "_next_state_from_cert";
   const std::string cert_step_name   = ctx.top_name + "_cert_step";
 
-  Cert_build               build;
-  std::vector<std::string> internal_exprs;
-  std::vector<std::string> internal_op_tags;
-  std::vector<uint32_t>    internal_ids;
+  Cert_build                  build;
+  std::vector<std::string>    internal_exprs;
+  std::vector<std::string>    internal_op_tags;
+  std::vector<uint32_t>       internal_ids;
+  std::vector<Cert_node_info> internal_infos;  // structured form, for the bridge
   internal_exprs.reserve(topo.size());
   internal_op_tags.reserve(topo.size());
   internal_ids.reserve(topo.size());
+  internal_infos.reserve(topo.size());
   for (const auto& node : topo) {
-    internal_exprs.push_back(cert_node_expr(ctx, build, node));
-    internal_op_tags.push_back(cert_op_tag_from_expr(internal_exprs.back()));
+    Cert_node_info info;
+    internal_exprs.push_back(cert_node_expr(ctx, build, node, "", {}, &info));
+    // op tag straight from the structured record, not re-parsed out of the text
+    internal_op_tags.push_back(info.op_expr.substr(0, info.op_expr.find(' ')));
     internal_ids.push_back(node_id(node));
+    internal_infos.push_back(std::move(info));
   }
 
   std::map<std::string, uint32_t> out_driver_ids;

@@ -29,6 +29,9 @@ public:
   // Configuration knobs (parsed from Eprp_var):
   bool        strict;        // strict:true (default) — abort on unsupported ops
   bool        normalize;     // normalize:true (default) — fix pre-export IR width artifacts
+  bool        emit_fast_bridge; // emit_fast_bridge:false (default) — emit the fast-view
+                                // bridge (<Top>_comb = evaluated certificate).  Requires a
+                                // memory-free design: the certificate has no memory operator.
   std::string top;           // top module name override (informational)
   CertWFMode cert_wf;        // cert_wf:skip|eval|sorry|chunked (default skip)
   CertWFFallback cert_wf_fallback; // cert_wf_fallback:fail|sorry|eval for unsupported chunk shapes
