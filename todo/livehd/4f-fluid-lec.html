@@ -11,8 +11,9 @@
 <main>
 <h1><strong class="item-id">4f-fluid-lec</strong> Transaction-level (accepted-stream) equivalence for elastic <code>valid</code>/<code>retry</code> interfaces</h1>
 
-<p><strong>4f = maybe; needs more thought before committing.</strong> Promoted from
-  the Pre-TODO bullet of 16/06/2026.</p>
+<p><strong>Kept 2026-08-09.</strong> This is the correctness check for Pyrope elastic
+designs whose accepted transaction stream is unchanged even when buffering or latency
+changes make cycle-accurate LEC inappropriate.</p>
 
 <h2>Idea</h2>
 <ul class="subtasks">
@@ -29,7 +30,7 @@
   generated, not reverse-engineered.</li>
 </ul>
 
-<h2>Before committing (the think-more part)</h2>
+<h2>Pending design work</h2>
 <ul class="subtasks">
 <li>Work one micro-example end-to-end by hand: a 2-stage vs 3-stage elastic FIFO
   pipeline — what exactly is the symbolic state, what is the accepted-step
@@ -41,7 +42,7 @@
   scope the verdict wording so a PASS is not read as "makes progress".</li>
 </ul>
 
-<p>Research track on top of the <a class="xref" href="2f-lec.html">2f-lec</a> engine;
+<p>Research track on top of the shared <code>pass/lec</code> engine;
   pairs with the <a class="xref" href="../pyrope/3f-fluid.html">3f-fluid</a> elastic
   lowering. The full brainstorming text is in git history (old
   <code>pass/lec/lec.md</code> Appendix A).</p>
