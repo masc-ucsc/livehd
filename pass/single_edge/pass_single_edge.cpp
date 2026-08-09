@@ -54,10 +54,10 @@ constexpr std::string_view kPhaseName = gu::single_edge_phase_name;
 // function of the class key. That is the soundness precondition condition 5
 // names; what it does NOT give is the L1 case, handled by rule 4 below.
 struct Element {
-  hhds::Node_class node;
-  lc::Commit_class cc;
-  bool             is_latch = false;
-  int              slot     = 0;
+  hhds::Node_class            node;
+  lc::Commit_class            cc;
+  bool                        is_latch = false;
+  int                         slot     = 0;
   // A decoded `<clock> & <enables>` clock cone. Present => this element's
   // gated clock is rewritten into its ENABLE (see apply_icg): it commits on the
   // reference clock's edge iff the enables hold, which is exactly what the
@@ -96,9 +96,7 @@ void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Cl
   }
 }
 
-hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) {
-  return gu::get_driver_of_sink_name(n, pin);
-}
+hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) { return gu::get_driver_of_sink_name(n, pin); }
 
 void drop_sink(const hhds::Node_class& n, std::string_view pin) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), pin);
@@ -128,14 +126,14 @@ void refuse(bool quiet, std::string_view code, const std::string& msg, std::stri
 // ---------------------------------------------------------------------------
 
 struct Plan {
-  std::vector<Element>            elems;
+  std::vector<Element>                  elems;
   absl::flat_hash_map<std::string, int> slot_of_key;
-  int                             slots = 1;
-  bool                            ok    = false;
-  std::string                     ref_net;  // class key of the reference clock ("" = none)
-  std::string                     why;   // failure reason when !ok
-  std::string                     code;  // diagnostic code when !ok
-  hhds::Pin_class                 ref_clk_pin;  // the reference clock net (may be invalid = implicit)
+  int                                   slots = 1;
+  bool                                  ok    = false;
+  std::string                           ref_net;      // class key of the reference clock ("" = none)
+  std::string                           why;          // failure reason when !ok
+  std::string                           code;         // diagnostic code when !ok
+  hhds::Pin_class                       ref_clk_pin;  // the reference clock net (may be invalid = implicit)
 };
 
 Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
@@ -143,7 +141,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 
   // 1. Collect every state element with its commit class.
   absl::flat_hash_map<std::string, int> per_net;  // net_key -> #elements on it (clock role only)
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
       // A memory rides the reference clock. Leaving it untouched is correct at
@@ -277,8 +275,8 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
       plan.why  = "state element `" + label_of(e.node) + "` commits on a net that is not the reference clock";
       return plan;
     }
-    e.slot                              = e.cc.rising ? 0 : 1;
-    plan.slot_of_key[e.cc.key()]        = e.slot;
+    e.slot                                 = e.cc.rising ? 0 : 1;
+    plan.slot_of_key[e.cc.key()]           = e.slot;
     slot_of_node[e.node.get_class_index()] = e.slot;
   }
   for (auto& e : plan.elems) {
@@ -298,7 +296,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     if (slots.size() > 1) {
       plan.code = "ambiguous-data-gate";
       plan.why  = "latch `" + label_of(e.node)
-               + "` has an enable driven by state in more than one commit class, so its closing edge is ambiguous";
+                  + "` has an enable driven by state in more than one commit class, so its closing edge is ambiguous";
       return plan;
     }
     e.slot                       = slots.empty() ? 0 : *slots.begin();
@@ -307,7 +305,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     // so a data-gated latch's slot is a function of clock-role state alone --
     // order-independent by construction. Writing data-gated results back made
     // the slot of a latch whose enable depends on ANOTHER data-gated latch
-    // depend on fast_class() iteration order, and the task page's condition 2
+    // depend on body().nodes() iteration order, and the task page's condition 2
     // is binding: slots are derived structurally, never from traversal order,
     // because the two miter sides run this independently and a disagreement is
     // a false REFUTED.
@@ -367,10 +365,13 @@ bool check_rule4(const Plan& plan, bool quiet) {
       }
       livehd::diag::err(kPass, "coincident-commit-edge", "unsupported")
           .msg("latch `{}` and state element `{}` commit at the SAME edge, and `{}` reads the latch combinationally",
-               label_of(l.node), label_of(s.node), label_of(s.node))
-          .hint("the latch is still transparent at that edge, so the real hardware samples its D while the "
-                "commit-at-closing-edge model samples its held Q — a persistent full-cycle error. Move the two onto "
-                "opposite phases (a master/slave pair), or replace the latch with a buffer if it is meant to be one")
+               label_of(l.node),
+               label_of(s.node),
+               label_of(s.node))
+          .hint(
+              "the latch is still transparent at that edge, so the real hardware samples its D while the "
+              "commit-at-closing-edge model samples its held Q — a persistent full-cycle error. Move the two onto "
+              "opposite phases (a master/slave pair), or replace the latch with a buffer if it is meant to be one")
           .emit();
       break;
     }
@@ -439,8 +440,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
 
-  const lc::Design_clocks clocks(g);
-  const auto              need = lc::needs_single_edge(g, &clocks);
+  const lc::Design_clocks           clocks(g);
+  const auto                        need = lc::needs_single_edge(g, &clocks);
   // A def only forces our hand when it holds something the ENGINES GET WRONG --
   // a Latch (the encoder refuses the cell) or a negedge flop (it is blind to
   // the edge). Keying this on the full trigger instead swept in ">= 2 clock
@@ -458,7 +459,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     while (!work.empty()) {
       auto* cur = work.back();
       work.pop_back();
-      for (auto n : cur->fast_class()) {
+      for (auto n : cur->body().nodes()) {
         if (gu::type_op_of(n) != Ntype_op::Sub) {
           continue;
         }
@@ -475,8 +476,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // would pre-empt the mechanism that makes such a design provable at all.
   // So consider a def only when it is BOTH instantiated and allowed.
   absl::flat_hash_set<hhds::Graph*> allowed(defs.begin(), defs.end());
-  bool        def_needs = false;
-  std::string def_why;  // which def, and WHAT is in it (the diagnostic must say)
+  bool                              def_needs = false;
+  std::string                       def_why;  // which def, and WHAT is in it (the diagnostic must say)
   for (auto* d : reachable) {
     if (d == nullptr || !allowed.contains(d)) {
       continue;
@@ -518,7 +519,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // per-side transition — the free-per-side-constant CEX, with no diagnostic.
     r.error  = true;
     r.reason = def_why + ", and normalizing across a module boundary is not supported yet";
-    refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+    refuse(quiet,
+           "hier-unsupported",
+           std::format("{}: {}", g->get_name(), r.reason),
            "flatten the design (--set formal.flatten=true), blackbox the def (--set formal.lec.trust=<def>), or "
            "normalize the def separately");
     return r;
@@ -532,7 +535,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
     r.error  = true;
     r.reason = plan.why;
-    refuse(quiet, plan.code, std::format("{}: {}", g->get_name(), plan.why),
+    refuse(quiet,
+           plan.code,
+           std::format("{}: {}", g->get_name(), plan.why),
            "edge normalization declines rather than half-transform: a partial lowering is a silent full-cycle error");
     return r;
   }
@@ -561,7 +566,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   }
 
   // Fail closed on shapes a partial lowering would silently mis-time.
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Fflop) {
       r.error  = true;
@@ -572,7 +577,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (op == Ntype_op::Memory && plan.slots > 1) {
       r.error  = true;
       r.reason = "memory `" + label_of(n) + "` would commit on every sub-step under a phase divider";
-      refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+      refuse(quiet,
+             "memory-unsupported",
+             std::format("{}: {}", g->get_name(), r.reason),
              "slot enables are not wired into the Memory cell yet");
       return r;
     }
@@ -597,7 +604,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // `minion_dcache_reduce` holds `u_ba_alloc_fifo`), so the unscoped guard
     // refused every def that mattered and the gated flops stayed unencodable.
     bool child_has_state = false;
-    for (auto sn : sub->fast_class()) {
+    for (auto sn : sub->body().nodes()) {
       if (gu::is_type_register(sn)) {
         child_has_state = true;
         break;
@@ -606,7 +613,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (child_has_state && plan.slots > 1) {
       r.error  = true;
       r.reason = "instance `" + label_of(n) + "` holds state; the phase divider is not port-threaded";
-      refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+      refuse(quiet,
+             "hier-unsupported",
+             std::format("{}: {}", g->get_name(), r.reason),
              "flatten the design before normalizing (all three M8 gate fixtures are flat)");
       return r;
     }
@@ -644,22 +653,22 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         }
         // A PLAIN clock input (possibly through the width mask the readers add)
         // is untouched by this pass; anything else is in-graph logic.
-        if (gu::is_graph_input_pin(e.driver)
-            || (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask
-                && [&] {
-                     for (const auto& ge : e.driver.get_master_node().inp_edges()) {
-                       if (gu::is_graph_input_pin(ge.driver)) {
-                         return true;
-                       }
-                     }
-                     return false;
-                   }())) {
+        if (gu::is_graph_input_pin(e.driver) || (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask && [&] {
+              for (const auto& ge : e.driver.get_master_node().inp_edges()) {
+                if (gu::is_graph_input_pin(ge.driver)) {
+                  return true;
+                }
+              }
+              return false;
+            }())) {
           continue;
         }
         {
           r.error  = true;
           r.reason = "instance `" + label_of(n) + "` holds state and is clocked by in-graph logic this pass rewrites";
-          refuse(quiet, "hier-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+          refuse(quiet,
+                 "hier-unsupported",
+                 std::format("{}: {}", g->get_name(), r.reason),
                  "the gate would be re-timed for this def's own flops but not for the child's; flatten the design, or "
                  "trust the child def, before normalizing");
           return r;
@@ -677,14 +686,18 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (sink_driver(e.node, "enable").is_invalid()) {
       r.error  = true;
       r.reason = "latch `" + label_of(e.node) + "` is active-low with no enable driver (permanently transparent)";
-      refuse(quiet, "raw-latch-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+      refuse(quiet,
+             "raw-latch-unsupported",
+             std::format("{}: {}", g->get_name(), r.reason),
              "a permanently transparent latch is a buffer, not a state element; drop the cell");
       return r;
     }
     if (has_hold_mux(e.node)) {
       r.error  = true;
       r.reason = "latch `" + label_of(e.node) + "` has an active-low polarity pin AND a hold mux on din";
-      refuse(quiet, "raw-latch-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+      refuse(quiet,
+             "raw-latch-unsupported",
+             std::format("{}: {}", g->get_name(), r.reason),
              "the hold mux is keyed on the un-inverted condition while the enable test is inverted, so the two "
              "disagree — no emitter produces this shape and lowering it would pick one arbitrarily");
       return r;
@@ -697,7 +710,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     r.applied   = plan.slots > 1 || r.latches_retyped > 0 || need.n_latches > 0 || need.n_negedge_flops > 0;
     r.slots     = plan.slots;
     r.ref_clock = plan.ref_net;
-    r.reason  = std::format("plan: P={} slots ({})", plan.slots, need.why.empty() ? "forced" : need.why);
+    r.reason    = std::format("plan: P={} slots ({})", plan.slots, need.why.empty() ? "forced" : need.why);
     return r;
   }
 
@@ -791,8 +804,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // transparent-low polarity canary.
       if (e.cc.role == lc::Net_role::Clock) {
         if (has_hold_mux(e.node)) {
-          auto q   = e.node.get_driver_pin(0);
-          auto mux = sink_driver(e.node, "din").get_master_node();
+          auto            q   = e.node.get_driver_pin(0);
+          auto            mux = sink_driver(e.node, "din").get_master_node();
           hhds::Pin_class transparent;
           for (const auto& me : mux.inp_edges()) {
             if (me.sink.get_port_id() == 0) {
@@ -898,7 +911,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // gate is exactly right for it, and it is also the form M7 ruled a
       // lowered latch's reset must keep.
       if (auto rstp = sink_driver(e.node, "reset_pin"); !rstp.is_invalid()) {
-        auto asyncp = sink_driver(e.node, "async");
+        auto       asyncp = sink_driver(e.node, "async");
         // A LATCH's reset is inherently ASYNCHRONOUS -- there is no clock edge
         // for it to synchronize to, which is M7's landed ruling and why cgen
         // emits it as the FIRST branch ahead of the transparency test. So a
@@ -906,9 +919,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // carries no `async` attribute. Folding it in would gate the reset on
         // the slot predicate, and an async reset pulse that falls between two
         // normalized clock edges would be silently lost.
-        const bool is_async = e.is_latch
-                              || (!asyncp.is_invalid() && gu::is_const_pin(asyncp)
-                                  && !gu::hydrate_const(asyncp).is_known_false());
+        const bool is_async
+            = e.is_latch || (!asyncp.is_invalid() && gu::is_const_pin(asyncp) && !gu::hydrate_const(asyncp).is_known_false());
         if (!is_async) {
           auto negp = sink_driver(e.node, "negreset");
           auto test = rstp;
@@ -919,9 +931,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             gu::set_bits(test, 1);
             gu::set_unsign(test);
           }
-          auto din  = sink_driver(e.node, "din");
-          auto init = sink_driver(e.node, "initial");
-          const int qw = std::max(1, static_cast<int>(gu::bits_of(e.node.get_driver_pin(0))));
+          auto      din  = sink_driver(e.node, "din");
+          auto      init = sink_driver(e.node, "initial");
+          const int qw   = std::max(1, static_cast<int>(gu::bits_of(e.node.get_driver_pin(0))));
           if (init.is_invalid()) {
             init = gu::create_const(*g, *Dlop::create_integer(0));
           }
@@ -996,13 +1008,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // flop_verify_posneg: at a phase-1 step `a` has committed and `b` has not,
     // so `bq == aq` is outright false there and plain BMC refutes it.
     const auto boundary = slot_pred[0];
-    for (auto n : g->fast_class()) {
+    for (auto n : g->body().nodes()) {
       if (gu::type_op_of(n) != Ntype_op::Sub) {
         continue;
       }
       auto sio = n.get_subnode_io();
-      if (sio == nullptr
-          || (sio->get_name() != gu::fproperty_module_name && sio->get_name() != gu::lgassert_module_name)) {
+      if (sio == nullptr || (sio->get_name() != gu::fproperty_module_name && sio->get_name() != gu::lgassert_module_name)) {
         continue;
       }
       // ASSERTS ONLY. An `fproperty` carries "<kind>\x1f<loc>\x1f<msg>" in its
@@ -1061,10 +1072,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   r.applied   = true;
   r.slots     = plan.slots;
   r.ref_clock = plan.ref_net;
-  r.reason  = std::format("P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable, {} element(s) "
-                          "slotted ({})",
-                          r.slots, r.latches_retyped, r.icg_folded, r.flops_slotted,
-                          need.why.empty() ? "def-driven" : need.why);
+  r.reason    = std::format(
+      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable, {} element(s) "
+      "slotted ({})",
+      r.slots,
+      r.latches_retyped,
+      r.icg_folded,
+      r.flops_slotted,
+      need.why.empty() ? "def-driven" : need.why);
   livehd::diag::info(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
       .emit();

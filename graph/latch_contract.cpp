@@ -39,12 +39,15 @@ namespace {
 // Anything else is treated as the root. A cone we cannot decode simply resolves
 // to itself, which makes two such cones compare UNEQUAL — the conservative
 // direction for rule C (it can only fail to fire, never fire spuriously).
-struct Phase {
-  hhds::Pin_class net;
-  bool            inverted = false;
+template <typename Pin>
+struct Phase_t {
+  Pin  net;
+  bool inverted = false;
 };
+using Phase = Phase_t<hhds::Pin_class>;
 
-bool const_is(const hhds::Pin_class& p, int64_t want) {
+template <typename Pin>
+bool const_is(const Pin& p, int64_t want) {
   if (p.is_invalid() || !gu::is_const_pin(p)) {
     return false;
   }
@@ -58,8 +61,9 @@ bool const_is(const hhds::Pin_class& p, int64_t want) {
 // it must step a CHAIN of gates one cell at a time so that every cell's enable
 // lands in the combined guard (`gate(gate(clk,en0),en1)` -> `en0 & en1`);
 // hopping straight to the root would silently drop the inner enable.
-Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
-  Phase ph;
+template <typename Pin>
+Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
+  Phase_t<Pin> ph;
   ph.net = p;
   for (int hops = 0; hops < 64 && !ph.net.is_invalid(); ++hops) {
     if (gu::is_graph_input_pin(ph.net) || gu::is_const_pin(ph.net)) {
@@ -72,7 +76,7 @@ Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
       // `cond ? 1 : 0` (or its negation `cond ? 0 : 1`): the phase is the
       // selector's, inverted when the arms are swapped. Any other mux is data,
       // not a control shape -> stop.
-      hhds::Pin_class sel, arm0, arm1;
+      Pin sel, arm0, arm1;
       for (const auto& e : n.inp_edges()) {
         const auto pid = e.sink.get_port_id();
         if (pid == 0) {
@@ -103,16 +107,16 @@ Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
       // identity. tolg emits `(x == 0) == 0` for a plain `if x`, so this arm is
       // walked twice and the parity comes out even — which is why an explicit
       // `if !clk` (one extra negation) reliably lands on the opposite parity.
-      hhds::Pin_class a, b;
-      int             cnt = 0;
+      Pin a, b;
+      int cnt = 0;
       for (const auto& e : n.inp_edges()) {
         (cnt++ == 0 ? a : b) = e.driver;
       }
       if (cnt != 2) {
         break;
       }
-      hhds::Pin_class val;
-      hhds::Pin_class cst;
+      Pin val;
+      Pin cst;
       if (gu::is_const_pin(b)) {
         val = a;
         cst = b;
@@ -135,7 +139,7 @@ Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
     }
 
     if (op == Ntype_op::Not) {
-      hhds::Pin_class a;
+      Pin a;
       for (const auto& e : n.inp_edges()) {
         a = e.driver;
         break;
@@ -155,9 +159,9 @@ Phase resolve_phase(hhds::Pin_class p, bool stop_at_clock_cell = false) {
       // the value and leave the parity alone. Deliberately narrow: an `And`
       // whose operands are BOTH real signals is an ICG cone (`clk & en`), and
       // treating that as an identity would silently drop the enable.
-      hhds::Pin_class val;
-      bool            masked = false;
-      int             cnt    = 0;
+      Pin  val;
+      bool masked = false;
+      int  cnt    = 0;
       for (const auto& e : n.inp_edges()) {
         ++cnt;
         if (const_is(e.driver, 1) || const_is(e.driver, -1)) {
@@ -250,7 +254,7 @@ void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner
   absl::flat_hash_set<hhds::Class_index> seen;
   std::vector<hhds::Pin_class>           work{start};
   const bool                             has_owner = !hold_owner.is_invalid();
-  const auto owner_q = has_owner ? hold_owner.get_driver_pin(0) : hhds::Pin_class{};
+  const auto                             owner_q   = has_owner ? hold_owner.get_driver_pin(0) : hhds::Pin_class{};
 
   while (!work.empty()) {
     auto p = work.back();
@@ -350,6 +354,11 @@ Control_root control_root(hhds::Pin_class p, bool stop_at_clock_cell) {
   return Control_root{ph.net, ph.inverted};
 }
 
+Occurrence_control_root control_root(hhds::Occurrence_pin p, bool stop_at_clock_cell) {
+  const auto ph = resolve_phase(p, stop_at_clock_cell);
+  return Occurrence_control_root{ph.net, ph.inverted};
+}
+
 hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), sink_name);
   for (const auto& e : n.inp_edges()) {
@@ -360,19 +369,25 @@ hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sin
   return {};
 }
 
-Design_clocks::Design_clocks(hhds::Graph* g, bool hier) {
+hhds::Occurrence_pin sink_driver_hier(const hhds::Occurrence_node& n, std::string_view sink_name) {
+  const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), sink_name);
+  for (const auto& e : n.inp_edges()) {
+    if (e.sink.get_port_id() == pid) {
+      return e.driver;
+    }
+  }
+  return {};
+}
+
+Design_clocks::Design_clocks(hhds::Graph* g, bool hier, const ankerl::unordered_dense::set<hhds::Gid>* opaque) {
   if (g == nullptr) {
     return;
   }
-  auto scan = [&](const hhds::Node_class& n) {
+  auto record = [&](const auto& n, const auto& clk) {
     const auto op = gu::type_op_of(n);
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop) {
       return;
     }
-    // Hierarchical scan MUST resolve across the instance boundary, or a leaf's
-    // own clock port becomes a "root" and a design with one clock looks like as
-    // many domains as it has instances.
-    auto clk = hier ? sink_driver_hier(n, "clock_pin") : gu::get_driver_of_sink_name(n, "clock_pin");
     if (clk.is_invalid()) {
       implicit_clock_ = true;  // `reg x = 0`: the module's own clock
       return;
@@ -387,12 +402,30 @@ Design_clocks::Design_clocks(hhds::Graph* g, bool hier) {
     }
   };
   if (hier) {
-    for (auto n : g->fast_hier()) {
-      scan(n);
+    if (opaque != nullptr) {
+      auto policy = [&](const hhds::Instance_site& site) {
+        return opaque->contains(site.target_gid()) ? hhds::Instance_action::opaque : hhds::Instance_action::descend;
+      };
+      for (auto n : g->grouped_hierarchy(policy).nodes()) {
+        const auto op = gu::type_op_of(n);
+        if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+          record(n, sink_driver_hier(n, "clock_pin"));
+        }
+      }
+    } else {
+      for (auto n : g->grouped_hierarchy().nodes()) {
+        const auto op = gu::type_op_of(n);
+        if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+          record(n, sink_driver_hier(n, "clock_pin"));
+        }
+      }
     }
   } else {
-    for (auto n : g->fast_class()) {
-      scan(n);
+    for (auto n : g->body().nodes()) {
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+        record(n, gu::get_driver_of_sink_name(n, "clock_pin"));
+      }
     }
   }
 }
@@ -413,6 +446,16 @@ bool Design_clocks::is_clock(const hhds::Pin_class& root) const {
     return false;
   }
   return name_looks_like_clock(gu::pin_name_of(root));
+}
+
+bool Design_clocks::is_clock(const hhds::Occurrence_pin& root) const {
+  if (root.is_invalid()) {
+    return false;
+  }
+  if (roots_.contains(root.get_class_index())) {
+    return true;
+  }
+  return gu::is_graph_input_pin(root) && name_looks_like_clock(gu::pin_name_of(root));
 }
 
 // ---------------------------------------------------------------------------
@@ -472,14 +515,45 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   return din;
 }
 
-int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
-                            const std::function<bool(const hhds::Graph*)>& is_boxed) {
+hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
+  if (gu::type_op_of(n) != Ntype_op::Latch) {
+    return {};
+  }
+  auto q   = n.get_driver_pin(0);
+  auto din = gu::get_driver_of_sink_name(n, "din");
+  if (q.is_invalid() || din.is_invalid()) {
+    return {};
+  }
+  if (!gu::is_const_pin(din) && !gu::is_graph_input_pin(din)) {
+    auto mux = din.get_master_node();
+    if (gu::type_op_of(mux) == Ntype_op::Mux) {
+      bool                 has_q_arm = false;
+      hhds::Occurrence_pin other;
+      for (const auto& e : mux.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          continue;
+        }
+        if (!e.driver.is_invalid() && e.driver == q) {
+          has_q_arm = true;
+        } else if (other.is_invalid()) {
+          other = e.driver;
+        }
+      }
+      if (has_q_arm) {
+        return other;
+      }
+    }
+  }
+  return din;
+}
+
+int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const std::function<bool(const hhds::Graph*)>& is_boxed) {
   if (g == nullptr) {
     return 0;
   }
   // 1. Collect the pins that drive some state element's clock_pin.
   absl::flat_hash_set<hhds::Class_index> clock_drivers;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Latch) {
       continue;
@@ -506,7 +580,7 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
   // into a sub-instance is just as much a clock driver as one wired to a local
   // flop — it is simply one definition away — and collecting only the local case
   // left minion's whole vpu/txfma cone with an unfoldable gate.
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -525,7 +599,7 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
       if (cport.is_invalid()) {
         continue;
       }
-      for (auto cn : cdef->fast_class()) {
+      for (auto cn : cdef->body().nodes()) {
         const auto cop = gu::type_op_of(cn);
         if (cop != Ntype_op::Flop && cop != Ntype_op::Fflop && cop != Ntype_op::Memory && cop != Ntype_op::Latch) {
           continue;
@@ -566,7 +640,7 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
   //    would inline an ordinary clock buffer or PLL wrapper for no reason, and
   //    "contains a latch" alone would inline half the design.
   std::vector<hhds::Node_class> cells;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -591,9 +665,9 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
     // "derived clock" for want of a latch nobody wrote. Inlining a state-free
     // callee cannot change state identity — the whole reason the latch test was
     // conservative — so the added arm carries none of that risk.
-    bool has_latch = false;
+    bool has_latch  = false;
     bool state_free = true;
-    for (auto dn : def->fast_class()) {
+    for (auto dn : def->body().nodes()) {
       const auto dop = gu::type_op_of(dn);
       if (dop == Ntype_op::Latch) {
         has_latch = true;
@@ -611,8 +685,11 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
   for (const auto& c : cells) {  // never mutate while iterating fast_class
     const bool ok = gu::inline_sub_instance(g, c, from_pass);
     if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
-      std::fprintf(stderr, "[icgdbg] %s: inline cell %s -> %s\n", std::string{g->get_name()}.c_str(),
-                   gu::debug_name(c).c_str(), ok ? "ok" : "FAILED");
+      std::fprintf(stderr,
+                   "[icgdbg] %s: inline cell %s -> %s\n",
+                   std::string{g->get_name()}.c_str(),
+                   gu::debug_name(c).c_str(),
+                   ok ? "ok" : "FAILED");
     }
     if (ok) {
       ++done;
@@ -629,10 +706,8 @@ namespace {
 // three cells.
 constexpr int kMaxGateChain = 16;
 
-[[nodiscard]] std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks,
-                                                     int depth);
-[[nodiscard]] std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks,
-                                                        int depth);
+[[nodiscard]] std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth);
+[[nodiscard]] std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth);
 
 // Absorb an inner cell's cone into `outer_cone`: the chain's clock is the INNER
 // cell's clock (recursively, the chain's root) and the guards ACCUMULATE — a
@@ -685,7 +760,7 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
     const auto ph = resolve_phase(e.driver);
     if (!ph.net.is_invalid() && clocks.is_clock(ph.net)) {
       ++n_clock;
-      icg.clock = ph.net;
+      icg.clock          = ph.net;
       // `~clk & en` gates the FALLING edge; an inversion on the way down to the
       // And (a latch's `Mux(cone,0,1)` shaping, or an explicit `!`) flips it too.
       icg.clock_inverted = ph.inverted != outer.inverted;
@@ -729,7 +804,7 @@ std::optional<Icg_cone> clock_cell_cone(const hhds::Node_class& n, const Design_
   if (gu::type_op_of(n) != Ntype_op::Clock_cell) {
     return std::nullopt;
   }
-  Icg_cone c;
+  Icg_cone   c;
   const auto ref = gu::get_driver_of_sink_name(n, "clk_ref");
   if (ref.is_invalid()) {
     return std::nullopt;
@@ -737,8 +812,8 @@ std::optional<Icg_cone> clock_cell_cone(const hhds::Node_class& n, const Design_
   // Fold any inversion picked up on the way to the reference into the cone's
   // edge, exactly as the inline path does -- so a Clock_cell fed `~clk` and one
   // carrying invert=true are the SAME operation and canonicalize together.
-  const Phase ph  = resolve_phase(ref);
-  c.clock         = ph.net.is_invalid() ? ref : ph.net;
+  const Phase ph   = resolve_phase(ref);
+  c.clock          = ph.net.is_invalid() ? ref : ph.net;
   // `invert` (the active-low gate flavour) does NOT change the reference edge a
   // consumer commits on -- see the note in resolve_phase. It only moves the
   // enable's sample point, which this cone type does not carry.
@@ -853,8 +928,7 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
         clk_port = ph.net;
         continue;
       }
-      if (!ph.net.is_invalid() && !gu::is_const_pin(ph.net)
-          && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
+      if (!ph.net.is_invalid() && !gu::is_const_pin(ph.net) && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
         ++n_latched;
         latched = ph.net;
         continue;
@@ -974,12 +1048,12 @@ private:
     return {};
   }
 
-  hhds::Graph*                                      parent_;
-  hhds::Graph*                                      def_;
-  hhds::Node_class                                  inst_;
-  const absl::flat_hash_map<std::string, uint32_t>& in_name2pid_;
+  hhds::Graph*                                          parent_;
+  hhds::Graph*                                          def_;
+  hhds::Node_class                                      inst_;
+  const absl::flat_hash_map<std::string, uint32_t>&     in_name2pid_;
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> cache_;
-  bool                                              failed_ = false;
+  bool                                                  failed_ = false;
 };
 
 }  // namespace
@@ -1030,7 +1104,7 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
   if (auto m = match_icg_def(def); m.has_value() && !m->clk_in.is_invalid()) {
     out.insert(std::string(gu::pin_name_of(m->clk_in)));
   }
-  for (auto n : def->fast_class()) {
+  for (auto n : def->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch) {
       if (auto in = walk_to_graph_input(gu::get_driver_of_sink_name(n, "clock_pin")); !in.is_invalid()) {
@@ -1073,8 +1147,7 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
 
 }  // namespace
 
-int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
-                            const std::function<bool(const hhds::Graph*)>& is_boxed) {
+int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const std::function<bool(const hhds::Graph*)>& is_boxed) {
   if (g == nullptr) {
     return 0;
   }
@@ -1082,7 +1155,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
   //    node-keyed trap) as inline_clock_gate_cells: the SAME pin reached through
   //    an edge and through out_pins() does not compare equal.
   absl::flat_hash_set<hhds::Class_index> clock_drivers;
-  auto note_clock_driver = [&clock_drivers](hhds::Pin_class d) {
+  auto                                   note_clock_driver = [&clock_drivers](hhds::Pin_class d) {
     for (int hops = 0; hops < 8 && !d.is_invalid(); ++hops) {
       if (gu::is_graph_input_pin(d) || gu::is_const_pin(d)) {
         break;
@@ -1096,7 +1169,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
       d = gu::first_value_driver(dn);
     }
   };
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch) {
       note_clock_driver(gu::get_driver_of_sink_name(n, "clock_pin"));
@@ -1138,7 +1211,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
   }
   // 2. Collect the instantiated gate cells (never mutate while walking).
   std::vector<std::pair<hhds::Node_class, Icg_def_match>> cells;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub || !clock_drivers.contains(n.get_class_index())) {
       continue;
     }
@@ -1241,7 +1314,7 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
 
   if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
     Commit_class cc;
-    auto         clk = gu::get_driver_of_sink_name(n, "clock_pin");
+    auto         clk          = gu::get_driver_of_sink_name(n, "clock_pin");
     bool         clk_inverted = false;
     if (clk.is_invalid()) {
       // Implicitly clocked: a real class on the module clock, NOT "unresolvable".
@@ -1282,7 +1355,7 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
       clk_inverted = ph.inverted;
       // A flop's clock_pin cone IS a clock by definition of the pin — even a
       // derived one (an ICG output). The role says "this is timing, not data".
-      cc.role = Net_role::Clock;
+      cc.role      = Net_role::Clock;
     }
     cc.rising = !posclk_is_false(n);  // known-false => negedge flop
     if (clk_inverted) {
@@ -1301,8 +1374,8 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
   // clock at all (`always @(posedge 'hx)`).
   if (auto icg = resolve_icg(gu::get_driver_of_sink_name(n, "enable"), *clocks)) {
     Commit_class cc;
-    cc.net  = icg->clock;
-    cc.role = Net_role::Clock;
+    cc.net    = icg->clock;
+    cc.role   = Net_role::Clock;
     // Transparent while the gate is asserted, so it COMMITS when the gate
     // deasserts: gated on `!clk` (inverted) => commits on the clock's RISE.
     cc.rising = icg->clock_inverted;
@@ -1317,7 +1390,7 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
     return std::nullopt;
   }
   Commit_class cc;
-  cc.net = ph.net;
+  cc.net    = ph.net;
   // Transparent while the enable is asserted, so it COMMITS when the enable
   // deasserts: an active-HIGH enable commits on the net's FALL, an active-LOW
   // (inverted) one on its RISE.
@@ -1338,7 +1411,7 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
   }
 
   absl::flat_hash_set<std::string> clock_nets;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Latch) {
       ++need.n_latches;
@@ -1390,7 +1463,7 @@ bool check(hhds::Graph* g) {
     return true;
   }
   std::vector<hhds::Node_class> latches;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) == Ntype_op::Latch) {
       latches.push_back(n);
     }

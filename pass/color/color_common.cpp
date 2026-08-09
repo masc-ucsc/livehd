@@ -3,13 +3,13 @@
 
 #include "color_common.hpp"
 
-#include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
-
 #include <algorithm>
 #include <format>
 #include <vector>
+
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
 namespace livehd::color {
 
@@ -23,17 +23,17 @@ using livehd::graph_util::set_color;
 // Re-number node2id so that each maximal connected region of equal-id nodes
 // gets a distinct fresh id. Two same-id nodes are connected when an edge runs
 // directly between them.
-Node2Id split_continuous(hhds::Graph *g, const Node2Id &node2id) {
+Node2Id split_continuous(hhds::Graph* g, const Node2Id& node2id) {
   Union_find uf;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!node2id.contains(n)) {
       continue;
     }
     auto id = node2id.at(n);
-    uf.find(n); // ensure present even if isolated
-    for (const auto &e : n.out_edges()) {
+    uf.find(n);  // ensure present even if isolated
+    for (const auto& e : n.out_edges()) {
       auto snode = e.sink.get_master_node();
-      auto it = node2id.find(snode);
+      auto it    = node2id.find(snode);
       if (it != node2id.end() && it->second == id) {
         uf.merge(n, snode);
       }
@@ -41,13 +41,13 @@ Node2Id split_continuous(hhds::Graph *g, const Node2Id &node2id) {
   }
 
   absl::flat_hash_map<hhds::Node_class, int> root2new;
-  int next = 1;
-  Node2Id out;
+  int                                        next = 1;
+  Node2Id                                    out;
   out.reserve(node2id.size());
-  for (const auto &[n, id] : node2id) {
+  for (const auto& [n, id] : node2id) {
     (void)id;
     auto root = uf.find(n);
-    auto it = root2new.find(root);
+    auto it   = root2new.find(root);
     if (it == root2new.end()) {
       it = root2new.emplace(root, next++).first;
     }
@@ -56,23 +56,20 @@ Node2Id split_continuous(hhds::Graph *g, const Node2Id &node2id) {
   return out;
 }
 
-} // namespace
+}  // namespace
 
-bool has_seeded_coloring(hhds::Graph *g) {
+bool has_seeded_coloring(hhds::Graph* g) {
   auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
   if (!a.has()) {
     return false;
   }
   const std::string info{a.get()};
-  return info.find("\"algorithm\":\"block-attr\"") != std::string::npos ||
-         info.find("\"seeded\":true") != std::string::npos;
+  return info.find("\"algorithm\":\"block-attr\"") != std::string::npos || info.find("\"seeded\":true") != std::string::npos;
 }
 
-int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
-                   const Color_opts &opts, Def_color_sizes *sizes) {
-  const Node2Id local =
-      opts.continuous ? split_continuous(g, node2id_in) : node2id_in;
-  const Node2Id &node2id = opts.continuous ? local : node2id_in;
+int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& opts, Def_color_sizes* sizes) {
+  const Node2Id  local   = opts.continuous ? split_continuous(g, node2id_in) : node2id_in;
+  const Node2Id& node2id = opts.continuous ? local : node2id_in;
 
   // Source-seeded colors (2opt-freq B block attributes, coloring_info
   // algorithm=="block-attr" or a carried "seeded":true): user block regions
@@ -82,9 +79,9 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
   // meaning for the 2p iterative flow (preserve ANY pre-existing color on
   // nodes the algorithm leaves uncolored).
   const bool seeded = has_seeded_coloring(g);
-  int base = 0;
+  int        base   = 0;
   if (seeded) {
-    for (auto n : g->forward_class()) {
+    for (auto n : g->body().nodes(hhds::Node_order::forward)) {
       if (!is_partitionable(n)) {
         continue;
       }
@@ -95,7 +92,7 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
   }
 
   absl::flat_hash_set<int> seen_ids;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }
@@ -115,7 +112,7 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
       }
     };
     if (seeded && has_color(n) && color_of(n) != 0) {
-      tally(color_of(n)); // seeded region membership wins
+      tally(color_of(n));  // seeded region membership wins
       continue;
     }
     auto it = node2id.find(n);
@@ -139,9 +136,9 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
   return static_cast<int>(seen_ids.size());
 }
 
-void clear_coloring(hhds::Graph *g) {
-  for (auto n : g->forward_class()) {
-    livehd::graph_util::del_color(n); // flat color (class context)
+void clear_coloring(hhds::Graph* g) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
+    livehd::graph_util::del_color(n);  // flat color (class context)
   }
   // The per-instance hier color is a hier_storage attr; its entries cannot be
   // reached from a class-context node handle, so clear the whole store
@@ -150,22 +147,20 @@ void clear_coloring(hhds::Graph *g) {
   del_coloring_info(g);
 }
 
-std::string preserve_seeded_info(hhds::Graph *g, std::string fresh_json) {
+std::string preserve_seeded_info(hhds::Graph* g, std::string fresh_json) {
   auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
   if (!a.has()) {
     return fresh_json;
   }
   const std::string old{a.get()};
-  if (old.find("\"algorithm\":\"block-attr\"") == std::string::npos &&
-      old.find("\"seeded\":true") == std::string::npos) {
+  if (old.find("\"algorithm\":\"block-attr\"") == std::string::npos && old.find("\"seeded\":true") == std::string::npos) {
     return fresh_json;
   }
   rapidjson::Document od;
   od.Parse(old.data(), old.size());
   rapidjson::Document nd;
   nd.Parse(fresh_json.data(), fresh_json.size());
-  if (od.HasParseError() || nd.HasParseError() || !od.IsObject() ||
-      !nd.IsObject()) {
+  if (od.HasParseError() || nd.HasParseError() || !od.IsObject() || !nd.IsObject()) {
     return fresh_json;
   }
   // Mark the rebuild as still carrying source-seeded regions, and carry the
@@ -175,29 +170,28 @@ std::string preserve_seeded_info(hhds::Graph *g, std::string fresh_json) {
     rapidjson::Value copy(ro->value, nd.GetAllocator());
     nd.AddMember("region_opts", copy, nd.GetAllocator());
   }
-  rapidjson::StringBuffer sb;
+  rapidjson::StringBuffer                    sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   nd.Accept(w);
   return std::string{sb.GetString(), sb.GetSize()};
 }
 
-void set_coloring_info(hhds::Graph *g, const std::string &json) {
+void set_coloring_info(hhds::Graph* g, const std::string& json) {
   g->get_input_node().attr(livehd::attrs::coloring_info).set(json);
 }
 
-void del_coloring_info(hhds::Graph *g) {
+void del_coloring_info(hhds::Graph* g) {
   auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
   if (a.has()) {
     a.del();
   }
 }
 
-std::string build_coloring_info_json(hhds::Graph *g, std::string_view top,
-                                     std::string_view algorithm,
+std::string build_coloring_info_json(hhds::Graph* g, std::string_view top, std::string_view algorithm,
                                      std::string_view params_json) {
   // Gather the active flat coloring on g's regular nodes.
   Node2Id node2id;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }
@@ -208,18 +202,18 @@ std::string build_coloring_info_json(hhds::Graph *g, std::string_view top,
   }
 
   // Region count per color = connected components of same-color nodes.
-  Union_find uf;
+  Union_find                    uf;
   absl::flat_hash_map<int, int> color_node_cnt;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     auto it = node2id.find(n);
     if (it == node2id.end()) {
       continue;
     }
     color_node_cnt[it->second]++;
     uf.find(n);
-    for (const auto &e : n.out_edges()) {
+    for (const auto& e : n.out_edges()) {
       auto snode = e.sink.get_master_node();
-      auto sit = node2id.find(snode);
+      auto sit   = node2id.find(snode);
       if (sit != node2id.end() && sit->second == it->second) {
         uf.merge(n, snode);
       }
@@ -227,23 +221,21 @@ std::string build_coloring_info_json(hhds::Graph *g, std::string_view top,
   }
   // Count distinct roots per color.
   absl::flat_hash_map<int, absl::flat_hash_set<hhds::Node_class>> color_roots;
-  for (const auto &[n, id] : node2id) {
+  for (const auto& [n, id] : node2id) {
     color_roots[id].insert(uf.find(n));
   }
 
-  std::string out = "{";
-  out += "\"schema_version\":1,";
-  out += std::format("\"top\":\"{}\",", top);
-  out += std::format("\"algorithm\":\"{}\",", algorithm);
-  out +=
-      std::format("\"params\":{},",
-                  params_json.empty() ? std::string_view{"{}"} : params_json);
-  out += "\"colors\":{";
-  bool first = true;
+  std::string out         = "{";
+  out                    += "\"schema_version\":1,";
+  out                    += std::format("\"top\":\"{}\",", top);
+  out                    += std::format("\"algorithm\":\"{}\",", algorithm);
+  out                    += std::format("\"params\":{},", params_json.empty() ? std::string_view{"{}"} : params_json);
+  out                    += "\"colors\":{";
+  bool             first  = true;
   // Deterministic order: sort color ids.
   std::vector<int> ids;
   ids.reserve(color_node_cnt.size());
-  for (const auto &[id, cnt] : color_node_cnt) {
+  for (const auto& [id, cnt] : color_node_cnt) {
     (void)cnt;
     ids.push_back(id);
   }
@@ -252,15 +244,13 @@ std::string build_coloring_info_json(hhds::Graph *g, std::string_view top,
     if (!first) {
       out += ",";
     }
-    first = false;
+    first       = false;
     int regions = static_cast<int>(color_roots[id].size());
     int instcnt = color_node_cnt[id];
-    out += std::format(
-        "\"{}\":{{\"name\":\"{}__c{}\",\"region_cnt\":{},\"instance_cnt\":{}}}",
-        id, top, id, regions, instcnt);
+    out += std::format("\"{}\":{{\"name\":\"{}__c{}\",\"region_cnt\":{},\"instance_cnt\":{}}}", id, top, id, regions, instcnt);
   }
   out += "}}";
   return out;
 }
 
-} // namespace livehd::color
+}  // namespace livehd::color

@@ -34,7 +34,7 @@ Color_mincut::Color_mincut(Color_opts opts_, int iters_, int seed_, std::string_
 
 void Color_mincut::gather_ids(hhds::Graph* g) {
   int next = 0;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }
@@ -159,7 +159,7 @@ void Color_mincut::viecut_label(const std::string& result_path) {
       if (it == id2node.end()) {
         continue;
       }
-      auto t_col           = str_tools::to_i(one_line);
+      auto t_col             = str_tools::to_i(one_line);
       node2color[it->second] = (t_col == NO_COLOR) ? (t_col + 1) : t_col;  // +1 keeps 0 out of the coloring
     }
   }

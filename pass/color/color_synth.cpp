@@ -101,7 +101,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
   // receive an id here nor hand one out, which is what keeps a register from
   // welding its din cone to its enable/stall cone, and its fan-out cones to
   // each other. Seeded nodes are excluded for the same structural reason.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(node) || is_cut(node) || is_seeded(node)) {
       continue;
     }
@@ -123,7 +123,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
   // come after pass 1: forward_class emits loop breaks first (they are the cut
   // points that make the walk acyclic), so during pass 1 a flop's din cone has
   // no id yet and every cut would fall back to a region of its own.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (is_partitionable(node) && is_cut(node) && !is_seeded(node)) {
       force_id(node, data_cone_id(node));
     }

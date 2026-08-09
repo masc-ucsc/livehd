@@ -10,8 +10,7 @@ namespace livehd::color {
 using livehd::graph_util::debug_name;
 using livehd::graph_util::is_graph_output_pin;
 
-Color_acyclic::Color_acyclic(Color_opts opts_, int cutoff_, bool merge_en_)
-    : opts(opts_), cutoff(cutoff_), merge_en(merge_en_) {}
+Color_acyclic::Color_acyclic(Color_opts opts_, int cutoff_, bool merge_en_) : opts(opts_), cutoff(cutoff_), merge_en(merge_en_) {}
 
 bool Color_acyclic::node_set_cmp(const NodeSet& a, const NodeSet& b) {
   if (a.size() != b.size()) {
@@ -78,11 +77,11 @@ void Color_acyclic::gather_roots(hhds::Graph* g) {
     }
   }
 
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }
-    bool root = false;
+    bool            root   = false;
     // Classify fan-out as 0 / 1 / >1 with an early-break cap (never size() the
     // lazy out_edges view); capture the lone sink for the exactly-one case.
     size_t          fanout = 0;

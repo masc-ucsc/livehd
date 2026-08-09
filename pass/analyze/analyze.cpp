@@ -32,17 +32,17 @@ const char* to_string(Loop_kind k) {
 
 const char* to_string(Clock_kind k) {
   switch (k) {
-    case Clock_kind::implicit      : return "implicit";
-    case Clock_kind::plain_input   : return "plain_input";
-    case Clock_kind::plain_internal: return "plain_internal";
-    case Clock_kind::gated_inline  : return "gated_inline";
-    case Clock_kind::gated_chain   : return "gated_chain";
-    case Clock_kind::gate_cell     : return "gate_cell";
-    case Clock_kind::from_sub      : return "from_sub";
+    case Clock_kind::implicit        : return "implicit";
+    case Clock_kind::plain_input     : return "plain_input";
+    case Clock_kind::plain_internal  : return "plain_internal";
+    case Clock_kind::gated_inline    : return "gated_inline";
+    case Clock_kind::gated_chain     : return "gated_chain";
+    case Clock_kind::gate_cell       : return "gate_cell";
+    case Clock_kind::from_sub        : return "from_sub";
     case Clock_kind::gates_child_port: return "gates_child_port";
-    case Clock_kind::inverted      : return "inverted";
-    case Clock_kind::divided       : return "divided";
-    case Clock_kind::unresolved    : return "unresolved";
+    case Clock_kind::inverted        : return "inverted";
+    case Clock_kind::divided         : return "divided";
+    case Clock_kind::unresolved      : return "unresolved";
   }
   return "unresolved";
 }
@@ -67,8 +67,8 @@ bool sim_can_lower(Clock_kind k) {
     // `inline_clock_gate_cells` before scheduling, so it folds like any inline
     // gate. Reporting it as unlowerable was this pass's own first answer and it
     // was wrong by 372 sites — every one of them emits clean.
-    case Clock_kind::gate_cell: return true;
-    default: return false;
+    case Clock_kind::gate_cell     : return true;
+    default                        : return false;
   }
 }
 
@@ -132,7 +132,7 @@ void on_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_
   absl::flat_hash_map<hhds::Node_class, int>                           indeg;
   absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
 
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (is_comb(n, strict)) {
       comb_nodes.push_back(n);
       indeg.try_emplace(n, 0);
@@ -184,7 +184,7 @@ void on_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_
   if (in_cycle.empty()) {
     return;
   }
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op != Ntype_op::Memory && op != Ntype_op::Sub) {
       continue;
@@ -343,7 +343,7 @@ bool port_is_child_clock(hhds::Graph* def, hhds::Port_id pid) {
   if (port.is_invalid()) {
     return false;
   }
-  for (auto sn : def->fast_class()) {
+  for (auto sn : def->body().nodes()) {
     const auto sop = gu::type_op_of(sn);
     if (!gu::is_type_register(sn) && sop != Ntype_op::Latch && sop != Ntype_op::Memory) {
       continue;
@@ -414,8 +414,7 @@ Clock_finding classify_clock(const hhds::Node_class& n, const livehd::latch_cont
   }
   if (gu::type_op_of(d.get_master_node()) == Ntype_op::Sub) {
     auto def = d.get_master_node().get_subnode_graph();
-    f.kind   = (def && livehd::latch_contract::match_icg_def(def.get())) ? Clock_kind::gate_cell
-                                                                        : Clock_kind::from_sub;
+    f.kind   = (def && livehd::latch_contract::match_icg_def(def.get())) ? Clock_kind::gate_cell : Clock_kind::from_sub;
     f.root   = std::string{gu::debug_name(d.get_master_node())};
     return f;
   }
@@ -442,8 +441,7 @@ Clock_finding classify_clock(const hhds::Node_class& n, const livehd::latch_cont
   // Not a gate. An identity wrapper around a clock root is fine; anything else
   // is a derived clock nothing here can name.
   const auto root = livehd::latch_contract::control_root(d);
-  if (!root.net.is_invalid() && clocks.is_clock(root.net)
-      && root.net.get_class_index() != d.get_class_index()) {
+  if (!root.net.is_invalid() && clocks.is_clock(root.net) && root.net.get_class_index() != d.get_class_index()) {
     f.kind = root.inverted ? Clock_kind::inverted : Clock_kind::plain_internal;
     f.root = gu::is_graph_input_pin(root.net) ? std::string{gu::pin_name_of(root.net)}
                                               : std::string{gu::debug_name(root.net.get_master_node())};
@@ -485,11 +483,11 @@ void check_colors(hhds::Graph* g, std::string_view def_name, bool node_graph_cyc
   livehd::color::Color_acyclic alg(copts, 1, /*merge_en=*/false);
   alg.label(g);
 
-  absl::flat_hash_map<int, int>                     part_size;
+  absl::flat_hash_map<int, int>                      part_size;
   absl::flat_hash_map<int, absl::flat_hash_set<int>> succ;  // colour -> colours
-  int n_nodes = 0;
+  int                                                n_nodes = 0;
 
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (!livehd::color::is_partitionable(n)) {
       continue;
     }
@@ -505,7 +503,7 @@ void check_colors(hhds::Graph* g, std::string_view def_name, bool node_graph_cyc
     }
     ++part_size[c];
   }
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (!livehd::color::is_partitionable(n)) {
       continue;
     }
@@ -607,7 +605,7 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
       f.n_on_cycle = static_cast<int>(strict_cycle.size());
       f.real       = !settled_cycle.empty();
       int n_comb   = 0;
-      for (auto n : g->fast_class()) {
+      for (auto n : g->body().nodes()) {
         if (is_comb(n, /*strict=*/true)) {
           ++n_comb;
         }
@@ -633,7 +631,7 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
     // EVERY tick with the gate as dead code. It is a silent miscompile, and it
     // is invisible from either definition alone — which is the whole argument
     // for surveying a library rather than a module.
-    for (auto n : g->fast_class()) {
+    for (auto n : g->body().nodes()) {
       if (gu::type_op_of(n) != Ntype_op::Sub) {
         continue;
       }
@@ -673,7 +671,7 @@ void analyze_def(hhds::Graph* g, const Opts& opts, Report& rep) {
         rep.clocks.push_back(std::move(f));
       }
     }
-    for (auto n : g->fast_class()) {
+    for (auto n : g->body().nodes()) {
       const auto op = gu::type_op_of(n);
       if (!gu::is_type_register(n) && op != Ntype_op::Latch && op != Ntype_op::Memory) {
         continue;
@@ -727,28 +725,45 @@ std::string report_json(const Report& rep) {
       kinds += (kinds.empty() ? "" : ",");
       kinds += jstr(to_string(k));
     }
-    o += std::format(
-        R"({{"check":"loops","def":{},"kind":{},"kinds":[{}],"node":{},"on_cycle":{},"comb_nodes":{},"real":{}}})"
-        "\n",
-        jstr(f.def), jstr(to_string(f.kind)), kinds, jstr(f.node), f.n_on_cycle, f.n_comb,
-        f.real ? "true" : "false");
+    o += std::format(R"({{"check":"loops","def":{},"kind":{},"kinds":[{}],"node":{},"on_cycle":{},"comb_nodes":{},"real":{}}})"
+                     "\n",
+                     jstr(f.def),
+                     jstr(to_string(f.kind)),
+                     kinds,
+                     jstr(f.node),
+                     f.n_on_cycle,
+                     f.n_comb,
+                     f.real ? "true" : "false");
   }
   for (const auto& f : rep.clocks) {
     o += std::format(
         R"({{"check":"clocks","def":{},"element":{},"op":{},"kind":{},"guards":{},"chain_depth":{},"root":{},"sim_ok":{}}})"
         "\n",
-        jstr(f.def), jstr(f.element), jstr(f.op), jstr(to_string(f.kind)), f.n_guards, f.chain_depth, jstr(f.root),
+        jstr(f.def),
+        jstr(f.element),
+        jstr(f.op),
+        jstr(to_string(f.kind)),
+        f.n_guards,
+        f.chain_depth,
+        jstr(f.root),
         sim_can_lower(f.kind) ? "true" : "false");
   }
   for (const auto& f : rep.colors) {
     o += std::format(R"({{"check":"colors","def":{},"defect":{},"detail":{},"parts":{},"nodes":{}}})"
                      "\n",
-                     jstr(f.def), jstr(to_string(f.defect)), jstr(f.detail), f.n_parts, f.n_nodes);
+                     jstr(f.def),
+                     jstr(to_string(f.defect)),
+                     jstr(f.detail),
+                     f.n_parts,
+                     f.n_nodes);
   }
-  o += std::format(
-      R"({{"check":"summary","defs":{},"state_elements":{},"loop_defs":{},"clock_findings":{},"color_findings":{}}})"
-      "\n",
-      rep.n_defs, rep.n_state_elements, rep.loops.size(), rep.clocks.size(), rep.colors.size());
+  o += std::format(R"({{"check":"summary","defs":{},"state_elements":{},"loop_defs":{},"clock_findings":{},"color_findings":{}}})"
+                   "\n",
+                   rep.n_defs,
+                   rep.n_state_elements,
+                   rep.loops.size(),
+                   rep.clocks.size(),
+                   rep.colors.size());
   return o;
 }
 

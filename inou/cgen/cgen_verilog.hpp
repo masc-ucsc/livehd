@@ -26,26 +26,57 @@ private:
   using pin_key_t  = hhds::Class_index;
   using node_key_t = hhds::Class_index;
 
+  struct Loop_pin_key {
+    node_key_t    site;
+    uint64_t      ordinal = 0;
+    hhds::Port_id port    = 0;
+
+    bool operator==(const Loop_pin_key&) const = default;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Loop_pin_key& key) {
+      return H::combine(std::move(h), key.site, key.ordinal, key.port);
+    }
+  };
+
+  struct Loop_occurrence_key {
+    node_key_t site;
+    uint64_t   ordinal = 0;
+
+    bool operator==(const Loop_occurrence_key&) const = default;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Loop_occurrence_key& key) {
+      return H::combine(std::move(h), key.site, key.ordinal);
+    }
+  };
+
   struct Expr {
     Expr(std::string_view v, bool n) : var(v), needs_parenthesis(n) {}
     std::string var;
     bool        needs_parenthesis;
   };
 
-  absl::flat_hash_map<pin_key_t, Expr>         pin2expr;
-  absl::flat_hash_map<pin_key_t, std::string>  pin2var;
+  absl::flat_hash_map<pin_key_t, Expr>                  pin2expr;
+  absl::flat_hash_map<pin_key_t, std::string>           pin2var;
   // Which pin2var entries were DECLARED unsigned. The pin's own signed hint is
   // not the answer: add_to_pin2var's callers override it (a Get_mask declares
   // its operand signed so the implicit widening sign-extends), so a consumer
   // that needs to know how the net will re-read has to ask what was declared.
-  absl::flat_hash_set<pin_key_t>               pin2var_unsigned_;
-  absl::flat_hash_map<node_key_t, std::string> mux2vector;
-  absl::flat_hash_map<std::string, int>         declared_name_counts;
+  absl::flat_hash_set<pin_key_t>                        pin2var_unsigned_;
+  absl::flat_hash_map<node_key_t, std::string>          mux2vector;
+  absl::flat_hash_map<std::string, int>                 declared_name_counts;
   // Chosen instance name per Sub node, computed once (in reserve_instance_names)
   // and de-collided, so every emit site renders the same name. An ANONYMOUS Sub
   // (no `name` attr -- e.g. a re-partition wrapper left transparent so hier names
   // are preserved) is named `u_<module>`; a named Sub keeps its name.
-  absl::flat_hash_map<node_key_t, std::string> sub_instance_names_;
+  absl::flat_hash_map<node_key_t, std::string>          sub_instance_names_;
+  // Private realization state for native compact Sub loops. These maps are
+  // emission-only: the source graph retains one Subnode_group and its literal
+  // carry self-edges throughout code generation.
+  absl::flat_hash_map<Loop_occurrence_key, std::string> loop_instance_names_;
+  absl::flat_hash_map<Loop_pin_key, std::string>        loop_output_vars_;
+  absl::flat_hash_map<Loop_pin_key, std::string>        loop_input_exprs_;
 
   bool first_array_block;
 
@@ -70,16 +101,16 @@ private:
   // Helper: name for a wire, preferring user-assigned name; falls back to a
   // synthesised name from node + port_id. Graph-IO pins resolve to their
   // declared name from GraphIO.
-  static std::string         pin_wire_name(const hhds::Pin_class& pin);
-  std::string                get_wire_or_const(const hhds::Pin_class& dpin) const;
-  static std::string         get_scaped_name(std::string_view name);
+  static std::string pin_wire_name(const hhds::Pin_class& pin);
+  std::string        get_wire_or_const(const hhds::Pin_class& dpin) const;
+  static std::string get_scaped_name(std::string_view name);
   // Flat Verilog module name for an internal `file.entity` graph name (see
   // flat_names_). Not yet scaped — the caller still runs get_scaped_name.
-  std::string                flat_module_name(std::string_view full) const;
-  static std::string         get_append_to_name(std::string_view name, std::string_view ext);
-  std::string                get_unique_decl_name(std::string_view name);
-  std::string                get_expression(const hhds::Pin_class& dpin);
-  std::string                add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin);
+  std::string        flat_module_name(std::string_view full) const;
+  static std::string get_append_to_name(std::string_view name, std::string_view ext);
+  std::string        get_unique_decl_name(std::string_view name);
+  std::string        get_expression(const hhds::Pin_class& dpin);
+  std::string        add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin);
 
   // Resolve the "driver of this sink pin": walk inp_edges and return the
   // first edge's driver. Returns an invalid Pin_class if not connected.
@@ -95,22 +126,22 @@ private:
   // result. SRA is the only right-shift cell, so it preserves its operand's
   // signedness — but tolg's bind_result tags every op output unsigned, so a
   // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
-  static bool operand_reads_signed(const hhds::Pin_class& dpin);
+  static bool    operand_reads_signed(const hhds::Pin_class& dpin);
   // Width the net for `dpin` was DECLARED with (see add_to_pin2var); 0 when
   // there is no net (constant / invalid pin) and 1 when it is a scalar `reg`
   // that cannot legally be indexed.
   static int32_t decl_bits_of(const hhds::Pin_class& dpin);
 
-  std::string build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
-  void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
-  void process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  std::string        build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   // Generate a cgen_memory_[multiclock_]<R>rd_<W>wr module body for a (R,W,clock)
   // shape that ware/rtl does not ship, mirroring the static wrapper templates.
   static std::string gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock);
-  void process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
-  void process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
-  void process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
-  void process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void               process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
 
   // Pre-reserve every Sub/Memory instance name into declared_name_counts
   // BEFORE create_locals runs. Instance names (default_instance_name) are
@@ -121,12 +152,13 @@ private:
   // happens to carry that exact name (e.g. a Chisel-style anonymous net
   // `_foo_io_out` falling back to "foo_2", colliding with a sibling instance
   // literally named "foo_2") — an invalid Verilog redefinition.
-  void reserve_instance_names(hhds::Graph* graph);
+  void        reserve_instance_names(hhds::Graph* graph);
   // The emit-time instance name for a Sub node (cached in sub_instance_names_,
   // computed on first call, so it can be called for its reserving side effect).
   // Named Sub keeps its name; an anonymous Sub becomes `u_<module>`, de-collided
   // against every already-chosen name.
   std::string sub_instance_name(const hhds::Node_class& node);
+  std::string loop_instance_name(const hhds::Node_class& node, const hhds::Subnode_occurrence& occurrence);
 
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);

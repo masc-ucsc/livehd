@@ -10,12 +10,12 @@
 #include "absl/container/node_hash_map.h"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
-#include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
 #include "hhds/index.hpp"
+#include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
 
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
 // library (TODO 3d, inou.cgen.sim). Structural twin of Cgen_verilog (same
-// forward_class() walk + Ntype_op dispatch via livehd::graph_util), but emits a
+// body().nodes(hhds::Node_order::forward) walk + Ntype_op dispatch via livehd::graph_util), but emits a
 // functional `Out cycle(In)` struct instead of inlined Verilog: one flat SSA
 // binding (Slop<W> v = a.op(b);) per node, registers as struct members. Each
 // module is split into <name>.hpp (the interface: data members, In/Out, method
@@ -31,7 +31,7 @@ private:
   // driver pin -> the C++ expression naming its current value: an input field
   // ("in.a"), a flop member ("q"), or a combinational temp ("cg_3").
   absl::flat_hash_map<pin_key_t, std::string> pin2var;
-  int                                          tmp_cnt = 0;
+  int                                         tmp_cnt = 0;
   // Pins whose C++ variable is CANONICAL at its declared width: the value the
   // word holds IS the exact mathematical value, correctly sign-extended. Only
   // the combinational temps we emit ourselves qualify -- their producing op ran
@@ -42,7 +42,7 @@ private:
   // testbench string (an s8 port can arrive holding 200, not -56), and memory
   // reads / sub outputs are materialized elsewhere. Reading those bare made
   // signed compares wrong -- caught by prp-simeq-rt_sat_s.
-  absl::flat_hash_set<pin_key_t> canonical_;
+  absl::flat_hash_set<pin_key_t>              canonical_;
 
   // Pins whose C++ name is REWRITTEN by the sequential section, mid-stream:
   // a latency-1 memory read register (`<mem>_q<n>`), which the memory block
@@ -142,7 +142,7 @@ private:
                               // false = plain edge-aligned updates (no X, no delay)
   // --set sim.flatten=N: structurally inline a Sub whose callee body has <= N
   // nodes into its parent before emitting. 0 = off. See flatten_small_subs().
-  int flatten_budget = 0;
+  int         flatten_budget = 0;
 
   // Bottom-up structural inline of every sub-instance that fits the budget.
   // Returns the number of instances inlined out of `g`.
@@ -239,8 +239,7 @@ public:
   // `clk == 1`, a width mask) rather than a gate: no guard needed, and no
   // refusal owed. Distinguishes "not gated" from "gated in a way I cannot fold",
   // which an empty `icg_guards` result conflates.
-  static bool plain_clock_cone(const hhds::Pin_class&                        clock_driver,
-                               const livehd::latch_contract::Design_clocks& clocks);
+  static bool plain_clock_cone(const hhds::Pin_class& clock_driver, const livehd::latch_contract::Design_clocks& clocks);
 
   // Every STRUCTURAL rewrite the emitter makes to a body (the clock-gate-cell
   // fold, the sim.flatten absorb, the packed self-ref wire split). Idempotent:
@@ -253,11 +252,14 @@ public:
   bool prepare_graph(const std::shared_ptr<hhds::Graph>& graph);
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
-  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
-           int _flatten = 0, const Split_map* _splits = nullptr)
-      : odir(_odir), vcd_file(_vcd), top(_top),
-        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")), flatten_budget(_flatten),
-        splits_(_splits) {}
+  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
+           const Split_map* _splits = nullptr)
+      : odir(_odir)
+      , vcd_file(_vcd)
+      , top(_top)
+      , vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off"))
+      , flatten_budget(_flatten)
+      , splits_(_splits) {}
 
 private:
   const Split_map* splits_ = nullptr;  // built once per pass run by to_cgen_sim

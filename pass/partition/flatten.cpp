@@ -143,7 +143,7 @@ void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const
 }
 
 void Flattener::create_nodes(Ictx* ctx) {
-  for (auto n : ctx->src->forward_class()) {
+  for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }
@@ -172,7 +172,7 @@ void Flattener::create_nodes(Ictx* ctx) {
         failed_ = true;
         return;
       }
-      auto* child = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + gu::default_instance_name(n) + ".");
+      auto* child       = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + gu::default_instance_name(n) + ".");
       ctx->child_ctx[n] = child;
       create_nodes(child);
       inline_stack_.erase(cgid);
@@ -283,7 +283,7 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
 }
 
 void Flattener::wire_edges(Ictx* ctx) {
-  for (auto n : ctx->src->forward_class()) {
+  for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }

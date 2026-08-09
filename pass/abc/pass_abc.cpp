@@ -19,8 +19,8 @@
 #include "graph_library_singleton.hpp"
 #include "mem_lower.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
-#include "replica_expand.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
@@ -64,7 +64,8 @@ void Pass_abc::setup() {
                        "native memory instance (false)",
                        "false");
   m.add_label_optional("dff_cell",
-                       "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)", "");
+                       "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
+                       "");
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
@@ -78,7 +79,8 @@ void Pass_abc::setup() {
                        "true|false skip memory admission and map the region regardless. It may exhaust "
                        "physical memory and be killed by the OS",
                        "false");
-  m.add_label_optional("multiplier", "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
+  m.add_label_optional("multiplier",
+                       "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
                        "array");
   m.add_label_optional("qor",
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
@@ -102,14 +104,13 @@ void Pass_abc::setup() {
                        "one region (auto = flatten exactly when the active coloring is `pass.color flat`); the result "
                        "is a single netlist module named after the top",
                        "auto");
-  m.add_label_optional(
-      "region_opts",
-      "per-region option overrides as JSON keyed by color id, e.g. "
-      "'{\"1\":{\"flow\":\"strash; resyn2; &get -n; &nf {D}; &put\",\"delay\":\"2\"},\"4\":{\"adder\":\"cla\"}}'. "
-      "Overridable per region: flow|delay|load|adder|block_size|multiplier. "
-      "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
-      "unknown keys or malformed values are hard errors",
-      "");
+  m.add_label_optional("region_opts",
+                       "per-region option overrides as JSON keyed by color id, e.g. "
+                       "'{\"1\":{\"flow\":\"strash; resyn2; &get -n; &nf {D}; &put\",\"delay\":\"2\"},\"4\":{\"adder\":\"cla\"}}'. "
+                       "Overridable per region: flow|delay|load|adder|block_size|multiplier. "
+                       "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
+                       "unknown keys or malformed values are hard errors",
+                       "");
   register_pass(m);
 }
 
@@ -137,7 +138,7 @@ std::string jesc(std::string_view s) {
   out.reserve(s.size());
   for (char c : s) {
     switch (c) {
-      case '"': out += "\\\""; break;
+      case '"' : out += "\\\""; break;
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
       case '\t': out += "\\t"; break;
@@ -161,16 +162,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
               const std::string& qor_path, const livehd::abc::Incr_cache* incr) {
   int    tgates = 0;
   double tarea  = 0.0;
-  int    tdivbb = 0;  // blackboxed div/mod cones (the score under-reports)
+  int    tdivbb = 0;   // blackboxed div/mod cones (the score under-reports)
   int    worst  = -1;  // index of the region with the worst delay
   // Where the run's time went, split by what the cache did with each region.
   // hits/misses alone cannot distinguish "the cache saved nothing" from "the
   // cache saved everything there was to save" — these can.
   double hit_ms = 0.0, miss_ms = 0.0;
   for (size_t r = 0; r < qor.size(); ++r) {
-    tgates += qor[r].gates;
-    tarea += qor[r].area;
-    tdivbb += qor[r].div_blackbox;
+    tgates                                                       += qor[r].gates;
+    tarea                                                        += qor[r].area;
+    tdivbb                                                       += qor[r].div_blackbox;
     (std::string_view{qor[r].cache} == "hit" ? hit_ms : miss_ms) += qor[r].ms;
     if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
       worst = static_cast<int>(r);
@@ -188,7 +189,11 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     crit += ")";
   }
-  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}{}\n", qor.size(), tgates, tarea, crit,
+  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}{}\n",
+             qor.size(),
+             tgates,
+             tarea,
+             crit,
              tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
 
   if (incr != nullptr) {
@@ -205,10 +210,10 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   if (qor_path.empty()) {
     return;
   }
-  std::string j = "{";
-  j += "\"schema_version\":1,\"kind\":\"abc-map\",";
-  j += std::format("\"top\":\"{}\",", jesc(top));
-  j += std::format("\"library\":\"{}\",", jesc(opts.library));
+  std::string j  = "{";
+  j             += "\"schema_version\":1,\"kind\":\"abc-map\",";
+  j             += std::format("\"top\":\"{}\",", jesc(top));
+  j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   j += std::format("\"total\":{{\"regions\":{},\"gates\":{},\"area\":{:.4f}", qor.size(), tgates, tarea);
@@ -216,8 +221,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     j += std::format(",\"div_blackbox\":{}", tdivbb);
   }
   if (worst >= 0) {
-    const auto& w = qor[static_cast<size_t>(worst)];
-    j += std::format(",\"max_delay\":{:.4f},\"critical_region\":\"{}\"", w.delay, jesc(w.module));
+    const auto& w  = qor[static_cast<size_t>(worst)];
+    j             += std::format(",\"max_delay\":{:.4f},\"critical_region\":\"{}\"", w.delay, jesc(w.module));
     if (!w.crit_output.empty()) {
       j += std::format(",\"critical_output\":\"{}\"", jesc(w.crit_output));
     }
@@ -277,31 +282,49 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) {
-  // A replicated Sub denotes `count` occurrences; this pass walks a Sub as ONE
-  // physical instance, so expand before it looks at anything (see
-  // graph/replica_expand.hpp). Without this a rolled design is measured/mapped
-  // as a single replica.
-  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.abc")) {
+  // ABC consumes a physical scratch design. Copy first so occurrence
+  // materialization and every later mapping rewrite leave the native source
+  // graph untouched.
+  hhds::GraphLibrary                        occurrence_library;
+  std::vector<std::shared_ptr<hhds::Graph>> occurrence_graphs;
+  for (const auto& source : var.graphs) {
+    if (!source) {
+      continue;
+    }
+    auto  io  = source->get_io();
+    auto* lib = io ? io->get_library() : nullptr;
+    if (lib == nullptr || !occurrence_library.copy_from(*lib, source->get_name())) {
+      livehd::diag::err("pass.abc", "scratch-copy", "internal")
+          .msg("could not copy '{}' into ABC's private physical library", source->get_name())
+          .emit();
+      return;
+    }
+  }
+  for (const auto& source : var.graphs) {
+    auto io = source ? occurrence_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
+    occurrence_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
+  }
+  if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.abc")) {
     return;
   }
 
-  auto top     = std::string{var.get("top", "")};
-  auto out     = std::string{var.get("out", "")};
-  auto library = std::string{var.get("library", "")};
-  auto flow    = std::string{var.get("flow", "")};
-  bool map_register = truthy(var.get("register", "true"));
-  bool map_memory   = truthy(var.get("memory", "false"));
-  auto delay   = std::string{var.get("delay", "")};
-  auto load    = std::string{var.get("load", "")};
-  bool verbose = truthy(var.get("verbose", "false"));
-  auto adder_s = std::string{var.get("adder", "rca")};
-  auto bs_s    = std::string{var.get("block_size", "0")};
-  auto mult_s  = std::string{var.get("multiplier", "array")};
-  auto qor_path          = std::string{var.get("qor", "")};
-  auto region_opts_s     = std::string{var.get("region_opts", "")};
-  auto mem_budget_s      = std::string{var.get("memory_budget_mb", "0")};
-  bool allow_oversize    = truthy(var.get("allow_oversize", "false"));
-  auto flatten           = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
+  auto top            = std::string{var.get("top", "")};
+  auto out            = std::string{var.get("out", "")};
+  auto library        = std::string{var.get("library", "")};
+  auto flow           = std::string{var.get("flow", "")};
+  bool map_register   = truthy(var.get("register", "true"));
+  bool map_memory     = truthy(var.get("memory", "false"));
+  auto delay          = std::string{var.get("delay", "")};
+  auto load           = std::string{var.get("load", "")};
+  bool verbose        = truthy(var.get("verbose", "false"));
+  auto adder_s        = std::string{var.get("adder", "rca")};
+  auto bs_s           = std::string{var.get("block_size", "0")};
+  auto mult_s         = std::string{var.get("multiplier", "array")};
+  auto qor_path       = std::string{var.get("qor", "")};
+  auto region_opts_s  = std::string{var.get("region_opts", "")};
+  auto mem_budget_s   = std::string{var.get("memory_budget_mb", "0")};
+  bool allow_oversize = truthy(var.get("allow_oversize", "false"));
+  auto flatten        = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
   if (!region_opts_s.empty()) {
@@ -348,18 +371,18 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   livehd::abc::Map_options opts;
-  opts.flow       = flow;
-  opts.map_register = map_register;
-  opts.map_memory   = map_memory;
-  opts.dff_cell     = std::string{var.get("dff_cell", "")};
-  opts.delay      = delay;
-  opts.load       = load;
-  opts.verbose    = verbose;
-  opts.adder      = adder.value();
-  opts.block_size = block_size;
-  opts.multiplier = multiplier.value();
-  opts.memory_budget_mb  = memory_budget_mb;
-  opts.allow_oversize    = allow_oversize;
+  opts.flow             = flow;
+  opts.map_register     = map_register;
+  opts.map_memory       = map_memory;
+  opts.dff_cell         = std::string{var.get("dff_cell", "")};
+  opts.delay            = delay;
+  opts.load             = load;
+  opts.verbose          = verbose;
+  opts.adder            = adder.value();
+  opts.block_size       = block_size;
+  opts.multiplier       = multiplier.value();
+  opts.memory_budget_mb = memory_budget_mb;
+  opts.allow_oversize   = allow_oversize;
   if (allow_oversize) {
     // Loud on purpose: this is the flag that lets a run take the machine down,
     // so it must be visible in the log of whatever ran afterwards.
@@ -372,7 +395,7 @@ void Pass_abc::work(Eprp_var& var) {
   if (out.empty()) {
     // Stats-only (no --emit-dir): no Liberty needed.
     opts.library = library;
-    livehd::abc::report_stats(var.graphs, top, opts);
+    livehd::abc::report_stats(occurrence_graphs, top, opts);
     return;
   }
 
@@ -387,7 +410,7 @@ void Pass_abc::work(Eprp_var& var) {
   if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold(); !allow_oversize && threshold != UINT64_MAX) {
     std::unordered_map<hhds::Gid, hhds::Graph*> gid2graph;
     hhds::Graph*                                top_g = nullptr;
-    for (const auto& g : var.graphs) {
+    for (const auto& g : occurrence_graphs) {
       if (!g) {
         continue;
       }
@@ -407,8 +430,9 @@ void Pass_abc::work(Eprp_var& var) {
             .hint(std::format("color into smaller regions and synthesize per-region: "
                               "`lhd pass color synth --top {} lg:... --stats`",
                               top))
-            .hint("--set pass.abc.allow_oversize=true synthesizes it anyway -- it may exhaust the machine "
-                  "(a whole-design XSCore run reached 221 GB before the OS killed it)")
+            .hint(
+                "--set pass.abc.allow_oversize=true synthesizes it anyway -- it may exhaust the machine "
+                "(a whole-design XSCore run reached 221 GB before the OS killed it)")
             .fatal();
       }
     }
@@ -430,7 +454,7 @@ void Pass_abc::work(Eprp_var& var) {
   // Memory nodes never reach the boundary code; any memory left native (an
   // unsupported shape) still cuts as a boundary (the memory=false behavior).
   if (map_memory) {
-    livehd::abc::lower_memories(var.graphs);
+    livehd::abc::lower_memories(occurrence_graphs);
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -476,7 +500,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   bool dbg = false;
   Pass_partition::build_decomposition(
-      var.graphs,
+      occurrence_graphs,
       &outlib,
       top,
       dbg,
@@ -498,8 +522,9 @@ void Pass_abc::work(Eprp_var& var) {
                           "(the region-splitting ceiling; lower it until the region fits)",
                           top))
         .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
-        .hint("--set pass.abc.allow_oversize=true runs it anyway -- it may exhaust the machine (a whole-design "
-              "XSCore run reached 221 GB before the OS killed it)")
+        .hint(
+            "--set pass.abc.allow_oversize=true runs it anyway -- it may exhaust the machine (a whole-design "
+            "XSCore run reached 221 GB before the OS killed it)")
         .fatal();
   }
 

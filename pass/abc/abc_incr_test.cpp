@@ -43,8 +43,8 @@ struct Fixture {
   // production the partitioner builds it (Region_body::pre_body); here `src` IS
   // that standalone graph, so the tests feed it straight to the cache API (which
   // is builder-agnostic -- it takes a pre-body Graph* + its library).
-  hhds::GraphLibrary* slib = nullptr;
-  std::string         src_name;
+  hhds::GraphLibrary*            slib = nullptr;
+  std::string                    src_name;
 };
 
 Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* name, Ntype_op op = Ntype_op::Xor,
@@ -52,16 +52,16 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   Fixture f;
 
   // --- pre-ABC logic in its own library (doubles as the pre-body) ---
-  auto& slib   = livehd::Hhds_graph_library::instance(srcdir);
-  f.slib       = &slib;
-  f.src_name   = name;
-  auto  sgio   = slib.create_io(name);
+  auto& slib = livehd::Hhds_graph_library::instance(srcdir);
+  f.slib     = &slib;
+  f.src_name = name;
+  auto sgio  = slib.create_io(name);
   sgio->add_input("a", 1);
   sgio->add_input("b", 2);
   sgio->add_input("c", 3);
   sgio->add_output("y", 4);
-  auto g = sgio->create_graph();
-  f.src  = g;
+  auto g  = sgio->create_graph();
+  f.src   = g;
   auto ia = g->get_input_pin("a");
   auto ib = g->get_input_pin("b");
   auto ic = g->get_input_pin("c");
@@ -113,20 +113,20 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   md.connect_sink(m->get_output_pin("y"));
   m->commit();
 
-  f.rb.body          = m.get();
-  f.rb.src           = g.get();
-  f.rb.color         = 1;
-  f.rb.module_name   = name;
+  f.rb.body           = m.get();
+  f.rb.src            = g.get();
+  f.rb.color          = 1;
+  f.rb.module_name    = name;
   f.rb.reuse_eligible = true;
-  f.rb.inputs        = f.in;
-  f.rb.outputs       = f.out;
-  f.rb.nodes         = std::span<const hhds::Node_class>(f.nodes.data(), f.nodes.size());
+  f.rb.inputs         = f.in;
+  f.rb.outputs        = f.out;
+  f.rb.nodes          = std::span<const hhds::Node_class>(f.nodes.data(), f.nodes.size());
   return f;
 }
 
 [[nodiscard]] size_t node_count(hhds::Graph* g) {
   size_t c = 0;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     (void)n;
     ++c;
   }
@@ -175,9 +175,9 @@ TEST(AbcIncr, RecipeMismatchMiss) {
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R_add", &out1));
   c1.save();
 
-  auto& out2 = livehd::Hhds_graph_library::instance("lgdb_p2b_o2");
-  auto  f2   = make_region("lgdb_p2b_s2", out2, "top__c1");
-  auto* pre2 = f2.src.get();
+  auto&      out2 = livehd::Hhds_graph_library::instance("lgdb_p2b_o2");
+  auto       f2   = make_region("lgdb_p2b_s2", out2, "top__c1");
+  auto*      pre2 = f2.src.get();
   Incr_cache c2("lgdb_p2b_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R_mul").hit) << "recipe gate";
   EXPECT_TRUE(c2.lookup_compare(f2.rb, pre2, "R_add").hit) << "same recipe hits";
@@ -192,9 +192,9 @@ TEST(AbcIncr, EditMiss) {
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R", &out1));
   c1.save();
 
-  auto& out2 = livehd::Hhds_graph_library::instance("lgdb_p2c_o2");
-  auto  f2   = make_region("lgdb_p2c_s2", out2, "top__c1", Ntype_op::Or);  // edited op
-  auto* pre2 = f2.src.get();
+  auto&      out2 = livehd::Hhds_graph_library::instance("lgdb_p2c_o2");
+  auto       f2   = make_region("lgdb_p2c_s2", out2, "top__c1", Ntype_op::Or);  // edited op
+  auto*      pre2 = f2.src.get();
   Incr_cache c2("lgdb_p2c_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R").hit) << "an edited region must not reuse";
 }
@@ -208,10 +208,10 @@ TEST(AbcIncr, ReuseIneligibleMiss) {
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R", &out1));
   c1.save();
 
-  auto& out2 = livehd::Hhds_graph_library::instance("lgdb_p2d_o2");
-  auto  f2   = make_region("lgdb_p2d_s2", out2, "top__c1");
+  auto& out2           = livehd::Hhds_graph_library::instance("lgdb_p2d_o2");
+  auto  f2             = make_region("lgdb_p2d_s2", out2, "top__c1");
   f2.rb.reuse_eligible = false;  // partitioner refused the boundary
-  auto* pre2 = f2.src.get();
+  auto*      pre2      = f2.src.get();
   Incr_cache c2("lgdb_p2d_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R").hit) << "reuse-ineligible region must not reuse";
 }

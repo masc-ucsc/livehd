@@ -45,8 +45,8 @@ Chain make_chain(const char* dir, const char* name, int n, int bits) {
   set_bits(in, bits);
 
   Chain c;
-  c.g          = g;
-  auto     prev = in;
+  c.g       = g;
+  auto prev = in;
   for (int i = 0; i < n; ++i) {
     auto node = create_typed_node(*g, Ntype_op::And);
     prev.connect_sink(node.create_sink_pin(0));
@@ -191,7 +191,7 @@ TEST(ColorSize, EveryNodeKeepsExactlyOneRegion) {
   }
 }
 
-// Ids are minted in forward_class() first-encounter order, so they are a function
+// Ids are minted in body().nodes(hhds::Node_order::forward) first-encounter order, so they are a function
 // of the graph rather than of hash iteration. This is what lets a caller (and
 // pass.partition's `<def>__c<id>` module names) be reproducible run to run.
 TEST(ColorSize, IdsAreDeterministicAndDense) {
@@ -213,7 +213,7 @@ TEST(ColorSize, IdsAreDeterministicAndDense) {
     EXPECT_GE(id, 1);
     EXPECT_LE(id, static_cast<int>(ge.size()));
   }
-  for (auto n : c.g->forward_class()) {
+  for (auto n : c.g->body().nodes(hhds::Node_order::forward)) {
     if (a.contains(n)) {
       EXPECT_EQ(a.at(n), 1) << "ids are minted in forward_class order";
       break;
@@ -333,8 +333,8 @@ TEST(ColorSize, SubWeighsMappableNotPortBits) {
   auto pio = lib.create_io("subw_parent");
   pio->add_input("a", 0);
   pio->add_output("z", 1);
-  auto pg  = pio->create_graph();
-  auto in  = pg->get_input_pin("a");
+  auto pg = pio->create_graph();
+  auto in = pg->get_input_pin("a");
   set_bits(in, 100);
   auto sub = create_typed_node(*pg, Ntype_op::Sub);
   sub.set_subnode(cio);

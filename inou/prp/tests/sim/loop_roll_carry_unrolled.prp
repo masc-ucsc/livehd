@@ -1,7 +1,7 @@
 /*
 :name: loop_roll_carry_unrolled
 :type: simulation
-:expect_instances: stage_li*=6 *=6
+:expect_instances: stage__li*=6 *=6
 */
 // A source `for` loop kept ROLLED (`upass.roll=true`, todo_loop_cond_sub.md M4):
 // the body is lifted into one generated definition and the loop becomes a

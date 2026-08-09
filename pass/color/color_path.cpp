@@ -159,7 +159,7 @@ void Color_path::label(hhds::Graph* g) {
     for (const auto& name : instance_names) {
       instance_set.insert(name);
     }
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (!is_partitionable(node) || !has_name(node) || !instance_set.contains(node_name_of(node))) {
         continue;
       }
@@ -173,7 +173,7 @@ void Color_path::label(hhds::Graph* g) {
       propagate_fwd(node, color);
     }
   } else {
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (!is_flop_like(node)) {
         continue;
       }

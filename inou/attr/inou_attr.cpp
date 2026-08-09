@@ -105,11 +105,11 @@ void Inou_attr::read_json(const std::string& filename, hhds::Graph* lg) {
 }
 
 void Inou_attr::color_lg(hhds::Graph* lg) {
-  for (auto node : lg->fast_hier()) {
-    const auto iname = default_instance_name(node);
+  for (auto node : lg->grouped_hierarchy().nodes()) {
+    const auto iname = default_instance_name(node.base_node());
     auto       it    = node2color.find(iname);
     if (it != node2color.end()) {
-      set_color(node, static_cast<int32_t>(it->second));
+      set_color(node.base_node(), static_cast<int32_t>(it->second));
       std::print("Set color {} to instance {} at nid {}.\n", it->second, iname, static_cast<uint64_t>(node.get_debug_nid()));
     }
   }
@@ -138,10 +138,10 @@ void Inou_attr::get_color_from_lg(Eprp_var& var) {
     writer.Key("node_colors");
 
     writer.StartObject();
-    for (auto node : g->fast_hier()) {
-      if (has_color(node)) {
-        auto        color_val = color_of(node);
-        const auto  iname     = default_instance_name(node);
+    for (auto node : g->grouped_hierarchy().nodes()) {
+      if (has_color(node.base_node())) {
+        auto        color_val = color_of(node.base_node());
+        const auto  iname     = default_instance_name(node.base_node());
         std::string iname_str{iname};
         writer.Key(iname_str.c_str());
         writer.Double(color_val);

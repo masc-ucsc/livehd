@@ -83,12 +83,11 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
   }
   std::string cex = out.witness.empty() ? std::string{} : (" (counterexample: " + out.witness + ")");
   std::string hint
-      = out.stateful
-            ? "checked over free module inputs and free (cut) register state in isolation; a different top-level "
-              "instantiation, or an unreachable register state, may explain it — re-check at the intended top, or "
-              "report a compiler bug if it should already hold"
-            : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
-              "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
+      = out.stateful ? "checked over free module inputs and free (cut) register state in isolation; a different top-level "
+                       "instantiation, or an unreachable register state, may explain it — re-check at the intended top, or "
+                       "report a compiler bug if it should already hold"
+                     : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
+                       "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
   if (code == "assume-refuted") {
     // An input `assume` at a root module is BY NATURE refutable here (inputs are
     // free) — the gate is telling the user the constraint is not self-evident,
@@ -98,11 +97,7 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
   }
   // Deferred: record + fail the build, but let the pipeline finish so cgen still
   // emits the design with the failing property kept as a runtime check.
-  livehd::diag::err("pass.formal", code, "comptime")
-      .msg("{} in '{}'{}{}", what, module, detail, cex)
-      .hint(hint)
-      .deferred()
-      .emit();
+  livehd::diag::err("pass.formal", code, "comptime").msg("{} in '{}'{}{}", what, module, detail, cex).hint(hint).deferred().emit();
 }
 
 // A REACHABLE-from-reset refutation found by the shared BMC engine (mode=normal,
@@ -123,8 +118,9 @@ void report_refuted_reachable(std::string_view code, const std::string& what, st
       = witness.empty() ? std::string{} : (" (counterexample from reset @ cycle " + std::to_string(cycle) + ": " + witness + ")");
   livehd::diag::err("pass.formal", code, "comptime")
       .msg("{} in '{}'{}{}", what, module, detail, cex)
-      .hint("reachable from reset within the compile budget (BMC), so this is a genuine violation — fix the design, narrow "
-            "it with a proven assume, or intend it as a runtime check; a deeper/unreachable case would not error")
+      .hint(
+          "reachable from reset within the compile budget (BMC), so this is a genuine violation — fix the design, narrow "
+          "it with a proven assume, or intend it as a runtime check; a deeper/unreachable case would not error")
       .deferred()
       .emit();
 }
@@ -143,21 +139,27 @@ void warn_deferred(bool enabled, std::string_view code, std::string_view subject
   std::string m{module};
   if (out.verdict == formal::Verdict::Refuted && downgraded) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' is refuted but downgraded to a warning by --set compile.formal.on_refute=warn; "
-             "kept as a runtime check",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' is refuted but downgraded to a warning by --set compile.formal.on_refute=warn; "
+            "kept as a runtime check",
+            subject,
+            m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted && !is_top) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' refuted only in module-isolation — its inputs are constrained by a parent "
-             "instantiation (not enough top); kept as a runtime check",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' refuted only in module-isolation — its inputs are constrained by a parent "
+            "instantiation (not enough top); kept as a runtime check",
+            subject,
+            m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' refuted only under a possibly-unreachable register state — kept as a runtime check "
-             "(use --set compile.formal.mode=normal for a BMC check)",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' refuted only under a possibly-unreachable register state — kept as a runtime check "
+            "(use --set compile.formal.mode=normal for a BMC check)",
+            subject,
+            m)
         .emit();
   } else {
     livehd::diag::warn("pass.formal", code, "comptime")
@@ -171,11 +173,10 @@ void Pass_formal::setup() {
   Eprp_method m("pass.formal",
                 "Single-design formal property checks (assert / assume / Hotmux one-hotness) on the cvc5 prover",
                 &Pass_formal::work);
-  m.add_label_optional(
-      "mode",
-      "none|fast|normal — none skips; fast=induction (trusts combinational refutations, defers stateful ones); "
-      "normal=BMC-intent (also trusts stateful refutations)",
-      "normal");
+  m.add_label_optional("mode",
+                       "none|fast|normal — none skips; fast=induction (trusts combinational refutations, defers stateful ones); "
+                       "normal=BMC-intent (also trusts stateful refutations)",
+                       "normal");
   m.add_label_optional("on_refute",
                        "error|warn — a refutation at the top boundary fails the build (error, default) or is downgraded "
                        "to a warning (warn). A proven/passing property is always sound; only a 'fail' can be spurious.",
@@ -242,17 +243,17 @@ void Pass_formal::work(Eprp_var& var) {
         .emit();
     return;
   }
-  const bool downgrade_refute = (on_refute == "warn");
+  const bool             downgrade_refute = (on_refute == "warn");
   // An explicit --top names the committed design boundary, so that graph is always
   // treated as a root for the FAIL decision (even if a parent that happens to be
   // in the same compilation instantiates it).
-  const std::string_view designated_top = var.get("top", "");
+  const std::string_view designated_top   = var.get("top", "");
 
   formal::Prove_options opts;
-  const int budget_k = to_int(var.get("budget_k", "0"), 0);
-  const int cone_max = to_int(var.get("cone_max", "0"), 0);
-  opts.budget_k = budget_k > 0 ? budget_k : 256;
-  opts.cone_max = cone_max > 0 ? cone_max : 50000;
+  const int             budget_k = to_int(var.get("budget_k", "0"), 0);
+  const int             cone_max = to_int(var.get("cone_max", "0"), 0);
+  opts.budget_k                  = budget_k > 0 ? budget_k : 256;
+  opts.cone_max                  = cone_max > 0 ? cone_max : 50000;
 
   // mode=normal BMC-from-reset unroll depth (2f-formal): a TINY bound — the
   // single-frame base case plus enough free cycles that shallow reachable
@@ -276,7 +277,7 @@ void Pass_formal::work(Eprp_var& var) {
     if (g2 == nullptr) {
       continue;
     }
-    for (auto node : g2->forward_class()) {
+    for (auto node : g2->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) == Ntype_op::Sub) {
         if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
           instantiated_gids.insert(gid);
@@ -292,17 +293,17 @@ void Pass_formal::work(Eprp_var& var) {
     }
     // is_top: the graph is the design boundary — the explicit --top (by module
     // name, tolerating a "unit." prefix) or, absent that, a root no Sub instantiates.
-    std::string_view gname = g->get_name();
-    auto             dot   = gname.rfind('.');
-    std::string_view gmod  = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
-    const bool matches_top = !designated_top.empty() && (gname == designated_top || gmod == designated_top);
-    const bool is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
-    formal::Prover prover(g, opts);
+    std::string_view gname       = g->get_name();
+    auto             dot         = gname.rfind('.');
+    std::string_view gmod        = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
+    const bool       matches_top = !designated_top.empty() && (gname == designated_top || gmod == designated_top);
+    const bool       is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
+    formal::Prover   prover(g, opts);
 
     // Built-in obligation: every Hotmux selector must be one-hot-or-zero. Collect
     // first so attribute writes never perturb the forward_class walk.
     std::vector<hhds::Node_class> hotmuxes;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) == Ntype_op::Hotmux) {
         hotmuxes.push_back(node);
       }
@@ -330,7 +331,10 @@ void Pass_formal::work(Eprp_var& var) {
         // to optimize with).
         report_refuted("onehot-violated",
                        "Hotmux selector can have two or more bits set at once (overlapping `unique if`/`match`)",
-                       g->get_name(), "", "", out);
+                       g->get_name(),
+                       "",
+                       "",
+                       out);
         gu::set_runtime_check(node, gu::kFormalOnehot);
       } else {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
@@ -344,7 +348,7 @@ void Pass_formal::work(Eprp_var& var) {
     // (assert / assert_always / assume). Collect first so attr writes don't
     // perturb the forward_class walk.
     std::vector<hhds::Node_class> props;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -353,9 +357,9 @@ void Pass_formal::work(Eprp_var& var) {
         props.push_back(node);
       }
     }
-    const bool warn_assume = warn_def && truthy(var.get("warn_assume", "true"));
+    const bool warn_assume  = warn_def && truthy(var.get("warn_assume", "true"));
     const bool warn_vacuous = truthy(var.get("warn_vacuous", "true"));
-    const bool warn_assert = warn_def && truthy(var.get("warn_assert", "true"));
+    const bool warn_assert  = warn_def && truthy(var.get("warn_assert", "true"));
 
     // Pass 1: prove each assume INDEPENDENTLY (no hypotheses, so no circular
     // self-proof). Only PROVEN assumes become hypotheses for the asserts below
@@ -380,8 +384,12 @@ void Pass_formal::work(Eprp_var& var) {
         // continue; keep the runtime check and do NOT add it as a hypothesis (a
         // refuted assume must never optimize, or every assert/abc query built on
         // it is unsound).
-        report_refuted("assume-refuted", "assume is refuted (a concrete input makes it false)", g->get_name(),
-                       parts.loc, parts.msg, out);
+        report_refuted("assume-refuted",
+                       "assume is refuted (a concrete input makes it false)",
+                       g->get_name(),
+                       parts.loc,
+                       parts.msg,
+                       out);
         gu::set_runtime_check(node, gu::kFormalAssume);
       } else {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
@@ -442,12 +450,13 @@ void Pass_formal::work(Eprp_var& var) {
         return;
       }
       livehd::diag::warn("pass.formal", "formal-vacuous-guard", "comptime")
-          .msg("VACUOUS: {} in '{}'{}{} sits in an `if`/`match` arm whose guard can NEVER be true, so it is never "
-               "exercised — the branch is dead. Fix the guard condition or drop the branch.",
-               parts.kind,
-               g->get_name(),
-               parts.loc.empty() ? std::string{} : " at " + parts.loc,
-               parts.msg.empty() ? std::string{} : " \"" + parts.msg + "\"")
+          .msg(
+              "VACUOUS: {} in '{}'{}{} sits in an `if`/`match` arm whose guard can NEVER be true, so it is never "
+              "exercised — the branch is dead. Fix the guard condition or drop the branch.",
+              parts.kind,
+              g->get_name(),
+              parts.loc.empty() ? std::string{} : " at " + parts.loc,
+              parts.msg.empty() ? std::string{} : " \"" + parts.msg + "\"")
           .emit();
     };
 
@@ -470,10 +479,14 @@ void Pass_formal::work(Eprp_var& var) {
       auto     out  = prover.is_true(cond);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
-      } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top
-                 && (trust_stateful_refute || !out.stateful) && !downgrade_refute) {
-        report_refuted("assert-refuted", parts.kind + " is refuted (a concrete input makes it false)", g->get_name(),
-                       parts.loc, parts.msg, out);
+      } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
+                 && !downgrade_refute) {
+        report_refuted("assert-refuted",
+                       parts.kind + " is refuted (a concrete input makes it false)",
+                       g->get_name(),
+                       parts.loc,
+                       parts.msg,
+                       out);
         gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
         gu::set_runtime_check(node, code);
@@ -503,19 +516,18 @@ void Pass_formal::work(Eprp_var& var) {
       //       -> recover a free-state proof under the proven assumes with the
       //       single-frame Prover (never lose a pre-rebase elision), else keep + defer.
       livehd::lec::Lec_options po;
-      po.engine        = "bmc";  // single strategy, in-process (never fork in compile)
-      po.solver        = "cvc5";
-      po.bound         = bmc_bound;  // tiny BMC depth + the 1-induction step
-      po.reset_cycles  = 1;
-      po.phase         = "after_reset";
-      po.timeout       = 0;  // deterministic budget only
-      po.rlimit        = static_cast<int>(std::min<long long>(
-          static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
-      po.witness       = true;
-      po.partitions    = 1;      // no case-split forks
-      po.split         = "none";
-      po.state_pairing = false;
-      po.ignore_assumes = true;  // proven assumes recovered by the Prover fallback below
+      po.engine       = "bmc";  // single strategy, in-process (never fork in compile)
+      po.solver       = "cvc5";
+      po.bound        = bmc_bound;  // tiny BMC depth + the 1-induction step
+      po.reset_cycles = 1;
+      po.phase        = "after_reset";
+      po.timeout      = 0;  // deterministic budget only
+      po.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      po.witness = true;
+      po.partitions     = 1;  // no case-split forks
+      po.split          = "none";
+      po.state_pairing  = false;
+      po.ignore_assumes = true;                               // proven assumes recovered by the Prover fallback below
       po.reset          = std::string{var.get("reset", "")};  // authoritative reset spec (else auto-detect)
 
       auto pres = livehd::lec::prove_properties(g, po);
@@ -525,8 +537,8 @@ void Pass_formal::work(Eprp_var& var) {
       // opaque free boxes (not descended), so only g's own top-level fproperties
       // are emitted -> 1:1 by index. A size mismatch (unexpected hierarchy) leaves
       // the map unused and falls back to the pre-rebase Prover engine.
-      std::vector<hhds::Node_class> occ_nodes;
-      for (auto pn : g->forward_hier(true, false, nullptr)) {
+      std::vector<hhds::Occurrence_node> occ_nodes;
+      for (auto pn : g->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
         if (gu::type_op_of(pn) != Ntype_op::Sub) {
           continue;
         }
@@ -572,7 +584,7 @@ void Pass_formal::work(Eprp_var& var) {
           parts.msg     = pr.msg;
           uint32_t code = (pr.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
           if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
-            gu::set_proven(node, code);  // inductive -> holds forever -> elide
+            gu::set_proven(node.base_node(), code);  // inductive -> holds forever -> elide
           } else if (pr.verdict == livehd::lec::Verdict::Refuted && pr.refuted_at >= pres.reset_hold && pres.reset_detected
                      && is_top && !downgrade_refute) {
             // A reset prologue actually pinned the initial state, so the BMC CEX
@@ -580,11 +592,16 @@ void Pass_formal::work(Eprp_var& var) {
             // detected reset (pres.reset_detected == false) the flops start FREE,
             // so the witness may be an unreachable initial state: fall through to
             // the deferred path rather than fail a possibly-correct build.
-            report_refuted_reachable("assert-refuted", pr.kind + " is refuted (a reachable state makes it false)",
-                                     g->get_name(), pr.loc, pr.msg, pr.witness, pr.refuted_at);
-            gu::set_runtime_check(node, code);
+            report_refuted_reachable("assert-refuted",
+                                     pr.kind + " is refuted (a reachable state makes it false)",
+                                     g->get_name(),
+                                     pr.loc,
+                                     pr.msg,
+                                     pr.witness,
+                                     pr.refuted_at);
+            gu::set_runtime_check(node.base_node(), code);
           } else {
-            prove_assert_prover(node, parts, /*allow_refute_error=*/false);
+            prove_assert_prover(node.base_node(), parts, /*allow_refute_error=*/false);
           }
         }
       }

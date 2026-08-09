@@ -12,7 +12,6 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
-#include "replica_desc.hpp"
 
 namespace livehd::graph_util {
 
@@ -39,14 +38,14 @@ private:
   absl::flat_hash_map<uint32_t, std::string>              out_pid2name_;
   bool                                                    failed_ = false;
 
-  void                            create_nodes();
-  void                            wire_edges();
-  void                            rewire_instance_outputs();
-  [[nodiscard]] hhds::Pin_class   resolve_driver(const hhds::Pin_class& d);
-  [[nodiscard]] hhds::Pin_class   resolve_output_of(std::string_view oname);
-  [[nodiscard]] hhds::Pin_class   driver_feeding_inst_port(uint32_t pid);
-  void                            carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo);
-  void                            carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
+  void                          create_nodes();
+  void                          wire_edges();
+  void                          rewire_instance_outputs();
+  [[nodiscard]] hhds::Pin_class resolve_driver(const hhds::Pin_class& d);
+  [[nodiscard]] hhds::Pin_class resolve_output_of(std::string_view oname);
+  [[nodiscard]] hhds::Pin_class driver_feeding_inst_port(uint32_t pid);
+  void                          carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo);
+  void                          carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
@@ -75,13 +74,6 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
   }
-  // A replicated Sub NESTED in the body being inlined must keep its descriptor:
-  // the clone is a fresh node, and dropping the attribute demotes `count`
-  // occurrences to one ordinary instance that no later expansion can recover.
-  // (The instance being inlined is refused outright — see run().)
-  if (auto a = orig.attr(livehd::attrs::replica_desc); a.has()) {
-    neo.attr(livehd::attrs::replica_desc).set(std::string{a.get()});
-  }
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
@@ -100,7 +92,7 @@ void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pi
 }
 
 void Sub_inliner::create_nodes() {
-  for (auto n : child_->forward_class()) {
+  for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
     if (n.is_invalid() || is_builtin_node(n) || node_map_.contains(n)) {
       continue;
     }
@@ -114,7 +106,11 @@ void Sub_inliner::create_nodes() {
       // the target def already lives in the same library the parent resolves
       // through, so the gid binds without cloning anything.
       if (auto io = n.get_subnode_io()) {
-        neo.set_subnode(io);
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(io, *loop);
+        } else {
+          neo.set_subnode(io);
+        }
       }
     }
     node_map_[n] = neo;
@@ -191,7 +187,7 @@ hhds::Pin_class Sub_inliner::resolve_output_of(std::string_view oname) {
 }
 
 void Sub_inliner::wire_edges() {
-  for (auto n : child_->forward_class()) {
+  for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }
@@ -236,16 +232,16 @@ void Sub_inliner::rewire_instance_outputs() {
 }
 
 bool Sub_inliner::run() {
-  // A replicated Sub denotes `count` occurrences (graph/replica_desc.hpp).
+  // A loop Sub denotes `count` occurrences in native HHDS structure.
   // Inlining it would splice ONE body copy and delete the node, silently
   // dropping count-1 replicas. Refuse — WITH a diagnostic: every caller treats
   // a false return as a hard failure whose message came from here (pass.color
   // bails out of coloring entirely), so a silent false aborts the run with no
   // output at all.
-  if (is_replicated_sub(inst_)) {
+  if (inst_.is_loop_subnode()) {
     livehd::diag::err(from_pass_, "inline-replicated-sub", "unsupported")
         .msg("inline: instance '{}' is a replicated Sub (it stands for several occurrences)", default_instance_name(inst_))
-        .hint("expand it first — livehd::graph_util::expand_replicated_subs (graph/replica_expand.hpp)")
+        .hint("consume occurrences() directly, or materialize into a backend-private output graph")
         .emit();
     return false;
   }

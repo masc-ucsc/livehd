@@ -40,10 +40,10 @@ using livehd::graph_util::is_type_const;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_sign;
-using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::set_type_const_serialized;
 using livehd::graph_util::set_type_op;
 using livehd::graph_util::set_unsign;
+using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::type_op_of;
 using livehd::graph_util::wire_name;
 
@@ -104,7 +104,7 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // translation should have inserted is missing, so the unsigned attribute lies
   // about the sign/upper bits.
   absl::flat_hash_map<hhds::Class_index, bool> declared_unsigned;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
       continue;
     }
@@ -122,7 +122,7 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   bw_pass(g.get());
 
 #ifndef NDEBUG
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
       continue;
     }
@@ -526,10 +526,9 @@ void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec&
     const auto n_lo  = n_bw.get_min();
     const auto n_hi  = n_bw.get_max();
 
-    const Dlop corners[4]
-        = {*a_max.sra_op(n_lo), *a_max.sra_op(n_hi), *a_min.sra_op(n_lo), *a_min.sra_op(n_hi)};
-    Dlop max_val = corners[0];
-    Dlop min_val = corners[0];
+    const Dlop corners[4] = {*a_max.sra_op(n_lo), *a_max.sra_op(n_hi), *a_min.sra_op(n_lo), *a_min.sra_op(n_hi)};
+    Dlop       max_val    = corners[0];
+    Dlop       min_val    = corners[0];
     for (int i = 1; i < 4; ++i) {
       if (corners[i].gt_op(max_val)->is_known_true()) {
         max_val = corners[i];
@@ -1613,7 +1612,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     // Forward-iterate nodes, collect work.
     pending_added_nodes.clear();
     std::vector<hhds::Node_class> to_visit;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       to_visit.push_back(node);
     }
     // Also include any deferred-added nodes from prior iterations.
@@ -1756,7 +1755,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
   if (!not_finished && gio) {
     // Delete leftover AttrSet nodes.
     std::vector<hhds::Node_class> attrs;
-    for (auto node : g->fast_class()) {
+    for (auto node : g->body().nodes()) {
       if (type_op_of(node) == Ntype_op::AttrSet) {
         attrs.push_back(node);
       }
@@ -1780,7 +1779,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
 // carry their width elsewhere).
 void Bitwidth::report_unbounded(hhds::Graph* g) {
   std::vector<std::string> unbounded;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
       continue;
@@ -1825,7 +1824,7 @@ void Bitwidth::report_unbounded(hhds::Graph* g) {
 }
 
 void Bitwidth::dump(hhds::Graph* g) {
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     auto dpin = node.create_driver_pin(0);
     auto it   = bwmap.find(dpin.get_class_index());
     if (it == bwmap.end()) {

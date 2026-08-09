@@ -51,7 +51,8 @@ protected:
 
   std::string qor_path;    // timing JSON sidecar (2opt-freq D); empty => none
   std::string top_filter;  // analyze only the def with this name; empty => the single def
-  std::string hier_setting_;  // `hier` label: true (default, structural flatten) | false (one module per run) | stitch (legacy walk)
+  std::string
+      hier_setting_;  // `hier` label: true (default, structural flatten) | false (one module per run) | stitch (legacy walk)
   std::string report_module_;  // display name for reports; empty => the analyzed graph's own name
                                // (set when hier=true times a scratch flattened def)
 
@@ -78,12 +79,12 @@ protected:
   // Leaf timing nodes of `g` (gates, flops, memories, tracker glue): flat mode
   // -> g's own fast_class; whole-design mode -> forward_hier snapshot descending
   // design modules and yielding Liberty-cell leaves (opaque_gids_).
-  std::vector<hhds::Node_class> leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const;
+  std::vector<hhds::Occurrence_node> leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const;
 
-  std::string get_driver_net_name(const hhds::Pin_class& dpin) const;
+  std::string get_driver_net_name(const hhds::Occurrence_pin& dpin) const;
   // Net a DRIVER pin drives, named from the traversal `owner` node (whose hier
   // chain is intact) rather than the pin's master (out_pins() pins drop it).
-  std::string driver_net_of(const hhds::Node_class& owner, const hhds::Pin_class& dpin) const;
+  std::string driver_net_of(const hhds::Occurrence_node& owner, const hhds::Occurrence_pin& dpin) const;
   void        backpath_set_color(hhds::Node_class node, int color);
   void        write_qor() const;  // write the accumulated qor_blocks_ to qor_path
 

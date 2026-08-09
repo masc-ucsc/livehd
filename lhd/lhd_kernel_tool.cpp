@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Unified LNAST/LGraph inspection tools: cat, grep, diff, and tree.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -17,6 +15,7 @@
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
@@ -97,7 +96,7 @@ Tool_filter parse_tool_filter(const std::string& tok) {
   // `x.prp:5`) — is a bare match-everything term: a substring tested against
   // every column and the node/pin identity, so `lhd tool grep get_mask lg:dir`
   // lights up the get_mask cells exactly as `cat` shows them.
-  auto sep = tok.find_first_of(":=<>~");
+  auto        sep = tok.find_first_of(":=<>~");
   if (sep == std::string::npos || !tool_is_known_field(std::string_view{tok}.substr(0, sep))) {
     f.kind = Tool_filter::Kind::any_sub;
     f.sval = tok;
@@ -195,19 +194,19 @@ bool tool_match(const Tool_record& r, const Tool_filter& f) {
   }
   switch (f.kind) {
     case Tool_filter::Kind::sub: return v->find(f.sval) != std::string::npos;
-    case Tool_filter::Kind::re: return std::regex_search(*v, f.re);
-    case Tool_filter::Kind::eq: return *v == f.sval;
-    default: break;
+    case Tool_filter::Kind::re : return std::regex_search(*v, f.re);
+    case Tool_filter::Kind::eq : return *v == f.sval;
+    default                    : break;
   }
   long n = tool_parse_long(*v, f.field);
   switch (f.kind) {
-    case Tool_filter::Kind::num_eq: return n == f.n1;
-    case Tool_filter::Kind::num_gt: return n > f.n1;
-    case Tool_filter::Kind::num_lt: return n < f.n1;
-    case Tool_filter::Kind::num_ge: return n >= f.n1;
-    case Tool_filter::Kind::num_le: return n <= f.n1;
+    case Tool_filter::Kind::num_eq   : return n == f.n1;
+    case Tool_filter::Kind::num_gt   : return n > f.n1;
+    case Tool_filter::Kind::num_lt   : return n < f.n1;
+    case Tool_filter::Kind::num_ge   : return n >= f.n1;
+    case Tool_filter::Kind::num_le   : return n <= f.n1;
     case Tool_filter::Kind::num_range: return n >= f.n1 && n <= f.n2;
-    default: return false;
+    default                          : return false;
   }
 }
 
@@ -323,7 +322,7 @@ void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& o
 }
 
 void tool_flat_records(hhds::Graph* g, Tool_target tgt, std::vector<Tool_record>& recs) {
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (tgt == Tool_target::node || tgt == Tool_target::all) {
       recs.push_back(tool_node_record(g, node));
     }
@@ -356,9 +355,9 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
   }
   switch (tgt) {
     case Tool_target::node: return {"color", "match", "src"};
-    case Tool_target::pin: return {"bits", "signed", "match"};
+    case Tool_target::pin : return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default: return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
+    default               : return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
   }
 }
 
@@ -384,9 +383,9 @@ std::string tool_render_pretty(const Tool_record& r, const std::vector<std::stri
 }
 
 std::string tool_render_jsonl(const Tool_record& r, std::string_view mod) {
-  std::string out = "{";
-  out += std::format("\"t\":\"{}\"", r.type == 'n' ? "node" : (r.type == 'p' ? "pin" : "edge"));
-  out += std::format(",\"mod\":\"{}\"", json_escape_min(mod));
+  std::string out  = "{";
+  out             += std::format("\"t\":\"{}\"", r.type == 'n' ? "node" : (r.type == 'p' ? "pin" : "edge"));
+  out             += std::format(",\"mod\":\"{}\"", json_escape_min(mod));
   for (const auto& [k, v] : r.cols) {
     if (v == "nil") {
       out += std::format(",\"{}\":null", k);
@@ -415,7 +414,7 @@ std::vector<std::shared_ptr<hhds::Graph>> tool_select_graphs(const std::string& 
   // whole library via load_lg_into_var would instead materialize every graph — on
   // a large design (XiangShan: 1630 graphs, top needs ~79) that is the difference
   // between reading a handful of bodies and reading all of them.
-  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto&                                     lib = livehd::Hhds_graph_library::instance(dir);
   std::vector<std::shared_ptr<hhds::Graph>> sel;
   if (!opts.top.empty()) {
     auto gio = lib.find_io(opts.top);
@@ -466,7 +465,7 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
     --budget;
     return true;
   };
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     auto nr = tool_node_record(g, node);
     if (!filters.empty() && !tool_match_all(nr, filters)) {
       continue;
@@ -508,9 +507,9 @@ void tool_cat_lg(Options& opts, const std::vector<std::string>& lg_dirs, const s
   if (lg_dirs.size() > 1) {
     throw Lhd_error{"usage", "tool cat takes one lg: input (use tool grep for multi-library search)", ""};
   }
-  Tool_target tgt   = parse_tool_target(opts.tool_target);
-  auto        dcols = tool_display_cols(opts, tgt);
-  bool        jsonl = opts.diag_fmt == Diag_fmt::jsonl;
+  Tool_target tgt    = parse_tool_target(opts.tool_target);
+  auto        dcols  = tool_display_cols(opts, tgt);
+  bool        jsonl  = opts.diag_fmt == Diag_fmt::jsonl;
   auto        graphs = tool_select_graphs(lg_dirs.front(), opts);
   if (graphs.empty()) {
     throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
@@ -559,9 +558,9 @@ void tool_grep_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (filters.empty()) {
     throw Lhd_error{"usage", "tool grep requires at least one filter (e.g. color:nil, name:Mult, bits:>8)", ""};
   }
-  Tool_target tgt    = parse_tool_target(opts.tool_target);
-  auto        dcols  = tool_display_cols(opts, tgt);
-  bool        jsonl  = opts.diag_fmt == Diag_fmt::jsonl;
+  Tool_target tgt   = parse_tool_target(opts.tool_target);
+  auto        dcols = tool_display_cols(opts, tgt);
+  bool        jsonl = opts.diag_fmt == Diag_fmt::jsonl;
   std::string out;
   size_t      budget    = tool_budget(opts);
   bool        truncated = false;
@@ -635,7 +634,7 @@ struct Match_node {
 std::vector<Match_node> tool_match_nodes(hhds::Graph* g) {
   namespace gu = livehd::graph_util;
   std::vector<Match_node> v;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     std::string src  = tool_node_src(g, node);
     std::string line = std::format("{:<10}  {}", Ntype::get_name(gu::type_op_of(node)), gu::debug_name(node));
     if (src != "nil") {
@@ -672,7 +671,7 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
   if (!saw_match) {
     std::string hint
         = "-- no `match` attribute found; run `lhd pass semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
-        "then `lhd tool diff … --match`\n";
+          "then `lhd tool diff … --match`\n";
     std::fwrite(hint.data(), 1, hint.size(), stdout);
     std::fflush(stdout);
     return;
@@ -680,8 +679,8 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
 
   std::string out;
   for (size_t i = 0; i < pairs; ++i) {
-    hhds::Graph* a = ga[i].get();
-    hhds::Graph* b = gb[i].get();
+    hhds::Graph* a  = ga[i].get();
+    hhds::Graph* b  = gb[i].get();
     auto         ra = tool_match_nodes(a);
     auto         rb = tool_match_nodes(b);
 
@@ -721,11 +720,11 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
         out += std::format("  + {}\n", r.line);
       }
     }
-    uint32_t ta = static_cast<uint32_t>(ra.size());
-    uint32_t tb = static_cast<uint32_t>(rb.size());
-    uint32_t tot = ta + tb;
-    double   sim = tot == 0 ? 1.0 : static_cast<double>(ma + mb) / static_cast<double>(tot);
-    out += std::format("  {}/{} ref matched, {}/{} impl matched, similarity {:.3f}\n", ma, ta, mb, tb, sim);
+    uint32_t ta   = static_cast<uint32_t>(ra.size());
+    uint32_t tb   = static_cast<uint32_t>(rb.size());
+    uint32_t tot  = ta + tb;
+    double   sim  = tot == 0 ? 1.0 : static_cast<double>(ma + mb) / static_cast<double>(tot);
+    out          += std::format("  {}/{} ref matched, {}/{} impl matched, similarity {:.3f}\n", ma, ta, mb, tb, sim);
   }
   std::fwrite(out.data(), 1, out.size(), stdout);
   std::fflush(stdout);
@@ -748,8 +747,8 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (!opts.top.empty() && tool_select_graphs(lg_dirs[0], opts).empty() && tool_select_graphs(lg_dirs[1], opts).empty()) {
     throw Lhd_error{"config", std::format("lg: inputs hold no graphs matching --top {}", opts.top), "check --top"};
   }
-  auto a = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
-  auto b = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
+  auto        a = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
+  auto        b = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
   std::string out;
   if (a == b) {
     out += "identical\n";
@@ -767,7 +766,7 @@ size_t tool_node_count(hhds::Graph* g) {
   // (edge-adjacency) sets to be loaded. fast_class touches only node_table, so a
   // pure node/instance tree never pays to read edges it will not print.
   size_t n = 0;
-  for ([[maybe_unused]] auto node : g->fast_class()) {
+  for ([[maybe_unused]] auto node : g->body().nodes()) {
     ++n;
   }
   return n;
@@ -816,7 +815,7 @@ void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds,
   if (kinds.empty()) {
     return;
   }
-  for (auto node : g->forward_class()) {  // topological => deterministic order
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {  // topological => deterministic order
     auto op = gu::type_op_of(node);
     if (op == Ntype_op::Sub || !tool_tree_kind_match(op, kinds)) {
       continue;  // Sub instances are the call tree itself (printed elsewhere)
@@ -825,12 +824,12 @@ void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds,
       truncated = true;
       return;
     }
-    auto bits = tool_tree_node_bits(node);
-    out += std::format("{}{}  : {}{}\n",
-                       std::string(static_cast<size_t>(indent), ' '),
-                       gu::default_instance_name(node),
-                       Ntype::get_name(op),
-                       bits != 0 ? std::format("  ({}b)", bits) : std::string{});
+    auto bits  = tool_tree_node_bits(node);
+    out       += std::format("{}{}  : {}{}\n",
+                             std::string(static_cast<size_t>(indent), ' '),
+                             gu::default_instance_name(node),
+                             Ntype::get_name(op),
+                             bits != 0 ? std::format("  ({}b)", bits) : std::string{});
     --budget;
   }
 }
@@ -841,7 +840,7 @@ void tool_tree_children(hhds::Graph* g, const std::vector<std::string>& kinds, i
   if (depth >= maxdepth) {
     return;
   }
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node.get_subnode_gid() == hhds::Gid_invalid) {
       continue;
     }
@@ -880,7 +879,7 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   if (lg_dirs.size() != 1) {
     throw Lhd_error{"usage", "tool tree takes one lg: input", ""};
   }
-  int maxdepth = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
+  int  maxdepth = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
   auto graphs   = tool_select_graphs(lg_dirs.front(), opts);
   if (graphs.empty()) {
     throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
@@ -889,8 +888,8 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   size_t      budget    = tool_budget(opts);
   bool        truncated = false;
   for (const auto& gp : graphs) {
-    hhds::Graph* g = gp.get();
-    out += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
+    hhds::Graph* g  = gp.get();
+    out            += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
     tool_tree_kind_nodes(g, opts.tool_kinds, 2, out, budget, truncated);  // top module's own regs/mems
     if (truncated) {
       break;
@@ -922,8 +921,8 @@ struct Ln_tree_row {
 
 bool tool_tree_ln_skeleton(Lnast_ntype::Lnast_ntype_int t) {
   using L = Lnast_ntype;
-  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t)
-         || L::is_tick(t) || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
+  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t) || L::is_tick(t)
+         || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
 }
 
 // `--target kind:<X>` for the ln tree: X names an Lnast verbal (store, declare,
@@ -1019,7 +1018,7 @@ void tool_tree_ln_print(const Ln_tree_row& row, const std::string& prefix, bool 
 }
 
 void tool_tree_ln(Options& opts, Result& res, const std::vector<std::string>& ln_tokens) {
-  auto in = classify_ln_inputs(ln_tokens, "tool tree");
+  auto in    = classify_ln_inputs(ln_tokens, "tool tree");
   auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
   if (units.empty()) {
     throw Lhd_error{"config", "ln: input holds no matching units", "check --top"};

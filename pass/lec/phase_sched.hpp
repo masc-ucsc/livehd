@@ -61,24 +61,24 @@ inline constexpr int kMicrosteps = 4;
 // `steps` / `obs_a` / `obs_b`.
 
 struct Phase_endpoint {
-  Phase phase = Phase::Rise;
+  Phase       phase            = Phase::Rise;
   // A LATCH whose window is controlled by the root clock. Its gate is TIMING,
   // not data: the encoder must ABSORB it (commit unconditionally in the close
   // microstep, din = the transparent arm of tolg's hold mux) rather than AND it
   // into the enable. AND-ing it evaluates the clock as a free data input once
   // per microstep, which is the measured `always @(posedge 'hx)` failure M8 hit.
-  bool clock_role_latch = false;
+  bool        clock_role_latch = false;
   // An ALWAYS-TRANSPARENT latch: no enable pin at all (tolg wires none when the
   // reg is written on every path) or a constant-true one. Its window never
   // closes, so it stores nothing -- it is a COMBINATIONAL BUFFER, and cgen
   // already emits it as `always_comb` with a blocking assign. Encoding it as a
   // flop-with-enable would insert a full period of delay that the hardware does
   // not have.
-  bool transparent = false;
+  bool        transparent      = false;
   // Microstep the endpoint's clock guard is SAMPLED in (parity of the CELL, not
   // of the consumer): an ordinary gate samples before the root rise, an inverted
   // one before the root fall. One sample serves every consumer in the period.
-  Phase guard_sample = Phase::Close_low;
+  Phase       guard_sample     = Phase::Close_low;
   // Key of the sampled-guard state cut, shared by every consumer of the same
   // cell. Empty when the endpoint's clock is ungated. The cut is always WRITTEN
   // (at `guard_sample`) before it is READ (at the consumer's microstep) inside
@@ -90,7 +90,7 @@ struct Phase_endpoint {
 struct Phase_plan {
   // A NAMED REFUSAL (`ok == false`) decides nothing: formal must fail closed,
   // regardless of formal.strict, exactly like an encoder refusal.
-  bool        ok    = true;
+  bool        ok = true;
   std::string error;
 
   // The 4-microstep schedule is REQUIRED. False means every endpoint commits at
@@ -103,24 +103,24 @@ struct Phase_plan {
   // guard_key -> the enable cone(s) to AND. A CHAIN of gates contributes one
   // entry per cell (`gate(gate(clk,en0),en1)` -> {en0, en1}), canonicalized to
   // ONE sampled guard on the root clock.
-  absl::flat_hash_map<std::string, std::vector<hhds::Pin_class>> guard_cones;
+  absl::flat_hash_map<std::string, std::vector<hhds::Occurrence_pin>> guard_cones;
 
   // Counts, for diagnostics and the schedule SIGNATURE that rides the verdict
   // cache key (a cached verdict computed under a different schedule is not a
   // verdict for this one).
-  int         n_flop_rise  = 0;
-  int         n_flop_fall  = 0;
-  int         n_latch_low  = 0;  // clock-role, closes before the rise
-  int         n_latch_high = 0;  // clock-role, closes before the fall
-  int         n_latch_data = 0;  // data-gated: ordinary tick semantics, rise batch
+  int         n_flop_rise         = 0;
+  int         n_flop_fall         = 0;
+  int         n_latch_low         = 0;  // clock-role, closes before the rise
+  int         n_latch_high        = 0;  // clock-role, closes before the fall
+  int         n_latch_data        = 0;  // data-gated: ordinary tick semantics, rise batch
   int         n_latch_transparent = 0;  // always-open: a combinational buffer, not state
-  int         n_mem_rise   = 0;
-  int         n_mem_fall   = 0;
-  int         n_guards     = 0;  // distinct sampled clock guards
-  int         n_guard_low  = 0;  // ...of those, sampled before the RISE (ordinary gate)
-  int         n_guard_high = 0;  // ...sampled before the FALL (the active-low gate flavour)
-  int         n_roots      = 0;  // distinct clock roots any endpoint commits on
-  std::string root_clock;        // the resolved root clock net name ("" = implicit)
+  int         n_mem_rise          = 0;
+  int         n_mem_fall          = 0;
+  int         n_guards            = 0;  // distinct sampled clock guards
+  int         n_guard_low         = 0;  // ...of those, sampled before the RISE (ordinary gate)
+  int         n_guard_high        = 0;  // ...sampled before the FALL (the active-low gate flavour)
+  int         n_roots             = 0;  // distinct clock roots any endpoint commits on
+  std::string root_clock;               // the resolved root clock net name ("" = implicit)
 
   // The encoder needs the plan (latch cells it otherwise refuses, or a gate
   // chain it otherwise cannot canonicalize) even when there is no SUB-PERIOD

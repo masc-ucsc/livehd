@@ -67,8 +67,8 @@ writes, it is one cycle behind. Put such reads below the `step`.
   nodes the design has, counted on the LGRAPH (`lhd tool grep kind=sub lg:`)
   rather than on emitted Verilog or C++, whose de-collision spellings
   (`_cgen2` / `__i2`) differ. `*` is the total, and a name ending in `*` is a
-  prefix glob — `stage_li*=6` says "six replicas of one source call site"
-  without pinning six literal `_li<ordinal>` names. This is what makes a
+  prefix glob — `stage__li*=6` says "six replicas of one source call site"
+  without pinning six literal `__li<ordinal>` names. This is what makes a
   "the loop stayed rolled" claim testable: without it a silent fall back to
   unrolling still passes every value assertion.
 

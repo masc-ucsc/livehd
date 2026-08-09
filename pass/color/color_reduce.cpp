@@ -55,8 +55,8 @@ uint64_t           hstr(std::string_view s) {
 }
 
 struct Sig {
-  uint64_t a = 0, b = 0;
-  friend bool operator==(const Sig& x, const Sig& y) = default;
+  uint64_t    a = 0, b = 0;
+  friend bool operator==(const Sig& x, const Sig& y)  = default;
   friend auto operator<=>(const Sig& x, const Sig& y) = default;
 };
 constexpr uint64_t kLaneB = 0x9ae16a3b2f90404fULL;
@@ -96,11 +96,11 @@ Sig fold_operands(Sig base, absl::flat_hash_map<int, std::vector<Sig>>& by_port)
 // it changes what cgen emits for the pin, so two cones differing only in it are
 // NOT the same pattern.
 struct Pin_shape {
-  uint32_t pid  = 0;
-  int32_t  bits = 0;
-  bool     sign = false;
-  int64_t  off  = 0;
-  friend bool operator==(const Pin_shape& x, const Pin_shape& y) = default;
+  uint32_t    pid                                                 = 0;
+  int32_t     bits                                                = 0;
+  bool        sign                                                = false;
+  int64_t     off                                                 = 0;
+  friend bool operator==(const Pin_shape& x, const Pin_shape& y)  = default;
   friend auto operator<=>(const Pin_shape& x, const Pin_shape& y) = default;
 };
 
@@ -116,25 +116,26 @@ Pin_shape shape_of(const Pin& p) {
 }
 
 Sig fold_shape(Sig h, const Pin_shape& s) {
-  h = sig_u64(h, (static_cast<uint64_t>(s.pid) << 33U) | (static_cast<uint64_t>(static_cast<uint32_t>(s.bits)) << 1U)
-                     | static_cast<uint64_t>(s.sign));
+  h = sig_u64(h,
+              (static_cast<uint64_t>(s.pid) << 33U) | (static_cast<uint64_t>(static_cast<uint32_t>(s.bits)) << 1U)
+                  | static_cast<uint64_t>(s.sign));
   return sig_u64(h, static_cast<uint64_t>(s.off));
 }
 
 struct Cone {
-  hhds::Graph* g = nullptr;
-  Node         root;
+  hhds::Graph*                   g = nullptr;
+  Node                           root;
   // Members in forward_class (topological) order; the root is the last member.
-  std::vector<Node> members;
+  std::vector<Node>              members;
   // Distinct non-const external driver pins, in deterministic first-use order.
-  std::vector<Pin> leaves;
-  std::vector<Sig> leaf_tok;  // final WL token per leaf (parallel to `leaves`)
+  std::vector<Pin>               leaves;
+  std::vector<Sig>               leaf_tok;  // final WL token per leaf (parallel to `leaves`)
   // Final per-member signatures (the verify walk's pairing key).
   absl::flat_hash_map<Node, Sig> sig;
   // The root's driven pins (deduped by pid, ascending) -- the pattern outputs.
-  std::vector<Pin_shape> out_ports;
-  Sig                    digest{};
-  bool                   valid = false;
+  std::vector<Pin_shape>         out_ports;
+  Sig                            digest{};
+  bool                           valid = false;
 };
 
 // A node may join a shared body only if it is a pure combinational PRIMITIVE
@@ -369,7 +370,7 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
   // forward_class position for every eligible node (also the membership set).
   absl::flat_hash_map<Node, uint32_t> pos;
   std::vector<Node>                   order;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (is_eligible(n)) {
       pos.emplace(n, static_cast<uint32_t>(order.size()));
       order.push_back(n);
@@ -488,14 +489,14 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
 
 // Operand of one member, classified for pairing.
 struct Opnd {
-  int         kind = 0;  // 0 = const, 1 = leaf, 2 = member
-  Sig         key{};     // pairing class: const shape token / leaf token / member sig
-  std::string cval;      // kind 0: serialized value (exact compare + tie order)
+  int         kind = 0;      // 0 = const, 1 = leaf, 2 = member
+  Sig         key{};         // pairing class: const shape token / leaf token / member sig
+  std::string cval;          // kind 0: serialized value (exact compare + tie order)
   bool        cunk = false;  // kind 0: value carries unknown (x) bits
-  Pin         pin;       // any kind: the driver pin
-  Node        node;      // kind 2: the member
-  Pin_shape   shape{};   // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
-  uint64_t    tie = 0;   // deterministic tie-break inside equal keys (nid-based)
+  Pin         pin;           // any kind: the driver pin
+  Node        node;          // kind 2: the member
+  Pin_shape   shape{};       // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
+  uint64_t    tie = 0;       // deterministic tie-break inside equal keys (nid-based)
 };
 
 bool opnd_less(const Opnd& x, const Opnd& y) {
@@ -565,7 +566,7 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       o.shape     = shape_of(d);
       o.shape.pid = 0;  // a leaf's source pid is not part of the pattern
       o.tie       = (static_cast<uint64_t>(d.get_master_node().get_debug_nid()) << 16U)
-            ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
+                    ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
     }
     by_port[static_cast<int>(e.sink.get_port_id())].push_back(std::move(o));
   }
@@ -671,8 +672,8 @@ Match match_cones(const Cone& A, const Cone& B, const Slot_index& slot_ix, size_
       return m;
     }
     {
-      auto  la = na.attr(livehd::attrs::lut);
-      auto  lb = nb.attr(livehd::attrs::lut);
+      auto la = na.attr(livehd::attrs::lut);
+      auto lb = nb.attr(livehd::attrs::lut);
       if (la.has() != lb.has() || (la.has() && std::string_view{la.get()} != std::string_view{lb.get()})) {
         return m;
       }
@@ -799,8 +800,7 @@ void carry_driver_attrs(const Pin& orig, const Pin& neo) {
 // Build the shared pattern def from the representative cone. Returns the
 // GraphIO, or nullptr after a fatal diag.
 std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const std::string& name, const Cone& rep,
-                                                 const Port_plan& plan, const std::vector<Const_slot>& slots,
-                                                 Reduce_stats& st) {
+                                                 const Port_plan& plan, const std::vector<Const_slot>& slots, Reduce_stats& st) {
   auto gio = lib->create_io(name);
 
   hhds::Port_id pid = 1;
@@ -953,9 +953,8 @@ Pin follow(const Fwd& fwd, Pin p) {
 
 // Replace one occurrence with an instance of the pattern def. `match` is
 // nullptr for the representative (identity correspondence).
-void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_plan& plan,
-            const std::vector<Const_slot>& slots, const std::shared_ptr<hhds::GraphIO>& gio, Fwd& fwd,
-            Reduce_stats& st) {
+void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_plan& plan, const std::vector<Const_slot>& slots,
+            const std::shared_ptr<hhds::GraphIO>& gio, Fwd& fwd, Reduce_stats& st) {
   auto* g = occ.g;
 
   // Snapshot the root's readers (and its driver pins) before any mutation:
@@ -1011,9 +1010,8 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
   // Outputs: rewire every reader of the old root to the instance, carrying the
   // occurrence's own wire name/shape so downstream naming does not shift.
   for (size_t j = 0; j < rep.out_ports.size(); ++j) {
-    const auto pid = rep.out_ports[j].pid;
-    auto       dp =
-        sub.create_driver_pin(static_cast<hhds::Port_id>(plan.leaf_rank.size() + plan.const_ports.size() + 1 + j));
+    const auto pid   = rep.out_ports[j].pid;
+    auto       dp    = sub.create_driver_pin(static_cast<hhds::Port_id>(plan.leaf_rank.size() + plan.const_ports.size() + 1 + j));
     bool       first = true;
     for (const auto& rd : readers) {
       if (rd.pid != pid) {
@@ -1102,10 +1100,10 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
 
   // -------- verify + extract --------
   struct Job {
-    std::vector<Cone>       occs;     // [0] = representative
-    std::vector<Match>      matches;  // per non-rep occurrence
-    std::vector<Const_slot> slots;    // representative const slots, canonical order
-    std::vector<bool>       promoted; // per slot: values diverge -> input port
+    std::vector<Cone>       occs;        // [0] = representative
+    std::vector<Match>      matches;     // per non-rep occurrence
+    std::vector<Const_slot> slots;       // representative const slots, canonical order
+    std::vector<bool>       promoted;    // per slot: values diverge -> input port
     Sig                     identity{};  // structural digest + slot decisions/values
   };
   std::vector<Job> jobs;
@@ -1124,8 +1122,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     // leaves+outs+2 lines (promoted consts only add). Not enough per-site win
     // => not worth a shared module. Re-checked after the const decision below.
     if (opts.min_win != 0
-        && est_verilog_lines(occs.front())
-               < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
+        && est_verilog_lines(occs.front()) < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
       continue;
     }
@@ -1165,8 +1162,8 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     // The pattern's identity refines the value-blind digest with the slot
     // decisions and the internal values, so the content-addressed name still
     // uniquely determines body AND interface.
-    Sig id = sig_comb(sig_seed(0x9a77e51d), rep.digest);
-    id     = sig_u64(id, job.slots.size());
+    Sig    id         = sig_comb(sig_seed(0x9a77e51d), rep.digest);
+    id                = sig_u64(id, job.slots.size());
     for (size_t s = 0; s < job.slots.size(); ++s) {
       if (job.promoted[s]) {
         id = sig_u64(id, 1);
@@ -1177,8 +1174,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     }
     job.identity = id;
 
-    if (opts.min_win != 0
-        && est_verilog_lines(rep) < rep.leaves.size() + n_promoted + rep.out_ports.size() + 2 + opts.min_win) {
+    if (opts.min_win != 0 && est_verilog_lines(rep) < rep.leaves.size() + n_promoted + rep.out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
       continue;
     }

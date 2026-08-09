@@ -853,7 +853,7 @@ class PrpRunner:
     def _expect_found(got, key):
         """How many instances `key` matches. A trailing `*` is a prefix glob.
 
-        A loop's replicas are named `<base>_li<ordinal>`, so `rca_li*=8` says
+        A loop's replicas are named `<base>__li<ordinal>`, so `rca__li*=8` says
         "eight replicas of one source call site" without pinning eight literal
         names — which is the property under test, not the spelling of each one.
         `*` alone stays the whole-design total.
@@ -867,7 +867,7 @@ class PrpRunner:
 
     @staticmethod
     def _parse_expect_instances(spec):
-        """`:expect_instances: lane=1 rca_li*=8 *=2` -> ({name: count}, err).
+        """`:expect_instances: lane=1 rca__li*=8 *=2` -> ({name: count}, err).
 
         `*` is the total number of Sub (instance) nodes in the design; a name
         ending in `*` is a prefix glob (see `_expect_found`).

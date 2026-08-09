@@ -4,6 +4,7 @@
 // invariants on the current hhds::Graph API rather than exact legacy ids.
 
 #include "color_acyclic.hpp"
+
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -55,7 +56,7 @@ TEST(ColorAcyclic, AllNodesColored) {
   labeler.label(g.get());
 
   int colored = 0;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }

@@ -83,9 +83,7 @@ void Pass_color::setup() {
                        "neutral at the default",
                        "4");
   m.add_label_optional("instance", "path: comma-separated seed instance names (forward-only)", "");
-  m.add_label_optional("min_count",
-                       "reduce: occurrences a repeated subgraph needs before it is extracted as a shared def",
-                       "3");
+  m.add_label_optional("min_count", "reduce: occurrences a repeated subgraph needs before it is extracted as a shared def", "3");
   m.add_label_optional("min_nodes", "reduce: smallest cone (in nodes) worth extracting", "3");
   m.add_label_optional("min_win",
                        "reduce: required PER-SITE Verilog line win (estimated lines saved minus the instance's "
@@ -133,18 +131,21 @@ uint64_t parse_count(const Eprp_var& var, std::string_view label, std::string_vi
 
 // JSON object string of the algorithm parameters (for the metadata blob).
 std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var) {
-  std::string s = "{";
-  s += std::format("\"hier\":{},", opts.hier);
-  s += std::format("\"compact\":{},", opts.compact);
-  s += std::format("\"continuous\":{},", opts.continuous);
-  s += std::format("\"keep_colored\":{}", opts.keep_colored);
+  std::string s  = "{";
+  s             += std::format("\"hier\":{},", opts.hier);
+  s             += std::format("\"compact\":{},", opts.compact);
+  s             += std::format("\"continuous\":{},", opts.continuous);
+  s             += std::format("\"keep_colored\":{}", opts.keep_colored);
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
   } else if (alg == "synth") {
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
-    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}", var.get("synth_alg", "synth"),
-                     opts.min_ge, opts.max_ge, opts.name_weight);
+    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
+                     var.get("synth_alg", "synth"),
+                     opts.min_ge,
+                     opts.max_ge,
+                     opts.name_weight);
     if (opts.min_ge != 0) {
       // The window bin-packs isolated under-min leftovers, so a color id MAY
       // span several disconnected clouds. pass.partition keys its same-color
@@ -182,7 +183,10 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
     Color_path c(opts, var.get("instance", ""));
     c.label(g);
   } else if (alg == "mincut") {
-    Color_mincut c(opts, str_tools::to_i(var.get("iters", "1")), str_tools::to_i(var.get("seed", "0")), var.get("mincut_alg", "vc"));
+    Color_mincut c(opts,
+                   str_tools::to_i(var.get("iters", "1")),
+                   str_tools::to_i(var.get("seed", "0")),
+                   var.get("mincut_alg", "vc"));
     c.label(g);
   } else if (alg == "flat") {
     Color_flat c(opts);
@@ -205,8 +209,7 @@ void Pass_color::color(Eprp_var& var) {
     return;
   }
 
-  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut" && alg != "flat"
-      && alg != "reduce") {
+  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut" && alg != "flat" && alg != "reduce") {
     livehd::diag::err("pass.color", "bad-alg", "unsupported")
         .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|flat|reduce|clear)", alg)
         .fatal();
@@ -271,8 +274,7 @@ void Pass_color::color(Eprp_var& var) {
   // count. This is a plain lazy walk of each unique def body -- no O(flat-nodes)
   // materialization (see flat_node_count). Skipped entirely when the gate is
   // disabled, so it never adds a walk to a run that did not ask for it.
-  if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold();
-      top_g != nullptr && threshold != UINT64_MAX) {
+  if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold(); top_g != nullptr && threshold != UINT64_MAX) {
     const uint64_t nodes = livehd::graph_util::flat_node_count(top_g, [&](hhds::Gid gid) -> hhds::Graph* {
       auto it = gid2graph.find(gid);
       return it == gid2graph.end() ? nullptr : it->second;
@@ -295,7 +297,7 @@ void Pass_color::color(Eprp_var& var) {
     if (top_g != nullptr && opts.hier) {
       absl::flat_hash_set<hhds::Gid> todo;
       todo.insert(top_g->get_gid());
-      for (auto inst : top_g->hier_range()) {
+      for (auto inst : top_g->grouped_hierarchy().instances()) {
         todo.insert(inst.get_target_gid());
       }
       for (auto gid : todo) {
@@ -328,9 +330,7 @@ void Pass_color::color(Eprp_var& var) {
       return;
     }
     if (ropts.min_nodes < 1) {
-      livehd::diag::err("pass.color", "bad-count", "io")
-          .msg("pass.color: reduce min_nodes must be at least 1 (got 0)")
-          .fatal();
+      livehd::diag::err("pass.color", "bad-count", "io").msg("pass.color: reduce min_nodes must be at least 1 (got 0)").fatal();
       return;
     }
 
@@ -397,7 +397,7 @@ void Pass_color::color(Eprp_var& var) {
   absl::flat_hash_map<hhds::Gid, uint64_t> inst_cnt;
   if (stats && top_g != nullptr) {
     inst_cnt[top_g->get_gid()] = 1;  // the top is instantiated once, by definition
-    for (auto inst : top_g->hier_range()) {
+    for (auto inst : top_g->grouped_hierarchy().instances()) {
       ++inst_cnt[inst.get_target_gid()];
     }
   }
@@ -421,7 +421,7 @@ void Pass_color::color(Eprp_var& var) {
     // once via the per-def algorithm.
     absl::flat_hash_set<hhds::Gid> todo;
     todo.insert(top_g->get_gid());
-    for (auto inst : top_g->hier_range()) {
+    for (auto inst : top_g->grouped_hierarchy().instances()) {
       todo.insert(inst.get_target_gid());
     }
     for (auto gid : todo) {
@@ -450,7 +450,8 @@ void Pass_color::color(Eprp_var& var) {
     // "region_opts") alive across this rebuild (2opt-freq B).
     set_coloring_info(
         top_g,
-        preserve_seeded_info(top_g,
-                             build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var))));
+        preserve_seeded_info(
+            top_g,
+            build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var))));
   }
 }

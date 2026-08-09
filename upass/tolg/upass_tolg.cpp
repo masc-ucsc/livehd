@@ -28,7 +28,6 @@
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
-#include "replica_desc.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 
 namespace {
@@ -1085,7 +1084,7 @@ private:
     bool changed = true;
     while (changed) {
       changed = false;
-      for (auto n : g_->forward_class()) {
+      for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
         if (n.is_invalid() || livehd::graph_util::is_builtin_node(n)) {
           continue;
         }
@@ -4226,7 +4225,8 @@ private:
     // rolled loop into a single instance, i.e. drop count-1 replicas.
     // Set when this call is replicated: the role-marked index input is supplied
     // per OCCURRENCE by realization, so it is legitimately unconnected here.
-    std::string replica_index_port;
+    std::string                                          replica_index_port;
+    std::vector<std::pair<hhds::Port_id, hhds::Port_id>> replica_carries;  // input, output
     {
       std::string dom_txt, idx_port, carry_txt;
       for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
@@ -4269,7 +4269,7 @@ private:
           return std::nullopt;
         };
 
-        livehd::graph_util::Replica_desc desc;
+        hhds::Subnode_loop desc;
         // `first=..;step=..;count=..`
         for (const auto& field : absl::StrSplit(dom_txt, ';', absl::SkipEmpty())) {
           const std::pair<std::string_view, std::string_view> kv = absl::StrSplit(field, absl::MaxSplits('=', 1));
@@ -4283,6 +4283,10 @@ private:
           } else if (kv.first == "step") {
             desc.step = iv;
           } else if (kv.first == "count") {
+            if (iv < 0) {
+              error_here("upass.tolg: replication count must be non-negative on call to '{}'", callee_full);
+              return;
+            }
             desc.count = static_cast<uint64_t>(iv);
           } else {
             error_here("upass.tolg: unknown replication marker `{}` on call to '{}'", kv.first, callee_full);
@@ -4300,20 +4304,20 @@ private:
           }
         }
         for (const auto& item : absl::StrSplit(carry_txt, ',', absl::SkipEmpty())) {
-          const std::pair<std::string_view, std::string_view> oi = absl::StrSplit(item, absl::MaxSplits('>', 1));
-          auto out_pid = pid_of_output(std::string(oi.first));
-          auto in_pid  = pid_of_input(std::string(oi.second));
+          const std::pair<std::string_view, std::string_view> oi      = absl::StrSplit(item, absl::MaxSplits('>', 1));
+          auto                                                out_pid = pid_of_output(std::string(oi.first));
+          auto                                                in_pid  = pid_of_input(std::string(oi.second));
           if (!out_pid || !in_pid) {
             error_here("upass.tolg: replicated call to '{}' declares carry `{}` whose ports do not exist", callee_full, item);
             return;
           }
-          desc.carries.emplace_back(livehd::graph_util::Replica_carry{*in_pid, *out_pid});
+          replica_carries.emplace_back(*in_pid, *out_pid);
         }
-        if (auto why = desc.validate(); !why.empty()) {
-          error_here("upass.tolg: replicated call to '{}' has an invalid descriptor: {}", callee_full, why);
+        if (desc.step == 0) {
+          error_here("upass.tolg: replicated call to '{}' has a zero step", callee_full);
           return;
         }
-        livehd::graph_util::set_replica_desc(sub, desc);
+        sub.set_subnode(gio, desc);
       }
     }
 
@@ -4465,6 +4469,13 @@ private:
         set_unsign(r);
       }
       sub.create_sink_pin("reset").connect_driver(r);
+    }
+
+    // Carries are native literal self-edges on the compact Sub. They are not
+    // duplicated in the descriptor; HHDS derives Subnode_group::carries()
+    // from these edges and omits them only from compact topological ordering.
+    for (const auto& [input_pid, output_pid] : replica_carries) {
+      sub.create_driver_pin(output_pid).connect_sink(sub.create_sink_pin(input_pid));
     }
 
     std::string dst_name(lnast_->get_name(dst));
@@ -5199,7 +5210,7 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto    node      = make_node(op);
+    auto    node          = make_node(op);
     int32_t max_mw        = 0;
     int32_t sum_mw        = 0;
     int32_t min_nonneg_mw = 0;      // andw: narrowest NON-NEGATIVE operand...
@@ -6057,9 +6068,9 @@ private:
       // wider arms. Take the max over every contributing pin's stamped bits
       // (bits >= mw by construction, so this only ever widens). pin_mw_of
       // shares this with the Hotmux path (lower_unique_merge).
-      int32_t mw        = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
-      int     n         = static_cast<int>(branches.size());
-      int     last_cond = has_else ? n - 2 : n - 1;
+      int32_t mw         = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
+      int     n          = static_cast<int>(branches.size());
+      int     last_cond  = has_else ? n - 2 : n - 1;
       // A merge is only as unsigned as its ARMS. bind_result stamps UNSIGNED
       // unconditionally, which is a lie the moment one arm can go negative, and
       // an unsigned pin is DEFINED to carry an always-0 spare sign bit -- so
@@ -6069,7 +6080,7 @@ private:
       // unsigned: `(-s1) + (c ? -2 : s7)` evaluated to 2 where the golden says
       // 6 (vloghammer wideexpr_00093, confirmed against iverilog). Collect the
       // sign over the same sources the width is collected over.
-      bool any_signed = pin_can_be_negative(cur) || pin_can_be_negative(pre);
+      bool    any_signed = pin_can_be_negative(cur) || pin_can_be_negative(pre);
       // Finalize the merged width BEFORE building the chain so every mux in it
       // (not only the outermost one bind_result stamps) carries it. An if/elif
       // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
@@ -6190,11 +6201,11 @@ private:
       // Hotmux to 65 bits and truncate the real arms back down. Size from real
       // sources only, then drive the none-of slot with a width-correct
       // don't-care.
-      int32_t mw = mw_lookup(var);
+      int32_t mw         = mw_lookup(var);
       // Same arm-signedness rule as the Mux chain in lower_if_merge: an
       // unsigned stamp promises an always-0 top bit, so a negative arm has to
       // re-sign the merge or every widening consumer zero-fills it.
-      bool any_signed = false;
+      bool    any_signed = false;
       if (has_pre) {
         mw         = std::max(mw, pin_mw_of(pre));
         any_signed = any_signed || pin_can_be_negative(pre);
@@ -6567,7 +6578,7 @@ public:
     // 1. Collect nodes + node-level digraph (consts/graph-inputs excluded).
     std::vector<hhds::Node_class>         nodes;
     absl::flat_hash_map<uint64_t, size_t> idx;
-    for (auto n : g_->fast_class()) {
+    for (auto n : g_->body().nodes()) {
       if (is_type_const(n)) {
         continue;
       }
@@ -6598,6 +6609,12 @@ public:
         continue;
       }
       for (const auto& e : nodes[i].inp_edges()) {
+        // A compact loop carry is a literal Sub self-edge for edge/binding
+        // visibility, but HHDS orders the group as if unrolled. Mirror that
+        // dependency rule in this domain-specific SCC classifier.
+        if (nodes[i].is_loop_subnode() && e.driver.get_master_node() == nodes[i]) {
+          continue;
+        }
         const int p = node_idx_of_pin(e.driver);
         if (p >= 0) {
           pred[i].push_back(p);

@@ -8,7 +8,6 @@
 
 #include "diag.hpp"
 #include "query.hpp"
-#include "replica_expand.hpp"
 #include "str_tools.hpp"
 
 using namespace livehd;
@@ -264,14 +263,6 @@ void Pass_lec::setup() {
 }
 
 void Pass_lec::lec(Eprp_var& var) {
-  // A replicated Sub denotes `count` occurrences; this pass walks a Sub as ONE
-  // physical instance, so expand before it looks at anything (see
-  // graph/replica_expand.hpp). Without this a rolled `lg:` input compares (or
-  // measures) count-1 replicas that are not there.
-  if (!livehd::graph_util::expand_replicated_subs_all(var.graphs, "pass.lec")) {
-    return;
-  }
-
   if (var.graphs.size() < 2) {
     livehd::diag::err("pass.lec", "lec-needs-pair", "internal")
         .msg("pass.lec needs two designs (ref, impl); got {} graph(s)", var.graphs.size())
@@ -280,26 +271,26 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine  = std::string{var.get("engine", "auto")};
-  o.solver  = std::string{var.get("solver", "cvc5")};
-  o.gold_x  = std::string{var.get("gold_x", "ignore")};
-  o.bound   = str_tools::to_i(var.get("bound", "6"));
-  o.timeout = str_tools::to_i(var.get("timeout", "120"));
-  o.witness = parse_bool(var.get("witness", "true"));
-  o.phase        = std::string{var.get("phase", "after_reset")};
-  o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
-  o.reset        = std::string{var.get("reset", "")};
-  o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
-  o.decompose    = std::string{var.get("decompose", "auto")};
-  o.cones        = std::string{var.get("cones", "auto")};
-  o.conelimit    = str_tools::to_i(var.get("conelimit", "10000"));
-  o.phase_sched  = parse_bool(var.get("phase_sched", "true"));
-  o.int_blast    = std::string{var.get("int_blast", "auto")};
-  o.box_seq      = std::string_view{var.get("box_model", "seq")} != "uf";
-  o.strict       = parse_bool(var.get("strict", "true"));
-  o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
-  o.partitions   = str_tools::to_i(var.get("partitions", "4"));
-  o.split        = std::string{var.get("split", "auto")};
+  o.engine         = std::string{var.get("engine", "auto")};
+  o.solver         = std::string{var.get("solver", "cvc5")};
+  o.gold_x         = std::string{var.get("gold_x", "ignore")};
+  o.bound          = str_tools::to_i(var.get("bound", "6"));
+  o.timeout        = str_tools::to_i(var.get("timeout", "120"));
+  o.witness        = parse_bool(var.get("witness", "true"));
+  o.phase          = std::string{var.get("phase", "after_reset")};
+  o.reset_cycles   = str_tools::to_i(var.get("reset_cycles", "2"));
+  o.reset          = std::string{var.get("reset", "")};
+  o.match          = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
+  o.decompose      = std::string{var.get("decompose", "auto")};
+  o.cones          = std::string{var.get("cones", "auto")};
+  o.conelimit      = str_tools::to_i(var.get("conelimit", "10000"));
+  o.phase_sched    = parse_bool(var.get("phase_sched", "true"));
+  o.int_blast      = std::string{var.get("int_blast", "auto")};
+  o.box_seq        = std::string_view{var.get("box_model", "seq")} != "uf";
+  o.strict         = parse_bool(var.get("strict", "true"));
+  o.semdiff        = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
+  o.partitions     = str_tools::to_i(var.get("partitions", "4"));
+  o.split          = std::string{var.get("split", "auto")};
   o.allow_oversize = parse_bool(var.get("allow_oversize", "false"));
   o.stats          = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
   // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
@@ -357,7 +348,7 @@ void Pass_lec::lec(Eprp_var& var) {
   // int_blast=auto second leg: a solver-give-up Unknown earns one int-blasted
   // re-solve at the min_timeout floor (driver-level, so the recursion inside
   // prove_equal never multiplies it).
-  r = lec::int_blast_retry(ref.get(), impl.get(), o, std::move(r));
+  r      = lec::int_blast_retry(ref.get(), impl.get(), o, std::move(r));
 
   // BEFORE the switch: the Refuted/Unknown arms below are .fatal(), so a report
   // printed after them would be lost in exactly the two cases where knowing how hard

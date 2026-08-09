@@ -31,7 +31,6 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
     hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
     hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
-    hhds::register_attr_tag<livehd::attrs::replica_desc_t>("livehd::attrs::replica_desc");
     hhds::register_attr_tag<livehd::attrs::time_range_t>("livehd::attrs::time_range");
     hhds::register_attr_tag<livehd::attrs::pending_time_t>("livehd::attrs::pending_time");
   }
@@ -214,24 +213,25 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       break;
     case Ntype_op::Memory:
       switch (pid) {
-        case 0 : return "addr";       // runtime  x n_ports
-        case 1 : return "bits";       // comptime x 1
-        case 2 : return "clock_pin";  // runtime  x 1 or n_ports
-        case 3 : return "din";        // runtime  x n_ports
-        case 4 : return "enable";     // runtime  x n_ports
-        case 5 : return "fwd";        // comptime x 1 -- per-(READ-port,WRITE-port) forwarding MATRIX: bit
-                                      // (r*n_wr + w) set => read port r sees write port w's new data on a
-                                      // same-cycle same-address collision (r/w = read/write ordinals, n_wr =
-                                      // the cell's TOTAL write-port count). A zero row => that read returns
-                                      // the committed contents. A 1-read-port memory encodes bit-identically
-                                      // to the old per-write-port mask. Built from the Pyrope `ordering`
-                                      // attr: "program" => row r is the PREFIX of writes preceding read r in
-                                      // program order; "fwd" => all ones; "none" => all zeros.
-        case 6 : return "posclk";     // comptime x 1
-        case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
-        case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
-        case 9 : return "size";       // comptime x 1
-        case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
+        case 0: return "addr";       // runtime  x n_ports
+        case 1: return "bits";       // comptime x 1
+        case 2: return "clock_pin";  // runtime  x 1 or n_ports
+        case 3: return "din";        // runtime  x n_ports
+        case 4: return "enable";     // runtime  x n_ports
+        case 5:
+          return "fwd";             // comptime x 1 -- per-(READ-port,WRITE-port) forwarding MATRIX: bit
+                                    // (r*n_wr + w) set => read port r sees write port w's new data on a
+                                    // same-cycle same-address collision (r/w = read/write ordinals, n_wr =
+                                    // the cell's TOTAL write-port count). A zero row => that read returns
+                                    // the committed contents. A 1-read-port memory encodes bit-identically
+                                    // to the old per-write-port mask. Built from the Pyrope `ordering`
+                                    // attr: "program" => row r is the PREFIX of writes preceding read r in
+                                    // program order; "fwd" => all ones; "none" => all zeros.
+        case 6 : return "posclk";   // comptime x 1
+        case 7 : return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
+        case 8 : return "wensize";  // comptime x 1  -- number of Write Enable bits
+        case 9 : return "size";     // comptime x 1
+        case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
         case 11:
           return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
                           // restores it via per-entry write ports (tolg). For a WHOLE-ARRAY cell (the `update` pin is
@@ -240,20 +240,21 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
         case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)
         case 14: return "reset";          // runtime  x 1 -- 1-bit reset condition (active high; tolg pre-inverts negreset)
-        case 15: return "undef";      // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED matrix, bit-identical
-                                      // layout to `fwd`: bit (r*n_wr + w) set => read port r's data is UNDEFINED (x)
-                                      // when write port w collides (same address, enabled) in the same cycle. `fwd`
-                                      // and `undef` are MUTUALLY EXCLUSIVE per (r,w): fwd says "see the NEW data",
-                                      // undef says "see nothing definite", both clear says "see the COMMITTED data".
-                                      // That third state is why this pin exists -- a zero `fwd` row alone cannot tell
-                                      // "defined old" from "undefined", which is yosys $mem_v2's
-                                      // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built from the Pyrope
-                                      // `ordering` attr: "none" => every USER write column set (restore/reset ports
-                                      // never, exactly like `fwd`); "program"/"fwd"/"old" => all zeros.
-                                      // Consumers: cgen passes it as the wrapper's UNDEF parameter (x on collision);
-                                      // the cvc5 lec encoder turns it into a read-dout X bit-plane so the miter
-                                      // treats the window as don't-care; every bit-blasting consumer (pass.abc,
-                                      // cgen_sim) may REFINE it to any concrete value.
+        case 15:
+          return "undef";  // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED matrix, bit-identical
+                           // layout to `fwd`: bit (r*n_wr + w) set => read port r's data is UNDEFINED (x)
+                           // when write port w collides (same address, enabled) in the same cycle. `fwd`
+                           // and `undef` are MUTUALLY EXCLUSIVE per (r,w): fwd says "see the NEW data",
+                           // undef says "see nothing definite", both clear says "see the COMMITTED data".
+                           // That third state is why this pin exists -- a zero `fwd` row alone cannot tell
+                           // "defined old" from "undefined", which is yosys $mem_v2's
+                           // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built from the Pyrope
+                           // `ordering` attr: "none" => every USER write column set (restore/reset ports
+                           // never, exactly like `fwd`); "program"/"fwd"/"old" => all zeros.
+                           // Consumers: cgen passes it as the wrapper's UNDEF parameter (x on collision);
+                           // the cvc5 lec encoder turns it into a read-dout X bit-plane so the miter
+                           // treats the window as don't-care; every bit-blasting consumer (pass.abc,
+                           // cgen_sim) may REFINE it to any concrete value.
         default: return "invalid";
       }
       break;
@@ -309,15 +310,16 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       // the ruling above collapses. `clock_pin` is reserved (see below) but
       // tolg still REFUSES it on a latch — no consumer gives it meaning yet.
       switch (pid) {
-        case 0 : return "async";     // reserved for M7 (async set/reset latches)
-        case 1 : return "initial";   // reset / power-on value
-        case 2 : return "clock_pin"; // reserved; NOT the gate (the enable is)
+        case 0: return "async";    // reserved for M7 (async set/reset latches)
+        case 1: return "initial";  // reset / power-on value
+        case 2:
+          return "clock_pin";  // reserved; NOT the gate (the enable is)
         // No 1 to keep din at pos 3 (a,b,c)
         case 3 : return "din";
         case 4 : return "enable";
-        case 5 : return "negreset";  // reserved for M7
-        case 6 : return "posclk";    // ENABLE POLARITY — see the note above
-        case 7 : return "reset_pin"; // reserved for M7
+        case 5 : return "negreset";   // reserved for M7
+        case 6 : return "posclk";     // ENABLE POLARITY — see the note above
+        case 7 : return "reset_pin";  // reserved for M7
         default: return "invalid";
       }
       break;

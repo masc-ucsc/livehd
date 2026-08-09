@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Common kernel plumbing: diagnostics, pass execution, typed I/O, and emits.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -23,6 +21,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
@@ -73,9 +72,8 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   // header's `:pyrope_top:` — calls it `s\m`. Backticks are escape SYNTAX, not
   // part of the name, so `--top s\m` must find it without the caller having to
   // know LiveHD's internal spelling.
-  auto peel = [](std::string_view s) {
-    return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? s.substr(1, s.size() - 2) : s;
-  };
+  auto peel
+      = [](std::string_view s) { return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? s.substr(1, s.size() - 2) : s; };
   const std::string_view want_entity = peel(top_entity_of(want));
   std::string            hit;
   int                    n_hits = 0;
@@ -277,7 +275,7 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
       }
     }
   }
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
@@ -502,9 +500,9 @@ std::string leaf_match_hint(std::string_view flag) {
     // Render the candidates the way `lhd list options` would, INLINE -- the
     // reader should not have to run a second command we could have run for
     // them (one `name=default  # first-sentence` line per match).
-    auto        cut   = o.help.find(". ");
-    std::string brief = cut == std::string::npos ? o.help : o.help.substr(0, cut);
-    constexpr size_t kMax = 96;
+    auto             cut   = o.help.find(". ");
+    std::string      brief = cut == std::string::npos ? o.help : o.help.substr(0, cut);
+    constexpr size_t kMax  = 96;
     if (brief.size() > kMax) {
       brief.resize(kMax);
       while (!brief.empty() && (static_cast<unsigned char>(brief.back()) & 0xC0) == 0x80) {
@@ -842,7 +840,7 @@ struct Manifest_unit {
   uint64_t                  hash{0};
   std::string               unit_kind;
   bool                      verilog_origin{false};  // durable: a Verilog-read tree (open ports legal, etc.)
-  std::vector<Manifest_pub> pubs;                    // file units only (the pub index)
+  std::vector<Manifest_pub> pubs;                   // file units only (the pub index)
   // For `ln:` units: the live Lnast, so write_manifest can persist the
   // post-upass io_meta/bw_meta side-channels (otherwise empty on adopt, see
   // lnast.hpp). A loaded import restores them and skips re-elaboration.
@@ -1175,8 +1173,7 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 // --set is merged, so the directory emit path (where each `.map` lands adjacent
 // to its `.v`) ships the source map by default while `--set cgen.srcmap=0` can
 // still turn it off.
-std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir,
-                                   bool default_srcmap) {
+std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir, bool default_srcmap) {
   ensure_dir(odir);
   Eprp_var::Eprp_dict labels{
       {"odir", odir}

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -33,21 +34,21 @@ struct uPass_function_registry {
   // Module/function name -> its already-extracted body lnast.
   absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> function_registry;
   // Keys whose bodies can reach themselves (direct/mutual recursion).
-  absl::flat_hash_set<std::string> recursive_callees;
+  absl::flat_hash_set<std::string>                         recursive_callees;
   // Keys the runner can fully splice (single output written by name, etc.).
-  absl::flat_hash_set<std::string> inlinable_callees;
+  absl::flat_hash_set<std::string>                         inlinable_callees;
   // Inlinable pure-dataflow combs convertible to a Sub module instance.
-  absl::flat_hash_set<std::string> sub_convertible_combs;
+  absl::flat_hash_set<std::string>                         sub_convertible_combs;
 
   // Per-lnast facts, all PURELY LOCAL to one body (so they can be cached and a
   // body never re-walked). The recursion-dependent part is recomputed globally.
   struct Lnast_facts {
-    std::vector<std::string> callee_names;          // raw func_call callee refs
+    std::vector<std::string> callee_names;           // raw func_call callee refs
     bool                     inlinable     = false;  // all declared outputs written
     bool                     sub_candidate = false;  // sub-convertible modulo recursion
   };
-  absl::flat_hash_map<std::string, Lnast_facts> facts;        // keyed by registry name
-  std::size_t             built_count = 0;  // #lnasts already folded in
+  absl::flat_hash_map<std::string, Lnast_facts> facts;            // keyed by registry name
+  std::size_t                                   built_count = 0;  // #lnasts already folded in
 
   // Idempotent. Folds any lnasts past built_count into the registry (one tree
   // walk each), then recomputes the global recursion closure + derived sets.
@@ -100,8 +101,8 @@ protected:
     // Per-pass dispatch wall-clock + call count, accumulated only when the
     // LIVEHD_UPASS_STATS env var is set (dispatch_to_passes / dispatch_push);
     // run() prints the per-unit breakdown to stderr at walk end.
-    uint64_t stat_ns{0};
-    uint64_t stat_calls{0};
+    uint64_t                      stat_ns{0};
+    uint64_t                      stat_calls{0};
   };
 
   std::vector<Pass_entry> upasses;
@@ -286,7 +287,7 @@ protected:
   // Folded (start, end_inclusive, step) bounds of a `range` tmp (comptime
   // for-loop iterable). The step is per-range (defaults to 1; `a..=b step n`
   // sets it), so the unroll always does `v += step`. See uPass::provide_range.
-  std::optional<std::tuple<Dlop, Dlop, Dlop>>             try_range(std::string_view name);
+  std::optional<std::tuple<Dlop, Dlop, Dlop>>              try_range(std::string_view name);
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type.
   std::optional<upass::uPass::Field_decl_type>             try_field_type(std::string_view name);
@@ -388,32 +389,46 @@ protected:
   // exits go through loop_fail (a throw).
   class Unroll_scope {
   public:
-    explicit Unroll_scope(uPass_runner& r) : r_(r) {
+    explicit Unroll_scope(uPass_runner& r) : r_(r), depth_(r_.loop_iter_ordinals_.size()) {
       ++r_.loop_depth_;
-      r_.loop_iter_ordinals_.push_back(0);
+      if (r_.next_loop_ordinal_bases_.size() <= depth_ + 1) {
+        r_.next_loop_ordinal_bases_.resize(depth_ + 2, 0);
+      }
+      base_                                   = r_.next_loop_ordinal_bases_[depth_];
+      r_.next_loop_ordinal_bases_[depth_ + 1] = 0;
+      r_.loop_iter_ordinals_.push_back(base_);
     }
     Unroll_scope(const Unroll_scope&)            = delete;
     Unroll_scope& operator=(const Unroll_scope&) = delete;
     ~Unroll_scope() {
+      r_.next_loop_ordinal_bases_[depth_]
+          = iterations_ > std::numeric_limits<uint64_t>::max() - base_ ? std::numeric_limits<uint64_t>::max() : base_ + iterations_;
       --r_.loop_depth_;
       r_.loop_iter_ordinals_.pop_back();
     }
-    void next_iteration() { ++r_.loop_iter_ordinals_.back(); }
+    void complete_iteration() { ++iterations_; }
+    void next_iteration() {
+      ++r_.loop_iter_ordinals_.back();
+      r_.next_loop_ordinal_bases_[depth_ + 1] = 0;
+    }
 
   private:
     uPass_runner& r_;
+    uint64_t      base_       = 0;
+    uint64_t      iterations_ = 0;
+    size_t        depth_      = 0;
   };
-  // `_li<ordinal>` per enclosing unroll, "" outside one. Stamped on the calls
+  // `__li<ordinal>` per enclosing unroll, "" outside one. Stamped on the calls
   // an unrolled body emits so their instances stay distinguishable.
   [[nodiscard]] std::string loop_inst_suffix() const;
   // Append the reserved `__inst_suffix` actual to the func_call just emitted
   // into staging (cursor-free: it works on `staging_parent`). No-op unless the
   // callee is one tolg lowers to a Sub instance.
-  void stamp_loop_inst_suffix(std::string_view callee);
+  void                      stamp_loop_inst_suffix(std::string_view callee);
   // Emit a per-iteration tuple pick `dst = src[index_text]` as a scratch
   // tuple_get run through the walk (so try_resolve_tuple_get / constprop
   // resolve it). index_text is the pyrope field literal ("0","1",… or "'name'").
-  void emit_inline_tuple_pick(const std::string& dst, const std::string& src, const std::string& index_text);
+  void                      emit_inline_tuple_pick(const std::string& dst, const std::string& src, const std::string& index_text);
   // Emit a per-iteration tuple write-back `dst[index_text] = value` (3-child
   // store) as a scratch tree run through the walk — the `for i in ref d` form.
   void emit_inline_tuple_store(const std::string& dst, const std::string& index_text, const std::string& value);
@@ -507,9 +522,7 @@ protected:
   // tolg (only memories/multi-out/comptime indices accept a dynamic index).
   // Gated on >=1 slot being a genuine runtime-wire ref (tuple_slot_ref), which
   // a `mut`/`reg` memory array never populates, so the memory path is untouched.
-  bool                                                                              try_lower_dynamic_tuple_index(const std::string& dst,
-                                                                                                                  const std::string& src,
-                                                                                                                  const std::string& idx_ref);
+  bool try_lower_dynamic_tuple_index(const std::string& dst, const std::string& src, const std::string& idx_ref);
   // Source ref held at `slot` of tuple `name` (runtime-scalar slot). First pass
   // that provides wins. See uPass::provide_tuple_slot_ref.
   std::optional<std::string>                               try_tuple_slot_ref(std::string_view name, std::string_view slot);
@@ -557,19 +570,19 @@ protected:
   // bound type substitutes into `a:T` params, `-> (r:T)` outputs and body
   // `:T` slots; normal typing rules apply afterwards (no special coercion).
   struct Generic_bind {
-    Io_kind             kind = Io_kind::none;  // integer/boolean/string; none = named type
-    std::optional<Dlop> max  = {};             // integer envelope when known
-    std::optional<Dlop> min  = {};
-    std::string         type_name = {};  // named type (kind == none)
-    std::string         from      = {};  // binding source, for the mismatch diagnostic
+    Io_kind             kind       = Io_kind::none;  // integer/boolean/string; none = named type
+    std::optional<Dlop> max        = {};             // integer envelope when known
+    std::optional<Dlop> min        = {};
+    std::string         type_name  = {};  // named type (kind == none)
+    std::string         from       = {};  // binding source, for the mismatch diagnostic
     // A CONSTANT-valued generic (`f<3>`): the literal substituted for body reads
     // of the generic name (`r = a + N` → `a + 3`). Non-empty ⇒ constant bind;
     // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
     // type slot has a width — todo 3g D). Never inferred (explicit/default only).
-    std::string const_text = {};
+    std::string         const_text = {};
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
     // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
-    std::string func_name = {};
+    std::string         func_name  = {};
   };
   // One explicit `<…>` argument at a call site. `value` is the bound entity's
   // text (a type ref / tmp, a constant, or a lambda name); `name` is set for a
@@ -593,7 +606,7 @@ protected:
                                       std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
                                       const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
                                       const std::string& dst_name, const std::string& callee_name,
-                                      const livehd::diag::Span& call_span,
+                                      const livehd::diag::Span&                             call_span,
                                       const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
   // Deep-copy `tmpl` verbatim into a fresh (TreeIO-backed) Lnast named
   // `mangled`, then inject a concrete prim_type_int / named-type child into
@@ -611,8 +624,7 @@ protected:
                                                     const std::string& vname, const std::vector<Spec_port>& out_inject,
                                                     const absl::flat_hash_map<std::string, Generic_bind>& type_subst);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                         const Lnast_nid& dst_parent,
-                         const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
+                         const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
   // Emit a `func_call(dst, callee, [name=], port=val…)` with NAMED actuals into a
   // scratch tree and re-walk it, so tolg wires the Sub instance by port name.
   // Used by template specialization and by the concrete pipe/mod decline to
@@ -692,11 +704,9 @@ protected:
   // instance under inline=false) must then re-emit the call with the dotted
   // NAMED binding — the source spelling names no leaf port tolg could wire.
   bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call, bool commit,
-                         std::string_view callee_name, const livehd::diag::Span& call_span,
-                         std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
-                         std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
-                         std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
-                         bool* out_tuple_expanded = nullptr);
+                         std::string_view callee_name, const livehd::diag::Span& call_span, std::vector<Lnast_node>& param_val,
+                         std::vector<bool>& param_set, std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
+                         std::vector<std::pair<std::string, Lnast_node>>& vararg_named, bool* out_tuple_expanded = nullptr);
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
   // shape `init` overloads use. Returns those names in tuple order (only the
@@ -712,7 +722,7 @@ protected:
   // it must be re-derived here to choose among candidates). Used ONLY to pick
   // among gathered candidates; the winner still runs the full bind path, which
   // remains the authority for diagnostics.
-  bool signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call);
+  bool                     signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call);
   // The RETURN half of the overload-dispatch callability test (so "can handle"
   // means the WHOLE `c = f(b)` would be valid, not just the call side): true iff
   // candidate `io`'s OUTPUTS can bind to how the call's result is consumed at the
@@ -732,7 +742,7 @@ protected:
   void collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
                                   absl::flat_hash_set<std::string>& req_fields, bool& whole_used);
   // >0 while a synthesized constructor call is being spliced.
-  int                      init_construction_depth_ = 0;
+  int  init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't
   // arrived yet — the only store where construction may run.
   absl::flat_hash_set<std::string> pending_ctor_store_;
@@ -874,13 +884,17 @@ protected:
   int                                           loop_depth_{0};
   // 0-based iteration ordinal of every unroll currently in flight (outermost
   // first), maintained alongside loop_depth_. `loop_inst_suffix()` renders it as
-  // the `_li<ordinal>` tag stamped on the instances a body copy creates: one
+  // the `__li<ordinal>` tag stamped on the instances a body copy creates: one
   // source `mod` call inside `for i in 0..<8` is EIGHT physical instances, and
   // without the tag all eight carry the same source-derived name. cgen would
   // then de-collide them itself as `x`, `x_cgen1`, … — a spelling that neither
   // starts at 0 nor says which iteration an instance came from, and that
   // renumbers as soon as an unrelated instance is added.
   std::vector<uint64_t>                         loop_iter_ordinals_;
+  // Per-parent-depth bases for successive source loops. This mirrors HHDS
+  // format_occurrence_path(): a second loop in one parent continues after the
+  // first site's count, while a newly entered nested parent restarts at zero.
+  std::vector<uint64_t>                         next_loop_ordinal_bases_{0};
   std::shared_ptr<hhds::Forest>                 scratch_forest_;
   // Callee bodies currently being spliced (innermost last). Re-entering one
   // means recursion — bailed to the evaluator until Phase D adds fuel.
@@ -901,13 +915,13 @@ protected:
   // inlines. Read from options["inline"] in the constructor.
   // (The recursion / inlinable / placeholder / sub-convertible sets these used
   // to sit beside now live in the shared uPass_function_registry — see reg().)
-  bool                                         inlining_enabled_ = true;
+  bool                                          inlining_enabled_ = true;
   // Result tmps of an inlined call that returned >1 LOGICAL output. Binding one
   // of these WHOLE to a single user variable (`const inner = two_output_f()`) is
   // an error — multiple outputs must be destructured (`const (o1,o2) = f()`).
   // A destructure consumes the tmp via tuple_gets, never a whole store, so it is
   // not flagged. (06-functions.md "Binding return values".)
-  absl::flat_hash_set<std::string>                                   multi_output_results_;
+  absl::flat_hash_set<std::string>              multi_output_results_;
   // Higher-order / closure support: maps a function-valued param's RAW name
   // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
   // function it is bound to at this call site (e.g. `step_up`). Saved/restored

@@ -42,7 +42,7 @@ public:
       return 0;  // recursive: the Sub's port weight is charged by the caller
     }
     uint64_t sum = 0;
-    for (auto n : g->fast_class()) {
+    for (auto n : g->body().nodes()) {
       if (gu::type_op_of(n) == Ntype_op::Sub) {
         auto it = g2g_.find(n.get_subnode_gid());
         if (it != g2g_.end() && it->second != nullptr) {
@@ -58,7 +58,7 @@ public:
   }
 
 private:
-  const Gid2Graph&                     g2g_;
+  const Gid2Graph&                         g2g_;
   absl::flat_hash_map<hhds::Gid, uint64_t> memo_;
   absl::flat_hash_set<hhds::Gid>           on_path_;
 };
@@ -66,12 +66,11 @@ private:
 // Reachable defs in CHILDREN-FIRST order. A def appears only after every def it
 // instantiates, so inlining it into its parents is a flat clone of a body that is
 // already fully absorbed.
-void post_order(hhds::Graph* g, const Gid2Graph& g2g, absl::flat_hash_set<hhds::Gid>& seen,
-                std::vector<hhds::Graph*>& order) {
+void post_order(hhds::Graph* g, const Gid2Graph& g2g, absl::flat_hash_set<hhds::Gid>& seen, std::vector<hhds::Graph*>& order) {
   if (g == nullptr || !seen.insert(g->get_gid()).second) {
     return;
   }
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -100,13 +99,13 @@ bool absorb_small_defs(hhds::Graph* top, const Gid2Graph& gid2graph, uint64_t mi
   // Decide absorption for every def UP FRONT, from the pre-inline hierarchy. The
   // decision must not drift as bodies grow: a def is absorbed at all of its sites
   // or at none, which is what makes it safe to leave the def in the library.
-  absl::flat_hash_set<hhds::Gid> absorb;
+  absl::flat_hash_set<hhds::Gid>           absorb;
   absl::flat_hash_map<hhds::Gid, uint64_t> weight;
   for (auto* g : order) {
     if (g == top) {
       continue;  // the top has no parent to fold into
     }
-    const uint64_t w = weigher.total(g);
+    const uint64_t w     = weigher.total(g);
     weight[g->get_gid()] = w;
     if (w < min_ge) {
       absorb.insert(g->get_gid());
@@ -122,9 +121,9 @@ bool absorb_small_defs(hhds::Graph* top, const Gid2Graph& gid2graph, uint64_t mi
   absl::flat_hash_map<hhds::Gid, uint64_t> sites;
   for (auto* g : order) {
     // Snapshot the instances first: inline_sub_instance deletes nodes, and
-    // fast_class() is a live view over the node table.
+    // body().nodes() is a live view over the node table.
     std::vector<hhds::Node_class> victims;
-    for (auto n : g->fast_class()) {
+    for (auto n : g->body().nodes()) {
       if (gu::type_op_of(n) == Ntype_op::Sub && absorb.contains(n.get_subnode_gid())) {
         victims.emplace_back(n);
       }

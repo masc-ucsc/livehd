@@ -199,7 +199,9 @@ void Pass_isabelle::setup() {
                  &Pass_isabelle::work);
   m1.add_label_optional("path", "Output directory for emitted *_Lgraph.thy");
   m1.add_label_optional("top", "Top module name (informational only)");
-  m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.isabelle.strict wins)", "true");
+  m1.add_label_optional("strict",
+                        "true|false. Abort on unsupported ops (formal.strict applies too; formal.isabelle.strict wins)",
+                        "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
@@ -560,15 +562,15 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
   mi.nid  = node_id(node);
 
   for (const auto& e : inp_edges_ordered(node)) {
-    const auto raw_pid = static_cast<size_t>(e.sink.get_port_id());
+    const auto       raw_pid    = static_cast<size_t>(e.sink.get_port_id());
     // Memory sink pids are laid out in blocks of Ntype::Memory_port_stride
     // (graph/cell.hpp). This used to hardcode 11, which both truncated the
     // cell-global pins (`init`/`update`/`reset`/`undef` all live at pid >= 11)
     // and fabricated phantom ports for them (e.g. `undef` at pid 15 decoded as
     // port 1's `enable`).
     constexpr size_t mem_stride = static_cast<size_t>(Ntype::Memory_port_stride);
-    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
-    const auto port_id = raw_pid / mem_stride;
+    const auto       pname      = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
+    const auto       port_id    = raw_pid / mem_stride;
     if (mi.ports.size() <= port_id) {
       mi.ports.resize(port_id + 1);
     }
@@ -2243,7 +2245,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w = pin_width(ctx, a, node);
+      uint32_t src_w    = pin_width(ctx, a, node);
       // The sign position is a VALUE, not a bit slice. LiveHD routinely gives a
       // constant amount a 1-bit pin, and `unat (32 :: 1 word) = 0` silently
       // turns the sign-extend into a no-op. Widen the amount to hold its value,
@@ -2291,7 +2293,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w = pin_width(ctx, a, node);
+      uint32_t src_w  = pin_width(ctx, a, node);
       // The canonical zext idiom Get_mask(a, -1) declares the -1 mask at 1 bit;
       // emitting sem_get_mask at that width would select only bit 0. Widen the
       // mask to at least the source width (matches pass.lean and cgen_sim).
@@ -2522,7 +2524,7 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // Flops
   std::vector<Node>             flop_nodes;
   absl::flat_hash_set<uint32_t> flop_nids;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node_is_flop(node)) {
       flop_nodes.emplace_back(node);
       flop_nids.insert(node_id(node));
@@ -2552,7 +2554,7 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // subset; parse_memory_info rejects the rest before emission.
   std::vector<Node>             memory_nodes;
   absl::flat_hash_set<uint32_t> memory_nids;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node_is_memory(node)) {
       auto        mi = parse_memory_info(ctx, node);
       std::string mem_raw;

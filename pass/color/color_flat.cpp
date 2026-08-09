@@ -15,7 +15,7 @@ Color_flat::Color_flat(Color_opts opts_) : opts(opts_) {
 
 void Color_flat::label(hhds::Graph* g) {
   Node2Id node2id;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }

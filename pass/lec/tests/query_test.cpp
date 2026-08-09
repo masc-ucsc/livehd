@@ -5,6 +5,8 @@
 // (and, in the lec.cross path, lgcheck). Graphs are built programmatically so
 // the test needs no reader.
 
+#include "query.hpp"
+
 #include <memory>
 #include <string>
 
@@ -13,7 +15,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
-#include "query.hpp"
+#include "occurrence_materialize.hpp"
 
 using namespace livehd;
 using livehd::lec::Verdict;
@@ -83,6 +85,67 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   return g;
 }
 
+std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib) {
+  auto body_io = lib.create_io("active_body");
+  body_io->add_input("carry", 0);
+  body_io->add_input("active", 1);
+  body_io->add_output("next_carry", 2);
+  body_io->add_output("next_active", 3);
+  body_io->set_bits("carry", 9);
+  body_io->set_bits("active", 1);
+  body_io->set_bits("next_carry", 9);
+  body_io->set_bits("next_active", 1);
+  body_io->set_unsign("carry", true);
+  body_io->set_unsign("active", true);
+  body_io->set_unsign("next_carry", true);
+  body_io->set_unsign("next_active", true);
+  auto body = body_io->create_graph();
+
+  auto sum = graph_util::create_typed_node(*body, Ntype_op::Sum, 9);
+  body->get_input_pin("carry").connect_sink(sum.create_sink_pin(0));
+  graph_util::create_const(*body, *Dlop::create_integer(1)).connect_sink(sum.create_sink_pin(0));
+
+  // The lifted body itself preserves the carry while inactive; the occurrence
+  // realization additionally inserts the inter-ordinal bypass required by the
+  // compact call-binding contract.
+  auto mux = graph_util::create_typed_node(*body, Ntype_op::Mux, 9);
+  body->get_input_pin("active").connect_sink(mux.create_sink_pin(0));
+  body->get_input_pin("carry").connect_sink(mux.create_sink_pin(1));
+  sum.create_driver_pin(0).connect_sink(mux.create_sink_pin(2));
+  auto next_carry = mux.create_driver_pin(0);
+  graph_util::set_bits(next_carry, 9);
+  graph_util::set_unsign(next_carry);
+  next_carry.connect_sink(body->get_output_pin("next_carry"));
+  graph_util::create_const(*body, *Dlop::create_integer(0)).connect_sink(body->get_output_pin("next_active"));
+
+  auto top_io = lib.create_io("active_top");
+  top_io->add_input("seed", 0);
+  top_io->add_input("enable", 1);
+  top_io->add_output("result", 2);
+  top_io->set_bits("seed", 9);
+  top_io->set_bits("enable", 1);
+  top_io->set_bits("result", 9);
+  top_io->set_unsign("seed", true);
+  top_io->set_unsign("enable", true);
+  top_io->set_unsign("result", true);
+  auto top  = top_io->create_graph();
+  auto call = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  call.set_subnode(body_io,
+                   hhds::Subnode_loop{
+                       .first              = 0,
+                       .step               = 1,
+                       .count              = 3,
+                       .activation_input   = 1,
+                       .next_active_output = 3,
+                   });
+  top->get_input_pin("seed").connect_sink(call.create_sink_pin(0));
+  top->get_input_pin("enable").connect_sink(call.create_sink_pin(1));
+  call.create_driver_pin(2).connect_sink(call.create_sink_pin(0));
+  call.create_driver_pin(2).connect_sink(top->get_output_pin("result"));
+  call.subnode_group().validate();
+  return top;
+}
+
 }  // namespace
 
 TEST(CombEquiv, AndCommutativeProven) {
@@ -139,4 +202,20 @@ TEST(CombEquiv, EngineBmcRefutes) {
   o.engine = "bmc";
   auto r   = lec::prove_equal(ref.get(), impl.get(), o);
   EXPECT_EQ(r.verdict, Verdict::Refuted) << r.detail;
+}
+
+TEST(CombEquiv, NativeActivationLoopMatchesPrivatePhysicalRealization) {
+  hhds::GraphLibrary compact_lib;
+  auto               compact = build_active_loop(compact_lib);
+
+  hhds::GraphLibrary physical_lib;
+  ASSERT_TRUE(physical_lib.copy_from(compact_lib, "active_body"));
+  ASSERT_TRUE(physical_lib.copy_from(compact_lib, "active_top"));
+  auto physical = physical_lib.find_io("active_top")->get_graph();
+  ASSERT_EQ(graph_util::materialize_occurrences(physical.get(), "test"), 1);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto result    = lec::prove_equal(compact.get(), physical.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
 }

@@ -23,7 +23,7 @@ void Color_cgen::label(hhds::Graph* g) {
   // partitionable node with cone-sink `idx`. Stops at loop_break (flop/mem): a
   // registered node feeds the sink but its own din-cone is a separate region.
   std::vector<hhds::Node_class> wl;
-  auto mark = [&](const hhds::Node_class& start, int idx) {
+  auto                          mark = [&](const hhds::Node_class& start, int idx) {
     wl.clear();
     wl.push_back(start);
     while (!wl.empty()) {
@@ -66,7 +66,7 @@ void Color_cgen::label(hhds::Graph* g) {
   // All flop/mem next-state (din etc.) logic shares the single STATE cone-sink:
   // it is off the input->output combinational feedthrough (flops break the loop),
   // so it never needs per-element splitting to break a false loop.
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!n.is_loop_break()) {
       continue;
     }
@@ -76,9 +76,9 @@ void Color_cgen::label(hhds::Graph* g) {
   }
 
   // Collapse each distinct signature to a dense color id (>= 1).
-  Node2Id                          node2id;
-  std::map<std::vector<int>, int>  sig2id;
-  int                              next_color = 1;
+  Node2Id                         node2id;
+  std::map<std::vector<int>, int> sig2id;
+  int                             next_color = 1;
   for (auto& [node, s] : sig) {
     std::sort(s.begin(), s.end());
     auto [it, inserted] = sig2id.try_emplace(s, next_color);

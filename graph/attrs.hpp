@@ -186,21 +186,6 @@ struct lut_t {
 };
 inline constexpr lut_t lut{};
 
-// Per-node serialized replication descriptor on a Ntype_op::Sub instance
-// (see graph/replica_desc.hpp). Present only on a compact replicated Sub: one
-// node standing for `count` spatial replicas of its callee, with carry
-// mappings between consecutive ordinals. The payload is self-describing and
-// starts with its version so a stale artifact fails loudly instead of being
-// read as an ordinary single instance.
-//
-// SPARSE (the flat_storage default): only the handful of rolled-loop Subs in a
-// design carry one.
-struct replica_desc_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr replica_desc_t replica_desc{};
-
 // Per-pin/node TIME interval annotation (cycles from the
 // enclosing partition's inputs; the LG half of the pipe/mod time machinery).
 // On a Sub node: the instance's pinned latency contribution (stage[N] pick
@@ -272,9 +257,6 @@ template <>
 inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
-template <>
-inline constexpr Attr_kind attr_kind<replica_desc_t> = Attr_kind::node;
-
 }  // namespace livehd::attrs
 
 namespace hhds {}  // namespace hhds

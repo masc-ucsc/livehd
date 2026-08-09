@@ -37,10 +37,8 @@ constexpr uint64_t mix64(uint64_t x) {
   x ^= x >> 33U;
   return x;
 }
-constexpr uint64_t hcombine(uint64_t h, uint64_t v) {
-  return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U)));
-}
-uint64_t hstr(std::string_view s) {
+constexpr uint64_t hcombine(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
+uint64_t           hstr(std::string_view s) {
   uint64_t h = 1469598103934665603ULL;  // FNV-1a
   for (char c : s) {
     h ^= static_cast<unsigned char>(c);
@@ -146,14 +144,14 @@ uint64_t sub_iface_key(const hhds::Node_class& node) {
   if (!io) {
     return 0;
   }
-  uint64_t h   = hcombine(hstr("\x01subif"), hstr(io->get_name()));
-  uint64_t acc = 0;
+  uint64_t h    = hcombine(hstr("\x01subif"), hstr(io->get_name()));
+  uint64_t acc  = 0;
   auto     fold = [&](const auto& decls, uint64_t tag) {
     for (const auto& p : decls) {
-      uint64_t ph = hcombine(tag, hstr(p.name));
-      ph          = hcombine(ph, static_cast<uint64_t>(p.bits));
-      ph          = hcombine(ph, p.unsign ? 1ULL : 2ULL);
-      acc ^= ph;
+      uint64_t ph  = hcombine(tag, hstr(p.name));
+      ph           = hcombine(ph, static_cast<uint64_t>(p.bits));
+      ph           = hcombine(ph, p.unsign ? 1ULL : 2ULL);
+      acc         ^= ph;
     }
   };
   fold(io->get_input_pin_decls(), hstr("\x01i"));
@@ -214,24 +212,24 @@ uint64_t fold_operands(uint64_t base, absl::flat_hash_map<int, std::vector<uint6
 bool data_sink_port(Ntype_op op, int pid) {
   switch (op) {
     case Ntype_op::Flop:
-    case Ntype_op::Latch: return pid == 3 || pid == 4;                // din, enable
-    case Ntype_op::Fflop: return pid == 0 || pid == 3 || pid == 5;    // valid, din, stop
+    case Ntype_op::Latch: return pid == 3 || pid == 4;              // din, enable
+    case Ntype_op::Fflop: return pid == 0 || pid == 3 || pid == 5;  // valid, din, stop
     case Ntype_op::Memory:
       return pid == 0 || pid == 3 || pid == 4 || pid == 12 || pid == 13;  // addr, din, enable, update, update_enable
-    default: return true;  // comb node: every input is data
+    default: return true;                                                 // comb node: every input is data
   }
 }
 
 struct State_cell {
-  hhds::Node_class      node;
-  std::string           key;    // state_key (tier-1 identity; mangled under name_noise)
-  std::string           truth;  // name_noise only: the original key (empty = key is original)
-  bool                  is_mem = false;
-  uint64_t              kind   = 0;  // op + bits + init fold (local identity)
-  std::vector<uint32_t> preds;       // state cells feeding a data pin through comb
-  std::vector<uint32_t> succs;       // state cells fed from a driver pin through comb
-  std::vector<uint64_t> in_anchors;   // graph-input tokens feeding a data pin
-  std::vector<uint64_t> out_anchors;  // graph-output tokens reached from a driver pin
+  hhds::Node_class                           node;
+  std::string                                key;    // state_key (tier-1 identity; mangled under name_noise)
+  std::string                                truth;  // name_noise only: the original key (empty = key is original)
+  bool                                       is_mem = false;
+  uint64_t                                   kind   = 0;   // op + bits + init fold (local identity)
+  std::vector<uint32_t>                      preds;        // state cells feeding a data pin through comb
+  std::vector<uint32_t>                      succs;        // state cells fed from a driver pin through comb
+  std::vector<uint64_t>                      in_anchors;   // graph-input tokens feeding a data pin
+  std::vector<uint64_t>                      out_anchors;  // graph-output tokens reached from a driver pin
   // Transitive closure over the state graph, with the min HOP DISTANCE (BFS
   // level). Distance-annotated resolved points are a deliberate refinement over
   // the paper's plain sets: a linear chain (in -> A -> B -> out) is permanently
@@ -239,11 +237,11 @@ struct State_cell {
   // Annotation only refines buckets, and lec re-verifies every pair anyway.
   std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
   std::vector<std::pair<uint32_t, uint32_t>> reach_f;
-  uint64_t              token = 0;    // nonzero = resolved (tier-1 seed or tier-2 pair)
-  bool                  t1_pair = false, t1_group = false, t2_pair = false, ambiguous = false;
-  uint64_t              kind_nw = 0;         // `kind` WITHOUT the width term (see collect_state)
-  bool                  kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
-                                             // kind fold (op/init — the pair precondition)
+  uint64_t                                   token   = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
+  bool                                       t1_pair = false, t1_group = false, t2_pair = false, ambiguous = false;
+  uint64_t                                   kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
+  bool                                       kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
+                                                                  // kind fold (op/init — the pair precondition)
 };
 
 struct State_side {
@@ -255,7 +253,7 @@ struct State_side {
 State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
   const bool want_labels = opts.explain_noise > 0;
   State_side ss;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     auto op = gu::type_op_of(node);
     if (!is_state(op)) {
       continue;
@@ -445,8 +443,8 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
 // Commutative by construction — this annotated set is the identity the
 // full-match compares, and what the explain dump renders/diffs.
 std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const State_cell& c, bool backward) {
-  const auto& reach = backward ? c.reach_b : c.reach_f;
-  const auto& own   = backward ? c.in_anchors : c.out_anchors;
+  const auto&                                reach = backward ? c.reach_b : c.reach_f;
+  const auto&                                own   = backward ? c.in_anchors : c.out_anchors;
   std::vector<std::pair<uint64_t, uint32_t>> items;
   items.reserve(own.size() + reach.size() * 2);
   for (uint64_t t : own) {
@@ -477,11 +475,10 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) 
 // Tier-1 (name) + tier-2 (full-match) state pairing. Fills stats + the exported
 // pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
 // under dump_state.
-void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts,
-                Match_result& res) {
+void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts, Match_result& res) {
   State_stats& st = res.state;
-  st.a_total = static_cast<uint32_t>(sa.cells.size());
-  st.b_total = static_cast<uint32_t>(sb.cells.size());
+  st.a_total      = static_cast<uint32_t>(sa.cells.size());
+  st.b_total      = static_cast<uint32_t>(sb.cells.size());
   for (const auto& c : sa.cells) {
     st.a_mems += c.is_mem ? 1 : 0;
   }
@@ -498,8 +495,8 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     const auto threshold = static_cast<uint64_t>(opts.name_noise * 1e6);
     for (auto& c : sb.cells) {
       if (mix64(hstr(c.key) ^ mix64(opts.noise_seed)) % 1000000 < threshold) {
-        c.truth = c.key;
-        c.key += "\x01!noise";
+        c.truth  = c.key;
+        c.key   += "\x01!noise";
         ++st.noised;
       }
     }
@@ -526,20 +523,20 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         sa.label.try_emplace(tok, "st:" + key);
         sb.label.try_emplace(tok, "st:" + key);
       }
-      bool     one = av.size() == 1 && it->second.size() == 1;
+      bool one = av.size() == 1 && it->second.size() == 1;
       for (uint32_t i : av) {
-        sa.cells[i].token   = tok;
-        sa.cells[i].t1_pair = one;
-        sa.cells[i].t1_group = !one;
-        st.a_name_grouped += one ? 0 : 1;
+        sa.cells[i].token     = tok;
+        sa.cells[i].t1_pair   = one;
+        sa.cells[i].t1_group  = !one;
+        st.a_name_grouped    += one ? 0 : 1;
       }
       for (uint32_t i : it->second) {
-        sb.cells[i].token   = tok;
-        sb.cells[i].t1_pair = one;
-        sb.cells[i].t1_group = !one;
-        st.b_name_grouped += one ? 0 : 1;
+        sb.cells[i].token     = tok;
+        sb.cells[i].t1_pair   = one;
+        sb.cells[i].t1_group  = !one;
+        st.b_name_grouped    += one ? 0 : 1;
       }
-      st.name_pairs += one ? 1 : 0;
+      st.name_pairs     += one ? 1 : 0;
       st.name_pairs_mem += one && sa.cells[av.front()].is_mem ? 1 : 0;
     }
   }
@@ -615,10 +612,10 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     // the residue that STILL has no counterpart is then retried width-blind
     // (see collect_state for why that is sound). Doing it the other way round
     // would let a width-crossing pair win a slot from an exact one.
-    bool relaxed = false;
+    bool           relaxed = false;
     for (uint32_t round = 1; round <= maxiter; ++round) {
       absl::flat_hash_map<uint64_t, std::vector<uint32_t>> asig, bsig;
-      auto sig_of = [&](const State_side& ss, const State_cell& c) {
+      auto                                                 sig_of = [&](const State_side& ss, const State_cell& c) {
         uint64_t h = hcombine(relaxed ? c.kind_nw : c.kind, rp_signature(ss, c, /*backward=*/true));
         return hcombine(h, rp_signature(ss, c, /*backward=*/false));
       };
@@ -639,13 +636,13 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
           continue;
         }
         if (av.size() == 1 && it->second.size() == 1) {
-          uint64_t tok                    = hcombine(hstr("\x02pair"), sig);
+          uint64_t tok = hcombine(hstr("\x02pair"), sig);
           if (opts.explain_noise > 0) {
             sa.label.try_emplace(tok, "pair:" + sa.cells[av.front()].key);
             sb.label.try_emplace(tok, "pair:" + sa.cells[av.front()].key);
           }
-          sa.cells[av.front()].token      = tok;
-          sa.cells[av.front()].t2_pair    = true;
+          sa.cells[av.front()].token           = tok;
+          sa.cells[av.front()].t2_pair         = true;
           sb.cells[it->second.front()].token   = tok;
           sb.cells[it->second.front()].t2_pair = true;
           ++st.full_pairs;
@@ -756,8 +753,8 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
             return s;
           };
           auto print_diff = [&](std::string_view what, const State_cell& cr, const State_cell& ci, bool backward) {
-            auto ri = rp_items(sa, cr, backward);
-            auto ii = rp_items(sb, ci, backward);
+            auto                                       ri = rp_items(sa, cr, backward);
+            auto                                       ii = rp_items(sb, ci, backward);
             std::vector<std::pair<uint64_t, uint32_t>> only_r, only_i;
             std::set_difference(ri.begin(), ri.end(), ii.begin(), ii.end(), std::back_inserter(only_r));
             std::set_difference(ii.begin(), ii.end(), ri.begin(), ri.end(), std::back_inserter(only_i));
@@ -776,13 +773,14 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
             uint64_t isig = sig_of(sb, ci);
             size_t   ibkt = bsig.contains(isig) ? bsig[isig].size() : 0;
             size_t   abkt = asig.contains(isig) ? asig[isig].size() : 0;
-            std::print("semdiff[explain] def '{}': impl '{}' ({} bits {}) noised, UNRECOVERED — same-sig candidates ref/impl {}/{}\n",
-                       gb->get_name(),
-                       ci.truth,
-                       Ntype::get_name(gu::type_op_of(ci.node)),
-                       node_out_bits(ci.node),
-                       abkt,
-                       ibkt);
+            std::print(
+                "semdiff[explain] def '{}': impl '{}' ({} bits {}) noised, UNRECOVERED — same-sig candidates ref/impl {}/{}\n",
+                gb->get_name(),
+                ci.truth,
+                Ntype::get_name(gu::type_op_of(ci.node)),
+                node_out_bits(ci.node),
+                abkt,
+                ibkt);
             std::print("    impl SRP:{}\n", items_str(sb, rp_items(sb, ci, true)));
             std::print("    impl ERP:{}\n", items_str(sb, rp_items(sb, ci, false)));
             auto tw = akeys.find(ci.truth);
@@ -833,8 +831,13 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     }
   }
 
-  auto finish = [&](hhds::Graph* g, State_side& ss, uint32_t& unpaired, uint32_t& ambiguous, std::vector<std::string>& names,
-                    std::vector<std::string>& mem_diverged, std::string_view side) {
+  auto finish = [&](hhds::Graph*              g,
+                    State_side&               ss,
+                    uint32_t&                 unpaired,
+                    uint32_t&                 ambiguous,
+                    std::vector<std::string>& names,
+                    std::vector<std::string>& mem_diverged,
+                    std::string_view          side) {
     for (auto& c : ss.cells) {
       if (c.token == 0) {
         ++unpaired;
@@ -847,7 +850,9 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         }
         if (opts.state_pairing) {
           names.push_back(c.node.get_hier_name()
-                          + (c.ambiguous ? " (ambiguous)" : c.kind_clash ? " (kind/init mismatch)" : " (no full match)"));
+                          + (c.ambiguous    ? " (ambiguous)"
+                             : c.kind_clash ? " (kind/init mismatch)"
+                                            : " (no full match)"));
         }
       }
       if (opts.dump_state) {
@@ -856,9 +861,9 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                    g->get_name(),
                    c.truth.empty() ? c.key : c.truth,
                    c.truth.empty() ? "" : " (noised)",
-                   c.t1_pair    ? "name"
-                   : c.t1_group ? "name-group"
-                   : c.t2_pair  ? "full"
+                   c.t1_pair     ? "name"
+                   : c.t1_group  ? "name-group"
+                   : c.t2_pair   ? "full"
                    : c.ambiguous ? "UNPAIRED(ambiguous)"
                                  : "UNPAIRED(no-counterpart)");
       }
@@ -870,12 +875,12 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
 
 // Per-side analysis: forward/backward signatures + node order.
 struct Side {
-  hhds::Graph*                                      g = nullptr;
-  std::vector<hhds::Node_class>                     order;   // forward_class order
-  absl::flat_hash_map<hhds::Class_index, uint64_t>  fsig;    // forward signature
-  absl::flat_hash_map<hhds::Class_index, uint64_t>  bsig;    // backward signature
-  absl::flat_hash_set<uint64_t>                     fvals;   // fsig value set
-  absl::flat_hash_set<uint64_t>                     bvals;   // bsig value set
+  hhds::Graph*                                     g = nullptr;
+  std::vector<hhds::Node_class>                    order;  // forward_class order
+  absl::flat_hash_map<hhds::Class_index, uint64_t> fsig;   // forward signature
+  absl::flat_hash_map<hhds::Class_index, uint64_t> bsig;   // backward signature
+  absl::flat_hash_set<uint64_t>                    fvals;  // fsig value set
+  absl::flat_hash_set<uint64_t>                    bvals;  // bsig value set
 };
 
 // The forward pass's operand rule, factored out so the compare-point obligation
@@ -938,9 +943,9 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       s.bsig[ci] = seed;
     }
   } else if (opts.matching_names) {
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (is_state(gu::type_op_of(node))) {
-        uint64_t seed             = hcombine(hstr("\x01state"), hstr(state_key(g, node)));
+        uint64_t seed                  = hcombine(hstr("\x01state"), hstr(state_key(g, node)));
         s.fsig[node.get_class_index()] = seed;
         s.bsig[node.get_class_index()] = seed;
       }
@@ -949,7 +954,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
 
   // ---- Forward pass: inputs/consts -> outputs (topological). A node is ready
   // when every fanin signal already has a forward signature.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     s.order.push_back(node);
     auto ci = node.get_class_index();
     auto op = gu::type_op_of(node);
@@ -969,7 +974,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       continue;  // unseeded state cell => forward frontier
     }
 
-    bool                                       ready = true;
+    bool                                            ready = true;
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
     for (const auto& e : node.inp_edges()) {
       uint64_t dsig = 0;
@@ -1014,7 +1019,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       if (op == Ntype_op::Nconst || is_state(op)) {
         continue;  // const already signed; unseeded state is a real frontier
       }
-      bool                                           ready = true;
+      bool                                            ready = true;
       absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
       for (const auto& e : node.inp_edges()) {
         uint64_t dsig = 0;
@@ -1051,11 +1056,11 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       continue;  // unseeded state cell => backward frontier
     }
 
-    bool                                       ready = true;
-    bool                                       any   = false;
+    bool                                            ready = true;
+    bool                                            any   = false;
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
     for (const auto& e : node.out_edges()) {
-      any = true;
+      any             = true;
       const auto& snk = e.sink;
       uint64_t    usig;
       if (gu::is_graph_output_pin(snk)) {
@@ -1154,7 +1159,7 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
     // seed a Sub with, and today's behavior is preserved bit-for-bit.
     if (opts.matching_names) {
       auto seed_cut_subs = [&](hhds::Graph* g, absl::flat_hash_map<hhds::Class_index, uint64_t>& seeds) {
-        for (auto node : g->forward_class()) {
+        for (auto node : g->body().nodes(hhds::Node_order::forward)) {
           if (gu::type_op_of(node) != Ntype_op::Sub) {
             continue;
           }
@@ -1177,7 +1182,7 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
               // name is content-stable. IO folded order-INDEPENDENTLY (XOR): decl
               // iteration order is not guaranteed stable and each port already
               // carries its own port_id, so the XOR is a faithful set signature.
-              seed = hcombine(seed, hstr(io->get_name()));
+              seed                = hcombine(seed, hstr(io->get_name()));
               uint64_t io_acc     = 0;
               auto     fold_decls = [&](const auto& decls, uint64_t tag) {
                 for (const auto& p : decls) {
@@ -1187,10 +1192,10 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
                   // pre-bodies would disagree on an unchanged region. The name is
                   // content-stable and already unique, so it is the faithful (and
                   // round-trip-safe) port identity. XOR => order-independent.
-                  uint64_t ph = hcombine(tag, hstr(p.name));
-                  ph          = hcombine(ph, static_cast<uint64_t>(p.bits));
-                  ph          = hcombine(ph, p.unsign ? 1ULL : 2ULL);
-                  io_acc ^= ph;
+                  uint64_t ph  = hcombine(tag, hstr(p.name));
+                  ph           = hcombine(ph, static_cast<uint64_t>(p.bits));
+                  ph           = hcombine(ph, p.unsign ? 1ULL : 2ULL);
+                  io_acc      ^= ph;
                 }
               };
               fold_decls(io->get_input_pin_decls(), hstr("\x01i"));
@@ -1220,8 +1225,7 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
   {
     absl::flat_hash_map<std::string, uint64_t> ka, kb;  // compare point -> csig
     absl::flat_hash_set<std::string>           ua, ub;  // ... or "undecidable"
-    auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k,
-                            absl::flat_hash_set<std::string>& u) {
+    auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k, absl::flat_hash_set<std::string>& u) {
       for (const auto& node : s.order) {
         if (!is_cut(node, opts.blackbox_subs)) {
           continue;
@@ -1277,12 +1281,10 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
       }
     }
   }
-
 }
 
 // Signatures present on BOTH sides are matchable.
-void common_values(const Side& sa, const Side& sb, absl::flat_hash_set<uint64_t>& fcommon,
-                   absl::flat_hash_set<uint64_t>& bcommon) {
+void common_values(const Side& sa, const Side& sb, absl::flat_hash_set<uint64_t>& fcommon, absl::flat_hash_set<uint64_t>& bcommon) {
   for (uint64_t v : sa.fvals) {
     if (sb.fvals.contains(v)) {
       fcommon.insert(v);
@@ -1312,7 +1314,7 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
   // a class shared across the two graphs lands on the same id on both sides.
   absl::flat_hash_map<Classkey, uint32_t> class2id;
   uint32_t                                next_id = 1;
-  auto assign = [&](Side& side, uint32_t& matched, uint32_t& unmatched) {
+  auto                                    assign  = [&](Side& side, uint32_t& matched, uint32_t& unmatched) {
     for (const auto& node : side.order) {
       auto     ck = class_of(side, node.get_class_index(), fcommon, bcommon);
       uint32_t id = 0;
@@ -1355,7 +1357,7 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
         uf[std::max(x, y)] = std::min(x, y);
       }
     };
-    for (auto node : a->forward_class()) {
+    for (auto node : a->body().nodes(hhds::Node_order::forward)) {
       uint32_t u = gu::match_of(node);
       if (u == 0) {
         continue;
@@ -1373,7 +1375,7 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
     absl::flat_hash_map<uint32_t, uint32_t> root2region;
     uint32_t                                next_region = 1;
     auto                                    region_of   = [&](uint32_t id) -> uint32_t {
-      uint32_t r           = find(id);
+      uint32_t r          = find(id);
       auto [it, inserted] = root2region.try_emplace(r, next_region);
       if (inserted) {
         ++next_region;
@@ -1381,7 +1383,7 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
       return it->second;
     };
     for (hhds::Graph* g : {a, b}) {
-      for (auto node : g->forward_class()) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         uint32_t id = gu::match_of(node);
         if (id != 0) {
           stamp(node, region_of(id));
@@ -1520,8 +1522,8 @@ uint64_t driver_desc(const hhds::Pin_class& drv, bool a_side, const Bimap& ab, c
 // combined with the driver descriptor. `ok` is cleared when the driver is
 // unresolved (verify: mismatch).
 uint64_t edge_desc(const hhds::Edge_class& e, bool sink_is_sub, bool a_side, const Bimap& ab, const Bimap& ba, bool& ok) {
-  uint64_t sink_port = sink_is_sub ? hstr(e.sink.get_pin_name())
-                                   : static_cast<uint64_t>(static_cast<uint32_t>(e.sink.get_port_id()));
+  uint64_t sink_port
+      = sink_is_sub ? hstr(e.sink.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.sink.get_port_id()));
   bool     resolved;
   uint64_t d = driver_desc(e.driver, a_side, ab, ba, resolved);
   ok         = resolved;
@@ -1531,8 +1533,8 @@ uint64_t edge_desc(const hhds::Edge_class& e, bool sink_is_sub, bool a_side, con
 // The multiset of a node's input-edge descriptors (sorted), a-space canonical.
 // `ok` is cleared if any driver is unresolved.
 std::vector<uint64_t> input_descs(const hhds::Node_class& node, bool a_side, const Bimap& ab, const Bimap& ba, bool& ok) {
-  ok            = true;
-  bool sink_sub = gu::type_op_of(node) == Ntype_op::Sub;
+  ok                             = true;
+  bool                  sink_sub = gu::type_op_of(node) == Ntype_op::Sub;
   std::vector<uint64_t> v;
   for (const auto& e : node.inp_edges()) {
     bool eok;
@@ -1626,20 +1628,18 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   // The distinct output driver pins of a node, keyed for cross-side matching
   // (Sub: by name; else by port_id).
   auto enqueue_node_outputs = [&](const hhds::Node_class& na, const hhds::Node_class& nb) {
-    bool                                          sub = gu::type_op_of(na) == Ntype_op::Sub;
+    bool                                           sub = gu::type_op_of(na) == Ntype_op::Sub;
     absl::flat_hash_map<uint64_t, hhds::Pin_class> bmap;
     absl::flat_hash_set<uint64_t>                  bseen;
     for (const auto& e : nb.out_edges()) {
-      uint64_t k = sub ? hstr(e.driver.get_pin_name())
-                       : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+      uint64_t k = sub ? hstr(e.driver.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
       if (bseen.insert(k).second) {
         bmap.emplace(k, e.driver);
       }
     }
     absl::flat_hash_set<uint64_t> aseen;
     for (const auto& e : na.out_edges()) {
-      uint64_t k = sub ? hstr(e.driver.get_pin_name())
-                       : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
+      uint64_t k = sub ? hstr(e.driver.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(e.driver.get_port_id()));
       if (!aseen.insert(k).second) {
         continue;
       }
@@ -1716,8 +1716,9 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
       continue;
     }
     auto by_canon = [&](std::vector<hhds::Node_class>& v, bool a_side) {
-      std::sort(v.begin(), v.end(),
-                [&](const hhds::Node_class& x, const hhds::Node_class& y) { return canon(x, a_side) < canon(y, a_side); });
+      std::sort(v.begin(), v.end(), [&](const hhds::Node_class& x, const hhds::Node_class& y) {
+        return canon(x, a_side) < canon(y, a_side);
+      });
     };
     by_canon(alist, true);
     by_canon(blist, false);
@@ -1751,13 +1752,13 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   // width, Sub interface, and -- the crux -- its full input-edge multiset under
   // the bijection. A wrong discovery pairing, a rewiring, or an unreached node
   // all surface here as an inequality, so a `true` is a genuine isomorphism.
-  for (auto node : a->forward_class()) {
+  for (auto node : a->body().nodes(hhds::Node_order::forward)) {
     if (!ab.contains(node.get_class_index())) {
       return false;  // an a node the traversal never paired
     }
   }
   size_t b_nodes = 0;
-  for (auto node : b->forward_class()) {
+  for (auto node : b->body().nodes(hhds::Node_order::forward)) {
     if (!ba.contains(node.get_class_index())) {
       return false;
     }
@@ -1766,7 +1767,7 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   if (ab.size() != b_nodes) {
     return false;  // not a bijection (size mismatch)
   }
-  for (auto na : a->forward_class()) {
+  for (auto na : a->body().nodes(hhds::Node_order::forward)) {
     auto nb = b->get_node(ab.at(na.get_class_index()));
     if (gu::type_op_of(na) != gu::type_op_of(nb)) {
       return false;
@@ -1804,8 +1805,7 @@ namespace {
 // One def's digest, recursing into resolvable Sub bodies (Merkle). `memo` and
 // `visiting` are shared across the whole canonical_digest() call so shared
 // children in the instance DAG are digested once and a cycle is caught.
-Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
-                            absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
+Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
                             absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold) {
   Canonical_digest d;
   if (g == nullptr) {
@@ -1815,7 +1815,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
   // Refuse anonymous state cells up front (see semdiff.hpp): their state_key
   // falls back to the per-run debug nid, which is neither stable across
   // processes nor safely replaceable by a constant.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (is_state(gu::type_op_of(node)) && state_key(g, node).starts_with("f:")) {
       return d;  // valid=false — not digestable, callers skip the cache
     }
@@ -1824,7 +1824,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
   Semdiff_options opts;
   opts.matching_names = true;  // state cells keyed by hierarchical name — lec's
                                // correspondence basis, so digest-equal transfers
-  Side s = analyze(g, opts);
+  Side s              = analyze(g, opts);
 
   // Order-independent fold: one token per node (fsig = input-cone identity,
   // bsig = output-cone identity, kind = local shape), sorted so allocation /
@@ -1890,8 +1890,8 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
   }
   for (const auto& dio : gio->get_output_pin_decls()) {
     uint64_t t = hcombine(hstr("\x01odecl"), hstr(dio.name));
-    t          = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_output_pin(dio.name), *gio, dio.name))));
-    t          = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
+    t = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_output_pin(dio.name), *gio, dio.name))));
+    t = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
     toks.push_back(t);
   }
   std::sort(toks.begin(), toks.end());

@@ -39,14 +39,14 @@ using livehd::graph_util::bits_of;
 using livehd::graph_util::create_const;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::debug_name;
+using livehd::graph_util::get_driver_of_sink_name;
 using livehd::graph_util::has_name;
 using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
-using livehd::graph_util::get_driver_of_sink_name;
+using livehd::graph_util::is_unsign;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
-using livehd::graph_util::is_unsign;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
@@ -214,7 +214,7 @@ static void set_loc(hhds::Node_class& node, const std::string& src) {
   if (name.empty()) {
     return {};
   }
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     for (const auto& dpin : node.out_pins()) {
       auto pn = pin_name_of(dpin);
       if (pn == name) {
@@ -666,7 +666,7 @@ static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_cla
     return dpin;
   }
 
-  auto mask_v   = hydrate_const_pin(mask);
+  auto mask_v    = hydrate_const_pin(mask);
   auto dpin_bits = bits_of(dpin);
   auto a_bits    = bits_of(a);
   bool all_ones  = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
@@ -850,7 +850,7 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
           // exactly that Or node. Mirrors the guarded pattern in
           // process_cell_drivers_intialization's parallel else branch.
           if (wire2pin.find(wire) == wire2pin.end()) {
-            auto pa_node   = create_typed_node(*g, Ntype_op::Or, wire->width);
+            auto pa_node = create_typed_node(*g, Ntype_op::Or, wire->width);
             set_loc(pa_node, wire->get_src_attribute());
             auto pa_dpin   = pa_node.create_driver_pin(0);
             wire2pin[wire] = pa_dpin;
@@ -1543,8 +1543,7 @@ static std::vector<const RTLIL::Wire*> sorted_wire_keys(const MapT& m) {
   for (const auto& it : m) {
     wires.push_back(it.first);
   }
-  std::sort(wires.begin(), wires.end(),
-            [](const RTLIL::Wire* a, const RTLIL::Wire* b) { return a->name.str() < b->name.str(); });
+  std::sort(wires.begin(), wires.end(), [](const RTLIL::Wire* a, const RTLIL::Wire* b) { return a->name.str() < b->name.str(); });
   return wires;
 }
 
@@ -1598,7 +1597,7 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
       pending_chain = false;
       absl::flat_hash_set<int> ready_pos;
       // ordered so the per-shift node creation below is deterministic
-      std::set<int> shifts;
+      std::set<int>            shifts;
 
       for (int pos = 0; pos < (int)partially_assigned_fwd[wire].size(); ++pos) {
         auto shift = partially_assigned_fwd[wire][pos];
@@ -2259,10 +2258,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       set_type_op(exit_node, Ntype_op::SHL);
       set_bits(exit_node.create_driver_pin(0), y_bits);
-      setup_sink_by_name(exit_node, "a")
-          .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::A), false));
+      setup_sink_by_name(exit_node, "a").connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::A), false));
 
-      auto s_dpin = create_pick_concat_dpin(g, cell->getPort(ID::S), false);
+      auto            s_dpin = create_pick_concat_dpin(g, cell->getPort(ID::S), false);
       hhds::Pin_class shift_dpin;
       if (width == 1) {
         shift_dpin = s_dpin;
@@ -2271,15 +2269,13 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         auto scale    = log2_exact(static_cast<uint32_t>(width));
         auto shl_node = create_typed_node(*g, Ntype_op::SHL, amount_w);
         setup_sink_by_name(shl_node, "a").connect_driver(s_dpin);
-        setup_sink_by_name(shl_node, "b")
-            .connect_driver(create_const(*g, *Dlop::create_integer(scale)));
+        setup_sink_by_name(shl_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(scale)));
         shift_dpin = shl_node.create_driver_pin(0);
       } else {
         auto amount_w = std::max<uint32_t>(1, ceil_log2(static_cast<uint32_t>(y_bits)));
         auto mul_node = create_typed_node(*g, Ntype_op::Mult, amount_w);
         setup_sink_by_name(mul_node, "as").connect_driver(s_dpin);
-        setup_sink_by_name(mul_node, "as")
-            .connect_driver(create_const(*g, *Dlop::create_integer(width)));
+        setup_sink_by_name(mul_node, "as").connect_driver(create_const(*g, *Dlop::create_integer(width)));
         shift_dpin = mul_node.create_driver_pin(0);
       }
       setup_sink_by_name(exit_node, "b").connect_driver(shift_dpin);
@@ -2318,8 +2314,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // get_dpin() defaults to signed and can turn a one-bit slice such as
       // addr[0] into a sign-extension of the whole address wire, which in turn
       // corrupts bmuxmap-generated SRAM read trees.
-      setup_sink_by_name(exit_node, "s")
-          .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::S), false));
+      setup_sink_by_name(exit_node, "s").connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::S), false));
       setup_sink_by_name(exit_node, "p1").connect_driver(get_dpin(g, cell, ID::A));
       setup_sink_by_name(exit_node, "p2").connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$add", 4) == 0 || std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
@@ -2524,11 +2519,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
     } else if (cell->type == "$mem" || cell->type == "$mem_v2") {
       set_type_op(exit_node, Ntype_op::Memory);
 
-      uint32_t width   = cell->getParam(ID::WIDTH).as_int();
-      uint32_t depth   = cell->getParam(ID::SIZE).as_int();
-      auto     abits   = cell->getParam(ID::ABITS).as_int();
-      auto     rdports = cell->getParam(ID::RD_PORTS).as_int();
-      auto     wrports = cell->getParam(ID::WR_PORTS).as_int();
+      uint32_t        width   = cell->getParam(ID::WIDTH).as_int();
+      uint32_t        depth   = cell->getParam(ID::SIZE).as_int();
+      auto            abits   = cell->getParam(ID::ABITS).as_int();
+      auto            rdports = cell->getParam(ID::RD_PORTS).as_int();
+      auto            wrports = cell->getParam(ID::WR_PORTS).as_int();
       // RD_TRANSPARENCY_MASK is indexed rd*WR_PORTS + wr (yosys simlib.v), which
       // is EXACTLY the Memory cell's per-(read,write) `fwd` matrix layout — so
       // it transfers verbatim. Build it bit-exactly (as_int() keeps only the
@@ -2608,7 +2603,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
               "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
               "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
               "--set formal.ignore_memory=<name>, which blackboxes it).\n",
-              cell->name.c_str(), edge_why.c_str(), kind, port, pos ? "posedge" : "negedge");
+              cell->name.c_str(),
+              edge_why.c_str(),
+              kind,
+              port,
+              pos ? "posedge" : "negedge");
         }
       };
       for (int i = 0; i < wrports; ++i) {
@@ -2624,8 +2623,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       const int wr_clkp = mem_mixed ? Ntype::Memory_posclk_mixed : ((have_edge && mem_pos) ? 1 : 0);
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
-      setup_sink_by_name(exit_node, "fwd")
-          .connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));
+      setup_sink_by_name(exit_node, "fwd").connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));
       // Driven only when non-zero, exactly like the cgen UNDEF parameter: every
       // pre-existing graph stays byte-identical.
       if (collx) {
@@ -2814,7 +2812,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 // set from wire->is_signed in look_for_wire(); sink pins are intentionally left
 // untouched (their sign is the driver's).
 static void finalize_module(hhds::Graph* g) {
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Invalid || Ntype::has_multiple_driver_pins(op) || op == Ntype_op::Nconst) {
       // Invalid: untyped placeholder (no real driver). Sub/Memory: per-port

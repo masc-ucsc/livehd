@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Standalone graph-pass command plumbing, including semdiff.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -13,6 +11,7 @@
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "semdiff.hpp"
@@ -153,30 +152,57 @@ void semdiff_command(Options& opts, Result& res) {
   // Deliberately reports BOTH sides — a ref-side-only view hides impl-side extra
   // logic (the flatten/inline asymmetry that makes a diff look clean from one
   // end). `pct` guards div-by-zero on empty designs.
-  auto print_stats = [](uint32_t def_pairs, uint32_t ref_only, uint64_t a_matched, uint64_t a_total, uint64_t b_matched,
-                        uint64_t b_total, uint64_t regions, const livehd::semdiff::State_stats& st) {
+  auto print_stats = [](uint32_t                            def_pairs,
+                        uint32_t                            ref_only,
+                        uint64_t                            a_matched,
+                        uint64_t                            a_total,
+                        uint64_t                            b_matched,
+                        uint64_t                            b_total,
+                        uint64_t                            regions,
+                        const livehd::semdiff::State_stats& st) {
     auto pct = [](uint64_t n, uint64_t d) { return d == 0 ? 100.0 : 100.0 * static_cast<double>(n) / static_cast<double>(d); };
     // Registers = every state cell that is not a Memory; the pair counts carry
     // their own Memory subset so both rows are exact rather than inferred.
-    const uint32_t a_regs = st.a_total - st.a_mems;
-    const uint32_t b_regs = st.b_total - st.b_mems;
+    const uint32_t a_regs      = st.a_total - st.a_mems;
+    const uint32_t b_regs      = st.b_total - st.b_mems;
     const uint32_t paired_mem  = st.name_pairs_mem + st.full_pairs_mem;
     const uint32_t paired_regs = (st.name_pairs + st.full_pairs) - paired_mem;
     std::print("semdiff[stats]: defs      {} paired, {} ref-only\n", def_pairs, ref_only);
     std::print("semdiff[stats]: nodes     ref {}/{} matched ({:.1f}%), impl {}/{} matched ({:.1f}%), {} region(s)\n",
-               a_matched, a_total, pct(a_matched, a_total), b_matched, b_total, pct(b_matched, b_total), regions);
+               a_matched,
+               a_total,
+               pct(a_matched, a_total),
+               b_matched,
+               b_total,
+               pct(b_matched, b_total),
+               regions);
     std::print("semdiff[stats]: registers ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
-               paired_regs, a_regs, pct(paired_regs, a_regs), paired_regs, b_regs,
-               st.name_pairs - st.name_pairs_mem, st.full_pairs - st.full_pairs_mem);
+               paired_regs,
+               a_regs,
+               pct(paired_regs, a_regs),
+               paired_regs,
+               b_regs,
+               st.name_pairs - st.name_pairs_mem,
+               st.full_pairs - st.full_pairs_mem);
     std::print("semdiff[stats]: memories  ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
-               paired_mem, st.a_mems, pct(paired_mem, st.a_mems), paired_mem, st.b_mems, st.name_pairs_mem,
+               paired_mem,
+               st.a_mems,
+               pct(paired_mem, st.a_mems),
+               paired_mem,
+               st.b_mems,
+               st.name_pairs_mem,
                st.full_pairs_mem);
     std::print("semdiff[stats]: UNMATCHED ref {} node(s) / {} state ({} ambiguous), impl {} node(s) / {} state ({} ambiguous)\n",
-               a_total - a_matched, st.a_unpaired, st.a_ambiguous, b_total - b_matched, st.b_unpaired, st.b_ambiguous);
+               a_total - a_matched,
+               st.a_unpaired,
+               st.a_ambiguous,
+               b_total - b_matched,
+               st.b_unpaired,
+               st.b_ambiguous);
     const bool clean = a_matched == a_total && b_matched == b_total && st.a_unpaired == 0 && st.b_unpaired == 0 && ref_only == 0;
-    std::print("semdiff[stats]: => {}\n",
-               clean ? "designs fully correspond"
-                     : "DIFFERENCES present (grep the `match=0` nodes: `lhd tool grep match=0 lg:<impl>`)");
+    std::print(
+        "semdiff[stats]: => {}\n",
+        clean ? "designs fully correspond" : "DIFFERENCES present (grep the `match=0` nodes: `lhd tool grep match=0 lg:<impl>`)");
   };
 
   if (hier) {
@@ -184,7 +210,7 @@ void semdiff_command(Options& opts, Result& res) {
     // Mirrors lec_hierarchical's correspondence: defs pair by ENTITY (post-'.'
     // tail) when the entity is side-unique, else full name; scoped to --top's
     // transitive ref-side subtree when a top is given, else every shared def.
-    namespace gu = livehd::graph_util;
+    namespace gu   = livehd::graph_util;
     auto entity_of = [](std::string_view n) -> std::string {
       auto d = n.rfind('.');
       return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
@@ -224,11 +250,11 @@ void semdiff_command(Options& opts, Result& res) {
 
     // Scope: --top's ref-side transitive subtree (over ALL ref defs, so
     // one-sided children are still visited and reported), else every ref def.
-    std::vector<std::string>                                    scope;  // ref canon keys, leaves-first
+    std::vector<std::string>                                   scope;  // ref canon keys, leaves-first
     absl::flat_hash_map<std::string, std::vector<std::string>> children;
     for (auto& [name, g] : ref_by_name) {
       absl::flat_hash_set<std::string> seen;
-      for (auto node : g->forward_class()) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -246,9 +272,7 @@ void semdiff_command(Options& opts, Result& res) {
       if (ref_by_name.size() == 1) {
         want_top = ref_by_name.begin()->first;
       } else {
-        throw Lhd_error{"usage",
-                        "pass semdiff: --impl-top needs --ref-top (or --top) when the ref library holds several defs",
-                        ""};
+        throw Lhd_error{"usage", "pass semdiff: --impl-top needs --ref-top (or --top) when the ref library holds several defs", ""};
       }
     }
     if (!want_top.empty()) {
@@ -322,10 +346,10 @@ void semdiff_command(Options& opts, Result& res) {
     // NODE totals across the sweep (the state agg above covers state cells only).
     // A ref-only def's nodes are unmatched by construction and are counted below,
     // so `nodes ref X/Y` stays honest about one-sided defs.
-    uint64_t agg_a_matched = 0, agg_a_total = 0, agg_b_matched = 0, agg_b_total = 0, agg_regions = 0;
+    uint64_t                     agg_a_matched = 0, agg_a_total = 0, agg_b_matched = 0, agg_b_total = 0, agg_regions = 0;
     uint32_t                     explain_left = o.explain_noise;  // budget shared across defs
-    auto count_state = [](hhds::Graph* g, uint32_t& total, uint32_t& mems) {
-      for (auto node : g->forward_class()) {
+    auto                         count_state  = [](hhds::Graph* g, uint32_t& total, uint32_t& mems) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         auto op = gu::type_op_of(node);
         if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
           ++total;
@@ -351,12 +375,12 @@ void semdiff_command(Options& opts, Result& res) {
         ++ref_only;
         uint32_t t = 0, m = 0;
         count_state(rit->second, t, m);
-        for (auto node : rit->second->forward_class()) {
+        for (auto node : rit->second->body().nodes(hhds::Node_order::forward)) {
           (void)node;
           ++agg_a_total;  // one-sided def: every node is unmatched by construction
         }
-        agg.a_total += t;
-        agg.a_mems += m;
+        agg.a_total    += t;
+        agg.a_mems     += m;
         agg.a_unpaired += t;
         if (!opts.quiet && t != 0) {
           std::print("semdiff[hier]: '{}' REF-ONLY, {} state cell(s) unpairable\n", name, t);
@@ -364,17 +388,17 @@ void semdiff_command(Options& opts, Result& res) {
         continue;
       }
       ++def_pairs;
-      auto o2          = o;
-      o2.explain_noise = explain_left;
-      auto r           = livehd::semdiff::structural_match(rit->second, iit->second, o2);
-      explain_left -= std::min(explain_left, r.state.explained);
-      agg += r.state;
-      agg_a_matched += r.a_matched;
-      agg_a_total += r.a_matched + r.a_unmatched;
-      agg_b_matched += r.b_matched;
-      agg_b_total += r.b_matched + r.b_unmatched;
-      agg_regions += r.regions;
-      const auto& st = r.state;
+      auto o2           = o;
+      o2.explain_noise  = explain_left;
+      auto r            = livehd::semdiff::structural_match(rit->second, iit->second, o2);
+      explain_left     -= std::min(explain_left, r.state.explained);
+      agg              += r.state;
+      agg_a_matched    += r.a_matched;
+      agg_a_total      += r.a_matched + r.a_unmatched;
+      agg_b_matched    += r.b_matched;
+      agg_b_total      += r.b_matched + r.b_unmatched;
+      agg_regions      += r.regions;
+      const auto& st    = r.state;
       if (!opts.quiet && (st.a_unpaired != 0 || st.b_unpaired != 0 || st.full_pairs != 0)) {
         print_state(std::format(" '{}'", name), st);
       }
@@ -382,11 +406,11 @@ void semdiff_command(Options& opts, Result& res) {
     if (def_pairs == 0) {
       // A sweep that paired NOTHING compared nothing — never a silent "pass"
       // (differently-named tops land here; the sweep pairs defs by name).
-      throw Lhd_error{"config",
-                      std::format("pass semdiff: 0 def pairs ({} ref-only def(s)) — no impl def pairs any ref def by name",
-                                  ref_only),
-                      "tops named differently? pass --ref-top/--impl-top for the renamed top pair, or "
-                      "--set pass.semdiff.hier=0 for a single top-pair compare"};
+      throw Lhd_error{
+          "config",
+          std::format("pass semdiff: 0 def pairs ({} ref-only def(s)) — no impl def pairs any ref def by name", ref_only),
+          "tops named differently? pass --ref-top/--impl-top for the renamed top pair, or "
+          "--set pass.semdiff.hier=0 for a single top-pair compare"};
     }
     if (!opts.quiet) {
       std::print("semdiff[hier]: {} def pair(s), {} ref-only def(s){}\n",
@@ -398,19 +422,18 @@ void semdiff_command(Options& opts, Result& res) {
         print_stats(def_pairs, ref_only, agg_a_matched, agg_a_total, agg_b_matched, agg_b_total, agg_regions, agg);
       }
     }
-    res.recipe_steps.emplace_back(std::format("pass.semdiff hier defs:{} state:{}/{} name:{} full:{} unpaired:{}/{}{}",
-                                              def_pairs,
-                                              agg.a_total,
-                                              agg.b_total,
-                                              agg.name_pairs,
-                                              agg.full_pairs,
-                                              agg.a_unpaired,
-                                              agg.b_unpaired,
-                                              // Node totals ride the machine-readable line only under stats (they cost
-                                              // an extra aggregate the plain hier sweep does not promise).
-                                              stats ? std::format(" nodes:{}/{}/{}/{}", agg_a_matched, agg_a_total,
-                                                                  agg_b_matched, agg_b_total)
-                                                    : std::string{}));
+    res.recipe_steps.emplace_back(std::format(
+        "pass.semdiff hier defs:{} state:{}/{} name:{} full:{} unpaired:{}/{}{}",
+        def_pairs,
+        agg.a_total,
+        agg.b_total,
+        agg.name_pairs,
+        agg.full_pairs,
+        agg.a_unpaired,
+        agg.b_unpaired,
+        // Node totals ride the machine-readable line only under stats (they cost
+        // an extra aggregate the plain hier sweep does not promise).
+        stats ? std::format(" nodes:{}/{}/{}/{}", agg_a_matched, agg_a_total, agg_b_matched, agg_b_total) : std::string{}));
     if (save) {
       livehd::Hhds_graph_library::save(opts.ref_path);
       livehd::Hhds_graph_library::save(opts.impl_path);
@@ -444,8 +467,7 @@ void semdiff_command(Options& opts, Result& res) {
       // Single-pair: this def only. hier defaults on, so reaching here means
       // the user asked for hier=false explicitly — report the one pair honestly
       // (0 ref-only: a single pair has no one-sided defs by construction).
-      print_stats(1, 0, r.a_matched, r.a_matched + r.a_unmatched, r.b_matched, r.b_matched + r.b_unmatched, r.regions,
-                  r.state);
+      print_stats(1, 0, r.a_matched, r.a_matched + r.a_unmatched, r.b_matched, r.b_matched + r.b_unmatched, r.regions, r.state);
     }
     std::print("  inspect: `lhd tool diff lg:{} lg:{} --match`  |  `lhd tool grep match=0 lg:{}`\n",
                opts.ref_path,
@@ -481,8 +503,7 @@ void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
 // every pass consumer gets the full internal name (they match g->get_name()
 // exactly); an unresolvable name passes through unchanged (each pass keeps its
 // own not-found policy).
-static void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels,
-                          std::string_view diag_pass) {
+static void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels, std::string_view diag_pass) {
   if (opts.top.empty()) {
     return;
   }
@@ -558,7 +579,7 @@ void pass_command(Options& opts, Result& res) {
     res.inputs.push_back(lib_file);
     Eprp_var            var;
     Eprp_var::Eprp_dict labels{
-        {"files", lib_file},
+        {"files",     lib_file},
         {  "out", lg_out->path}
     };
     merge_sets(opts, "pass.liberty", labels);
@@ -732,7 +753,7 @@ void pass_command(Options& opts, Result& res) {
     // pretty/jsonl report always has timing data to render. merge_sets runs
     // after, so an explicit `--set pass.opentimer.qor=FILE` still overrides.
     const std::string ephemeral_qor = opts.workdir.empty() ? (fs::path(workdir(opts)) / "timing.json").string() : std::string{};
-    labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
+    labels["qor"]                   = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
     merge_sets(opts, "pass.opentimer", labels);
     run_step("pass.opentimer", var, labels, opts, res);
     embed_qor_sidecar(labels, res);

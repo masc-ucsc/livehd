@@ -10,8 +10,6 @@
 
 #include "abc_map.hpp"
 
-#include "abc_incr.hpp"
-
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -24,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "abc_incr.hpp"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -87,8 +86,17 @@ constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; &get -n
 // list in sync with the cheat-sheet in pass_abc.cpp's `flow` help text.
 constexpr std::string_view kAbcAliases[] = {
     // building blocks: short name -> real ABC command
-    "alias b balance", "alias rw rewrite", "alias rwz rewrite -z", "alias rf refactor", "alias rfz refactor -z",
-    "alias rs resub", "alias rsz resub -z", "alias st strash", "alias f fraig", "alias dret dretime", "alias ret retime",
+    "alias b balance",
+    "alias rw rewrite",
+    "alias rwz rewrite -z",
+    "alias rf refactor",
+    "alias rfz refactor -z",
+    "alias rs resub",
+    "alias rsz resub -z",
+    "alias st strash",
+    "alias f fraig",
+    "alias dret dretime",
+    "alias ret retime",
     // AIG optimization scripts
     R"(alias resyn   "b; rw; rwz; b; rwz; b")",
     R"(alias resyn2  "b; rw; rf; b; rw; rwz; b; rfz; rwz; b")",
@@ -214,7 +222,8 @@ bool Mapper::start() {
     if (!dff_.has_value()) {
       livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
           .msg("pass.abc register=true: no {} in '{}' — keeping flops native (no DFF-cell mapping)",
-               opts_.dff_cell.empty() ? "plain posedge D-flop cell" : std::format("cell '{}'", opts_.dff_cell), opts_.library)
+               opts_.dff_cell.empty() ? "plain posedge D-flop cell" : std::format("cell '{}'", opts_.dff_cell),
+               opts_.library)
           .emit();
     }
   }
@@ -295,10 +304,10 @@ bool parse_region_opts_object(const rapidjson::Value& obj, Region_opts_map& out,
   }
   for (const auto& mem : obj.GetObject()) {
     const std::string_view key{mem.name.GetString(), mem.name.GetStringLength()};
-    int                    color   = 0;
-    const auto*            b       = key.data();
-    const auto*            e       = key.data() + key.size();
-    auto [p, ec]                   = std::from_chars(b, e, color);
+    int                    color = 0;
+    const auto*            b     = key.data();
+    const auto*            e     = key.data() + key.size();
+    auto [p, ec]                 = std::from_chars(b, e, color);
     if (ec != std::errc{} || p != e || color < 0) {
       livehd::diag::err("pass.abc", "region-opts", "io")
           .msg("{}: region_opts key '{}' is not a color id (non-negative integer)", where, key)
@@ -386,7 +395,7 @@ namespace {
 // leaves crit_src empty — the QoR row is still useful without provenance.
 void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Region_qor& q) {
   q.crit_output = rb.outputs[po].name;
-  auto drv = rb.outputs[po].src_driver;
+  auto drv      = rb.outputs[po].src_driver;
   if (drv.is_invalid()) {
     return;
   }
@@ -440,7 +449,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // ALU 6.1x, RegisterFile 2.5x, ImmediateGenerator 29.6x, dino CPU 12.3x. It is
   // emphatically NOT a constant -- read_lib's fixed cost dominates small regions,
   // which is what makes ImmediateGenerator's 96 gates look 29x.
-  constexpr double kFlowPeakFactor = 10.0;
+  constexpr double   kFlowPeakFactor     = 10.0;
   // Extrapolating from a 5% sample multiplies whatever it sees by ~20, and then
   // by the factor above: ~200x. RSS at that point moves in malloc-arena steps, so
   // a single arena faulting in would project GiBs out of noise and FATAL a region
@@ -463,18 +472,16 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
     return false;
   }
 
-  const auto mib = [](uint64_t b) { return b >> 20; };
+  const auto        mib         = [](uint64_t b) { return b >> 20; };
   // Say which budget this actually is: an explicit memory_budget_mb is taken
   // verbatim and no reserve is subtracted, so quoting a reserve there would
   // describe a derivation that never happened.
-  const std::string budget_desc
-      = opts_.memory_budget_mb > 0
-            ? std::format("budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
-            : std::format("budget {} MiB (physical {} MiB minus a {} MiB reserve)",
-                          mib(budget),
-                          mib(cost::physical_ram_bytes()),
-                          mib(cost::reserve_bytes()));
-  refusal_ = std::format(
+  const std::string budget_desc = opts_.memory_budget_mb > 0 ? std::format("budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
+                                                             : std::format("budget {} MiB (physical {} MiB minus a {} MiB reserve)",
+                                                                           mib(budget),
+                                                                           mib(cost::physical_ram_bytes()),
+                                                                           mib(cost::reserve_bytes()));
+  refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
       "(was {} MiB){}, {}",
       region,
@@ -484,9 +491,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss),
       mib(rss_before),
       over_now ? std::string{}
-               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak",
-                             mib(projected),
-                             mib(peak)),
+               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
       budget_desc);
   return true;
 }
@@ -507,7 +512,7 @@ namespace {
 // one AND gate.
 void rewrite_trivial_rems(hhds::Graph* g) {
   std::vector<hhds::Node_class> to_fix;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Rem) {
       continue;
     }
@@ -530,8 +535,8 @@ void rewrite_trivial_rems(hhds::Graph* g) {
     to_fix.push_back(n);
   }
   for (auto n : to_fix) {
-    auto a  = gu::get_driver_of_sink_name(n, "a");
-    auto bc = gu::hydrate_const(gu::get_driver_of_sink_name(n, "b"));
+    auto          a  = gu::get_driver_of_sink_name(n, "a");
+    auto          bc = gu::hydrate_const(gu::get_driver_of_sink_name(n, "b"));
     const int64_t bv = bc.to_just_i64();
     const int64_t ba = bv < 0 ? -bv : bv;
 
@@ -558,10 +563,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // Per-region wall time: the only way to tell a cache that hits a lot from a
   // cache that saves time. A hit on a 200ms region and a miss on a 200s one
   // count the same in hits/misses and nothing alike in the total.
-  const auto t_start  = std::chrono::steady_clock::now();
-  const auto since    = [&t_start] {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
-  };
+  const auto t_start = std::chrono::steady_clock::now();
+  const auto since
+      = [&t_start] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(); };
 
   // Per-region option overrides (2opt-freq C): overlay onto opts_ for the
   // duration of this region (every helper below reads opts_), restored on
@@ -583,7 +587,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // never starts. `recipe`/`pre_g` live to the store site below (a miss
   // snapshots them). Null when reuse-ineligible or flattening (uncacheable).
   const std::string recipe = resolve_recipe();
-  hhds::Graph*      pre_g   = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
+  hhds::Graph*      pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
   // fast diagnostic for why a region misses on a comment edit.
   if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
@@ -592,7 +596,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       hit = incr_->lookup_compare(rb, pre_g, recipe).hit;
       incr_->store_pre(rb, *rb.pre_lib, rb.pre_name, recipe);
     }
-    std::print("COMPARE {} {}\n", rb.module_name,
+    std::print("COMPARE {} {}\n",
+               rb.module_name,
                !rb.reuse_eligible ? "INELIGIBLE" : (pre_g == nullptr ? "REBUILD-FAIL" : (hit ? "HIT" : "MISS")));
     Region_qor q;
     q.module = rb.module_name;
@@ -842,10 +847,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     region_in_name.emplace(port.src_driver, port.name);
   }
 
-  std::vector<Seq_flop>                  flops;
-  absl::flat_hash_set<hhds::Node_class>  clk_demoted;  // registers demoted to boundary: clock from region-internal logic
+  std::vector<Seq_flop>                 flops;
+  absl::flat_hash_set<hhds::Node_class> clk_demoted;  // registers demoted to boundary: clock from region-internal logic
   if (opts_.map_register) {
-    for (auto n : rb.src->forward_class()) {
+    for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
       if (!region.contains(n)) {
         continue;
       }
@@ -938,11 +943,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     if (!clk_demoted.empty()) {
       livehd::diag::warn("pass.abc", "derived-clock-native", "unsupported")
-          .msg("pass.abc region '{}': {} register(s) clocked by region-internal logic (a gated/derived clock) kept as "
-               "native flops — a DFF cell cannot take its clock from mapped logic; the clock cone is still mapped and "
-               "reconnected",
-               rb.module_name,
-               clk_demoted.size())
+          .msg(
+              "pass.abc region '{}': {} register(s) clocked by region-internal logic (a gated/derived clock) kept as "
+              "native flops — a DFF cell cannot take its clock from mapped logic; the clock cone is still mapped and "
+              "reconnected",
+              rb.module_name,
+              clk_demoted.size())
           .emit();
     }
   }
@@ -988,11 +994,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
-  for (auto n : rb.src->forward_class()) {
+  for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
     if (!region.contains(n)) {
       continue;
     }
-    auto op = gu::type_op_of(n);
+    auto       op             = gu::type_op_of(n);
     // A flop in a !seq (combinational-only) map is kept as a native boundary,
     // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
     // din/enable/clock/reset are cut as POs (or recreated when const), and the
@@ -1000,7 +1006,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // mode flops instead cross into ABC as 1-bit latches (handled above), so they
     // are excluded from the boundary set there — EXCEPT registers demoted for a
     // region-internal (gated/derived) clock, which take this boundary path.
-    bool flop_boundary = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n));
+    bool       flop_boundary  = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n));
     // A LATCH is a boundary in BOTH modes, unconditionally (2f-latch M2).
     // TERMINOLOGY TRAP: an ABC/AIGER "latch" is an edge-triggered unit-delay
     // register on an implicit global clock, NOT a level-sensitive latch — and
@@ -1022,8 +1028,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // Sub/Memory instance, and rebuilt unchanged on read-back. Warn so the
       // user knows this cone is not technology-mapped.
       livehd::diag::warn("pass.abc", "div-blackbox", "unsupported")
-          .msg("pass.abc: division in region '{}' is blackboxed (kept as a native div, not technology-mapped)",
-               rb.module_name)
+          .msg("pass.abc: division in region '{}' is blackboxed (kept as a native div, not technology-mapped)", rb.module_name)
           .emit();
     }
     if (op == Ntype_op::Rem) {
@@ -1040,14 +1045,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // genuinely has no easy gate-level translation.
       livehd::diag::err("pass.abc", "rem-unsupported", "unsupported")
           .msg("pass.abc: remainder (`%`) in region '{}' has no gate-level translation", rb.module_name)
-          .hint("only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
-                "remainders out of the synthesized region")
+          .hint(
+              "only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
+              "remainders out of the synthesized region")
           .emit();
     }
     Bbox bb;
-    bb.node                                          = n;
-    bb.op                                            = op;
-    int                                       bb_idx = static_cast<int>(bboxes.size());
+    bb.node                                      = n;
+    bb.op                                        = op;
+    int                                   bb_idx = static_cast<int>(bboxes.size());
     // outputs: distinct driver pins that feed region logic -> fresh PI sources.
     // btree_map (ascending port_id) so the fresh-PI creation order — hence ABC
     // ObjId assignment and the read-back `g<id>_<cell>` gate names — is
@@ -1093,7 +1099,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bboxes.push_back(std::move(bb));
   }
 
-  // --- bit-blast each region node in dependency order. forward_class() is
+  // --- bit-blast each region node in dependency order. body().nodes(hhds::Node_order::forward) is
   // *mostly* topological, but it can emit a reader before its producer (the
   // same phenomenon the LEC encoder fixpoints around for forward_hier — seen
   // on the DINO top, where a wide packed-bus Get_mask was read by an Sra a
@@ -1107,7 +1113,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<hhds::Node_class> blast_order;
   {
     std::vector<hhds::Node_class> pending;
-    for (auto n : rb.src->forward_class()) {
+    for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
       if (!region.contains(n)) {
         continue;
       }
@@ -1176,7 +1182,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         return;
       }
     }
-    auto op = gu::type_op_of(n);
+    auto op       = gu::type_op_of(n);
     auto out_pin  = n.create_driver_pin(0);
     int  out_bits = gu::bits_of(out_pin);
     if (out_bits == 0) {
@@ -1207,9 +1213,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = acc == nullptr ? abc_const_bit(false) : acc;
       }
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
-      hhds::Pin_class                           sel;
+      hhds::Pin_class                       sel;
       absl::btree_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver; ordered so the OR-tree fed to ABC is deterministic
-      int                                       max_v = -1;
+      int                                   max_v = -1;
       for (const auto& e : n.inp_edges()) {
         auto pid = e.sink.get_port_id();
         if (pid == 0) {
@@ -1255,11 +1261,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             .emit();
         unsupported = true;
       } else {
-        auto             mask   = gu::hydrate_const(m_drv);
-        bool             neg    = mask.is_negative();
-        int              mb     = mask.get_bits();
-        int              pmb    = neg ? mb - 1 : mb;
-        int              a_bits = gu::bits_of(a_drv);
+        auto mask   = gu::hydrate_const(m_drv);
+        bool neg    = mask.is_negative();
+        int  mb     = mask.get_bits();
+        int  pmb    = neg ? mb - 1 : mb;
+        int  a_bits = gu::bits_of(a_drv);
         if (a_bits == 0 && gu::is_const_pin(a_drv)) {
           // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
           // eff_width above — create_const stamps only the value, never a width).
@@ -1503,16 +1509,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           }
         }
       }
-      bool a_sign  = !gu::is_unsign(a_d);
-      int  a_width = eff_width(a_d);                      // operand width as the LEC reads it (port=bits_of, internal=real_width)
-      int  out_w   = real_width(out_pin);                 // result magnitude width (LEC W)
-      int  cw      = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
+      bool                    a_sign  = !gu::is_unsign(a_d);
+      int                     a_width = eff_width(a_d);  // operand width as the LEC reads it (port=bits_of, internal=real_width)
+      int                     out_w   = real_width(out_pin);                    // result magnitude width (LEC W)
+      int                     cw      = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
       std::vector<Abc_Obj_t*> av(cw);
       for (int i = 0; i < cw; ++i) {
         av[i] = abc_eff_bit(a_d, i);  // a, sign/zero-extended (past its effective width) to the shift width cw
       }
       Abc_Obj_t*              fill = a_sign ? av[cw - 1] : abc_const_bit(false);  // sign bit (arith) or 0 (logical)
-      std::vector<Abc_Obj_t*> res;                                               // cw-wide shifted value
+      std::vector<Abc_Obj_t*> res;                                                // cw-wide shifted value
       if (gu::is_const_pin(b_d)) {
         auto amt_c = gu::hydrate_const(b_d);
         if (amt_c.has_unknowns() || amt_c.is_negative()) {
@@ -1731,9 +1737,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     if (auto* pMappedLogic = Abc_FrameReadNtk(frame); pMappedLogic != nullptr && Abc_NtkIsMappedLogic(pMappedLogic)) {
-      q.delay = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
-      q.area  = Abc_NtkGetMappedArea(pMappedLogic);
-      q.gates = Abc_NtkNodeNum(pMappedLogic);
+      q.delay          = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
+      q.area           = Abc_NtkGetMappedArea(pMappedLogic);
+      q.gates          = Abc_NtkNodeNum(pMappedLogic);
       // Worst-arrival REGION output (the delay trace leaves per-node arrivals
       // behind; POs beyond po_order are blackbox-input cuts, not outputs).
       float      worst = -1.0f;
@@ -1777,7 +1783,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // import re-copies the per-FILE metadata (line-offset tables) into every
   // region body -- the pass.partition std::bad_alloc shape -- while the body
   // resolves the id through its library base chain either way.
-  auto& out_srcmap = body->get_io()->get_library()->source_map();
+  auto&                       out_srcmap = body->get_io()->get_library()->source_map();
   std::vector<hhds::SourceId> po_srcid(rb.outputs.size(), hhds::SourceId_invalid);
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
     auto drv = rb.outputs[po].src_driver;
@@ -1961,7 +1967,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // would silently collapse its fanout cone to const0 (seen with
       // multi-output supergates before read_lib -s). Never miscompile.
       livehd::diag::err("pass.abc", "abc-readback", "internal")
-          .msg("region '{}': mapped node {} carries no Mio gate — unreadable mapping (multi-output cell?)", rb.module_name,
+          .msg("region '{}': mapped node {} carries no Mio gate — unreadable mapping (multi-output cell?)",
+               rb.module_name,
                Abc_ObjId(pObj))
           .fatal();
       Abc_NtkDelete(mapped);
@@ -2054,8 +2061,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // on X, exactly like the reset flop's own cgen) is then equivalent and the bit
     // can map to a cell. Only a resetless init must keep its native flop.
     auto owner_has_reset = [&](int k) -> bool {
-      return k < static_cast<int>(latch_owner.size()) ? !latch_owner[k]->rst_drv.is_invalid()
-                                                       : !flops.front().rst_drv.is_invalid();
+      return k < static_cast<int>(latch_owner.size()) ? !latch_owner[k]->rst_drv.is_invalid() : !flops.front().rst_drv.is_invalid();
     };
 
     // Original-name reconstruction: with the latch count preserved, latches
@@ -2081,7 +2087,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // Nothing enforces wire-name uniqueness across a region's registers; two
     // same-named rebuilt flops would cgen as two `reg` declarations of one name.
     absl::flat_hash_map<std::string, int> name_used;
-    auto unique_flop_name = [&](const std::string& base) {
+    auto                                  unique_flop_name = [&](const std::string& base) {
       int& n = name_used[base];
       ++n;
       return n == 1 ? base : std::format("{}__dup{}", base, n - 1);
@@ -2149,7 +2155,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // latch carrying a concrete power-on init CANNOT be represented by the cell
       // without changing power-on behavior — such a bit stays a native flop (the
       // netlist stays equivalent), only init-less bits become DFF cells.
-      auto io = liberty::create_dff_io(*outlib_, *dff_);
+      auto io           = liberty::create_dff_io(*outlib_, *dff_);
       // resetless power-on init: such a bit must keep a native flop so the
       // value survives
       auto needs_native = [&](int k) -> bool {
@@ -2174,9 +2180,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       };
       auto native_single = [&](int k) {
         init_dropped = true;
-        build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(lat[k]))),
-                          owner_clk(k),
-                          {k});
+        build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(lat[k]))), owner_clk(k), {k});
       };
       if (!spans.empty()) {
         for (const auto& sp : spans) {
@@ -2209,43 +2213,44 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
     } else {
-
-    if (!spans.empty()) {
-      // one flop per source register under its ORIGINAL name — multi-root
-      // regions (the whole-design flatten) keep the name correspondence
-      for (const auto& sp : spans) {
-        std::vector<int> idx(sp.f->bits);
-        std::iota(idx.begin(), idx.end(), sp.start);
-        build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
-      }
-    } else {
-      absl::flat_hash_set<std::string> roots;
-      for (const auto& f : flops) {
-        roots.insert(f.root);
-      }
-      if (roots.size() == 1) {
-        // retime-reshaped single-root region (one register name): collapse
-        // every surviving latch into one named flop
-        std::vector<int> idx(m);
-        std::iota(idx.begin(), idx.end(), 0);
-        build_native_flop(unique_flop_name(flops.front().root), region_clk, idx);
+      if (!spans.empty()) {
+        // one flop per source register under its ORIGINAL name — multi-root
+        // regions (the whole-design flatten) keep the name correspondence
+        for (const auto& sp : spans) {
+          std::vector<int> idx(sp.f->bits);
+          std::iota(idx.begin(), idx.end(), sp.start);
+          build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
+        }
       } else {
-        // retime-reshaped multi-register region: per-latch 1-bit flops --
-        // always LEC-correct regardless of how retiming reshaped or reordered
-        // the latches (each latch is faithfully its own 1-bit register; no
-        // cross-register order assumption), clocked from its OWN source flop
-        for (int k = 0; k < m; ++k) {
-          build_native_flop(unique_flop_name(std::format("{}__r{}", rb.module_name, k)), owner_clk(k), {k});
+        absl::flat_hash_set<std::string> roots;
+        for (const auto& f : flops) {
+          roots.insert(f.root);
+        }
+        if (roots.size() == 1) {
+          // retime-reshaped single-root region (one register name): collapse
+          // every surviving latch into one named flop
+          std::vector<int> idx(m);
+          std::iota(idx.begin(), idx.end(), 0);
+          build_native_flop(unique_flop_name(flops.front().root), region_clk, idx);
+        } else {
+          // retime-reshaped multi-register region: per-latch 1-bit flops --
+          // always LEC-correct regardless of how retiming reshaped or reordered
+          // the latches (each latch is faithfully its own 1-bit register; no
+          // cross-register order assumption), clocked from its OWN source flop
+          for (int k = 0; k < m; ++k) {
+            build_native_flop(unique_flop_name(std::format("{}__r{}", rb.module_name, k)), owner_clk(k), {k});
+          }
         }
       }
-    }
     }  // else (native-flop read-back)
   }
   if (init_dropped) {
     livehd::diag::warn("pass.abc", "dff-init-kept-native", "unsupported")
-        .msg("pass.abc region '{}': register(s) carry a power-on init value that the plain DFF cell '{}' has no pin for; "
-             "they were kept as native flops (still correct) while init-less registers mapped to DFF cells",
-             rb.module_name, dff_->name)
+        .msg(
+            "pass.abc region '{}': register(s) carry a power-on init value that the plain DFF cell '{}' has no pin for; "
+            "they were kept as native flops (still correct) while init-less registers mapped to DFF cells",
+            rb.module_name,
+            dff_->name)
         .emit();
   }
 
@@ -2266,7 +2271,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto spin = sub.create_sink_pin(pins[k]);
       // No set_bits on this cell-input SINK: `bits` is a driver-pin property (the
       // 1-bit width lives on the gate's GraphIO port + the 1-bit driver net).
-      auto it = net2drv.find(fin);
+      auto it   = net2drv.find(fin);
       if (it != net2drv.end()) {
         it->second.connect_sink(spin);
       } else {
@@ -2471,7 +2476,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           if (!sid_attr.has() || sid_attr.get() == 0) {
             continue;
           }
-          auto* bi_obj = Abc_ObjFanin0(lat_objs[k]);                          // latch -> BI
+          auto* bi_obj = Abc_ObjFanin0(lat_objs[k]);                           // latch -> BI
           auto* dnet   = bi_obj != nullptr ? Abc_ObjFanin0(bi_obj) : nullptr;  // BI -> net
           auto* drv    = dnet != nullptr ? Abc_ObjFanin0(dnet) : nullptr;      // net -> driving node
           if (drv == nullptr || !Abc_ObjIsNode(drv)) {
@@ -2479,8 +2484,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           }
           port_roots.push_back({drv});
           // Into the library srcmap, not the body locator (see po_srcid above).
-          cone_srcid.push_back(
-              body->get_io()->get_library()->source_map().import_from(rb.src->source_locator(), sid_attr.get()));
+          cone_srcid.push_back(body->get_io()->get_library()->source_map().import_from(rb.src->source_locator(), sid_attr.get()));
         }
       }
     }
@@ -2556,7 +2560,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {
   (void)graphs;
-  std::print("pass.abc stats: top='{}' library='{}' register={} memory={}\n", top, opts.library, opts.map_register,
+  std::print("pass.abc stats: top='{}' library='{}' register={} memory={}\n",
+             top,
+             opts.library,
+             opts.map_register,
              opts.map_memory);
   std::print("  (run with --emit-dir lg:DIR to produce the mapped netlist library)\n");
 }

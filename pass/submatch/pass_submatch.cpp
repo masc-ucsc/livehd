@@ -135,15 +135,15 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
   absl::flat_hash_map<hhds::Class_index, MFFCNode> mffc;
 
   each_graph_output_driver(g, [&](const hhds::Pin_class& driver) {
-    auto node                       = driver.get_master_node();
-    auto ci                         = node.get_class_index();
-    auto h_root                     = hash_mffc_root(node);
-    mffc[ci]                        = {mffc_id++, h_root, 0};
+    auto node   = driver.get_master_node();
+    auto ci     = node.get_class_index();
+    auto h_root = hash_mffc_root(node);
+    mffc[ci]    = {mffc_id++, h_root, 0};
     mffc_root.push_back({ci, h_root});
     mffc_root_set.insert(ci);
   });
 
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     // Skip a single-fanout node. Cap the walk at 2 instead of size()-ing the
     // lazy out_edges view (only the "exactly one out edge" distinction matters).
     size_t fanout = 0;
@@ -156,9 +156,9 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
     if (fanout == 1) {
       continue;
     }
-    auto ci                         = node.get_class_index();
-    auto h_root                     = hash_mffc_root(node);
-    mffc[ci]                        = {mffc_id++, h_root, 0};
+    auto ci     = node.get_class_index();
+    auto h_root = hash_mffc_root(node);
+    mffc[ci]    = {mffc_id++, h_root, 0};
     mffc_root.push_back({ci, h_root});
     mffc_root_set.insert(ci);
   }
@@ -167,7 +167,9 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
     uint32_t               mffc_size = 1;
     std::queue<FringeNode> fringe;
     fringe.push({mffc_root[id].ci, mffc_root[id].h, 0});
-    mffc_depth_tree.push_back({{mffc_root[id].h, 1}});
+    mffc_depth_tree.push_back({
+        {mffc_root[id].h, 1}
+    });
     for (uint32_t mffc_depth = 1; fringe.size() > 0; ++mffc_depth) {
       std::vector<uint64_t> i_hash;
       while (fringe.size()) {
@@ -194,8 +196,8 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
         break;
       }
       std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h_mffc = lh::woothash64(i_hash.data(), i_hash.size() * 8);
-      h_mffc ^= mffc_depth_tree[id].back().h;
+      uint64_t h_mffc  = lh::woothash64(i_hash.data(), i_hash.size() * 8);
+      h_mffc          ^= mffc_depth_tree[id].back().h;
       mffc_depth_tree[id].push_back({h_mffc, mffc_size});
       max_mffc_depth = std::max(max_mffc_depth, mffc_depth);
     }
@@ -341,7 +343,7 @@ void pass_submatch::find_subs(hhds::Graph* g) {
         break;
       }
       h ^= node2depth_hash[node_ci][height - 1];
-      h = lh::waterhash(&h, 4, pid & 0xFFFF);
+      h  = lh::waterhash(&h, 4, pid & 0xFFFF);
       node2height_hash[ci].emplace_back(Root_hash(node_ci, h));
 
       if (height_hash2node.size() < height) {
@@ -369,8 +371,7 @@ void pass_submatch::find_subs(hhds::Graph* g) {
         // tied entry in (run-to-run-varying) iteration order. Require a strict
         // improvement, breaking ties by largest depth then smallest hash so the
         // chosen candidate is reproducible regardless of map iteration order.
-        if (score > best_score
-            || (score == best_score && score > 0 && (depth > d_best || (depth == d_best && hash < h_best)))) {
+        if (score > best_score || (score == best_score && score > 0 && (depth > d_best || (depth == d_best && hash < h_best)))) {
           h_best     = hash;
           d_best     = static_cast<uint8_t>(depth);
           best_score = score;
@@ -417,8 +418,8 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     std::print("#Nodes covered: {}\n", global_node_set.size());
     std::print("#Nodes shared:  {}\n", shared_node_set.size());
 
-    absl::flat_hash_map<hhds::Class_index, hhds::Class_index>                 leaf2root;
-    absl::flat_hash_map<uint64_t, absl::flat_hash_set<hhds::Class_index>>     hash2leaf;
+    absl::flat_hash_map<hhds::Class_index, hhds::Class_index>             leaf2root;
+    absl::flat_hash_map<uint64_t, absl::flat_hash_set<hhds::Class_index>> hash2leaf;
     for (const auto& [ci, vec] : node2height_hash) {
       for (size_t d = 0; d < d_best && d < vec.size(); ++d) {
         if (shared_node_set.count(ci)) {

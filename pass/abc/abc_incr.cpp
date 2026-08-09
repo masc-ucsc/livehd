@@ -14,10 +14,10 @@
 #include <utility>
 #include <vector>
 
+#include "abc_map.hpp"  // Region_qor
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "abc_map.hpp"  // Region_qor
-#include "cell.hpp"     // Ntype_op
+#include "cell.hpp"  // Ntype_op
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/name.hpp"
@@ -106,7 +106,7 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
   if (!in) {
     return;
   }
-  std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  std::string         body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   rapidjson::Document doc;
   doc.Parse(body.data(), body.size());
   // A corrupt, old-schema or wrong-salt file starts the cache cold -- it is only
@@ -220,7 +220,7 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
   // does. The pre-bodies + their Sub child decls live in cached_pre_lib(), a
   // library separate from the mapped bodies, so both compare sides resolve the same
   // body-less decls. ON by default; opt-out via ABC_INCR_NO_BLACKBOX.
-  so.blackbox_subs = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
+  so.blackbox_subs  = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
   if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
     // The signature stalls on a genuine combinational loop (mux feedback): the
     // loop cone gets no forward signature, so its obligations stay `cut_unknown`
@@ -238,7 +238,12 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
         std::print(
             "[abc-incr] MISS {} -- structural NOT equal (a_unmatched={} b_unmatched={} cut_violated={} cut_unknown={} "
             "seed_pairs={} full_pairs={})\n",
-            rb.module_name, m.a_unmatched, m.b_unmatched, m.cut_violated, m.cut_unknown, m.state.seed_pairs,
+            rb.module_name,
+            m.a_unmatched,
+            m.b_unmatched,
+            m.cut_violated,
+            m.cut_unknown,
+            m.state.seed_pairs,
             m.state.full_pairs);
       }
       return res;
@@ -297,7 +302,7 @@ void Incr_cache::copy_pre_children(const livehd::partition::Region_body& rb, hhd
   // cache save/load round-trip. create_io mints the same name-hash gid the copied
   // pre-body's Sub already references, so resolution lines up.
   auto& l = cached_pre_lib();
-  for (auto n : rb.pre_body->fast_class()) {
+  for (auto n : rb.pre_body->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -326,7 +331,7 @@ void Incr_cache::copy_mapped_children(const livehd::partition::Region_body& rb, 
     return;
   }
   auto& l = lib();
-  for (auto n : mapped->fast_class()) {
+  for (auto n : mapped->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -418,7 +423,7 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
   // cold map's blackbox_io produces (their behavior comes from the Liberty
   // models at LEC / the library at synthesis). A bodied child region already sits
   // in `outlib` (stored children-first), so find-or-skip leaves it untouched.
-  for (auto n : mapped->fast_class()) {
+  for (auto n : mapped->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -453,12 +458,12 @@ void Incr_cache::save() {
     o.reserve(s.size() + 8);
     for (char c : s) {
       switch (c) {
-        case '"': o += "\\\""; break;
+        case '"' : o += "\\\""; break;
         case '\\': o += "\\\\"; break;
         case '\n': o += "\\n"; break;
         case '\r': o += "\\r"; break;
         case '\t': o += "\\t"; break;
-        default: o += c; break;
+        default  : o += c; break;
       }
     }
     return o;
@@ -471,12 +476,12 @@ void Incr_cache::save() {
     if (!first) {
       out += ",";
     }
-    first = false;
-    out += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                       jesc(*k),
-                       jesc(r.module),
-                       jesc(r.pre),
-                       jesc(r.recipe));
+    first  = false;
+    out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
+                         jesc(*k),
+                         jesc(r.module),
+                         jesc(r.pre),
+                         jesc(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.in[i]));
     }
@@ -509,8 +514,7 @@ void Incr_cache::save() {
   livehd::Hhds_graph_library::save(pre_dir_);  // pre-bodies + their Sub child decls
 }
 
-uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory,
-                               std::string_view dff_cell) {
+uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_cell) {
   // Bump the tag whenever the mapper's read-back or the cache shape changes:
   // stale bodies must never survive a semantic change.
   // v3: lgraph-compare cache -- keyed by module name, stores pre+mapped bodies,

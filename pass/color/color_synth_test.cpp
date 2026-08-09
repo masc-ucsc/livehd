@@ -2,8 +2,9 @@
 //
 // Ported from the old pass/label synth test (2c-color) onto the current hhds::Graph API.
 
-#include "color_common.hpp"
 #include "color_synth.hpp"
+
+#include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -270,7 +271,7 @@ TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
 
   auto count_regions = [&]() {
     absl::flat_hash_set<int> ids;
-    for (auto n : g->forward_class()) {
+    for (auto n : g->body().nodes(hhds::Node_order::forward)) {
       if (is_partitionable(n)) {
         ids.insert(node_color_of(n));
       }

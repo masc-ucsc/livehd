@@ -41,7 +41,7 @@ std::shared_ptr<hhds::Graph> build_and_or(const std::string& dir, const std::str
 
 uint32_t unmatched_nodes(hhds::Graph* g) {
   uint32_t n = 0;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (match_of(node) == 0) {
       ++n;
     }
@@ -68,12 +68,12 @@ TEST(Semdiff, IdenticalAllMatched) {
 
   // Corresponding nodes carry the SAME id across the two graphs.
   uint32_t a_or = 0, b_or = 0;
-  for (auto n : a->forward_class()) {
+  for (auto n : a->body().nodes(hhds::Node_order::forward)) {
     if (livehd::graph_util::type_op_of(n) == Ntype_op::Or) {
       a_or = match_of(n);
     }
   }
-  for (auto n : b->forward_class()) {
+  for (auto n : b->body().nodes(hhds::Node_order::forward)) {
     if (livehd::graph_util::type_op_of(n) == Ntype_op::Or) {
       b_or = match_of(n);
     }
@@ -94,8 +94,8 @@ TEST(Semdiff, ExtraGateUnmatched) {
 
   auto r = livehd::semdiff::structural_match(a.get(), b.get());
 
-  EXPECT_EQ(0U, r.a_unmatched);   // ref fully matched
-  EXPECT_EQ(1U, r.b_unmatched);   // only the extra Not is unmatched
+  EXPECT_EQ(0U, r.a_unmatched);  // ref fully matched
+  EXPECT_EQ(1U, r.b_unmatched);  // only the extra Not is unmatched
   EXPECT_EQ(2U, r.a_matched);
   EXPECT_EQ(2U, r.b_matched);
 }
@@ -108,10 +108,10 @@ TEST(Semdiff, StructuralIdenticalFastPath) {
   EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get()));
 
   // the fast path leaves the match attribute untouched on both graphs
-  for (auto n : a->forward_class()) {
+  for (auto n : a->body().nodes(hhds::Node_order::forward)) {
     EXPECT_FALSE(livehd::graph_util::has_match(n));
   }
-  for (auto n : b->forward_class()) {
+  for (auto n : b->body().nodes(hhds::Node_order::forward)) {
     EXPECT_FALSE(livehd::graph_util::has_match(n));
   }
 
@@ -124,14 +124,14 @@ TEST(Semdiff, StructuralIdenticalFastPath) {
 // structural_identical: a swapped operation (functionally different) is refused
 // even though the node COUNT matches.
 TEST(Semdiff, StructuralIdenticalOpSwap) {
-  auto a = build_and_or("lgdb_semdiff_so_a", "m");  // y = (a & b) | c
+  auto  a   = build_and_or("lgdb_semdiff_so_a", "m");  // y = (a & b) | c
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_semdiff_so_b");
   auto  gio = lib.create_io("m");
   gio->add_input("a", 1);
   gio->add_input("b", 1);
   gio->add_input("c", 1);
   gio->add_output("y", 1);
-  auto b = gio->create_graph();
+  auto b    = gio->create_graph();
   auto a_or = create_typed_node(*b, Ntype_op::Or);  // swapped: y = (a | b) & c
   b->get_input_pin("a").connect_sink(a_or.create_sink_pin(0));
   b->get_input_pin("b").connect_sink(a_or.create_sink_pin(0));
@@ -193,8 +193,8 @@ TEST(Semdiff, DigestSensitiveToWidthAndIoName) {
   auto wg = build_and_or("lgdb_semdiff_dw_w", "m");
   livehd::graph_util::set_bits(wg->get_input_pin("a"), 2);  // widened input
 
-  auto& ln  = livehd::Hhds_graph_library::instance("lgdb_semdiff_dw_n");
-  auto  gn  = ln.create_io("m");
+  auto& ln = livehd::Hhds_graph_library::instance("lgdb_semdiff_dw_n");
+  auto  gn = ln.create_io("m");
   gn->add_input("a", 1);
   gn->add_input("b", 2);
   gn->add_input("c", 3);
@@ -254,8 +254,8 @@ TEST(Semdiff, DigestHierarchicalMerkle) {
     cio->add_input("x", 1);
     cio->add_input("y", 1);
     cio->add_output("o", 1);
-    auto cg  = cio->create_graph();
-    auto op  = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
+    auto cg = cio->create_graph();
+    auto op = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
     cg->get_input_pin("x").connect_sink(op.create_sink_pin(0));
     cg->get_input_pin("y").connect_sink(op.create_sink_pin(0));
     op.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
@@ -346,7 +346,7 @@ std::shared_ptr<hhds::Graph> build_pipe2(const std::string& dir, const std::stri
   auto g = gio->create_graph();
 
   auto f0 = create_typed_node(*g, Ntype_op::Flop);
-  f0.set_name(n0);  // node name too (tolg stamps both) — the exported State_pair basis
+  f0.set_name(n0);                                            // node name too (tolg stamps both) — the exported State_pair basis
   g->get_input_pin("d").connect_sink(f0.create_sink_pin(3));  // din
   auto q0 = f0.create_driver_pin(0);
   livehd::graph_util::set_pin_name(q0, n0);
@@ -627,7 +627,7 @@ TEST(Semdiff, StatePairingNoiseRecoveryScored) {
 // A diverging op (And vs Or at the same spot) is the gap: neither side's node
 // matches, surrounding primary IO is the anchored boundary.
 TEST(Semdiff, DivergentOpIsGap) {
-  auto& la  = livehd::Hhds_graph_library::instance("lgdb_semdiff_dv_a");
+  auto& la   = livehd::Hhds_graph_library::instance("lgdb_semdiff_dv_a");
   auto  gioa = la.create_io("m");
   gioa->add_input("a", 1);
   gioa->add_input("b", 1);
@@ -638,7 +638,7 @@ TEST(Semdiff, DivergentOpIsGap) {
   a->get_input_pin("b").connect_sink(a_op.create_sink_pin(0));
   a_op.create_driver_pin(0).connect_sink(a->get_output_pin("y"));
 
-  auto& lb  = livehd::Hhds_graph_library::instance("lgdb_semdiff_dv_b");
+  auto& lb   = livehd::Hhds_graph_library::instance("lgdb_semdiff_dv_b");
   auto  giob = lb.create_io("m");
   giob->add_input("a", 1);
   giob->add_input("b", 1);

@@ -21,8 +21,21 @@ namespace {
 // graph/cell.hpp Memory_port_stride: sink pids are laid out in blocks of 16,
 // raw_pid = port*16 + field. Field offsets within a block:
 constexpr int kMemStride = 16;
-enum Mem_off { kAddr = 0, kBits = 1, kClk = 2, kDin = 3, kEnable = 4, kFwd = 5, kPosclk = 6, kType = 7, kWensize = 8,
-               kSize = 9, kRdport = 10, kInit = 11, kUndef = 15 };  // 12/13/14 = whole-array update/enable/reset (unsupported here)
+enum Mem_off {
+  kAddr    = 0,
+  kBits    = 1,
+  kClk     = 2,
+  kDin     = 3,
+  kEnable  = 4,
+  kFwd     = 5,
+  kPosclk  = 6,
+  kType    = 7,
+  kWensize = 8,
+  kSize    = 9,
+  kRdport  = 10,
+  kInit    = 11,
+  kUndef   = 15
+};  // 12/13/14 = whole-array update/enable/reset (unsupported here)
 
 // A one-hot mask constant with only bit `b` set (MSB-first binary string).
 spool_ptr<Dlop> bit_mask(int b) {
@@ -119,11 +132,11 @@ int const_i(const hhds::Pin_class& d, int def) {
 // Lower one Memory node into flops + comb. Returns false (node left intact) for
 // shapes not handled here (whole-array cells, negedge, type==2 arrays).
 bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
-  int             bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
-  spool_ptr<Dlop> fwd;  // per-(read,write) matrix; arbitrary precision
-  hhds::Pin_class init_drv;
-  bool            whole_array   = false;
-  bool            undef_refined = false;  // ordering="none" matrix dropped by the bit-blast
+  int                 bits = 0, size = 0, mtype = 0, wensize = 1, posclk = 1;
+  spool_ptr<Dlop>     fwd;  // per-(read,write) matrix; arbitrary precision
+  hhds::Pin_class     init_drv;
+  bool                whole_array   = false;
+  bool                undef_refined = false;  // ordering="none" matrix dropped by the bit-blast
   std::map<int, Port> ports;
   for (auto e : mem.inp_edges()) {
     int  raw  = static_cast<int>(e.sink.get_port_id());
@@ -131,22 +144,37 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     int  pidx = raw / kMemStride;
     auto drv  = e.driver;
     switch (off) {
-      case kAddr: ports[pidx].addr = drv; ports[pidx].block = pidx; break;
-      case kClk: ports[pidx].clk = drv; ports[pidx].block = pidx; break;
-      case kDin: ports[pidx].din = drv; ports[pidx].block = pidx; break;
-      case kEnable: ports[pidx].en = drv; ports[pidx].block = pidx; break;
-      case kRdport: ports[pidx].role = const_i(drv, -1); ports[pidx].block = pidx; break;
+      case kAddr:
+        ports[pidx].addr  = drv;
+        ports[pidx].block = pidx;
+        break;
+      case kClk:
+        ports[pidx].clk   = drv;
+        ports[pidx].block = pidx;
+        break;
+      case kDin:
+        ports[pidx].din   = drv;
+        ports[pidx].block = pidx;
+        break;
+      case kEnable:
+        ports[pidx].en    = drv;
+        ports[pidx].block = pidx;
+        break;
+      case kRdport:
+        ports[pidx].role  = const_i(drv, -1);
+        ports[pidx].block = pidx;
+        break;
       case kBits: bits = const_i(drv, bits); break;
       case kFwd:
         if (gu::is_const_pin(drv)) {
           fwd = Dlop::clone(gu::hydrate_const(drv));
         }
         break;
-      case kPosclk: posclk = const_i(drv, posclk); break;
-      case kType: mtype = const_i(drv, mtype); break;
+      case kPosclk : posclk = const_i(drv, posclk); break;
+      case kType   : mtype = const_i(drv, mtype); break;
       case kWensize: wensize = const_i(drv, wensize); break;
-      case kSize: size = const_i(drv, size); break;
-      case kInit: init_drv = drv; break;
+      case kSize   : size = const_i(drv, size); break;
+      case kInit   : init_drv = drv; break;
       case kUndef:
         // ordering="none" (undefined read-during-write). Bit-blasting cannot
         // carry an x, so the netlist REFINES it to the committed value -- which
@@ -168,7 +196,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   auto bail = [&](std::string_view why) {
     livehd::diag::warn("pass.abc", "memory-unlowered", "unsupported")
         .msg("pass.abc memory=true: memory in '{}' not bit-blasted ({}) — kept as a native instance",
-             std::string{g.get_name()}, why)
+             std::string{g.get_name()},
+             why)
         .emit();
     return false;
   };
@@ -198,7 +227,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
     }
     (role == 1 ? rd : wr).push_back(p);
   }
-  int n_wr = static_cast<int>(wr.size());
+  int  n_wr    = static_cast<int>(wr.size());
   // `fwd` is a per-(read,write) matrix (graph/cell.cpp): bit r*n_wr + w says
   // read port r forwards write port w. Dlop::bit_test is arbitrary precision,
   // so wide (many-port) shapes do not truncate.
@@ -209,11 +238,12 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   // netlist quietly disagree with the un-mapped design's emitted RTL.
   if (undef_refined) {
     livehd::diag::warn("pass.abc", "memory-undef-refined", "unsupported")
-        .msg("pass.abc memory=true: memory in '{}' declares ordering=\"none\" (undefined read-during-write), but a "
-             "bit-blasted netlist cannot carry an x — the collision window is REFINED to the committed value. The "
-             "emitted RTL therefore differs from the un-mapped design (x there), and lec is only sound with this "
-             "netlist as the IMPL side. Set pass.abc memory=false to keep it a native memory instance",
-             std::string{g.get_name()})
+        .msg(
+            "pass.abc memory=true: memory in '{}' declares ordering=\"none\" (undefined read-during-write), but a "
+            "bit-blasted netlist cannot carry an x — the collision window is REFINED to the committed value. The "
+            "emitted RTL therefore differs from the un-mapped design (x there), and lec is only sound with this "
+            "netlist as the IMPL side. Set pass.abc memory=false to keep it a native memory instance",
+            std::string{g.get_name()})
         .emit();
   }
 
@@ -301,7 +331,7 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   // optional read-latency register. dout driver pid = n_wr + read-rank (cgen).
   std::map<int, hhds::Pin_class> read_dout;
   for (int r = 0; r < static_cast<int>(rd.size()); ++r) {
-    const auto& p = rd[r];
+    const auto&                  p = rd[r];
     std::vector<hhds::Pin_class> onehot(size);
     for (int en = 0; en < size; ++en) {
       onehot[en] = B.eq(p.addr, B.konst_i(en));
@@ -357,8 +387,8 @@ bool lower_one(hhds::Graph& g, const hhds::Node_class& mem) {
   // rewire the memory's read-data consumers onto the new douts, then drop it.
   bool ok = true;
   for (const auto& out : mem.out_edges()) {
-    int pid = static_cast<int>(out.driver.get_port_id());
-    auto it = read_dout.find(pid);
+    int  pid = static_cast<int>(out.driver.get_port_id());
+    auto it  = read_dout.find(pid);
     if (it == read_dout.end() || it->second.is_invalid()) {
       ok = false;  // an output we did not model (e.g. read_all) — cannot lower
       break;
@@ -385,7 +415,7 @@ int lower_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
       continue;
     }
     std::vector<hhds::Node_class> mems;
-    for (auto n : gp->forward_class()) {
+    for (auto n : gp->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(n) == Ntype_op::Memory) {
         mems.push_back(n);
       }

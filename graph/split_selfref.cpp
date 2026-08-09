@@ -11,7 +11,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "replica_desc.hpp"
 #include "cell.hpp"       // Ntype / Ntype_op
 #include "diag.hpp"       // livehd::diag::warn (non-silent cap diagnostic)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
@@ -22,25 +21,25 @@ namespace {
 // Debug-print helper (mirrors the cgen_sim local; only used by split[dbg] lines).
 const char* op_name(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Sum: return "Sum";
-    case Ntype_op::Mult: return "Mult";
-    case Ntype_op::Div: return "Div";
-    case Ntype_op::And: return "And";
-    case Ntype_op::Or: return "Or";
-    case Ntype_op::Xor: return "Xor";
-    case Ntype_op::Not: return "Not";
-    case Ntype_op::LT: return "LT";
-    case Ntype_op::GT: return "GT";
-    case Ntype_op::EQ: return "EQ";
-    case Ntype_op::SHL: return "SHL";
-    case Ntype_op::SRA: return "SRA";
-    case Ntype_op::Mux: return "Mux";
-    case Ntype_op::Hotmux: return "Hotmux";
+    case Ntype_op::Sum     : return "Sum";
+    case Ntype_op::Mult    : return "Mult";
+    case Ntype_op::Div     : return "Div";
+    case Ntype_op::And     : return "And";
+    case Ntype_op::Or      : return "Or";
+    case Ntype_op::Xor     : return "Xor";
+    case Ntype_op::Not     : return "Not";
+    case Ntype_op::LT      : return "LT";
+    case Ntype_op::GT      : return "GT";
+    case Ntype_op::EQ      : return "EQ";
+    case Ntype_op::SHL     : return "SHL";
+    case Ntype_op::SRA     : return "SRA";
+    case Ntype_op::Mux     : return "Mux";
+    case Ntype_op::Hotmux  : return "Hotmux";
     case Ntype_op::Get_mask: return "Get_mask";
     case Ntype_op::Set_mask: return "Set_mask";
-    case Ntype_op::Sext: return "Sext";
-    case Ntype_op::Nconst: return "Nconst";
-    default: return "op?";
+    case Ntype_op::Sext    : return "Sext";
+    case Ntype_op::Nconst  : return "Nconst";
+    default                : return "op?";
   }
 }
 }  // namespace
@@ -78,10 +77,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   };
 
   // --- gate: which comb nodes sit on a word-level cycle (Kahn peel of sources) ---
-  std::vector<hhds::Node_class>                                       comb_nodes;
-  absl::flat_hash_map<hhds::Node_class, int>                          indeg;
+  std::vector<hhds::Node_class>                                        comb_nodes;
+  absl::flat_hash_map<hhds::Node_class, int>                           indeg;
   absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (is_comb(n)) {
       comb_nodes.push_back(n);
       indeg.try_emplace(n, 0);
@@ -121,8 +120,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       std::string drvs;
       for (auto e : n.inp_edges()) {
-        drvs += e.driver.is_invalid()             ? " inv"
-                : gu::is_const_pin(e.driver)      ? " const"
+        drvs += e.driver.is_invalid()                  ? " inv"
+                : gu::is_const_pin(e.driver)           ? " const"
                 : !is_comb(e.driver.get_master_node()) ? " noncomb"
                                                        : (" " + std::string(gu::debug_name(e.driver.get_master_node())));
       }
@@ -324,9 +323,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   //  * Sum with no subtrahend and pairwise-DISJOINT operand footprints == Or
   //  * Or operands with footprints outside the requested slice -> exact zero
   //  * EQ control bit -> rebuild only from complete bounded operands
-  auto mask_const = [&](int lo, int hi) -> hhds::Pin_class {
-    return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo));
-  };
+  auto mask_const
+      = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo)); };
   // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
   // head below) and a GLOBAL ceiling proportional to the design. The old code
   // had ONE global counter that was never reset: a big def's early readers burnt
@@ -342,7 +340,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   int           total_created  = 0;  // global (never reset)
   // LIVEHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
   // refusal (op, slice) -- the fast way to see WHY a pack did not split.
-  const bool split_dbg = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  const bool    split_dbg      = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
   absl::flat_hash_map<std::tuple<hhds::Class_index, int, int>, hhds::Pin_class> memo;
   // A (pin,slice) already on the RESOLUTION STACK means this slice depends on
   // itself -- a GENUINE bit-level cycle: fail it permanently. That makes the
@@ -350,13 +348,18 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // and a failure caused ONLY by the caps must NOT be memoized -- an earlier
   // capped frame would otherwise poison every later resolution through that
   // slice (the BlockCipherModule 21-bit sbox hit exactly this).
-  absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> on_stack;
-  bool cap_hit = false;
+  absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>>                  on_stack;
+  bool                                                                          cap_hit = false;
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
     if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > per_reader_cap || total_created > global_cap) {
       if (split_dbg) {
-        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n", depth, lo, hi, created,
-                   total_created, v.is_invalid());
+        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n",
+                   depth,
+                   lo,
+                   hi,
+                   created,
+                   total_created,
+                   v.is_invalid());
       }
       cap_hit = true;
       return {};
@@ -399,8 +402,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       memo.emplace(key, r);
       return r;
     }
-    const bool cap_before = cap_hit;
-    auto            op = gu::type_op_of(m);
+    const bool      cap_before = cap_hit;
+    auto            op         = gu::type_op_of(m);
     hhds::Pin_class res{};
     if (op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor || op == Ntype_op::Sum) {
       std::vector<hhds::Pin_class> operands;
@@ -604,7 +607,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           }
           auto d = e.driver;
           if (!gu::is_const_pin(d) && in_cycle.contains(d.get_master_node())) {
-            const int db = gu::bits_of(d);
+            const int db      = gu::bits_of(d);
             int       whole_w = 0;
             if (gu::is_unsign(d) && db > 0) {
               whole_w = std::max(1, db - 1);
@@ -619,7 +622,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             if (whole_w == 0) {
               if (split_dbg) {
                 std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
-                           op_name(gu::type_op_of(d.get_master_node())), db, gu::is_unsign(d));
+                           op_name(gu::type_op_of(d.get_master_node())),
+                           db,
+                           gu::is_unsign(d));
               }
               ok = false;
               break;
@@ -771,8 +776,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     if (!in_cycle.contains(R)) {
       continue;
     }
-    created = 0;      // per-reader budget: this read pays only for its own subtree
-    cap_hit = false;  // per-reader cap-taint detection (the memoization guard in resolve)
+    created  = 0;      // per-reader budget: this read pays only for its own subtree
+    cap_hit  = false;  // per-reader cap-taint detection (the memoization guard in resolve)
     auto rop = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
       auto md = drv_at(R, 2);
@@ -850,7 +855,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       auto res = resolve(resolve, wd, k, k + j, 0);
       if (split_dbg) {
-        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n", j, k, gu::type_op_of(sm) == Ntype_op::SRA,
+        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n",
+                   j,
+                   k,
+                   gu::type_op_of(sm) == Ntype_op::SRA,
                    res.is_invalid() ? "FAIL" : "ok");
       }
       if (res.is_invalid()) {
@@ -911,13 +919,13 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
   // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
-  constexpr int max_rounds  = 16;
-  int           total       = 0;
-  int           unresolved  = 0;
-  bool          cap_hit     = false;
+  constexpr int max_rounds = 16;
+  int           total      = 0;
+  int           unresolved = 0;
+  bool          cap_hit    = false;
   for (int round = 0; round < max_rounds; ++round) {
-    const int n = split_selfref_pass(g, unresolved, cap_hit);
-    total += n;
+    const int n  = split_selfref_pass(g, unresolved, cap_hit);
+    total       += n;
     if (n == 0) {
       break;  // fixpoint: nothing left to rewrite (cycle gone, or genuinely stuck)
     }
@@ -927,11 +935,12 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   // count. `unresolved` is the final pass's remaining on-cycle reads.
   if (unresolved > 0) {
     livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
-        .msg("{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
-             "word-level combinational cycle may remain",
-             unresolved,
-             total,
-             max_rounds)
+        .msg(
+            "{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
+            "word-level combinational cycle may remain",
+            unresolved,
+            total,
+            max_rounds)
         .hint(cap_hit ? "node-creation budget exhausted on a read -- raise the split budget if this is not a real loop"
                       : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
         .emit();
@@ -957,7 +966,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
   std::vector<hhds::Node_class>                                        nodes;
   absl::flat_hash_map<hhds::Node_class, int>                           indeg;
   absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (comb(n)) {
       nodes.push_back(n);
       indeg.try_emplace(n, 0);
@@ -1008,7 +1017,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
 int flatten_false_loop_subs(hhds::Graph* g) {
   // A replicated Sub is never a false-loop target: dissolving one keeps a
   // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
-  // Consumers expand it explicitly instead (graph/replica_expand.hpp).
+  // Physical backends materialize it only in their private output state.
   namespace gu = livehd::graph_util;  // the lambdas below qualify with it
 
   // The whole CLOSURE must be state-free: nested comb Subs are fine (the clone
@@ -1019,7 +1028,7 @@ int flatten_false_loop_subs(hhds::Graph* g) {
     if (!cg) {
       return false;
     }
-    for (auto n : cg->fast_class()) {
+    for (auto n : cg->body().nodes()) {
       auto op = gu::type_op_of(n);
       if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
         return false;
@@ -1093,11 +1102,11 @@ int flatten_false_loop_subs(hhds::Graph* g) {
   int flattened = 0;
   for (int round = 0; round < 8; ++round) {
     std::vector<hhds::Node_class> targets;
-    for (auto node : g->fast_class()) {
+    for (auto node : g->body().nodes()) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
-      if (gu::is_replicated_sub(node)) {
+      if (node.is_loop_subnode()) {
         continue;  // count occurrences, not one — inlining here drops count-1 replicas
       }
       if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
@@ -1124,7 +1133,7 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 
       // (a) copy every callee comb node into g (consts/IO ports handled on demand).
       absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
-      for (auto cn : cg->fast_class()) {
+      for (auto cn : cg->body().nodes()) {
         auto op = gu::type_op_of(cn);
         if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
           continue;
@@ -1133,12 +1142,10 @@ int flatten_false_loop_subs(hhds::Graph* g) {
         if (op == Ntype_op::Sub) {
           // a nested comb Sub is re-instantiated in g as an ordinary child
           // instance (the closure check above guarantees it is state-free)
-          neo.set_subnode(cn.get_subnode_io());
-          // ... unless it is REPLICATED, in which case the descriptor is part of
-          // its identity: a clone without it is one occurrence where `count`
-          // belong, and no later expansion can tell.
-          if (auto a = cn.attr(livehd::attrs::replica_desc); a.has()) {
-            neo.attr(livehd::attrs::replica_desc).set(std::string{a.get()});
+          if (auto loop = cn.subnode_loop()) {
+            neo.set_subnode(cn.get_subnode_io(), *loop);
+          } else {
+            neo.set_subnode(cn.get_subnode_io());
           }
         }
         if (gu::has_name(cn)) {
@@ -1176,7 +1183,7 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       };
 
       // (b) rewire the callee's internal edges onto the copies.
-      for (auto cn : cg->fast_class()) {
+      for (auto cn : cg->body().nodes()) {
         auto it = nmap.find(cn);
         if (it == nmap.end()) {
           continue;

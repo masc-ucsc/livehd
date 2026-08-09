@@ -2,19 +2,19 @@
 
 #include "inou_cgen.hpp"
 
-#include <charconv>
 #include <array>
+#include <charconv>
 #include <map>
 #include <tuple>
 
 #include "cgen_sim.hpp"
-#include "node_util.hpp"
-#include "port_reach.hpp"
-#include "split_selfref.hpp"
 #include "cgen_verilog.hpp"
 #include "diag.hpp"  // livehd::diag::err — flag-value validation
 #include "file_utils.hpp"
+#include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "port_reach.hpp"
+#include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
@@ -126,8 +126,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but the sim.vcd_fake_delay knob reaches this label directly).
-  if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false"
-      && fakedelay != "0" && fakedelay != "off") {
+  if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false" && fakedelay != "0"
+      && fakedelay != "off") {
     livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
         .msg("sim.vcd_fake_delay expects true|false, got '{}'", fakedelay)
         .emit();
@@ -150,6 +150,32 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
   }
 
+  // Simulator lowering still performs backend-specific structural rewrites
+  // (clock-gate folding, optional small-instance flattening, and compact-loop
+  // realization). Build those into a private output library: the EPRP input
+  // graphs remain native and read-only, and every pre-scan/emission handle
+  // below belongs to the same scratch bodies it measures.
+  hhds::GraphLibrary                        sim_library;
+  std::vector<std::shared_ptr<hhds::Graph>> sim_graphs;
+  sim_graphs.reserve(var.graphs.size());
+  for (const auto& source : var.graphs) {
+    if (!source) {
+      continue;
+    }
+    auto  source_io      = source->get_io();
+    auto* source_library = source_io ? source_io->get_library() : nullptr;
+    if (source_library == nullptr || !sim_library.copy_from(*source_library, source->get_name())) {
+      livehd::diag::err("inou.cgen.sim", "scratch-copy", "internal")
+          .msg("could not copy '{}' into the simulator's private output library", source->get_name())
+          .emit();
+      return;
+    }
+  }
+  for (const auto& source : var.graphs) {
+    auto io = source ? sim_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
+    sim_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
+  }
+
   // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,
   // BEFORE the pre-scan below measures anything. The pre-scan holds Pin_class
   // handles into callee bodies, and the rewrites delete nodes and rewire edges
@@ -157,7 +183,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // indices that no longer mean what was measured.
   {
     Cgen_sim prep(dir, vcd_out, top, fakedelay, flatten_budget);
-    for (const auto& g : var.graphs) {
+    for (const auto& g : sim_graphs) {
       // A body that cannot be prepared cannot be emitted correctly (the
       // diagnostic came from prepare_graph): stop the whole emission rather
       // than write a partial design whose remaining modules look fine.
@@ -176,10 +202,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // path and get no group.
   Cgen_sim::Split_map splits;
   {
-    livehd::port_reach::Cache                                        reach;
+    livehd::port_reach::Cache                                             reach;
     absl::node_hash_map<const hhds::Graph*, std::shared_ptr<hhds::Graph>> need;
-    absl::flat_hash_set<hhds::Node_class>                            cyc;
-    for (const auto& g : var.graphs) {
+    absl::flat_hash_set<hhds::Node_class>                                 cyc;
+    for (const auto& g : sim_graphs) {
       if (!g) {
         continue;
       }
@@ -195,7 +221,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       }
     }
     for (const auto& [ptr, sp] : need) {
-      const auto& dr = reach.of(sp);
+      const auto&                                                           dr = reach.of(sp);
       // signature (sorted support atoms) -> group under construction
       std::map<std::vector<std::array<uint32_t, 3>>, Cgen_sim::Split_group> by_sig;
       auto add_entry = [&](Cgen_sim::Split_group::Out out, const std::vector<std::array<uint32_t, 3>>& sig) {
@@ -256,13 +282,18 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
         groups.push_back(std::move(grp));
       }
       if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-        auto cio = sp->get_io();
+        auto                                       cio = sp->get_io();
         absl::flat_hash_map<uint32_t, std::string> in_names, out_names;
         if (cio) {
-          for (const auto& d : cio->get_input_pin_decls()) in_names[d.port_id] = d.name;
-          for (const auto& d : cio->get_output_pin_decls()) out_names[d.port_id] = d.name;
+          for (const auto& d : cio->get_input_pin_decls()) {
+            in_names[d.port_id] = d.name;
+          }
+          for (const auto& d : cio->get_output_pin_decls()) {
+            out_names[d.port_id] = d.name;
+          }
         }
-        std::string dbg = std::string("[splitdbg] ") + std::string(sp->get_name()) + ": " + std::to_string(groups.size()) + " group(s)\n";
+        std::string dbg
+            = std::string("[splitdbg] ") + std::string(sp->get_name()) + ": " + std::to_string(groups.size()) + " group(s)\n";
         for (size_t gi2 = 0; gi2 < groups.size(); ++gi2) {
           dbg += "  g" + std::to_string(gi2) + " outs:";
           for (const auto& o : groups[gi2].outs) {
@@ -288,7 +319,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
 
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
-  for (const auto& g : var.graphs) {
+  for (const auto& g : sim_graphs) {
     if (!g) {
       continue;
     }

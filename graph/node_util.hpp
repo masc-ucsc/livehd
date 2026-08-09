@@ -115,8 +115,10 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // form (pid encoding for small ints, `pin_const_value` attribute otherwise)
 // and the legacy `Ntype_op::Nconst` regular-node form (with the per-node
 // `const_value` attribute) that the lgraph wrapper still produces.
-[[nodiscard]] Dlop hydrate_const(const hhds::Pin_class& pin);
-[[nodiscard]] Dlop hydrate_const(const hhds::Node_class& node);
+[[nodiscard]] Dlop        hydrate_const(const hhds::Pin_class& pin);
+[[nodiscard]] Dlop        hydrate_const(const hhds::Node_class& node);
+[[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_pin& pin) { return hydrate_const(pin.base_pin()); }
+[[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_node& node) { return hydrate_const(node.base_node()); }
 
 // HHDS stores the user-supplied type in NodeEntry::type with the low bit
 // reserved for HHDS's own `is_loop_last` semantics. The Ntype_op encoding
@@ -138,15 +140,19 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   return static_cast<Ntype_op>(static_cast<uint16_t>(node.get_type()));
 }
 
+[[nodiscard]] inline Ntype_op type_op_of(const hhds::Occurrence_node& node) { return type_op_of(node.base_node()); }
+
 [[nodiscard]] inline bool is_type_flop(const hhds::Node_class& node) {
   auto op = type_op_of(node);
   return op == Ntype_op::Flop || op == Ntype_op::Fflop;
 }
+[[nodiscard]] inline bool is_type_flop(const hhds::Occurrence_node& node) { return is_type_flop(node.base_node()); }
 
 [[nodiscard]] inline bool is_type_register(const hhds::Node_class& node) {
   auto op = type_op_of(node);
   return op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Fflop;
 }
+[[nodiscard]] inline bool is_type_register(const hhds::Occurrence_node& node) { return is_type_register(node.base_node()); }
 
 [[nodiscard]] inline bool is_type_const(const hhds::Node_class& node) {
   // Constants live on the CONST_NODE singleton. A driver pin attached to
@@ -154,8 +160,10 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   // get_debug_nid returns the raw Nid for this node handle.
   return node.get_debug_nid() == hhds::Graph::CONST_NODE;
 }
+[[nodiscard]] inline bool is_type_const(const hhds::Occurrence_node& node) { return is_type_const(node.base_node()); }
 
 [[nodiscard]] inline bool is_type_sub(const hhds::Node_class& node) { return type_op_of(node) == Ntype_op::Sub; }
+[[nodiscard]] inline bool is_type_sub(const hhds::Occurrence_node& node) { return type_op_of(node) == Ntype_op::Sub; }
 
 // Per-pin bit width. `livehd::attrs::bits` holds the value (0 == unspecified).
 // For graph-IO pins, the declared bits live on `GraphIO::get_bits(name)`
@@ -183,6 +191,12 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   }
   return !pin.attr(livehd::attrs::pin_signed).has();
 }
+[[nodiscard]] inline bool is_unsign(const hhds::Occurrence_pin& pin) { return is_unsign(pin.base_pin()); }
+
+[[nodiscard]] inline int32_t bits_of(const hhds::Occurrence_pin& pin) { return bits_of(pin.base_pin()); }
+[[nodiscard]] inline int32_t bits_of(const hhds::Occurrence_pin& pin, const hhds::GraphIO& gio, std::string_view io_name) {
+  return bits_of(pin.base_pin(), gio, io_name);
+}
 
 // Per-node color taint (set by pass diagnostics).
 [[nodiscard]] inline bool has_color(const hhds::Node_class& node) { return node.attr(livehd::attrs::color).has(); }
@@ -200,6 +214,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   auto master = pin.get_master_node();
   return master.get_debug_nid() == hhds::Graph::INPUT_NODE;
 }
+[[nodiscard]] inline bool is_graph_input_pin(const hhds::Occurrence_pin& pin) { return is_graph_input_pin(pin.base_pin()); }
 
 [[nodiscard]] inline bool is_graph_output_pin(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
@@ -208,6 +223,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   auto master = pin.get_master_node();
   return master.get_debug_nid() == hhds::Graph::OUTPUT_NODE;
 }
+[[nodiscard]] inline bool is_graph_output_pin(const hhds::Occurrence_pin& pin) { return is_graph_output_pin(pin.base_pin()); }
 
 // Per-pin / per-node user-assigned name. Returns empty string when no name
 // attribute is present — EXCEPT for graph-IO pins, whose port name lives on
@@ -229,6 +245,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   }
   return {};
 }
+[[nodiscard]] inline std::string_view pin_name_of(const hhds::Occurrence_pin& pin) { return pin_name_of(pin.base_pin()); }
 
 [[nodiscard]] inline std::string_view node_name_of(const hhds::Node_class& node) {
   if (node.is_invalid()) {
@@ -237,6 +254,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   auto a = node.attr(hhds::attrs::name);
   return a.has() ? std::string_view{a.get()} : std::string_view{};
 }
+[[nodiscard]] inline std::string_view node_name_of(const hhds::Occurrence_node& node) { return node_name_of(node.base_node()); }
 
 [[nodiscard]] inline bool has_name(const hhds::Node_class& node) { return node.attr(hhds::attrs::name).has(); }
 
@@ -270,6 +288,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   // sources for cgen.
   return type_op_of(master) == Ntype_op::Nconst;
 }
+[[nodiscard]] inline bool is_const_pin(const hhds::Occurrence_pin& pin) { return is_const_pin(pin.base_pin()); }
 
 // LiveHD's `default_instance_name`: a deterministic name derived from
 // `<type>_<nid>` if the node has no user-assigned name, otherwise the
@@ -291,6 +310,8 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   }
   return base;
 }
+
+[[nodiscard]] inline std::string debug_name(const hhds::Occurrence_node& node) { return debug_name(node.base_node()); }
 
 // Wire-name generation: prefer the user-assigned pin name; otherwise fall
 // back to the node's debug name + port id. The cgen output uses this to
@@ -314,6 +335,8 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   }
   return base + "_" + std::to_string(static_cast<uint32_t>(port_id));
 }
+
+[[nodiscard]] inline std::string wire_name(const hhds::Occurrence_pin& pin) { return wire_name(pin.base_pin()); }
 
 // ---------------------------------------------------------------------------
 // Debug-only attribute self-checks (-c dbg). Tier 1: a constant driver pin must
@@ -383,7 +406,7 @@ inline void debug_check_const_pin([[maybe_unused]] const hhds::Pin_class& dpin) 
 // out under NDEBUG (-c opt).
 inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_unused]] std::string_view where) {
 #ifndef NDEBUG
-  for (auto node : g.forward_class()) {
+  for (auto node : g.body().nodes(hhds::Node_order::forward)) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
       continue;
@@ -488,6 +511,17 @@ inline void del_hier_color(const hhds::Node_class& node) {
     node.attr(livehd::attrs::hier_color).del();
   }
 }
+[[nodiscard]] inline bool has_hier_color(const hhds::Occurrence_node& node) { return node.attr(livehd::attrs::hier_color).has(); }
+[[nodiscard]] inline int32_t hier_color_of(const hhds::Occurrence_node& node) {
+  auto a = node.attr(livehd::attrs::hier_color);
+  return a.has() ? a.get() : 0;
+}
+inline void set_hier_color(const hhds::Occurrence_node& node, int32_t c) { node.attr(livehd::attrs::hier_color).set(c); }
+inline void del_hier_color(const hhds::Occurrence_node& node) {
+  if (node.attr(livehd::attrs::hier_color).has()) {
+    node.attr(livehd::attrs::hier_color).del();
+  }
+}
 
 // Per-node / per-pin structural-correspondence id (pass/semdiff). 0 is a real,
 // greppable value meaning "no counterpart" — distinct from the attribute being
@@ -543,6 +577,12 @@ inline void set_runtime_check(const hhds::Node_class& node, uint32_t v) { node.a
 [[nodiscard]] inline bool has_node_color(const hhds::Node_class& node) {
   return (node.is_hier() && node.attr(livehd::attrs::hier_color).has()) || has_color(node);
 }
+[[nodiscard]] inline int32_t node_color_of(const hhds::Occurrence_node& node) {
+  return node.attr(livehd::attrs::hier_color).has() ? node.attr(livehd::attrs::hier_color).get() : color_of(node.base_node());
+}
+[[nodiscard]] inline bool has_node_color(const hhds::Occurrence_node& node) {
+  return node.attr(livehd::attrs::hier_color).has() || has_color(node.base_node());
+}
 
 // User-assigned pin name. Empty string clears the attr.
 inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
@@ -587,6 +627,26 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   return {};
 }
 
+[[nodiscard]] inline hhds::Occurrence_pin find_sink_pin(const hhds::Occurrence_node& node, std::string_view name) {
+  if (node.is_invalid()) {
+    return {};
+  }
+  auto op = type_op_of(node);
+  if (op == Ntype_op::Sub) {
+    return node.get_sink_pin(name);
+  }
+  auto pid = Ntype::get_sink_pid(op, name);
+  if (pid == livehd::Port_invalid) {
+    return {};
+  }
+  for (const auto& e : node.inp_edges()) {
+    if (e.sink.get_port_id() == pid) {
+      return e.sink;
+    }
+  }
+  return {};
+}
+
 [[nodiscard]] inline bool is_sink_connected(const hhds::Node_class& node, std::string_view name) {
   return !find_sink_pin(node, name).is_invalid();
 }
@@ -602,6 +662,19 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 [[nodiscard]] inline hhds::Pin_class first_value_driver(const hhds::Node_class& node) {
   hhds::Pin_class a;
   uint32_t        best = 0;
+  for (const auto& e : node.inp_edges()) {
+    const auto sp = static_cast<uint32_t>(e.sink.get_port_id());
+    if (a.is_invalid() || sp < best) {
+      a    = e.driver;
+      best = sp;
+    }
+  }
+  return a;
+}
+
+[[nodiscard]] inline hhds::Occurrence_pin first_value_driver(const hhds::Occurrence_node& node) {
+  hhds::Occurrence_pin a;
+  uint32_t             best = 0;
   for (const auto& e : node.inp_edges()) {
     const auto sp = static_cast<uint32_t>(e.sink.get_port_id());
     if (a.is_invalid() || sp < best) {
@@ -630,6 +703,19 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   // Single-driver contract: a multi-driver sink (the "as"/"bs" pins -- Sum as/bs,
   // Or as, SHL bs, ...) must read every driver via inp_drivers_of — silently
   // taking the first would drop fan-in. Assert callers honor it.
+  I(drivers.size() == 1, "get_driver_of_sink_name on a multi-driver sink; use inp_drivers_of");
+  return drivers.front();
+}
+
+[[nodiscard]] inline hhds::Occurrence_pin get_driver_of_sink_name(const hhds::Occurrence_node& node, std::string_view name) {
+  auto sink = find_sink_pin(node, name);
+  if (sink.is_invalid()) {
+    return {};
+  }
+  auto drivers = sink.get_driver_pins();
+  if (drivers.empty()) {
+    return {};
+  }
   I(drivers.size() == 1, "get_driver_of_sink_name on a multi-driver sink; use inp_drivers_of");
   return drivers.front();
 }
@@ -743,8 +829,8 @@ inline constexpr uint64_t large_design_nodes_default = 1'000'000;
 
 [[nodiscard]] inline uint64_t large_design_node_threshold() {
   if (const char* env = std::getenv("LIVEHD_LARGE_DESIGN_NODES"); env != nullptr && *env != '\0') {
-    char*                     end = nullptr;
-    const unsigned long long  v   = std::strtoull(env, &end, 10);
+    char*                    end = nullptr;
+    const unsigned long long v   = std::strtoull(env, &end, 10);
     if (end != env && *end == '\0') {
       // 0 disables the gate; the count can never exceed UINT64_MAX.
       return v == 0 ? UINT64_MAX : static_cast<uint64_t>(v);
@@ -761,7 +847,7 @@ inline constexpr uint64_t large_design_nodes_default = 1'000'000;
     return 0;
   }
   uint64_t n = 0;
-  for ([[maybe_unused]] auto node : const_cast<hhds::Graph*>(g)->fast_class()) {
+  for ([[maybe_unused]] auto node : const_cast<hhds::Graph*>(g)->body().nodes()) {
     ++n;
   }
   return n;
@@ -773,7 +859,7 @@ inline constexpr uint64_t large_design_nodes_default = 1'000'000;
 // subnode's target gid to its Graph* (or nullptr if not in the library; such
 // instances are skipped -- the count is then a lower bound).
 //
-// Cost: hier_range() walks the STRUCTURE TREE only (proportional to the instance
+// Cost: grouped_hierarchy().instances() walks the STRUCTURE TREE only (proportional to the instance
 // count, not the flat node count), and each unique def body is counted once via
 // body_node_count. So this is O(unique-nodes + instances), O(unique-defs) space
 // -- it never materializes the flattened walk (which is exactly the O(flat-nodes)
@@ -784,7 +870,7 @@ template <typename Resolve>
     return 0;
   }
   std::unordered_map<hhds::Gid, uint64_t> per_def;  // memoize: a def may recur
-  auto count_def = [&](hhds::Gid gid, hhds::Graph* g) -> uint64_t {
+  auto                                    count_def = [&](hhds::Gid gid, hhds::Graph* g) -> uint64_t {
     auto it = per_def.find(gid);
     if (it != per_def.end()) {
       return it->second;
@@ -795,7 +881,7 @@ template <typename Resolve>
   };
 
   uint64_t total = count_def(top->get_gid(), top);  // the top is instantiated once
-  for (auto inst : top->hier_range()) {
+  for (auto inst : top->grouped_hierarchy().instances()) {
     hhds::Gid gid = inst.get_target_gid();
     if (hhds::Graph* g = resolve(gid); g != nullptr) {
       total += count_def(gid, g);
@@ -818,13 +904,13 @@ template <typename Resolve, typename IsOpaque>
     return 0;
   }
   std::unordered_map<hhds::Gid, uint64_t> memo;
-  auto count = [&](auto&& self, hhds::Graph* g) -> uint64_t {
+  auto                                    count = [&](auto&& self, hhds::Graph* g) -> uint64_t {
     if (auto it = memo.find(g->get_gid()); it != memo.end()) {
       return it->second;  // 0 while in progress = cycle guard (hier is a DAG; a back-edge undercounts, never loops)
     }
     memo.emplace(g->get_gid(), 0);
     uint64_t total = 0;
-    for (auto node : g->fast_class()) {
+    for (auto node : g->body().nodes()) {
       ++total;  // every node counts, Sub nodes included
       if (type_op_of(node) != Ntype_op::Sub) {
         continue;
@@ -902,8 +988,8 @@ namespace ge_detail {
 // anywhere (ABC folds it).
 [[nodiscard]] inline uint64_t port_bits_sum(const hhds::Node_class& node) {
   std::vector<uint32_t> seen;
-  uint64_t              sum = 0;
-  auto once = [&](uint32_t pid, const hhds::Pin_class& width_pin) {
+  uint64_t              sum  = 0;
+  auto                  once = [&](uint32_t pid, const hhds::Pin_class& width_pin) {
     if (std::find(seen.begin(), seen.end(), pid) != seen.end()) {
       return;
     }
@@ -957,7 +1043,7 @@ namespace ge_detail {
   switch (type_op_of(node)) {
     case Ntype_op::Invalid:
     case Ntype_op::IO:
-    case Ntype_op::Nconst: return 0;
+    case Ntype_op::Nconst : return 0;
 
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
 

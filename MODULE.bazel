@@ -164,14 +164,14 @@ http_archive(
     build_file = "//packages:parallel_hashmap.BUILD",
 )
 
-# HHDS (plain git repo — see the iassert/hlop note above)
-git_repository(
-    name = "hhds",
-    commit = "11b58a75fba9ed2605f5cbde93bb4fc984fede87",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-)
-# For local co-development swap the git_repository above for:
-# local_repository(name = "hhds", path = "../hhds")
+# HHDS local checkout for co-development.
+local_repository(name = "hhds", path = "../hhds")
+# To use the published repository instead, swap the local_repository above for:
+# git_repository(
+#     name = "hhds",
+#     commit = "11b58a75fba9ed2605f5cbde93bb4fc984fede87",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+# )
 
 # emhash — @hhds//hhds:core|graph dep on it. hhds's own MODULE.bazel declares
 # this wrapper, but a plain-repo fetch does not evaluate MODULE.bazel, so the

@@ -30,20 +30,20 @@ namespace livehd::color {
 
 // What the window did -- for `--stats` and for the tests that pin the invariant.
 struct Size_window_stats {
-  uint64_t regions_in   = 0;  // regions before the window (connected components)
-  uint64_t regions_out  = 0;  // regions after
-  uint64_t merges       = 0;  // merge-small steps taken
-  uint64_t splits       = 0;  // regions that were split
-  uint64_t packed       = 0;  // isolated under-min regions folded into misc bins
-  uint64_t left_under   = 0;  // regions still under min: the def's whole body is below it
-  uint64_t left_over    = 0;  // regions still over max: indivisible (one huge node)
+  uint64_t regions_in  = 0;  // regions before the window (connected components)
+  uint64_t regions_out = 0;  // regions after
+  uint64_t merges      = 0;  // merge-small steps taken
+  uint64_t splits      = 0;  // regions that were split
+  uint64_t packed      = 0;  // isolated under-min regions folded into misc bins
+  uint64_t left_under  = 0;  // regions still under min: the def's whole body is below it
+  uint64_t left_over   = 0;  // regions still over max: indivisible (one huge node)
 };
 
 // Reshape `node2id` so each region (= connected component of equal-id nodes)
 // weighs between min_ge and max_ge gate equivalents. 0 disables that half of the
 // window; 0/0 returns the input's component split unchanged.
 //
-// The returned ids are 1..k, minted in `forward_class()` first-encounter order --
+// The returned ids are 1..k, minted in `body().nodes(hhds::Node_order::forward)` first-encounter order --
 // a deterministic function of the graph, not of hash iteration. Ids are one
 // connected region each EXCEPT the misc bins below, so a caller must NOT apply
 // Color_opts::continuous on top (it would shred the bins back apart).

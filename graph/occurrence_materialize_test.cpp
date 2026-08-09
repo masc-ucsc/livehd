@@ -10,7 +10,7 @@
 // inputs shared, one index constant per ordinal, a carry chain threaded
 // ordinal-to-ordinal, and external readers bound to the last occurrence.
 
-#include "replica_expand.hpp"
+#include "occurrence_materialize.hpp"
 
 #include <format>
 #include <string>
@@ -22,13 +22,10 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
-#include "replica_desc.hpp"
 
 namespace gu = livehd::graph_util;
 
-using gu::expand_replicated_subs;
-using gu::Replica_carry;
-using gu::Replica_desc;
+using gu::materialize_occurrences;
 
 namespace {
 
@@ -58,7 +55,7 @@ std::shared_ptr<hhds::GraphIO> make_body_io(hhds::GraphLibrary& lib, const std::
 
 std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
   std::vector<hhds::Node_class> v;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) == Ntype_op::Sub) {
       v.emplace_back(n);
     }
@@ -77,7 +74,7 @@ hhds::Pin_class driver_of(const hhds::Node_class& n, hhds::Port_id pid) {
 }
 
 // Orders the expanded occurrences by the constant on their index input, so the
-// test does not depend on node-creation order leaking through fast_class().
+// test does not depend on node-creation order leaking through body().nodes().
 std::vector<hhds::Node_class> subs_by_index(hhds::Graph* g) {
   auto v = subs_of(g);
   std::ranges::sort(v, [](const hhds::Node_class& a, const hhds::Node_class& b) {
@@ -128,13 +125,13 @@ Fixture build_compact(const std::string& lgdb, uint64_t count, int64_t first = 0
   f.compact.create_driver_pin(kPidAccOut).connect_sink(f.parent->get_output_pin("total"));
   f.compact.create_driver_pin(kPidQ).connect_sink(f.parent->get_output_pin("last"));
 
-  Replica_desc d;
+  hhds::Subnode_loop d;
   d.first       = first;
   d.step        = step;
   d.count       = count;
   d.index_input = kPidIdx;
-  d.carries.emplace_back(Replica_carry{kPidAccIn, kPidAccOut});
-  gu::set_replica_desc(f.compact, d);
+  f.compact.set_subnode(f.body_io, d);
+  f.compact.create_driver_pin(kPidAccOut).connect_sink(f.compact.create_sink_pin(kPidAccIn));
   return f;
 }
 
@@ -142,33 +139,45 @@ Fixture build_compact(const std::string& lgdb, uint64_t count, int64_t first = 0
 
 TEST(ReplicaExpand, PredicateOnlyTrueForDescriptorCarrier) {
   auto f = build_compact("lgdb_rexp_pred", 4);
-  EXPECT_TRUE(gu::is_replicated_sub(f.compact));
-  EXPECT_TRUE(gu::graph_has_replicated_subs(f.parent.get()));
+  EXPECT_TRUE(f.compact.is_loop_subnode());
 
-  gu::del_replica_desc(f.compact);
-  EXPECT_FALSE(gu::is_replicated_sub(f.compact)) << "an ordinary Sub is never replicated by inference";
-  EXPECT_FALSE(gu::graph_has_replicated_subs(f.parent.get()));
+  f.compact.set_subnode(f.body_io);
+  EXPECT_FALSE(f.compact.is_loop_subnode()) << "an ordinary Sub is never replicated by inference";
 }
 
 TEST(ReplicaExpand, ExpandsToOneInstancePerOrdinal) {
   auto f = build_compact("lgdb_rexp_basic", 4);
   ASSERT_EQ(subs_of(f.parent.get()).size(), 1u);
 
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
 
   auto reps = subs_by_index(f.parent.get());
   ASSERT_EQ(reps.size(), 4u);
   for (std::size_t r = 0; r < reps.size(); ++r) {
-    EXPECT_FALSE(gu::is_replicated_sub(reps[r])) << "an expanded occurrence is an ordinary instance";
-    EXPECT_EQ(gu::node_name_of(reps[r]), std::format("lane_li{}", r))
+    EXPECT_FALSE(reps[r].is_loop_subnode()) << "an expanded occurrence is an ordinary instance";
+    EXPECT_EQ(gu::node_name_of(reps[r]), std::format("lane__li{}", r))
         << "each occurrence carries its ordinal, matching what the unroller stamps";
   }
-  EXPECT_FALSE(gu::graph_has_replicated_subs(f.parent.get()));
+}
+
+TEST(ReplicaExpand, MultipleSitesShareModuleOrdinalSpace) {
+  auto f      = build_compact("lgdb_rexp_multi_site", 4);
+  auto second = gu::create_typed_node(*f.parent, Ntype_op::Sub);
+  second.set_name("tail");
+  second.set_subnode(f.body_io, hhds::Subnode_loop{.first = 0, .step = 1, .count = 2, .index_input = kPidIdx});
+
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 2);
+  std::vector<std::string> names;
+  for (const auto& sub : subs_of(f.parent.get())) {
+    names.emplace_back(gu::node_name_of(sub));
+  }
+  std::ranges::sort(names);
+  EXPECT_EQ(names, (std::vector<std::string>{"lane__li0", "lane__li1", "lane__li2", "lane__li3", "tail__li4", "tail__li5"}));
 }
 
 TEST(ReplicaExpand, IndexConstantPerOrdinal) {
   auto f = build_compact("lgdb_rexp_idx", 4, /*first=*/10, /*step=*/3);
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
 
   auto reps = subs_by_index(f.parent.get());
   ASSERT_EQ(reps.size(), 4u);
@@ -181,10 +190,10 @@ TEST(ReplicaExpand, IndexConstantPerOrdinal) {
 }
 
 TEST(ReplicaExpand, InvariantInputIsSharedAndCarryIsChained) {
-  auto f      = build_compact("lgdb_rexp_chain", 4);
-  auto px     = f.parent->get_input_pin("px");
-  auto seed   = f.parent->get_input_pin("seed");
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  auto f    = build_compact("lgdb_rexp_chain", 4);
+  auto px   = f.parent->get_input_pin("px");
+  auto seed = f.parent->get_input_pin("seed");
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
 
   auto reps = subs_by_index(f.parent.get());
   ASSERT_EQ(reps.size(), 4u);
@@ -206,7 +215,7 @@ TEST(ReplicaExpand, InvariantInputIsSharedAndCarryIsChained) {
 
 TEST(ReplicaExpand, ExternalReadersBindToTheLastOccurrence) {
   auto f = build_compact("lgdb_rexp_readers", 4);
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
 
   auto reps = subs_by_index(f.parent.get());
   auto last = reps.back();
@@ -223,7 +232,7 @@ TEST(ReplicaExpand, ExternalReadersBindToTheLastOccurrence) {
 
 TEST(ReplicaExpand, SingleOrdinalIsAPlainInstance) {
   auto f = build_compact("lgdb_rexp_one", 1);
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
 
   auto reps = subs_of(f.parent.get());
   ASSERT_EQ(reps.size(), 1u);
@@ -250,15 +259,15 @@ TEST(ReplicaExpand, ZeroCountPassesCarriesThroughAndInstantiatesNothing) {
     }
   }
 
-  ASSERT_EQ(expand_replicated_subs(f.parent.get(), "test"), 1);
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
   EXPECT_TRUE(subs_of(f.parent.get()).empty()) << "zero replicas instantiate nothing";
   EXPECT_EQ(driver_of(f.parent->get_output_node(), 2), seed) << "the carried result is its own initial value";
 }
 
 TEST(ReplicaExpand, NoDescriptorIsALeftAlone) {
   auto f = build_compact("lgdb_rexp_none", 4);
-  gu::del_replica_desc(f.compact);
-  EXPECT_EQ(expand_replicated_subs(f.parent.get(), "test"), 0);
+  f.compact.set_subnode(f.body_io);
+  EXPECT_EQ(materialize_occurrences(f.parent.get(), "test"), 0);
   EXPECT_EQ(subs_of(f.parent.get()).size(), 1u) << "an ordinary Sub is untouched";
 }
 
@@ -285,15 +294,10 @@ std::shared_ptr<hhds::GraphIO> make_active_io(hhds::GraphLibrary& lib) {
 
 }  // namespace
 
-TEST(ReplicaExpand, ActivationIsRefusedUntilTheBypassMuxExists) {
-  // Rule 8 makes a carry `carry[r+1] = active[r] ? body_out[r] : carry[r]`, and
-  // rule 3 makes carried outputs SPECIFIED (equal to the bypass value) while
-  // inactive. Expansion wires the chain straight through, with no mux, so an
-  // inactive replica's output would be published as the loop result. Until the
-  // mux exists this must REFUSE, not silently mis-expand.
-  //
-  // No front end mints an activation port today (design M2), so nothing
-  // regresses; this test is what keeps the gap loud if one starts to.
+TEST(ReplicaExpand, ActivationBuildsCumulativeEnableAndCarryBypass) {
+  // Each later carry is active[r-1] ? output[r-1] : input[r-1]. When a
+  // next_active output exists, active itself advances cumulatively through an
+  // And; without one, every occurrence reuses the external activation.
   for (const bool chained : {false, true}) {
     auto& lib = livehd::Hhds_graph_library::instance(chained ? "lgdb_rexp_act_chain" : "lgdb_rexp_act");
     auto  bio = make_active_io(lib);
@@ -319,7 +323,7 @@ TEST(ReplicaExpand, ActivationIsRefusedUntilTheBypassMuxExists) {
     seed.connect_sink(compact.create_sink_pin(kPidAccIn));
     compact.create_driver_pin(kPidAccOut).connect_sink(parent->get_output_pin("total"));
 
-    Replica_desc d;
+    hhds::Subnode_loop d;
     d.count            = 3;
     d.step             = 1;
     d.index_input      = kPidIdx;
@@ -327,12 +331,38 @@ TEST(ReplicaExpand, ActivationIsRefusedUntilTheBypassMuxExists) {
     if (chained) {
       d.next_active_output = kPidNext;
     }
-    d.carries.emplace_back(Replica_carry{kPidAccIn, kPidAccOut});
-    ASSERT_TRUE(d.validate().empty()) << d.validate();
-    gu::set_replica_desc(compact, d);
+    compact.set_subnode(bio, d);
+    compact.create_driver_pin(kPidAccOut).connect_sink(compact.create_sink_pin(kPidAccIn));
 
-    EXPECT_EQ(expand_replicated_subs(parent.get(), "test"), -1) << (chained ? "chained" : "unchained");
-    EXPECT_TRUE(gu::is_replicated_sub(compact)) << "a refused expansion must leave the graph alone";
+    ASSERT_EQ(materialize_occurrences(parent.get(), "test"), 1) << (chained ? "chained" : "unchained");
+    auto reps = subs_by_index(parent.get());
+    ASSERT_EQ(reps.size(), 3u);
+    EXPECT_TRUE(compact.is_invalid());
+
+    std::vector<hhds::Pin_class> carry_values;
+    for (size_t r = 0; r < reps.size(); ++r) {
+      auto carry = driver_of(reps[r], kPidAccIn);
+      ASSERT_FALSE(carry.is_invalid());
+      carry_values.push_back(carry);
+
+      auto active = driver_of(reps[r], kPidAct);
+      ASSERT_FALSE(active.is_invalid());
+      if (!chained || r == 0) {
+        EXPECT_EQ(active, en);
+      } else {
+        EXPECT_EQ(gu::type_op_of(active.get_master_node()), Ntype_op::And);
+      }
+    }
+
+    EXPECT_EQ(carry_values[0], seed);
+    for (size_t r = 1; r < reps.size(); ++r) {
+      auto mux = carry_values[r].get_master_node();
+      ASSERT_EQ(gu::type_op_of(mux), Ntype_op::Mux);
+      EXPECT_EQ(driver_of(mux, 0), driver_of(reps[r - 1], kPidAct));
+      EXPECT_EQ(driver_of(mux, 1), carry_values[r - 1]);
+      EXPECT_EQ(driver_of(mux, 2).get_master_node(), reps[r - 1]);
+      EXPECT_EQ(driver_of(mux, 2).get_port_id(), kPidAccOut);
+    }
   }
 }
 
@@ -363,54 +393,20 @@ TEST(ReplicaExpand, UnsizedCalleeOutputIsRefusedNotSilentlyOneBit) {
   seed.connect_sink(compact.create_sink_pin(kPidAccIn));
   compact.create_driver_pin(kPidAccOut).connect_sink(parent->get_output_pin("total"));
 
-  Replica_desc d;
+  hhds::Subnode_loop d;
   d.count       = 3;
   d.step        = 1;
   d.index_input = kPidIdx;
-  d.carries.emplace_back(Replica_carry{kPidAccIn, kPidAccOut});
-  gu::set_replica_desc(compact, d);
+  compact.set_subnode(io, d);
+  compact.create_driver_pin(kPidAccOut).connect_sink(compact.create_sink_pin(kPidAccIn));
 
-  EXPECT_EQ(expand_replicated_subs(parent.get(), "test"), -1);
+  EXPECT_EQ(materialize_occurrences(parent.get(), "test"), -1);
   // ATOMIC: the refusal must fire before anything is created. A half-expanded
   // body (the occurrences plus the still-present compact node) is worse than an
   // unexpanded one — a consumer that keeps going on the -1 emits count+1
   // physical instances instead of refusing.
   EXPECT_EQ(subs_of(parent.get()).size(), 1u) << "a refused expansion must leave the graph alone";
-  EXPECT_TRUE(gu::is_replicated_sub(compact));
-}
-
-TEST(ReplicaExpand, UnreadableDescriptorIsRefusedNotTreatedAsAbsent) {
-  // A payload this build cannot parse (a newer version, a corrupt string) must
-  // keep the node REPLICATED for every guard and make expansion fail loudly.
-  // Answering "not replicated" is the silent stale-artifact failure the version
-  // field exists to prevent: one compact node standing for `count` replicas
-  // would be emitted, mapped and proven as a single ordinary instance.
-  auto& lib = livehd::Hhds_graph_library::instance("lgdb_rexp_badver");
-  auto  bio = make_body_io(lib, "vbody");
-  (void)bio->create_graph();
-
-  auto pio = lib.create_io("parent_badver");
-  pio->add_input("seed", 0);
-  pio->add_output("total", 1);
-  pio->set_bits("seed", 12);
-  auto parent = pio->create_graph();
-  auto seed   = parent->get_input_pin("seed");
-  gu::set_bits(seed, 12);
-
-  auto compact = gu::create_typed_node(*parent, Ntype_op::Sub);
-  compact.set_subnode(bio);
-  compact.set_name("lane");
-  seed.connect_sink(compact.create_sink_pin(kPidAccIn));
-  compact.create_driver_pin(kPidAccOut).connect_sink(parent->get_output_pin("total"));
-
-  compact.attr(livehd::attrs::replica_desc).set(std::string{"version=999;first=0;step=1;count=4"});
-
-  EXPECT_TRUE(gu::is_replicated_sub(compact)) << "an unreadable descriptor is still a descriptor";
-  std::string err;
-  EXPECT_FALSE(gu::replica_desc_of(compact, &err).has_value());
-  EXPECT_FALSE(err.empty()) << "the parse failure must be reportable, not discarded";
-  EXPECT_EQ(expand_replicated_subs(parent.get(), "test"), -1);
-  EXPECT_EQ(subs_of(parent.get()).size(), 1u);
+  EXPECT_TRUE(compact.is_loop_subnode());
 }
 
 TEST(ReplicaExpand, AbsurdCountIsRefusedBeforeAllocating) {
@@ -432,13 +428,12 @@ TEST(ReplicaExpand, AbsurdCountIsRefusedBeforeAllocating) {
   seed.connect_sink(compact.create_sink_pin(kPidAccIn));
   compact.create_driver_pin(kPidAccOut).connect_sink(parent->get_output_pin("total"));
 
-  Replica_desc d;
+  hhds::Subnode_loop d;
   d.first = 0;
   d.step  = 1;
   d.count = 4000000000ull;  // validates cleanly: no int64 index overflow
-  d.carries.emplace_back(Replica_carry{kPidAccIn, kPidAccOut});
-  ASSERT_TRUE(d.validate().empty()) << d.validate();
-  gu::set_replica_desc(compact, d);
+  compact.set_subnode(bio, d);
+  compact.create_driver_pin(kPidAccOut).connect_sink(compact.create_sink_pin(kPidAccIn));
 
-  EXPECT_EQ(expand_replicated_subs(parent.get(), "test"), -1) << "must refuse rather than try to build 4e9 nodes";
+  EXPECT_EQ(materialize_occurrences(parent.get(), "test"), -1) << "must refuse rather than try to build 4e9 nodes";
 }

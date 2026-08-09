@@ -54,7 +54,7 @@ Occ make_cone(hhds::Graph* g, const hhds::Pin_class& xor_in, const hhds::Pin_cla
 
 std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
   std::vector<hhds::Node_class> subs;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
@@ -67,7 +67,7 @@ std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
 
 uint64_t count_ops(hhds::Graph* g, Ntype_op op) {
   uint64_t c = 0;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (!n.is_invalid() && !gu::is_builtin_node(n) && gu::type_op_of(n) == op) {
       ++c;
     }
@@ -176,7 +176,7 @@ TEST(ColorReduce, ExtractsThreeIdenticalCones) {
 
   // Every output is still driven -- by an instance pin.
   for (const char* out : {"y0", "y1", "y2"}) {
-    auto op   = g->get_output_pin(out);
+    auto op    = g->get_output_pin(out);
     bool wired = false;
     for (const auto& e : op.inp_edges()) {
       wired = gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub;
@@ -268,7 +268,7 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   // The shared body reads the port, not a baked-in constant.
   auto body = subs[0].get_subnode_graph();
   ASSERT_TRUE(body != nullptr);
-  for (auto n : body->fast_class()) {
+  for (auto n : body->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
@@ -318,7 +318,7 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
   auto body = subs[0].get_subnode_graph();
   ASSERT_TRUE(body != nullptr);
   bool body_has_const = false;
-  for (auto n : body->fast_class()) {
+  for (auto n : body->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
@@ -392,7 +392,7 @@ TEST(ColorReduce, ConeFeedingFlopExtracts) {
   EXPECT_EQ(1u, st.patterns);
   EXPECT_EQ(3u, st.occurrences);
   EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Flop)) << "flops are never extracted";
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n) || gu::type_op_of(n) != Ntype_op::Flop) {
       continue;
     }
@@ -503,7 +503,7 @@ TEST(ColorReduce, DupEdgeConeRefused) {
   for (int i = 0; i < 3; ++i) {
     auto x = create_typed_node(*g, Ntype_op::Xor);
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
-    auto s = create_typed_node(*g, Ntype_op::Sum);
+    auto s  = create_typed_node(*g, Ntype_op::Sum);
     auto xd = x.create_driver_pin(0);
     xd.connect_sink(s.create_sink_pin(0));
     xd.connect_sink(s.create_sink_pin(0));  // x + x: parallel duplicate edge
@@ -604,8 +604,8 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
   }
 
   Reduce_stats st;
-  auto         o = small_opts();
-  o.min_win      = 1;  // the guard under test; small_opts leaves it inert
+  auto         o      = small_opts();
+  o.min_win           = 1;  // the guard under test; small_opts leaves it inert
   hhds::Graph* defs[] = {g.get()};
   ASSERT_TRUE(color_reduce(defs, o, &st));
 

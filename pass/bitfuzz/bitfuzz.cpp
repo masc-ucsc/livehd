@@ -32,7 +32,7 @@ constexpr int32_t kSentinelBits = 32768;
     case Ntype_op::Rem:
     case Ntype_op::LUT:
     case Ntype_op::Clock_cell: return true;
-    default: return false;
+    default                  : return false;
   }
 }
 
@@ -41,8 +41,8 @@ constexpr int32_t kSentinelBits = 32768;
 // same cleared set on a re-run (what M3's bisect needs).
 [[nodiscard]] uint64_t splitmix64(uint64_t x) {
   x += 0x9e3779b97f4a7c15ULL;
-  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x  = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
   return x ^ (x >> 31);
 }
 
@@ -85,12 +85,12 @@ struct Snap {
   hhds::Node_class node;
   hhds::Pin_class  pin;
   std::string      name;
-  Ntype_op         op         = Ntype_op::Invalid;
-  int32_t          bits       = 0;
-  bool             unsign     = true;
-  bool             is_state   = false;
-  bool             restored   = false;
-  bool             cyclic     = false;
+  Ntype_op         op       = Ntype_op::Invalid;
+  int32_t          bits     = 0;
+  bool             unsign   = true;
+  bool             is_state = false;
+  bool             restored = false;
+  bool             cyclic   = false;
 };
 
 // Every driver pin this pass is allowed to strip.
@@ -106,11 +106,11 @@ struct Snap {
 //   Sub           - instance boundary; treated like IO in v1.
 //   Flop/Latch    - state, unless Mode::All.
 //
-// fast_class() never emits the INPUT/OUTPUT/CONST singletons (hhds graph.hpp),
+// body().nodes() never emits the INPUT/OUTPUT/CONST singletons (hhds graph.hpp),
 // so IO and constant pins are excluded by construction.
 [[nodiscard]] std::vector<Snap> collect(hhds::Graph* g, const Options& opts) {
   std::vector<Snap> out;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory) {
       continue;
@@ -201,8 +201,8 @@ void infer(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
 std::string_view mode_name(Mode m) {
   switch (m) {
     case Mode::Wires: return "wires";
-    case Mode::All: return "all";
-    default: return "off";
+    case Mode::All  : return "all";
+    default         : return "off";
   }
 }
 
@@ -319,9 +319,9 @@ Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
       continue;
     }
 
-    const auto now    = gu::bits_of(s.pin);
-    f.now_bits        = now;
-    f.now_unsign      = gu::is_unsign(s.pin);
+    const auto now = gu::bits_of(s.pin);
+    f.now_bits     = now;
+    f.now_unsign   = gu::is_unsign(s.pin);
 
     if (s.restored || is_pathological(now)) {
       f.kind = "unrecovered";

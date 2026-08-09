@@ -2,10 +2,10 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <ctime>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -121,7 +121,7 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
         continue;
       }
       namespace gu = livehd::graph_util;
-      for (auto node : g->fast_class()) {
+      for (auto node : g->body().nodes()) {
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -399,15 +399,15 @@ void write_pretty(const Options& opts, const Result& res) {
 
 std::string compute_run_id(const Options& opts) {
   std::string buf;
-  buf += "lhd-";
-  buf += kVersion;
-  buf += '|';
-  buf += opts.command;
-  buf += ' ';
-  buf += opts.language;
+  buf                += "lhd-";
+  buf                += kVersion;
+  buf                += '|';
+  buf                += opts.command;
+  buf                += ' ';
+  buf                += opts.language;
   // Hash the RESOLVED config: the implicit default recipe must hash the same
   // as the equivalent explicit --recipe.
-  std::string recipe = opts.recipe;
+  std::string recipe  = opts.recipe;
   if (recipe.empty() && opts.command == "compile") {
     recipe = "O1";
   }
@@ -465,12 +465,12 @@ std::string compute_run_id(const Options& opts) {
   // Each row is ordinal + per-side top + a mode tag (lgslice/dir/file), so
   // slice, whole-dir and file byte streams can never alias each other.
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    const auto& [f, kind, eff_top] = inputs[idx];
-    buf += '|';
-    buf += std::format("{}", idx);
-    buf += '\0';
-    buf += std::format("top={}", eff_top);
-    buf += '\0';
+    const auto& [f, kind, eff_top]  = inputs[idx];
+    buf                            += '|';
+    buf                            += std::format("{}", idx);
+    buf                            += '\0';
+    buf                            += std::format("top={}", eff_top);
+    buf                            += '\0';
     if (fs::is_directory(f)) {
       // Slice only a true lg: side: an ln:/pyrope: DIRECTORY side may share
       // its db dir with a (stale) graph library, but lec reads the sources.

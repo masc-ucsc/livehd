@@ -101,7 +101,7 @@ void Pass_sample::do_wirecount(hhds::Graph* g, int indent) {
   int n_wire_bits = 0;
   int n_nodes     = 0;
   int n_subs      = 0;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     ++n_nodes;
     if (type_op_of(node) == Ntype_op::Sub) {
       ++n_subs;
@@ -131,7 +131,7 @@ void Pass_sample::do_wirecount(hhds::Graph* g, int indent) {
 
   // Walk immediate sub-instances. Recurse only into bodies that exist; sub
   // declarations with no body (black-box) get a single-line summary.
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (type_op_of(node) != Ntype_op::Sub) {
       continue;
     }
@@ -164,7 +164,7 @@ void Pass_sample::compute_histogram(hhds::Graph* g) {
   std::map<Ntype_op, int> histogram;
 
   int cells = 0;
-  for (const auto& node : g->forward_class()) {
+  for (const auto& node : g->body().nodes(hhds::Node_order::forward)) {
     ++cells;
     auto type = type_op_of(node);
     ++histogram[type];
@@ -183,7 +183,7 @@ void Pass_sample::compute_max_depth(hhds::Graph* g) {
   absl::flat_hash_map<hhds::Class_index, int> depth;
 
   int max_depth = 0;
-  for (const auto& node : g->forward_class()) {
+  for (const auto& node : g->body().nodes(hhds::Node_order::forward)) {
     int local_max = 0;
     for (const auto& edge : node.inp_edges()) {
       int d = depth[edge.driver.get_master_node().get_class_index()];

@@ -53,7 +53,7 @@ void fill_leaf(hhds::Graph* g, int bits) {
 
 size_t count_op(hhds::Graph* g, Ntype_op op) {
   size_t k = 0;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (type_op_of(n) == op) {
       ++k;
     }

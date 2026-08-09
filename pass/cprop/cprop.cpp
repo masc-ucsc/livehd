@@ -1350,9 +1350,9 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       if (x.is_invalid()) {
         break;
       }
-      cur = x;
-      lo -= k;
-      hi -= k;
+      cur  = x;
+      lo  -= k;
+      hi  -= k;
       continue;
     }
 
@@ -1371,9 +1371,9 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       if (x.is_invalid()) {
         break;
       }
-      cur = x;
-      lo += r.first;
-      hi += r.first;
+      cur  = x;
+      lo  += r.first;
+      hi  += r.first;
       continue;
     }
 
@@ -1441,9 +1441,9 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
         if (fv.first < 0) {
           break;
         }
-        cur = v;
-        lo -= r.first;  // `value` is LSB-aligned to the lane's low bit
-        hi -= r.first;
+        cur  = v;
+        lo  -= r.first;  // `value` is LSB-aligned to the lane's low bit
+        hi  -= r.first;
         continue;
       }
       break;  // straddles the lane boundary: would need a concat
@@ -1556,10 +1556,10 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   if (!mask_const.is_negative() && !mask_const.has_unknowns()) {
     auto [mb, me] = mask_const.get_mask_range();  // {-1,-1} = noncontiguous
     if (mb == 0 && me > 0) {
-      auto       am        = a_pin.get_master_node();
-      const auto amo       = type_op_of(am);
-      const bool computed  = !am.is_invalid() && amo != Ntype_op::Invalid && amo <= Ntype_op::Hotmux
-                            && !is_const_pin(a_pin) && !is_graph_input_pin(a_pin);
+      auto       am       = a_pin.get_master_node();
+      const auto amo      = type_op_of(am);
+      const bool computed = !am.is_invalid() && amo != Ntype_op::Invalid && amo <= Ntype_op::Hotmux && !is_const_pin(a_pin)
+                            && !is_graph_input_pin(a_pin);
       // NO flop/Memory/Sub-source arm, by MEASUREMENT (2026-08-06): a
       // "physical width" variant (unsigned such pin holds < 2^bits, so
       // bits <= n clears nothing) was implemented, passed the whole suite,
@@ -1572,7 +1572,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       // path already lands it in one conversion; do not re-add the arm
       // without first making the collapse width-shrink-tolerant AND proving
       // that against LEC.
-      const int  abits     = bits_of(a_pin);
+      const int  abits    = bits_of(a_pin);
       if (computed && abits > 0 && livehd::graph_util::is_unsign(a_pin) && (abits - 1) <= me) {
         if (collapse_forward_for_pin(node, a_pin)) {
           return true;
@@ -1635,7 +1635,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 // (struct_field_chain_disjoint / _own_lane).
 void Cprop::normalize_get_mask_slices(hhds::Graph* g) {
   std::vector<hhds::Node_class> nodes;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (type_op_of(node) == Ntype_op::Get_mask) {
       nodes.push_back(node);
     }
@@ -1702,14 +1702,13 @@ void Cprop::normalize_get_mask_slices(hhds::Graph* g) {
     }
 
     node.create_sink_pin(a_pid).connect_driver(sd);
-    node.create_sink_pin(m_pid).connect_driver(
-        create_const(*current_graph, *Dlop::get_mask_value(static_cast<int>(me - mb))));
+    node.create_sink_pin(m_pid).connect_driver(create_const(*current_graph, *Dlop::get_mask_value(static_cast<int>(me - mb))));
   }
 }
 
 void Cprop::scalar_pass(hhds::Graph* g) {
   std::vector<hhds::Node_class> snapshot;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     snapshot.push_back(node);
   }
 
@@ -1765,7 +1764,7 @@ void Cprop::scalar_pass(hhds::Graph* g) {
 
 void Cprop::canonicalize_latch_holds(hhds::Graph* g) {
   std::vector<hhds::Node_class> latches;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (type_op_of(node) == Ntype_op::Latch) {
       latches.push_back(node);
     }
@@ -1899,7 +1898,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // consistent with the bits/sign attributes on its pin. cprop is the only
   // graph pass that runs in the default O1 recipe, so this is the front line for
   // catching front-end translation misses (a const stamped the wrong width/sign).
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (type_op_of(node) != Ntype_op::Nconst) {
       continue;
     }

@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "replica_expand.hpp"
+#include "occurrence_materialize.hpp"
 
 #include <algorithm>
 #include <format>
@@ -13,7 +13,6 @@
 #include "diag.hpp"
 #include "dlop.hpp"
 #include "node_util.hpp"
-#include "replica_desc.hpp"
 
 namespace livehd::graph_util {
 
@@ -23,25 +22,31 @@ namespace {
 // inp_edges()/out_edges() are LAZY views over live edge storage and this
 // transform both adds edges and deletes the node it is reading.
 struct Boundary {
-  absl::flat_hash_map<uint32_t, hhds::Pin_class>   in_driver;  // input pid -> external driver
-  std::vector<std::pair<uint32_t, hhds::Pin_class>> readers;   // (output pid, external sink)
+  absl::flat_hash_map<uint32_t, hhds::Pin_class>    in_driver;  // input pid -> external driver
+  std::vector<std::pair<uint32_t, hhds::Pin_class>> readers;    // (output pid, external sink)
 };
 
 Boundary snapshot_boundary(const hhds::Node_class& inst) {
   Boundary b;
   for (const auto& e : inst.inp_edges()) {
+    if (e.driver.get_master_node() == inst) {
+      continue;  // native carry self-edge, not an external initial driver
+    }
     b.in_driver[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
   }
   for (const auto& e : inst.out_edges()) {
+    if (e.sink.get_master_node() == inst) {
+      continue;  // native carry self-edge, not a parent reader
+    }
     b.readers.emplace_back(static_cast<uint32_t>(e.driver.get_port_id()), e.sink);
   }
   return b;
 }
 
-bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc& desc, std::string_view from_pass) {
-  const auto  gio       = inst.get_subnode_io();
-  const auto  inst_name = default_instance_name(inst);
-  const auto  fail      = [&](const std::string& msg) {
+bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnode_loop& desc, std::string_view from_pass) {
+  const auto gio       = inst.get_subnode_io();
+  const auto inst_name = default_instance_name(inst);
+  const auto fail      = [&](const std::string& msg) {
     livehd::diag::err(from_pass, "replica-expand", "internal")
         .msg("cannot expand replicated instance '{}': {}", inst_name, msg)
         .emit();
@@ -50,17 +55,13 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
   if (!gio) {
     return fail("it has no callee interface");
   }
-
-  // Activation is NOT expandable yet. Rule 8 makes a carry
-  //   carry[r+1] = active[r] ? body_out[r] : carry[r]
-  // and rule 3 makes carried outputs SPECIFIED while inactive, so an honest
-  // expansion needs a bypass mux per carry per ordinal. This function wires the
-  // chain straight through instead, which would publish an inactive replica's
-  // output as the loop result. Refuse rather than mis-expand; no front end
-  // mints an activation port today (that is design M2).
-  if (desc.activation_input) {
-    return fail("activation is not implemented yet (the rule-8 carry bypass mux is missing)");
-  }
+  const auto carries         = inst.subnode_group().carries();
+  const auto is_carry_source = [&](hhds::Port_id pid) {
+    return std::ranges::any_of(carries, [pid](const auto& carry) { return carry.output_port() == pid; });
+  };
+  const auto is_carry_dest = [&](hhds::Port_id pid) {
+    return std::ranges::any_of(carries, [pid](const auto& carry) { return carry.input_port() == pid; });
+  };
 
   // A count large enough to exhaust memory is a descriptor bug, not a design.
   // The front end has its own `upass.roll_cap`, but a hand-built or loaded
@@ -94,22 +95,20 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
   // the wiring loops one-for-one, so the loops' own guards stay as a backstop.
   if (desc.index_input) {
     for (uint64_t r = 0; r < desc.count; ++r) {
-      if (!desc.index_at(r)) {
-        return fail(std::format("index of ordinal {} overflows", r));
-      }
+      (void)desc.index_at(r);  // the native descriptor validated the complete domain at attach/load
     }
   }
-  for (const auto& c : desc.carries) {
-    if (!boundary.in_driver.contains(static_cast<uint32_t>(c.input_pid))) {
-      return fail(std::format("carry destination pid {} has no initial value", static_cast<uint64_t>(c.input_pid)));
+  for (const auto& c : carries) {
+    if (!boundary.in_driver.contains(static_cast<uint32_t>(c.input_port()))) {
+      return fail(std::format("carry destination pid {} has no initial value", static_cast<uint64_t>(c.input_port())));
     }
-    if (desc.count > 1 && !output_is_sized(c.output_pid)) {
-      return fail(std::format("carry source pid {} has no sized output declaration", static_cast<uint64_t>(c.output_pid)));
+    if (desc.count > 1 && !output_is_sized(c.output_port())) {
+      return fail(std::format("carry source pid {} has no sized output declaration", static_cast<uint64_t>(c.output_port())));
     }
   }
   for (const auto& [out_pid, sink] : boundary.readers) {
     if (desc.count == 0) {
-      if (!desc.is_carry_source(static_cast<hhds::Port_id>(out_pid))) {
+      if (!is_carry_source(static_cast<hhds::Port_id>(out_pid))) {
         return fail(std::format("zero-count instance drives output pid {}, which is not a carry", out_pid));
       }
     } else if (!output_is_sized(static_cast<hhds::Port_id>(out_pid))) {
@@ -117,9 +116,9 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
     }
   }
 
-  // Occurrence names follow the same `_li<ordinal>` convention the unroller
-  // stamps on the instances an unrolled body creates, so a rolled loop and the
-  // same source unrolled spell their replicas identically (see header).
+  // Use HHDS's one structural formatter so multiple loop sites in the same
+  // parent continue the module-scoped __li ordinal space instead of each
+  // restarting at zero.
   std::string occ_base{inst_name};
   if (auto a = inst.attr(hhds::attrs::name); a.has()) {
     occ_base = std::string{a.get()};
@@ -131,11 +130,11 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
   if (desc.count == 0) {
     for (const auto& [out_pid, sink] : boundary.readers) {
       bool tied = false;
-      for (const auto& c : desc.carries) {
-        if (static_cast<uint32_t>(c.output_pid) != out_pid) {
+      for (const auto& c : carries) {
+        if (static_cast<uint32_t>(c.output_port()) != out_pid) {
           continue;
         }
-        auto it = boundary.in_driver.find(static_cast<uint32_t>(c.input_pid));
+        auto it = boundary.in_driver.find(static_cast<uint32_t>(c.input_port()));
         if (it == boundary.in_driver.end()) {
           return fail(std::format("zero-count carry output pid {} has no initial value to pass through", out_pid));
         }
@@ -153,10 +152,16 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
 
   std::vector<hhds::Node_class> reps;
   reps.reserve(desc.count);
-  for (uint64_t r = 0; r < desc.count; ++r) {
-    auto rep = create_typed_node(*g, Ntype_op::Sub);
+  const auto* lib = g->get_io() != nullptr ? g->get_io()->get_library() : nullptr;
+  for (const auto occurrence : inst.subnode_group().occurrences()) {
+    const uint64_t r   = occurrence.ordinal();
+    auto           rep = create_typed_node(*g, Ntype_op::Sub);
     rep.set_subnode(gio);
-    rep.set_name(std::format("{}_li{}", occ_base, r));
+    auto occurrence_name = lib != nullptr ? hhds::format_occurrence_path(*lib, occurrence.path()) : std::string{};
+    if (occurrence_name.empty()) {
+      occurrence_name = std::format("{}__li{}", occ_base, r);
+    }
+    rep.set_name(occurrence_name);
     // Carry the compact node's own annotations (srcid, color, ...) so
     // provenance survives expansion; the descriptor itself must NOT ride along
     // (each occurrence is an ordinary instance now).
@@ -204,11 +209,17 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
   std::vector<uint32_t> invariant_pids;
   invariant_pids.reserve(boundary.in_driver.size());
   for (const auto& [pid, drv] : boundary.in_driver) {
-    if (!is_role_input(pid) && !desc.is_carry_dest(static_cast<hhds::Port_id>(pid))) {
+    if (!is_role_input(pid) && !is_carry_dest(static_cast<hhds::Port_id>(pid))) {
       invariant_pids.emplace_back(pid);
     }
   }
   std::ranges::sort(invariant_pids);
+
+  std::vector<hhds::Pin_class>                                active_values(desc.count);
+  absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> carry_input_values;
+  for (const auto& carry : carries) {
+    carry_input_values[static_cast<uint32_t>(carry.input_port())].reserve(desc.count);
+  }
 
   for (uint64_t r = 0; r < desc.count; ++r) {
     auto rep = reps[r];
@@ -223,25 +234,23 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
 
     // Index: one fresh constant per occurrence.
     if (desc.index_input) {
-      const auto v = desc.index_at(r);
-      if (!v) {
-        return fail(std::format("index of ordinal {} overflows", r));
-      }
-      auto cpin = create_const(*g, *Dlop::from_pyrope(std::to_string(*v)));
-      auto sp   = rep.create_sink_pin(*desc.index_input);
+      const auto v    = desc.index_at(r);
+      auto       cpin = create_const(*g, *Dlop::from_pyrope(std::to_string(v)));
+      auto       sp   = rep.create_sink_pin(*desc.index_input);
       cpin.connect_sink(sp);
     }
 
     // Activation.
     if (desc.activation_input) {
-      auto sp  = rep.create_sink_pin(*desc.activation_input);
-      auto ext = boundary.in_driver.find(static_cast<uint32_t>(*desc.activation_input));
+      auto            sp  = rep.create_sink_pin(*desc.activation_input);
+      auto            ext = boundary.in_driver.find(static_cast<uint32_t>(*desc.activation_input));
+      hhds::Pin_class active_value;
       if (r == 0 || !desc.next_active_output) {
         if (ext != boundary.in_driver.end()) {
-          ext->second.connect_sink(sp);
+          active_value = ext->second;
         } else {
           // An unconnected activation input means "always called".
-          create_const(*g, *Dlop::from_pyrope("1")).connect_sink(sp);
+          active_value = create_const(*g, *Dlop::from_pyrope("1"));
         }
       } else {
         // active[r] = active[r-1] && next_active[r-1]
@@ -263,28 +272,55 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
         auto ao = andn.create_driver_pin(static_cast<hhds::Port_id>(0));
         set_bits(ao, 1);
         set_unsign(ao);
-        ao.connect_sink(sp);
+        active_value = ao;
       }
+      active_value.connect_sink(sp);
+      active_values[r] = active_value;
     }
 
-    // Carries: replica 0 takes the external initial value, later replicas take
-    // the previous occurrence's mapped output.
-    for (const auto& c : desc.carries) {
-      auto sp = rep.create_sink_pin(c.input_pid);
+    // Carries: replica 0 takes the external initial value. Later replicas use
+    // active[r-1] ? output[r-1] : input[r-1], so an inactive occurrence
+    // preserves the carry instead of publishing an arbitrary body result.
+    for (const auto& c : carries) {
+      auto            sp = rep.create_sink_pin(c.input_port());
+      hhds::Pin_class carry_value;
       if (r == 0) {
-        auto it = boundary.in_driver.find(static_cast<uint32_t>(c.input_pid));
+        auto it = boundary.in_driver.find(static_cast<uint32_t>(c.input_port()));
         if (it == boundary.in_driver.end()) {
-          return fail(std::format("carry destination pid {} has no initial value", static_cast<uint64_t>(c.input_pid)));
+          return fail(std::format("carry destination pid {} has no initial value", static_cast<uint64_t>(c.input_port())));
         }
-        it->second.connect_sink(sp);
+        carry_value = it->second;
       } else {
-        auto src = make_driver(reps[r - 1], c.output_pid);
-        if (src.is_invalid()) {
-          return fail(std::format("carry source pid {} has no sized output declaration",
-                                  static_cast<uint64_t>(c.output_pid)));
+        auto previous_output = make_driver(reps[r - 1], c.output_port());
+        if (previous_output.is_invalid()) {
+          return fail(std::format("carry source pid {} has no sized output declaration", static_cast<uint64_t>(c.output_port())));
         }
-        src.connect_sink(sp);
+        if (!desc.activation_input) {
+          carry_value = previous_output;
+        } else {
+          const auto* decl = output_decl(c.output_port());
+          if (decl == nullptr || decl->bits == 0 || active_values[r - 1].is_invalid()) {
+            return fail(
+                std::format("carry source pid {} cannot build an activation bypass", static_cast<uint64_t>(c.output_port())));
+          }
+          auto& prior_values = carry_input_values.at(static_cast<uint32_t>(c.input_port()));
+          if (prior_values.size() != r || prior_values.back().is_invalid()) {
+            return fail(std::format("carry destination pid {} has no previous input value", static_cast<uint64_t>(c.input_port())));
+          }
+          auto mux = create_typed_node(*g, Ntype_op::Mux, static_cast<int32_t>(decl->bits));
+          active_values[r - 1].connect_sink(mux.create_sink_pin(0));
+          prior_values.back().connect_sink(mux.create_sink_pin(1));
+          previous_output.connect_sink(mux.create_sink_pin(2));
+          carry_value = mux.create_driver_pin(0);
+          if (decl->unsign) {
+            set_unsign(carry_value);
+          } else {
+            set_sign(carry_value);
+          }
+        }
       }
+      carry_value.connect_sink(sp);
+      carry_input_values.at(static_cast<uint32_t>(c.input_port())).push_back(carry_value);
     }
   }
 
@@ -307,25 +343,21 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const Replica_desc
 
 }  // namespace
 
-int expand_replicated_subs(hhds::Graph* g, std::string_view from_pass) {
+int materialize_occurrences(hhds::Graph* g, std::string_view from_pass) {
   if (g == nullptr) {
     return 0;
   }
   // Snapshot the targets first: expansion creates Sub nodes, and a live walk
   // would revisit the occurrences it just made.
-  std::vector<std::pair<hhds::Node_class, Replica_desc>> targets;
-  for (auto n : g->fast_class()) {
-    if (!is_replicated_sub(n)) {
+  std::vector<std::pair<hhds::Node_class, hhds::Subnode_loop>> targets;
+  for (auto n : g->body().nodes()) {
+    if (!n.is_loop_subnode()) {
       continue;
     }
-    std::string err;
-    auto        d = replica_desc_of(n, &err);
+    auto d = n.subnode_loop();
     if (!d) {
-      // The node IS replicated (the attribute is there); this build just cannot
-      // read the payload. Skipping it would emit/prove `count` replicas as one.
       livehd::diag::err(from_pass, "replica-desc-unreadable", "unsupported")
-          .msg("instance '{}' carries a replica descriptor this build cannot read: {}", default_instance_name(n), err)
-          .hint("the artifact was written by a different LiveHD version — recompile the design from source")
+          .msg("instance '{}' is marked as a loop Sub but has no native descriptor", default_instance_name(n))
           .emit();
       return -1;
     }
@@ -333,8 +365,11 @@ int expand_replicated_subs(hhds::Graph* g, std::string_view from_pass) {
   }
 
   int expanded = 0;
-  for (auto& [node, desc] : targets) {
-    if (!expand_one(g, node, desc, from_pass)) {
+  // Expand in reverse storage order. The shared occurrence formatter derives
+  // a site's module-scoped ordinal base from earlier compact loop sites; those
+  // descriptors must still be present when a later site is formatted.
+  for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+    if (!expand_one(g, it->first, it->second, from_pass)) {
       return -1;
     }
     ++expanded;
@@ -342,9 +377,9 @@ int expand_replicated_subs(hhds::Graph* g, std::string_view from_pass) {
   return expanded;
 }
 
-bool expand_replicated_subs_all(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view from_pass) {
+bool materialize_occurrences_all(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view from_pass) {
   for (const auto& g : graphs) {
-    if (expand_replicated_subs(g.get(), from_pass) < 0) {
+    if (materialize_occurrences(g.get(), from_pass) < 0) {
       return false;
     }
   }

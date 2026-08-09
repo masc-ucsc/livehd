@@ -1,11 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <algorithm>
+#include <concepts>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,7 +49,8 @@ namespace {
 // port id. Instance pins loaded from an lg: library may carry no pin_name of
 // their own (only the def declares names), so resolving through the decl is
 // what keeps OT pin names equal to the Liberty pin names.
-[[nodiscard]] std::string sub_pin_name_from_decl(const hhds::Node_class& node, hhds::Port_id pid, bool is_driver) {
+template <typename Node>
+[[nodiscard]] std::string sub_pin_name_from_decl(const Node& node, hhds::Port_id pid, bool is_driver) {
   auto io = node.get_subnode_io();
   if (!io) {
     return {};
@@ -63,7 +66,8 @@ namespace {
 
 // Sink-pin name for a node + sink port. For Sub nodes the name is the
 // sub-graph's IO declared name; for other nodes it's Ntype's sink_name.
-[[nodiscard]] std::string sink_pin_name_of(const hhds::Node_class& node, const hhds::Pin_class& sink) {
+template <typename Node, typename Pin>
+[[nodiscard]] std::string sink_pin_name_of(const Node& node, const Pin& sink) {
   auto pid = sink.get_port_id();
   if (type_op_of(node) == Ntype_op::Sub) {
     auto n = sink.get_pin_name();
@@ -79,7 +83,8 @@ namespace {
 }
 
 // Driver-pin name for a node + driver port (used to name OT cell pins).
-[[nodiscard]] std::string driver_pin_name_of(const hhds::Node_class& node, const hhds::Pin_class& dpin) {
+template <typename Node, typename Pin>
+[[nodiscard]] std::string driver_pin_name_of(const Node& node, const Pin& dpin) {
   if (type_op_of(node) == Ntype_op::Sub) {
     auto n = dpin.get_pin_name();
     if (!n.empty()) {
@@ -94,7 +99,8 @@ namespace {
 }
 
 // Sub-graph cell type name (the module being instantiated).
-[[nodiscard]] std::string sub_type_name(const hhds::Node_class& node) {
+template <typename Node>
+[[nodiscard]] std::string sub_type_name(const Node& node) {
   auto io = node.get_subnode_io();
   if (!io) {
     return {};
@@ -112,9 +118,14 @@ namespace {
 // the port suffix, one appends it) and the driver/consumer nets would not meet.
 // The master node's get_hier_name is the stable, representation-independent id
 // (the same primitive LEC keys flops on). Module-IO pins keep their decl name.
-[[nodiscard]] std::string net_of(const hhds::Pin_class& dpin, bool hier) {
+template <typename Pin>
+[[nodiscard]] std::string net_of(const Pin& dpin, bool hier) {
   if (!hier) {
-    return wire_name(dpin);
+    if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
+      return wire_name(dpin.base_pin());
+    } else {
+      return wire_name(dpin);
+    }
   }
   if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
     return wire_name(dpin);  // module IO: the declared port name (root level)
@@ -131,9 +142,14 @@ namespace {
 // traversal `owner` node does. A pin resolved through a hier edge (e.driver)
 // keeps its chain, so consumers use net_of(); this owner-based form is the
 // matching driver-side spelling. Both yield the same string for the same gate.
-[[nodiscard]] std::string net_of_node(const hhds::Node_class& owner, const hhds::Pin_class& dpin, bool hier) {
+template <typename Node, typename Pin>
+[[nodiscard]] std::string net_of_node(const Node& owner, const Pin& dpin, bool hier) {
   if (!hier) {
-    return wire_name(dpin);
+    if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
+      return wire_name(dpin.base_pin());
+    } else {
+      return wire_name(dpin);
+    }
   }
   if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
     return wire_name(dpin);
@@ -145,8 +161,16 @@ namespace {
 
 // Gate/instance name of a node: hier-unique get_hier_name when flattening, else
 // the flat instance name.
-[[nodiscard]] std::string inst_of(const hhds::Node_class& node, bool hier) {
-  return hier ? std::string{node.get_hier_name()} : default_instance_name(node);
+template <typename Node>
+[[nodiscard]] std::string inst_of(const Node& node, bool hier) {
+  if (hier) {
+    return std::string{node.get_hier_name()};
+  }
+  if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
+    return default_instance_name(node.base_node());
+  } else {
+    return default_instance_name(node);
+  }
 }
 
 // Per-pin delay annotation helpers (replaces Lgraph's Node_pin::set_delay /
@@ -170,6 +194,8 @@ inline void  del_delay(const hhds::Pin_class& pin) {
   }
   pin.attr(livehd::attrs::pin_delay).del();
 }
+inline void set_delay(const hhds::Occurrence_pin& pin, float d) { set_delay(pin.base_pin(), d); }
+inline void del_delay(const hhds::Occurrence_pin& pin) { del_delay(pin.base_pin()); }
 
 // Minimal JSON string escape for the timing report (pin names / file paths).
 std::string jesc(std::string_view s) {
@@ -177,7 +203,7 @@ std::string jesc(std::string_view s) {
   out.reserve(s.size());
   for (char c : s) {
     switch (c) {
-      case '"': out += "\\\""; break;
+      case '"' : out += "\\\""; break;
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
       case '\t': out += "\\t"; break;
@@ -196,14 +222,22 @@ std::string jesc(std::string_view s) {
 // "file:line" of a node's srcid (empty when absent/unresolvable). Mapped gates
 // carry the srcid of the output cone they feed (pass.abc carry-through), so a
 // critical pin points back at the pre-synthesis RTL.
-std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const hhds::Node_class& n) {
-  auto a = n.attr(hhds::attrs::srcid);
+template <typename Node>
+std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const Node& n) {
+  const auto base = [&]() {
+    if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
+      return n.base_node();
+    } else {
+      return n;
+    }
+  }();
+  auto a = base.attr(hhds::attrs::srcid);
   if (!a.has() || a.get() == 0) {
     return {};
   }
   // A flattened leaf lives in a child graph, so its srcid indexes that child's
   // source map, not the top's — resolve against the node's own graph.
-  auto* ng   = n.get_graph();
+  auto* ng   = base.get_graph();
   auto  span = (ng != nullptr ? ng : g.get())->source_locator().resolve_span(a.get());
   if (span.file.empty() || !span.start_line.has_value()) {
     return {};
@@ -240,8 +274,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   }
   if (selected.size() > 1) {
     livehd::diag::err("pass.opentimer", "bad-option", "usage")
-        .msg("pass.opentimer times one module per run ({} defs in the library): pass --top <module> to pick one",
-             selected.size())
+        .msg("pass.opentimer times one module per run ({} defs in the library): pass --top <module> to pick one", selected.size())
         .fatal();
     return;
   }
@@ -265,7 +298,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   std::string                  scratch_name;
   if (pass.hier_setting_ == "true") {
     bool has_hier = false;
-    for (auto n : g->forward_class()) {
+    for (auto n : g->body().nodes(hhds::Node_order::forward)) {
       if (livehd::graph_util::is_type_sub(n) && n.get_subnode_graph() != nullptr) {
         has_hier = true;
         break;
@@ -284,14 +317,6 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   }
 
   pass.setup_hier(g);
-  // The hier edge walk (inp_edges/out_edges -> resolve_hier_driver) consults the
-  // AMBIENT opaque scope, not the set passed to forward_hier — so the Liberty
-  // cells must be opaque here too, or edge resolution descends into their empty
-  // blackbox bodies and every gate-to-gate net silently disconnects. Set it once
-  // around the whole build+analyze (nullptr in flat mode == descend-all default).
-  const auto*             opq = pass.opaque_gids_.empty() ? nullptr : &pass.opaque_gids_;
-  hhds::Hier_opaque_scope opaque_scope(opq);
-
   pass.build_circuit(g);
   pass.read_sdc_spef();
   pass.compute_timing(g);
@@ -327,7 +352,7 @@ void Pass_opentimer::setup_hier(const std::shared_ptr<hhds::Graph>& g) {
   // Every instantiated Liberty cell in the hierarchy is a non-descend leaf; the
   // hier walk then yields those as gates and recurses only through design
   // modules. hier_range visits one instance per subnode at every depth.
-  for (auto inst : g->hier_range()) {
+  for (auto inst : g->grouped_hierarchy().instances()) {
     auto tg = inst.get_target_graph();
     if (tg && is_cell(tg->get_name())) {
       opaque_gids_.insert(inst.get_target_gid());
@@ -351,7 +376,7 @@ void Pass_opentimer::power_work(Eprp_var& var) {
   }
 }
 
-std::string Pass_opentimer::get_driver_net_name(const hhds::Pin_class& dpin) const {
+std::string Pass_opentimer::get_driver_net_name(const hhds::Occurrence_pin& dpin) const {
   if (hier_mode_) {
     auto hn = net_of(dpin, true);
     auto it = overwrite_hnet_.find(hn);
@@ -361,10 +386,10 @@ std::string Pass_opentimer::get_driver_net_name(const hhds::Pin_class& dpin) con
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
-  return wire_name(dpin);
+  return wire_name(dpin.base_pin());
 }
 
-std::string Pass_opentimer::driver_net_of(const hhds::Node_class& owner, const hhds::Pin_class& dpin) const {
+std::string Pass_opentimer::driver_net_of(const hhds::Occurrence_node& owner, const hhds::Occurrence_pin& dpin) const {
   if (hier_mode_) {
     auto key = net_of_node(owner, dpin, true);
     auto it  = overwrite_hnet_.find(key);
@@ -374,19 +399,20 @@ std::string Pass_opentimer::driver_net_of(const hhds::Node_class& owner, const h
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
-  return wire_name(dpin);
+  return wire_name(dpin.base_pin());
 }
 
-std::vector<hhds::Node_class> Pass_opentimer::leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const {
-  std::vector<hhds::Node_class> v;
+std::vector<hhds::Occurrence_node> Pass_opentimer::leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const {
+  std::vector<hhds::Occurrence_node> v;
+  const auto*                        opq  = opaque_gids_.empty() ? nullptr : &opaque_gids_;
+  auto                               view = g->occurrences(opq);
   if (hier_mode_) {
-    const auto* opq = opaque_gids_.empty() ? nullptr : &opaque_gids_;
-    for (auto n : g->forward_hier(true, false, opq)) {
+    for (auto n : view.nodes(hhds::Node_order::forward)) {
       v.push_back(n);
     }
   } else {
-    for (auto n : g->fast_class()) {
-      v.push_back(n);
+    for (auto n : g->body().nodes()) {
+      v.push_back(view.lift(n));
     }
   }
   return v;
@@ -446,7 +472,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // Pin-level `bits` on a graph-IO pin is usually unset (widths live on the
   // GraphIO decl) — the pin tracker needs the real width, so fall back to the
   // decl when the driver is a module input.
-  auto io_bits_of = [&](const hhds::Pin_class& dpin) -> int32_t {
+  auto io_bits_of = [&](const auto& dpin) -> int32_t {
     auto b = bits_of(dpin);
     if (b != 0 || !is_graph_input_pin(dpin)) {
       return b;
@@ -477,7 +503,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // decorate exactly those with a prefix no port/net name ever carries;
   // tracker LEAVES (ports, gate output nets) stay undecorated, which keeps
   // every pv root a name that exists as an OT net.
-  auto trk_id = [&](const hhds::Pin_class& pin) -> std::string {
+  auto trk_id = [&](const auto& pin) -> std::string {
     if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
       return net_of(pin, hier_mode_);
     }
@@ -494,14 +520,14 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // key_net is the driver's net name computed with the correct hier context by
   // the caller (net_of_node for a traversal-node driver, net_of for a resolved
   // edge driver); the flat map keys on the pin's Class_index as before.
-  auto set_overwrite = [&](const std::string& key_net, const hhds::Pin_class& dpin, const std::string& netname) {
+  auto set_overwrite = [&](const std::string& key_net, const auto& dpin, const std::string& netname) {
     if (hier_mode_) {
       overwrite_hnet_.insert_or_assign(key_net, netname);
     } else {
       overwrite_dpin2net.insert_or_assign(dpin.get_class_index(), netname);
     }
   };
-  auto is_overwritten = [&](const std::string& key_net, const hhds::Pin_class& dpin) -> bool {
+  auto is_overwritten = [&](const std::string& key_net, const auto& dpin) -> bool {
     return hier_mode_ ? overwrite_hnet_.contains(key_net) : overwrite_dpin2net.contains(dpin.get_class_index());
   };
 
@@ -511,10 +537,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // module's own input port (a bare "io_x") instead of the parent's driver.
   // node.inp_edges() (the Node overload) is the hier-resolving one, so route the
   // tracker's operand lookups through it when flattening.
-  auto hier_driver_of = [&](const hhds::Node_class& n, std::string_view sname) -> hhds::Pin_class {
-    if (!hier_mode_) {
-      return get_driver_of_sink_name(n, sname);
-    }
+  auto hier_driver_of = [&](const hhds::Occurrence_node& n, std::string_view sname) -> hhds::Occurrence_pin {
     for (auto& e : n.inp_edges()) {
       if (sink_pin_name_of(n, e.sink) == sname) {
         return e.driver;
@@ -529,15 +552,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // and is snapshot into a vector first: processing materializes port-0 driver
   // pins on shared child bodies, which must not mutate a live hier iterator.
   auto forward_nodes = [&]() {
-    std::vector<hhds::Node_class> v;
+    std::vector<hhds::Occurrence_node> v;
+    const auto*                        opq  = opaque_gids_.empty() ? nullptr : &opaque_gids_;
+    auto                               view = g->occurrences(opq);
     if (hier_mode_) {
-      const auto* opq = opaque_gids_.empty() ? nullptr : &opaque_gids_;
-      for (auto n : g->forward_hier(true, false, opq)) {
+      for (auto n : view.nodes(hhds::Node_order::forward)) {
         v.push_back(n);
       }
     } else {
-      for (auto n : g->forward_class()) {
-        v.push_back(n);
+      for (auto n : g->body().nodes(hhds::Node_order::forward)) {
+        v.push_back(view.lift(n));
       }
     }
     return v;
@@ -616,7 +640,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
     bool root_track = Ntype::is_pin_trackable(op);
     if (root_track) {
-      auto dpin0 = node.create_driver_pin(0);
+      auto dpin0 = node.get_driver_pin(0);
       // This trackable node's OWN output: name it from the traversal node (its
       // hier chain is intact; a create_driver_pin/out_pins handle drops it). The
       // "n$" prefix keeps the pure-rewiring output out of the real-net space.
@@ -713,8 +737,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           pin_tracker.add_or(wname, trk_id(e.driver));
         }
       } else if (op == Ntype_op::And) {
-        Dlop            a_mask = *Dlop::create_integer(-1);
-        hhds::Pin_class a_dpin;
+        Dlop                 a_mask = *Dlop::create_integer(-1);
+        hhds::Occurrence_pin a_dpin;
         for (auto e : node.inp_edges()) {
           if (is_const_pin(e.driver)) {
             a_mask = a_mask.and_op(hydrate_const(e.driver));
@@ -743,12 +767,12 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // through an implicit port-0 pin that materializes no PinEntry, so
     // out_pins() misses it — fall back to the port-0 driver handle explicitly
     // (Sub node ports are always materialized, no fallback there).
-    std::vector<hhds::Pin_class> dpins;
+    std::vector<hhds::Occurrence_pin> dpins;
     for (auto& dpin : node.out_pins()) {
       dpins.push_back(dpin);
     }
     if (dpins.empty() && op != Ntype_op::Sub) {
-      auto dpin0 = node.create_driver_pin(0);
+      auto dpin0 = node.get_driver_pin(0);
       if (!dpin0.is_invalid()) {
         dpins.push_back(dpin0);
       }
@@ -821,15 +845,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       // port-0 pin, and a MEMORY exposes each read-data port only on its
       // consuming edges (out_pins() is empty). Collect the actually-driven output
       // pins from out_edges (deduped by pin) so every read port becomes a net.
-      std::vector<hhds::Pin_class>           bpins;
-      absl::flat_hash_set<hhds::Class_index> seen;
-      for (const auto e : node.out_edges()) {
-        if (!e.driver.is_invalid() && seen.insert(e.driver.get_class_index()).second) {
+      std::vector<hhds::Occurrence_pin>           bpins;
+      absl::flat_hash_set<hhds::Occurrence_index> seen;
+      for (const auto& e : node.out_edges()) {
+        if (!e.driver.is_invalid() && seen.insert(e.driver.get_occurrence_index()).second) {
           bpins.push_back(e.driver);
         }
       }
       if (bpins.empty()) {  // no consuming edge (a dead flop): fall back to port 0
-        auto dpin0 = node.create_driver_pin(0);
+        auto dpin0 = node.get_driver_pin(0);
         if (!dpin0.is_invalid()) {
           bpins.push_back(dpin0);
         }
@@ -842,8 +866,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         if (is_overwritten(dnet, dpin)) {
           continue;  // drives a primary output directly: already a PO net
         }
-        auto        wname = dnet;
-        const auto  bits  = bits_of(dpin);
+        auto       wname = dnet;
+        const auto bits  = bits_of(dpin);
         timer.insert_primary_input(wname);  // idempotent net insert underneath
         set_input_delays(wname);
         for (auto i = 1; i < bits; ++i) {
@@ -890,11 +914,12 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         return;
       }
       livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-          .msg("module instantiates '{}' (instance {}), which is not a cell in the Liberty library — hier=false times one "
-               "tech-mapped module per run. Pass --top of a mapped region (<mod>__c<N>), or drop hier=false: the default "
-               "(pass.opentimer.hier=true) flattens the whole design across the instance hierarchy",
-               type_name,
-               instance_name)
+          .msg(
+              "module instantiates '{}' (instance {}), which is not a cell in the Liberty library — hier=false times one "
+              "tech-mapped module per run. Pass --top of a mapped region (<mod>__c<N>), or drop hier=false: the default "
+              "(pass.opentimer.hier=true) flattens the whole design across the instance hierarchy",
+              type_name,
+              instance_name)
           .fatal();
       return;
     }
@@ -972,15 +997,15 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   // Every annotated gate output, kept for the timing report (2opt-freq D).
   struct Arrival {
-    float            delay;
-    std::string      pin;
-    hhds::Node_class node;
+    float                 delay;
+    std::string           pin;
+    hhds::Occurrence_node node;
   };
-  std::vector<Arrival> arrivals;
-  hhds::Node_class     max_node;
+  std::vector<Arrival>  arrivals;
+  hhds::Occurrence_node max_node;
 
   // OT gate/instance name -> node, to source-attribute the path points below.
-  absl::flat_hash_map<std::string, hhds::Node_class> inst2node;
+  absl::flat_hash_map<std::string, hhds::Occurrence_node> inst2node;
 
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
@@ -1235,7 +1260,7 @@ void Pass_opentimer::compute_power(const std::shared_ptr<hhds::Graph>& g) {
     pvcd.set_timescale(timeunit);
   }
   std::cout << "================================\n";
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     auto op = type_op_of(node);
     if (op != Ntype_op::Sub) {
       continue;
@@ -1296,11 +1321,11 @@ void Pass_opentimer::populate_table(const std::shared_ptr<hhds::Graph>& g) {
   }
 
   // Clear any pre-existing colors before annotating critical paths.
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     node.attr(livehd::attrs::color).del();
   }
 
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     for (auto& dpin : node.out_pins()) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
         continue;

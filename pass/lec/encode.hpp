@@ -106,7 +106,7 @@ struct Encoded {
     // two read ports with equal addresses MUST hold equal values -- the
     // precondition for merging the two sides' dout symbols. A forwarding or
     // combinational read sources a per-design array instead: not mergeable.
-    bool from_shared_cur = false;
+    bool       from_shared_cur = false;
   };
   Io_name_map<std::vector<Mem_wr_port>> mem_wr;  // mem key -> write ports, in port order
   Io_name_map<std::vector<Mem_rd_port>> mem_rd;  // mem key -> read ports, in port order
@@ -178,8 +178,8 @@ struct Encoded {
 // encodes. Keyed "<defname>#<tag>" — the box correspondence key from query.cpp's
 // builder (name-first instance pairing, occurrence fallback; see set_box_keys).
 struct State_box {
-  int                                      in_w    = 0;  // concatenated input width (UF domain)
-  int                                      state_w = 0;  // state width (UF domain + next codomain)
+  int                                          in_w    = 0;  // concatenated input width (UF domain)
+  int                                          state_w = 0;  // state width (UF domain + next codomain)
   // NAME-SORTED (port, width) input concat layout, unioned across the two
   // designs (max declared width per port). The encoder MUST build the UF_next
   // input concat from this layout — NOT from its own side's decl order: two
@@ -188,7 +188,7 @@ struct State_box {
   // feeds the shared UF structurally different values for EQUAL inputs, so the
   // threaded states spuriously diverge. A port a side does not connect (or
   // does not even declare) contributes 0.
-  std::vector<std::pair<std::string, int>> in_ports;
+  std::vector<std::pair<std::string, int>>     in_ports;
   cvc5::Term                                   next_fn;  // UF (inputs, state) -> state
   absl::flat_hash_map<std::string, cvc5::Term> out_fn;   // output port -> UF (state) -> out  [Moore]
   absl::flat_hash_map<std::string, int>        out_w;    // output port -> width
@@ -224,12 +224,12 @@ struct State_box {
 // so the outputs are instead ONE shared free symbol per (def, port) in
 // `out_const` — same def + no inputs => same outputs, trivially congruent.
 struct Comb_box {
-  int                                            in_w = 0;   // concatenated input width (UF domain)
-  std::vector<std::pair<std::string, int>>       in_ports;   // NAME-SORTED (port, width) concat layout
-  absl::flat_hash_map<std::string, cvc5::Term>   out_fn;     // port -> UF (inputs) -> out (in_w > 0)
-  absl::flat_hash_map<std::string, Val>          out_const;  // port -> shared symbol (in_w == 0)
-  absl::flat_hash_map<std::string, int>          out_w;      // port -> width (max across designs)
-  absl::flat_hash_map<std::string, bool>         out_sgn;    // port -> signedness (of the widest side)
+  int                                          in_w = 0;   // concatenated input width (UF domain)
+  std::vector<std::pair<std::string, int>>     in_ports;   // NAME-SORTED (port, width) concat layout
+  absl::flat_hash_map<std::string, cvc5::Term> out_fn;     // port -> UF (inputs) -> out (in_w > 0)
+  absl::flat_hash_map<std::string, Val>        out_const;  // port -> shared symbol (in_w == 0)
+  absl::flat_hash_map<std::string, int>        out_w;      // port -> width (max across designs)
+  absl::flat_hash_map<std::string, bool>       out_sgn;    // port -> signedness (of the widest side)
 };
 
 // Structural identity of a node inside one design's hierarchical walk
@@ -237,6 +237,7 @@ struct Comb_box {
 // the same in-memory design, so query.cpp's box-correspondence builder and the
 // encoder agree on which instance is which without sharing traversal order.
 std::string box_node_key(const hhds::Node_class& n);
+std::string box_node_key(const hhds::Occurrence_node& n);
 
 // Reader-invariant signature of a Memory cell (the same RTL array read through
 // two front-ends yields the same signature). Drives both the shared-array sort
@@ -251,14 +252,16 @@ struct Mem_sig {
 
 // Decode the size/bits/port-count signature of a Memory node from its config
 // pins (mirrors inou/cgen's port decode). occ is supplied by the caller as the
-// running count of prior same-signature memories in forward_class() order, so
+// running count of prior same-signature memories in body().nodes(hhds::Node_order::forward) order, so
 // the key is stable and identical across the two front-ends.
-Mem_sig     read_mem_sig(const hhds::Node_class& node);
-std::string mem_state_key(const Mem_sig& sig, int occ);
+Mem_sig        read_mem_sig(const hhds::Node_class& node);
+inline Mem_sig read_mem_sig(const hhds::Occurrence_node& node) { return read_mem_sig(node.base_node()); }
+std::string    mem_state_key(const Mem_sig& sig, int occ);
 
 // Real bus width of a pin (signed magnitude+1 count; unsigned drops the spare
 // sign bit). 0 means "unknown / no bits attribute". See lec.md "Bit-width trap".
 int real_width(const hhds::Pin_class& pin);
+int real_width(const hhds::Occurrence_pin& pin);
 int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view name);
 
 // Stable cross-design / cross-front-end correspondence key for a Flop state
@@ -281,6 +284,7 @@ std::string canon_flop_name(std::string_view hier_name);
 // BV; nullopt for a reset-less flop. Used by the BMC engine to seed the
 // reachable-from-reset initial state. See M2/BMC in lec.md.
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined = false);
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_node& node, int width, bool x_as_undefined = false);
 
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
@@ -379,9 +383,8 @@ public:
   // value AND its X bit-plane. Read ports whose key is present reuse both (the
   // sync-read latency-1 state cut, threaded across cycles like shared_mems);
   // absent keys get a fresh symbol and no plane.
-  Encoded encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs = nullptr,
-                 std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr,
-                 const Io_name_map<Val>* shared_reads = nullptr);
+  Encoded encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs = nullptr, std::string_view prefix = "",
+                 const Io_name_map<cvc5::Term>* shared_mems = nullptr, const Io_name_map<Val>* shared_reads = nullptr);
 
   // lec.gold_x=ignore: while true, constants with unknown ('?') bits source an
   // undef bit-plane on every Val (see Val::undef) instead of being silently
@@ -467,7 +470,7 @@ private:
   // dropping a leading 'r'/'i' yields a tag shared between SIDES but distinct
   // across CYCLES — exactly the sharing this needs.
   mutable absl::flat_hash_map<std::string, Val> clk_prev_;
-  [[nodiscard]] static std::string frame_tag(std::string_view prefix);
+  [[nodiscard]] static std::string              frame_tag(std::string_view prefix);
 
   cvc5::TermManager&                                  tm_;
   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_       = nullptr;
@@ -478,14 +481,14 @@ private:
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
   const Io_name_map<std::string>*                     box_keys_      = nullptr;
-  int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
-  bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
-  bool                                                emit_props_  = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
-  const absl::flat_hash_set<std::string>*             port_taps_   = nullptr;  // sub instances whose ports get \x05tap: outputs
-  const Phase_plan*                                   phase_plan_  = nullptr;  // 4-microstep schedule (M10); null = legacy
-  int                                                 microstep_   = -1;       // which batch commits; <0 = single-step (see set_phase_plan)
+  int                                                 sub_depth_     = 0;      // Sub flattening recursion guard
+  bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)
+  bool                                                emit_props_ = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
+  const absl::flat_hash_set<std::string>*             port_taps_  = nullptr;  // sub instances whose ports get \x05tap: outputs
+  const Phase_plan*                                   phase_plan_ = nullptr;  // 4-microstep schedule (M10); null = legacy
+  int                microstep_ = -1;  // which batch commits; <0 = single-step (see set_phase_plan)
   [[nodiscard]] bool single_step() const { return microstep_ < 0; }
-  int                                                 budget_seconds_ = 0;  // per-encode wall-clock budget in s (2f-lec); 0 = none
+  int                budget_seconds_ = 0;                            // per-encode wall-clock budget in s (2f-lec); 0 = none
   std::optional<std::chrono::steady_clock::time_point> deadline_{};  // set at each top-level encode() entry from budget_seconds_
 };
 

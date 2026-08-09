@@ -123,7 +123,7 @@ void Graphviz::do_hierarchy(hhds::Graph* lg) {
   // HHDS hierarchy traversal is via the structure-tree on the Graph; for the
   // diagnostic dump we just enumerate Sub nodes on this graph and emit one
   // edge from this graph's name to each immediate sub-instance's graph name.
-  // Deep hierarchy walks use Graph::hier_range() but this entrypoint only
+  // Deep hierarchy walks use Graph::grouped_hierarchy().instances() but this entrypoint only
   // diagrams the immediate level.
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
@@ -137,7 +137,7 @@ void Graphviz::do_hierarchy(hhds::Graph* lg) {
   absl::flat_hash_set<std::pair<std::string, std::string>> added;
   auto                                                     parent_name = std::string{gio->get_name()};
 
-  for (auto node : lg->fast_class()) {
+  for (auto node : lg->body().nodes()) {
     if (type_op_of(node) != Ntype_op::Sub) {
       continue;
     }
@@ -164,7 +164,7 @@ void Graphviz::do_hierarchy(hhds::Graph* lg) {
 void Graphviz::create_color_map(hhds::Graph* lg) {
   absl::flat_hash_map<int, size_t> color2id;
 
-  for (auto node : lg->fast_class()) {
+  for (auto node : lg->body().nodes()) {
     if (!has_color(node)) {
       continue;
     }
@@ -190,7 +190,7 @@ void Graphviz::create_color_map(hhds::Graph* lg) {
   }
 
   absl::flat_hash_set<uint64_t> edges;  // hackish graph
-  for (auto node : lg->fast_class()) {
+  for (auto node : lg->body().nodes()) {
     if (!has_color(node)) {
       continue;
     }
@@ -234,7 +234,7 @@ void Graphviz::do_from_lgraph(hhds::Graph* lg_parent, std::string_view dot_postf
   // nodes once and follow each subnode_graph(); HHDS's set_subnode wiring
   // gives us the body directly.
   absl::flat_hash_set<hhds::Gid> visited;
-  for (auto node : lg_parent->fast_class()) {
+  for (auto node : lg_parent->body().nodes()) {
     if (type_op_of(node) != Ntype_op::Sub) {
       continue;
     }
@@ -253,7 +253,7 @@ void Graphviz::do_from_lgraph(hhds::Graph* lg_parent, std::string_view dot_postf
 void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
@@ -287,7 +287,7 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
     }
 
     if (verbose) {
-      // CONST_NODE is a builtin singleton skipped by fast_class(), so const
+      // CONST_NODE is a builtin singleton skipped by body().nodes(), so const
       // edges are invisible from the driver side. Show them from the sink.
       for (const auto& inp : node.inp_edges()) {
         if (!is_const_pin(inp.driver)) {

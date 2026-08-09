@@ -82,11 +82,10 @@ size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
 }
 
 const std::unordered_set<std::string> kLeanReserved = {
-    "abbrev", "axiom", "by",       "class", "def",     "deriving", "do",      "else",   "end",
-    "example", "false", "for",      "fun",   "if",      "import",   "in",      "inductive",
-    "instance", "let",  "match",    "mutual", "namespace", "open",  "opaque",  "partial",
-    "private", "protected", "rec", "set_option", "structure", "theorem", "then", "true",
-    "universe", "variable", "where", "with",
+    "abbrev",  "axiom",     "by",   "class",    "def",      "deriving", "do",        "else",     "end",        "example",
+    "false",   "for",       "fun",  "if",       "import",   "in",       "inductive", "instance", "let",        "match",
+    "mutual",  "namespace", "open", "opaque",   "partial",  "private",  "protected", "rec",      "set_option", "structure",
+    "theorem", "then",      "true", "universe", "variable", "where",    "with",
 };
 
 std::string sanitize_lean(std::string_view name) {
@@ -194,7 +193,7 @@ struct Memory_port_info {
 
 struct Memory_info {
   Node                          node;
-  uint32_t                      nid        = 0;
+  uint32_t                      nid = 0;
   std::string                   field;
   std::string                   raw_name;
   uint32_t                      bits       = 0;
@@ -211,15 +210,15 @@ struct Memory_info {
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
-  bool                          sync = false;                   // type == 1 (registered read data)
-  std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (sync only)
+  bool                          sync = false;    // type == 1 (registered read data)
+  std::map<size_t, std::string> read_reg_field;  // port_id -> st_ read-data register field (sync only)
 };
 
 struct LeanCtx {
   hhds::Graph* g = nullptr;
   std::string  top_name;
   std::string  base_name;
-  bool         strict = true;
+  bool         strict    = true;
   size_t       max_width = 1024;
 
   absl::flat_hash_set<std::string> used_fields;
@@ -240,8 +239,8 @@ struct LeanCtx {
   // references an internal node's value as a factored top-level def
   // `<base>_fv<id><bridge_fv_args>` (e.g. " i" or " i s") instead of the local
   // let name `n_<id>`, so φ and the per-node have-chain can name each value.
-  bool         bridge_fv_mode = false;
-  std::string  bridge_fv_args;
+  bool        bridge_fv_mode = false;
+  std::string bridge_fv_args;
 };
 
 [[noreturn]] void fatal(const LeanCtx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.lean: " + msg); }
@@ -403,8 +402,9 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     mi.wensize = 1;
   }
   if (mi.bits % mi.wensize != 0) {
-    fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has bits not divisible by wensize: bits=" + std::to_string(mi.bits)
-                   + " wensize=" + std::to_string(mi.wensize));
+    fatal(ctx,
+          "Memory node n_" + std::to_string(mi.nid) + " has bits not divisible by wensize: bits=" + std::to_string(mi.bits)
+              + " wensize=" + std::to_string(mi.wensize));
   }
 
   for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
@@ -491,7 +491,8 @@ std::string lit_const_at(const LeanCtx& ctx, const Node& node, const Dlop& v, ui
   }
   if (v.has_unknowns()) {
     if (ctx.strict) {
-      fatal(ctx, "Const node n_" + std::to_string(node_id(node)) + " has X/Z bits; strict Lean emission rejects four-valued logic.");
+      fatal(ctx,
+            "Const node n_" + std::to_string(node_id(node)) + " has X/Z bits; strict Lean emission rejects four-valued logic.");
     }
     return lit_zero(w);
   }
@@ -511,7 +512,8 @@ std::string lit_const_at(const LeanCtx& ctx, const Node& node, const Dlop& v, ui
 
 std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v) {
   if (v.has_unknowns()) {
-    fatal(ctx, "Const node n_" + std::to_string(node_id(node)) + " has X/Z bits; strict Lean certificate rejects four-valued logic.");
+    fatal(ctx,
+          "Const node n_" + std::to_string(node_id(node)) + " has X/Z bits; strict Lean certificate rejects four-valued logic.");
   }
   if (v.is_known_zero()) {
     return "0";
@@ -678,7 +680,7 @@ uint32_t minimal_unsigned_const_width(const Dlop& v) {
   if (iv <= 0) {
     return 1;
   }
-  auto uv = static_cast<uint64_t>(iv);
+  auto     uv   = static_cast<uint64_t>(iv);
   uint32_t bits = 0;
   while (uv != 0) {
     ++bits;
@@ -804,9 +806,9 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
         fatal(ctx, "LT/GT node n_" + std::to_string(node_id(node)) + " is not binary.");
       }
       const uint32_t cmp_w = std::max(pin_width(ctx, drivers[0], node), pin_width(ctx, drivers[1], node));
-      const auto a = ucast_pin_at(ctx, drivers[0], cmp_w);
-      const auto b = ucast_pin_at(ctx, drivers[1], cmp_w);
-      const char* cmp = op == Ntype_op::LT ? "<" : ">";
+      const auto     a     = ucast_pin_at(ctx, drivers[0], cmp_w);
+      const auto     b     = ucast_pin_at(ctx, drivers[1], cmp_w);
+      const char*    cmp   = op == Ntype_op::LT ? "<" : ">";
       if (node_output_is_signed(node)) {
         return "(bool_to_bv1 (BitVec.toInt " + a + " " + cmp + " BitVec.toInt " + b + "))";
       }
@@ -825,11 +827,11 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
       for (auto& dp : drivers) {
         eq_w = std::max(eq_w, pin_width(ctx, dp, node));
       }
-      const auto head = ucast_pin_at(ctx, drivers[0], eq_w);
+      const auto  head = ucast_pin_at(ctx, drivers[0], eq_w);
       std::string conj;
       for (size_t i = 1; i < drivers.size(); ++i) {
         const auto t = "(" + ucast_pin_at(ctx, drivers[i], eq_w) + " = " + head + ")";
-        conj = (i == 1) ? t : "(" + conj + " && " + t + ")";
+        conj         = (i == 1) ? t : "(" + conj + " && " + t + ")";
       }
       return "(bool_to_bv1 " + conj + ")";
     }
@@ -858,12 +860,12 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
         fatal(ctx, "SRA node n_" + std::to_string(node_id(node)) + " is not binary.");
       }
       const auto vw = pin_width(ctx, drivers[0], node);
-      auto sw = pin_width(ctx, drivers[1], node);
+      auto       sw = pin_width(ctx, drivers[1], node);
       if (pin_is_const(drivers[1])) {
         sw = std::max<uint32_t>(sw, minimal_unsigned_const_width(pin_const_value(drivers[1])));
       }
-      return "((bv_zext (sem_sra " + ucast_pin_at(ctx, drivers[0], vw) + " "
-             + shift_amount_expr_at(ctx, drivers[1], sw) + ")) : BitVec " + std::to_string(w) + ")";
+      return "((bv_zext (sem_sra " + ucast_pin_at(ctx, drivers[0], vw) + " " + shift_amount_expr_at(ctx, drivers[1], sw)
+             + ")) : BitVec " + std::to_string(w) + ")";
     }
 
     case Ntype_op::Mux: {
@@ -890,7 +892,7 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
                + ucast_pin_at(ctx, options.at(1), w) + ")";
       }
       std::string out = "(";
-      size_t idx = 0;
+      size_t      idx = 0;
       for (auto& kv : options) {
         out += "if BitVec.toNat " + sel_e + " = " + std::to_string(idx) + " then " + ucast_pin_at(ctx, kv.second, w) + " else ";
         ++idx;
@@ -927,8 +929,8 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
       // the source; for a concrete positive pattern the extra high bits are 0.
       const uint32_t mask_src_w = pin_width(ctx, drivers[0], node);
       const uint32_t mask_w     = std::max(mask_src_w, w);
-      return "((sem_get_mask " + driver_expr(ctx, drivers[0]) + " " + driver_expr_at(ctx, drivers[1], mask_w)
-             + ") : BitVec " + std::to_string(w) + ")";
+      return "((sem_get_mask " + driver_expr(ctx, drivers[0]) + " " + driver_expr_at(ctx, drivers[1], mask_w) + ") : BitVec "
+             + std::to_string(w) + ")";
     }
 
     case Ntype_op::Set_mask: {
@@ -946,8 +948,7 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
     case Ntype_op::Memory:
       // A Memory node's read outputs are multi-valued (one per read port) and are
       // emitted as per-port lets by emit_node_lets; it is never a scalar expr.
-      throw Emit_error("internal: Memory node n_" + std::to_string(node_id(node))
-                       + " must be emitted via per-port read lets");
+      throw Emit_error("internal: Memory node n_" + std::to_string(node_id(node)) + " must be emitted via per-port read lets");
 
     case Ntype_op::Latch:
     case Ntype_op::Fflop:
@@ -962,8 +963,8 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
 }
 
 std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const absl::flat_hash_set<uint32_t>& flop_nids) {
-  absl::flat_hash_set<uint32_t> reached;
-  std::vector<Node>             order;
+  absl::flat_hash_set<uint32_t>      reached;
+  std::vector<Node>                  order;
   std::vector<std::pair<Node, bool>> stack;
 
   for (const auto& dpin : roots) {
@@ -1012,8 +1013,8 @@ std::string bst_literal(const std::vector<std::pair<uint32_t, std::string>>& sor
     return "BT.lf";
   }
   const size_t mid = lo + (hi - lo) / 2;
-  return "(BT.nd " + std::to_string(sorted[mid].first) + " (" + sorted[mid].second + ") "
-         + bst_literal(sorted, lo, mid) + " " + bst_literal(sorted, mid + 1, hi) + ")";
+  return "(BT.nd " + std::to_string(sorted[mid].first) + " (" + sorted[mid].second + ") " + bst_literal(sorted, lo, mid) + " "
+         + bst_literal(sorted, mid + 1, hi) + ")";
 }
 
 std::string bst_literal(std::vector<std::pair<uint32_t, std::string>> pairs) {
@@ -1035,20 +1036,20 @@ std::string nat_list(const std::vector<uint32_t>& xs) {
 }
 
 struct CertBuild {
-  std::set<uint32_t> source_ids;
+  std::set<uint32_t>              source_ids;
   std::map<uint32_t, std::string> source_exprs;
   // Fast-view bridge (step 5): per-source `bvenc`-able BitVec leaf + kind, so the
   // emitter can generate `<base>_src<id> : sourceEnv id = bvenc <leaf>` facts.
-  std::map<uint32_t, std::string> source_leaf;  // BitVec expr: i.f / s.f / BitVec.ofInt w c
-  std::map<uint32_t, int>         source_kind;  // 0 = input, 1 = const, 2 = flop
-  std::map<uint32_t, uint32_t>    source_width; // BitVec width of the source leaf
-  uint32_t next_synth_id = 1000000000;
+  std::map<uint32_t, std::string> source_leaf;   // BitVec expr: i.f / s.f / BitVec.ofInt w c
+  std::map<uint32_t, int>         source_kind;   // 0 = input, 1 = const, 2 = flop
+  std::map<uint32_t, uint32_t>    source_width;  // BitVec width of the source leaf
+  uint32_t                        next_synth_id = 1000000000;
 };
 
 // Structured view of one emitted node certificate, captured for bridge codegen.
 struct CertNodeInfo {
   uint32_t              nid = 0;
-  std::string           op_expr;   // e.g. "LGraphOp.Op_And"
+  std::string           op_expr;  // e.g. "LGraphOp.Op_And"
   uint32_t              width = 0;
   std::vector<uint32_t> deps;
 };
@@ -1059,21 +1060,21 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
     const uint32_t sid = build.next_synth_id++;
     build.source_ids.insert(sid);
     build.source_exprs[sid] = "mk_bv " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
-    build.source_leaf[sid]  = "BitVec.ofInt " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
-    build.source_kind[sid]  = 1;
+    build.source_leaf[sid] = "BitVec.ofInt " + std::to_string(expected_w) + " (" + int_of_const(ctx, n, pin_const_value(pin)) + ")";
+    build.source_kind[sid] = 1;
     build.source_width[sid] = expected_w;
     return sid;
   }
   if (pin_is_input(pin)) {
-    auto pname = input_name_for_pin(ctx, pin);
+    auto pname  = input_name_for_pin(ctx, pin);
     auto sid_it = ctx.input_source_id.find(pname);
     if (sid_it == ctx.input_source_id.end()) {
       fatal(ctx, "internal: input source id missing for certificate dependency");
     }
     const auto sid = sid_it->second;
     build.source_ids.insert(sid);
-    build.source_exprs[sid] = "mk_bv " + std::to_string(ctx.input_width.at(pname)) + " (Int.ofNat (BitVec.toNat i."
-                             + ctx.input_field.at(pname) + "))";
+    build.source_exprs[sid]
+        = "mk_bv " + std::to_string(ctx.input_width.at(pname)) + " (Int.ofNat (BitVec.toNat i." + ctx.input_field.at(pname) + "))";
     build.source_leaf[sid]  = "i." + ctx.input_field.at(pname);
     build.source_kind[sid]  = 0;
     build.source_width[sid] = ctx.input_width.at(pname);
@@ -1082,8 +1083,8 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
   if (node_is_flop(n)) {
     const auto sid = node_id(n);
     build.source_ids.insert(sid);
-    build.source_exprs[sid] = "mk_bv " + std::to_string(ctx.flop_width.at(sid)) + " (Int.ofNat (BitVec.toNat s."
-                             + ctx.flop_field.at(sid) + "))";
+    build.source_exprs[sid]
+        = "mk_bv " + std::to_string(ctx.flop_width.at(sid)) + " (Int.ofNat (BitVec.toNat s." + ctx.flop_field.at(sid) + "))";
     build.source_leaf[sid]  = "s." + ctx.flop_field.at(sid);
     build.source_kind[sid]  = 2;
     build.source_width[sid] = ctx.flop_width.at(sid);
@@ -1106,16 +1107,14 @@ uint32_t shift_dep_width(const LeanCtx& ctx, const Node_pin& dpin, const Node& o
 }
 
 std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& node, CertNodeInfo* info = nullptr) {
-  const auto op = node_op(node);
-  const auto w = node_width(ctx, node);
-  std::string op_expr;
+  const auto            op = node_op(node);
+  const auto            w  = node_width(ctx, node);
+  std::string           op_expr;
   std::vector<uint32_t> deps;
 
   switch (op) {
-    case Ntype_op::Nconst:
-      op_expr = "LGraphOp.Op_Const (" + int_of_const(ctx, node, node_const_value(node)) + ")";
-      break;
-    case Ntype_op::Sum: {
+    case Ntype_op::Nconst: op_expr = "LGraphOp.Op_Const (" + int_of_const(ctx, node, node_const_value(node)) + ")"; break;
+    case Ntype_op::Sum   : {
       std::vector<uint32_t> adds;
       std::vector<uint32_t> subs;
       for (const auto& e : inp_edges_ordered(node)) {
@@ -1146,7 +1145,7 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
     case Ntype_op::Or:
     case Ntype_op::Xor:
     case Ntype_op::Ror:
-    case Ntype_op::EQ: {
+    case Ntype_op::EQ : {
       if (op == Ntype_op::And) {
         op_expr = "LGraphOp.Op_And";
       } else if (op == Ntype_op::Or) {
@@ -1217,8 +1216,8 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
       }
       break;
     case Ntype_op::Mux: {
-      uint32_t sel_w = 1;
-      size_t data_count = 0;
+      uint32_t sel_w      = 1;
+      size_t   data_count = 0;
       for (const auto& e : inp_edges_ordered(node)) {
         if (e.sink.get_port_id() == 0) {
           sel_w = pin_width(ctx, e.driver, node);
@@ -1275,7 +1274,9 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
       }
       break;
     default:
-      fatal(ctx, "unsupported certificate op `" + std::string(Ntype::get_name(op)) + "` at node n_" + std::to_string(node_id(node)) + ".");
+      fatal(
+          ctx,
+          "unsupported certificate op `" + std::string(Ntype::get_name(op)) + "` at node n_" + std::to_string(node_id(node)) + ".");
   }
 
   if (info != nullptr) {
@@ -1296,17 +1297,17 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
   auto s = var.get("strict");
   strict = (s == "false") ? false : true;
 
-  auto n = var.get("normalize");
+  auto n    = var.get("normalize");
   normalize = (n == "false") ? false : true;
 
-  auto ec = var.get("emit_cert");
+  auto ec   = var.get("emit_cert");
   emit_cert = (ec == "false") ? false : true;
 
-  auto efb = var.get("emit_fast_bridge");
+  auto efb         = var.get("emit_fast_bridge");
   emit_fast_bridge = (efb == "true") ? true : false;
 
-  top = std::string(var.get("top"));
-  cert_wf = parse_cert_wf_mode(var.get("cert_wf"));
+  top              = std::string(var.get("top"));
+  cert_wf          = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
 
   auto ccs = var.get("cert_chunk_size");
@@ -1338,15 +1339,17 @@ Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var) {
 }
 
 void Pass_lean::setup() {
-  Eprp_method m1("pass.lean",
-                 "Emit per-design Lean theories for graph-certificate translation proofs.",
-                 &Pass_lean::work);
+  Eprp_method m1("pass.lean", "Emit per-design Lean theories for graph-certificate translation proofs.", &Pass_lean::work);
   m1.add_label_optional("path", "Output directory for emitted Lean files.");
   m1.add_label_optional("top", "Top module name override.");
-  m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)", "true");
+  m1.add_label_optional("strict",
+                        "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)",
+                        "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
-  m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.", "false");
+  m1.add_label_optional("emit_fast_bridge",
+                        "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.",
+                        "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
@@ -1373,7 +1376,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
   const std::string output_dir = (path == "/INVALID" || path.empty()) ? std::string(".") : path;
 
-  const std::string raw_name = top.empty() ? std::string(g->get_name()) : top;
+  const std::string raw_name  = top.empty() ? std::string(g->get_name()) : top;
   const std::string base_name = sanitize_lean(raw_name);
   const std::string lean_path = output_dir + "/" + base_name + "_Lgraph.lean";
 
@@ -1384,7 +1387,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ctx.strict    = strict;
   ctx.max_width = max_width;
 
-  auto gio = g->get_io();
+  auto     gio                  = g->get_io();
   uint32_t next_input_source_id = 2000000000;
 
   for (const auto& decl : gio->get_input_pin_decls()) {
@@ -1415,7 +1418,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   std::vector<Node>             flop_nodes;
   absl::flat_hash_set<uint32_t> flop_nids;
   std::vector<Node>             memory_nodes;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node_is_flop(node)) {
       flop_nodes.emplace_back(node);
       flop_nids.insert(node_id(node));
@@ -1444,7 +1447,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // async/array or sync-read, bits % wensize == 0) and assign a function-valued
   // state field.  Mirrors pass.isabelle parse_memory_info + memory field naming.
   for (auto& mn : memory_nodes) {
-    auto mi = parse_memory_info(ctx, mn);
+    auto        mi = parse_memory_info(ctx, mn);
     std::string mem_raw;
     for (const auto& e : mn.out_edges()) {
       auto wn = livehd::graph_util::wire_name(e.driver);
@@ -1456,20 +1459,20 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     if (mem_raw.empty()) {
       mem_raw = "mem_" + std::to_string(node_id(mn));
     }
-    mi.raw_name                   = mem_raw;
-    mi.field                      = make_field_name("st_", mem_raw, ctx.used_fields);
+    mi.raw_name = mem_raw;
+    mi.field    = make_field_name("st_", mem_raw, ctx.used_fields);
     // Sync-read memories carry a registered read-data field per read port.
     if (mi.sync) {
       for (auto pidx : mi.read_ports) {
         mi.read_reg_field[pidx] = make_field_name("st_", mem_raw + "_rdata_" + std::to_string(pidx), ctx.used_fields);
       }
     }
-    ctx.memory_info[node_id(mn)]  = mi;
+    ctx.memory_info[node_id(mn)] = mi;
   }
 
   const bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
-  std::vector<Node_pin> roots;
+  std::vector<Node_pin>           roots;
   std::map<std::string, Node_pin> out_drivers;
   for (const auto& decl : gio->get_output_pin_decls()) {
     auto out_sink = g->get_output_pin(decl.name);
@@ -1644,8 +1647,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
 
     if (sequential) {
-      ofs << "def " << base_name << "_comb (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-          << base_name << "_out :=\n";
+      ofs << "def " << base_name << "_comb (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+          << "_out :=\n";
     } else {
       ofs << "def " << base_name << "_comb (i : " << base_name << "_in) : " << base_name << "_out :=\n";
     }
@@ -1659,9 +1662,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         if (!first_out) {
           comb_result << ", ";
         }
-        first_out = false;
+        first_out            = false;
         const auto& out_name = kv.first;
-        auto drv = out_drivers.find(out_name);
+        auto        drv      = out_drivers.find(out_name);
         comb_result << kv.second << " := ";
         if (drv == out_drivers.end()) {
           comb_result << lit_zero(ctx.output_width.at(out_name));
@@ -1678,17 +1681,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
 
     if (sequential) {
-      ofs << "def " << base_name << "_next (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-          << base_name << "_state :=\n";
+      ofs << "def " << base_name << "_next (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+          << "_state :=\n";
       if (!bridge) {
         for (const auto& n : topo) {
           emit_node_lets(ofs, n);
         }
       }
       for (auto& fn : flop_nodes) {
-        const auto fid = node_id(fn);
-        const auto fld = ctx.flop_field.at(fid);
-        const auto fw  = ctx.flop_width.at(fid);
+        const auto  fid   = node_id(fn);
+        const auto  fld   = ctx.flop_field.at(fid);
+        const auto  fw    = ctx.flop_width.at(fid);
         std::string din_e = lit_zero(fw);
         if (auto it = flop_din.find(fid); it != flop_din.end()) {
           din_e = ucast_pin_at(ctx, it->second, fw);
@@ -1701,8 +1704,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         if (auto it = flop_enable.find(fid); it != flop_enable.end()) {
           en_e = "(bitvec_nonzero " + driver_expr_at(ctx, it->second, 1) + ")";
         }
-        ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " "
-            << lit_zero(fw) << " " << en_e << " " << din_e << " s." << fld << "\n";
+        ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " " << lit_zero(fw) << " " << en_e << " "
+            << din_e << " s." << fld << "\n";
       }
       // Per-memory new state via mem_write / mem_write_be over the current
       // s.field, plus each sync read-data register via sram_sync_read_reg_next.
@@ -1711,8 +1714,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         ofs << "  let new_" << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits
             << ") := " << memory_next_expr(ctx, mi) << "\n";
         for (const auto& kv : mi.read_reg_field) {
-          ofs << "  let new_" << kv.second << " : BitVec " << mi.bits
-              << " := " << memory_sync_reg_next_port(ctx, mi, kv.first) << "\n";
+          ofs << "  let new_" << kv.second << " : BitVec " << mi.bits << " := " << memory_sync_reg_next_port(ctx, mi, kv.first)
+              << "\n";
         }
       }
       ofs << "  { ";
@@ -1738,8 +1741,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       ofs << " }\n\n";
 
-      ofs << "def " << base_name << "_step (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-          << base_name << "_state × " << base_name << "_out :=\n";
+      ofs << "def " << base_name << "_step (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+          << "_state × " << base_name << "_out :=\n";
       ofs << "  (" << base_name << "_next i s, " << base_name << "_comb i s)\n\n";
     }
   } catch (const Emit_error& err) {
@@ -1757,9 +1760,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "end " << base_name << "_Lgraph\n";
     ofs.close();
 
-    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, "
-              << flop_nodes.size() << " flops, sequential=" << (sequential ? "yes" : "no")
-              << ", certificate disabled)\n";
+    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, " << flop_nodes.size()
+              << " flops, sequential=" << (sequential ? "yes" : "no") << ", certificate disabled)\n";
     return;
   }
 
@@ -1778,19 +1780,19 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "def " << base_name << "_flop_count : Nat := " << flop_nodes.size() << "\n";
     ofs << "def " << base_name << "_memory_count : Nat := " << memory_nodes.size() << "\n\n";
     ofs << "theorem " << base_name << "_certificate_counts :\n";
-    ofs << "    " << base_name << "_node_count = " << topo.size() << " ∧ " << base_name << "_flop_count = "
-        << flop_nodes.size() << " ∧ " << base_name << "_memory_count = " << memory_nodes.size() << " := by\n";
+    ofs << "    " << base_name << "_node_count = " << topo.size() << " ∧ " << base_name << "_flop_count = " << flop_nodes.size()
+        << " ∧ " << base_name << "_memory_count = " << memory_nodes.size() << " := by\n";
     ofs << "  decide\n\n";
     ofs << "end " << base_name << "_Lgraph\n";
     ofs.close();
-    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (memory certificate stub: " << topo.size()
-              << " nodes, " << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
+    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (memory certificate stub: " << topo.size() << " nodes, "
+              << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
     return;
   }
 
-  CertBuild cert_build;
-  std::vector<std::string> cert_nodes;
-  std::vector<uint32_t> topo_ids;
+  CertBuild                 cert_build;
+  std::vector<std::string>  cert_nodes;
+  std::vector<uint32_t>     topo_ids;
   std::vector<CertNodeInfo> cert_infos;
   for (const auto& n : topo) {
     topo_ids.push_back(node_id(n));
@@ -1838,13 +1840,13 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ofs << "]\n\n";
 
   // In bridge mode the lookups must be O(log N) (BT data + find), see bst_literal.
-  const bool bridge_lookups = emit_cert && emit_fast_bridge && memory_nodes.empty();
-  const std::string senv_params = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)")
-                                             : ("(i : " + base_name + "_in)");
+  const bool        bridge_lookups = emit_cert && emit_fast_bridge && memory_nodes.empty();
+  const std::string senv_params
+      = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)") : ("(i : " + base_name + "_in)");
   const std::string senv_args    = sequential ? "i s" : "i";
   const std::string senv_closure = sequential ? "fun i s => " : "fun i => ";
-  const std::string senv_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)")
-                                              : ("(" + base_name + "_in → BV)");
+  const std::string senv_ty
+      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)") : ("(" + base_name + "_in → BV)");
   if (bridge_lookups) {
     std::vector<std::pair<uint32_t, std::string>> src_pairs;
     for (const auto& sid : source_ids) {
@@ -1873,8 +1875,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       node_pairs.emplace_back(nid, "(" + nc + " : NodeCert)");
     }
     ofs << "def " << base_name << "_nodesTree : BT NodeCert :=\n  " << bst_literal(node_pairs) << "\n\n";
-    ofs << "def " << base_name << "_nodesFn : Nat → Option NodeCert := fun n => BT.find " << base_name
-        << "_nodesTree n\n\n";
+    ofs << "def " << base_name << "_nodesFn : Nat → Option NodeCert := fun n => BT.find " << base_name << "_nodesTree n\n\n";
   }
   ofs << "def " << base_name << "_graphCert : GraphCert :=\n";
   ofs << "  { topo := " << nat_list(topo_ids) << ", sources := " << nat_list(source_ids) << ", nodes := ";
@@ -1915,15 +1916,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   };
 
   if (sequential) {
-    ofs << "def " << base_name << "_nextStateFromCert (rho : Nat -> BV) (s : " << base_name << "_state) : "
-        << base_name << "_state :=\n";
+    ofs << "def " << base_name << "_nextStateFromCert (rho : Nat -> BV) (s : " << base_name << "_state) : " << base_name
+        << "_state :=\n";
     for (auto& fn : flop_nodes) {
-      const auto fid = node_id(fn);
-      const auto fld = ctx.flop_field.at(fid);
-      const auto fw  = ctx.flop_width.at(fid);
-      const auto dit = flop_din_cert_ids.find(fid);
-      const auto rit = flop_reset_cert_ids.find(fid);
-      const auto eit = flop_enable_cert_ids.find(fid);
+      const auto  fid   = node_id(fn);
+      const auto  fld   = ctx.flop_field.at(fid);
+      const auto  fw    = ctx.flop_width.at(fid);
+      const auto  dit   = flop_din_cert_ids.find(fid);
+      const auto  rit   = flop_reset_cert_ids.find(fid);
+      const auto  eit   = flop_enable_cert_ids.find(fid);
       std::string din_e = lit_zero(fw);
       if (dit != flop_din_cert_ids.end()) {
         din_e = "(bv_to_bitvec " + std::to_string(fw) + " (rho " + std::to_string(dit->second) + "))";
@@ -1936,8 +1937,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (eit != flop_enable_cert_ids.end()) {
         en_e = "(bv_nonzero (rho " + std::to_string(eit->second) + "))";
       }
-      ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " "
-          << lit_zero(fw) << " " << en_e << " " << din_e << " s." << fld << "\n";
+      ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " " << lit_zero(fw) << " " << en_e << " "
+          << din_e << " s." << fld << "\n";
     }
     ofs << "  { ";
     bool first_field = true;
@@ -1951,16 +1952,16 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
     ofs << " }\n\n";
 
-    ofs << "def " << base_name << "_comb_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-        << base_name << "_out :=\n";
+    ofs << "def " << base_name << "_comb_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+        << "_out :=\n";
     ofs << "  " << base_name << "_outputsFromCert (" << eval_expr() << ")\n\n";
 
-    ofs << "def " << base_name << "_next_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-        << base_name << "_state :=\n";
+    ofs << "def " << base_name << "_next_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+        << "_state :=\n";
     ofs << "  " << base_name << "_nextStateFromCert (" << eval_expr() << ") s\n\n";
 
-    ofs << "def " << base_name << "_step_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : "
-        << base_name << "_state × " << base_name << "_out :=\n";
+    ofs << "def " << base_name << "_step_cert (i : " << base_name << "_in) (s : " << base_name << "_state) : " << base_name
+        << "_state × " << base_name << "_out :=\n";
     ofs << "  (" << base_name << "_next_cert i s, " << base_name << "_comb_cert i s)\n\n";
 
     ofs << "theorem " << base_name << "_comb_cert_refines_cert (i : " << base_name << "_in) (s : " << base_name << "_state) :\n";
@@ -1971,9 +1972,10 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "    " << base_name << "_next_cert i s = " << base_name << "_nextStateFromCert (" << eval_expr() << ") s := by\n";
     ofs << "  rfl\n\n";
 
-    ofs << "theorem " << base_name << "_step_cert_refines_lgraph_certificate (i : " << base_name << "_in) (s : " << base_name << "_state) :\n";
-    ofs << "    " << base_name << "_step_cert i s = (" << base_name << "_nextStateFromCert (" << eval_expr() << ") s, "
-        << base_name << "_outputsFromCert (" << eval_expr() << ")) := by\n";
+    ofs << "theorem " << base_name << "_step_cert_refines_lgraph_certificate (i : " << base_name << "_in) (s : " << base_name
+        << "_state) :\n";
+    ofs << "    " << base_name << "_step_cert i s = (" << base_name << "_nextStateFromCert (" << eval_expr() << ") s, " << base_name
+        << "_outputsFromCert (" << eval_expr() << ")) := by\n";
     ofs << "  rfl\n\n";
   } else {
     ofs << "def " << base_name << "_comb_cert (i : " << base_name << "_in) : " << base_name << "_out :=\n";
@@ -1987,14 +1989,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   if (sequential) {
     ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) (s : " << base_name << "_state) :\n";
     ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
-    ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s))\n";
-    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)) := by\n";
+    ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name
+        << "_sourceEnv i s))\n";
+    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name
+        << "_sourceEnv i s)) := by\n";
     ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)\n\n";
   } else {
     ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) :\n";
     ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
     ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i))\n";
-    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i)) := by\n";
+    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name
+        << "_sourceEnv i)) := by\n";
     ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i)\n\n";
   }
 
@@ -2011,11 +2016,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // (emit_cert is true and there are no memory nodes at this point.)
   // ---------------------------------------------------------------------------
   if (emit_fast_bridge) {
-    const std::string P = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)")
-                                      : ("(i : " + base_name + "_in)");
-    const std::string A = sequential ? "i s" : "i";
-    const std::string G = base_name + "_graphCert";
-    int bridge_gaps = 0;
+    const std::string P
+        = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)") : ("(i : " + base_name + "_in)");
+    const std::string A           = sequential ? "i s" : "i";
+    const std::string G           = base_name + "_graphCert";
+    int               bridge_gaps = 0;
 
     // Width of any cert id (topo node or source), for ops whose bridge needs an
     // explicit operand/compare width (e.g. EQ/ULT: the compare width is not
@@ -2035,7 +2040,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // Resolve a dependency id to its φ value by DEFEQ (topo node → its factored
     // fv def; source → sourceEnv), so the per-node `show` never has to unfold the
     // whole φ if-chain (that materialization is O(n) per node → O(n²) blow-up).
-    auto phi_dep = [&](uint32_t d) -> std::string {
+    auto                     phi_dep = [&](uint32_t d) -> std::string {
       if (topo_set.count(d)) {
         return "bvenc (" + base_name + "_fv" + std::to_string(d) + " " + A + ")";
       }
@@ -2060,24 +2065,24 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // substitutes the design inputs into N positions.  See bst_literal.
     {
       const std::string phi_closure = sequential ? "fun i s => " : "fun i => ";
-      const std::string phi_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)")
-                                                 : ("(" + base_name + "_in → BV)");
+      const std::string phi_ty
+          = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)") : ("(" + base_name + "_in → BV)");
       std::vector<std::pair<uint32_t, std::string>> phi_pairs;
       for (const auto id : topo_ids) {
         phi_pairs.emplace_back(id, phi_closure + "bvenc (" + base_name + "_fv" + std::to_string(id) + " " + A + ")");
       }
       ofs << "def " << base_name << "_phiTree : BT " << phi_ty << " :=\n  " << bst_literal(phi_pairs) << "\n\n";
       ofs << "def " << base_name << "_phi " << P << " : Nat → BV := fun n =>\n"
-          << "  (BT.find " << base_name << "_phiTree n).elim (" << base_name << "_sourceEnv " << A << " n) (fun f => f "
-          << A << ")\n\n";
+          << "  (BT.find " << base_name << "_phiTree n).elim (" << base_name << "_sourceEnv " << A << " n) (fun f => f " << A
+          << ")\n\n";
     }
 
     // Per-source facts: sourceEnv value equals bvenc of the leaf BitVec.
     for (const auto sid : source_ids) {
-      const int kind = cert_build.source_kind.count(sid) ? cert_build.source_kind.at(sid) : 0;
+      const int         kind = cert_build.source_kind.count(sid) ? cert_build.source_kind.at(sid) : 0;
       const std::string leaf = cert_build.source_leaf.count(sid) ? cert_build.source_leaf.at(sid) : "0#0";
-      ofs << "theorem " << base_name << "_src" << sid << " " << P << " : "
-          << base_name << "_sourceEnv " << A << " " << sid << " = bvenc (" << leaf << ") := by\n";
+      ofs << "theorem " << base_name << "_src" << sid << " " << P << " : " << base_name << "_sourceEnv " << A << " " << sid
+          << " = bvenc (" << leaf << ") := by\n";
       if (kind == 1) {
         // sourceEnv is BT.find-based: the lookup reduces by whnf, so the const
         // case closes by unifying mk_bv with bvenc, and inputs/flops are defeq.
@@ -2109,17 +2114,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       std::string bridge_call;
       // Sext dispatches between two lemmas at proof time (see below).
-      bool sext_mode = false;
+      bool        sext_mode = false;
       std::string sext_a, sext_amt;
       // GetMask with a constant all-ones mask also dispatches at proof time.
-      bool getmask_allones_mode = false;
+      bool        getmask_allones_mode = false;
       std::string getmask_allones_call;
       // Post-bridge closer simp set; the default unfolds the node def + normalizes
       // constant Int spellings.  `ofInt_zero_eq` reconciles the fast model's zero
       // literal `0#w` with the cert source leaf `BitVec.ofInt w 0` for ops where a
       // zero const survives into the result (compares, MuxN branches).
-      std::string closer = "ofInt_zero_eq, bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
-      bool supported = true;
+      std::string closer    = "ofInt_zero_eq, bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
+      bool        supported = true;
       if (info.op_expr.rfind("LGraphOp.Op_GetMask", 0) == 0) {
         // `decide` (kernel), not `native_decide`: native_decide compiles a
         // decision procedure into the environment PER node — over ~2000 wide-mask
@@ -2150,7 +2155,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           const uint32_t mdep = info.deps[1];
           const auto     mit  = cert_build.source_leaf.find(mdep);
           if (mit != cert_build.source_leaf.end()) {
-            const uint32_t mw = width_of(mdep);
+            const uint32_t    mw     = width_of(mdep);
             const std::string expect = "BitVec.ofInt " + std::to_string(mw) + " ((-Int.ofNat 1))";
             if (mit->second == expect && mw <= info.width) {
               getmask_allones_mode = true;
@@ -2185,8 +2190,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       } else if (info.op_expr == "LGraphOp.Op_Or") {
         // n-ary Or over the certificate BV list (any arity, mixed widths).
         bridge_call = "orn_bv_bridge";
-        closer = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, BitVec.zero_or, "
-                 "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
+        closer
+            = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, BitVec.zero_or, "
+              "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
       } else if (info.op_expr == "LGraphOp.Op_Xor" && info.deps.size() == 2) {
         bridge_call = "xor_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Not" && info.deps.size() == 1) {
@@ -2201,19 +2207,19 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "muxn3_bridge";
       } else if (info.op_expr == "LGraphOp.Op_SRA" && info.deps.size() == 2) {
         bridge_call = "sra_bridge _ _ (by decide)";
-      } else if ((info.op_expr == "LGraphOp.Op_EQ" || info.op_expr == "LGraphOp.Op_ULT"
-                  || info.op_expr == "LGraphOp.Op_UGT") && info.deps.size() == 2) {
+      } else if ((info.op_expr == "LGraphOp.Op_EQ" || info.op_expr == "LGraphOp.Op_ULT" || info.op_expr == "LGraphOp.Op_UGT")
+                 && info.deps.size() == 2) {
         // Compare width is the fast model's cmp/eq width = max(operand widths);
         // supply it (and the operand widths) as literals so `wa ≤ cw` decides and
         // the RHS type matches the fast model with no symbolic `max` to reduce.
-        const uint32_t w0 = width_of(info.deps[0]);
-        const uint32_t w1 = width_of(info.deps[1]);
-        const uint32_t cw = std::max(w0, w1);
-        const std::string base_lemma = info.op_expr == "LGraphOp.Op_EQ"  ? "eq_bridge"
-                                     : info.op_expr == "LGraphOp.Op_ULT" ? "ult_bridge"
-                                                                          : "ugt_bridge";
-        bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " "
-                      + std::to_string(cw) + " _ _ (by decide) (by decide)";
+        const uint32_t    w0         = width_of(info.deps[0]);
+        const uint32_t    w1         = width_of(info.deps[1]);
+        const uint32_t    cw         = std::max(w0, w1);
+        const std::string base_lemma = info.op_expr == "LGraphOp.Op_EQ"    ? "eq_bridge"
+                                       : info.op_expr == "LGraphOp.Op_ULT" ? "ult_bridge"
+                                                                           : "ugt_bridge";
+        bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " " + std::to_string(cw)
+                      + " _ _ (by decide) (by decide)";
       } else if (info.op_expr == "LGraphOp.Op_Sext" && info.deps.size() == 2) {
         // Sext's `amount` is the sign position = min(out_width, operand_width):
         // amount = operand_width for a full sign-extend (out >= operand), amount =
@@ -2222,10 +2228,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         // then sext_bridge_low (amt = out width <= operand width).  Operands are
         // passed explicitly so the `by decide` side goals are on concrete widths.
         sext_mode = true;
-        sext_a = raw_dep(info.deps[0]);
-        sext_amt = raw_dep(info.deps[1]);
-      } else if (info.op_expr == "LGraphOp.Op_SLT" && info.deps.size() == 2
-                 && width_of(info.deps[0]) == width_of(info.deps[1])) {
+        sext_a    = raw_dep(info.deps[0]);
+        sext_amt  = raw_dep(info.deps[1]);
+      } else if (info.op_expr == "LGraphOp.Op_SLT" && info.deps.size() == 2 && width_of(info.deps[0]) == width_of(info.deps[1])) {
         bridge_call = "slt_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Sum 1" && info.deps.size() == 2) {
         bridge_call = "sum1_bridge";
@@ -2238,16 +2243,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           srcfacts += base_name + "_src" + std::to_string(d) + " " + A + ", ";
         }
       }
-      ofs << "theorem " << base_name << "_rec" << info.nid << " " << P << " : " << base_name << "_phi " << A
-          << " " << info.nid << " = evalNode " << G << " (" << base_name << "_phi " << A << ") " << info.nid << " := by\n";
+      ofs << "theorem " << base_name << "_rec" << info.nid << " " << P << " : " << base_name << "_phi " << A << " " << info.nid
+          << " = evalNode " << G << " (" << base_name << "_phi " << A << ") " << info.nid << " := by\n";
       if (supported) {
-        ofs << "  show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op ("
-            << info.op_expr << ") " << info.width << " [" << deplist << "]\n";
+        ofs << "  show bvenc (" << base_name << "_fv" << info.nid << " " << A << ") = eval_op (" << info.op_expr << ") "
+            << info.width << " [" << deplist << "]\n";
         if (sext_mode) {
           ofs << "  first\n";
           ofs << "  | rw [" << srcfacts << "sext_bridge " << sext_a << " " << sext_amt << " (by decide)]\n";
-          ofs << "  | rw [" << srcfacts << "sext_bridge_low " << sext_a << " " << sext_amt
-              << " (by decide) (by decide)]\n";
+          ofs << "  | rw [" << srcfacts << "sext_bridge_low " << sext_a << " " << sext_amt << " (by decide) (by decide)]\n";
         } else if (getmask_allones_mode) {
           // All-ones fast path first, generic bridge as the drift fallback.
           ofs << "  first\n";
@@ -2274,8 +2278,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // re-substitutes the goal in every branch.  On DINO (4772 nodes) that one
     // declaration alone ran for hours — longer than the whole rest of the file —
     // while every other section measured ~3 minutes.
-    ofs << "theorem " << base_name << "_bridge_rec " << P << " : ∀ n ∈ " << G << ".topo, "
-        << base_name << "_phi " << A << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n :=\n";
+    ofs << "theorem " << base_name << "_bridge_rec " << P << " : ∀ n ∈ " << G << ".topo, " << base_name << "_phi " << A
+        << " n = evalNode " << G << " (" << base_name << "_phi " << A << ") n :=\n";
     {
       std::string term = "List.forall_mem_nil _";
       for (auto it = topo_ids.rbegin(); it != topo_ids.rend(); ++it) {
@@ -2290,23 +2294,22 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // The former proof listed one `if_neg` accessor per topo node — an O(N^2) term.
     ofs << "theorem " << base_name << "_phiTree_keys_sub : BT.keys " << base_name << "_phiTree ⊆ " << G
         << ".topo := by native_decide\n";
-    ofs << "theorem " << base_name << "_bridge_src " << P << " : ∀ n ∈ " << G << ".topo, ∀ d ∈ depopts_of "
-        << G << " n, d ∉ " << G << ".topo → " << base_name << "_sourceEnv " << A << " d = " << base_name
-        << "_phi " << A << " d := by\n";
+    ofs << "theorem " << base_name << "_bridge_src " << P << " : ∀ n ∈ " << G << ".topo, ∀ d ∈ depopts_of " << G << " n, d ∉ " << G
+        << ".topo → " << base_name << "_sourceEnv " << A << " d = " << base_name << "_phi " << A << " d := by\n";
     ofs << "  intro n _ d _ hd\n";
     ofs << "  have hnone : BT.find " << base_name << "_phiTree d = none :=\n";
     ofs << "    BT.find_eq_none _ d (fun hc => hd (" << base_name << "_phiTree_keys_sub hc))\n";
-    ofs << "  show " << base_name << "_sourceEnv " << A << " d = (BT.find " << base_name
-        << "_phiTree d).elim (" << base_name << "_sourceEnv " << A << " d) (fun f => f " << A << ")\n";
+    ofs << "  show " << base_name << "_sourceEnv " << A << " d = (BT.find " << base_name << "_phiTree d).elim (" << base_name
+        << "_sourceEnv " << A << " d) (fun f => f " << A << ")\n";
     ofs << "  rw [hnone]\n  rfl\n\n";
 
     // Step-5 theorem: _comb = _comb_cert.
-    ofs << "theorem " << base_name << "_comb_refines_fast " << P << " : " << base_name << "_comb " << A
-        << " = " << base_name << "_comb_cert " << A << " := by\n";
-    ofs << "  have hb := GraphRefine.evalGraph_of_localAgree " << G << " (" << base_name << "_phi " << A
-        << ") (" << base_name << "_sourceEnv " << A << ")\n";
-    ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name
-        << "_bridge_some (" << base_name << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
+    ofs << "theorem " << base_name << "_comb_refines_fast " << P << " : " << base_name << "_comb " << A << " = " << base_name
+        << "_comb_cert " << A << " := by\n";
+    ofs << "  have hb := GraphRefine.evalGraph_of_localAgree " << G << " (" << base_name << "_phi " << A << ") (" << base_name
+        << "_sourceEnv " << A << ")\n";
+    ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name << "_bridge_some (" << base_name
+        << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
     ofs << "  unfold " << base_name << "_comb " << base_name << "_comb_cert " << base_name << "_outputsFromCert\n";
     for (const auto& kv : ctx.output_field) {
       auto oid = output_cert_ids.find(kv.first);
@@ -2318,16 +2321,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       // no `_fv<id>`, and `hb` does not apply.  `evalGraph` leaves off-topo ids
       // untouched, so rewrite with evalGraph_not_mem + that source's `_src` fact.
       if (!topo_set.count(oid->second)) {
-        ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") "
-            << G << ".topo " << oid->second << " (by decide), " << base_name << "_src" << oid->second << " " << A
-            << "]\n";
+        ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") " << G << ".topo "
+            << oid->second << " (by decide), " << base_name << "_src" << oid->second << " " << A << "]\n";
         continue;
       }
       // φ at a topo id is `bvenc (fv<id> ..)` by defeq (BT.find on a literal key
       // reduces), so `rfl` closes it — never `simp [φ]`, which would materialize
       // the whole lookup structure into the proof term.
-      ofs << "  rw [hb " << oid->second << " (by decide), show " << base_name << "_phi " << A << " "
-          << oid->second << " = bvenc (" << base_name << "_fv" << oid->second << " " << A << ") from by rfl]\n";
+      ofs << "  rw [hb " << oid->second << " (by decide), show " << base_name << "_phi " << A << " " << oid->second << " = bvenc ("
+          << base_name << "_fv" << oid->second << " " << A << ") from by rfl]\n";
     }
     // Outputs wider than their driver need bv_to_bitvec (bvenc x) = bv_zext x
     // (same closer the _next flop-din path already uses).
@@ -2335,12 +2337,12 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
     // Sequential designs: _next_refines_fast (each flop din) and _step_refines_fast.
     if (sequential) {
-      ofs << "theorem " << base_name << "_next_refines_fast " << P << " : " << base_name << "_next " << A
-          << " = " << base_name << "_next_cert " << A << " := by\n";
-      ofs << "  have hb := GraphRefine.evalGraph_of_localAgree " << G << " (" << base_name << "_phi " << A
-          << ") (" << base_name << "_sourceEnv " << A << ")\n";
-      ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name
-          << "_bridge_some (" << base_name << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
+      ofs << "theorem " << base_name << "_next_refines_fast " << P << " : " << base_name << "_next " << A << " = " << base_name
+          << "_next_cert " << A << " := by\n";
+      ofs << "  have hb := GraphRefine.evalGraph_of_localAgree " << G << " (" << base_name << "_phi " << A << ") (" << base_name
+          << "_sourceEnv " << A << ")\n";
+      ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name << "_bridge_some (" << base_name
+          << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
       ofs << "  unfold " << base_name << "_next " << base_name << "_next_cert " << base_name << "_nextStateFromCert\n";
       int seq_gaps = 0;
       for (const auto& fn : flop_nodes) {
@@ -2351,13 +2353,13 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         }
         const uint32_t d = dit->second;
         if (topo_set.count(d)) {
-          ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d
-              << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by rfl]\n";
+          ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d << " = bvenc (" << base_name
+              << "_fv" << d << " " << A << ") from by rfl]\n";
         } else {
           // din driven directly by a source (constant / input / flop): off-topo, so
           // evalGraph reads through to the source env (same as the output case).
-          ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") "
-              << G << ".topo " << d << " (by decide), " << base_name << "_src" << d << " " << A << "]\n";
+          ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") " << G << ".topo "
+              << d << " (by decide), " << base_name << "_src" << d << " " << A << "]\n";
         }
       }
       ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n";
@@ -2366,11 +2368,10 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       ofs << "\n";
 
-      ofs << "theorem " << base_name << "_step_refines_fast " << P << " : " << base_name << "_step " << A
-          << " = " << base_name << "_step_cert " << A << " := by\n";
+      ofs << "theorem " << base_name << "_step_refines_fast " << P << " : " << base_name << "_step " << A << " = " << base_name
+          << "_step_cert " << A << " := by\n";
       ofs << "  unfold " << base_name << "_step " << base_name << "_step_cert\n";
-      ofs << "  rw [" << base_name << "_next_refines_fast " << A << ", " << base_name << "_comb_refines_fast "
-          << A << "]\n\n";
+      ofs << "  rw [" << base_name << "_next_refines_fast " << A << ", " << base_name << "_comb_refines_fast " << A << "]\n\n";
     }
 
     if (bridge_gaps != 0) {
@@ -2381,7 +2382,6 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ofs << "end " << base_name << "_Lgraph\n";
   ofs.close();
 
-  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, "
-            << flop_nodes.size() << " flops, sequential=" << (sequential ? "yes" : "no")
-            << ", certificate shell)\n";
+  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, " << flop_nodes.size()
+            << " flops, sequential=" << (sequential ? "yes" : "no") << ", certificate shell)\n";
 }

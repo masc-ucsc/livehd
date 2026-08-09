@@ -47,7 +47,7 @@ constexpr size_t kActor_degree_cap = 4096;
 
 // The region graph: one vertex per region, one weighted edge per adjacent pair.
 //
-// Region ids are DENSE (0..n-1) and minted in forward_class() order, so every
+// Region ids are DENSE (0..n-1) and minted in body().nodes(hhds::Node_order::forward) order, so every
 // loop below is deterministic without sorting a hash map. Merging is a union-find
 // over region ids -- never a rescan of the node map, which is what makes a merge
 // O(neighbours) instead of O(nodes) (the shape that makes color_acyclic's merge
@@ -83,12 +83,12 @@ public:
   }
 
 private:
-  std::vector<uint64_t>                            weight_;
-  std::vector<bool>                                alive_;
-  std::vector<int>                                 rep_;
-  std::vector<absl::flat_hash_map<int, uint64_t>>  adj_;      // region -> neighbour -> crossing bits
-  std::vector<std::vector<hhds::Node_class>>       members_;  // forward_class order
-  absl::flat_hash_map<hhds::Node_class, int>       node2region_;
+  std::vector<uint64_t>                           weight_;
+  std::vector<bool>                               alive_;
+  std::vector<int>                                rep_;
+  std::vector<absl::flat_hash_map<int, uint64_t>> adj_;      // region -> neighbour -> crossing bits
+  std::vector<std::vector<hhds::Node_class>>      members_;  // forward_class order
+  absl::flat_hash_map<hhds::Node_class, int>      node2region_;
 };
 
 Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weight) {
@@ -96,7 +96,7 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
   //    is split_continuous's rule -- a color that is two disjoint clouds is two
   //    regions to pass.partition, so it must be two vertices here too.
   Union_find uf;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     auto it = node2id.find(n);
     if (it == node2id.end()) {
       continue;
@@ -111,9 +111,9 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
     }
   }
 
-  // 2. Mint dense ids in forward_class() first-encounter order.
+  // 2. Mint dense ids in body().nodes(hhds::Node_order::forward) first-encounter order.
   absl::flat_hash_map<hhds::Node_class, int> root2region;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!node2id.contains(n)) {
       continue;
     }
@@ -136,7 +136,7 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
   // 3. Edges: weight = total driver bits crossing the boundary. Bits, not edge
   //    count -- a 64-bit bus binds two regions far more tightly than a 1-bit
   //    enable, and cutting it costs 64 ports.
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     auto it = node2region_.find(n);
     if (it == node2region_.end()) {
       continue;
@@ -427,14 +427,14 @@ void topo_chunk(const std::vector<hhds::Node_class>& nodes, uint64_t max_ge, int
       id  = next_id++;
       acc = 0;
     }
-    out[n] = id;
-    acc += w;
+    out[n]  = id;
+    acc    += w;
   }
 }
 
 // Split every region over `max_ge`. Returns the new per-node ids (fresh space).
-void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_hash_map<hhds::Node_class, int>& out,
-                 int& next_id, Size_window_stats& st) {
+void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_hash_map<hhds::Node_class, int>& out, int& next_id,
+                 Size_window_stats& st) {
   if (max_ge == 0) {
     return;
   }
@@ -479,8 +479,8 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
       absl::flat_hash_map<hhds::Node_class, int> chopped;
       int                                        chop_next = 0;
       topo_chunk(b, max_ge, chop_next, chopped);
-      const int base = next_cluster;
-      next_cluster += chop_next;
+      const int base  = next_cluster;
+      next_cluster   += chop_next;
       for (const auto& n : b) {
         sub[n] = base + chopped.at(n);
       }
@@ -522,7 +522,7 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
 
 Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_ge, uint64_t max_ge, Size_window_stats* st,
                           int name_weight) {
-  Size_window_stats local;
+  Size_window_stats  local;
   Size_window_stats& s = st == nullptr ? local : *st;
 
   Region_graph rg(g, node2id, name_weight);
@@ -609,7 +609,7 @@ Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_g
   Node2Id                       out;
   absl::flat_hash_map<int, int> region2color;
   out.reserve(node2id.size());
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     const int r = rg2.region_of(n);
     if (r == NO_REGION) {
       continue;

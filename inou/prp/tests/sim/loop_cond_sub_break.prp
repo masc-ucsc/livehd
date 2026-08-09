@@ -1,7 +1,7 @@
 /*
 :name: loop_cond_sub_break
 :type: simulation
-:expect_instances: add_lane_li*=6 xor_lane_li*=6 *=12
+:expect_instances: add_lane__li*=6 xor_lane__li*=6 *=12
 */
 // A source `for` loop that is unrolled today and is eligible for the compact
 // replicated-Sub representation described by todo_loop_cond_sub.md.  The two

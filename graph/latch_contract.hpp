@@ -50,14 +50,14 @@ enum class Net_role : uint8_t {
 };
 
 struct Commit_class {
-  hhds::Pin_class net;             // root net; invalid iff `implicit_clock`
-  bool            rising = false;  // true = commits on the net's RISE
-  Net_role        role   = Net_role::Data;
+  hhds::Pin_class net;                     // root net; invalid iff `implicit_clock`
+  bool            rising         = false;  // true = commits on the net's RISE
+  Net_role        role           = Net_role::Data;
   // A `reg x = 0` with no `clock_pin` driver commits on the MODULE's implicit
   // clock. That is a real commit class, not an unresolvable cone — returning
   // nullopt for it (the pre-M8 behavior) hid the single most common state
   // element in the tree from every consumer of this analysis.
-  bool implicit_clock = false;
+  bool            implicit_clock = false;
 
   // Stable identity of the committing (net, edge) pair, for grouping elements
   // into slots. Derived STRUCTURALLY — never from a nid or traversal order —
@@ -84,9 +84,10 @@ public:
   // the formal phase schedule needs: the leaves-first driver proves a def with
   // its clock ports unbound, and minion's prim_rf_*_preview family declares two
   // clock ports that every instantiation site ties to ONE net.
-  explicit Design_clocks(hhds::Graph* g, bool hier = false);
+  explicit Design_clocks(hhds::Graph* g, bool hier = false, const ankerl::unordered_dense::set<hhds::Gid>* opaque = nullptr);
 
   [[nodiscard]] bool   is_clock(const hhds::Pin_class& root) const;
+  [[nodiscard]] bool   is_clock(const hhds::Occurrence_pin& root) const;
   [[nodiscard]] size_t n_clock_inputs() const { return input_names_.size(); }
   [[nodiscard]] bool   has_implicit_clock() const { return implicit_clock_; }
 
@@ -117,15 +118,21 @@ struct Control_root {
   hhds::Pin_class net;
   bool            inverted = false;
 };
+struct Occurrence_control_root {
+  hhds::Occurrence_pin net;
+  bool                 inverted = false;
+};
 // `stop_at_clock_cell` leaves a `Clock_cell` as the root instead of
 // canonicalizing through it to the reference clock -- what a caller that must
 // visit every cell of a GATE CHAIN needs (each cell carries its own enable).
-[[nodiscard]] Control_root control_root(hhds::Pin_class p, bool stop_at_clock_cell = false);
+[[nodiscard]] Control_root            control_root(hhds::Pin_class p, bool stop_at_clock_cell = false);
+[[nodiscard]] Occurrence_control_root control_root(hhds::Occurrence_pin p, bool stop_at_clock_cell = false);
 
 // Hierarchy-aware driver of a named sink. `get_driver_of_sink_name` is
 // class-local and stops at a sub's GraphIO pin; `inp_edges()` resolves across
 // the instance boundary, which is what a flop deep in an instance needs.
-[[nodiscard]] hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name);
+[[nodiscard]] hhds::Pin_class      sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name);
+[[nodiscard]] hhds::Occurrence_pin sink_driver_hier(const hhds::Occurrence_node& n, std::string_view sink_name);
 
 // A recognized INTEGRATED CLOCK GATE cone: `<clock> & <enables...>` driving a
 // state element's clock_pin.
@@ -138,15 +145,15 @@ struct Control_root {
 // So the right move is to recognize the pattern and rewrite it into the enable,
 // which is what the encoder already models natively.
 struct Icg_cone {
-  hhds::Pin_class              clock;    // the clock operand, resolved to its root
+  hhds::Pin_class              clock;                   // the clock operand, resolved to its root
   bool                         clock_inverted = false;  // `~clk & en` gates the FALLING edge
-  std::vector<hhds::Pin_class> enables;  // the remaining operands (constants excluded)
+  std::vector<hhds::Pin_class> enables;                 // the remaining operands (constants excluded)
   // 2^N clock division. v1 only ever produces 1; a `Clock_cell` carrying any
   // other value is refused BY NAME at every lowering rather than approximated,
   // because a divider's INITIAL PHASE has to become part of its identity or two
   // 180-degrees-apart div-by-2s compare equal -- the clock-blindness
   // false-PROVEN class these guards exist to stop.
-  int div = 1;
+  int                          div = 1;
 };
 
 // Decode `clock_pin`'s driver as an ICG cone, or nullopt when it is not one.
@@ -196,9 +203,9 @@ struct Icg_cone {
 // to offer inside the def and a name heuristic would be the only alternative --
 // which is exactly what M9 retires.
 struct Icg_def_match {
-  hhds::Pin_class clk_in;         // the def's clock INPUT pin
-  hhds::Pin_class out;            // the def's clock OUTPUT pin
-  hhds::Pin_class enable_cone;    // root of the latched enable cone, inside the def
+  hhds::Pin_class clk_in;       // the def's clock INPUT pin
+  hhds::Pin_class out;          // the def's clock OUTPUT pin
+  hhds::Pin_class enable_cone;  // root of the latched enable cone, inside the def
   // The ACTIVE-LOW GATE FLAVOUR: `clk | ~en_latch` (enable latched while the
   // clock is HIGH) rather than `clk & en_latch` (latched while it is LOW). Both
   // gate the SAME reference edges -- neither output moves while the enable is
@@ -240,7 +247,8 @@ struct Icg_def_match {
 // `enable`), `din` -- a graph input, a const, or a residual value mux with no
 // Q arm -- IS the through-value and is returned as-is. Invalid only when `n`
 // is not a latch or a hold mux has no non-Q arm (fail closed).
-[[nodiscard]] hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n);
+[[nodiscard]] hhds::Pin_class      latch_transparent_arm(const hhds::Node_class& n);
+[[nodiscard]] hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n);
 
 // Inline every instance whose output drives a state element's `clock_pin` and
 // whose def contains a Latch — i.e. an INTEGRATED CLOCK GATE CELL.
@@ -287,12 +295,12 @@ struct Icg_def_match {
 // This is the ONE scan; do not add a private copy (encode.cpp, cgen_sim.cpp and
 // semdiff.cpp already keep three, and that drift is the bug M3 meant to prevent).
 struct Single_edge_need {
-  bool needed = false;
-  int  n_latches       = 0;  // Latch cells
-  int  n_negedge_flops = 0;  // Flop/Fflop with posclk known-false
-  int  n_icg_flops     = 0;  // Flop/Fflop on a recognized `<clock> & <enables>` gate
-  int  n_clock_nets    = 0;  // distinct clock roots flops commit on (implicit counts as one)
-  std::string why;           // human-readable trigger reason ("" when not needed)
+  bool        needed          = false;
+  int         n_latches       = 0;  // Latch cells
+  int         n_negedge_flops = 0;  // Flop/Fflop with posclk known-false
+  int         n_icg_flops     = 0;  // Flop/Fflop on a recognized `<clock> & <enables>` gate
+  int         n_clock_nets    = 0;  // distinct clock roots flops commit on (implicit counts as one)
+  std::string why;                  // human-readable trigger reason ("" when not needed)
 };
 
 [[nodiscard]] Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks = nullptr);

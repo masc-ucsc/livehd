@@ -25,6 +25,7 @@
 #include "encode.hpp"
 #include "host_mem.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 
 namespace livehd::lec {
 
@@ -191,7 +192,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
     // fast_hier: builds a name-keyed map, no topological order needed. (`init`
     // is last-wins under an ambiguous name, but the reader below drops any pair
     // whose count != 1, so an ambiguous entry is never read.)
-    for (auto node : g->fast_hier()) {
+    for (auto node : g->grouped_hierarchy().nodes()) {
       auto op = graph_util::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
         continue;
@@ -1326,7 +1327,7 @@ bool graph_is_combinational(hhds::Graph* g, const absl::flat_hash_map<hhds::Gid,
   if (g == nullptr || !seen.insert(g).second) {
     return true;  // null / already-verified body (a real hw hierarchy is a finite DAG)
   }
-  for (auto node : g->forward_class()) {  // single level; Sub bodies are descended explicitly below
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {  // single level; Sub bodies are descended explicitly below
     auto op = graph_util::type_op_of(node);
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
       return false;
@@ -1435,7 +1436,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
       }
     }
   };
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     ++dbg_nodes;
     uint64_t m = 0;
     for (auto e : node.inp_edges()) {
@@ -2085,24 +2086,24 @@ std::vector<Port_bundle> detect_port_bundles(hhds::Graph* ref, hhds::Graph* impl
 
 // Longest flop-weighted path from a primary input/constant to any node. State
 // nodes are loop breakers in HHDS and are deliberately yielded before the
-// combinational body, so a single forward_hier() sweep cannot accumulate a
+// combinational body, so a single occurrences().nodes(hhds::Node_order::forward) sweep cannot accumulate a
 // chain such as p0 -> p1 -> out: its state-node order is not a next-state
 // dependency order. Use an explicit DFS stack (the old recursive definition,
 // without its large-design stack overflow) and cut feedback back-edges at an
 // active node. Parallel paths take MAX; serial flops add their pipeline depth.
 int pipeline_flush_latency(hhds::Graph* g) {
   struct Frame {
-    hhds::Node_class              node;
-    std::string                   id;
-    std::vector<hhds::Node_class> deps;
-    size_t                        next = 0;
-    int                           base = 0;
+    hhds::Occurrence_node              node;
+    std::string                        id;
+    std::vector<hhds::Occurrence_node> deps;
+    size_t                             next = 0;
+    int                                base = 0;
   };
 
   absl::flat_hash_map<std::string, int> memo;
   absl::flat_hash_set<std::string>      active;
 
-  auto depth_of = [](const hhds::Node_class& node) {
+  auto depth_of = [](const hhds::Occurrence_node& node) {
     if (graph_util::type_op_of(node) != Ntype_op::Flop) {
       return 0;
     }
@@ -2115,7 +2116,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
     }
     return 1;
   };
-  auto make_frame = [](const hhds::Node_class& node) {
+  auto make_frame = [](const hhds::Occurrence_node& node) {
     Frame frame{node, std::string(node.get_hier_name()), {}};
     for (const auto& e : node.inp_edges()) {
       if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
@@ -2125,7 +2126,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
     }
     return frame;
   };
-  auto evaluate = [&](const hhds::Node_class& root) {
+  auto evaluate = [&](const hhds::Occurrence_node& root) {
     const std::string root_id{root.get_hier_name()};
     if (auto it = memo.find(root_id); it != memo.end()) {
       return it->second;
@@ -2160,7 +2161,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
   };
 
   int result = 0;
-  for (auto node : g->forward_hier()) {
+  for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
     result = std::max(result, evaluate(node));
   }
   return result;
@@ -2366,7 +2367,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
   for (auto* g : {ref, impl}) {
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> ents;
-    for (auto node : g->fast_hier()) {  // set-valued map build: order-free
+    for (auto node : g->grouped_hierarchy().nodes()) {  // set-valued map build: order-free
       if (graph_util::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -2453,7 +2454,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // fast_hier: a gid set build. Like the encoder's own scan, this DISCOVERS
       // the opaque set, so it must descend everywhere (the scope below is armed
       // from its result).
-      for (auto node : g->fast_hier()) {
+      for (auto node : g->grouped_hierarchy().nodes()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -2489,10 +2490,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // nested boxes silently degraded a stateful box to a stateless constant one —
   // a false-PASS hazard. The encoder now hard-errors on a key it cannot find.
   struct Box_inst {
-    std::string      nk;     // box_node_key (per-design structural identity)
-    std::string      cname;  // canonicalized instance hier-name
-    hhds::Node_class node;
-    bool             in_ref;
+    std::string           nk;     // box_node_key (per-design structural identity)
+    std::string           cname;  // canonicalized instance hier-name
+    hhds::Occurrence_node node;
+    bool                  in_ref;
   };
   absl::flat_hash_map<std::string, std::vector<Box_inst>> boxes_by_def;
   std::vector<std::string>                                box_defnames;    // insertion order (walk-deterministic)
@@ -2507,8 +2508,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   absl::flat_hash_set<std::string>                        seen_ref_nk, seen_impl_nk;
   bool                                                    nk_collision = false;
   auto                                                    scan_boxes   = [&](hhds::Graph* g, bool in_ref) {
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // mirror the encoder's ambient opacity
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Sub || !node.has_out_edges()) {
         continue;  // the encoder skips consumer-less nodes before its box path
       }
@@ -2531,7 +2531,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!force_collapse && sub_lib != nullptr) {
         if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
           bool lib_stateful = false;
-          for (auto dn : git->second->forward_class()) {
+          for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
             auto dop = graph_util::type_op_of(dn);
             if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
               lib_stateful = true;
@@ -2552,7 +2552,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (auto def = node.get_subnode_graph(); def != nullptr) {
           def_has_body[defkey] = true;
           if (scanned_bodies.insert(def.get()).second) {
-            for (auto dn : def->forward_class()) {
+            for (auto dn : def->body().nodes(hhds::Node_order::forward)) {
               auto dop = graph_util::type_op_of(dn);
               if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
                 def_stateful[defkey] = true;
@@ -2625,7 +2625,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   {
     Io_name_map<int>  bw;   // true-blackbox "key:port" -> max real width across designs
     Io_name_map<bool> bsg;  // "key:port" -> signedness of the widest side
-    auto              out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const hhds::Pin_class& dp) -> std::string {
+    auto              out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const auto& dp) -> std::string {
       for (const auto& d : sio->get_output_pin_decls()) {
         if (sio->get_output_port_id(d.name) == dp.get_port_id()) {
           return d.name;
@@ -2851,7 +2851,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // other or the shared symbol is one-sided.
     for (auto* g : {ref, impl}) {
       Io_name_map<int> occ;
-      for (auto node : g->forward_class()) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -2976,8 +2976,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   for (auto* g : {ref, impl}) {
     // Hierarchical: a memory one level down still introduces ARRAY symbols, and
     // the eager bit-blaster this gates has no array theory.
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) == Ntype_op::Memory) {
         has_mem = true;
         break;
@@ -3018,8 +3017,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // shape_collapse_ok's `rn <= 1 && in <= 1` fast path then declares that
     // shape UNAMBIGUOUS from an EMPTY census -- silently disabling the
     // crossed-occurrence guard it exists to enforce.
-    hhds::Hier_opaque_scope                                    sc(collapse_gids_ptr);
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
@@ -3091,7 +3089,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       bool         aligned = common > 0;
       for (size_t i = 0; i < common && aligned; ++i) {
         const std::string rcn = canon_flop_name(ri->second[i]);
-        aligned = !rcn.empty() && rcn == canon_flop_name(ii->second[i]) && mem_diverged.count(rcn) == 0;
+        aligned               = !rcn.empty() && rcn == canon_flop_name(ii->second[i]) && mem_diverged.count(rcn) == 0;
       }
       if (aligned) {
         return true;
@@ -3147,8 +3145,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // array -- and the miter REFUTED two BYTE-IDENTICAL designs. Measured with
       // formal.lec.hier=false (the config that puts a submodule memory in the
       // top miter); see lhd/tests/mem_hier_census_test.sh.
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3384,7 +3381,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // free; the canonical-name fallback below still covers pass-through resets.
     Io_name_map<bool> reset_negset;  // name -> negreset
     auto              collect_resets = [&](hhds::Graph* g) {
-      for (auto node : g->forward_hier()) {  // descend hierarchy: flops at every level
+      for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: flops at every level
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -3476,9 +3473,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
     auto collect_state_keys = [&](hhds::Graph* g) {
-      std::set<std::string>   keys;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      std::set<std::string> keys;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         auto op = graph_util::type_op_of(node);
         if (op == Ntype_op::Flop || (use_plan && op == Ntype_op::Latch)) {
           keys.insert(eff(node.get_hier_name()));
@@ -3532,7 +3528,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // power-on state of a soundness-critical miter -- do not trade it for memory
         // without first making the collision explicit (detect + drop, like the
         // uncertain-pair path does).
-        for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
+        for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: cut flops at every level
           const auto nop = graph_util::type_op_of(node);
           // A LATCH is a state cut exactly like a flop under a phase schedule
           // (the encoder seeds and threads it the same way), so its power-on
@@ -3571,14 +3567,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       };
       {
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // a collapsed leaf's state is the box's, not its flops'
         collect_flops(ref);
         collect_flops(impl);
       }
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
-          for (auto node : g->fast_hier()) {  // sorted std::set + debug-only: order-free
+          for (auto node : g->grouped_hierarchy().nodes()) {  // sorted std::set + debug-only: order-free
             if (graph_util::type_op_of(node) != Ntype_op::Flop) {
               continue;
             }
@@ -3714,10 +3709,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     {
       // Per-design memory cut keys (shape-only occ, matching build_shared_mems).
       auto collect_mem_keys = [&](hhds::Graph* g) {
-        Io_name_map<Mem_sig>    out;
-        Io_name_map<int>        occ;
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+        Io_name_map<Mem_sig> out;
+        Io_name_map<int>     occ;
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
           if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
             continue;
           }
@@ -3733,11 +3727,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       // Per-design flop cut key -> width (hier-canon key, matching ref_state above).
       auto collect_flop_w = [&](hhds::Graph* g) {
-        Io_name_map<int>        out;
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+        Io_name_map<int> out;
         // fast_hier: a max-per-key map build; order-free. fast_hier honors the
         // ambient opaque scope just installed above.
-        for (auto node : g->fast_hier()) {
+        for (auto node : g->grouped_hierarchy().nodes()) {
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
           }
@@ -3821,8 +3814,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto collect_memory_inits = [&](hhds::Graph* g) {
       Io_name_map<std::string> out;
       Io_name_map<int>         occ;
-      hhds::Hier_opaque_scope  sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3865,10 +3857,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return arr;
     };
     auto collect_memory_sigs = [&](hhds::Graph* g) {
-      Io_name_map<Mem_sig>    out;
-      Io_name_map<int>        occ;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      Io_name_map<Mem_sig> out;
+      Io_name_map<int>     occ;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3883,10 +3874,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return out;
     };
     auto collect_memory_types = [&](hhds::Graph* g) {
-      Io_name_map<int>        out;
-      Io_name_map<int>        occ;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      Io_name_map<int> out;
+      Io_name_map<int> occ;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -4746,7 +4736,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   auto add_flops = [&](hhds::Graph* g) {
     // fast_hier: a key->width map build (min-width wins by explicit compare, not by
     // visit order). Honors the ambient opaque scope its caller installs.
-    for (auto node : g->fast_hier()) {  // descend hierarchy: cut flops at every level
+    for (auto node : g->grouped_hierarchy().nodes()) {  // descend hierarchy: cut flops at every level
       const auto nop = graph_util::type_op_of(node);
       // Under a phase schedule a LATCH is a state cut exactly like a flop, so it
       // needs its shared current-state symbol here too. Without it each side
@@ -4785,7 +4775,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   {
     // Skip the flops INSIDE a collapsed leaf — its state is the box's one cut,
     // not a set of internal flop cuts.
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
     add_flops(ref);
     add_flops(impl);
   }
@@ -4829,7 +4818,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     auto collect_flops = [&](hhds::Graph* g) {
       Io_name_map<FlopRec> out;
-      for (auto node : g->forward_hier()) {
+      for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -4851,7 +4840,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto collect_mems = [&](hhds::Graph* g) {
       Io_name_map<MemRec> out;
       Io_name_map<int>    occ;
-      for (auto node : g->forward_class()) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -5045,8 +5034,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Rebuild half 1's primary-input symbols (state keys are left alone).
       absl::flat_hash_set<std::string> state_keys;
       for (auto* g : {ref, impl}) {
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        for (auto node : g->fast_hier()) {
+        for (auto node : g->grouped_hierarchy().nodes()) {
           const auto nop = graph_util::type_op_of(node);
           if (nop != Ntype_op::Flop && nop != Ntype_op::Latch) {
             continue;
@@ -6323,8 +6311,104 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   return res;
 }
 
+namespace {
+
+bool has_activation_loops(hhds::Graph* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  if (const auto io = root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
+    return false;
+  }
+  for (const auto& graph : root->definitions().graphs()) {
+    for (const auto node : graph->body().nodes()) {
+      if (const auto loop = node.subnode_loop(); loop && loop->activation_input) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool build_activation_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                              hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
+                              std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
+  if (source == nullptr) {
+    return false;
+  }
+  const auto source_io  = source->get_io();
+  auto*      source_lib = source_io ? source_io->get_library() : nullptr;
+  if (source_lib == nullptr) {
+    return false;
+  }
+
+  // copy_from is definition-local, so copy the closure callee-first. The
+  // scratch library owns every body and occurrence materialization can never
+  // mutate the shared source design.
+  for (const auto& graph : source->definitions().graphs()) {
+    if (!scratch.copy_from(*source_lib, graph->get_name())) {
+      return false;
+    }
+  }
+  if (sub_lib != nullptr) {
+    for (const auto& [gid, external] : *sub_lib) {
+      if (external == nullptr || scratch.find_io(external->get_name())) {
+        continue;
+      }
+      const auto external_io  = external->get_io();
+      auto*      external_lib = external_io ? external_io->get_library() : nullptr;
+      if (external_lib == nullptr) {
+        return false;
+      }
+      for (const auto& graph : external->definitions().graphs()) {
+        if (!scratch.find_io(graph->get_name()) && !scratch.copy_from(*external_lib, graph->get_name())) {
+          return false;
+        }
+      }
+    }
+  }
+
+  for (const auto gid : scratch.all_gids()) {
+    if (auto graph = scratch.get_graph(gid)) {
+      scratch_graphs.push_back(std::move(graph));
+    }
+  }
+  if (!graph_util::materialize_occurrences_all(scratch_graphs, "pass.lec")) {
+    return false;
+  }
+  auto top_io = scratch.find_io(source->get_name());
+  scratch_top = top_io ? top_io->get_graph() : std::shared_ptr<hhds::Graph>{};
+  return scratch_top != nullptr;
+}
+
+}  // namespace
+
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // Connectivity-only occurrence edges intentionally expose both sides of an
+  // inactive-carry dependency. The SMT encoder needs its exact mux value, so
+  // activation-capable groups use a private occurrence realization. Ordinary
+  // loops stay on the native read-only occurrence path.
+  if (has_activation_loops(ref) || has_activation_loops(impl)) {
+    hhds::GraphLibrary                        ref_scratch;
+    hhds::GraphLibrary                        impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top;
+    std::shared_ptr<hhds::Graph>              impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs;
+    std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+    if (!build_activation_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        || !build_activation_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not realize activation-capable loop occurrences in private LEC scratch state";
+      return failure;
+    }
+    Cvc5_stats   acc;
+    Query_result res  = prove_equal_impl(ref_top.get(), impl_top.get(), opts, sub_lib, opts.stats ? &acc : nullptr);
+    res.cvc5         += acc;
+    return res;
+  }
+
   Cvc5_stats   acc;
   Query_result res  = prove_equal_impl(ref, impl, opts, sub_lib, opts.stats ? &acc : nullptr);
   // MERGE, never assign. Under engine=auto `res` already carries the forked
@@ -6386,10 +6470,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   // on read(), and SIGKILL the worker if it passes. A killed worker sends no
   // serialized result, so it falls into the `died` path below and reports as an
   // Unknown naming the backstop — never a verdict.
-  const long long hard_ms = (opts.timeout > 0 && opts.hard_timeout_mult > 0)
-                              ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult
-                              : 0;
-  bool            killed  = false;
+  const long long hard_ms
+      = (opts.timeout > 0 && opts.hard_timeout_mult > 0) ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult : 0;
+  bool        killed = false;
   std::string blob;
   char        buf[8192];
   while (true) {
@@ -6407,10 +6490,8 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         killed = true;
         continue;
       }
-      struct pollfd pfd {
-        p[0], POLLIN, 0
-      };
-      const int pr = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
+      struct pollfd pfd{p[0], POLLIN, 0};
+      const int     pr = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
       if (pr == 0) {
         continue;  // nothing yet; re-check the deadline
       }
@@ -6446,12 +6527,13 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // exactly, and name the knob — this is the ONE overrun cvc5's tlimit-per
         // cannot report itself, so a vague "worker died" here would read as a
         // host problem and send the reader hunting for memory.
-        why = std::format("exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
-                          "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
-                          "miter compiles to — raise either knob, or 0 disables the backstop",
-                          static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
-                          opts.timeout,
-                          opts.hard_timeout_mult);
+        why         = std::format(
+            "exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
+            "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+            "miter compiles to — raise either knob, or 0 disables the backstop",
+            static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
+            opts.timeout,
+            opts.hard_timeout_mult);
       } else if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
         // The usual causes at these signals on a big flat def: the RLIMIT_AS
         // memory backstop (malloc fails -> abort / the OS kills), or a genuine
@@ -6517,7 +6599,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   std::string  ind_why;
   bool         ind_killed = false;
   Query_result ri         = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why, ind_killed);
-  ri.engine       = "ind";
+  ri.engine               = "ind";
   if (ind_died) {
     ri.detail = "ind retry worker also died: " + ind_why;
   }
@@ -6533,7 +6615,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   std::string  bmc_why;
   bool         bmc_killed = false;
   Query_result rb         = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why, bmc_killed);
-  rb.engine       = "bmc";
+  rb.engine               = "bmc";
   if (bmc_died) {
     rb.detail = "bmc retry worker also died: " + bmc_why;
   }
@@ -6994,7 +7076,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // the trustworthy config (the lazy default has a spurious-SAT history) but has
   // no array theory, so memory designs keep the default solver.
   bool has_mem = false;
-  for (auto node : design->forward_class()) {
+  for (auto node : design->body().nodes(hhds::Node_order::forward)) {
     if (graph_util::type_op_of(node) == Ntype_op::Memory) {
       has_mem = true;
       break;
@@ -7121,7 +7203,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // so it is downgraded to Unknown below (the single-design analog of
   // prove_equal's incomplete-correspondence gate).
   bool has_bbox = false;
-  for (auto node : design->fast_hier()) {  // OR-reduction into has_bbox: order-free
+  for (auto node : design->grouped_hierarchy().nodes()) {  // OR-reduction into has_bbox: order-free
     if (graph_util::type_op_of(node) != Ntype_op::Sub || node.get_subnode_graph() != nullptr) {
       continue;
     }
@@ -7134,7 +7216,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     if (sub_lib != nullptr) {
       if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
         flattenable = true;
-        for (auto dn : git->second->forward_class()) {
+        for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
           auto dop = graph_util::type_op_of(dn);
           if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
             flattenable = false;
@@ -7250,7 +7332,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // a subgraph flop's reset driver is the SUBGRAPH's own input pin, and name-
       // matching its port against the top-level `ins` map could pin an unrelated
       // same-named top input (under-exploration -> unsound PROVEN).
-      for (auto node : design->forward_hier()) {
+      for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -7318,7 +7400,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     Io_name_map<int>  fw;
     Io_name_map<bool> fsgn;
     Io_name_map<Val>  init;
-    for (auto node : design->forward_hier()) {
+    for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Flop) {
         continue;
       }
@@ -7384,7 +7466,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   Io_name_map<cvc5::Term> mem;
   {
     Io_name_map<int> occ;
-    for (auto node : design->forward_class()) {
+    for (auto node : design->body().nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
@@ -7427,7 +7509,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // fast_hier: an existence scan. Being lazy, the early return below now
       // actually stops the walk -- forward_hier materialized+sorted the entire
       // design before yielding the first node, so the `return true` saved nothing.
-      for (auto node : gg->fast_hier()) {
+      for (auto node : gg->grouped_hierarchy().nodes()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -7910,14 +7992,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!mon_hist_noted[mi]) {
           mon_hist_noted[mi]  = true;
           res.detail         += "; monitor '" + mon.block + "' needs " + std::to_string(max_delay)
-                        + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
+                                + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
         }
         continue;
       }
       Io_name_map<Val> msh;
       bool             bind_ok = true;
       for (const auto& b : mon.binds) {
-        const Val* v = nullptr;
+        const Val*       v       = nullptr;
         // `past(x, n)`: resolve against the cycle n steps back. mon_hist was
         // just extended with this cycle, so index from its END.
         const Mon_cycle& src_cyc = mon_hist[mon_hist.size() - 1 - static_cast<size_t>(b.delay)];
@@ -9046,6 +9128,22 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
 
 Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
+  if (has_activation_loops(design)) {
+    hhds::GraphLibrary                        scratch;
+    std::shared_ptr<hhds::Graph>              scratch_top;
+    std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
+    if (!build_activation_scratch(design, sub_lib, scratch, scratch_top, scratch_graphs)) {
+      Verify_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not realize activation-capable loop occurrences in private formal scratch state";
+      return failure;
+    }
+    Cvc5_stats    acc;
+    Verify_result res  = prove_properties_impl(scratch_top.get(), opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
+    res.cvc5          += acc;
+    return res;
+  }
+
   Cvc5_stats    acc;
   Verify_result res  = prove_properties_impl(design, opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
   // MERGE, never assign: under engine=auto `res` already carries the forked

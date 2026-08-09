@@ -20,20 +20,21 @@ namespace lc = livehd::latch_contract;
 
 // box_node_key lives in encode.cpp (one definition, shared identity).
 std::string box_node_key(const hhds::Node_class& n);
+std::string box_node_key(const hhds::Occurrence_node& n);
 
 const char* phase_name(Phase p) {
   switch (p) {
-    case Phase::Close_low: return "close_low";
-    case Phase::Rise: return "rise";
+    case Phase::Close_low : return "close_low";
+    case Phase::Rise      : return "rise";
     case Phase::Close_high: return "close_high";
-    case Phase::Fall: return "fall";
+    case Phase::Fall      : return "fall";
   }
   return "?";
 }
 
 namespace {
 
-bool posclk_is_false(const hhds::Node_class& n) {
+bool posclk_is_false(const hhds::Occurrence_node& n) {
   auto pc = lc::sink_driver_hier(n, "posclk");
   return !pc.is_invalid() && gu::is_const_pin(pc) && gu::hydrate_const(pc).is_known_false();
 }
@@ -47,16 +48,16 @@ bool posclk_is_false(const hhds::Node_class& n) {
 // cell's enable here, so this walker steps one cell at a time
 // (`control_root(..., stop_at_clock_cell=true)`).
 struct Clock_chain {
-  hhds::Pin_class              root;                 // invalid => unresolved / implicit
-  bool                         inverted   = false;   // edge parity accumulated from cone inversions
+  hhds::Occurrence_pin              root;                       // invalid => unresolved / implicit
+  bool                              inverted          = false;  // edge parity accumulated from cone inversions
   // The ACTIVE-LOW gate flavour (`clk | ~en_latch`) latches its enable while the
   // reference clock is HIGH, so the guard must be sampled before the FALL. It
   // does NOT change any consumer's edge (see Icg_cone::invert).
-  bool                         guard_before_fall = false;
-  bool                         gated      = false;   // at least one enable was collected
-  bool                         refused    = false;   // a div != 1 (or a cycle) was hit
-  std::string                  why;                  // refusal text
-  std::vector<hhds::Pin_class> guards;               // enables to AND into the commit condition
+  bool                              guard_before_fall = false;
+  bool                              gated             = false;  // at least one enable was collected
+  bool                              refused           = false;  // a div != 1 (or a cycle) was hit
+  std::string                       why;                        // refusal text
+  std::vector<hhds::Occurrence_pin> guards;                     // enables to AND into the commit condition
 };
 
 // Structural digest of a cone, used to give the SAMPLED GUARD a name. Two
@@ -65,7 +66,7 @@ struct Clock_chain {
 // the two sides simply thread separate guard cuts, which is sound because a
 // guard is always SAMPLED before it is READ inside one period (its power-on
 // value is dead).
-std::string cone_digest(const hhds::Pin_class& p, int depth = 0) {
+std::string cone_digest(const hhds::Occurrence_pin& p, int depth = 0) {
   if (p.is_invalid()) {
     return "-";
   }
@@ -92,13 +93,13 @@ std::string cone_digest(const hhds::Pin_class& p, int depth = 0) {
   return s + ")";
 }
 
-Clock_chain resolve_chain(hhds::Pin_class clk, const lc::Design_clocks& clocks, int depth = 0);
+Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clocks, int depth = 0);
 
 // Is `p` a path that reaches a real clock? Used to pick the clock operand of an
 // inline `<clock> & <enables>` cone: BOTH operands are ordinary nets, so "is it
 // an input?" cannot tell them apart -- getting that backwards classifies the
 // ENABLE as the clock and produces no gating at all (measured, see resolve_icg).
-bool reaches_clock(const hhds::Pin_class& p, const lc::Design_clocks& clocks, int depth) {
+bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clocks, int depth) {
   if (depth >= 6) {
     return false;
   }
@@ -128,7 +129,7 @@ bool reaches_clock(const hhds::Pin_class& p, const lc::Design_clocks& clocks, in
   return false;
 }
 
-Clock_chain resolve_chain(hhds::Pin_class clk, const lc::Design_clocks& clocks, int depth) {
+Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clocks, int depth) {
   Clock_chain ch;
   auto        cur = clk;
   for (int hops = 0; hops < 16 && !cur.is_invalid(); ++hops) {
@@ -153,8 +154,7 @@ Clock_chain resolve_chain(hhds::Pin_class clk, const lc::Design_clocks& clocks, 
           // the clock-blindness false-PROVEN class. Named refusal, never an
           // approximation.
           ch.refused = true;
-          ch.why     = "is clocked by a Clock_cell with div=" + std::to_string(iv)
-                   + ", which is not implemented (v1 is div=1 only)";
+          ch.why = "is clocked by a Clock_cell with div=" + std::to_string(iv) + ", which is not implemented (v1 is div=1 only)";
           return ch;
         }
       }
@@ -183,9 +183,9 @@ Clock_chain resolve_chain(hhds::Pin_class clk, const lc::Design_clocks& clocks, 
       // Exactly one operand may reach a clock; a constant operand is a WIDTH
       // MASK, not an enable (`x & 1` is how the slang reader spells a 1-bit
       // boolean control).
-      hhds::Pin_class              clk_op;
-      std::vector<hhds::Pin_class> ens;
-      int                          n_clock = 0;
+      hhds::Occurrence_pin              clk_op;
+      std::vector<hhds::Occurrence_pin> ens;
+      int                               n_clock = 0;
       for (const auto& e : n.inp_edges()) {
         if (gu::is_const_pin(e.driver)) {
           continue;
@@ -249,7 +249,7 @@ Clock_chain resolve_chain(hhds::Pin_class clk, const lc::Design_clocks& clocks, 
 // `owner` is the def the ENDPOINT lives in, needed for the implicit clock: a
 // `reg x = 0` has no cone at all, so the only thing that identifies its clock is
 // which module it is in.
-std::string root_key(const hhds::Pin_class& root, const hhds::Node_class* owner, const Clock_forest* forest) {
+std::string root_key(const hhds::Occurrence_pin& root, const hhds::Occurrence_node* owner, const Clock_forest* forest) {
   if (root.is_invalid()) {
     if (forest != nullptr && owner != nullptr) {
       if (auto* r = forest->find(owner->get_graph()->get_name(), "")) {
@@ -279,13 +279,13 @@ std::string Phase_plan::signature() const {
 }
 
 std::string Phase_plan::describe() const {
-  std::string s = "root=" + (root_clock.empty() ? std::string("<implicit>") : root_clock);
-  s += ", flops rise/fall=" + std::to_string(n_flop_rise) + "/" + std::to_string(n_flop_fall);
-  s += ", clock latches low/high=" + std::to_string(n_latch_low) + "/" + std::to_string(n_latch_high);
-  s += ", data latches=" + std::to_string(n_latch_data);
-  s += ", transparent latches=" + std::to_string(n_latch_transparent);
-  s += ", mem rise/fall=" + std::to_string(n_mem_rise) + "/" + std::to_string(n_mem_fall);
-  s += ", sampled clock guards=" + std::to_string(n_guards);
+  std::string s  = "root=" + (root_clock.empty() ? std::string("<implicit>") : root_clock);
+  s             += ", flops rise/fall=" + std::to_string(n_flop_rise) + "/" + std::to_string(n_flop_fall);
+  s             += ", clock latches low/high=" + std::to_string(n_latch_low) + "/" + std::to_string(n_latch_high);
+  s             += ", data latches=" + std::to_string(n_latch_data);
+  s             += ", transparent latches=" + std::to_string(n_latch_transparent);
+  s             += ", mem rise/fall=" + std::to_string(n_mem_rise) + "/" + std::to_string(n_mem_fall);
+  s             += ", sampled clock guards=" + std::to_string(n_guards);
   return s;
 }
 
@@ -308,7 +308,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
   // cannot honor one), which only ever makes it fall through to the full walk.
   {
     bool interesting = false;
-    for (auto n : g->fast_hier()) {
+    for (auto n : g->grouped_hierarchy().nodes()) {
       const auto op = gu::type_op_of(n);
       if (op == Ntype_op::Latch || op == Ntype_op::Clock_cell) {
         interesting = true;
@@ -321,7 +321,8 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     }
     if (!interesting) {
       if (std::getenv("LEC_PHASE_PLAN") != nullptr) {
-        std::fprintf(stderr, "[LEC_PLAN] %-46s FAST-REJECT (no latch / negedge / Clock_cell anywhere)\n",
+        std::fprintf(stderr,
+                     "[LEC_PLAN] %-46s FAST-REJECT (no latch / negedge / Clock_cell anywhere)\n",
                      std::string{g->get_name()}.c_str());
       }
       return plan;  // ok, !multi, !needs_plan -- the legacy encoding is exact
@@ -329,7 +330,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
   }
   ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
   if (collapse_defs != nullptr) {
-    for (auto sn : g->fast_hier()) {
+    for (auto sn : g->grouped_hierarchy().nodes()) {
       if (gu::type_op_of(sn) != Ntype_op::Sub) {
         continue;
       }
@@ -340,12 +341,11 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     }
   }
   const ankerl::unordered_dense::set<hhds::Gid>* opaque = opaque_subs.empty() ? nullptr : &opaque_subs;
-  hhds::Hier_opaque_scope                        opaque_scope(opaque);
-  lc::Design_clocks                              clocks(g, /*hier=*/true);
+  lc::Design_clocks                              clocks(g, /*hier=*/true, opaque);
 
-  absl::flat_hash_set<std::string> roots;      // distinct root nets any endpoint commits on
+  absl::flat_hash_set<std::string> roots;       // distinct root nets any endpoint commits on
   absl::flat_hash_set<std::string> guard_keys;  // distinct sampled guards
-  bool                             implicit_root = false;
+  bool                             implicit_root     = false;
   std::string                      implicit_root_key = "\x01implicit";
   std::string                      derived_root;  // an endpoint whose clock is not a clock INPUT
 
@@ -356,7 +356,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     }
   };
 
-  for (auto node : g->forward_hier(true, false, opaque)) {
+  for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
     const auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
       continue;
@@ -368,14 +368,13 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     const bool     is_latch = op == Ntype_op::Latch;
     // A latch's window is controlled by its ENABLE (its gate IS its enable, user
     // ruling 2026-07-20); everything else by `clock_pin`.
-    const auto ctrl = lc::sink_driver_hier(node, is_latch ? "enable" : "clock_pin");
+    const auto     ctrl     = lc::sink_driver_hier(node, is_latch ? "enable" : "clock_pin");
     // An ALWAYS-OPEN latch (no enable pin -- tolg wires none when every path
     // writes the reg -- or a constant-true one) stores nothing. Classify it
     // BEFORE any clock question is asked: it has no window, so it has no closing
     // edge and no phase, and resolving its constant control cone would land on a
     // "derived clock" and refuse what is really a combinational buffer.
-    if (is_latch
-        && (ctrl.is_invalid() || (gu::is_const_pin(ctrl) && !gu::hydrate_const(ctrl).is_known_false()))) {
+    if (is_latch && (ctrl.is_invalid() || (gu::is_const_pin(ctrl) && !gu::hydrate_const(ctrl).is_known_false()))) {
       e.transparent = true;
       e.phase       = Phase::Rise;
       ++plan.n_latch_transparent;
@@ -415,19 +414,19 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     }
 
     if (op == Ntype_op::Memory) {
-      e.phase = rising ? Phase::Rise : Phase::Fall;
+      e.phase                                       = rising ? Phase::Rise : Phase::Fall;
       (rising ? plan.n_mem_rise : plan.n_mem_fall) += 1;
     } else if (is_latch && clock_role) {
       // Transparent-LOW closes at the RISE, so it must commit in the microstep
       // IMMEDIATELY BEFORE the rise batch; transparent-HIGH closes at the FALL.
-      e.phase            = rising ? Phase::Close_low : Phase::Close_high;
-      e.clock_role_latch = true;
+      e.phase                                          = rising ? Phase::Close_low : Phase::Close_high;
+      e.clock_role_latch                               = true;
       (rising ? plan.n_latch_low : plan.n_latch_high) += 1;
     } else if (is_latch) {
       e.phase = Phase::Rise;
       ++plan.n_latch_data;
     } else {
-      e.phase = rising ? Phase::Rise : Phase::Fall;
+      e.phase                                         = rising ? Phase::Rise : Phase::Fall;
       (rising ? plan.n_flop_rise : plan.n_flop_fall) += 1;
     }
 
@@ -442,9 +441,10 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       for (const auto& gp : ch.guards) {
         digest += "&" + cone_digest(gp);
       }
-      e.guard_key = "\x01"
-                    "ckguard:"
-                  + digest;
+      e.guard_key
+          = "\x01"
+            "ckguard:"
+            + digest;
       if (guard_keys.insert(e.guard_key).second) {
         (ch.guard_before_fall ? plan.n_guard_high : plan.n_guard_low) += 1;
       }
@@ -494,7 +494,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
   // corpus for no verdict it does not already get -- and it measurably COSTS
   // verdicts, because the single-step inductive engine declines a multi design
   // and the bounded-BMC fallback is suppressed under a speculative state pair.
-  plan.multi = plan.n_flop_fall > 0 || plan.n_latch_low > 0 || plan.n_latch_high > 0 || plan.n_mem_fall > 0;
+  plan.multi   = plan.n_flop_fall > 0 || plan.n_latch_low > 0 || plan.n_latch_high > 0 || plan.n_mem_fall > 0;
   if (!roots.empty()) {
     std::vector<std::string> sorted(roots.begin(), roots.end());
     std::sort(sorted.begin(), sorted.end());
@@ -508,8 +508,8 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       for (const auto& r : sorted) {
         names += (names.empty() ? "" : ", ") + (r == "\x01implicit" ? std::string("<implicit>") : r);
       }
-      refuse("the phase schedule needs a total order between " + std::to_string(sorted.size())
-             + " unrelated clock roots {" + names + "}; v1 orders ONE root clock");
+      refuse("the phase schedule needs a total order between " + std::to_string(sorted.size()) + " unrelated clock roots {" + names
+             + "}; v1 orders ONE root clock");
     }
   }
   if (plan.multi && !derived_root.empty()) {
@@ -521,9 +521,16 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
   // refusals are all decided above, and printing before they are set reports a
   // plan that does not exist (it cost an hour of chasing a phantom `multi=0`).
   if (std::getenv("LEC_PHASE_PLAN") != nullptr) {
-    std::fprintf(stderr, "[LEC_PLAN] %-46s %s roots=%d multi=%d needs_plan=%d multi_root=%d ok=%d %s\n",
-                 std::string{g->get_name()}.c_str(), plan.describe().c_str(), plan.n_roots, plan.multi ? 1 : 0,
-                 plan.needs_plan() ? 1 : 0, plan.multi_root() ? 1 : 0, plan.ok ? 1 : 0, plan.error.c_str());
+    std::fprintf(stderr,
+                 "[LEC_PLAN] %-46s %s roots=%d multi=%d needs_plan=%d multi_root=%d ok=%d %s\n",
+                 std::string{g->get_name()}.c_str(),
+                 plan.describe().c_str(),
+                 plan.n_roots,
+                 plan.multi ? 1 : 0,
+                 plan.needs_plan() ? 1 : 0,
+                 plan.multi_root() ? 1 : 0,
+                 plan.ok ? 1 : 0,
+                 plan.error.c_str());
   }
   return plan;
 }

@@ -1,8 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// Replica expansion — turn a compact replicated `Sub` back into the `count`
-// ordinary Sub occurrences it denotes.
+// Backend occurrence materialization — realize compact Subnode_groups into a
+// private physical output graph.
 //
 // This is the correctness escape hatch for every consumer that is not
 // occurrence-aware (LEC, ABC, timing, Verilog emission, structural inliners).
@@ -10,8 +10,8 @@
 // expanded copy and see exactly the graph today's source unrolling produces.
 //
 // The expansion is deliberately shape-faithful to that unrolled form, down to
-// the spelling: occurrence `r` is named `<compact name>_li<r>`, the same
-// `_li<ordinal>` tag the runner's unroller stamps on the instances one source
+// the spelling: occurrence `r` is named `<compact name>__li<r>`, the same
+// `__li<ordinal>` tag the runner's unroller stamps on the instances one source
 // call site produces per iteration. So a rolled loop and the same source
 // unrolled name their replicas identically, each occurrence carries the ordinal
 // LEC's box correspondence needs to pair by name, and neither code generator's
@@ -32,9 +32,9 @@
 //   count == 0        -> carried outputs pass their external initial value
 //                        straight through to the readers; the node vanishes
 //
-// It mutates the graph it is given, so callers pass a scratch copy when the
-// library graph must survive (`lhd` gives each flow its own loaded library, so
-// an emission-time expansion is already private to that run).
+// This adapter is only for backends whose private output representation is
+// still an hhds::Graph. It mutates that scratch graph and must never receive a
+// source/EPRP graph. Read-only consumers use occurrences() directly.
 
 #include <memory>
 #include <string_view>
@@ -44,10 +44,9 @@
 
 namespace livehd::graph_util {
 
-// Expands every replicated Sub in `g`. Returns the number of compact nodes
-// expanded, or -1 if a descriptor could not be realized (a diagnostic is
-// emitted against `from_pass`).
-int expand_replicated_subs(hhds::Graph* g, std::string_view from_pass);
+// Materializes every compact Subnode_group in private scratch `g`. Returns the
+// number of groups realized, or -1 if a binding could not be represented.
+int materialize_occurrences(hhds::Graph* g, std::string_view from_pass);
 
 // Same, over a whole design (an Eprp_var's graph list). Returns false when any
 // graph failed to expand.
@@ -57,6 +56,6 @@ int expand_replicated_subs(hhds::Graph* g, std::string_view from_pass);
 // compact node as ONE occurrence: a prover then compares count-1 replicas that
 // are not there (a false PROVEN), and an area/timing pass under-counts by the
 // same factor.
-bool expand_replicated_subs_all(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view from_pass);
+bool materialize_occurrences_all(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view from_pass);
 
 }  // namespace livehd::graph_util
