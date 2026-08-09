@@ -6440,16 +6440,61 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
 
 namespace {
 
-bool has_native_loops(hhds::Graph* root) {
-  if (root == nullptr) {
+// True when any node matching `pred` exists in the SAME universe
+// copy_loop_scratch() copies: the design's own definition closure plus the
+// `sub_lib` externals. The gate must never be narrower than the thing it gates
+// -- a `--lib` body lives in ANOTHER library, so neither root's closure nor its
+// library-level has_loop_subnodes() flag can see it, and a compact loop missed
+// here is never materialized: the query then compares count-1 replicas that are
+// not there (a false PROVEN).
+//
+// Only CROSS-library sub_lib entries need that extra scan, though. Not every
+// caller passes a `--lib` external set: pass.formal fills sub_lib with EVERY
+// graph of the compile unit, so scanning same-library members would let one
+// loop anywhere in the design route every loop-free root through the scratch
+// copy+materialize path (and one copy failure there returns unsupported, which
+// pass.formal reads as a correlation mismatch and silently discharges NO
+// hierarchy contract). A same-library graph instantiated under root is already
+// in scan(root)'s definition closure; one that is not instantiated under root
+// cannot change this comparison either way.
+template <class Pred>
+bool any_loop_subnode(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, Pred pred) {
+  const auto scan = [&pred](hhds::Graph* def_root) {
+    if (def_root == nullptr) {
+      return false;
+    }
+    if (const auto io = def_root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
+      return false;
+    }
+    for (const auto& graph : def_root->definitions().graphs()) {
+      for (const auto node : graph->body().nodes()) {
+        if (pred(node)) {
+          return true;
+        }
+      }
+    }
     return false;
+  };
+
+  if (scan(root)) {
+    return true;
   }
-  if (const auto io = root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
-    return false;
-  }
-  for (const auto& graph : root->definitions().graphs()) {
-    for (const auto node : graph->body().nodes()) {
-      if (node.is_loop_subnode()) {
+  if (sub_lib != nullptr) {
+    // get_io() hands back a TEMPORARY shared_ptr (weak_ptr::lock) that can be
+    // empty, so bind it before dereferencing.
+    hhds::GraphLibrary* root_lib = nullptr;
+    if (root != nullptr) {
+      if (const auto root_io = root->get_io(); root_io) {
+        root_lib = root_io->get_library();
+      }
+    }
+    for (const auto& [gid, external] : *sub_lib) {
+      if (root_lib != nullptr && external != nullptr) {
+        if (const auto external_io = external->get_io(); external_io && external_io->get_library() == root_lib) {
+          continue;  // same library => already covered by scan(root)'s closure
+        }
+      }
+      if (scan(external)) {
         return true;
       }
     }
@@ -6457,21 +6502,15 @@ bool has_native_loops(hhds::Graph* root) {
   return false;
 }
 
-bool has_activation_loops(hhds::Graph* root) {
-  if (root == nullptr) {
-    return false;
-  }
-  if (const auto io = root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
-    return false;
-  }
-  for (const auto& graph : root->definitions().graphs()) {
-    for (const auto node : graph->body().nodes()) {
-      if (const auto loop = node.subnode_loop(); loop && loop->activation_input) {
-        return true;
-      }
-    }
-  }
-  return false;
+bool has_native_loops(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  return any_loop_subnode(root, sub_lib, [](const auto& node) { return node.is_loop_subnode(); });
+}
+
+bool has_activation_loops(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  return any_loop_subnode(root, sub_lib, [](const auto& node) {
+    const auto loop = node.subnode_loop();
+    return loop && loop->activation_input;
+  });
 }
 
 bool copy_loop_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
@@ -6842,7 +6881,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // or unproved-body loops retain the correctness fallback and are materialized
   // in this same private scratch. This also handles activation exactly (the
   // native connectivity view is dependency-only for inactive carry bypasses).
-  if (!opts._loop_prepared && (has_native_loops(ref) || has_native_loops(impl))) {
+  if (!opts._loop_prepared && (has_native_loops(ref, sub_lib) || has_native_loops(impl, sub_lib))) {
     hhds::GraphLibrary                        ref_scratch;
     hhds::GraphLibrary                        impl_scratch;
     std::shared_ptr<hhds::Graph>              ref_top;
@@ -9587,7 +9626,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
 
 Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
-  if (has_activation_loops(design)) {
+  if (has_activation_loops(design, sub_lib)) {
     hhds::GraphLibrary                        scratch;
     std::shared_ptr<hhds::Graph>              scratch_top;
     std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;

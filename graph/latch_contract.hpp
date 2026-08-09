@@ -3,11 +3,14 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 
@@ -292,6 +295,72 @@ struct Icg_def_match {
 // disproof.
 [[nodiscard]] int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
                                           const std::function<bool(const hhds::Graph*)>& is_boxed = {});
+
+// The structural clock/reset interface of a definition. A clock input is a
+// port from which state in the definition subtree takes an edge, directly or
+// through a recognized gate. A reset input is a port from which that state's
+// reset derives; active_low tells how the port must be interpreted at the call
+// site. Neither classification depends on the port spelling.
+//
+// The cache is caller-owned because graph preparation can inline gate cells or
+// materialize occurrences. Sharing a process-global answer across those
+// rewrites would make the result depend on which consumer queried first.
+struct Reset_input_port {
+  uint32_t port_id    = 0;
+  bool     active_low = false;
+
+  friend bool operator==(const Reset_input_port&, const Reset_input_port&) = default;
+};
+
+struct Reset_input_ports {
+  std::vector<Reset_input_port> ports;
+  // False means some reset-bearing state in the subtree is driven by a cone
+  // that cannot be reduced to one declared input. A caller may still use the
+  // listed ports for clock correctness, but must not use them to skip the
+  // instance during simulation.
+  bool                          complete = true;
+};
+
+struct Clock_input_ports {
+  absl::flat_hash_set<uint32_t> ports;
+  // Same discipline as Reset_input_ports::complete, and for the same reason:
+  // an empty port set means "nothing in the subtree takes an edge" ONLY when
+  // the walk got all the way down. A body-less callee, a mutually
+  // instantiating pair, or a clock cone that does not reduce to a declared
+  // input all produce an empty-looking answer that a caller must NOT read as
+  // "there is nothing to gate here".
+  bool                          complete = true;
+};
+
+struct Clock_port_cache {
+  // node_hash_map: both memos hand out references that outlive later queries
+  // (callers bind `const auto& ports = ...` and the walk itself recurses while
+  // an outer frame holds one). A flat map moves its values on rehash.
+  absl::node_hash_map<const hhds::Graph*, Clock_input_ports> clock_memo;
+  absl::flat_hash_set<const hhds::Graph*>                    clock_busy;
+  absl::node_hash_map<const hhds::Graph*, Reset_input_ports> reset_memo;
+  absl::flat_hash_set<const hhds::Graph*>                    reset_busy;
+};
+
+[[nodiscard]] const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
+// The port set alone, for the consumers that only ask "does this port clock
+// state inside?" and have no gating decision riding on completeness.
+[[nodiscard]] const absl::flat_hash_set<uint32_t>& clock_input_ports(const std::shared_ptr<hhds::Graph>& def,
+                                                                     Clock_port_cache&                   cache);
+[[nodiscard]] const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
+
+// Insert Clock_cell(en = __valid | reset_asserted) on the structural clock
+// inputs of conditionally activated Sub instances. This is a post-lowering
+// library phase: call lowering has the composed __valid value, but callee
+// bodies (which identify their clock/reset ports) are not all complete yet.
+//
+// An instance whose clock or reset interface came back INCOMPLETE is refused
+// with a `time` error rather than skipped: this phase replaced tolg's
+// name-based gate, so declining to gate one silently lets its state advance
+// while __valid is false. A resolved-but-stateless callee is skipped quietly.
+//
+// Idempotent; returns the number of cells inserted.
+[[nodiscard]] int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_port_cache& cache);
 
 // Commit class of `n`, or nullopt when `n` is not a state element (or its
 // controlling cone could not be resolved to a root). `clocks` supplies the

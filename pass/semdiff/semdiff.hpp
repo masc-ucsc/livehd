@@ -210,6 +210,15 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // without the stamping/region/similarity work.
 [[nodiscard]] bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
 
+// Exact mixed-representation proof for one compact Subnode_loop against a
+// source-unrolled flat graph. The compact side is read through HHDS occurrence
+// traversal; neither graph is copied, expanded, or structurally mutated. v1 is
+// deliberately narrow: one combinational loop, one unsigned additive carry,
+// one index use per lane, no activation/nesting, and a chain/single-reduction
+// composition. Every output cone and every live node must canonicalize under
+// the descriptor's virtual occurrences; unsupported shapes return false.
+[[nodiscard]] bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled);
+
 // EXACT structural-equivalence proof by anchored parallel traversal -- the
 // verify-on-inconclusive fallback for abc incremental region reuse. Where
 // structural_identical()'s forward signing STALLS on a genuine combinational

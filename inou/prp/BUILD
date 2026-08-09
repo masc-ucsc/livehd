@@ -695,48 +695,13 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
 #
 # See tests/equiv/README.md for the four gap classes and how to read the output.
 _STATEMATCH_FIXME = [
-    "arr2d_dyn_sel",                 # mems: only 0/1 paired
-    "arr_comb_mux_const",            # mems: only 0/1 paired
-    "arr_comb_tmp",                  # mems: only 0/1 paired
-    "array_store_stale_rhs",         # mems: only 0/1 paired
-    "comb_array_const_index_read",   # mems: only 1/2 paired
     "dual_async_set_reset",          # `lhd compile` refuses the .v (attr-conflict: two async rungs on one Q slot)
-    "flop_reset_matrix",             # regs: only 4/6 paired
-    "instance_state_anon",           # regs: only 0/1 paired
-    "instance_state_order",          # regs: only 0/1 paired
-    "latch_reset",                   # regs: only 0/1 paired
-    "mem_comptime_init",             # mems: only 1/2 paired
-    "mem_comptime_init_inferred",    # mems: only 1/2 paired
     "mem_const_idx",                 # mems: only 0/1 paired
-    "mem_fwd_selfwrite",             # mems: only 0/1 paired
-    "mem_mut_array",                 # mems: only 0/1 paired
-    "mem_pending_reset_restore",     # mems: only 0/1 paired
-    "mem_pending_sync_init",         # mems: only 0/1 paired
-    "mem_rom",                       # mems: only 0/1 paired
-    "mem_rtl_rf",                    # mems: only 0/1 paired
-    "mem_whole_coexist",             # mems: only 0/1 paired
-    "mem_whole_comb",                # mems: only 0/1 paired
-    "mem_whole_cond_const",          # mems: only 0/1 paired
-    "mem_whole_reg",                 # mems: only 0/1 paired
-    "mod_call_mod",                  # regs: only 0/1 paired
-    "mod_call_pipe2",                # regs: only 1/2 paired
-    "mod_mul_add",                   # regs: only 0/4 paired
-    "mod_template",                  # regs: only 0/1 paired
-    "packed_assign",                 # mems: only 0/1 paired
+    "mem_fwd_selfwrite",             # ref memory vs golden two-flop representation
+    "mem_pending_sync_init",         # ref memory vs golden output flop representation
     "partsel_oob_ascending",         # `lhd compile` refuses the .v (negative-shift)
     "phase_hier_latch_neg",          # regs: only 0/1 paired
     "phase_two_clock_ports",         # regs: only 0/2 paired
-    "pipe2_two_out",                 # regs: only 0/2 paired
-    "pipe3_mul",                     # regs: only 0/1 paired
-    "pipe_range",                    # regs: only 0/1 paired
-    "pipe_stage_reg",                # regs: only 0/1 paired
-    "pipe_state_acc",                # regs: only 1/2 paired
-    "pipe_varargs_add",              # regs: only 0/1 paired
-    "reg_delay_init",                # regs: only 0/1 paired
-    "reg_tuple_reset",               # regs: only 0/2 paired
-    "sim_loop_mem_prefetch",         # mems: only 0/1 paired
-    "sim_sub_mealy_feedback",        # regs: only 0/1 paired
-    "sim_sub_stateful_feedback",     # regs: only 0/1 paired
     "struct_top_port",               # regs: only 0/1 paired
     "wire_reg",                      # regs: only 0/1 paired
 ]

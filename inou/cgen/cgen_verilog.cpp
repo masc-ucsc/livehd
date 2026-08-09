@@ -2306,7 +2306,13 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
     // attr. Skip emission when pass.formal proved it (no runtime check needed);
     // otherwise emit an immediate assert/assume in synthesis-off (LEC-invisible).
     if (sub_io->get_name() == livehd::graph_util::fproperty_module_name) {
-      if (livehd::graph_util::proven_of(node) != 0) {
+      // A DEFERRED obligation outranks a `proven` stamp. pass.formal marks a
+      // selected-top IO assume BOTH proven (the only channel that keeps it an
+      // active hypothesis for verify/LEC) and runtime_check (its verdict was
+      // never Proven, so the netlist must still police the environment). Only a
+      // genuinely discharged obligation — proven with NO deferred check — is
+      // elided here.
+      if (!livehd::graph_util::has_runtime_check(node) && livehd::graph_util::proven_of(node) != 0) {
         continue;  // pass.formal discharged it -> elide the runtime check
       }
       auto cond = get_driver(find_sink_pin(node, "cond"));

@@ -5,7 +5,7 @@
 // are fine; lhd `--emit-dir sim:` rejects it because the whole-callee Moore
 // deferral declines (echo depends on din) and the stateful callee cannot be
 // flattened.
-module ssmf_cell(
+module \sim_sub_mealy_feedback.cell (
   input        clock,
   input        reset,
   input        start,
@@ -24,7 +24,7 @@ module ssmf_cell(
   assign echo  = din ^ 4'd3;
 endmodule
 
-module sim_sub_mealy_feedback_top(
+module \sim_sub_mealy_feedback.top (
   input        clock,
   input        reset,
   input        go,
@@ -35,7 +35,7 @@ module sim_sub_mealy_feedback_top(
 );
   wire u_ready;
   wire kill = ~u_ready & flush;  // depends on the instance's own output
-  ssmf_cell u(.clock(clock), .reset(reset), .start(go), .kill(kill), .din(d),
-              .ready(u_ready), .echo(echo_o));
+  \sim_sub_mealy_feedback.cell  u(.clock(clock), .reset(reset), .start(go), .kill(kill), .din(d),
+                                    .ready(u_ready), .echo(echo_o));
   assign ready_o = u_ready;
 endmodule

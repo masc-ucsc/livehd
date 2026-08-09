@@ -164,16 +164,42 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
     auto  source_io      = source->get_io();
     auto* source_library = source_io ? source_io->get_library() : nullptr;
-    if (source_library == nullptr || !sim_library.copy_from(*source_library, source->get_name())) {
+    if (source_library == nullptr) {
       livehd::diag::err("inou.cgen.sim", "scratch-copy", "internal")
           .msg("could not copy '{}' into the simulator's private output library", source->get_name())
           .emit();
       return;
     }
+    // copy_from is DEFINITION-LOCAL and a copied parent resolves
+    // get_subnode_graph() through the DESTINATION library only, so copy the
+    // whole callee closure — a child def missing from `var.graphs` would
+    // otherwise resolve to null here and its instances would silently become
+    // body-less blackboxes that compute nothing at simulation time.
+    for (const auto& graph : source->definitions().graphs()) {
+      if (sim_library.find_io(graph->get_name())) {
+        continue;  // shared callee already copied for an earlier source
+      }
+      if (!sim_library.copy_from(*source_library, graph->get_name())) {
+        livehd::diag::err("inou.cgen.sim", "scratch-copy", "internal")
+            .msg("could not copy '{}' into the simulator's private output library", graph->get_name())
+            .emit();
+        return;
+      }
+    }
   }
-  for (const auto& source : var.graphs) {
-    auto io = source ? sim_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
-    sim_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
+  // Drive prepare/pre-scan/emission from the LIBRARY, not from `var.graphs`:
+  // the closure copy above makes a callee definition VISIBLE to the emitter
+  // (get_subnode_io() resolves where it used to return null), so a parent now
+  // writes `#include "<callee>.hpp"` and `__settle_g<k>()` calls for it. A list
+  // built from `var.graphs` alone would never emit that header/struct and the
+  // sim host-compile would die on the missing include. In the normal `lhd` flow
+  // `var.graphs` IS the whole library, so this is the same set — and the emit
+  // dir's BUILD srcs/manifest, which sim_into() derives from `var.graphs`, keeps
+  // listing every .cpp written here.
+  for (const auto gid : sim_library.all_gids()) {
+    if (auto g = sim_library.get_graph(gid)) {
+      sim_graphs.push_back(std::move(g));
+    }
   }
 
   // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,

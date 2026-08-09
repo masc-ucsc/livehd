@@ -32,8 +32,16 @@ mod lane(x:u8) -> (q:u16@[0]) {
 mod top(x:u8) -> (total:u32@[0]) {
   mut sum:u32 = 0
   for i in 0..<$count {
-    const q = lane::[name=lane_state](x=x)
-    sum = sum + q + i
+    if i == x { break }
+    // Keep the descriptor compact while its lifted body contains a runtime
+    // conditional Sub call and a runtime break. The simulator must emit BOTH
+    // a runtime ordinal for and guarded calls, never source-unroll this shape.
+    if x != 0 {
+      const q = lane::[name=lane_state](x=x)
+      sum = sum + q + i
+    } else {
+      sum = sum + i
+    }
   }
   total = sum
 }
@@ -62,6 +70,8 @@ write_design 400
 grep -q 'static constexpr std::size_t count = 400' "$H" || fail "descriptor-aware digest reused the count=4 source"
 grep -q 'std::array<Callee, count> lanes' "$H" || fail "compact state is not a std::array"
 grep -q 'for (std::size_t ordinal = 0; ordinal < count; ++ordinal)' "$H" || fail "runtime ordinal loop missing"
+grep -Rq 'conditional activation (reset keeps it open)' "$W/scale/sim" \
+  || fail "conditional Sub call was not emitted as a runtime if"
 grep -q '"count":400' "$W/scale/sim/compact.top.iface.json" || fail "iface manifest lost the compact count"
 if grep -q '__li399' "$H" "$C"; then
   fail "large compact sim physically emitted occurrence 399"

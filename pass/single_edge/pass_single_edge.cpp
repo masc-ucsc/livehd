@@ -123,6 +123,80 @@ void refuse(bool quiet, std::string_view code, const std::string& msg, std::stri
   livehd::diag::err(kPass, code, "unsupported").msg("{}", msg).hint(hint).emit();
 }
 
+// Why a Clock_cell GATE CHAIN cannot be folded into ONE endpoint enable, or
+// `None`. One walk, but the reason is reported back so each refusal keeps the
+// diagnostic code and wording it already had.
+enum class Chain_refusal { None, Invert, Div, Unbounded };
+
+// The WHOLE chain has to be walked, not just the outermost cell, because
+// `clock_op_of` absorbs every cell's enable into ONE endpoint enable:
+//
+//   invert — an active-low cell buried in the chain contributes an enable the
+//     hardware samples before the FALL, which the fold would then evaluate at
+//     the reference RISE: half a period out, and silent.
+//   div — worse than invisible. `absorb_chain` does `outer.div = inner.div`, so
+//     an OUTER cell with div=2 over an inner div=1 folds to a cone reading
+//     div == 1 and the `e.icg->div != 1` backstop below never fires; the
+//     divider then gets retimed into an endpoint enable, which is exactly the
+//     clock-blindness class the div refusal exists to stop.
+//
+// single_edge is deliberately STRICTLY MORE CONSERVATIVE than the same walk in
+// pass/lec/phase_sched.cpp (`resolve_chain`): that one sets `guard_before_fall`
+// only for a CONSTANT `invert` and only refuses a CONSTANT `div`, while a
+// NON-CONSTANT one refuses here — its sample phase / divisor is not decidable,
+// and single_edge's only move is to decline, never to mis-schedule. Do NOT
+// "fix" the divergence by relaxing this side; the two are allowed to disagree
+// in the refusing direction, not in the accepting one.
+//
+// Scan ONE MORE cell than the fold can absorb: `clock_op_depth` recurses while
+// `depth < kMaxGateChain` starting at depth 0, so it folds up to
+// kMaxGateChain+1 == 17 cells (graph/latch_contract.cpp). The extra hop is what
+// lets a legal 17-cell chain run off its end (a non-Clock_cell root) instead of
+// tripping the bound. kMaxGateChain lives in that file's anonymous namespace,
+// so the value is duplicated here — keep the two in step.
+constexpr int kMaxChainScan = 18;
+
+Chain_refusal chain_refusal(hhds::Pin_class cell_out) {
+  for (int hops = 0; hops < kMaxChainScan; ++hops) {
+    if (cell_out.is_invalid()) {
+      return Chain_refusal::None;  // an unconnected clk_ref: the `!e.icg` backstop below catches it
+    }
+    const auto cr = lc::control_root(cell_out, /*stop_at_clock_cell=*/true);
+    if (cr.net.is_invalid() || gu::is_graph_input_pin(cr.net) || gu::is_const_pin(cr.net)) {
+      return Chain_refusal::None;  // the chain ended on a real net
+    }
+    const auto cell = cr.net.get_master_node();
+    if (gu::type_op_of(cell) != Ntype_op::Clock_cell) {
+      return Chain_refusal::None;
+    }
+    // A NON-CONSTANT `invert` counts too: the sample phase is then not even
+    // decidable here, so fail closed rather than assume the positive flavour.
+    if (const auto inv = sink_driver(cell, "invert");
+        !inv.is_invalid() && (!gu::is_const_pin(inv) || !gu::hydrate_const(inv).is_known_false())) {
+      return Chain_refusal::Invert;
+    }
+    // Same fail-closed rule for `div`: `clock_cell_cone` only reads the pin when
+    // it is CONST, so a non-constant divisor leaves `Icg_cone::div` at its 1
+    // default and reads downstream as "no division at all".
+    if (const auto d = sink_driver(cell, "div"); !d.is_invalid()) {
+      if (!gu::is_const_pin(d)) {
+        return Chain_refusal::Div;
+      }
+      const auto dv = gu::hydrate_const(d);
+      if (!dv.is_just_i64() || dv.to_just_i64() != 1) {
+        return Chain_refusal::Div;
+      }
+    }
+    cell_out = sink_driver(cell, "clk_ref");
+  }
+  // The bound is exhausted — a chain deeper than the fold can absorb, or a
+  // cyclic clock cone (nothing type-checks one). FAIL CLOSED: `clock_op_of`
+  // absorbed those cells into one endpoint enable regardless, so returning
+  // "nothing wrong" here would ship precisely the silent mis-timing this walk
+  // exists to catch.
+  return Chain_refusal::Unbounded;
+}
+
 // ---------------------------------------------------------------------------
 
 struct Plan {
@@ -157,16 +231,34 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     const bool through_clock_cell = !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !gu::is_const_pin(cr.net)
                                     && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell;
     if (through_clock_cell) {
-      const auto cell = cr.net.get_master_node();
       // The positive gate flavour (`clk & en_latched`) can be retimed exactly
       // into the endpoint enable at the same reference edge. The active-low
       // flavour samples before the falling edge and needs a sub-period the slot
-      // model does not have, so it remains a named refusal.
-      if (const auto inv = sink_driver(cell, "invert");
-          !inv.is_invalid() && (!gu::is_const_pin(inv) || !gu::hydrate_const(inv).is_known_false())) {
+      // model does not have, so it remains a named refusal — ANYWHERE in the
+      // chain, because the fold below absorbs every cell's enable into one.
+      // Same reach for `div`: the per-cell scan is the ONLY place it is visible,
+      // since the fold overwrites the outer cell's divisor with the inner one's
+      // (the `e.icg->div != 1` test below stays as a backstop for the shapes
+      // that never reach a Clock_cell chain at all).
+      const auto refusal = chain_refusal(cr.net);
+      if (refusal == Chain_refusal::Invert) {
         plan.code = "clock-cell-sample-phase";
         plan.why  = "state element `" + label_of(n)
                     + "` is clocked through an active-low Clock_cell whose enable sample phase cannot be represented";
+        return plan;
+      }
+      if (refusal == Chain_refusal::Div) {
+        plan.code = "clock-cell-unsupported";
+        plan.why  = "state element `" + label_of(n)
+                    + "` is clocked through a Clock_cell chain that divides the clock, which cannot be retimed to one "
+                      "endpoint enable";
+        return plan;
+      }
+      if (refusal == Chain_refusal::Unbounded) {
+        plan.code = "clock-cell-unsupported";
+        plan.why  = "state element `" + label_of(n)
+                    + "` is clocked through a Clock_cell chain deeper than the fold can absorb, so it cannot be retimed "
+                      "to one endpoint enable";
         return plan;
       }
     }

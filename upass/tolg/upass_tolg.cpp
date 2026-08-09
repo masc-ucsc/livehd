@@ -25,6 +25,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hlop/dlop.hpp"
+#include "latch_contract.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
@@ -4607,6 +4608,17 @@ private:
     // reset ports would require a per-state clock/reset-domain map, and OR-ing
     // unrelated resets could advance non-reset state while the call is absent.
     // Fail closed rather than guess that mapping.
+    // Generated activation-capable callees are gated structurally after every
+    // body has been built. A port name is neither necessary (`clk_i`) nor
+    // sufficient (a minted but unused `clock`) evidence that it clocks state.
+    // Keep the legacy spelling path only for imported callees without the
+    // generated __valid ABI, where no post-lowering guard is available.
+    if (gio->has_input("__valid")) {
+      for (const auto& [sink, raw_clock] : deferred_clocks) {
+        sink.connect_driver(raw_clock);
+      }
+      deferred_clocks.clear();
+    }
     if (!call_guard.is_invalid() && !deferred_clocks.empty()) {
       if (active_resets.size() > 1) {
         error_here("upass.tolg: conditional call to '{}' has multiple reset inputs; clock/reset domain mapping is ambiguous",
@@ -8148,6 +8160,15 @@ static void check_unlowered_casserts(const std::shared_ptr<Lnast>& lnast) {
     }
   };
   walk(lnast->get_root());
+}
+
+void uPass_tolg::gate_activation_clocks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  livehd::latch_contract::Clock_port_cache cache;
+  for (const auto& graph : graphs) {
+    if (graph) {
+      (void)livehd::latch_contract::gate_activation_clocks(graph.get(), "upass.tolg", cache);
+    }
+  }
 }
 
 void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry) {

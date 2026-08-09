@@ -1,0 +1,15 @@
+/*
+:name: loop_roll_flat
+:type: lec
+:set: compile.upass.roll=true
+*/
+// Rolled-vs-unrolled structural correspondence with no call boundary in the
+// loop body. Comparisons and muxes survive O1, so semdiff must recognize the
+// four lanes without physically expanding the compact LGraph.
+pub mod top(x:u8, y:u8) -> (z:u10@[0]) {
+  mut acc:u10 = 0
+  for i in 0..<4 {
+    acc = acc + (if x > i { y } else { 0 })
+  }
+  z = acc
+}

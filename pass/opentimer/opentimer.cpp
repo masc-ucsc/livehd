@@ -20,7 +20,9 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 #include "pass_opentimer.hpp"
+#include "pass_partition.hpp"
 #include "pin_tracker.hpp"
 #include "str_tools.hpp"
 
@@ -248,6 +250,13 @@ std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const Node& n) {
 }  // namespace
 
 void Pass_opentimer::time_work(Eprp_var& var) {
+  // Private physical library for the occurrence expansion below: pass.opentimer
+  // is not occurrence-aware (it times a Sub as ONE instance), so a rolled
+  // design is copied here and expanded before anything reads it. Declared
+  // FIRST, ahead of every other local, so it outlives each graph handle that
+  // points into it (locals die in reverse declaration order).
+  hhds::GraphLibrary occurrence_library;
+
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
@@ -281,6 +290,80 @@ void Pass_opentimer::time_work(Eprp_var& var) {
 
   auto g = selected.front();
 
+  // A design compiled with compile.upass.roll keeps ONE compact Sub standing
+  // for `count` occurrences. pass.opentimer is not occurrence-aware — all three
+  // hier modes walk a Sub as a single physical instance — so area, path count
+  // and every QoR number would come out short by count-1. Expand up front, for
+  // every mode, into opentimer's private library: the input library belongs to
+  // the caller and this pass only reads it. When there is no compact Sub (the
+  // common case) nothing is copied and the input graph is timed in place.
+  const auto design_defs = g->definitions().graphs();
+  bool       has_compact = false;
+  for (const auto& def : design_defs) {
+    for (auto n : def->body().nodes()) {
+      // Deliberately NO get_subnode_graph() test: a body-less replicated black
+      // box (a liberty/IP cell instantiated in a loop) is a compact group too —
+      // pass/partition/flatten.cpp re-stamps its loop descriptor rather than
+      // collapsing it, and materialize_occurrences keys off this flag alone.
+      if (n.is_loop_subnode()) {
+        has_compact = true;
+        break;
+      }
+    }
+    if (has_compact) {
+      break;
+    }
+  }
+  if (has_compact) {
+    // copy_from is DEFINITION-LOCAL and a copied parent resolves
+    // get_subnode_graph() through the DESTINATION library only, so the whole
+    // callee closure has to come along — and every def copied gets
+    // materialized, not just the top: a compact loop nested in a callee is
+    // timed too (and, under hier=true, inlined by the flattener).
+    auto  io  = g->get_io();
+    auto* lib = io ? io->get_library() : nullptr;
+    if (lib == nullptr) {
+      livehd::diag::err("pass.opentimer", "scratch-copy", "internal")
+          .msg("could not copy '{}' into opentimer's private physical library", g->get_name())
+          .emit();
+      return;
+    }
+    std::vector<std::shared_ptr<hhds::Graph>> occurrence_graphs;
+    for (const auto& def : design_defs) {
+      if (!occurrence_library.find_io(def->get_name())) {  // shared callee may already be copied
+        if (!occurrence_library.copy_from(*lib, def->get_name())) {
+          livehd::diag::err("pass.opentimer", "scratch-copy", "internal")
+              .msg("could not copy '{}' into opentimer's private physical library", def->get_name())
+              .emit();
+          return;
+        }
+        auto def_io = occurrence_library.find_io(def->get_name());
+        occurrence_graphs.push_back(def_io ? def_io->get_graph() : std::shared_ptr<hhds::Graph>{});
+      }
+      // Body-less defs (the liberty/tie cells that dominate a mapped netlist)
+      // are IO-only, so definitions() never lists them as graphs. Clone the
+      // decls this body references: without them the copied Sub instances
+      // resolve to no subnode, and expansion/flatten drop the black box.
+      for (auto n : def->body().nodes()) {
+        if (livehd::graph_util::is_type_sub(n) && n.get_subnode_graph() == nullptr) {
+          livehd::partition::resolve_or_clone_subdef(&occurrence_library, n);
+        }
+      }
+    }
+    auto top_io   = occurrence_library.find_io(g->get_name());
+    auto top_copy = top_io ? top_io->get_graph() : std::shared_ptr<hhds::Graph>{};
+    if (!top_copy) {
+      livehd::diag::err("pass.opentimer", "scratch-copy", "internal")
+          .msg("could not copy '{}' into opentimer's private physical library", g->get_name())
+          .emit();
+      return;
+    }
+    if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.opentimer")) {
+      return;  // diag already emitted
+    }
+    g = top_copy;
+  }
+
   // Whole-design timing (`hier=true`): structurally inline the instance
   // hierarchy into a scratch def (pass/partition's flatten_hierarchy) and time
   // THAT through the classic single-module path below. The legacy forward_hier
@@ -306,9 +389,15 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     }
     if (has_hier) {
       pass.report_module_ = std::string{g->get_name()};  // reports keep the real top name
-      scratch_lib         = g->get_io()->get_library();
-      scratch_name        = pass.report_module_ + "__ot_flat_tmp";
-      scratch             = livehd::partition::flatten_hierarchy(g.get(), scratch_lib, scratch_name);
+
+      // flatten_hierarchy hard-refuses a replicated Sub (splicing one body copy
+      // would silently drop count-1 occurrences); the prologue above already
+      // materialized every one of them, so `g` is safe to splice. When it was
+      // copied, this library is opentimer's own; otherwise the scratch def
+      // lands in the input library and is deleted at the end of the run.
+      scratch_lib  = g->get_io()->get_library();
+      scratch_name = pass.report_module_ + "__ot_flat_tmp";
+      scratch      = livehd::partition::flatten_hierarchy(g.get(), scratch_lib, scratch_name);
       if (!scratch) {
         return;  // diag already emitted
       }

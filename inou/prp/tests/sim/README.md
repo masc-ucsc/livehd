@@ -54,12 +54,14 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `loop_roll_carry.prp` | accumulator over a lifted body | `loop_roll_carry.accumulates` | a ROLLED loop (`compile.upass.roll=true`): one replicated `Sub`, asserted by `:expect_instances:` |
 | `loop_roll_carry_unrolled.prp` | same source, rolling off | `loop_roll_carry_unrolled.accumulates` | the other half of the rolled-vs-unrolled differential — same values, six instances |
 | `loop_roll_cond_write.prp` | conditionally-written carry | `loop_roll_cond_write.conditional_carry` | rolled; pins the carry-classification hazard (a variable written on only some paths is still a carry) |
+| `loop_roll_conditional_state_call.prp` | runtime-break loop with stateful conditional child | `rolled_cond_top.compact_for_and_conditional_child_if` | native `std::array` loop, cumulative activation, inactive carry bypass, reset-open child calls |
 | `loop_roll_final_only.prp` | final-only loop result | `loop_roll_final_only.last_value` | rolled output with no ordinal-0 input value |
 | `loop_roll_named_alias.prp` | source-unit scalar type alias | `loop_roll_named_alias.alias_carry` | alias is resolved to a concrete lifted boundary |
 | `loop_roll_inferred_bool.prp` | inferred boolean carry | `loop_roll_inferred_bool.bool_carry` | boolean boundary inference without guessing an integer width |
 | `loop_roll_later_comptime.prp` | carry used by a later loop domain | `loop_roll_later_comptime.preserved` | planner keeps the first loop unrolled so the later domain remains comptime |
 | `loop_roll_external_reg.prp` | enclosing register carry | `loop_roll_external_reg.shared_reg` | explicit unrolled fallback until `ref` is legal across a `mod` boundary |
 | `loop_comptime_break_under_runtime_if.prp` | guarded loop with a comptime break | `loop_comptime_break_under_runtime_if.guarded` | regression for `loop-runtime-break`: an enclosing RUNTIME `if` must not make a comptime `break` illegal |
+| `conditional_state_named_clock.prp` | stateful conditional child on `clk_i`/`rst_ni` | `named_clock_parent.holds_and_resets` | structural clock/reset discovery; inactive child holds, active-low reset still reaches it |
 
 ## Header tags used by these fixtures
 

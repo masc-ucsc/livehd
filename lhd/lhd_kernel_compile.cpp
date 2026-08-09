@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Compile pipeline: validation, elaboration, scanning, lowering, and synthesis.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -15,6 +13,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
 #include "latch_contract.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
@@ -103,7 +102,7 @@ void validate_emits(const Options& opts) {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean"}) {
       reject_emit_kind(
           opts,
-                       k,
+          k,
           {"usage", "tool prints to stdout (redirect with `>`); it has no --emit outputs", "use compile for declared artifacts"});
     }
   }
@@ -372,8 +371,8 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
     return fit == lit->second.end() ? std::string{} : fit->second;
   };
 
-  absl::flat_hash_map<std::string, std::string>          unit_dir;      // unit -> source dir (case-sensitive)
-  absl::flat_hash_set<std::string> parsed_paths;  // abs paths already parsed
+  absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
+  absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
   for (const auto& f : seed_files) {
     unit_dir[unit_name_of(f)] = dir_of(f);
     parsed_paths.insert(abspath_of(f));
@@ -452,11 +451,11 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
       }
       livehd::diag::sink().emit(
           livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-          .code     = "import-ambiguous",
-          .category = "name",
-          .pass     = "lhd.compile",
-          .message  = std::format("ambiguous import \"{}\": resolves to more than one file", name),
-          .hint     = std::format("candidates: {}; rename the file or import explicitly", list)});
+                                   .code     = "import-ambiguous",
+                                   .category = "name",
+                                   .pass     = "lhd.compile",
+                                   .message  = std::format("ambiguous import \"{}\": resolves to more than one file", name),
+                                   .hint     = std::format("candidates: {}; rename the file or import explicitly", list)});
     }
     if (ambiguous) {
       throw classify_engine_failure("ambiguous import resolution");
@@ -631,7 +630,8 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
         labels["preserve_param_provenance"] = "true";
       }
     } else if (needs_graphs && (pit->second == "1" || pit->second == "true")) {
-      throw Lhd_error{"io", "compile.slang.preserve_param_provenance=true requires a pyrope-only emission",
+      throw Lhd_error{"io",
+                      "compile.slang.preserve_param_provenance=true requires a pyrope-only emission",
                       "a graphs flow (lg/verilog/sim emit) folds package params; drop the flag or emit pyrope in a "
                       "separate invocation"};
     }
@@ -1023,7 +1023,7 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
 // `lhd tool cat ln:…` — the former ln.cat: bare Lnast::dump concatenation of
 // every selected unit. `tokens` are the input tokens (the verb stripped).
 void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens) {
-  auto in = classify_ln_inputs(tokens, "tool cat");
+  auto in    = classify_ln_inputs(tokens, "tool cat");
   auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
   for (const auto& ln : units) {  // bare Lnast::dump concatenation (true cat)
     std::ostringstream oss;
@@ -1165,7 +1165,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
         .msg("--set upass.toln=0 keeps the original pre-upass LNAST, but no pyrope emit (pass.prp_writer) consumes it")
         .hint(
             "toln:0 is meant for `--emit-dir pyrope:DIR/` (re-emit source from the inou.slang/inou.prp LNAST); "
-              "without a pyrope emit this is a debugging or unexpected flow")
+            "without a pyrope emit this is a debugging or unexpected flow")
         .emit();
   }
 
@@ -1302,12 +1302,15 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     if (auto it = up.find("reset_style"); it != up.end() && !it->second.empty()) {
       reset_style = it->second;
     }
+    std::vector<std::shared_ptr<hhds::Graph>> lowered;
     for (const auto& ln : var.lnasts) {
       auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style);
       if (g) {
         var.add(g);
+        lowered.push_back(g);
       }
     }
+    uPass_tolg::gate_activation_clocks(lowered);
   }
   res.recipe_steps.emplace_back("lnast.tolg");
   if (livehd::diag::sink().has_errors()) {
@@ -1611,7 +1614,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         // every module it instantiates — unlike the lg:/pyrope: emits, which
         // never filter — so `--top X --emit-dir ln:` wrote a one-unit dir that
         // could not be linked ("call to undefined function '<child>'").
-        auto units = var.lnasts;
+        auto                                units = var.lnasts;
         std::vector<std::shared_ptr<Lnast>> wrappers;
         for (const auto& ln : units) {
           if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {

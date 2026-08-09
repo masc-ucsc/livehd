@@ -1,0 +1,45 @@
+/*
+:name: loop_roll_conditional_state_call
+:type: simulation
+:set: compile.upass.roll=true
+*/
+
+// One compact runtime loop whose lifted body conditionally calls a stateful
+// module. Generated simulation must retain the loop as std::array + C++ for,
+// and skip each inactive child call with C++ if; source unrolling is not an
+// acceptable implementation of this fixture.
+mod rolled_cond_lane(a:u8) -> (q:u12@[0]) {
+  reg acc:u12 = 0
+  acc = acc + a
+  q = acc
+}
+
+pub mod rolled_cond_top(mask:u4, stop:u4, a:u8) -> (total:u16@[0]) {
+  mut sum:u16 = 0
+  for i in 0..<4 {
+    if stop#[i] { break }
+    if mask#[i] {
+      const q = rolled_cond_lane::[name=lane_state](a=a + i)
+      sum = sum + q
+    }
+  }
+  total = sum
+}
+
+test rolled_cond_top.compact_for_and_conditional_child_if {
+  mut dut = rolled_cond_top
+  mut bad = 0
+  tick 3 {
+    dut.a = 1
+    dut.mask = 5
+    dut.stop = 8
+    if clock == 1 { dut.mask = 0 }
+    step
+
+    mut want:u16 = 0
+    if clock == 0 { want = 4 }
+    if clock == 2 { want = 8 }
+    if dut.total != want { bad = bad + 1 }
+  }
+  assert(bad == 0, "inactive rolled lanes hold state and active lanes resume")
+}

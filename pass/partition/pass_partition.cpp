@@ -1681,8 +1681,38 @@ void Pass_partition::partition(Eprp_var& var) {
     auto io = source ? occurrence_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
     occurrence_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
   }
-  if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.partition")) {
+  // Materialize everything the closure copy brought in, not just the
+  // `var.graphs`-named entries: a compact loop Sub left inside a closure-only
+  // callee reaches flatten's structural inliner (which refuses it) and makes
+  // every region/port statistic count one instance instead of `count`.
+  std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
+  for (const auto gid : occurrence_library.all_gids()) {
+    if (auto graph = occurrence_library.get_graph(gid)) {
+      scratch_graphs.push_back(std::move(graph));
+    }
+  }
+  if (!livehd::graph_util::materialize_occurrences_all(scratch_graphs, "pass.partition")) {
     return;
+  }
+  // Def list handed to resolve_order: it builds its gid2graph EXCLUSIVELY from
+  // this vector, so a closure-only callee missing here is a Sub the DFS cannot
+  // follow — it never lands in `order` and no Partitioner ever runs on it.
+  // `occurrence_graphs` (i.e. `var.graphs`) stays FIRST because resolve_order
+  // picks the first entry as top when --top is empty and all_gids() is
+  // name-hash order: top selection must not depend on it.
+  std::vector<std::shared_ptr<hhds::Graph>> resolve_graphs = occurrence_graphs;
+  {
+    absl::flat_hash_set<hhds::Gid> listed;
+    for (const auto& graph : occurrence_graphs) {
+      if (graph) {
+        listed.insert(graph->get_gid());
+      }
+    }
+    for (const auto& graph : scratch_graphs) {
+      if (listed.insert(graph->get_gid()).second) {
+        resolve_graphs.push_back(graph);
+      }
+    }
   }
 
   auto top     = std::string{var.get("top", "")};
@@ -1696,7 +1726,7 @@ void Pass_partition::partition(Eprp_var& var) {
     // decomposition must match what an emit run would build.
     std::string               t = top;
     std::vector<hhds::Graph*> order;
-    auto*                     g = resolve_order(occurrence_graphs, t, order);
+    auto*                     g = resolve_order(resolve_graphs, t, order);
     if (g == nullptr) {
       livehd::diag::err("pass.partition", "no-top", "unsupported")
           .msg("partition: top module '{}' not found in the input library", t)
@@ -1736,5 +1766,5 @@ void Pass_partition::partition(Eprp_var& var) {
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
-  build_decomposition(occurrence_graphs, &outlib, top, dbg, {}, flatten);
+  build_decomposition(resolve_graphs, &outlib, top, dbg, {}, flatten);
 }

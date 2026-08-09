@@ -43,10 +43,15 @@ struct uPass_tolg {
   // and cheap (linear scan); callable from any tolg orchestration site.
   static void detect_lg_collisions(const Registry& registry);
 
+  // Phase 3: gate conditionally activated instance clocks after every phase-2
+  // body exists. The classification is structural and recursive, so it cannot
+  // be performed safely while calls are lowered in arbitrary definition order.
+  static void gate_activation_clocks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs);
+
   // Phase 2 — build the body graph. `reset_style` is the elaboration
   // flag (`upass.reset_style=sync|async`, default sync — target-dependent,
   // FPGA-typical): it decides whether implicit-reset flops tie their `async`
   // pin. A per-reg `:[sync=…]` attr beats the flag.
-  static std::shared_ptr<hhds::Graph> run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
-                                          const Registry& registry, std::string_view reset_style = "sync");
+  static std::shared_ptr<hhds::Graph> run(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry,
+                                          std::string_view reset_style = "sync");
 };

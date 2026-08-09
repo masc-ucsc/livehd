@@ -17,8 +17,8 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
-#include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
-#include "perf_tracing.hpp"       // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "log.hpp"               // LHD_LOG developer tracing on the "upass" channel
+#include "perf_tracing.hpp"      // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
@@ -418,7 +418,7 @@ void Pass_upass::work(Eprp_var& var) {
   // ORIGINAL count: the appended trees already arrive in extracted unit form
   // and carry no func_def to split. SSA below harvests io_meta from them.
   for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
-    const auto                  ln = var.lnasts.at(idx);
+    const auto ln = var.lnasts.at(idx);
     if (ln->is_pre_elaborated() || ln->is_upass_converged()) {
       continue;  // already detupled + lambda-split (loaded import / earlier round)
     }
@@ -636,12 +636,15 @@ void Pass_upass::work(Eprp_var& var) {
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
     }
+    std::vector<std::shared_ptr<hhds::Graph>> lowered;
     for (const auto& ln : var.lnasts) {
       auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
         var.add(g);
+        lowered.push_back(g);
       }
     }
+    uPass_tolg::gate_activation_clocks(lowered);
   }
 
   // ── Unresolved live imports. With import_defer:1 the kernel's

@@ -47,13 +47,11 @@ bool setting_enabled(std::string_view value) { return value != "false" && value 
 
 // ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
 
-// Exact no-solver normalization for the mixed representation of ONE source
-// loop: compact Subnode_loop on one side, ordinary source-unrolled structure on
-// the other. Materialize the compact sites in private scratch and inline only
-// their synthetic lifted bodies; then semdiff sees the same direct nodes the
-// source unroller emitted. This is intentionally a VERIFY-only optimization:
-// false (or any unsupported shape) falls through to normal CVC5 LEC, while true
-// is an exact structural identity proof and avoids solving the body count times.
+// Legacy exact no-solver fallback for mixed loop representation. New flat
+// additive loops are handled first by semdiff's read-only occurrence fold. This
+// private-scratch materialize+inline path remains for older supported shapes
+// (notably lifted bodies containing calls); replacing it is tracked as the
+// highest-priority representation debt in todo_loop_cond_sub.md.
 bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled, const livehd::semdiff::Semdiff_options& options) {
   if (compact == nullptr || unrolled == nullptr) {
     return false;
@@ -1538,24 +1536,34 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // every other child Sub stays an opaque node matched by name/def identity
       // alone. Without it a def holding a rolled loop next to an UNKNOWN (or
       // REFUTED) child would be cached Proven on a child proof never made.
-      const bool normalized_loop_identity
-          = o.semdiff != "none" && kids_proven && !o.design_assumes && mixed_loop_repr
-            && (ref_loop ? mixed_loop_structural_identity(ref_by_name[name], impl_by_name[name], so)
-                         : mixed_loop_structural_identity(impl_by_name[name], ref_by_name[name], so));
+      bool virtual_loop_fold        = false;
+      bool normalized_loop_identity = false;
+      if (o.semdiff != "none" && kids_proven && !o.design_assumes && mixed_loop_repr) {
+        auto* compact            = ref_loop ? ref_by_name[name] : impl_by_name[name];
+        auto* unrolled           = ref_loop ? impl_by_name[name] : ref_by_name[name];
+        virtual_loop_fold        = livehd::semdiff::folded_loop_identical(compact, unrolled);
+        normalized_loop_identity = virtual_loop_fold || mixed_loop_structural_identity(compact, unrolled, so);
+      }
       if (normalized_loop_identity) {
         const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
         livehd::lec::Query_result sr;
         sr.verdict         = Verdict::Proven;
         sr.engine          = "semdiff";
         sr.elapsed_ms      = ms;
-        sr.detail          = "structurally identical after compact-loop materialize+inline normalization (no solver call)";
+        sr.detail          = virtual_loop_fold
+                                 ? "structurally identical by compact-loop virtual-occurrence fold (no solver call)"
+                                 : "structurally identical after compact-loop materialize+inline normalization (no solver call)";
         proven[def_ix]     = 1;
         by_semdiff[def_ix] = 1;
         ++semdiff_count;
         {
           std::lock_guard report_lock(report_mutex);
           emit_lec_block_progress(name, sr, o, ms);
-          std::print("lec[hier]: '{}' MATCHED (semdiff compact-vs-unrolled normalization, no solver)\n", name);
+          if (virtual_loop_fold) {
+            std::print("lec[hier]: '{}' MATCHED (semdiff compact-vs-unrolled virtual-occurrence fold, no solver)\n", name);
+          } else {
+            std::print("lec[hier]: '{}' MATCHED (semdiff compact-vs-unrolled normalization, no solver)\n", name);
+          }
         }
         if (vcache != nullptr && !ckey.empty()) {
           vcache->insert(ckey, {sr.engine, sr.detail, ms});

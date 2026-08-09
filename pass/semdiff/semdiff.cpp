@@ -945,10 +945,11 @@ struct Side {
 };
 
 // A Get_mask is transparent only when its CONSTANT mask selects exactly every
-// bit of the value pin's DECLARED width, in order. This is deliberately based
-// on pin metadata plus the literal mask -- never on inferred ranges. A wider,
-// narrower, shifted, sparse, unknown, or dynamic mask is real logic and must
-// remain in the correspondence graph.
+// bit of the value pin's DECLARED width, in order, and the result declares the
+// same width. This is deliberately based on pin metadata plus the literal mask
+// -- never on inferred ranges. A widening/narrowing result or wider, narrower,
+// shifted, sparse, unknown, or dynamic mask is real logic and must remain in
+// the correspondence graph.
 std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& node) {
   if (gu::type_op_of(node) != Ntype_op::Get_mask) {
     return std::nullopt;
@@ -970,8 +971,9 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
       mask = e.driver;
     }
   }
-  const int bits = gu::bits_of(a);
-  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || !gu::is_const_pin(mask)) {
+  const int bits     = gu::bits_of(a);
+  const int out_bits = node_out_bits(node);
+  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || out_bits != bits || !gu::is_const_pin(mask)) {
     return std::nullopt;
   }
   const auto value = gu::hydrate_const(mask);
@@ -1743,6 +1745,527 @@ std::vector<uint64_t> input_descs(const hhds::Node_class& node, bool a_side, con
 }
 
 }  // namespace
+
+namespace {
+
+// Two independent chains keep the virtual-expression comparison on the same
+// collision footing as Canonical_digest. This is still only the discovery
+// representation: folded_loop_identical's shape/accounting gates are what make
+// the accepted mixed-loop class deliberately small and inspectable.
+struct Fold_key {
+  uint64_t h0 = 0;
+  uint64_t h1 = 0;
+  auto operator<=>(const Fold_key&) const = default;
+};
+
+Fold_key fold_atom(std::string_view tag, std::string_view payload = {}) {
+  const uint64_t t = hstr(tag);
+  const uint64_t p = hstr(payload);
+  return {hcombine(t, p), hcombine(hcombine(0xd6e8feb86659fd93ULL, t), p)};
+}
+
+Fold_key fold_join(Fold_key base, uint64_t value) {
+  base.h0 = hcombine(base.h0, value);
+  base.h1 = hcombine(base.h1, mix64(value ^ 0xa0761d6478bd642fULL));
+  return base;
+}
+
+Fold_key fold_join(Fold_key base, Fold_key value) {
+  base = fold_join(base, value.h0);
+  return fold_join(base, value.h1);
+}
+
+int occurrence_width(const hhds::Occurrence_pin& pin) {
+  if (pin.is_invalid()) {
+    return 0;
+  }
+  if (gu::is_graph_input_pin(pin)) {
+    auto io = pin.get_graph() == nullptr ? std::shared_ptr<hhds::GraphIO>{} : pin.get_graph()->get_io();
+    if (io) {
+      return gu::bits_of(pin, *io, pin.get_pin_name());
+    }
+  }
+  return gu::bits_of(pin);
+}
+
+std::optional<hhds::Occurrence_pin> occurrence_value_input(const hhds::Occurrence_node& node, std::string_view name) {
+  const auto           pid = Ntype::get_sink_pid(gu::type_op_of(node), name);
+  hhds::Occurrence_pin found;
+  for (const auto& edge : node.inp_edges()) {
+    if (edge.sink.get_port_id() != pid) {
+      continue;
+    }
+    if (!found.is_invalid()) {
+      return std::nullopt;
+    }
+    found = edge.driver;
+  }
+  return found.is_invalid() ? std::nullopt : std::optional<hhds::Occurrence_pin>{found};
+}
+
+bool occurrence_all_bits_mask(const hhds::Occurrence_node& node) {
+  if (gu::type_op_of(node) != Ntype_op::Get_mask) {
+    return false;
+  }
+  auto mask = occurrence_value_input(node, "mask");
+  if (!mask || !gu::is_const_pin(*mask)) {
+    return false;
+  }
+  const auto value = gu::hydrate_const(*mask);
+  return !value.has_unknowns() && value.is_just_i64() && value.to_just_i64() == -1;
+}
+
+// at_width's per-graph CACHE identity (not the cross-design fold key): the
+// pin's structural occurrence plus the requested width. It must never be a
+// display name — two nodes in one body are allowed to share attrs::name (cgen
+// de-collides them only at emit time), so a name-keyed cache hands the second
+// cone the FIRST cone's fold key and two different functions fold alike.
+struct Memo_key {
+  hhds::Occurrence_index pin;
+  int                    width = 0;
+
+  bool operator==(const Memo_key&) const = default;
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Memo_key& key) {
+    return H::combine(std::move(h), key.pin, key.width);
+  }
+};
+
+// Canonicalize a virtually-flattened combinational graph. The one intentional
+// algebraic normalization is addition modulo the selected output width:
+// intermediate Get_mask(-1) fits may move across an all-positive Sum when both
+// sides of the fit are at least that modulus. This is the exact bit-vector
+// identity (a+b mod 2^W), and is what lets a compact carry chain compare with
+// cprop's single n-ary reduction without materializing either representation.
+class Virtual_expr {
+public:
+  explicit Virtual_expr(hhds::Graph* graph) : graph_(graph), view_(graph->occurrences()) {}
+
+  std::optional<std::vector<std::pair<std::string, Fold_key>>> outputs() {
+    if (graph_ == nullptr || graph_->get_io() == nullptr) {
+      return std::nullopt;
+    }
+    std::vector<std::pair<std::string, Fold_key>> result;
+    auto                                          out = view_.lift(graph_->get_output_node());
+    for (const auto& edge : out.inp_edges()) {
+      const std::string name{edge.sink.get_pin_name()};
+      const int         width = static_cast<int>(graph_->get_io()->get_bits(name));
+      if (width <= 0) {
+        return std::nullopt;
+      }
+      auto key = at_width(edge.driver, width);
+      if (!key) {
+        return std::nullopt;
+      }
+      result.emplace_back(name, *key);
+    }
+    std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+    return result;
+  }
+
+  bool every_live_node_consumed() {
+    for (const auto& node : view_.nodes(hhds::Node_order::forward)) {
+      const auto op = gu::type_op_of(node);
+      if (op == Ntype_op::Nconst) {
+        continue;
+      }
+      if (op == Ntype_op::Sub) {
+        continue;  // occurrence view also surfaces the expanded wrapper
+      }
+      if (is_state(op)) {
+        return false;
+      }
+      if (node.has_out_edges() && !visited_.contains(node.get_occurrence_index())) {
+        return false;
+      }
+    }
+    return !failed_;
+  }
+
+private:
+  std::optional<int64_t> loop_index_value(const hhds::Occurrence_pin& pin) const {
+    if (!gu::is_graph_input_pin(pin) || pin.path().steps().empty() || graph_ == nullptr || graph_->get_io() == nullptr
+        || graph_->get_io()->get_library() == nullptr) {
+      return std::nullopt;
+    }
+    const auto& step = pin.path().steps().back();
+    if (!step.ordinal) {
+      return std::nullopt;
+    }
+    const auto sub  = graph_->get_io()->get_library()->get_node(step.subnode);
+    const auto loop = sub.subnode_loop();
+    if (!loop || !loop->index_input || pin.get_port_id() != *loop->index_input) {
+      return std::nullopt;
+    }
+    return loop->index_at(*step.ordinal);
+  }
+
+  std::optional<hhds::Occurrence_pin> loop_initial_driver(const hhds::Occurrence_pin& pin) const {
+    if (!gu::is_graph_input_pin(pin) || pin.path().steps().size() != 1 || graph_ == nullptr || graph_->get_io() == nullptr
+        || graph_->get_io()->get_library() == nullptr) {
+      return std::nullopt;
+    }
+    const auto& step = pin.path().steps().back();
+    if (!step.ordinal) {
+      return std::nullopt;
+    }
+    const auto sub = graph_->get_io()->get_library()->get_node(step.subnode);
+    if (sub.is_invalid() || !sub.is_loop_subnode()) {
+      return std::nullopt;
+    }
+    for (const auto occurrence : sub.subnode_group().occurrences()) {
+      if (occurrence.ordinal() != *step.ordinal) {
+        continue;
+      }
+      for (const auto& binding : occurrence.input_bindings()) {
+        if (binding.input_port() != pin.get_port_id() || binding.kind() != hhds::Input_binding_kind::carry_initial
+            || binding.stored_edges().size() != 1) {
+          continue;
+        }
+        return view_.lift(binding.stored_edges().front().driver);
+      }
+      break;
+    }
+    return std::nullopt;
+  }
+
+  std::optional<Fold_key> at_width(const hhds::Occurrence_pin& pin, int width) {
+    if (pin.is_invalid() || width <= 0) {
+      failed_ = true;
+      return std::nullopt;
+    }
+    const Memo_key memo_key{pin.get_occurrence_index(), width};
+    if (auto it = memo_.find(memo_key); it != memo_.end()) {
+      return it->second;
+    }
+    if (!active_.insert(memo_key).second) {
+      failed_ = true;  // v1 is combinational; any residual cycle declines
+      return std::nullopt;
+    }
+
+    std::optional<Fold_key> result;
+    if (gu::is_const_pin(pin)) {
+      result = fold_atom("const", gu::hydrate_const(pin).serialize());
+    } else if (gu::is_graph_input_pin(pin)) {
+      if (auto index = loop_index_value(pin)) {
+        result = fold_atom("const", Dlop::create_integer(*index)->serialize());
+      } else if (auto initial = loop_initial_driver(pin)) {
+        result = at_width(*initial, width);
+      } else {
+        auto key = fold_atom("input", pin.get_pin_name());
+        key      = fold_join(key, static_cast<uint64_t>(width));
+        key      = fold_join(key, gu::is_unsign(pin) ? 1 : 2);
+        result   = key;
+      }
+    } else {
+      const auto node = pin.get_master_node();
+      visited_.insert(node.get_occurrence_index());
+      const int native_width = occurrence_width(pin);
+
+      // A zero-extension/truncation can be crossed only while it preserves the
+      // modulus being compared. This deliberately does NOT make a narrowing
+      // Get_mask globally transparent; outside an additive reduction it stays
+      // a normal node with its own width and operand.
+      if (occurrence_all_bits_mask(node)) {
+        auto       input           = occurrence_value_input(node, "a");
+        const bool input_preserves = input
+                                     && ((gu::is_const_pin(*input) && !gu::hydrate_const(*input).has_unknowns()
+                                          && !gu::hydrate_const(*input).is_negative())
+                                         || occurrence_width(*input) >= width);
+        if (input && native_width >= width && input_preserves) {
+          result = at_width(*input, width);
+        }
+      }
+
+      if (!result && gu::type_op_of(node) == Ntype_op::Sum && native_width >= width) {
+        std::vector<Fold_key> terms;
+        if (collect_sum(pin, width, terms)) {
+          std::sort(terms.begin(), terms.end());
+          Fold_key key = fold_join(fold_atom("sum-mod"), static_cast<uint64_t>(width));
+          for (const auto& term : terms) {
+            key = fold_join(key, term);
+          }
+          result = key;
+        }
+      }
+
+      if (!result) {
+        auto key = native(pin);
+        if (key) {
+          result = occurrence_width(pin) == width ? *key : fold_join(fold_join(fold_atom("fit"), width), *key);
+        }
+      }
+    }
+
+    active_.erase(memo_key);
+    if (result) {
+      memo_.emplace(memo_key, *result);
+    }
+    return result;
+  }
+
+  bool collect_sum(const hhds::Occurrence_pin& pin, int width, std::vector<Fold_key>& terms) {
+    if (pin.is_invalid()) {
+      return false;
+    }
+    if (!gu::is_const_pin(pin) && !gu::is_graph_input_pin(pin)) {
+      const auto node = pin.get_master_node();
+      visited_.insert(node.get_occurrence_index());
+      if (occurrence_all_bits_mask(node)) {
+        auto       input           = occurrence_value_input(node, "a");
+        const bool input_preserves = input
+                                     && ((gu::is_const_pin(*input) && !gu::hydrate_const(*input).has_unknowns()
+                                          && !gu::hydrate_const(*input).is_negative())
+                                         || occurrence_width(*input) >= width);
+        if (input && occurrence_width(pin) >= width && input_preserves) {
+          return collect_sum(*input, width, terms);
+        }
+      }
+      if (gu::type_op_of(node) == Ntype_op::Sum && occurrence_width(pin) >= width) {
+        bool any = false;
+        for (const auto& edge : node.inp_edges()) {
+          // Sum port 0 is addition. Any subtract/other operand makes this a
+          // non-associative shape and the fold declines.
+          if (edge.sink.get_port_id() != 0 || !collect_sum(edge.driver, width, terms)) {
+            return false;
+          }
+          any = true;
+        }
+        return any;
+      }
+    }
+    auto term = at_width(pin, width);
+    if (!term) {
+      return false;
+    }
+    terms.push_back(*term);
+    return true;
+  }
+
+  std::optional<Fold_key> native(const hhds::Occurrence_pin& pin) {
+    if (pin.is_invalid() || gu::is_const_pin(pin) || gu::is_graph_input_pin(pin)) {
+      return at_width(pin, std::max(1, occurrence_width(pin)));
+    }
+    const auto node = pin.get_master_node();
+    const auto op   = gu::type_op_of(node);
+    if (op == Ntype_op::Sub || is_state(op) || op == Ntype_op::Invalid) {
+      failed_ = true;
+      return std::nullopt;
+    }
+    Fold_key key = fold_join(fold_atom("node"), static_cast<uint64_t>(op));
+    key          = fold_join(key, static_cast<uint64_t>(std::max(0, occurrence_width(pin))));
+    key          = fold_join(key, static_cast<uint64_t>(static_cast<uint32_t>(pin.get_port_id())));
+
+    absl::flat_hash_map<int, std::vector<Fold_key>> by_port;
+    for (const auto& edge : node.inp_edges()) {
+      const int child_width = std::max(1, occurrence_width(edge.driver));
+      auto      child       = at_width(edge.driver, child_width);
+      if (!child) {
+        return std::nullopt;
+      }
+      by_port[edge.sink.get_port_id()].push_back(*child);
+    }
+    std::vector<int> ports;
+    ports.reserve(by_port.size());
+    for (const auto& [port, _] : by_port) {
+      ports.push_back(port);
+    }
+    std::sort(ports.begin(), ports.end());
+    for (int port : ports) {
+      key          = fold_join(key, static_cast<uint64_t>(static_cast<uint32_t>(port)) | (1ULL << 40U));
+      auto& values = by_port[port];
+      std::sort(values.begin(), values.end());
+      for (const auto& value : values) {
+        key = fold_join(key, value);
+      }
+    }
+    return key;
+  }
+
+  hhds::Graph*                                graph_ = nullptr;
+  hhds::Occurrences_view                      view_;
+  absl::flat_hash_map<Memo_key, Fold_key>     memo_;
+  absl::flat_hash_set<Memo_key>               active_;
+  absl::flat_hash_set<hhds::Occurrence_index> visited_;
+  bool                                        failed_ = false;
+};
+
+bool same_io_contract(hhds::Graph* a, hhds::Graph* b) {
+  if (a == nullptr || b == nullptr || a->get_io() == nullptr || b->get_io() == nullptr) {
+    return false;
+  }
+  auto describe = [](const auto& decls, char kind) {
+    std::vector<std::string> out;
+    for (const auto& decl : decls) {
+      out.push_back(std::format("{}:{}:{}:{}", kind, decl.name, decl.bits, decl.unsign));
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+  };
+  return describe(a->get_io()->get_input_pin_decls(), 'i') == describe(b->get_io()->get_input_pin_decls(), 'i')
+         && describe(a->get_io()->get_output_pin_decls(), 'o') == describe(b->get_io()->get_output_pin_decls(), 'o');
+}
+
+int graph_input_uses(const hhds::Pin_class& root, const hhds::Pin_class& wanted, absl::flat_hash_set<hhds::Class_index>& active) {
+  if (root.is_invalid()) {
+    return 0;
+  }
+  if (gu::is_graph_input_pin(root)) {
+    return root.get_port_id() == wanted.get_port_id() ? 1 : 0;
+  }
+  if (gu::is_const_pin(root)) {
+    return 0;
+  }
+  auto node = root.get_master_node();
+  if (!active.insert(node.get_class_index()).second) {
+    return -1;
+  }
+  int uses = 0;
+  for (const auto& edge : node.inp_edges()) {
+    const int n = graph_input_uses(edge.driver, wanted, active);
+    if (n < 0) {
+      return -1;
+    }
+    uses += n;
+  }
+  active.erase(node.get_class_index());
+  return uses;
+}
+
+}  // namespace
+
+bool folded_loop_identical(hhds::Graph* compact, hhds::Graph* unrolled) {
+  if (!same_io_contract(compact, unrolled)) {
+    return false;
+  }
+
+  hhds::Node_class loop;
+  for (const auto& node : compact->body().nodes(hhds::Node_order::forward)) {
+    if (gu::type_op_of(node) == Ntype_op::Sub) {
+      if (!node.is_loop_subnode() || !loop.is_invalid()) {
+        return false;
+      }
+      loop = node;
+    } else if (is_state(gu::type_op_of(node))) {
+      return false;
+    }
+  }
+  if (loop.is_invalid()) {
+    return false;
+  }
+  for (const auto& node : unrolled->body().nodes(hhds::Node_order::forward)) {
+    if (gu::type_op_of(node) == Ntype_op::Sub || is_state(gu::type_op_of(node))) {
+      return false;
+    }
+  }
+
+  const auto descriptor = loop.subnode_loop();
+  const auto body       = loop.get_subnode_graph();
+  if (!descriptor || !body || descriptor->count < 2 || descriptor->count > (1u << 20) || !descriptor->index_input
+      || descriptor->activation_input || descriptor->next_active_output) {
+    return false;
+  }
+  const auto carries = loop.subnode_group().carries();
+  if (carries.size() != 1) {
+    return false;
+  }
+  for (const auto& node : body->body().nodes(hhds::Node_order::forward)) {
+    if (gu::type_op_of(node) == Ntype_op::Sub || is_state(gu::type_op_of(node))) {
+      return false;  // nested/stateful lanes decline in v1
+    }
+  }
+
+  auto input_decl = [&](hhds::Port_id pid) -> const hhds::GraphIO::DeclaredIoPin* {
+    for (const auto& decl : body->get_io()->get_input_pin_decls()) {
+      if (decl.port_id == pid) {
+        return &decl;
+      }
+    }
+    return nullptr;
+  };
+  auto output_decl = [&](hhds::Port_id pid) -> const hhds::GraphIO::DeclaredIoPin* {
+    for (const auto& decl : body->get_io()->get_output_pin_decls()) {
+      if (decl.port_id == pid) {
+        return &decl;
+      }
+    }
+    return nullptr;
+  };
+  const auto* index_decl  = input_decl(*descriptor->index_input);
+  const auto* carry_idecl = input_decl(carries.front().input_port());
+  const auto* carry_odecl = output_decl(carries.front().output_port());
+  if (index_decl == nullptr || carry_idecl == nullptr || carry_odecl == nullptr || carry_idecl->bits == 0
+      || carry_idecl->bits != carry_odecl->bits || !carry_idecl->unsign || !carry_odecl->unsign) {
+    return false;
+  }
+  const auto index_pin = body->get_input_pin(index_decl->name);
+  const auto carry_pin = body->get_input_pin(carry_idecl->name);
+  if (index_pin.is_invalid() || carry_pin.is_invalid()) {
+    return false;
+  }
+
+  // One body output, driven by an additive node with exactly one carry operand
+  // and one lane operand. The lane must abstract exactly one index use and no
+  // carry use; the carry operand must contain exactly one carry and no index.
+  hhds::Pin_class carry_driver;
+  size_t          output_edges = 0;
+  for (const auto& edge : body->get_output_node().inp_edges()) {
+    ++output_edges;
+    if (edge.sink.get_pin_name() == carry_odecl->name) {
+      carry_driver = edge.driver;
+    }
+  }
+  if (output_edges != 1 || carry_driver.is_invalid() || gu::is_const_pin(carry_driver) || gu::is_graph_input_pin(carry_driver)
+      || gu::type_op_of(carry_driver.get_master_node()) != Ntype_op::Sum) {
+    return false;
+  }
+  int carry_operands = 0;
+  int lane_operands  = 0;
+  for (const auto& edge : carry_driver.get_master_node().inp_edges()) {
+    if (edge.sink.get_port_id() != 0) {
+      return false;
+    }
+    absl::flat_hash_set<hhds::Class_index> active_index;
+    absl::flat_hash_set<hhds::Class_index> active_carry;
+    const int                              index_uses = graph_input_uses(edge.driver, index_pin, active_index);
+    const int                              carry_uses = graph_input_uses(edge.driver, carry_pin, active_carry);
+    if (index_uses < 0 || carry_uses < 0) {
+      return false;
+    }
+    if (index_uses == 0 && carry_uses == 1) {
+      ++carry_operands;
+    } else if (index_uses == 1 && carry_uses == 0) {
+      ++lane_operands;
+    } else {
+      return false;
+    }
+  }
+  if (carry_operands != 1 || lane_operands != 1) {
+    return false;
+  }
+
+  Virtual_expr compact_expr(compact);
+  Virtual_expr unrolled_expr(unrolled);
+  const auto   compact_outputs  = compact_expr.outputs();
+  const auto   unrolled_outputs = unrolled_expr.outputs();
+  const bool   compact_live     = compact_outputs && compact_expr.every_live_node_consumed();
+  const bool   unrolled_live    = unrolled_outputs && unrolled_expr.every_live_node_consumed();
+  if (!compact_outputs || !unrolled_outputs || *compact_outputs != *unrolled_outputs || !compact_live || !unrolled_live) {
+    return false;
+  }
+
+  // The only mutation is an inspectable correspondence attribute after every
+  // hard gate has discharged. No nodes or edges are added/removed.
+  gu::set_match(loop, 1);
+  for (const auto& node : body->body().nodes(hhds::Node_order::forward)) {
+    gu::set_match(node, 1);
+  }
+  for (const auto& node : unrolled->body().nodes(hhds::Node_order::forward)) {
+    gu::set_match(node, 1);
+  }
+  return true;
+}
 
 bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
   if (a == nullptr || b == nullptr) {

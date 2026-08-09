@@ -12,6 +12,7 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "abc_incr.hpp"
 #include "abc_map.hpp"
@@ -320,8 +321,38 @@ void Pass_abc::work(Eprp_var& var) {
     auto io = source ? occurrence_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
     occurrence_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
   }
-  if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.abc")) {
+  // Materialize everything the closure copy brought in, not just the
+  // `var.graphs`-named entries: a compact loop Sub left inside a closure-only
+  // callee is not something the mapper can read, so it would map one replica
+  // and drop the rest.
+  std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
+  for (const auto gid : occurrence_library.all_gids()) {
+    if (auto graph = occurrence_library.get_graph(gid)) {
+      scratch_graphs.push_back(std::move(graph));
+    }
+  }
+  if (!livehd::graph_util::materialize_occurrences_all(scratch_graphs, "pass.abc")) {
     return;
+  }
+  // Def list handed to the hierarchy walks below (size gate, decomposition).
+  // resolve_order builds its gid2graph EXCLUSIVELY from the vector it gets, so a
+  // closure-only callee missing here is a Sub the DFS cannot follow and no
+  // region is ever built for it. `occurrence_graphs` (i.e. `var.graphs`) stays
+  // FIRST because top is the first matching entry and all_gids() is name-hash
+  // order: top selection must not depend on it.
+  std::vector<std::shared_ptr<hhds::Graph>> resolve_graphs = occurrence_graphs;
+  {
+    std::unordered_set<hhds::Gid> listed;
+    for (const auto& graph : occurrence_graphs) {
+      if (graph) {
+        listed.insert(graph->get_gid());
+      }
+    }
+    for (const auto& graph : scratch_graphs) {
+      if (listed.insert(graph->get_gid()).second) {
+        resolve_graphs.push_back(graph);
+      }
+    }
   }
 
   auto top            = std::string{var.get("top", "")};
@@ -426,7 +457,7 @@ void Pass_abc::work(Eprp_var& var) {
   if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold(); !allow_oversize && threshold != UINT64_MAX) {
     std::unordered_map<hhds::Gid, hhds::Graph*> gid2graph;
     hhds::Graph*                                top_g = nullptr;
-    for (const auto& g : occurrence_graphs) {
+    for (const auto& g : resolve_graphs) {
       if (!g) {
         continue;
       }
@@ -470,7 +501,10 @@ void Pass_abc::work(Eprp_var& var) {
   // Memory nodes never reach the boundary code; any memory left native (an
   // unsupported shape) still cuts as a boundary (the memory=false behavior).
   if (map_memory) {
-    livehd::abc::lower_memories(occurrence_graphs);
+    // Whole scratch library, not just the `var.graphs`-named subset: flatten
+    // inlines closure-only callees into the top, so a Memory left native inside
+    // one would reach the mapper as a boundary in a memory=true run.
+    livehd::abc::lower_memories(scratch_graphs);
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -516,7 +550,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   bool dbg = false;
   Pass_partition::build_decomposition(
-      occurrence_graphs,
+      resolve_graphs,
       &outlib,
       top,
       dbg,

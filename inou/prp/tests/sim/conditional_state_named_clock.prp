@@ -1,0 +1,47 @@
+/*
+:name: conditional_state_named_clock
+:type: simulation
+*/
+
+// A conditional call must gate the ports that STRUCTURALLY clock state, not
+// ports whose spelling happens to be `clock` or `clk`.  This is the Minion
+// shape in miniature: the leaf uses `clk_i` and an active-low `rst_ni`.
+mod named_clock_leaf(clk_i:bool, rst_ni:bool, a:u8) -> (out:u8@[0]) {
+  reg q:u8:[clock_pin=ref clk_i, reset_pin=ref rst_ni, negreset=true] = 0
+  q = q + a
+  out = q
+}
+
+pub mod conditional_named_top(clk_i:bool, rst_ni:bool, en:bool, a:u8) ->
+    (out:u8@[0], ctl:u8@[1]) {
+  out = 0
+  if en {
+    out = named_clock_leaf(clk_i=clk_i, rst_ni=rst_ni, a=a)
+  }
+
+  // Non-vacuity control on the same explicit clock/reset domain.
+  reg every:u8:[clock_pin=ref clk_i, reset_pin=ref rst_ni, negreset=true] = 0
+  every = a
+  ctl = every
+}
+
+test conditional_named_top.hold_named_clock_and_open_gate_for_reset {
+  mut dut = conditional_named_top
+  mut bad = 0
+  tick 5 {
+    dut.rst_ni = clock != 0
+    dut.en = (clock == 1) or (clock == 4)
+    dut.a = 1 << clock
+    step
+
+    mut want_ctl:u8 = 0
+    if clock != 0 { want_ctl = 1 << clock }
+    if dut.ctl != want_ctl { bad = bad + 1 }
+
+    mut want_out:u8 = 0
+    if clock == 1 { want_out = 2 }
+    if clock == 4 { want_out = 18 }
+    if dut.out != want_out { bad = bad + 1 }
+  }
+  assert(bad == 0, "named clocks hold inactive child state and reset still reaches it")
+}

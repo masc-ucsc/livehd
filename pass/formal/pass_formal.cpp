@@ -384,10 +384,22 @@ void Pass_formal::work(Eprp_var& var) {
       if (root == nullptr || !is_designated_top(root)) {
         continue;
       }
-      // Collect FIRST: a design with no contract at all must not pay for a
-      // whole-design SMT encode + solve, and that is the common compile.
+      // Collect FIRST: a design with no contract ASSUMPTION must not pay for a
+      // whole-design SMT encode + solve, and an assert-only design is the common
+      // compile. The verdict correlation below is POSITIONAL over the encoder's
+      // own occ walk, so the vector itself must keep every occurrence (asserts
+      // included) — only the decision to solve at all is filtered here. The two
+      // filters agree by construction: lec reports kind=="assume" for exactly
+      // the occurrences is_assume_kind() accepts.
       auto occurrences = prop_occurrences(root);
-      if (occurrences.empty()) {
+      bool any_assume  = false;
+      for (const auto& occ : occurrences) {
+        if (livehd::lec::is_assume_kind(fprop_parts(occ.base_node()).kind)) {
+          any_assume = true;
+          break;
+        }
+      }
+      if (!any_assume) {
         continue;
       }
       livehd::lec::Lec_options ho;
@@ -563,9 +575,12 @@ void Pass_formal::work(Eprp_var& var) {
     // conditional and the obligations must stay in the persisted graph for
     // `lhd formal verify` / `lhd lec` to re-adjudicate.
     bool unchecked_hypotheses = false;
-    // The assume NODES stamped proven WITHOUT proof. Individually-proven assumes
-    // are all true in the design simultaneously, so a joint contradiction can only
-    // come from this set — and only this set has to be retracted below.
+    // The assume NODES stamped proven WITHOUT proof: assume_nocheck /
+    // assume_check=false, plus the selected-top IO assume (that one also carries a
+    // runtime_check, so only its `proven` stamp is a retraction concern).
+    // Individually-proven assumes are all true in the design simultaneously, so a
+    // joint contradiction can only come from this set — and only this set has to
+    // be retracted below.
     std::vector<hhds::Node_class> unchecked_assume_nodes;
     for (auto& node : props) {
       auto parts = fprop_parts(node);
@@ -597,20 +612,41 @@ void Pass_formal::work(Eprp_var& var) {
       if (is_top && !out.stateful && !gu::is_const_pin(cond)) {
         // A selected top has no parent that can discharge a precondition over
         // its primary IO. It is therefore an environment constraint by
-        // construction: keep it active, but say loudly that its check was
-        // converted to assume_nocheck. Descendant input assumes do NOT take
-        // this path; their actual call-site bindings are checked top-rooted by
-        // verify/LEC and by the hierarchy-aware compile preflight below.
+        // construction: keep it active as a hypothesis here instead of failing
+        // the build. Descendant input assumes do NOT take this path; their
+        // actual call-site bindings are checked top-rooted by verify/LEC and by
+        // the hierarchy-aware compile preflight below.
+        //
+        // Stamp BOTH, because the two attributes answer two different questions
+        // and this hypothesis needs both answers:
+        //   * `proven` is the ONLY channel that tells the persisted-graph
+        //     consumers the hypothesis is active — pass/lec/encode.cpp seeds
+        //     prop_active_assume from it, and lhd_kernel_formal counts it for the
+        //     "unchecked assume(s)" disclosure. Without it `lhd lec` compares the
+        //     FULL input space and REFUTES a design that is equivalent only under
+        //     the constraint (LEC's `assume_nocheck` spelling rule is an
+        //     ADDITIONAL entry point, not a substitute).
+        //   * `runtime_check` keeps the obligation in the emitted netlist: the
+        //     verdict was never Proven, so eliding the `assume(...)` would leave a
+        //     violating environment caught NOWHERE at compile time (unprovable
+        //     here is not an error). cgen_verilog honors the pair — a deferred
+        //     runtime check beats the `proven` stamp. Note only a VERILOG
+        //     simulation of that netlist executes it (it is emitted inside
+        //     `synthesis translate_off`); LiveHD's own simulator skips every
+        //     fproperty Sub, proven or not (inou/cgen/cgen_sim.cpp).
+        // `lhd formal verify` needs neither stamp: it re-derives this top_input
+        // class structurally (pass/lec/query occ_aclass).
         gu::set_proven(node, gu::kFormalAssume);
+        gu::set_runtime_check(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);
-        unchecked_assume_nodes.push_back(node);
+        unchecked_assume_nodes.push_back(node);  // proven WITHOUT proof -> retract on a joint contradiction
         unchecked_hypotheses = true;
         if (warn_assume) {
           livehd::diag::warn("pass.formal", "formal-top-assume", "comptime")
-              .msg("top-level IO assume in '{}'{} cannot be checked; treating it as assume_nocheck",
+              .msg("top-level IO assume in '{}'{} cannot be checked; treating it as an unchecked environment constraint",
                    g->get_name(),
                    parts.loc.empty() ? std::string{} : " at " + parts.loc)
-              .hint("the constraint remains active in assertion verification and LEC")
+              .hint("it stays active as a hypothesis for assertion verification and LEC, and as a runtime check in the netlist")
               .emit();
         }
         continue;
@@ -891,7 +927,8 @@ void Pass_formal::work(Eprp_var& var) {
     // graph too. Do this only for asserts: a proved checked assume is removed by
     // the occurrence-aware hierarchy preflight above, while an unchecked/top IO
     // assume is marked proven solely to make it an active hypothesis and must
-    // remain in the design for verify and LEC.
+    // remain in the design for verify and LEC (the top IO one additionally keeps
+    // its runtime check, so its netlist obligation survives too).
     //
     // ...and only when NO unchecked hypothesis was in play: under an unproven
     // assume the proof is conditional, so deleting the node would leave the

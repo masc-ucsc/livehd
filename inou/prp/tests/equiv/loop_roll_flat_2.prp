@@ -1,0 +1,17 @@
+/*
+:name: loop_roll_flat_2
+:set: compile.upass.roll=false
+:lec_expect: refuted
+:lec_set: formal.lec.semdiff=structural
+:lec_grep_not: MATCHED \(semdiff compact-vs-unrolled virtual-occurrence fold
+*/
+// Negative control: same surviving lane shape and count, different descriptor
+// start. The virtual fold must compare the inferred ordinal constants and
+// decline; the ordinary solver then refutes 4*x-domain lanes 1..4 vs 0..3.
+pub mod top(x:u8, y:u8) -> (z:u10@[0]) {
+  mut acc:u10 = 0
+  for i in 1..<5 {
+    acc = acc + (if x > i { y } else { 0 })
+  }
+  z = acc
+}

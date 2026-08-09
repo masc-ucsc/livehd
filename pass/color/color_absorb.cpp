@@ -111,6 +111,23 @@ bool absorb_small_defs(hhds::Graph* top, const Gid2Graph& gid2graph, uint64_t mi
       absorb.insert(g->get_gid());
     }
   }
+
+  // A replicated Sub stands for `count` occurrences, so splicing ONE body copy
+  // would silently drop the rest: gu::inline_sub_instance refuses it, and that
+  // refusal would abort the whole coloring run over what is only a QoR choice.
+  // Give the def up instead -- at EVERY site, not just the replicated one, so
+  // the all-or-none rule above still holds. pass.color cannot materialize the
+  // occurrences the way pass.abc/pass.partition/pass.lec do: those expand a
+  // private scratch copy, while absorb rewrites the live library in place, and
+  // unrolling it here would un-roll the design for every later consumer.
+  for (auto* g : order) {
+    for (auto n : g->body().nodes()) {
+      if (gu::type_op_of(n) == Ntype_op::Sub && n.is_loop_subnode()) {
+        absorb.erase(n.get_subnode_gid());
+      }
+    }
+  }
+
   s.defs_absorbed = absorb.size();
   if (absorb.empty()) {
     return true;

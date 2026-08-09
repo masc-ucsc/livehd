@@ -1,0 +1,8 @@
+/*
+:name: loop_roll_flat_1
+:set: compile.upass.roll=false
+:lec_set: formal.lec.semdiff=structural
+:lec_grep: MATCHED \(semdiff compact-vs-unrolled virtual-occurrence fold
+:lec_grep: 0 via solver
+*/
+// HEADER-ONLY variant: compile loop_roll_flat.prp with rolling disabled.
