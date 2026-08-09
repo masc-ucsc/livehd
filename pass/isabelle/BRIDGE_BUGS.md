@@ -510,3 +510,74 @@ same lever in different clothing, and both are chunking.
 
 Current honest budget for a DINO-scale Isabelle certificate proof: **≈ 5.5 h**,
 exponent ≈ 2.1.
+
+---
+
+## The first DINO-scale run: it closes, and where the 9 hours went
+
+**Synthetic** bridge at N=4912 (DINO SingleCycleCPU's node count), threads=8,
+detached systemd unit:
+
+| | |
+|---|---|
+| wall | **8 h 54 m 39 s** (parallel factor 2.54) |
+| CPU | 22 h 37 m |
+| peak RSS | **64.1 GB** |
+| result | `exit=0`, **0 errors, 0 sorries** |
+
+**Scope, stated precisely:** this is a synthetic chain — every node `Op_Not` of
+the previous, all 8-bit, one dep per node, one source, no outputs or flops. It
+shares DINO's *node count* and nothing else (DINO: GetMask 2093, And 803, SRA
+714, SHL 644, MuxN 150, `Or` up to arity 55, widths 1–127, 36 sources, 33 flops).
+It is a **scaling measurement at DINO's size, not a DINO proof.** Piece C — the
+emitter that would produce DINO's actual bridge — does not exist yet, so no DINO
+bridge file exists to check.
+
+The prediction was 5.5 h; the actual was 8.9 h, a **1.6× underestimate** even
+though the run used 8 threads against a threads=4 fit. Extrapolating from N=800
+underestimates, because the exponent is still climbing at that size.
+
+### Two declarations were essentially the entire run
+
+| line | lemma | time |
+|---|---|---|
+| 39360 | `combiner` | **26,371 s = 7 h 19 m** |
+| 39348 | `wf_distinct` | **15,425 s = 4 h 17 m** |
+| — | every other command | < 223 s |
+
+`combiner` is a single declaration and therefore single-threaded, so its 7 h 19 m
+*is* the 8 h 54 m wall.
+
+`wf_distinct` is `distinct topo_list` by `simp` — ~12 M pairwise numeral
+comparisons as rewrite steps on a 4912-element literal. It is the identical
+pathology already fixed in the other three well-formedness lemmas, and it was
+left on `simp`. Worse, the N=800 profile had flagged it (an unattributed 90.3 s
+entry noted as "probably `wf_distinct`") and it was not acted on.
+
+### Both fixed
+
+- `wf_distinct` → `by eval`. Ground decidable fact; the code generator runs the
+  real `distinct` in compiled ML.
+- `combiner` → **structural fold**. Was one `simp` carrying N rewrite rules
+  against an N-conjunct goal. Now: split the bounded quantifier once with two
+  locally-proved helpers (`ball_set_cons`, `ball_set_nil` — proved here rather
+  than looked up, so nothing depends on a library name), then discharge each
+  small goal with a directed `rule rec_k`, which is O(1) per node. This is the
+  Isabelle form of Lean's `List.forall_mem_cons` term fold.
+
+| N | before | after | gain |
+|---|---|---|---|
+| 400 | 103 s | 76 s | 1.36× |
+| 800 | 430 s | **262 s** | **1.64×** |
+
+**Exponent 2.12 → 1.86.** Naive extrapolation says ≈ 2 h at 4912; given the last
+extrapolation was 1.6× low, budget **2–4 h** and re-measure rather than trust it.
+
+### `by eval` extends the trusted base
+
+`eval` is oracle-based: it trusts the code generator rather than producing
+kernel-checked steps. Five lemmas now use it (`wf_distinct`, `wf_some_ev`,
+`wf_dep`, `phi_keys_sub_ev`, and the harness's own). For an artifact whose point
+is trustworthiness that is a real trade — `code_simp` is the checked-but-slower
+alternative. This is a deliberate choice and should be made explicitly before it
+reaches the emitter.

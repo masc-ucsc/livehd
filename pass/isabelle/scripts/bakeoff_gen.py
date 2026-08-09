@@ -53,7 +53,7 @@ def bst(pairs, val):
 
 
 def e2e(n):
-    recs = " ".join(f"rec{k}[symmetric]" for k in range(1, n + 1))
+    rule_lines = "\n".join(f"  apply (rule rec{k})" for k in range(1, n + 1))
     nds  = " ".join(f"nodes_at{k}" for k in range(1, n + 1))
     return f"""
 section \\<open>end-to-end: close the certificate bridge\\<close>
@@ -63,7 +63,7 @@ lemma word_of_bv_bvenc [simp]:
   by (simp add: word_of_int_uint)
 
 lemma wf_distinct: "distinct topo_list"
-  by (simp add: topo_list_def)
+  by eval
 
 lemma wf_some_ev: "list_all (\\<lambda>m. nodes_fn m \\<noteq> None) topo_list"
   by eval
@@ -74,8 +74,22 @@ lemma wf_some: "\\<forall>m \\<in> set topo_list. nodes G m \\<noteq> None"
 lemma wf_dep: "dep_ordered G topo_list"
   by eval
 
+text \\<open>Split the bounded quantifier structurally.  A single simp
+  carrying N rewrite rules against an N-conjunct goal is quadratic and
+  single-threaded; splitting once and then discharging each small goal with a
+  directed `rule` is O(1) per node.  These two helpers are proved here rather
+  than looked up, so nothing depends on a library lemma name.\\<close>
+
+lemma ball_set_nil: "(\\<forall>x \\<in> set []. P x) = True" by simp
+lemma ball_set_cons: "(\\<forall>x \\<in> set (a # xs). P x) = (P a \\<and> (\\<forall>x \\<in> set xs. P x))"
+  by simp
+
 lemma combiner: "\\<forall>m \\<in> set topo_list. phi m = eval_node G phi m"
-  by (simp del: One_nat_def add: topo_list_def {recs})
+  unfolding topo_list_def
+  apply (simp only: ball_set_cons ball_set_nil)
+  apply (intro conjI TrueI)
+{rule_lines}
+  done
 
 text \\<open>The off-topo side condition must NOT be proved by deciding
   membership per dependency -- that is N deps against an N-element set literal.
