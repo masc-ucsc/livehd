@@ -581,3 +581,60 @@ kernel-checked steps. Five lemmas now use it (`wf_distinct`, `wf_some_ev`,
 is trustworthiness that is a real trade — `code_simp` is the checked-but-slower
 alternative. This is a deliberate choice and should be made explicitly before it
 reaches the emitter.
+
+---
+
+## Trust base: `eval` vs `code_simp`, measured (2026-08-08)
+
+**Which methods extend the trusted base** — checked with `Thm_Deps.all_oracles`
+rather than asserted:
+
+| method | oracle |
+|---|---|
+| `by eval` | **`Code_Generator.holds_by_evaluation`** |
+| `by code_simp` | none |
+| `by simp` | none |
+
+So `eval` runs compiled ML and asserts the result through an oracle: believing it
+means trusting Isabelle's code generator and Poly/ML *in addition to* the kernel.
+`code_simp` uses the same code equations but routes every step through the
+simplifier, so it is kernel-checked. (`code_simp` takes no `add:` argument.)
+
+**Cost, N=800, run back-to-back so both saw the same machine load:**
+
+| variant | wall |
+|---|---|
+| `eval` | 263 s |
+| `code_simp` | **TIMEOUT at 3000 s** (never finished) |
+
+`code_simp` is >11× slower and did not complete in 50 minutes at N=800; at DINO
+scale it would be worse than the original `simp`. **The kernel-checked route is
+not affordable**, so the emitted bridge necessarily carries a code-generator
+dependency for its ground facts. That is a real limitation of the artifact, not a
+footnote: emit a `thm_oracles` audit on the final `_refines_fast` theorems so the
+dependency is reported rather than assumed away.
+
+## `wf_distinct` was dead code — and it cost 4 h 17 m
+
+`distinct topo_list` had **exactly one occurrence in the generated theory: its own
+declaration.** Nothing cited it.
+
+`eval_graph_of_local_agree_all` takes only `dep_ordered`, `some`, `rec` and `src`
+— distinctness drops out of its induction, because a repeated id is simply
+re-evaluated and covered by the inductive hypothesis. It was needed only by
+`dep_ordered_acc_sound`, and once `wf_dep` was discharged directly `by eval` that
+route disappeared. The lemma was left behind.
+
+In the original 8 h 54 m run it was still `by simp` and consumed **4 h 17 m —
+half the wall clock, on a lemma nothing used.** Removing it now saves almost
+nothing (the `eval` conversion had already neutralised it: 263 s at N=800 either
+way); what it buys is **one fewer oracle site**, 4 → 3.
+
+**The lesson is about profiling, not about `distinct`.** A per-command profile
+ranks what is *expensive*; it says nothing about what is *needed*. Both times the
+profile pointed at this lemma the response was to make it faster — first `simp` →
+`eval` — and neither time did anyone check whether it was cited. Check the call
+graph before optimising an entry in a profile.
+
+(A full `graph_cert_wf` claim *does* still require distinctness — but `by eval`,
+never `by simp`.)

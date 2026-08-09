@@ -62,8 +62,12 @@ lemma word_of_bv_bvenc [simp]:
   "(word_of_int (bv_uint (bvenc (y :: 'w::len word))) :: 'w word) = y"
   by (simp add: word_of_int_uint)
 
-lemma wf_distinct: "distinct topo_list"
-  by eval
+text \\<open>No `distinct topo_list` lemma is emitted.  eval_graph_of_local_agree_all
+  needs only dep_ordered, some, rec and src -- distinctness drops out of its
+  induction, since a repeated id is simply re-evaluated and covered by the
+  inductive hypothesis.  It was carried here as dead code and cost 4h17m of an
+  8h54m run at N=4912 before anyone checked whether it was cited.  (A full
+  graph_cert_wf claim does still require it -- but `by eval`, not `by simp`.)\\<close>
 
 lemma wf_some_ev: "list_all (\\<lambda>m. nodes_fn m \\<noteq> None) topo_list"
   by eval
