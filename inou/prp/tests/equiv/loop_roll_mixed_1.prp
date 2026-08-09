@@ -1,0 +1,16 @@
+/*
+:name: loop_roll_mixed_1
+:set: compile.upass.roll=false
+:lec_set: formal.lec.semdiff=structural
+:lec_grep: MATCHED \(semdiff compact-vs-unrolled normalization, no solver\)
+:lec_grep: 0 via solver
+*/
+// HEADER-ONLY variant: the source is loop_roll_mixed.prp, and the ONLY
+// difference from the reference is this `:set:` — rolling off, so the same
+// source lowers to six inlined occurrences instead of one replicated Sub.
+//
+// The pair must take the EXACT no-solver path: semdiff normalizes the compact
+// side (materialize + inline + cprop) and finds the two structurally identical.
+// `0 via solver` is the load-bearing half of the claim — proving it with CVC5
+// would also say PROVEN, and would mean the normalization silently stopped
+// working.

@@ -186,6 +186,41 @@ TEST(FileOutput, PrependParticipatesInTheComparison) {
   std::filesystem::remove(path);
 }
 
+// mark()/detach_from(): inou.cgen.sim emits a whole method, detaches it, drops
+// the dead temporaries and appends the rewritten text. The bytes before the
+// mark must survive untouched, and the line tallies must follow the detach (a
+// source-map consumer reads append_line() after the rewrite).
+TEST(FileOutput, MarkDetachRewritesTail) {
+  const auto path = tmp_path("detach");
+  {
+    File_output fo(path);
+    fo.append("keep\n");
+    const auto m = fo.mark();
+    fo.append("dead\n");
+    fo.append("alive\n");
+    EXPECT_EQ(fo.append_line(), 3U);
+
+    auto tail = fo.detach_from(m);
+    EXPECT_EQ(tail, "dead\nalive\n");
+    EXPECT_EQ(fo.append_line(), 1U);
+
+    fo.append("alive\n");  // the rewritten region
+  }
+  EXPECT_EQ(slurp(path), "keep\nalive\n");
+  std::filesystem::remove(path);
+}
+
+TEST(FileOutput, DetachAtEndIsEmpty) {
+  const auto path = tmp_path("detach_end");
+  {
+    File_output fo(path);
+    fo.append("only\n");
+    EXPECT_TRUE(fo.detach_from(fo.mark()).empty());
+  }
+  EXPECT_EQ(slurp(path), "only\n");
+  std::filesystem::remove(path);
+}
+
 TEST(FileOutput, AbortWritesNothing) {
   const auto path = tmp_path("abort");
   {

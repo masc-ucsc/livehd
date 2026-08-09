@@ -1,0 +1,15 @@
+/*
+:name: loop_lec_index_2
+:lec_set: formal.lec.semdiff=none
+:lec_grep: loop certificate: 1 matched compact recurrence
+:lec_grep: "loop_certificates":".*P0=descriptor-exact.*P4/P5=ordinal-recurrence
+*/
+// HEADER-ONLY variant: no Pyrope code, so the source is loop_lec_index.prp
+// itself and the two sides share its `:set:` flags. That makes this the SELF
+// check — one compact loop against itself.
+//
+// It is not a tautology: with semdiff's structural shortcut turned OFF, the
+// matched form has to reuse the ONE body theorem and report every M6 premise
+// (`:lec_grep:`) instead of materializing the four ordinals. Losing the
+// certificate would still say PROVEN, just by re-proving the body per ordinal —
+// which is precisely the cost M6 exists to avoid.

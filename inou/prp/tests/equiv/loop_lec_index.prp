@@ -1,0 +1,27 @@
+/*
+:name: loop_lec_index
+:type: lec
+:set: compile.upass.roll=true
+:lec_set: formal.engine=ind
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope ↔ Pyrope variants"): this file is the
+// REFERENCE, and every `loop_lec_index_<N>.prp` beside it is LEC'd against it.
+//
+// M6 soundness. A plain (non-activation) compact loop's index is provided by
+// the loop DESCRIPTOR — there is deliberately no stored graph edge on that Sub
+// input — so LEC must recover it from the descriptor or expand occurrences, and
+// may never silently omit the obligation. Before M6, hierarchical LEC collapsed
+// the lifted body, dropped the descriptor-only index from the bbin obligations,
+// and reported a false PROVEN.
+//
+// The loop computes 4*x + (0+1+2+3) = 4*x + 6.
+//
+//   _1  the same body over 1..<5 — a REFUTATION, under both semdiff settings
+//   _2  the same source against itself — the M6 recurrence certificate
+pub mod top(x:u8) -> (z:u16@[0]) {
+  mut acc:u16 = 0
+  for i in 0..<4 {
+    acc = acc + x + i
+  }
+  z = acc
+}

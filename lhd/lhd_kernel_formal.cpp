@@ -17,6 +17,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "cprop.hpp"
 #include "diag.hpp"
 #include "encode.hpp"
 #include "file_utils.hpp"
@@ -25,10 +26,12 @@
 #include "formal_salt.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
+#include "inline_sub.hpp"
 #include "latch_contract.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
 #include "pass.hpp"
 #include "pass_single_edge.hpp"
 #include "query.hpp"
@@ -43,6 +46,86 @@ bool setting_enabled(std::string_view value) { return value != "false" && value 
 }  // namespace
 
 // ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
+
+// Exact no-solver normalization for the mixed representation of ONE source
+// loop: compact Subnode_loop on one side, ordinary source-unrolled structure on
+// the other. Materialize the compact sites in private scratch and inline only
+// their synthetic lifted bodies; then semdiff sees the same direct nodes the
+// source unroller emitted. This is intentionally a VERIFY-only optimization:
+// false (or any unsupported shape) falls through to normal CVC5 LEC, while true
+// is an exact structural identity proof and avoids solving the body count times.
+bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled, const livehd::semdiff::Semdiff_options& options) {
+  if (compact == nullptr || unrolled == nullptr) {
+    return false;
+  }
+  std::vector<hhds::Gid> lifted_gids;
+  for (const auto node : compact->body().nodes()) {
+    if (!node.is_loop_subnode()) {
+      continue;
+    }
+    const auto desc = node.subnode_loop();
+    const auto body = node.get_subnode_graph();
+    if (!desc || !body || desc->count > (1u << 20)) {
+      return false;
+    }
+    // inline_sub_instance diagnoses a direct IO feed-through as an unsupported
+    // boundary cycle. Since this path is optional, decline it silently before
+    // calling the mutator and leave the ordinary solver fallback pristine.
+    for (const auto& edge : body->get_output_node().inp_edges()) {
+      if (livehd::graph_util::is_graph_input_pin(edge.driver)) {
+        return false;
+      }
+    }
+    lifted_gids.push_back(node.get_subnode_gid());
+  }
+  if (lifted_gids.empty()) {
+    return false;
+  }
+
+  const auto compact_io  = compact->get_io();
+  auto*      compact_lib = compact_io ? compact_io->get_library() : nullptr;
+  if (compact_lib == nullptr) {
+    return false;
+  }
+  hhds::GraphLibrary scratch;
+  for (const auto& graph : compact->definitions().graphs()) {
+    if (!scratch.copy_from(*compact_lib, graph->get_name())) {
+      return false;
+    }
+  }
+  const auto top_io = scratch.find_io(compact->get_name());
+  auto       top    = top_io ? top_io->get_graph() : std::shared_ptr<hhds::Graph>{};
+  if (!top) {
+    return false;
+  }
+  const int materialized = livehd::graph_util::materialize_occurrences(top.get(), "pass.semdiff");
+  if (materialized < 0) {
+    return false;
+  }
+
+  absl::flat_hash_set<hhds::Gid> lifted(lifted_gids.begin(), lifted_gids.end());
+  std::vector<hhds::Node_class>  instances;
+  for (const auto node : top->body().nodes()) {
+    if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && lifted.contains(node.get_subnode_gid())) {
+      instances.push_back(node);
+    }
+  }
+  if (instances.empty()) {
+    return false;
+  }
+  for (const auto& instance : instances) {
+    if (!livehd::graph_util::inline_sub_instance(top.get(), instance, "pass.semdiff")) {
+      return false;
+    }
+  }
+  Cprop cprop;
+  cprop.do_trans(top);
+  const bool identical = livehd::semdiff::structural_identical(top.get(), unrolled, options);
+  if (identical) {
+    return true;
+  }
+  return livehd::semdiff::structural_equivalent_traversal(top.get(), unrolled, options);
+}
 
 // Load one --impl/--ref side into `var.graphs` WITHOUT cgen. lg: libraries load
 // directly; pyrope:/ln: parse/load then lower (upass + tolg + recipe) to
@@ -196,6 +279,13 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
                               .duration_ms(ms);
   if (!r.detail.empty()) {
     b.attr("detail", r.detail);
+  }
+  if (!r.loop_certificates.empty()) {
+    std::string certificates;
+    for (const auto& certificate : r.loop_certificates) {
+      certificates += (certificates.empty() ? "" : " | ") + certificate;
+    }
+    b.attr("loop_certificates", certificates);
   }
   if (!r.witness.empty()) {
     b.attr("witness", r.witness);
@@ -1417,14 +1507,65 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // (state_pairing): its full-match signature pass pairs the state cells
     // tier-1 names left unmatched, and the surviving pairs are injected as
     // UNCERTAIN correspondence (2f-lec discipline enforced inside prove_equal).
-    const bool want_pairing = o.state_pairing && !pairs_from_hint;
+    const bool want_pairing    = o.state_pairing && !pairs_from_hint;
+    auto       has_direct_loop = [](hhds::Graph* graph) {
+      if (graph == nullptr) {
+        return false;
+      }
+      for (const auto node : graph->body().nodes()) {
+        if (node.is_loop_subnode()) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const bool ref_loop        = has_direct_loop(ref_by_name[name]);
+    const bool impl_loop       = has_direct_loop(impl_by_name[name]);
+    const bool mixed_loop_repr = ref_loop != impl_loop;
+    // The lifted loop body lives on ONE side only, so it never appears in
+    // `children` (built from the defs present on BOTH sides) and therefore never
+    // forces `kids_proven` false by itself: the normalization below can keep the
+    // ordinary hierarchical-child gate.
     if ((o.semdiff != "none" && kids_proven) || want_pairing) {
       auto                             t0 = std::chrono::steady_clock::now();
       livehd::semdiff::Semdiff_options so;
-      so.alg             = o.semdiff == "none" ? "structural" : o.semdiff;
-      so.matching_names  = true;  // anchor flops/mems by hier name (lec's correspondence basis)
-      so.state_pairing   = want_pairing;
-      so.seed_pairs      = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
+      so.alg            = o.semdiff == "none" ? "structural" : o.semdiff;
+      so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
+      so.state_pairing  = want_pairing;
+      so.seed_pairs     = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
+      // `kids_proven` is as load-bearing here as it is for the plain structural
+      // skip below: the normalization inlines ONLY the lifted loop bodies, so
+      // every other child Sub stays an opaque node matched by name/def identity
+      // alone. Without it a def holding a rolled loop next to an UNKNOWN (or
+      // REFUTED) child would be cached Proven on a child proof never made.
+      const bool normalized_loop_identity
+          = o.semdiff != "none" && kids_proven && !o.design_assumes && mixed_loop_repr
+            && (ref_loop ? mixed_loop_structural_identity(ref_by_name[name], impl_by_name[name], so)
+                         : mixed_loop_structural_identity(impl_by_name[name], ref_by_name[name], so));
+      if (normalized_loop_identity) {
+        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        livehd::lec::Query_result sr;
+        sr.verdict         = Verdict::Proven;
+        sr.engine          = "semdiff";
+        sr.elapsed_ms      = ms;
+        sr.detail          = "structurally identical after compact-loop materialize+inline normalization (no solver call)";
+        proven[def_ix]     = 1;
+        by_semdiff[def_ix] = 1;
+        ++semdiff_count;
+        {
+          std::lock_guard report_lock(report_mutex);
+          emit_lec_block_progress(name, sr, o, ms);
+          std::print("lec[hier]: '{}' MATCHED (semdiff compact-vs-unrolled normalization, no solver)\n", name);
+        }
+        if (vcache != nullptr && !ckey.empty()) {
+          vcache->insert(ckey, {sr.engine, sr.detail, ms});
+        }
+        if (name == top_key) {
+          top_result = sr;
+          have_top   = true;
+        }
+        return;
+      }
       auto            m  = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       // 2f-lec diverged-use guard: memories semdiff flagged as genuinely diverged

@@ -26,6 +26,12 @@
 // solver — shrinking the miter.
 namespace livehd::semdiff {
 
+// True for state that persists across evaluations/cycles. A Memory with
+// constant type=2 is the combinational-array cell used for `mut`/`const`
+// arrays; it is structurally a loop-last boundary but is not a state anchor and
+// must not appear in register/memory correspondence statistics.
+[[nodiscard]] bool is_persistent_state(const hhds::Node_class& node);
+
 struct Semdiff_options {
   std::string alg            = "structural";  // v1; future: region | functional
   bool        matching_names = false;         // anchor internal flops/mems by hier name

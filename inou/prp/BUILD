@@ -478,6 +478,61 @@ _SIM_FIXME = [
     for prp_file in glob(["tests/verify/*.prp"])
 ]
 
+# ── Pyrope ↔ Pyrope LEC groups (`prp-lec-*`) ─────────────────────────────────
+#
+# `tests/equiv/foo.prp` plus any sibling `foo_<N>.prp` is a GROUP: each numbered
+# variant is LEC'd against the base by tests/prplec.py (`--mode lec`). The NAME
+# is the whole wiring — no per-test script, no hand-written rule — so a new
+# claim about `foo` is one new file. See tests/equiv/README.md for the header
+# tags (`:lec_expect:`, `:lec_sweep:`, `:lec_grep:`, …).
+_EQUIV_PRP_STEMS = [f.split("/")[-1][:-len(".prp")] for f in glob(["tests/equiv/*.prp"])]
+
+_EQUIV_V_STEMS = [f.split("/")[-1][:-len(".v")] for f in glob(["tests/equiv/*.v"])]
+
+# A numbered sibling with its OWN golden `.v` is an ordinary Pyrope↔Verilog pair
+# that merely happens to be named `foo_2`, not a LEC variant of `foo`: claiming
+# it here would delete its `prp-equiv-*`/`prp-statematch-*` targets (silently --
+# bazel just emits no target) and replace them with a `prp-lec-foo_2` claim the
+# author never wrote. Having no golden of its own is exactly what makes a file a
+# variant, so that is the test.
+_PRPLEC_VARIANTS = [
+    s
+    for s in _EQUIV_PRP_STEMS
+    if "_" in s and s.rsplit("_", 1)[1].isdigit() and s.rsplit("_", 1)[0] in _EQUIV_PRP_STEMS and s not in _EQUIV_V_STEMS
+]
+
+# What the Pyrope↔Verilog tiers below must skip: every variant (a variant states
+# its claim against the base, and has no golden of its own), plus any base with
+# no golden `.v`. A base that DOES have one keeps its ordinary `prp-equiv-*` /
+# `prp-statematch-*` targets — the two axes are independent claims.
+_PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
+    "tests/equiv/%s.prp" % s.rsplit("_", 1)[0]
+    for s in _PRPLEC_VARIANTS
+    if s.rsplit("_", 1)[0] not in _EQUIV_V_STEMS
+]
+
+[
+    sh_test(
+        name = "prp-lec-%s" % variant,
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % variant,
+            "--mode",
+            "lec",
+        ],
+        data = [
+            "//inou/prp:tests/prplec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % variant,
+            "//inou/prp:tests/equiv/%s.prp" % variant.rsplit("_", 1)[0],
+            "//lhd",
+        ],
+    )
+    for variant in _PRPLEC_VARIANTS
+]
+
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on
@@ -618,9 +673,15 @@ _SIM_FIXME = [
             # yosys-slang plugin, and each golden's top is an UNDOTTED plain
             # identifier (dotted escaped `\a.b ` names break yosys-slang's
             # --top/RTLIL naming).
-        ],
+        ] + _PRPLEC_SKIP,
     )
 ]
+
+# The two M6 compact-loop LEC regressions that used to live here as hand-written
+# sh_tests (`prp-equiv-loop_lec_index_mismatch`, `prp-equiv-loop_lec_mixed_semdiff`)
+# are now ORDINARY fixtures of the `prp-lec-*` tier above: loop_lec_index{,_1,_2}
+# (descriptor-domain refutation + the P0-P5 certificate) and loop_roll_mixed{,_1}
+# (rolled vs unrolled, discharged with no solver call).
 
 # ── state-name correspondence (`prp-statematch-*`) ───────────────────────────
 #
@@ -708,7 +769,7 @@ _STATEMATCH_FIXME = [
             "tests/equiv/*_tb.prp",
             # no header, no golden .v
             "tests/equiv/accum.prp",
-        ],
+        ] + _PRPLEC_SKIP,
     )
 ]
 

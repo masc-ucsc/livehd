@@ -351,7 +351,7 @@ void semdiff_command(Options& opts, Result& res) {
     auto                         count_state  = [](hhds::Graph* g, uint32_t& total, uint32_t& mems) {
       for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         auto op = gu::type_op_of(node);
-        if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
+        if (livehd::semdiff::is_persistent_state(node)) {
           ++total;
           mems += op == Ntype_op::Memory ? 1 : 0;
         }

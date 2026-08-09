@@ -104,6 +104,162 @@ const char* op_name(Ntype_op op) {
     default                : return "op?";
   }
 }
+
+// ---- Dead-temporary sweep over ONE finished method body ----
+//
+// Binding is demand-driven and cone-based, so a temporary can be emitted for a
+// value the method never reads: the settle pass walks a Moore-deferred
+// instance's whole input cone (build_settle_cone traverses the Sub) but only
+// the RISE emits that instance's `cycle(in)` call, and a group-scheduled slice
+// read binds a pin whose consumer turns out to live in a different pass. The
+// host compiler drops them at -O, but they still cost compile time and raise
+// -Wunused-variable on every one.
+//
+// A dead line's operands can die with it (dropping the last reader of a group
+// snapshot strands the snapshot too), so iterate to a fixpoint. A PURE
+// initializer is deleted outright; an IMPURE one keeps its call as a discarded
+// statement -- a memory read resolves through Slop::unknown when the address is
+// not a plain integer or an `ordering="none"` write collides, and that is a
+// draw from the seeded process PRNG.
+//
+// Every name matched here is a block-scope local of this method, so "used
+// nowhere else in the body" is exactly "dead".
+
+// The name a line DECLARES, or empty when the line is not a declaration this
+// sweep owns. Covers the three forms the emitter mints: `Slop<W> v = e;` (also
+// the `Slop<W> v{e};` width-expression spelling) and `auto v = e;`.
+std::string_view declared_temp(std::string_view line) {
+  auto rest = line.substr(std::min(line.find_first_not_of(" \t"), line.size()));
+  if (rest.starts_with("Slop<")) {
+    const auto gt = rest.find('>');  // the width is an integer literal, never nested
+    if (gt == std::string_view::npos) {
+      return {};
+    }
+    rest = rest.substr(gt + 1);
+  } else if (rest.starts_with("auto ")) {
+    rest = rest.substr(5);
+  } else {
+    return {};
+  }
+  rest = rest.substr(std::min(rest.find_first_not_of(" \t"), rest.size()));
+  if (rest.empty() || (std::isalpha(static_cast<unsigned char>(rest.front())) == 0 && rest.front() != '_')) {
+    return {};
+  }
+  size_t n = 1;
+  while (n < rest.size() && (std::isalnum(static_cast<unsigned char>(rest[n])) != 0 || rest[n] == '_')) {
+    ++n;
+  }
+  // Must be the whole declarator: an initializer follows immediately.
+  auto tail = rest.substr(n);
+  tail      = tail.substr(std::min(tail.find_first_not_of(" \t"), tail.size()));
+  if (!tail.starts_with('=') && !tail.starts_with('{')) {
+    return {};
+  }
+  return rest.substr(0, n);
+}
+
+// A single-line declaration whose initializer has no side effect. Child calls
+// (`cycle`/`__settle`) and memory reads are the exceptions; staged writes are
+// statements, never initializers, but reject them too so a future emission
+// shape cannot silently become removable.
+bool pure_temp_decl(std::string_view line) {
+  const auto code = line.substr(0, line.find("//"));
+  if (code.find(';') == std::string_view::npos) {
+    return false;  // not a complete statement on this line
+  }
+  for (auto bad : {".read<", ".read(", ".read_all(", ".cycle(", "__settle", "slop_update", "apply_update"}) {
+    if (line.find(bad) != std::string_view::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A dead call cannot be deleted (see above), but it can stop DECLARING the
+// value nobody reads: `Slop<W> v = mem.read<r>(a);` becomes the plain statement
+// `mem.read<r>(a);`, which keeps the side effect and lets the host compiler
+// drop the rest. Empty when the initializer is not a plain `= <call>;` (the
+// `{}` spelling is only ever a pure Slop expression, deleted outright).
+std::string discard_dead_call(std::string_view line, std::string_view name) {
+  const auto eq = line.find(" = ", line.find(name));
+  if (eq == std::string_view::npos) {
+    return {};
+  }
+  auto rhs = line.substr(eq + 3);
+  while (!rhs.empty() && (rhs.back() == '\n' || rhs.back() == '\r')) {
+    rhs.remove_suffix(1);
+  }
+  const auto tag = rhs.find("//") == std::string_view::npos ? "  // value unused" : " (value unused)";
+  return absl::StrCat("    ", rhs, tag, "\n");
+}
+
+void strip_dead_temps(std::string& body) {
+  std::vector<std::string> lines;
+  for (size_t pos = 0; pos < body.size();) {
+    const auto nl  = body.find('\n', pos);
+    const auto end = nl == std::string::npos ? body.size() : nl + 1;
+    lines.emplace_back(body, pos, end - pos);
+    pos = end;
+  }
+
+  std::vector<bool> alive(lines.size(), true);
+  bool              changed = true;
+  bool              any     = false;
+  while (changed) {
+    changed = false;
+    absl::flat_hash_map<std::string_view, int> uses;  // identifier -> occurrences in the LIVE body
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (!alive[i]) {
+        continue;
+      }
+      const std::string_view l = lines[i];
+      for (size_t p = 0; p < l.size();) {
+        if (std::isalpha(static_cast<unsigned char>(l[p])) == 0 && l[p] != '_') {
+          ++p;
+          continue;
+        }
+        size_t n = p + 1;
+        while (n < l.size() && (std::isalnum(static_cast<unsigned char>(l[n])) != 0 || l[n] == '_')) {
+          ++n;
+        }
+        ++uses[l.substr(p, n - p)];
+        p = n;
+      }
+    }
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (!alive[i]) {
+        continue;
+      }
+      const auto name = declared_temp(lines[i]);
+      if (name.empty() || uses[name] != 1) {
+        continue;
+      }
+      if (pure_temp_decl(lines[i])) {
+        alive[i] = false;
+        changed  = true;
+        any      = true;
+        continue;
+      }
+      if (auto discarded = discard_dead_call(lines[i], name); !discarded.empty()) {
+        lines[i] = std::move(discarded);
+        changed  = true;
+        any      = true;
+        break;  // `uses` keys point INTO the line just replaced: recount before reusing them
+      }
+    }
+  }
+  if (!any) {
+    return;
+  }
+  std::string out;
+  out.reserve(body.size());
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (alive[i]) {
+      out.append(lines[i]);
+    }
+  }
+  body = std::move(out);
+}
 }  // namespace
 
 std::string Cgen_sim::cpp_port_path(std::string_view name) {
@@ -1243,7 +1399,10 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // simgen-15: native rolled-loop ABI. The digest includes the complete HHDS
 // Subnode_loop descriptor so a warm workdir cannot reuse code for a different
 // count/domain/role mapping.
-static constexpr std::string_view kSimGenVersion = "simgen-15";
+// simgen-16: dead-temporary sweep — a local no statement in the method reads is
+// dropped (with its now-dead operands) instead of emitted; a dead call keeps
+// its side effect as a discarded statement.
+static constexpr std::string_view kSimGenVersion = "simgen-16";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -3818,6 +3977,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   auto emit_period_body = [&](Pass pass_) -> bool {
     const bool settle = pass_ == Pass::Settle;
     const bool fall   = pass_ == Pass::Fall;
+    // Where this method's text begins: the dead-temporary sweep detaches and
+    // rewrites exactly this region once the body is closed (see strip_dead_temps).
+    const auto body_mark  = fout->mark();
+    auto       close_body = [&] {  // call on EVERY successful exit (the settle closes early, below)
+      auto body = fout->detach_from(body_mark);
+      strip_dead_temps(body);
+      fout->append(body);
+    };
     // `settle_mode` means "do NOT advance a child" -- true for the fall as well as
     // the settle. A sub-instance already ran its whole `cycle()` (both halves plus
     // its own trailing settle) during this module's RISE, so all the fall needs
@@ -4436,6 +4603,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       if (s.loop->index_input && pid == *s.loop->index_input) {
         return hhds::Pin_class{};  // occurrence-supplied by the wrapper
+      }
+      if (sink.is_invalid()) {
+        // find_sink_pin returns an INVALID pin for a declared callee input with
+        // no materialized pin (the non-loop path gets this guard for free from
+        // get_driver). A compact loop node stores no external edge for any
+        // descriptor-provided role or unbound input, and inp_edges() asserts on
+        // a null graph_.
+        return hhds::Pin_class{};
       }
       for (const auto& e : sink.inp_edges()) {
         if (e.driver.get_master_node() != s.node) {
@@ -6018,6 +6193,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("    ", gate_kids, " = __k0;\n");
       }
       fout->append("}\n");
+      close_body();
       return true;
     }
 
@@ -6364,6 +6540,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append("    ", gate_kids, " = __k0;\n");
     }
     fout->append("}\n");
+    close_body();
     return true;
   };
   if (!emit_period_body(Pass::Rise)) {

@@ -8,6 +8,7 @@
 #include "query.hpp"
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "cell.hpp"
@@ -85,7 +86,7 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   return g;
 }
 
-std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib) {
+std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t count = 3) {
   auto body_io = lib.create_io("active_body");
   body_io->add_input("carry", 0);
   body_io->add_input("active", 1);
@@ -134,7 +135,7 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib) {
                    hhds::Subnode_loop{
                        .first              = 0,
                        .step               = 1,
-                       .count              = 3,
+                       .count              = count,
                        .activation_input   = 1,
                        .next_active_output = 3,
                    });
@@ -143,6 +144,68 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib) {
   call.create_driver_pin(2).connect_sink(call.create_sink_pin(0));
   call.create_driver_pin(2).connect_sink(top->get_output_pin("result"));
   call.subnode_group().validate();
+  return top;
+}
+
+std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, int64_t first, uint64_t count,
+                                                      bool observe_plain_output = false) {
+  auto body_io = lib.create_io("indexed_body");
+  body_io->add_input("index", 0);
+  body_io->add_input("x", 1);
+  body_io->add_input("carry", 2);
+  body_io->add_output("next_carry", 3);
+  for (const auto name : {"index", "x", "carry", "next_carry"}) {
+    body_io->set_bits(name, 17);
+    body_io->set_unsign(name, true);
+  }
+  if (observe_plain_output) {
+    body_io->add_output("body_value", 4);
+    body_io->set_bits("body_value", 17);
+    body_io->set_unsign("body_value", true);
+  }
+  auto body = body_io->create_graph();
+  auto sum  = graph_util::create_typed_node(*body, Ntype_op::Sum, 17);
+  body->get_input_pin("index").connect_sink(sum.create_sink_pin(0));
+  body->get_input_pin("x").connect_sink(sum.create_sink_pin(0));
+  body->get_input_pin("carry").connect_sink(sum.create_sink_pin(0));
+  auto sum_out = sum.create_driver_pin(0);
+  graph_util::set_bits(sum_out, 17);
+  graph_util::set_unsign(sum_out);
+  sum_out.connect_sink(body->get_output_pin("next_carry"));
+  if (observe_plain_output) {
+    body->get_input_pin("x").connect_sink(body->get_output_pin("body_value"));
+  }
+
+  auto top_io = lib.create_io("indexed_top");
+  top_io->add_input("x", 0);
+  top_io->add_output("result", 1);
+  top_io->set_bits("x", 17);
+  top_io->set_bits("result", 17);
+  top_io->set_unsign("x", true);
+  top_io->set_unsign("result", true);
+  if (observe_plain_output) {
+    top_io->add_output("observed", 2);
+    top_io->set_bits("observed", 17);
+    top_io->set_unsign("observed", true);
+  }
+  auto top  = top_io->create_graph();
+  auto loop = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  loop.set_name("loop_site");
+  loop.set_subnode(body_io, hhds::Subnode_loop{.first = first, .step = 1, .count = count, .index_input = 0});
+  top->get_input_pin("x").connect_sink(loop.create_sink_pin(1));
+  graph_util::create_const(*top, *Dlop::create_integer(0)).connect_sink(loop.create_sink_pin(2));
+  auto result = loop.create_driver_pin(3);
+  graph_util::set_bits(result, 17);
+  graph_util::set_unsign(result);
+  result.connect_sink(loop.create_sink_pin(2));
+  result.connect_sink(top->get_output_pin("result"));
+  if (observe_plain_output) {
+    auto observed = loop.create_driver_pin(4);
+    graph_util::set_bits(observed, 17);
+    graph_util::set_unsign(observed);
+    observed.connect_sink(top->get_output_pin("observed"));
+  }
+  loop.subnode_group().validate();
   return top;
 }
 
@@ -218,4 +281,65 @@ TEST(CombEquiv, NativeActivationLoopMatchesPrivatePhysicalRealization) {
   options.engine = "ind";
   auto result    = lec::prove_equal(compact.get(), physical.get(), options);
   EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+}
+
+TEST(CombEquiv, ProvenBodyAndMatchedDescriptorUseCompactLoopCertificate) {
+  constexpr uint64_t kPastMaterializationCap = (1u << 20) + 1;
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_active_loop(ref_lib, kPastMaterializationCap);
+  auto               impl = build_active_loop(impl_lib, kPastMaterializationCap);
+
+  lec::Lec_options body_options;
+  body_options.engine = "ind";
+  auto body_result    = lec::prove_equal(ref_lib.find_io("active_body")->get_graph().get(),
+                                         impl_lib.find_io("active_body")->get_graph().get(),
+                                         body_options);
+  ASSERT_EQ(body_result.verdict, Verdict::Proven) << body_result.detail;
+
+  lec::Lec_options top_options;
+  top_options.engine   = "ind";
+  top_options.collapse = {"active_body"};  // the discharged body theorem
+  auto result          = lec::prove_equal(ref.get(), impl.get(), top_options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_NE(result.detail.find("loop certificate: 1 matched compact recurrence"), std::string::npos) << result.detail;
+  ASSERT_EQ(result.loop_certificates.size(), 1);
+  EXPECT_NE(result.loop_certificates.front().find("P0=descriptor-exact"), std::string::npos);
+  EXPECT_NE(result.loop_certificates.front().find("P4/P5=ordinal-recurrence"), std::string::npos);
+}
+
+TEST(CombEquiv, IndexedCarryLoopCertificateOmitsNoDescriptorObligation) {
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_indexed_carry_loop(ref_lib, 0, 4);
+  auto               impl = build_indexed_carry_loop(impl_lib, 0, 4);
+
+  lec::Lec_options options;
+  options.engine   = "ind";
+  options.collapse = {"indexed_body"};
+  auto result      = lec::prove_equal(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_NE(result.detail.find("loop certificate: 1 matched compact recurrence"), std::string::npos) << result.detail;
+  ASSERT_EQ(result.loop_certificates.size(), 1);
+  EXPECT_NE(result.loop_certificates.front().find("body=indexed_body"), std::string::npos);
+}
+
+TEST(CombEquiv, IndexedCarryDescriptorMismatchFallsBackAndRefutes) {
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_indexed_carry_loop(ref_lib, 0, 4);
+  auto               impl = build_indexed_carry_loop(impl_lib, 1, 4);
+
+  lec::Lec_options options;
+  options.engine   = "ind";
+  options.collapse = {"indexed_body"};
+  auto result      = lec::prove_equal(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Refuted) << result.detail;
+  EXPECT_EQ(result.detail.find("loop certificate:"), std::string::npos) << result.detail;
+  EXPECT_TRUE(result.loop_certificates.empty());
+}
+
+TEST(CombEquiv, ZeroCountObservedPlainOutputIsRejectedBeforeCertification) {
+  hhds::GraphLibrary lib;
+  EXPECT_THROW((void)build_indexed_carry_loop(lib, 0, 0, true), std::logic_error);
 }

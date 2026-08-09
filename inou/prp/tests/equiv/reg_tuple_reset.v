@@ -10,20 +10,20 @@ module \reg_tuple_reset.rtr (
 
   // The tuple register is split per field: one Flop for `.x`, one for `.y`,
   // each with its own slice of the reset value (x<=20, y<=3).
-  reg [7:0] bx;
-  reg [3:0] by;
+  reg [7:0] \bank.x ;
+  reg [3:0] \bank.y ;
 
   always @(posedge clock) begin
     if (reset) begin
-      bx <= 8'd20;
-      by <= 4'd3;
+      \bank.x  <= 8'd20;
+      \bank.y  <= 4'd3;
     end else if (en) begin
-      bx <= wx;
-      by <= wy;
+      \bank.x  <= wx;
+      \bank.y  <= wy;
     end
   end
 
-  assign ox = bx;
-  assign oy = by;
+  assign ox = \bank.x ;
+  assign oy = \bank.y ;
 
 endmodule

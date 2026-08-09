@@ -3179,12 +3179,22 @@ private:
     }
 
     auto mem = make_node(Ntype_op::Memory);
-    // Stamp the RESULT name on the Memory node (same rationale as the
+    // Stamp the USER BINDING on the Memory node (same rationale as the
     // array-declare site: a null name degrades pass/lec memory pairing to
-    // anonymous shape+ordinal). The __memory builtin's dst ref names the
-    // instance (`const m = __memory(cfg)`); strip any SSA suffix.
+    // anonymous shape+ordinal). Calls lower through a compiler temporary:
+    //
+    //   fcall(%res_0, __memory, cfg)
+    //   store(res, %res_0)
+    //
+    // so naming the cell directly from `dst` leaks `%res_0` into the state
+    // correspondence key. Recover the adjacent source binding exactly as the
+    // ordinary Sub path does; fall back to dst only when the result is consumed
+    // directly by an expression.
     {
       std::string mem_base{lnast_->get_name(dst)};
+      if (auto bound = lhs_var_of_temp_dst(nid, mem_base); !bound.empty()) {
+        mem_base = std::move(bound);
+      }
       if (auto p = mem_base.find("___ssa_"); p != std::string::npos) {
         mem_base.resize(p);
       }
@@ -3978,11 +3988,16 @@ private:
     // uncertain pairs suppress a bounded-bmc PASS. A `stage[N]` design would
     // report UNKNOWN even though it is provably equivalent.
     //
-    // `%pipe_*` (the LN-inserted pipe output flop) is a compiler temp with no
-    // counterpart name on the other front-end, so naming it buys no pairing —
-    // it would only push an escaped `\%pipe_0` identifier into the Verilog.
+    // `%pipe_<output>` is an LN-inserted pipe-output flop. The prefix is
+    // lowering-only, but the suffix is the stable source/output state name and
+    // is exactly the tier-1 correspondence anchor used by another front end.
+    // Keeping the whole temp anonymous turns a fixed-latency pipe into an
+    // unpairable `f:<nid>` frontier and cuts every downstream semdiff region.
     {
       std::string base{name};
+      if (base.starts_with("%pipe_")) {
+        base.erase(0, std::string_view{"%pipe_"}.size());
+      }
       if (auto ssa = base.find("___ssa_"); ssa != std::string::npos) {
         base.resize(ssa);
       }

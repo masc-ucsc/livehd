@@ -11,6 +11,7 @@
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
+#include "hlop/dlop.hpp"
 #include "node_util.hpp"
 
 using livehd::graph_util::create_typed_node;
@@ -36,6 +37,88 @@ std::shared_ptr<hhds::Graph> build_and_or(const std::string& dir, const std::str
   a_and.create_driver_pin(0).connect_sink(an_or.create_sink_pin(0));
   g->get_input_pin("c").connect_sink(an_or.create_sink_pin(0));
   an_or.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+  return g;
+}
+
+std::shared_ptr<hhds::Graph> build_compact_loop(const std::string& dir, uint64_t count) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+
+  auto body_io = lib.create_io("loop_body");
+  body_io->add_input("x", 0);
+  body_io->add_output("y", 1);
+  body_io->set_bits("x", 9);
+  body_io->set_bits("y", 9);
+  body_io->set_unsign("x", true);
+  body_io->set_unsign("y", true);
+  auto body = body_io->create_graph();
+  body->get_input_pin("x").connect_sink(body->get_output_pin("y"));
+
+  auto top_io = lib.create_io("loop_top");
+  top_io->add_input("x", 0);
+  top_io->add_output("y", 1);
+  top_io->set_bits("x", 9);
+  top_io->set_bits("y", 9);
+  top_io->set_unsign("x", true);
+  top_io->set_unsign("y", true);
+  auto top  = top_io->create_graph();
+  auto loop = create_typed_node(*top, Ntype_op::Sub);
+  loop.set_name("loop_site");
+  loop.set_subnode(body_io, hhds::Subnode_loop{.first = 0, .step = 1, .count = count});
+  top->get_input_pin("x").connect_sink(loop.create_sink_pin(0));
+  auto out = loop.create_driver_pin(1);
+  livehd::graph_util::set_bits(out, 9);
+  livehd::graph_util::set_unsign(out);
+  out.connect_sink(top->get_output_pin("y"));
+  loop.subnode_group().validate();
+  return top;
+}
+
+// y = ~x, optionally with a Get_mask boundary between x and Not. `mask ==
+// nullopt` is the direct form.
+std::shared_ptr<hhds::Graph> build_mask_boundary(const std::string& dir, std::optional<int64_t> mask) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("mask_boundary");
+  gio->add_input("x", 0);
+  gio->add_output("y", 1);
+  gio->set_bits("x", 8);
+  gio->set_bits("y", 8);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class value = g->get_input_pin("x");
+  if (mask) {
+    auto gm = create_typed_node(*g, Ntype_op::Get_mask);
+    value.connect_sink(livehd::graph_util::setup_sink_by_name(gm, "a"));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(*mask))
+        .connect_sink(livehd::graph_util::setup_sink_by_name(gm, "mask"));
+    value = gm.create_driver_pin(0);
+    livehd::graph_util::set_bits(value, 8);
+  }
+  auto inv = create_typed_node(*g, Ntype_op::Not);
+  value.connect_sink(inv.create_sink_pin(0));
+  auto out = inv.create_driver_pin(0);
+  livehd::graph_util::set_bits(out, 8);
+  out.connect_sink(g->get_output_pin("y"));
+  return g;
+}
+
+std::shared_ptr<hhds::Graph> build_memory_kind(const std::string& dir, int64_t type) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("memory_kind");
+  gio->add_output("q", 0);
+  gio->set_bits("q", 8);
+  auto g   = gio->create_graph();
+  auto mem = create_typed_node(*g, Ntype_op::Memory);
+  mem.set_name("m");
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(type))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "type"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(8))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(4))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
+  auto q = mem.create_driver_pin(0);
+  livehd::graph_util::set_bits(q, 8);
+  livehd::graph_util::set_pin_name(q, "m");
+  q.connect_sink(g->get_output_pin("q"));
   return g;
 }
 
@@ -143,6 +226,49 @@ TEST(Semdiff, StructuralIdenticalOpSwap) {
   EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
 }
 
+TEST(Semdiff, IdentityGetMaskIsTransparent) {
+  auto direct = build_mask_boundary("lgdb_semdiff_gm_direct", std::nullopt);
+  auto exact  = build_mask_boundary("lgdb_semdiff_gm_exact", 0xff);
+  auto all    = build_mask_boundary("lgdb_semdiff_gm_all", -1);
+
+  EXPECT_TRUE(livehd::semdiff::structural_identical(direct.get(), exact.get()));
+  EXPECT_TRUE(livehd::semdiff::structural_identical(direct.get(), all.get()));
+
+  auto r = livehd::semdiff::structural_match(direct.get(), exact.get());
+  EXPECT_EQ(0U, r.a_unmatched);
+  EXPECT_EQ(0U, r.b_unmatched);
+  EXPECT_EQ(1U, r.a_matched);  // only Not; the identity wrapper is not a node obligation
+  EXPECT_EQ(1U, r.b_matched);
+}
+
+TEST(Semdiff, NonIdentityGetMaskNeverDisappears) {
+  auto direct = build_mask_boundary("lgdb_semdiff_gm_bad_direct", std::nullopt);
+  auto narrow = build_mask_boundary("lgdb_semdiff_gm_narrow", 0x7f);
+  auto sparse = build_mask_boundary("lgdb_semdiff_gm_sparse", 0xf7);
+  auto wider  = build_mask_boundary("lgdb_semdiff_gm_wider", 0x1ff);
+
+  EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), narrow.get()));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), sparse.get()));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), wider.get()));
+}
+
+TEST(Semdiff, CombinationalArrayMemoryIsNotStateCorrespondence) {
+  auto comb_a = build_memory_kind("lgdb_semdiff_mem_comb_a", 2);
+  auto comb_b = build_memory_kind("lgdb_semdiff_mem_comb_b", 2);
+  auto seq_a  = build_memory_kind("lgdb_semdiff_mem_seq_a", 0);
+  auto seq_b  = build_memory_kind("lgdb_semdiff_mem_seq_b", 0);
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto comb              = livehd::semdiff::structural_match(comb_a.get(), comb_b.get(), options);
+  auto seq               = livehd::semdiff::structural_match(seq_a.get(), seq_b.get(), options);
+  EXPECT_EQ(0U, comb.state.a_total);
+  EXPECT_EQ(0U, comb.state.b_total);
+  EXPECT_EQ(1U, seq.state.a_total);
+  EXPECT_EQ(1U, seq.state.b_total);
+  EXPECT_EQ(1U, seq.state.name_pairs_mem);
+}
+
 // canonical_digest: two independently-built identical designs (separate
 // libraries — independent gids, allocation order) produce the SAME digest.
 TEST(Semdiff, DigestStableAcrossLibraries) {
@@ -155,6 +281,24 @@ TEST(Semdiff, DigestStableAcrossLibraries) {
   EXPECT_TRUE(da.valid);
   EXPECT_TRUE(db.valid);
   EXPECT_EQ(da, db);
+}
+
+TEST(Semdiff, CompactLoopDescriptorParticipatesInIdentityAndDigest) {
+  auto a = build_compact_loop("lgdb_semdiff_loop_a", 7);
+  auto b = build_compact_loop("lgdb_semdiff_loop_b", 7);
+  auto c = build_compact_loop("lgdb_semdiff_loop_c", 8);
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get(), options));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), c.get(), options));
+
+  const auto da = livehd::semdiff::canonical_digest(a.get());
+  const auto db = livehd::semdiff::canonical_digest(b.get());
+  const auto dc = livehd::semdiff::canonical_digest(c.get());
+  ASSERT_TRUE(da.valid && db.valid && dc.valid);
+  EXPECT_EQ(da, db);
+  EXPECT_NE(da, dc);
 }
 
 // canonical_digest: construction ORDER must not leak in — build the same
@@ -398,6 +542,19 @@ TEST(Semdiff, StatePairingRenamedPipeline) {
   // The paired seeds let the WHOLE structure match: nothing left unmatched.
   EXPECT_EQ(0U, r.a_unmatched);
   EXPECT_EQ(0U, r.b_unmatched);
+}
+
+TEST(Semdiff, EscapedVerilogStateNameUsesCanonicalIdentity) {
+  auto a = build_pipe2("lgdb_semdiff_escaped_a", "bank.x", "bank.y");
+  auto b = build_pipe2("lgdb_semdiff_escaped_b", "`bank.x`", "`bank.y`");
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto r                 = livehd::semdiff::structural_match(a.get(), b.get(), options);
+  EXPECT_EQ(2U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.full_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
 }
 
 // Without state_pairing the renamed flops stay unmatched frontiers (the

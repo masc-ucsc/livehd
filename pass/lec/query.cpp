@@ -16,7 +16,9 @@
 #include <cstring>
 #include <format>
 #include <functional>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -189,10 +191,13 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   };
   auto collect = [](hhds::Graph* g) {
     absl::flat_hash_map<std::string, Vflop> m;
-    // fast_hier: builds a name-keyed map, no topological order needed. (`init`
+    // occurrences: builds a name-keyed map, no topological order needed. (`init`
     // is last-wins under an ambiguous name, but the reader below drops any pair
-    // whose count != 1, so an ambiguous entry is never read.)
-    for (auto node : g->grouped_hierarchy().nodes()) {
+    // whose count != 1, so an ambiguous entry is never read.) It must be the
+    // LOOP-EXPANDING view (grouped_hierarchy is expand_loops=false) so the
+    // census is a superset of the encoder's cut keys, which come from
+    // occurrences(opaque) and include every `__li<r>` replica flop.
+    for (auto node : g->occurrences().nodes()) {
       auto op = graph_util::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
         continue;
@@ -418,6 +423,10 @@ std::string serialize_result(const Query_result& r) {
   // parent's `--stats` report is all zeros on every forked path. Strict tail,
   // no version byte: an older/truncated blob just leaves Cvc5_stats{}.
   put_cvc5_stats(b, r.cvc5);
+  put_u32(b, static_cast<uint32_t>(r.loop_certificates.size()));
+  for (const auto& certificate : r.loop_certificates) {
+    put_str(b, certificate);
+  }
   return b;
 }
 
@@ -672,7 +681,21 @@ bool deserialize_result(std::string_view b, Query_result& r) {
   // cvc5 statistics tail (mirror serialize_result). All-or-nothing inside
   // get_cvc5_stats: a truncated tail leaves Cvc5_stats{}, which reads as "no
   // cvc5 query ran" rather than as a half-filled report.
-  (void)get_cvc5_stats(b, r.cvc5);
+  if (!get_cvc5_stats(b, r.cvc5)) {
+    return true;
+  }
+  uint32_t ncert = 0;
+  if (!get_u32(b, ncert)) {
+    return true;
+  }
+  r.loop_certificates.clear();
+  for (uint32_t i = 0; i < ncert; ++i) {
+    std::string certificate;
+    if (!get_str(b, certificate)) {
+      return true;
+    }
+    r.loop_certificates.push_back(std::move(certificate));
+  }
   return true;
 }
 
@@ -3596,7 +3619,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // power-on state of a soundness-critical miter -- do not trade it for memory
         // without first making the collision explicit (detect + drop, like the
         // uncertain-pair path does).
-        for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: cut flops at every level
+        // Opaque at the collapse set: a collapsed leaf's state is the box's ONE
+        // cut, not a set of internal flop cuts (the encoder agrees -- encode.cpp
+        // passes the same opaque set explicitly).
+        for (auto node :
+             g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {  // descend: cut flops at every level
           const auto nop = graph_util::type_op_of(node);
           // A LATCH is a state cut exactly like a flop under a phase schedule
           // (the encoder seeds and threads it the same way), so its power-on
@@ -3634,10 +3661,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
       };
-      {
-        collect_flops(ref);
-        collect_flops(impl);
-      }
+      collect_flops(ref);
+      collect_flops(impl);
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
@@ -3796,9 +3821,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Per-design flop cut key -> width (hier-canon key, matching ref_state above).
       auto collect_flop_w = [&](hhds::Graph* g) {
         Io_name_map<int> out;
-        // fast_hier: a max-per-key map build; order-free. fast_hier honors the
-        // ambient opaque scope just installed above.
-        for (auto node : g->grouped_hierarchy().nodes()) {
+        // grouped_hierarchy: a max-per-key map build; order-free. Opaque at the
+        // collapse set so a collapsed leaf contributes its ONE box cut and not
+        // its internal flops -- try_bridge's uniqueness test below counts these.
+        for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
           }
@@ -4213,7 +4239,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // their legacy clock folding, making them commit unconditionally.  A
       // true multi-phase run still installs both plans because both designs
       // must advance on the shared microstep time base.
-      const bool ref_use_plan = use_phase || ref_plan.needs_plan();
+      // `use_plan` carries the `formal.phase_sched` gate AND the plan-refusal
+      // hard-fail above: without it `phase_sched=false` would still hand the
+      // encoder a plan (a REFUSED one, even) while collect_flops/add_flops kept
+      // skipping Latch, so the two sides would mint independent latch symbols.
+      const bool ref_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
       enc.set_phase_plan(ref_use_plan ? &ref_plan : nullptr, ms);
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
@@ -4224,7 +4254,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return res;
       }
       enc.set_box_keys(&impl_box_keys);
-      const bool impl_use_plan = use_phase || impl_plan.needs_plan();
+      const bool impl_use_plan = use_plan && (use_phase || impl_plan.needs_plan());
       enc.set_phase_plan(impl_use_plan ? &impl_plan : nullptr, ms);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
@@ -4814,9 +4844,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // these, so the miter assumes equal current state and proves equal next state
   // + outputs (the M2 register-correspondence inductive step).
   auto add_flops = [&](hhds::Graph* g) {
-    // fast_hier: a key->width map build (min-width wins by explicit compare, not by
-    // visit order). Honors the ambient opaque scope its caller installs.
-    for (auto node : g->grouped_hierarchy().nodes()) {  // descend hierarchy: cut flops at every level
+    // grouped_hierarchy: a key->width map build (min-width wins by explicit
+    // compare, not by visit order). Opaque at the collapse set — a collapsed
+    // leaf's state is the box's one cut, not a set of internal flop cuts.
+    for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {  // descend: cut flops at every level
       const auto nop = graph_util::type_op_of(node);
       // Under a phase schedule a LATCH is a state cut exactly like a flop, so it
       // needs its shared current-state symbol here too. Without it each side
@@ -4852,12 +4883,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared[key]    = Val{t, w, sgn};
     }
   };
-  {
-    // Skip the flops INSIDE a collapsed leaf — its state is the box's one cut,
-    // not a set of internal flop cuts.
-    add_flops(ref);
-    add_flops(impl);
-  }
+  add_flops(ref);
+  add_flops(impl);
   // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
   // cut), corresponding on both designs: the inductive miter assumes it equal and
   // proves the box's next-state (UF) equal alongside the parent's.
@@ -5115,7 +5142,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Rebuild half 1's primary-input symbols (state keys are left alone).
       absl::flat_hash_set<std::string> state_keys;
       for (auto* g : {ref, impl}) {
-        for (auto node : g->grouped_hierarchy().nodes()) {
+        // Opaque at the collapse set, exactly like add_flops above: a key that
+        // only exists inside a collapsed box is not a state key here either.
+        for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {
           const auto nop = graph_util::type_op_of(node);
           if (nop != Ntype_op::Flop && nop != Ntype_op::Latch) {
             continue;
@@ -6411,6 +6440,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
 
 namespace {
 
+bool has_native_loops(hhds::Graph* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  if (const auto io = root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
+    return false;
+  }
+  for (const auto& graph : root->definitions().graphs()) {
+    for (const auto node : graph->body().nodes()) {
+      if (node.is_loop_subnode()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool has_activation_loops(hhds::Graph* root) {
   if (root == nullptr) {
     return false;
@@ -6428,9 +6474,9 @@ bool has_activation_loops(hhds::Graph* root) {
   return false;
 }
 
-bool build_activation_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
-                              hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
-                              std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
+bool copy_loop_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                       hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
+                       std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
   if (source == nullptr) {
     return false;
   }
@@ -6471,39 +6517,363 @@ bool build_activation_scratch(hhds::Graph* source, const absl::flat_hash_map<hhd
       scratch_graphs.push_back(std::move(graph));
     }
   }
-  if (!graph_util::materialize_occurrences_all(scratch_graphs, "pass.lec")) {
-    return false;
-  }
   auto top_io = scratch.find_io(source->get_name());
   scratch_top = top_io ? top_io->get_graph() : std::shared_ptr<hhds::Graph>{};
   return scratch_top != nullptr;
+}
+
+bool build_activation_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                              hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
+                              std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
+  return copy_loop_scratch(source, sub_lib, scratch, scratch_top, scratch_graphs)
+         && graph_util::materialize_occurrences_all(scratch_graphs, "pass.lec");
+}
+
+std::string def_entity(std::string_view name) {
+  const auto dot = name.rfind('.');
+  return std::string(dot == std::string_view::npos ? name : name.substr(dot + 1));
+}
+
+bool collapse_names_def(hhds::Graph* root, std::string_view full_name, const Lec_options& opts) {
+  if (root == nullptr) {
+    return false;
+  }
+  const std::string entity       = def_entity(full_name);
+  int               entity_count = 0;
+  for (const auto& graph : root->definitions().graphs()) {
+    if (def_entity(graph->get_name()) == entity) {
+      ++entity_count;
+    }
+  }
+  for (const auto& name : opts.collapse) {
+    if (name == full_name || (entity_count == 1 && name == entity)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct Loop_port_contract {
+  std::string name;
+  uint32_t    bits                                        = 0;
+  bool        unsign                                      = false;
+  bool        operator==(const Loop_port_contract&) const = default;
+};
+
+struct Loop_contract {
+  int64_t                                                        first = 0;
+  int64_t                                                        step  = 0;
+  uint64_t                                                       count = 0;
+  std::optional<Loop_port_contract>                              index;
+  std::optional<Loop_port_contract>                              activation;
+  std::optional<Loop_port_contract>                              next_active;
+  std::vector<Loop_port_contract>                                inputs;
+  std::vector<Loop_port_contract>                                outputs;
+  std::vector<std::pair<Loop_port_contract, Loop_port_contract>> carries;
+  bool                                                           valid                                  = false;
+  bool                                                           operator==(const Loop_contract&) const = default;
+};
+
+std::optional<Loop_port_contract> loop_port(const hhds::GraphIO& io, hhds::Port_id pid, bool input) {
+  const auto& decls = input ? io.get_input_pin_decls() : io.get_output_pin_decls();
+  for (const auto& decl : decls) {
+    if (decl.port_id == pid) {
+      return Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign};
+    }
+  }
+  return std::nullopt;
+}
+
+Loop_contract loop_contract(const hhds::Node_class& node) {
+  Loop_contract out;
+  const auto    loop = node.subnode_loop();
+  const auto    io   = node.get_subnode_io();
+  if (!loop || !io) {
+    return out;
+  }
+  try {
+    node.subnode_group().validate();
+  } catch (const std::exception&) {
+    return out;
+  }
+  out.first = loop->first;
+  out.step  = loop->step;
+  out.count = loop->count;
+  for (const auto& decl : io->get_input_pin_decls()) {
+    out.inputs.push_back(Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign});
+  }
+  for (const auto& decl : io->get_output_pin_decls()) {
+    out.outputs.push_back(Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign});
+  }
+  auto sort_ports = [](auto& ports) {
+    std::sort(ports.begin(), ports.end(), [](const auto& a, const auto& b) {
+      return std::tie(a.name, a.bits, a.unsign) < std::tie(b.name, b.bits, b.unsign);
+    });
+  };
+  sort_ports(out.inputs);
+  sort_ports(out.outputs);
+  if (loop->index_input) {
+    out.index = loop_port(*io, *loop->index_input, true);
+    if (!out.index) {
+      return out;
+    }
+  }
+  if (loop->activation_input) {
+    out.activation = loop_port(*io, *loop->activation_input, true);
+    if (!out.activation) {
+      return out;
+    }
+  }
+  if (loop->next_active_output) {
+    out.next_active = loop_port(*io, *loop->next_active_output, false);
+    if (!out.next_active) {
+      return out;
+    }
+  }
+  for (const auto& carry : node.subnode_group().carries()) {
+    auto input  = loop_port(*io, carry.input_port(), true);
+    auto output = loop_port(*io, carry.output_port(), false);
+    if (!input || !output) {
+      return out;
+    }
+    out.carries.emplace_back(std::move(*input), std::move(*output));
+  }
+  if (out.count == 0) {
+    absl::flat_hash_set<uint32_t> carry_outputs;
+    for (const auto& carry : node.subnode_group().carries()) {
+      carry_outputs.insert(static_cast<uint32_t>(carry.output_port()));
+    }
+    // With no ordinal there is no value for an observed ordinary body output.
+    // Only carried outputs have defined pass-through semantics. Sharing a free
+    // sequence-box symbol here would turn two undefined outputs into a false
+    // proof, so leave this shape to materialization/refusal.
+    for (const auto& edge : node.out_edges()) {
+      if (edge.sink.get_master_node() != node && !carry_outputs.contains(static_cast<uint32_t>(edge.driver.get_port_id()))) {
+        return out;
+      }
+    }
+  }
+  std::sort(out.carries.begin(), out.carries.end(), [](const auto& a, const auto& b) {
+    return std::tie(a.first.name, a.second.name, a.first.bits, a.second.bits, a.first.unsign, a.second.unsign)
+           < std::tie(b.first.name, b.second.name, b.first.bits, b.second.bits, b.first.unsign, b.second.unsign);
+  });
+  out.valid = true;
+  return out;
+}
+
+// Replace one certified compact recurrence by ONE ordinary collapsed call in
+// private scratch. The body theorem plus Loop_contract equality justifies this
+// sequence-box summary; its external inputs remain bbin obligations and its
+// outputs use the existing shared sequence-box symbols. No source graph is
+// mutated, and a failed certificate leaves the compact node for the ordinary
+// occurrence-materialization fallback below.
+bool summarize_certified_loop(const hhds::Node_class& old) {
+  auto* graph = old.get_graph();
+  auto  io    = old.get_subnode_io();
+  if (graph == nullptr || !io) {
+    return false;
+  }
+
+  struct Input_edge {
+    hhds::Port_id   pid;
+    hhds::Pin_class driver;
+  };
+  struct Output_edge {
+    hhds::Port_id   pid;
+    hhds::Pin_class old_driver;
+    hhds::Pin_class sink;
+  };
+  std::vector<Input_edge>  inputs;
+  std::vector<Output_edge> outputs;
+  for (const auto& edge : old.inp_edges()) {
+    if (edge.driver.get_master_node() != old) {
+      inputs.push_back(Input_edge{edge.sink.get_port_id(), edge.driver});
+    }
+  }
+  for (const auto& edge : old.out_edges()) {
+    if (edge.sink.get_master_node() != old) {
+      outputs.push_back(Output_edge{edge.driver.get_port_id(), edge.driver, edge.sink});
+    }
+  }
+
+  auto summary = graph_util::create_typed_node(*graph, Ntype_op::Sub);
+  summary.set_subnode(io);
+  if (graph_util::has_name(old)) {
+    summary.set_name(std::string(graph_util::node_name_of(old)));
+  }
+  if (auto src = old.attr(hhds::attrs::srcid); src.has()) {
+    summary.attr(hhds::attrs::srcid).set(src.get());
+  }
+  absl::flat_hash_set<uint32_t> input_pids;
+  for (const auto& input : inputs) {
+    input.driver.connect_sink(summary.create_sink_pin(input.pid));
+    input_pids.insert(static_cast<uint32_t>(input.pid));
+  }
+  // Descriptor-provided roles (most importantly the loop index) deliberately
+  // have no stored external edge, but an ordinary Sub still must materialize
+  // every declared pin: HHDS boundary resolution asks for the pin before it can
+  // decide that it is unconnected. The certificate accounts for these roles in
+  // Loop_contract, so leaving the summary pin un-driven is intentional.
+  for (const auto& decl : io->get_input_pin_decls()) {
+    if (input_pids.insert(static_cast<uint32_t>(decl.port_id)).second) {
+      (void)summary.create_sink_pin(decl.port_id);
+    }
+  }
+  absl::flat_hash_map<uint32_t, hhds::Pin_class> drivers;
+  for (const auto& decl : io->get_output_pin_decls()) {
+    auto driver = summary.create_driver_pin(decl.port_id);
+    if (decl.bits != 0) {
+      graph_util::set_bits(driver, static_cast<int32_t>(decl.bits));
+    }
+    if (decl.unsign) {
+      graph_util::set_unsign(driver);
+    } else {
+      graph_util::set_sign(driver);
+    }
+    drivers.emplace(static_cast<uint32_t>(decl.port_id), driver);
+  }
+  for (const auto& output : outputs) {
+    const uint32_t pid  = static_cast<uint32_t>(output.pid);
+    auto [it, inserted] = drivers.try_emplace(pid);
+    if (inserted) {
+      it->second = summary.create_driver_pin(output.pid);
+      if (const auto bits = graph_util::bits_of(output.old_driver); bits != 0) {
+        graph_util::set_bits(it->second, bits);
+      }
+      if (graph_util::is_unsign(output.old_driver)) {
+        graph_util::set_unsign(it->second);
+      } else {
+        graph_util::set_sign(it->second);
+      }
+      if (const auto name = graph_util::pin_name_of(output.old_driver); !name.empty()) {
+        graph_util::set_pin_name(it->second, std::string(name));
+      }
+    }
+    it->second.connect_sink(output.sink);
+  }
+  old.del_node();
+  return true;
+}
+
+struct Loop_candidate {
+  hhds::Node_class node;
+  Loop_contract    contract;
+  std::string      callee;
+  std::string      instance;
+  bool             used = false;
+};
+
+std::vector<Loop_candidate> direct_loop_candidates(hhds::Graph* graph) {
+  std::vector<Loop_candidate> out;
+  if (graph == nullptr) {
+    return out;
+  }
+  for (const auto node : graph->body().nodes()) {
+    if (!node.is_loop_subnode()) {
+      continue;
+    }
+    const auto io = node.get_subnode_io();
+    out.push_back(Loop_candidate{node,
+                                 loop_contract(node),
+                                 io ? def_entity(io->get_name()) : std::string{},
+                                 graph_util::default_instance_name(node),
+                                 false});
+  }
+  return out;
+}
+
+std::vector<std::string> summarize_loop_pairs(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts) {
+  auto                     refs  = direct_loop_candidates(ref);
+  auto                     impls = direct_loop_candidates(impl);
+  std::vector<std::string> summarized;
+  for (auto& r : refs) {
+    if (!r.contract.valid) {
+      continue;
+    }
+    std::vector<size_t> exact;
+    std::vector<size_t> compatible;
+    for (size_t i = 0; i < impls.size(); ++i) {
+      const auto& m = impls[i];
+      if (m.used || !m.contract.valid || r.callee != m.callee || !(r.contract == m.contract)) {
+        continue;
+      }
+      compatible.push_back(i);
+      if (r.instance == m.instance) {
+        exact.push_back(i);
+      }
+    }
+    std::optional<size_t> choice;
+    if (exact.size() == 1) {
+      choice = exact.front();
+    } else if (exact.empty() && compatible.size() == 1) {
+      choice = compatible.front();
+    }
+    if (!choice) {
+      continue;
+    }
+    auto&      m   = impls[*choice];
+    const auto rio = r.node.get_subnode_io();
+    const auto mio = m.node.get_subnode_io();
+    if (!rio || !mio || !collapse_names_def(ref, rio->get_name(), opts) || !collapse_names_def(impl, mio->get_name(), opts)) {
+      continue;  // no discharged/pending body theorem: expansion is mandatory
+    }
+    if (!summarize_certified_loop(r.node) || !summarize_certified_loop(m.node)) {
+      continue;
+    }
+    r.used = true;
+    m.used = true;
+    summarized.push_back(
+        std::format("instance={} body={} P0=descriptor-exact P1=boundary-sequence P2=initial-state P3={}-body-theorem "
+                    "P4/P5=ordinal-recurrence count={}",
+                    r.instance,
+                    r.callee,
+                    r.contract.activation ? "activation-guarded" : "unconditional",
+                    r.contract.count));
+  }
+  return summarized;
 }
 
 }  // namespace
 
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
-  // Connectivity-only occurrence edges intentionally expose both sides of an
-  // inactive-carry dependency. The SMT encoder needs its exact mux value, so
-  // activation-capable groups use a private occurrence realization. Ordinary
-  // loops stay on the native read-only occurrence path.
-  if (has_activation_loops(ref) || has_activation_loops(impl)) {
+  // M6 compact-loop certificate. A matched descriptor whose body def is in the
+  // hierarchical collapse set becomes one sequence-box summary; all unmatched
+  // or unproved-body loops retain the correctness fallback and are materialized
+  // in this same private scratch. This also handles activation exactly (the
+  // native connectivity view is dependency-only for inactive carry bypasses).
+  if (!opts._loop_prepared && (has_native_loops(ref) || has_native_loops(impl))) {
     hhds::GraphLibrary                        ref_scratch;
     hhds::GraphLibrary                        impl_scratch;
     std::shared_ptr<hhds::Graph>              ref_top;
     std::shared_ptr<hhds::Graph>              impl_top;
     std::vector<std::shared_ptr<hhds::Graph>> ref_graphs;
     std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
-    if (!build_activation_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
-        || !build_activation_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+    if (!copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        || !copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
       Query_result failure;
       failure.unsupported = true;
-      failure.detail      = "could not realize activation-capable loop occurrences in private LEC scratch state";
+      failure.detail      = "could not copy compact-loop definitions into private LEC scratch state";
       return failure;
     }
+    auto certificates = summarize_loop_pairs(ref_top.get(), impl_top.get(), opts);
+    if (!graph_util::materialize_occurrences_all(ref_graphs, "pass.lec")
+        || !graph_util::materialize_occurrences_all(impl_graphs, "pass.lec")) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not realize uncertified compact-loop occurrences in private LEC scratch state";
+      return failure;
+    }
+    Lec_options prepared    = opts;
+    prepared._loop_prepared = true;
     Cvc5_stats   acc;
-    Query_result res  = prove_equal_impl(ref_top.get(), impl_top.get(), opts, sub_lib, opts.stats ? &acc : nullptr);
-    res.cvc5         += acc;
+    Query_result res       = prove_equal_impl(ref_top.get(), impl_top.get(), prepared, sub_lib, opts.stats ? &acc : nullptr);
+    res.cvc5              += acc;
+    res.loop_certificates  = std::move(certificates);
+    if (!res.loop_certificates.empty()) {
+      res.detail += std::format("; loop certificate: {} matched compact recurrence(s) summarized without ordinal expansion",
+                                res.loop_certificates.size());
+    }
     return res;
   }
 

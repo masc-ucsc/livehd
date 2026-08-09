@@ -128,6 +128,12 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       return fail(std::format("output pid {} has no sized declaration on the callee", out_pid));
     }
   }
+  // The activation chain reads `__next_active` off occurrence r-1, and it is
+  // NOT necessarily a reader port, so neither loop above covers it.
+  if (desc.count > 1 && desc.activation_input && desc.next_active_output && !output_is_sized(*desc.next_active_output)) {
+    return fail(
+        std::format("activation source pid {} has no sized output declaration", static_cast<uint64_t>(*desc.next_active_output)));
+  }
 
   // Use HHDS's one structural formatter so multiple loop sites in the same
   // parent continue the module-scoped __li ordinal space instead of each
@@ -283,7 +289,14 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
         auto prev      = reps[r - 1];
         auto prev_act  = prev.get_sink_pin(*desc.activation_input);
         auto prev_next = make_driver(prev, *desc.next_active_output);
-        auto andn      = create_typed_node(*g, Ntype_op::And);
+        if (prev_next.is_invalid()) {
+          // make_driver's documented failure return. Diagnose it like the carry
+          // and reader paths do -- connect_sink on a default-constructed pin
+          // asserts (dbg) / null-derefs (NDEBUG) instead of reporting.
+          return fail(std::format("activation source pid {} has no sized output declaration",
+                                  static_cast<uint64_t>(*desc.next_active_output)));
+        }
+        auto andn = create_typed_node(*g, Ntype_op::And);
         auto as        = andn.create_sink_pin(static_cast<hhds::Port_id>(0));  // multi-driver "as"
         // The previous occurrence's activation is whatever drives its sink.
         if (!prev_act.is_invalid()) {

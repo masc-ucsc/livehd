@@ -293,11 +293,27 @@ void Pass_abc::work(Eprp_var& var) {
     }
     auto  io  = source->get_io();
     auto* lib = io ? io->get_library() : nullptr;
-    if (lib == nullptr || !occurrence_library.copy_from(*lib, source->get_name())) {
+    if (lib == nullptr) {
       livehd::diag::err("pass.abc", "scratch-copy", "internal")
           .msg("could not copy '{}' into ABC's private physical library", source->get_name())
           .emit();
       return;
+    }
+    // copy_from is DEFINITION-LOCAL: it never pulls in a callee, and a copied
+    // parent resolves get_subnode_graph() through the DESTINATION library only.
+    // Copy the whole callee closure (as pass/lec's copy_loop_scratch does) so a
+    // child def that `var.graphs` does not happen to list still resolves here --
+    // otherwise its instances silently become blackboxes in the mapped netlist.
+    for (const auto& graph : source->definitions().graphs()) {
+      if (occurrence_library.find_io(graph->get_name())) {
+        continue;  // shared callee already copied for an earlier source
+      }
+      if (!occurrence_library.copy_from(*lib, graph->get_name())) {
+        livehd::diag::err("pass.abc", "scratch-copy", "internal")
+            .msg("could not copy '{}' into ABC's private physical library", graph->get_name())
+            .emit();
+        return;
+      }
     }
   }
   for (const auto& source : var.graphs) {

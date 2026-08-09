@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,6 +80,26 @@ public:
   // appended content only (add prepend_lines() for the final absolute line).
   [[nodiscard]] size_t append_line() const noexcept { return append_newlines_; }
   [[nodiscard]] size_t prepend_lines() const noexcept { return prepend_newlines_; }
+
+  // Mark/detach: a generator that must REWRITE a region it has already emitted
+  // (inou.cgen.sim's dead-temporary sweep runs over one finished method body)
+  // takes a mark before the region, detaches the region once it is complete,
+  // rewrites the text, and appends the result back. A mark is only valid while
+  // nothing is prepend()ed -- a prepend shifts every index.
+  [[nodiscard]] size_t mark() const noexcept { return sequence.size(); }
+  std::string          detach_from(size_t m) {
+    std::string out;
+    if (m >= sequence.size()) {
+      return out;
+    }
+    for (size_t i = m; i < sequence.size(); ++i) {
+      out += sequence[i];
+    }
+    sz -= out.size();
+    append_newlines_ -= count_nl(out);
+    sequence.erase(sequence.begin() + static_cast<std::ptrdiff_t>(m), sequence.end());
+    return out;
+  }
 
   void abort() { aborted = true; }  // abort/cancel (the destructor will do nothing)
 };

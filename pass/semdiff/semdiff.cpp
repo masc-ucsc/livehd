@@ -80,6 +80,13 @@ bool is_cut(const hhds::Node_class& node, bool blackbox_subs = false) {
 // hierarchical decoration so the same RTL register matches across front-ends.
 std::string normalize_reg_name(std::string_view raw) {
   std::string_view s = raw;
+  // Slang transports an escaped Verilog identifier as a backtick-delimited
+  // LGraph name (`bank.x`). Pyrope already carries the canonical `bank.x`.
+  // The delimiters are reader syntax, not part of the RTL state identity.
+  if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+    s.remove_prefix(1);
+    s.remove_suffix(1);
+  }
   if (!s.empty() && s.front() == '$') {
     if (auto e = s.find('$', 1); e != std::string_view::npos) {
       s.remove_prefix(e + 1);
@@ -159,6 +166,54 @@ uint64_t sub_iface_key(const hhds::Node_class& node) {
   return hcombine(h, acc);
 }
 
+// Cross-design identity of a native compact-loop descriptor. Port ids are
+// allocation-local, so resolve every role/carry endpoint through the callee IO
+// and fold names plus declared shape. This participates in BOTH structural
+// identity and canonical_digest through node_kind_key: a descriptor-only edit
+// must never hit the no-solver semdiff shortcut or a warm verdict-cache entry.
+uint64_t loop_descriptor_key(const hhds::Node_class& node) {
+  auto loop = node.subnode_loop();
+  auto io   = node.get_subnode_io();
+  if (!loop || !io) {
+    return 0;
+  }
+
+  auto port_key = [&](hhds::Port_id pid, bool input) {
+    const auto& decls = input ? io->get_input_pin_decls() : io->get_output_pin_decls();
+    for (const auto& p : decls) {
+      if (p.port_id != pid) {
+        continue;
+      }
+      uint64_t h = hcombine(hstr(input ? "\x01li" : "\x01lo"), hstr(p.name));
+      h          = hcombine(h, static_cast<uint64_t>(p.bits));
+      return hcombine(h, p.unsign ? 1ULL : 2ULL);
+    }
+    // Malformed descriptors are rejected by HHDS validation / occurrence
+    // materialization. Keep the structural key fail-closed meanwhile: an
+    // unresolved pid is side-local and therefore cannot match by coincidence.
+    const std::string_view bad_tag = input ? std::string_view{"\x01" "bad-li"} : std::string_view{"\x01" "bad-lo"};
+    return hcombine(hstr(bad_tag), static_cast<uint64_t>(pid));
+  };
+
+  uint64_t h = hstr("\x01subnode-loop-v1");
+  h          = hcombine(h, static_cast<uint64_t>(loop->first));
+  h          = hcombine(h, static_cast<uint64_t>(loop->step));
+  h          = hcombine(h, loop->count);
+  h          = hcombine(h, loop->index_input ? port_key(*loop->index_input, true) : hstr("\x01no-index"));
+  h          = hcombine(h, loop->activation_input ? port_key(*loop->activation_input, true) : hstr("\x01no-active"));
+  h          = hcombine(h, loop->next_active_output ? port_key(*loop->next_active_output, false) : hstr("\x01no-next-active"));
+
+  std::vector<uint64_t> carries;
+  for (const auto& c : node.subnode_group().carries()) {
+    carries.push_back(hcombine(port_key(c.input_port(), true), port_key(c.output_port(), false)));
+  }
+  std::sort(carries.begin(), carries.end());
+  for (uint64_t c : carries) {
+    h = hcombine(h, c);
+  }
+  return h;
+}
+
 // op + width + subnode identity: the local "kind" part of a node's key, shared
 // by the forward and backward signatures (a Sub also folds in its def gid so two
 // instances of different modules never match).
@@ -167,6 +222,9 @@ uint64_t node_kind_key(const hhds::Node_class& node) {
   h          = hcombine(h, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
   if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
     h = hcombine(h, static_cast<uint64_t>(gid));
+  }
+  if (node.is_loop_subnode()) {
+    h = hcombine(h, loop_descriptor_key(node));
   }
   return h;
 }
@@ -255,7 +313,7 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
   State_side ss;
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     auto op = gu::type_op_of(node);
-    if (!is_state(op)) {
+    if (!is_persistent_state(node)) {
       continue;
     }
     State_cell c;
@@ -877,11 +935,98 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
 struct Side {
   hhds::Graph*                                     g = nullptr;
   std::vector<hhds::Node_class>                    order;  // forward_class order
+  // Identity Get_mask nodes are representation-only boundaries. They are not
+  // members of the structural node bijection; signatures walk through them.
+  std::vector<hhds::Node_class>                    transparent;
   absl::flat_hash_map<hhds::Class_index, uint64_t> fsig;   // forward signature
   absl::flat_hash_map<hhds::Class_index, uint64_t> bsig;   // backward signature
   absl::flat_hash_set<uint64_t>                    fvals;  // fsig value set
   absl::flat_hash_set<uint64_t>                    bvals;  // bsig value set
 };
+
+// A Get_mask is transparent only when its CONSTANT mask selects exactly every
+// bit of the value pin's DECLARED width, in order. This is deliberately based
+// on pin metadata plus the literal mask -- never on inferred ranges. A wider,
+// narrower, shifted, sparse, unknown, or dynamic mask is real logic and must
+// remain in the correspondence graph.
+std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& node) {
+  if (gu::type_op_of(node) != Ntype_op::Get_mask) {
+    return std::nullopt;
+  }
+  const auto      a_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "a");
+  const auto      m_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "mask");
+  hhds::Pin_class a;
+  hhds::Pin_class mask;
+  for (const auto& e : node.inp_edges()) {
+    if (e.sink.get_port_id() == a_pid) {
+      if (!a.is_invalid()) {
+        return std::nullopt;
+      }
+      a = e.driver;
+    } else if (e.sink.get_port_id() == m_pid) {
+      if (!mask.is_invalid()) {
+        return std::nullopt;
+      }
+      mask = e.driver;
+    }
+  }
+  const int bits = gu::bits_of(a);
+  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || !gu::is_const_pin(mask)) {
+    return std::nullopt;
+  }
+  const auto value = gu::hydrate_const(mask);
+  if (value.has_unknowns()) {
+    return std::nullopt;
+  }
+  // -1 is the explicit all-source-bits sentinel used by Get_mask.
+  if (value.is_just_i64() && value.to_just_i64() == -1) {
+    return a;
+  }
+  if (value.is_negative()) {
+    return std::nullopt;
+  }
+  const auto [first, end] = value.get_mask_range();
+  if (first != 0 || end != bits) {
+    return std::nullopt;
+  }
+  return a;
+}
+
+hhds::Pin_class skip_identity_get_masks(hhds::Pin_class pin) {
+  for (int hops = 0; hops < 64 && !pin.is_invalid() && !gu::is_graph_input_pin(pin) && !gu::is_const_pin(pin); ++hops) {
+    auto input = identity_get_mask_input(pin.get_master_node());
+    if (!input) {
+      break;
+    }
+    pin = *input;
+  }
+  return pin;
+}
+
+// Follow an outgoing edge through any identity Get_mask value inputs. The
+// returned sinks are the real structural consumers used by the backward
+// signature. A small hop cap is fail-closed: on malformed/cyclic wrapper
+// topology the unresolved Get_mask sink remains and the match declines.
+void collect_structural_sinks(const hhds::Pin_class& sink, std::vector<hhds::Pin_class>& out, int hops = 0) {
+  if (sink.is_invalid() || gu::is_graph_output_pin(sink) || hops >= 64) {
+    out.push_back(sink);
+    return;
+  }
+  auto node  = sink.get_master_node();
+  auto input = identity_get_mask_input(node);
+  if (!input || sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+    out.push_back(sink);
+    return;
+  }
+  bool any = false;
+  for (const auto& e : node.out_edges()) {
+    any = true;
+    collect_structural_sinks(e.sink, out, hops + 1);
+  }
+  if (!any) {
+    out.push_back(sink);
+  }
+}
 
 // The forward pass's operand rule, factored out so the compare-point obligation
 // below folds operands EXACTLY the way the signatures did. Returns false when the
@@ -891,23 +1036,24 @@ struct Side {
 // has no CONST_NODE in forward_class, so an obligation that only consulted fsig
 // would miss a changed constant entirely.
 bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
-  if (gu::is_graph_input_pin(drv)) {
-    out = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
+  auto structural_drv = skip_identity_get_masks(drv);
+  if (gu::is_graph_input_pin(structural_drv)) {
+    out = hcombine(hstr("\x01in"), hstr(structural_drv.get_pin_name()));
     return true;
   }
-  if (gu::is_const_pin(drv)) {
+  if (gu::is_const_pin(structural_drv)) {
     // A constant operand (incl. the pid-encoded const that drives e.g. a
     // get_mask's mask) is anchored by value — its CONST_NODE is not a
     // forward_class node, so resolve it here or forward would stall and the
     // node would fall back to a coarser backward (symmetric) match.
-    out = hcombine(hstr("\x01const"), hstr(gu::hydrate_const(drv).serialize()));
+    out = hcombine(hstr("\x01const"), hstr(gu::hydrate_const(structural_drv).serialize()));
     return true;
   }
-  auto it = s.fsig.find(drv.get_master_node().get_class_index());
+  auto it = s.fsig.find(structural_drv.get_master_node().get_class_index());
   if (it == s.fsig.end()) {
     return false;
   }
-  out = hcombine(it->second, static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id())));
+  out = hcombine(it->second, static_cast<uint64_t>(static_cast<uint32_t>(structural_drv.get_port_id())));
   return true;
 }
 
@@ -955,6 +1101,10 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
   // ---- Forward pass: inputs/consts -> outputs (topological). A node is ready
   // when every fanin signal already has a forward signature.
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    if (identity_get_mask_input(node)) {
+      s.transparent.push_back(node);
+      continue;
+    }
     s.order.push_back(node);
     auto ci = node.get_class_index();
     auto op = gu::type_op_of(node);
@@ -1059,10 +1209,13 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     bool                                            ready = true;
     bool                                            any   = false;
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
+    std::vector<hhds::Pin_class>                    structural_sinks;
     for (const auto& e : node.out_edges()) {
-      any             = true;
-      const auto& snk = e.sink;
-      uint64_t    usig;
+      collect_structural_sinks(e.sink, structural_sinks);
+    }
+    for (const auto& snk : structural_sinks) {
+      any = true;
+      uint64_t usig;
       if (gu::is_graph_output_pin(snk)) {
         usig = hcombine(hstr("\x01out"), hstr(snk.get_pin_name()));
       } else {
@@ -1299,6 +1452,21 @@ void common_values(const Side& sa, const Side& sb, absl::flat_hash_set<uint64_t>
 
 }  // namespace
 
+bool is_persistent_state(const hhds::Node_class& node) {
+  const auto op = gu::type_op_of(node);
+  if (op != Ntype_op::Memory) {
+    return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch;
+  }
+  auto type = gu::get_driver_of_sink_name(node, "type");
+  if (!type.is_invalid() && gu::is_const_pin(type)) {
+    const auto value = gu::hydrate_const(type);
+    if (value.is_just_i64() && value.to_just_i64() == 2) {
+      return false;
+    }
+  }
+  return true;
+}
+
 Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
   Match_result res;
   if (a == nullptr || b == nullptr) {
@@ -1333,6 +1501,35 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
   };
   assign(sa, res.a_matched, res.a_unmatched);
   assign(sb, res.b_matched, res.b_unmatched);
+  // Surface a transparent wrapper as part of its matched consumer region when
+  // possible. It is intentionally not counted as a matched node (there is no
+  // node counterpart on the other side), but leaving a stale/zero mark in a
+  // stamped diff would misleadingly present the cancelled boundary artifact as
+  // unique logic.
+  auto stamp_transparent = [](Side& side) {
+    for (const auto& node : side.transparent) {
+      uint32_t id = 0;
+      for (const auto& edge : node.out_edges()) {
+        std::vector<hhds::Pin_class> sinks;
+        collect_structural_sinks(edge.sink, sinks);
+        for (const auto& sink : sinks) {
+          if (sink.is_invalid() || gu::is_graph_output_pin(sink)) {
+            continue;
+          }
+          id = gu::match_of(sink.get_master_node());
+          if (id != 0) {
+            break;
+          }
+        }
+        if (id != 0) {
+          break;
+        }
+      }
+      stamp(node, id);
+    }
+  };
+  stamp_transparent(sa);
+  stamp_transparent(sb);
   res.regions = next_id - 1;
 
   // id_granularity=region: union ids that are adjacent through a matched edge in

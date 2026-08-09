@@ -157,6 +157,20 @@ void Flattener::create_nodes(Ictx* ctx) {
     if (op == Ntype_op::Sub && ctx->child_ctx.contains(n)) {
       continue;
     }
+    if (op == Ntype_op::Sub && n.is_loop_subnode() && n.get_subnode_graph() != nullptr) {
+      // A loop Sub stands for `count` occurrences in native HHDS structure.
+      // Recursing would splice ONE body copy and dissolve the node, silently
+      // dropping count-1 replicas (graph/inline_sub.cpp refuses for the same
+      // reason). Callers that must flatten a rolled design materialize the
+      // occurrences into their own scratch library first.
+      livehd::diag::err("pass.partition", "flatten-replicated-sub", "unsupported")
+          .msg("flatten: instance '{}' is a replicated Sub (it stands for several occurrences)",
+               ctx->prefix + gu::default_instance_name(n))
+          .hint("materialize occurrences into a pass-private scratch library before flattening")
+          .emit();
+      failed_ = true;
+      return;
+    }
     if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr) {
       // Design instance: recurse — its internals become flat nodes with a
       // longer prefix; the Sub itself dissolves (edges hop through it in
@@ -184,7 +198,15 @@ void Flattener::create_nodes(Ictx* ctx) {
       // stays an opaque instance; clone its IO decl into the flat graph's lib.
       auto io = livehd::partition::resolve_or_clone_subdef(lib_, n);
       if (io) {
-        neo.set_subnode(io);
+        // Keep the loop descriptor when there is one: dropping it would turn a
+        // replicated black box into a single occurrence (a body-less loop Sub
+        // survives the refusal above only because it has no body to recurse
+        // into, not because it denotes one instance).
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(io, *loop);
+        } else {
+          neo.set_subnode(io);
+        }
       } else if (n.get_subnode_io()) {
         livehd::diag::err("pass.partition", "flatten-subdef", "unsupported")
             .msg("flatten: cannot resolve black-box def '{}' for instance '{}'",

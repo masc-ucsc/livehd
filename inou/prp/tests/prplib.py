@@ -16,6 +16,11 @@ class PrpTest:
     def __init__(self, prp_file):
         # Set default values
         self.params = {}
+        # Every occurrence of every tag, in file order. `params` keeps the LAST
+        # value (as it always has); tags that are naturally a LIST — an
+        # expectation stated once per line, e.g. `:lec_grep:` — read `multi`
+        # instead, so they need no in-value separator to hide spaces from.
+        self.multi  = {}
         self.params['name']       = os.path.basename(prp_file)
         self.params['files']      = prp_file
         self.params['incdirs']    = os.path.dirname(prp_file)
@@ -35,6 +40,7 @@ class PrpTest:
                     param_value = param[2]
 
                     self.params[param_name] = param_value
+                    self.multi.setdefault(param_name, []).append(param_value)
         except Exception as e:
             print('Failed to process "{}"'.format(prp_file))
             sys.exit(1)
@@ -779,6 +785,10 @@ class PrpRunner:
         # simfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
         cmd += ['--set', 'formal.simfail_run=false']
+        # `:set:` rides here too: without it a `:set: upass.roll=true` fixture
+        # silently verifies the DEFAULT lowering, so a rolled-only regression
+        # passes green while its name and header claim the rolled netlist.
+        cmd += self._extra_sets(test)
 
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -1193,6 +1203,13 @@ class PrpRunner:
                 # `fixme` — dropping a live equivalence proof — every time the
                 # naming is the only thing wrong.
                 rc = self.check_state_match(tmp_dir, test)
+                continue
+            if mode == 'lec':
+                # PYROPE-vs-PYROPE equivalence: `foo.prp` against its `foo_<N>.prp`
+                # variants, discovered from the file name (prplec.py). Lazy import
+                # so only the `prp-lec-*` targets stage that module.
+                from prplec import run_prplec
+                rc = run_prplec(self, tmp_dir, test)
                 continue
             if mode == 'equiv_slang':
                 rc = self.run_equiv_slang(tmp_dir, test)

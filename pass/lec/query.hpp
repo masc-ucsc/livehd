@@ -145,6 +145,12 @@ struct Query_result {
   // Lec_options::_cone_cache for the read direction.
   std::vector<std::string> cone_proven;
 
+  // M6 compact-loop certificates consumed by this result. Each entry is a
+  // machine-readable premise summary (instance/body plus P0..P5 discharge),
+  // also emitted on the per-block progress diagnostic. Empty means no compact
+  // recurrence was summarized.
+  std::vector<std::string> loop_certificates;
+
   // cvc5 solve-insight accounting (formal.stats / --stats). Empty (solvers == 0)
   // when stats are off or no cvc5 query ran. Summed, never assigned, at every
   // point that merges two results (the auto portfolio, the case split, the
@@ -542,6 +548,11 @@ struct Lec_options {
   // cache file -- it just checks membership. A hit skips abc for that cone.
   absl::flat_hash_set<std::string> _cone_cache;
   bool                             _isolated_worker = false;  // one global-pool child: no nested forks
+  // Internal recursion guard: prove_equal() has already copied the design into
+  // private scratch, summarized every admissible matched compact loop, and
+  // materialized the remaining loop occurrences. Portfolio/tier retries must
+  // reuse that prepared graph rather than copying and expanding it again.
+  bool                             _loop_prepared = false;
   // Internal-only mode for the speculative-pair recovery leg. With a detected
   // reset it is inert. Without one, otherwise-uninitialized reference flop state
   // gets a full '?' plane under gold_x=ignore (implementation power-on remains

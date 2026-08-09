@@ -5254,6 +5254,37 @@ bool written_outside(const Lnast& ln, const Lnast_nid& nid, const Lnast_nid& ski
   return false;
 }
 
+// True when a write to `name` REACHES the loop, i.e. some `store` that precedes
+// `loop` in program order writes it. Order matters: a store that only happens
+// AFTER the loop is not a value entering ordinal 0, and accepting it emits a
+// `<name>__carry_in = ref(<name>)` actual against a name with no driver yet --
+// exactly what the "written only inside the loop" refusal exists to prevent.
+// Everything under `loop` (including the body) is excluded by construction.
+bool written_before(const Lnast& ln, const Lnast_nid& loop, std::string_view name) {
+  for (auto node = loop; !node.is_invalid(); node = ln.get_parent(node)) {
+    const auto parent = ln.get_parent(node);
+    if (parent.is_invalid()) {
+      break;
+    }
+    if (Lnast_ntype::is_func_def(ln.get_type(parent))) {
+      break;  // a lambda boundary: an enclosing scope's writes are not this one's
+    }
+    const bool parent_keys = makes_store_keys(ln, parent);
+    for (auto sib : ln.children(parent)) {
+      if (sib == node) {
+        break;  // only the siblings BEFORE this level's ancestor have run
+      }
+      if (Lnast_ntype::is_func_def(ln.get_type(sib))) {
+        continue;
+      }
+      if (written_outside(ln, sib, Lnast_nid{}, name, parent_keys)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Conservative must-write proof for the final-only class. A straight-line
 // store establishes the value. An if/match does so only when it has an else
 // arm and every arm establishes it. Anything more involved (nested loops,
@@ -5305,7 +5336,7 @@ bool body_must_write(const Lnast& ln, const Lnast_nid& nid, std::string_view nam
 // True when the subtree holds a `break` or `continue`. The roller uses this to
 // select the per-occurrence `next_active` ABI and predicate the lifted body;
 // nested loops own their control independently later in the classification.
-bool subtree_has_loop_control(const Lnast& ln, const Lnast_nid& nid) {
+bool subtree_has_loop_control(const Lnast& ln, const Lnast_nid& nid, bool is_root = true) {
   if (nid.is_invalid()) {
     return false;
   }
@@ -5313,11 +5344,20 @@ bool subtree_has_loop_control(const Lnast& ln, const Lnast_nid& nid) {
   if (Lnast_ntype::is_func_def(t)) {
     return false;
   }
+  // `break`/`continue` bind to the INNERMOST enclosing loop, so a nested
+  // `for`/`while` owns everything under it — it lowers inside the lifted
+  // definition and mints its own activation there. Counting it here would
+  // predicate THIS body under a `__next_active` that copy_controlled_stmt never
+  // writes (a constant copy of `__valid`), and would also block the `finals`
+  // class for names this loop must-writes.
+  if (!is_root && (Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t))) {
+    return false;
+  }
   if (Lnast_ntype::is_func_break(t) || Lnast_ntype::is_func_continue(t)) {
     return true;
   }
   for (auto c : ln.children(nid)) {
-    if (subtree_has_loop_control(ln, c)) {
+    if (subtree_has_loop_control(ln, c, /*is_root=*/false)) {
       return true;
     }
   }
@@ -5532,9 +5572,20 @@ bool later_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, c
     }
     return false;
   };
-  for (auto stmt = ln.get_sibling_next(loop); !stmt.is_invalid(); stmt = ln.get_sibling_next(stmt)) {
-    if (contains_domain_read(stmt)) {
-      return true;
+  // Walk the ENCLOSING chain, not just this loop's own sibling list: a loop
+  // nested in an `if` (or any other block) has a sibling chain that ends inside
+  // that block, so a later comptime loop in the outer scope would never be
+  // reached and the refusal could not fire. Sibling arms of an enclosing `if`
+  // are scanned too — over-approximating costs at most a declined roll.
+  for (auto node = loop; !node.is_invalid(); node = ln.get_parent(node)) {
+    const auto parent = ln.get_parent(node);
+    if (parent.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(parent))) {
+      break;  // a lambda boundary: the outer scope's statements are not "later" here
+    }
+    for (auto stmt = ln.get_sibling_next(node); !stmt.is_invalid(); stmt = ln.get_sibling_next(stmt)) {
+      if (contains_domain_read(stmt)) {
+        return true;
+      }
     }
   }
   return false;
@@ -5580,6 +5631,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
 
   const auto& ln       = *lm->get_lnast();
   out.has_loop_control = subtree_has_loop_control(ln, body_stmts);
+  const auto loop_nid  = ln.get_parent(body_stmts);  // the `for` node: the order anchor for written_before
 
   Body_vars vars;
   collect_body_vars(ln, body_stmts, /*parent_is_call=*/false, vars);
@@ -5599,7 +5651,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     if (is_local(n)) {
       continue;
     }
-    const bool has_incoming = written_outside(ln, ln.get_root(), body_stmts, n);
+    const bool has_incoming = written_before(ln, loop_nid, n);
     if (!read.contains(n) && !has_incoming && !out.has_loop_control && body_must_write(ln, body_stmts, n)) {
       out.finals.emplace_back(n);
     } else {
@@ -5832,7 +5884,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
     // A non-final variable still needs an ordinal-0 value. Conditional writes,
     // reads-before-write and breakable loops all land here deliberately.
-    if (!written_outside(ln, ln.get_root(), body_stmts, n)) {
+    if (!written_before(ln, loop_nid, n)) {
       return refuse(std::format("`{}` is written only inside the loop (no value enters ordinal 0)", n));
     }
     Spec_port sp;

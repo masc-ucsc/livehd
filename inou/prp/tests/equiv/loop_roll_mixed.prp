@@ -1,0 +1,30 @@
+/*
+:name: loop_roll_mixed
+:type: lec
+:set: compile.upass.roll=true
+*/
+// PYROPE-vs-PYROPE group: this is the REFERENCE, compiled with the source loop
+// kept ROLLED (one replicated Sub over a lifted body, O(1) in the trip count).
+// `loop_roll_mixed_1.prp` is the same source with rolling OFF.
+//
+// M6 representation bridge: the two are the same design in two REPRESENTATIONS,
+// and the private materialize+inline+cprop normalization must discharge them
+// structurally — without asking CVC5 to prove the same loop body once per
+// ordinal. The lifted body holds an instance (`stage`), which is what makes the
+// normalization non-trivial: it has to inline the replica before comparing.
+//
+// The value side of this design (rolled and unrolled agree with 6*x+15) is
+// covered by tests/sim/loop_roll_carry.prp; what this pair pins is the PROOF
+// PATH, not the arithmetic.
+mod acc_step(idx:u4, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
+  acc_out = acc_in + x + idx
+}
+
+pub mod top(x:u8) -> (total:u16@[0]) {
+  mut acc:u16 = 0
+  for i in 0..<6 {
+    const t = acc_step::[name=stage](idx=i, x=x, acc_in=acc)
+    acc = t
+  }
+  total = acc
+}
