@@ -334,6 +334,15 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       const auto& conv = expr.as<slang::ast::ConversionExpression>();
       const auto& from = *conv.operand().type;
       const auto& to   = *conv.type;
+      // A streaming concatenation is not an integral TYPE in slang's model, but
+      // it lowers to a plain integral value here (`{<<8{x}}` is a byte swap of
+      // x), so it must not be refused as a non-integral conversion.
+      if (conv.operand().kind == ExpressionKind::Streaming) {
+        const auto& sc = conv.operand().as<slang::ast::StreamingConcatenationExpression>();
+        auto        sv = lower_streaming(sc);
+        auto        ti = tinfo(to);
+        return materialize_conversion(sv, static_cast<int>(sc.getBitstreamWidth()), false, ti.bits, ti.is_signed);
+      }
       if (!to.isIntegral() || !from.isIntegral()) {
         emit_unsupported(expr.sourceRange, "unsupported-conversion", "only integral conversions are supported by --reader slang");
         return "0";
@@ -437,9 +446,7 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
                        "assignments inside expressions are not supported by --reader slang");
       return "0";
     case ExpressionKind::Streaming:
-      emit_unsupported(expr.sourceRange, "unsupported-streaming",
-                       "streaming concatenation is not supported by --reader slang yet");
-      return "0";
+      return lower_streaming(expr.as<slang::ast::StreamingConcatenationExpression>());
     default: break;
   }
 
@@ -879,6 +886,66 @@ std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression
   }
   if (parts.empty()) {
     return "0";
+  }
+  return builder_.create_bit_or_stmts(parts);
+}
+
+
+// `{<<N{x}}` / `{>>N{x}}` — the streaming (bit/byte reversal) operator.
+//
+// The value is sliced into N-bit blocks and, for `<<`, the block ORDER is
+// reversed: `{<<8{x[31:0]}}` is a byte swap, which is how CVA6's load_unit /
+// store_unit implement big-endian access. `>>` (and a slice size of 0, which is
+// slang's spelling for a plain left-to-right stream) keeps the order, so the
+// value passes through unchanged.
+//
+// Only the FIXED-SIZE, whole-block case is lowered. A width that is not a
+// multiple of the slice size leaves a short block whose placement is easy to
+// get subtly wrong, and a dynamically sized stream has no static width at all:
+// both are refused rather than lowered into a plausible-looking swap.
+std::string Slang_context::lower_streaming(const slang::ast::StreamingConcatenationExpression& expr) {
+  if (!expr.isFixedSize()) {
+    emit_unsupported(expr.sourceRange, "unsupported-streaming",
+                     "dynamically sized streaming concatenation is not supported by --reader slang");
+    return "0";
+  }
+  const auto streams = expr.streams();
+  if (streams.size() != 1 || streams[0].withExpr != nullptr) {
+    emit_unsupported(expr.sourceRange, "unsupported-streaming",
+                     "only a single-operand streaming concatenation without `with` is supported by --reader slang");
+    return "0";
+  }
+
+  const auto  width = static_cast<int>(expr.getBitstreamWidth());
+  const auto  slice = static_cast<int>(expr.getSliceSize());
+  const auto& oper  = *streams[0].operand;
+  auto        val   = to_int_value(lower_rvalue(oper));
+
+  // slice 0 == left-to-right: the bits keep their order, so this is the value.
+  if (slice <= 0 || slice >= width) {
+    return val;
+  }
+  if (width % slice != 0) {
+    emit_unsupported(expr.sourceRange, "unsupported-streaming",
+                     std::format("streaming width {} is not a multiple of the slice size {} — the short block's "
+                                 "placement is not supported by --reader slang",
+                                 width,
+                                 slice));
+    return "0";
+  }
+
+  // Reverse the blocks: block i of the source lands at position (n-1-i).
+  const int                nblocks = width / slice;
+  std::vector<std::string> parts;
+  parts.reserve(static_cast<size_t>(nblocks));
+  for (int i = 0; i < nblocks; ++i) {
+    // shift-then-mask rather than get_mask: `#[...]` right-aligns what it
+    // extracts, so masking in place and shifting down would shift twice.
+    const int  lo   = i * slice;
+    auto       down = lo == 0 ? val : builder_.create_sra_stmts(val, std::to_string(lo));
+    auto       blk  = builder_.create_bit_and_stmts(down, std::format("0x{:x}", (1ULL << slice) - 1));
+    const int  dest = (nblocks - 1 - i) * slice;
+    parts.emplace_back(dest == 0 ? blk : builder_.create_shl_stmts(blk, std::to_string(dest)));
   }
   return builder_.create_bit_or_stmts(parts);
 }

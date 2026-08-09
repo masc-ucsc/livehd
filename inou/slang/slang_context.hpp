@@ -526,6 +526,10 @@ private:
   // diagnosed by the caller.
   std::string lower_assignment_pattern(const slang::ast::Expression& expr, std::span<const slang::ast::Expression* const> elems);
   std::string lower_conditional_expr(const slang::ast::ConditionalExpression& expr);
+  // `{<<N{x}}` — slice into N-bit blocks and reverse their order (a byte swap
+  // for N=8, how CVA6's load/store units do big-endian). Fixed-size,
+  // whole-block, single-operand only; anything else is refused.
+  std::string lower_streaming(const slang::ast::StreamingConcatenationExpression& expr);
   std::string lower_call(const slang::ast::CallExpression& expr);
   // Inline a (synthesizable, input-only) user function: bind args, lower the
   // body, capture the return value. Returns the result temp.

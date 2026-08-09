@@ -369,6 +369,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `{<<N{x}}` streaming (byte reversal). Proven EQUAL to an explicit reversed
+# concatenation by LEC: the first implementation looked right and was wrong
+# (get_mask right-aligns, so the block was shifted twice).
+sh_test(
+    name = "lhd_sv_streaming_test",
+    size = "large",
+    srcs = ["lhd_sv_streaming_test.sh"],
+    data = ["//lhd"],
+)
+
 # F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
 # induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
 # per-obligation merge takes bmc-first's deep reachable refute, and auto never
