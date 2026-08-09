@@ -644,7 +644,6 @@ _STATEMATCH_FIXME = [
     "instance_state_anon",           # regs: only 0/1 paired
     "instance_state_order",          # regs: only 0/1 paired
     "latch_reset",                   # regs: only 0/1 paired
-    "loop_runtime_break",            # `lhd compile` refuses the .prp (loop-runtime-break, interim)
     "mem_comptime_init",             # mems: only 1/2 paired
     "mem_comptime_init_inferred",    # mems: only 1/2 paired
     "mem_const_idx",                 # mems: only 0/1 paired

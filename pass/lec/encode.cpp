@@ -2694,6 +2694,46 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto        nm  = gu::node_name_of(node);
       std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
       out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
+      // A Sub occurrence's path includes the site itself.  Consequently a
+      // property authored in the selected root has exactly one step (the
+      // fproperty site), while a property in a child has the parent call-site
+      // step(s) followed by the fproperty site.
+      const auto steps                                                                = node.get_occurrence_index().path.steps();
+      if (steps.size() <= 1) {
+        out.prop_top.insert(occ);
+      } else {
+        // Name only the containing occurrence.  get_hier_name() includes the
+        // fproperty site's packed "kind<US>loc<US>msg" name, which is useful
+        // for graph debugging but is not an instance path and leaks delimiter
+        // bytes into diagnostics.  Build the parent path explicitly and keep
+        // anonymous sites distinguishable with a stable definition fallback.
+        std::string instance;
+        auto*       lib = g->get_io() ? g->get_io()->get_library() : nullptr;
+        for (size_t si = 0; si + 1 < steps.size(); ++si) {
+          const auto& step = steps[si];
+          std::string segment;
+          if (lib != nullptr) {
+            if (auto parent = lib->get_graph(step.subnode.gid)) {
+              auto site = parent->get_node(hhds::Class_index{step.subnode.value});
+              if (site.is_valid() && !site.get_name().empty()) {
+                segment = std::string{site.get_name()};
+              }
+            }
+          }
+          if (segment.empty()) {
+            segment = "@" + std::to_string(static_cast<uint64_t>(step.subnode.gid)) + ":"
+                      + std::to_string(static_cast<uint64_t>(step.subnode.value));
+          }
+          if (step.ordinal) {
+            segment += "__li" + std::to_string(*step.ordinal);
+          }
+          if (!instance.empty()) {
+            instance += '.';
+          }
+          instance += segment;
+        }
+        out.prop_instance.emplace(occ, std::move(instance));
+      }
 
       // R1 Phase 2 — the optional raw GUARD of a property written inside an
       // `if`/`match` arm, emitted as "\x04guard:<occ>" so prove_properties can

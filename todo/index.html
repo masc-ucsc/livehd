@@ -129,18 +129,16 @@ tier.</p>
   <code>--set upass.tolg=false</code> — the test is about uPass <em>order resolution</em>,
   and the seam explicitly exempts the LNAST-only tiers.</li>
 <li><strong>R2 — make "<code>assume</code> anywhere in the code" mean something (root /
-  child policy).</strong> <span class="status">G3 · medium</span>
-  Today a <em>root</em>-module input assume is a hard compile error
-  (<code>assume-refuted</code>), while a <em>child</em>-module assume defers to a runtime
-  check and is never re-proven at the parent that binds it — and
-  <code>pass/formal/pass_formal.cpp:351-367</code> promotes only <em>PROVEN</em> assumes to
-  hypotheses, so an undischarged assume constrains nothing. Net: an assume either fails
-  the build or is a no-op. Needs a <strong>ruling first</strong> (is a root input assume
-  an environment constraint or an obligation? who discharges a child's — the parent
-  binding, per the fcore contract?), then the wiring.
-  <em>Done when:</em> <code>lhd/tests:hier_property_test</code> sheds its
-  <code>fixme</code> tag — its case 3 (a parent that <em>violates</em> a submodule's
-  assume must FAIL) is what keeps the fix honest.
+  child policy).</strong> <span class="status landed">LANDED 2026-08-08</span>
+  The compile gate now checks contracts from the selected top through real
+  occurrence bindings: a satisfied child input assume is discharged and removed;
+  a refuted or unresolved one is an error naming the occurrence and the two escapes
+  (<code>assume_nocheck</code> or <code>formal.assume_check=false</code>). A selected-top
+  IO assume has no parent that could check it, so it warns and remains active with
+  disclosed <code>assume_nocheck</code> semantics. Design-body
+  <code>assume_nocheck</code> is a first-class spelling. The one canonical option is
+  <code>formal.assume_check</code>, default true; false disables checks without dropping
+  constraints. <code>lhd/tests:hier_property_test</code> is live (no fixme).
   Home: <a class="xref" href="livehd/2f-verify.html">2f-verify</a> (hierarchy half).</li>
 <li><strong>R3 — multi-module Pyrope recompile (sibling-file callees).</strong>
   <span class="status">DONE</span>
@@ -302,15 +300,15 @@ tier.</p>
   docs drop the TBD marks for the core while deleting the out-of-scope operators.
   Home: <a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a>.</li>
 <li><strong>R14 — re-admit design assumes into <code>lhd lec</code>.</strong>
-  <span class="status">G3+G1 · small</span>
-  After the per-block assume-scoping change, <code>lhd lec</code> honors <strong>no user
-  assume of any kind</strong>: <code>graph_has_assume</code> lives in
-  <code>prove_properties</code> (verify) only, and <code>compile_lec_formal_helpers</code> was
-  deleted. The engine hook (<code>Lec_options::assumptions</code> + the monitor encode in
-  <code>query.cpp</code>) was deliberately retained and left unused, so re-admitting is flag
-  wiring plus the P1 input-vs-internal classification and the "PROVEN under N input
-  assume(s)" disclosure. Wanted by G1 too — the RTL-vs-RTL iteration gate should be allowed
-  to run under the design's own environment constraints rather than over all inputs.
+  <span class="status landed">LANDED 2026-08-08</span>
+  The cvc5 LEC translation asserts surviving design assumptions on both reference
+  and implementation sides, checks the active set for contradiction, includes the
+  policy in verdict-cache keys, and discloses conditional proofs. Existing
+  hierarchical LEC is used: until boxes expose boundary contracts, any cone that
+  contains an active assumption stays transparent while unrelated proven defs are
+  still boxed. This preserves occurrence bindings and rejects vacuous equivalence
+  under contradictory unchecked constraints. Regression:
+  <code>lhd/tests:lec_design_assume_test</code>.
   Home: <a class="xref" href="livehd/2f-lec.html">2f-lec</a>.</li>
 <li><strong>R15 — emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into
   slop.</strong> <span class="status">G3 · medium</span>

@@ -77,6 +77,9 @@ private:
   absl::flat_hash_map<Loop_occurrence_key, std::string> loop_instance_names_;
   absl::flat_hash_map<Loop_pin_key, std::string>        loop_output_vars_;
   absl::flat_hash_map<Loop_pin_key, std::string>        loop_input_exprs_;
+  // Clock_cell output -> private enable-latch variable. The output itself is a
+  // wire in pin2var; the latch implements glitch-free gating in emitted RTL.
+  absl::flat_hash_map<node_key_t, std::string>          clock_latch_vars_;
 
   bool first_array_block;
 
@@ -163,6 +166,7 @@ private:
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_subs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void create_clock_cells(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_registers(std::shared_ptr<File_output> fout, hhds::Graph* graph);

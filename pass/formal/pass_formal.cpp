@@ -13,6 +13,7 @@
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 #include "prove.hpp"
+#include "query.hpp"
 
 using namespace livehd;
 namespace gu = livehd::graph_util;
@@ -89,11 +90,7 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
                      : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
                        "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
   if (code == "assume-refuted") {
-    // An input `assume` at a root module is BY NATURE refutable here (inputs are
-    // free) — the gate is telling the user the constraint is not self-evident,
-    // not that the design is broken. Name both real escapes explicitly.
-    hint += "; for an intentional environment constraint, move the assume into a `formal name { }` block "
-            "(adjudicated by `lhd formal verify`, not this gate) or pass --set compile.formal.on_refute=warn";
+    hint += "; fix the binding, rewrite the contract as assume_nocheck, or set formal.assume_check=false";
   }
   // Deferred: record + fail the build, but let the pipeline finish so cgen still
   // emits the design with the failing property kept as a runtime check.
@@ -204,6 +201,14 @@ void Pass_formal::setup() {
                        "under formal.strict; without that both tiers would emit the same diagnostic code twice",
                        "true");
   m.add_label_optional("warn_assume", "true|false warn on a deferred assume", "true");
+  m.add_label_optional("assume_check",
+                       "internal compile mirror of canonical formal.assume_check: false keeps assumptions active but "
+                       "treats all of them as assume_nocheck",
+                       "true");
+  m.add_label_optional("hier_preflight",
+                       "internal load gate: top-rooted child-assumption discharge (formal verify disables it because "
+                       "its deeper property engine is authoritative)",
+                       "true");
   register_pass(m);
 }
 
@@ -286,6 +291,132 @@ void Pass_formal::work(Eprp_var& var) {
     }
   }
 
+  // R2 hierarchy contract preflight. The semantic view is the selected top
+  // virtually flattened: every descendant fproperty occurrence is encoded with
+  // its REAL call-site bindings, so `leaf.assume(a==3)` may be discharged by a
+  // grandparent that eventually binds 3. This is assumptions/assertions only,
+  // not a modular hierarchical-verify scheduler; LEC owns that scheduler. The
+  // occurrence-aware result is nevertheless the same representation that the
+  // future verify scheduler can consume.
+  //
+  // A property lives once in its definition but can occur many times. Delete
+  // the definition-level fproperty only when EVERY reached occurrence is
+  // proven unbounded. An unchecked occurrence stays in the graph as a live
+  // constraint; one refuted/unknown checked assumption is a build error.
+  if (truthy(var.get("hier_preflight", "true"))) {
+    struct Hier_prop_state {
+      int  total     = 0;
+      int  proven    = 0;
+      bool unchecked = false;
+      bool failed    = false;
+    };
+    absl::flat_hash_map<hhds::Node_class, Hier_prop_state> hier_props;
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*>           sub_lib;
+    for (auto& gp2 : var.graphs) {
+      if (gp2) {
+        sub_lib[gp2->get_gid()] = gp2.get();
+      }
+    }
+    auto is_designated_top = [&](hhds::Graph* g) {
+      std::string_view gname = g->get_name();
+      auto             dot   = gname.rfind('.');
+      std::string_view gmod  = dot == std::string_view::npos ? gname : gname.substr(dot + 1);
+      return (!designated_top.empty() && (gname == designated_top || gmod == designated_top))
+             || (designated_top.empty() && !instantiated_gids.contains(g->get_gid()));
+    };
+    for (auto& root_sp : var.graphs) {
+      auto* root = root_sp.get();
+      if (root == nullptr || !is_designated_top(root)) {
+        continue;
+      }
+      livehd::lec::Lec_options ho;
+      ho.engine  = "bmc";
+      ho.solver  = "cvc5";
+      ho.bound   = bmc_bound;
+      ho.timeout = 0;
+      ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      ho.partitions     = 1;
+      ho.split          = "none";
+      ho.state_pairing  = false;
+      ho.assume_check   = truthy(var.get("assume_check", "true"));
+      ho.ignore_assumes = false;
+      auto hr           = livehd::lec::prove_properties(root, ho, &sub_lib);
+
+      std::vector<hhds::Occurrence_node> occurrences;
+      for (auto pn : root->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
+        if (gu::type_op_of(pn) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = pn.get_subnode_io();
+        if (sio == nullptr || sio->get_name() != gu::fproperty_module_name) {
+          continue;
+        }
+        const auto cond_pid  = sio->get_input_port_id("cond");
+        bool       connected = false;
+        for (const auto& e : pn.inp_edges()) {
+          if (e.sink.get_port_id() == cond_pid) {
+            connected = true;
+            break;
+          }
+        }
+        if (connected) {
+          occurrences.push_back(pn);
+        }
+      }
+      if (occurrences.size() != hr.props.size()) {
+        livehd::diag::err("pass.formal", "hier-property-correlation", "internal")
+            .msg("hierarchical property correlation failed for '{}': {} occurrence(s), {} result(s)",
+                 root->get_name(),
+                 occurrences.size(),
+                 hr.props.size())
+            .emit();
+        continue;
+      }
+      for (size_t i = 0; i < occurrences.size(); ++i) {
+        const auto& pr = hr.props[i];
+        if (pr.kind != "assume") {
+          continue;  // hierarchy preflight owns contract assumptions only
+        }
+        auto& st = hier_props[occurrences[i].base_node()];
+        ++st.total;
+        if (livehd::lec::is_unchecked_assume_class(pr.aclass)) {
+          st.unchecked = true;
+          continue;
+        }
+        if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
+          ++st.proven;
+          continue;
+        }
+        st.failed              = true;
+        const std::string path = pr.instance.empty() ? std::string{root->get_name()} : pr.instance;
+        if (pr.verdict == livehd::lec::Verdict::Refuted) {
+          livehd::diag::err("pass.formal", "assume-refuted", "comptime")
+              .msg("child assume{} is refuted at hierarchy occurrence '{}'", pr.loc.empty() ? std::string{} : " at " + pr.loc, path)
+              .hint("fix the binding, rewrite the contract as assume_nocheck, or set formal.assume_check=false")
+              .deferred()
+              .emit();
+        } else {
+          livehd::diag::err("pass.formal", "assume-unproven", "comptime")
+              .msg("child assume{} could not be proven at hierarchy occurrence '{}'",
+                   pr.loc.empty() ? std::string{} : " at " + pr.loc,
+                   path)
+              .hint("make the parent establish it, rewrite it as assume_nocheck, or set formal.assume_check=false")
+              .deferred()
+              .emit();
+        }
+      }
+    }
+    std::vector<hhds::Node_class> discharged;
+    for (const auto& [node, st] : hier_props) {
+      if (st.total > 0 && st.proven == st.total && !st.unchecked && !st.failed) {
+        discharged.push_back(node);
+      }
+    }
+    for (auto& node : discharged) {
+      node.del_node();
+    }
+  }
+
   for (auto& gp : var.graphs) {
     auto* g = gp.get();
     if (g == nullptr) {
@@ -358,6 +489,7 @@ void Pass_formal::work(Eprp_var& var) {
       }
     }
     const bool warn_assume  = warn_def && truthy(var.get("warn_assume", "true"));
+    const bool assume_check = truthy(var.get("assume_check", "true"));
     const bool warn_vacuous = truthy(var.get("warn_vacuous", "true"));
     const bool warn_assert  = warn_def && truthy(var.get("warn_assert", "true"));
 
@@ -367,14 +499,48 @@ void Pass_formal::work(Eprp_var& var) {
     std::vector<hhds::Pin_class> proven_assumes;
     for (auto& node : props) {
       auto parts = fprop_parts(node);
-      if (parts.kind != "assume") {
+      if (!livehd::lec::is_assume_kind(parts.kind)) {
         continue;
       }
       auto cond = gu::get_driver_of_sink_name(node, "cond");
       if (cond.is_invalid()) {
         continue;
       }
+      const bool explicit_nocheck = parts.kind == "assume_nocheck";
+      if (!assume_check || explicit_nocheck) {
+        gu::set_proven(node, gu::kFormalAssume);
+        proven_assumes.push_back(cond);
+        if (warn_assume) {
+          livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
+              .msg("assume in '{}'{} is active but UNCHECKED ({})",
+                   g->get_name(),
+                   parts.loc.empty() ? std::string{} : " at " + parts.loc,
+                   assume_check ? "assume_nocheck" : "formal.assume_check=false")
+              .hint("verification and LEC verdicts are conditional on this unchecked constraint")
+              .emit();
+        }
+        continue;
+      }
       auto out = prover.is_true(cond);
+      if (is_top && !out.stateful && !gu::is_const_pin(cond)) {
+        // A selected top has no parent that can discharge a precondition over
+        // its primary IO. It is therefore an environment constraint by
+        // construction: keep it active, but say loudly that its check was
+        // converted to assume_nocheck. Descendant input assumes do NOT take
+        // this path; their actual call-site bindings are checked top-rooted by
+        // verify/LEC and by the hierarchy-aware compile preflight below.
+        gu::set_proven(node, gu::kFormalAssume);
+        proven_assumes.push_back(cond);
+        if (warn_assume) {
+          livehd::diag::warn("pass.formal", "formal-top-assume", "comptime")
+              .msg("top-level IO assume in '{}'{} cannot be checked; treating it as assume_nocheck",
+                   g->get_name(),
+                   parts.loc.empty() ? std::string{} : " at " + parts.loc)
+              .hint("the constraint remains active in assertion verification and LEC")
+              .emit();
+        }
+        continue;
+      }
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);  // only PROVEN assumes become hypotheses (sound)
@@ -498,7 +664,7 @@ void Pass_formal::work(Eprp_var& var) {
       // mode=fast: single-frame induction over free (cut) state (unchanged).
       for (auto& node : props) {
         auto parts = fprop_parts(node);
-        if (parts.kind != "assume") {
+        if (!livehd::lec::is_assume_kind(parts.kind)) {
           prove_assert_prover(node, parts, /*allow_refute_error=*/true);
         }
       }
@@ -564,7 +730,7 @@ void Pass_formal::work(Eprp_var& var) {
         // to the pre-rebase Prover engine rather than risk mis-marking a node.
         for (auto& node : props) {
           auto parts = fprop_parts(node);
-          if (parts.kind != "assume") {
+          if (!livehd::lec::is_assume_kind(parts.kind)) {
             prove_assert_prover(node, parts, /*allow_refute_error=*/true);
           }
         }
@@ -615,8 +781,27 @@ void Pass_formal::work(Eprp_var& var) {
     // the user wrote a check that can never run.
     for (auto& node : props) {
       auto parts = fprop_parts(node);
-      if (parts.kind != "assume") {
+      if (!livehd::lec::is_assume_kind(parts.kind)) {
         warn_vacuous_guard(node, parts);
+      }
+    }
+
+    // A proved assert has no remaining obligation and cgen already elides it
+    // via the proven attribute. Remove that inert fproperty from the persisted
+    // graph too. Do this only for asserts: a proved checked assume is removed by
+    // the occurrence-aware hierarchy preflight above, while an unchecked/top IO
+    // assume is marked proven solely to make it an active hypothesis and must
+    // remain in the design for verify and LEC.
+    if (truthy(var.get("hier_preflight", "true"))) {
+      std::vector<hhds::Node_class> proved_asserts;
+      for (auto& node : props) {
+        auto parts = fprop_parts(node);
+        if (!livehd::lec::is_assume_kind(parts.kind) && gu::has_proven(node)) {
+          proved_asserts.push_back(node);
+        }
+      }
+      for (auto& node : proved_asserts) {
+        node.del_node();
       }
     }
   }

@@ -58,13 +58,21 @@
   assume defaults to "internal" (the sound side). The vacuity backstop stays,
   gated on env-class assumes.</p>
 <ul class="subtasks">
-<li><strong>Input-vs-internal classification</strong>: input-only assume = free env
-  constraint (disclosed "input environment constraint"; headline "under K input
-  assume(s)"); state/output-touching assume = PROOF OBLIGATION, prove-then-use
+<li><strong>Hierarchy-aware input-vs-internal classification</strong>: a selected-top
+  input-only assume has no parent that can discharge it, so it warns and remains a
+  disclosed unchecked environment constraint. A child input assume is a call-site
+  obligation proved or refuted with its real occurrence binding; state/output-touching
+  assumes remain PROOF OBLIGATIONS, prove-then-use
   (frontier at just-proven cycles, rule A; induction-step use only as a Houdini
   survivor, rule E). REFUTED internal assume = hard error (aggregate Refuted, even
   with zero asserts); Unknown = NOT used, disclosed. <code>Prop_result::aclass</code>
   carries the class through the fork codec.</li>
+<li><strong>Unified spelling and policy (2026-08-08)</strong>:
+  design-body <code>assume_nocheck</code> lowers and round-trips as an active property;
+  <code>formal.assume_check</code> is the single canonical default-true option shared by
+  compile, verify, and LEC. False keeps every assumption active but unchecked. The
+  occurrence path carried by <code>Prop_result</code> is ready for the forthcoming
+  modular hierarchical-verify scheduler; this change does not add that scheduler.</li>
 <li><strong><code>assume_nocheck_formal</code> accepted on verify</strong>
   (extract <code>allow_nocheck=true</code>; rewritten to <code>assume</code> in the
   generated monitor with <code>Monitor::nocheck_lines</code> marking; per-encounter

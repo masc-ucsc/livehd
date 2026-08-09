@@ -46,7 +46,7 @@ inline constexpr std::string_view lgassert_module_name = "lgassert";
 // Reserved sub-module name for a materialized user property (pass/formal, task
 // 2f-formal): an `fproperty` Sub instance carries a 1-bit `cond` plus, packed in
 // its instance-name attr, "<kind>\x1f<loc>\x1f<msg>" (kind = assert |
-// assert_always | assume). pass.formal proves/defers it; cgen emits a runtime
+// assert_always | assume | assume_nocheck). pass.formal proves/defers it; cgen emits a runtime
 // check for the ones it could not prove (skipping any marked `proven`). Like
 // lgassert it is a recognized PRIMITIVE, not a real sub-graph, so LEC (which
 // compares data outputs) is unaffected.

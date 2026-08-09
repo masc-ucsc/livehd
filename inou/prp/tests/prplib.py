@@ -555,9 +555,11 @@ class PrpRunner:
             lec.kill()
             lrc, llog = 1, b''
         ltxt = llog.decode('utf-8', 'ignore')
-        # PASS(n) is a real pass (exit 0); only a genuine UNKNOWN (solver timeout,
-        # encoder refusal, unattributable divergence) is a failure here.
-        lec_ok = lrc == 0 and 'UNKNOWN' not in ltxt and 'INCONCLUSIVE' not in ltxt
+        # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
+        # the successful flat retry's detail. Judge the final top-level line;
+        # PASS(n) is a real bounded pass, not an inconclusive result.
+        lec_ok = lrc == 0 and re.search(
+            r"(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent", ltxt)
         if not lec_ok:
             print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
                   'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))

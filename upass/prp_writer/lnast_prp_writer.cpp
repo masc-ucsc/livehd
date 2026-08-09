@@ -3083,6 +3083,8 @@ void Lnast_prp_writer::write_cassert() {
       kw = "assert_always";
     } else if (t == "__fkind__assume") {
       kw = "assume";
+    } else if (t == "__fkind__assume_nocheck") {
+      kw = "assume_nocheck";
     } else if (t == "__fkind__cassert") {
       kw = "cassert";
     } else {

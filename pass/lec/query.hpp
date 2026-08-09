@@ -162,6 +162,19 @@ struct Monitor;
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
+  // Canonical assumption policy shared by compile, verify, and LEC.
+  // true: checked assumptions are proof obligations before use. A checked
+  // assumption over the selected top's primary IO is necessarily uncheckable
+  // and is treated as an explicitly disclosed assume_nocheck. false: every
+  // assume remains active but is trusted like assume_nocheck.
+  bool assume_check = true;
+
+  // Equivalence-only internal switch: include design-tier fproperty assumptions
+  // in each cvc5 frame. The CLI enables it only after the selected tops have
+  // passed the occurrence-aware assumption-discharge preflight (or when
+  // assume_check=false explicitly trusts them).
+  bool design_assumes = false;
+
   // Reference-side X semantics — the cvc5 analogue of yosys `miter
   // -ignore_gold_x`. "ignore" (default): a ref constant's '?' bits source an
   // undef bit-plane; the miters exclude ref-unknown output/next-state bits from
@@ -569,8 +582,10 @@ struct Lec_options {
   // never prune an assert's proof (only proven assumes are hypotheses — that
   // discipline lives in the pass.formal driver, which proves assumes separately
   // and recovers assume-dependent elisions with the single-frame Prover). The
-  // verify CLI leaves this false: there, an assume is a proof obligation
-  // (prove-then-use), and only assume_nocheck is a free env constraint.
+  // verify CLI leaves this false: there, child/local assumes are proof
+  // obligations (prove-then-use); an explicit assume_nocheck, a selected-top IO
+  // assume, or every assume under formal.assume_check=false is a disclosed free
+  // environment constraint.
   bool ignore_assumes = false;
 
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
@@ -723,25 +738,37 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
 // are ABSOLUTE unroll indices (the after_reset reset-hold prologue occupies
 // 0..reset_hold-1; plain `assert` is checked only in the run window,
 // `assert_always` at every cycle, and in just_reset every cycle is checked).
+[[nodiscard]] inline bool is_assume_kind(std::string_view kind) {
+  return kind == "assume" || kind == "assume_nocheck";
+}
+
+[[nodiscard]] inline bool is_unchecked_assume_class(std::string_view aclass) {
+  return aclass == "unchecked" || aclass == "top_input" || aclass == "check_disabled";
+}
+
 struct Prop_result {
   std::string kind;   // assert | assert_always | assume
   std::string loc;    // source location ("" when tolg carried none)
   std::string msg;    // user message ("")
   std::string block;  // formal-block dotted name + "@instance" ("" = an fproperty in the design itself)
+  // Design-body property occurrence path. Empty for a statement authored in
+  // the selected top and for sidecar monitors (whose `block` already carries
+  // @instance). This makes repeated child contracts independently attributable
+  // now and is the identity seam a future hierarchical-verify driver can reuse.
+  std::string   instance;
   // The obligation's ASSUME SCOPE: the formal block's dotted name WITHOUT the
   // "@instance" suffix, so every instance context of one authored block shares
   // it ("" = the design tier). Blocks are independent tests (user ruling,
   // 2026-07-25): an obligation is discharged under exactly its own scope's
   // assumes plus the always-in-force design-tier ones, never under a sibling
   // block's. See prove_properties' per-scope activation literals.
-  std::string scope;
+  std::string   scope;
   // kind==assume classification (P1 assume discipline; "" for asserts and under
-  // ignore_assumes). EVERY assume except "unchecked" is a PROOF OBLIGATION,
+  // ignore_assumes). Every assume except an unchecked class is a PROOF OBLIGATION,
   // prove-then-use: checked per cycle like a plain assert; only a just-PROVEN
   // cycle's fact constrains later obligations (rule A), and only an inductive
   // survivor constrains the step frame (rule E). REFUTED = a hard error;
-  // Unknown = NOT used, disclosed as unproven. The input/internal split is
-  // DIAGNOSTIC only (same discipline, different hint on failure):
+  // Unknown = NOT used, disclosed as unproven. Classes:
   //   "input"     — the cond's cone reaches primary inputs (or free blackbox
   //                 outputs) only. Over free inputs such a constraint can
   //                 never be proven unless it is a tautology, so a refute
@@ -751,13 +778,16 @@ struct Prop_result {
   //   "unchecked" — assume_nocheck (and the fcore spelling
   //                 assume_nocheck_formal): a free constraint by explicit user
   //                 fiat; never checked, disclosed distinctly.
-  std::string aclass;
-  Verdict verdict = Verdict::Unknown;
+  //   "top_input" — design-body input constraint authored in the selected top;
+  //                 no parent can discharge it, so it is active and unchecked.
+  //   "check_disabled" — formal.assume_check=false; active and unchecked.
+  std::string   aclass;
+  Verdict       verdict       = Verdict::Unknown;
   // V3 verdict ladder: a bounded-proven assert that also survives the
   // simultaneous-induction step is PROVEN UNBOUNDED — true at every cycle of
   // every bound (the conjunction of survivors is inductive; the BMC run is its
   // base case), eligible as an unconditional helper everywhere.
-  bool unbounded = false;
+  bool          unbounded     = false;
   int proven_to  = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
   int refuted_at = -1;  // first cycle with a reachable violation (SAT)
   int unknown_at = -1;  // first cycle where the solver gave up (timeout/unknown);

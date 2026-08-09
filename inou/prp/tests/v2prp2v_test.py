@@ -186,7 +186,12 @@ def main():
         native_failed = True
     else:
         native_out = native.stdout.decode("utf-8", "ignore")
-        if native.returncode == 0 and "INCONCLUSIVE" not in native_out and "UNKNOWN" not in native_out:
+        # Hierarchical LEC may report an intermediate collapsed-box UNKNOWN and
+        # then prove the required flat retry.  Judge the final top-level verdict,
+        # not diagnostic words retained in that successful retry's detail.
+        native_proven = native.returncode == 0 and re.search(
+            r"(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent", native_out)
+        if native_proven:
             print("{} - v2prp2v - native Pyrope check success "
                   "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
         elif native.returncode == 0:
@@ -239,6 +244,15 @@ def main():
                 out.write("\n")
 
     # 2. lgcheck: reference = the ORIGINAL .v (independent yosys read).
+    # Like the direct equiv harness, skip this posedge-only oracle when the
+    # fixture explicitly selects cvc5 for latch/opposite-edge structure.
+    # lgcheck cannot represent the intervening close phase and otherwise burns
+    # through its SAT cascade before returning inconclusive.
+    if (_header(ref_prp, "equiv_engine") or "").strip() == "cvc5":
+        print("{} - v2prp2v - original Verilog check skipped "
+              "(:equiv_engine: cvc5; latch/edge structure)".format(name))
+        return 1 if native_failed else 0
+
     cmd = ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
            "--reference_top", vtop, "--implementation_top", impl_top]
     if (_header(ref_prp, "gold_reader") or "") == "slang":

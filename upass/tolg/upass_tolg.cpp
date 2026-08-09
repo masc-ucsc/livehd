@@ -113,18 +113,6 @@ struct Val {
   return !is_unsign(p);
 }
 
-// Does this LNAST subtree hold an assert/assume/assert_always/cassert? (All four
-// share the `cassert` node type.) Used to warn when a callee carrying properties
-// is INSTANTIATED under a guard those properties will never see.
-[[nodiscard]] bool lnast_subtree_has_cassert(const Lnast& ln, const Lnast_nid& root) {
-  for (auto c = ln.get_first_child(root); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    if (Lnast_ntype::is_cassert(ln.get_type(c)) || lnast_subtree_has_cassert(ln, c)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
@@ -229,6 +217,9 @@ struct Io_setup {
   std::string reset_name;
   bool        reset_minted = false;
   bool        reset_neg    = false;
+  std::string valid_name;
+  bool        valid_minted = false;
+  bool        valid_active = false;
 };
 
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
@@ -248,7 +239,10 @@ public:
       , reset_name_(std::move(io_setup.reset_name))
       , reset_minted_(io_setup.reset_minted)
       , reset_neg_(io_setup.reset_neg)
-      , reset_async_default_(async_default) {}
+      , reset_async_default_(async_default)
+      , valid_name_(std::move(io_setup.valid_name))
+      , valid_minted_(io_setup.valid_minted)
+      , valid_active_(io_setup.valid_active) {}
 
 private:
   // Deferred stage-reg creation: a declare(reg)+stages does NOT
@@ -1157,6 +1151,51 @@ private:
     g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);
   }
 
+  // Remove hold arms that branch lowering bakes into a latch's D before
+  // cprop. This narrow structural proof matters for hierarchical LEC, where a
+  // child definition can be inspected before a graph-pass sweep reaches it.
+  // At every peeled layer, D's Q arm must correspond to a known-false arm of
+  // the enable mux under the exact same selector.
+  [[nodiscard]] Pin canonical_latch_din(Pin din, const Pin& q, Pin en) {
+    const auto driver_at = [](const hhds::Node_class& n, hhds::Port_id pid) {
+      for (const auto& e : n.inp_edges()) {
+        if (!e.sink.is_invalid() && e.sink.get_port_id() == pid) {
+          return e.driver;
+        }
+      }
+      return Pin{};
+    };
+    const auto same = [](const Pin& a, const Pin& b) {
+      return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
+    };
+    for (int depth = 0; depth < 64 && !din.is_invalid() && !en.is_invalid(); ++depth) {
+      auto dm = din.get_master_node();
+      auto em = en.get_master_node();
+      if (livehd::graph_util::type_op_of(dm) != Ntype_op::Mux || livehd::graph_util::type_op_of(em) != Ntype_op::Mux) {
+        break;
+      }
+      auto ds = driver_at(dm, 0);
+      auto es = driver_at(em, 0);
+      if (!same(ds, es)) {
+        break;
+      }
+      auto d0    = driver_at(dm, 1);
+      auto d1    = driver_at(dm, 2);
+      int  q_arm = same(d0, q) ? 0 : (same(d1, q) ? 1 : -1);
+      if (q_arm < 0) {
+        break;
+      }
+      auto e_hold = driver_at(em, static_cast<hhds::Port_id>(q_arm + 1));
+      if (e_hold.is_invalid() || !livehd::graph_util::is_const_pin(e_hold)
+          || !livehd::graph_util::hydrate_const(e_hold).is_known_false()) {
+        break;
+      }
+      din = q_arm == 0 ? d1 : d0;
+      en  = driver_at(em, static_cast<hhds::Port_id>((1 - q_arm) + 1));
+    }
+    return din;
+  }
+
   // Wire each declared reg's din / enable / reset_pin / initial /
   // async / negreset after the whole body has been lowered (stores and attr
   // overrides arrive in any order relative to the declare).
@@ -1218,6 +1257,11 @@ private:
         din = dit->second;
       } else {
         din = q;
+      }
+      if (info.is_latch) {
+        if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
+          din = canonical_latch_din(din, q, eit->second);
+        }
       }
       setup_sink_by_name(flop, "din").connect_driver(din);
 
@@ -1370,8 +1414,21 @@ private:
         const auto en_nid   = en.get_master_node().get_debug_nid();
         const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
         const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
-        if ((info.is_latch && is_true) || (!is_true && !is_false)) {
-          setup_sink_by_name(flop, "enable").connect_driver(en);
+        if (!is_false) {
+          if (info.is_latch) {
+            // A latch has no clock to gate, so the transported instance
+            // activation participates directly in its transparency enable.
+            // Reset remains a separate, higher-priority control in cgen.
+            const auto active = !valid_active_ ? Pin{} : valid_pin();
+            // Dynamic enables come from lower_if's merged branch selectors,
+            // which already include activation so din's hold mux and enable
+            // remain structurally identical (the latch-contract proof relies
+            // on that identity). Only an unconditional true needs gating here.
+            setup_sink_by_name(flop, "enable")
+                .connect_driver(is_true ? (active.is_invalid() ? en : active) : (valid_minted_ ? en : and2(en, active)));
+          } else if (!is_true) {
+            setup_sink_by_name(flop, "enable").connect_driver(en);
+          }
         }
       }
 
@@ -1993,6 +2050,14 @@ private:
     return acc;
   }
 
+  // Full execution context for state, calls and source-visible effects. A
+  // definition's transported activation composes with its local branch path;
+  // an invalid term denotes constant true and therefore mints no glue.
+  [[nodiscard]] Pin effect_path_cond() {
+    const auto local = current_path_cond();
+    return !valid_active_ ? local : and2(valid_pin(), local);
+  }
+
   // Push one term (a branch condition, or its negation for a later arm/else).
   void push_path_term(const Pin& cond, bool negated) {
     path_terms_.push_back({cond, negated});
@@ -2036,6 +2101,24 @@ private:
     set_bits(d, 1);
     set_unsign(d);
     return d;
+  }
+
+  // A glitch-free clock gate. `en` is sampled by the backend on the inactive
+  // clock phase; div=1/invert=false are explicit so every consumer sees the
+  // same v1 contract rather than relying on implicit pin defaults.
+  [[nodiscard]] Pin clock_gate(const Pin& clk, const Pin& en) {
+    if (clk.is_invalid() || en.is_invalid()) {
+      return clk;
+    }
+    auto cell = make_node(Ntype_op::Clock_cell);
+    setup_sink_by_name(cell, "clk_ref").connect_driver(clk);
+    setup_sink_by_name(cell, "div").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(cell, "en").connect_driver(nonzero1(en));
+    setup_sink_by_name(cell, "invert").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto out = cell.create_driver_pin(0);
+    set_bits(out, 1);
+    set_unsign(out);
+    return out;
   }
 
   // "a != 0" as a 1-bit unsigned pin: an OR-reduction over every bit, which is
@@ -4148,23 +4231,11 @@ private:
     // NOTE: set_subnode RE-STAMPS the raw hhds type to its own 2/3 loop-hint
     // encoding — type_op_of() recognizes Subs by the subnode LINK, never by
     // the stored type (see node_util.hpp).
-    // R1 limit, made LOUD instead of silent: the path condition is BODY-LOCAL.
-    // A property inside an INSTANTIATED callee lives in the callee's graph, so
-    // the caller's guard never reaches it and the obligation stays the bare
-    // condition — strictly stronger than what the source says. The same `comb`
-    // INLINED (the default) does get the guard, so without this warning the
-    // identical source proves or refutes depending on compile.upass.inline.
-    // Propagating a guard across the boundary is the caller-context discharge
-    // R2 owns; until then, say so at the call site.
-    if (callee != nullptr && !current_path_cond().is_invalid() && lnast_subtree_has_cassert(*callee, callee->get_root())) {
-      warn_at(nid,
-              {"guarded-instance-property", "unsupported"},
-              "upass.tolg: '{}' is instantiated inside an `if`/`match` arm and its body holds an assert/assume — the "
-              "guard does NOT cross the instance boundary, so those properties are checked UNCONDITIONALLY (a stricter "
-              "obligation than the source states)",
-              callee_name);
-    }
-    auto sub = make_node(Ntype_op::Sub);
+    // Transport the complete caller execution context. Conditional callees
+    // expose __valid in their GraphIO, so latch enables, properties, and any
+    // descendants see the same guard that clocked state already receives.
+    const Pin call_guard = effect_path_cond();
+    auto      sub        = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
     {
       // Name the Sub by its RTL INSTANCE name so hhds get_hier_name() yields
@@ -4228,7 +4299,7 @@ private:
     std::string                                          replica_index_port;
     std::vector<std::pair<hhds::Port_id, hhds::Port_id>> replica_carries;  // input, output
     {
-      std::string dom_txt, idx_port, carry_txt;
+      std::string dom_txt, idx_port, carry_txt, activation_port, next_active_port;
       for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
         if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
           continue;
@@ -4248,6 +4319,10 @@ private:
           idx_port = std::string(lnast_->get_name(v));
         } else if (kn == "__replica_carry") {
           carry_txt = std::string(lnast_->get_name(v));
+        } else if (kn == "__replica_activation") {
+          activation_port = std::string(lnast_->get_name(v));
+        } else if (kn == "__replica_next_active") {
+          next_active_port = std::string(lnast_->get_name(v));
         }
       }
       if (!dom_txt.empty()) {
@@ -4303,6 +4378,28 @@ private:
             return;
           }
         }
+        if (!activation_port.empty()) {
+          desc.activation_input = pid_of_input(activation_port);
+          if (!desc.activation_input) {
+            error_here("upass.tolg: replicated call to '{}' names activation port '{}', which is not a callee input",
+                       callee_full,
+                       activation_port);
+            return;
+          }
+        }
+        if (!next_active_port.empty()) {
+          desc.next_active_output = pid_of_output(next_active_port);
+          if (!desc.next_active_output) {
+            error_here("upass.tolg: replicated call to '{}' names next-active port '{}', which is not a callee output",
+                       callee_full,
+                       next_active_port);
+            return;
+          }
+          if (!desc.activation_input) {
+            error_here("upass.tolg: replicated call to '{}' declares next-active without an activation input", callee_full);
+            return;
+          }
+        }
         for (const auto& item : absl::StrSplit(carry_txt, ',', absl::SkipEmpty())) {
           const std::pair<std::string_view, std::string_view> oi      = absl::StrSplit(item, absl::MaxSplits('>', 1));
           auto                                                out_pid = pid_of_output(std::string(oi.first));
@@ -4328,6 +4425,8 @@ private:
     // net out equal when one port was bound twice and another left undriven.
     std::size_t                      pos = 0;
     absl::flat_hash_set<std::string> bound_ports;
+    std::vector<std::pair<Pin, Pin>> deferred_clocks;  // (Sub sink, ungated parent clock)
+    std::vector<Pin>                 active_resets;    // normalized active-high callee resets
     for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
       std::string pname;
       Lnast_nid   val;
@@ -4362,7 +4461,8 @@ private:
         // descriptor's domain, its index port and its carry mapping as named
         // actuals, exactly like `__inst_name`. They are consumed below into the
         // node's Replica_desc; none of them is a callee port.
-        if (pname == "__replica" || pname == "__replica_index" || pname == "__replica_carry") {
+        if (pname == "__replica" || pname == "__replica_index" || pname == "__replica_carry" || pname == "__replica_activation"
+            || pname == "__replica_next_active") {
           continue;
         }
       } else {
@@ -4379,6 +4479,13 @@ private:
         val = a;
       }
       auto v = leaf(val);
+      // Generated activation-capable definitions expose `__valid` for
+      // source-visible side effects. An unconditional call passes true; a call
+      // under if/match conjoins the caller path so nested activation composes.
+      if (pname == "__valid" && !call_guard.is_invalid()) {
+        v.pin = and2(nonzero1(v.pin), call_guard);
+        v.mw  = 1;
+      }
       // 2f-lgimport — validate the port name BEFORE create_sink_pin: an unknown
       // port (e.g. a typo, or a call shaped for a different module) otherwise
       // asserts inside resolve_sink_port (graph.cpp). The compiler must never
@@ -4400,7 +4507,30 @@ private:
         error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
         return;
       }
-      spin.connect_driver(v.pin);
+      if (is_clock_port_name(pname) && !call_guard.is_invalid()) {
+        // Reset is not known until all actuals have been visited. Defer clock
+        // wiring so the gate can use `guard | reset_asserted` and a synchronous
+        // reset still reaches state while the source call is inactive.
+        deferred_clocks.emplace_back(spin, v.pin);
+      } else {
+        spin.connect_driver(v.pin);
+      }
+      if (is_reset_port_name(pname)) {
+        auto r = nonzero1(v.pin);
+        if (str_tools::ends_with(pname, "_n")) {
+          r = not1(r);
+        }
+        active_resets.push_back(r);
+      }
+    }
+    // A compiler-minted activation port is deliberately absent from io_meta,
+    // so source arity does not change. Missing explicit generated __valid is
+    // also safe to fill here: unconditional context means true; otherwise the
+    // complete caller guard is forwarded.
+    if (gio->has_input("__valid") && !bound_ports.contains("__valid")) {
+      auto active = call_guard.is_invalid() ? create_const(*g_, *Dlop::create_integer(1)) : call_guard;
+      sub.create_sink_pin("__valid").connect_driver(active);
+      bound_ports.insert("__valid");
     }
     // Every declared input must be driven — checked per-port so an omitted input
     // is caught even when another was bound twice (a bare provided==declared
@@ -4437,7 +4567,12 @@ private:
             lnast_->get_top_module_name());
         return;
       }
-      sub.create_sink_pin("clock").connect_driver(clock_pin());
+      auto sink = sub.create_sink_pin("clock");
+      if (call_guard.is_invalid()) {
+        sink.connect_driver(clock_pin());
+      } else {
+        deferred_clocks.emplace_back(sink, clock_pin());
+      }
     }
 
     // Minted-reset forwarding, same pattern: the callee's implicit
@@ -4469,6 +4604,27 @@ private:
         set_unsign(r);
       }
       sub.create_sink_pin("reset").connect_driver(r);
+      active_resets.push_back(nonzero1(r));
+    }
+
+    // Conditional state activation: each clock domain gets its own glitch-free
+    // gate. Pyrope's generated defs have one canonical reset; accepting several
+    // reset ports would require a per-state clock/reset-domain map, and OR-ing
+    // unrelated resets could advance non-reset state while the call is absent.
+    // Fail closed rather than guess that mapping.
+    if (!call_guard.is_invalid() && !deferred_clocks.empty()) {
+      if (active_resets.size() > 1) {
+        error_here("upass.tolg: conditional call to '{}' has multiple reset inputs; clock/reset domain mapping is ambiguous",
+                   callee_full);
+        return;
+      }
+      Pin gate_en = call_guard;
+      if (!active_resets.empty()) {
+        gate_en = or2(gate_en, active_resets.front());
+      }
+      for (const auto& [sink, raw_clock] : deferred_clocks) {
+        sink.connect_driver(clock_gate(raw_clock, gate_en));
+      }
     }
 
     // Carries are native literal self-edges on the compact Sub. They are not
@@ -4614,6 +4770,21 @@ private:
       reset_pin_valid_ = true;
     }
     return reset_pin_;
+  }
+
+  // The activation graph-input pin. Minted pins are stamped lazily like the
+  // implicit clock/reset; an explicit generated __valid keeps its IO stamp.
+  [[nodiscard]] Pin valid_pin() {
+    if (!valid_pin_valid_) {
+      auto p = g_->get_input_pin(valid_name_);
+      if (valid_minted_) {
+        set_bits(p, 1);
+        set_unsign(p);
+      }
+      valid_pin_       = p;
+      valid_pin_valid_ = true;
+    }
+    return valid_pin_;
   }
 
   // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
@@ -4861,6 +5032,13 @@ private:
     set_bits(cond, 2);
     set_unsign(cond);
 
+    // A dynamic range check is a source-visible effect just like an assert:
+    // while this definition/branch is inactive, the obligation is vacuous.
+    const auto guard = effect_path_cond();
+    if (!guard.is_invalid()) {
+      cond = or2(not1(nonzero1(guard)), nonzero1(cond));
+    }
+
     auto gio = lib_->find_io(livehd::graph_util::lgassert_module_name);
     if (!gio) {
       gio = lib_->create_io(livehd::graph_util::lgassert_module_name);
@@ -4916,6 +5094,9 @@ private:
         nxt  = lnast_->get_sibling_next(nxt);
       } else if (s == "__fkind__assume") {
         kind = "assume";
+        nxt  = lnast_->get_sibling_next(nxt);
+      } else if (s == "__fkind__assume_nocheck") {
+        kind = "assume_nocheck";
         nxt  = lnast_->get_sibling_next(nxt);
       } else if (s == "__fkind__cassert") {
         kind = "cassert";
@@ -5002,7 +5183,7 @@ private:
     // operands go through it: `cond` because the user may assert any integer,
     // and `guard` because it is only 1-bit by convention (prp2lnast gives an
     // if-condition a synthetic `:bool`), not by construction.
-    const auto guard    = current_path_cond();
+    const auto guard    = effect_path_cond();
     const auto eff_cond = guard.is_invalid() ? cond.pin : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
     auto       sub      = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
@@ -5978,7 +6159,8 @@ private:
     // Arm k is taken when every earlier condition is false and c_k is true, so
     // its terms are ¬c_0 … ¬c_{k-1}, c_k; the bare else drops the final c_k.
     std::vector<Pin> prior_conds;
-    auto             lower_arm = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
+    auto             merge_cond = [&](const Pin& raw) { return !valid_minted_ ? raw : and2(valid_pin(), nonzero1(raw)); };
+    auto             lower_arm  = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
       for (const auto& pc : prior_conds) {
         push_path_term(pc, /*negated=*/true);
       }
@@ -5995,14 +6177,25 @@ private:
     if (child.is_invalid()) {
       return;
     }
-    branches.push_back({false, first_cond, lower_arm(child, first_cond, /*is_else=*/false)});
+    branches.push_back({false, merge_cond(first_cond), lower_arm(child, first_cond, /*is_else=*/false)});
     prior_conds.push_back(first_cond);
 
     child = lnast_->get_sibling_next(child);
     while (!child.is_invalid()) {
       bool last = lnast_->is_last_child(child);
       if (last && Lnast_ntype::is_stmts(lnast_->get_type(child))) {
-        branches.push_back({true, Pin{}, lower_arm(child, Pin{}, /*is_else=*/true)});
+        if (!valid_minted_) {
+          branches.push_back({true, Pin{}, lower_arm(child, Pin{}, /*is_else=*/true)});
+        } else {
+          // Inactive means NO arm, including else. Spell the else as an
+          // explicit `active & !c0 & ...` arm so its writes fall through to
+          // the pre-if value while inactive and unique-if stays one-hot.
+          Pin else_cond = valid_pin();
+          for (const auto& pc : prior_conds) {
+            else_cond = and2(else_cond, not1(nonzero1(pc)));
+          }
+          branches.push_back({false, else_cond, lower_arm(child, Pin{}, /*is_else=*/true)});
+        }
         break;
       }
       Pin elif_cond = leaf(child).pin;
@@ -6010,7 +6203,7 @@ private:
       if (child.is_invalid()) {
         break;
       }
-      branches.push_back({false, elif_cond, lower_arm(child, elif_cond, /*is_else=*/false)});
+      branches.push_back({false, merge_cond(elif_cond), lower_arm(child, elif_cond, /*is_else=*/false)});
       prior_conds.push_back(elif_cond);
       child = lnast_->get_sibling_next(child);
     }
@@ -6336,6 +6529,11 @@ private:
   bool                                                                            reset_async_default_ = false;
   Pin                                                                             reset_pin_;
   bool                                                                            reset_pin_valid_ = false;
+  std::string                                                                     valid_name_;
+  bool                                                                            valid_minted_ = false;
+  bool                                                                            valid_active_ = false;
+  Pin                                                                             valid_pin_;
+  bool                                                                            valid_pin_valid_ = false;
   Pin                                                                             en_true_pin_;
   Pin                                                                             en_false_pin_;
   bool                                                                            en_true_valid_  = false;
@@ -7511,7 +7709,98 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reset_reg);
 }
 
-// Shared phase-1 io+clock+reset GraphIO registration. Idempotent (the GraphIO
+// Activation is an ABI property of the CALLEE, but it is discovered at call
+// sites: a definition reached below a runtime if/match arm must be able to hold
+// every kind of state and suppress every property/side effect while that arm is
+// inactive. Include transitive descendants because an activated A may call B
+// unconditionally; B still runs in A's activation context.
+[[nodiscard]] std::vector<std::string> collect_guarded_callee_names(const std::shared_ptr<Lnast>& lnast) {
+  std::vector<std::string>                    out;
+  std::function<void(const Lnast_nid&, bool)> walk = [&](const Lnast_nid& nid, bool guarded) {
+    if (lnast->is_dce_dead(nid)) {
+      return;
+    }
+    const auto type = lnast->get_type(nid);
+    if (guarded && Lnast_ntype::is_func_call(type)) {
+      auto dst = lnast->get_first_child(nid);
+      auto cal = dst.is_invalid() ? dst : lnast->get_sibling_next(dst);
+      if (!cal.is_invalid() && (Lnast_ntype::is_ref(lnast->get_type(cal)) || Lnast_ntype::is_const(lnast->get_type(cal)))) {
+        std::string name(lnast->get_name(cal));
+        if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
+          name = name.substr(1, name.size() - 2);
+        }
+        out.emplace_back(std::move(name));
+      }
+    }
+    const bool branches = Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type);
+    size_t     ordinal  = 0;
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++ordinal) {
+      // child 0 is the first condition, evaluated in the surrounding context.
+      // Every later child is an arm or a later condition, hence conditionally
+      // reached. The runner has already removed compile-time-dead arms.
+      walk(c, guarded || (branches && ordinal != 0));
+    }
+  };
+  walk(lnast->get_root(), false);
+  return out;
+}
+
+[[nodiscard]] bool activation_reaches(const std::shared_ptr<Lnast>& from, const std::shared_ptr<Lnast>& target,
+                                      const uPass_tolg::Registry& registry, absl::flat_hash_set<std::string>& visiting) {
+  if (from == target || from->get_top_module_name() == target->get_top_module_name()) {
+    return true;
+  }
+  const std::string key(from->get_top_module_name());
+  if (!visiting.insert(key).second) {
+    return false;
+  }
+  for (const auto& name : collect_callee_names(from)) {
+    auto child = resolve_callee_lnast(name, registry);
+    if (child && activation_reaches(child, target, registry, visiting)) {
+      visiting.erase(key);
+      return true;
+    }
+  }
+  visiting.erase(key);
+  return false;
+}
+
+[[nodiscard]] bool is_activation_capable(const std::shared_ptr<Lnast>& target, const uPass_tolg::Registry& registry) {
+  // Runtime-control loops can deactivate later occurrences through
+  // __next_active even when their compact call is not inside a source if.
+  for (const auto& e : target->io_meta().outputs) {
+    if (e.name == "__next_active") {
+      return true;
+    }
+  }
+  for (const auto& caller : registry) {
+    if (!caller || caller->is_template()) {
+      continue;
+    }
+    const bool runtime_control_root = std::any_of(caller->io_meta().outputs.begin(),
+                                                  caller->io_meta().outputs.end(),
+                                                  [](const auto& e) { return e.name == "__next_active"; });
+    if (runtime_control_root) {
+      absl::flat_hash_set<std::string> visiting;
+      if (activation_reaches(caller, target, registry, visiting)) {
+        return true;
+      }
+    }
+    for (const auto& name : collect_guarded_callee_names(caller)) {
+      auto root = resolve_callee_lnast(name, registry);
+      if (!root) {
+        continue;
+      }
+      absl::flat_hash_set<std::string> visiting;
+      if (activation_reaches(root, target, registry, visiting)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Shared phase-1 io+clock+reset/activation GraphIO registration. Idempotent (the GraphIO
 // add calls are has_-guarded). Returns the clock/reset binding for the body
 // build; empty names = the module needs none.
 [[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
@@ -7560,6 +7849,28 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   }
   for (const auto& e : lnast->io_meta().outputs) {
     declare(e, /*is_input=*/false);
+  }
+
+  // Append-only hidden activation ABI. Do not perturb ordinary public tops:
+  // only a definition reached from a runtime-conditional call receives the
+  // compiler-minted port. Lifted loop bodies already declare __valid, but only
+  // runtime-control or conditionally called bodies consume it as execution
+  // context; ordinary always-active loops keep their pre-activation netlist.
+  std::string valid_name;
+  bool        valid_minted   = false;
+  bool        valid_active   = is_activation_capable(lnast, registry);
+  const bool  explicit_valid = std::any_of(lnast->io_meta().inputs.begin(), lnast->io_meta().inputs.end(), [](const auto& e) {
+    return e.name == "__valid";
+  });
+  if (valid_active || explicit_valid) {
+    valid_name = "__valid";
+    if (!gio->has_input(valid_name) && !gio->has_output(valid_name)) {
+      gio->add_input(valid_name, pid);
+      ++pid;
+      valid_minted = true;
+    }
+    gio->set_bits(valid_name, 1);
+    gio->set_unsign(valid_name, true);
   }
 
   // Implicit clock: when the tree holds state (own regs OR,
@@ -7698,7 +8009,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
     }
   }
 
-  return {clock_name, clock_minted, reset_name, reset_minted, reset_neg};
+  return {clock_name, clock_minted, reset_name, reset_minted, reset_neg, valid_name, valid_minted, valid_active};
 }
 
 }  // namespace

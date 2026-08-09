@@ -63,6 +63,16 @@ struct Encoded {
   Io_name_map<Val> inputs;
   Io_name_map<Val> outputs;
 
+  // Occurrence metadata for the synthetic \x04prop:<occ> outputs. Kept outside
+  // the encoded output name so the existing fork/cache protocol and arbitrary
+  // user messages remain unambiguous. `prop_top` distinguishes a property
+  // authored in the selected top definition from the same source statement
+  // reached through a child occurrence; `prop_instance` is the occurrence path
+  // used by diagnostics and is intentionally available for a future modular
+  // hierarchical-verify scheduler.
+  absl::flat_hash_set<int>              prop_top;
+  absl::flat_hash_map<int, std::string> prop_instance;
+
   // M4 memory state. Each Memory cell is cut like a Flop: its current contents
   // are an SMT array symbol (shared across the two designs by mem_state_key, so
   // corresponding memories "collapse"), and its post-cycle contents are the

@@ -2345,7 +2345,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       note_src(fout, node);
       fout->append("// synthesis translate_off\n");
       fout->append("always_comb begin\n");
-      if (kind == "assume") {
+      if (kind == "assume" || kind == "assume_nocheck") {
         fout->append("  assume (", get_wire_or_const(cond), ");\n");
       } else {
         fout->append("  assert (", get_wire_or_const(cond), ") else $error(\"", detail, "\");\n");
@@ -2541,12 +2541,76 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
   }
 }
 
+void Cgen_verilog::create_clock_cells(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
+  for (auto node : graph->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Clock_cell || !node.has_out_edges()) {
+      continue;
+    }
+    auto clk = get_driver(find_sink_pin(node, "clk_ref"));
+    if (clk.is_invalid()) {
+      livehd::diag::err("inou.cgen", "clock-cell-missing-clock", "internal")
+          .msg("Clock_cell `{}` has no clk_ref", debug_name(node))
+          .fatal();
+      return;
+    }
+
+    int64_t div = 1;
+    if (auto d = get_driver(find_sink_pin(node, "div")); !d.is_invalid()) {
+      if (!is_const_pin(d) || !hydrate_const(d).is_just_i64()) {
+        livehd::diag::err("inou.cgen", "clock-cell-div", "unsupported")
+            .msg("Clock_cell `{}` has a non-constant divider", debug_name(node))
+            .fatal();
+        return;
+      }
+      div = hydrate_const(d).to_just_i64();
+    }
+    if (div != 1) {
+      livehd::diag::err("inou.cgen", "clock-cell-div", "unsupported")
+          .msg("Clock_cell `{}` requests div={}, but Verilog lowering supports only div=1", debug_name(node), div)
+          .fatal();
+      return;
+    }
+
+    bool invert = false;
+    if (auto d = get_driver(find_sink_pin(node, "invert")); !d.is_invalid()) {
+      if (!is_const_pin(d)) {
+        livehd::diag::err("inou.cgen", "clock-cell-invert", "unsupported")
+            .msg("Clock_cell `{}` has a non-constant invert flavour", debug_name(node))
+            .fatal();
+        return;
+      }
+      invert = !hydrate_const(d).is_known_false();
+    }
+
+    const auto dpin = node.create_driver_pin(0);
+    auto       oit  = pin2var.find(dpin.get_class_index());
+    auto       lit  = clock_latch_vars_.find(node.get_class_index());
+    I(oit != pin2var.end() && lit != clock_latch_vars_.end());
+    const auto clk_expr = get_expression(clk);
+    const auto en_pin   = get_driver(find_sink_pin(node, "en"));
+    const auto en_expr  = en_pin.is_invalid() ? std::string{"1'b1"} : get_expression(en_pin);
+
+    note_src(fout, node);
+    fout->append("always_latch begin\n");
+    fout->append(absl::StrCat("  if (", invert ? "" : "!", clk_expr, ") ", lit->second, " <= ", en_expr, ";\n"));
+    fout->append("end\n");
+    if (invert) {
+      fout->append(absl::StrCat("assign ", oit->second, " = ", clk_expr, " | ~", lit->second, ";\n"));
+    } else {
+      fout->append(absl::StrCat("assign ", oit->second, " = ", clk_expr, " & ", lit->second, ";\n"));
+    }
+  }
+}
+
 void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
   note_module(fout);
   fout->append("always_comb begin\n");
 
   for (auto node : graph->body().nodes(hhds::Node_order::forward)) {
     auto op = type_op_of(node);
+    if (op == Ntype_op::Clock_cell) {
+      continue;  // emitted as a latch + continuous assignment below
+    }
     if (Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
@@ -2629,7 +2693,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         edge = "negedge";
       }
     }
-    auto clock_sink = find_sink_pin(node, "clock_pin");
+    auto        clock_sink = find_sink_pin(node, "clock_pin");
     // Use get_expression (not pin_wire_name directly): an internal/derived clock
     // (a gated/buffered clock feeding the flop's clock_pin) may be either a
     // DECLARED net — e.g. a `Get_mask` masking `clk & en` to 1 bit, whose wire
@@ -2646,23 +2710,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     // back, and tests/equiv/mclk_derived failed on exactly that. create_locals'
     // THIRD pass now force-declares every clock_pin driver, so the pin is in
     // pin2var by the time we get here and get_expression yields a net name.
-    // A Clock_cell must never reach Verilog emission (2f-latch M9: recognition
-    // is scoped to the formal and sim pipelines, never the compile/emission
-    // path). Guard it explicitly because the failure would otherwise be SILENT
-    // and of the worst kind: get_expression has no arm for the cell, falls
-    // through to `'hx`, and emits `always @(posedge 'hx)` -- a register with no
-    // clock at all. create_locals does not declare a fanout-1 cell either, so
-    // there is not even an undeclared-identifier error to catch it.
-    if (auto cdrv = get_driver(clock_sink); !cdrv.is_invalid() && type_op_of(cdrv.get_master_node()) == Ntype_op::Clock_cell) {
-      livehd::diag::err("inou.cgen", "clock-cell-emission", "unsupported")
-          .msg("flop `{}` is clocked by a Clock_cell, which has no Verilog lowering yet", debug_name(node))
-          .hint(
-              "the synthesis lowering (Clock_cell -> a real ICG cell, so the SHARED gate survives mapping) is not "
-              "implemented; recognition must not run on the emission path")
-          .fatal();
-      return;
-    }
-    std::string clock = get_expression(get_driver(clock_sink));
+    std::string clock      = get_expression(get_driver(clock_sink));
 
     std::string reset_async;
     std::string reset;
@@ -2902,6 +2950,25 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
 }
 
 void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
+  // Clock nets must be claimed before the ordinary traversal: a downstream
+  // state/control consumer can otherwise name the Clock_cell output first and
+  // add_to_pin2var declares it as a procedural reg, leaving no private enable
+  // latch record for the dedicated lowering.
+  for (auto node : graph->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Clock_cell || !node.has_out_edges()) {
+      continue;
+    }
+    auto       dpin     = node.create_driver_pin(0);
+    const auto out_name = get_unique_decl_name(get_scaped_name(pin_wire_name(dpin)));
+    const auto lat_name = get_unique_decl_name(get_scaped_name(absl::StrCat(out_name, "__en_latched")));
+    pin2var.insert_or_assign(dpin.get_class_index(), out_name);
+    pin2var_unsigned_.insert(dpin.get_class_index());
+    clock_latch_vars_.insert_or_assign(node.get_class_index(), lat_name);
+    note_src(fout, node);
+    fout->append("wire ", out_name, ";\n");
+    fout->append("reg ", lat_name, ";\n");
+  }
+
   for (auto node : graph->body().nodes()) {
     auto op = type_op_of(node);
 
@@ -3107,6 +3174,21 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       continue;
     }
     I(op != Ntype_op::Sub && op != Ntype_op::Memory);
+
+    if (op == Ntype_op::Clock_cell) {
+      auto dpin = node.create_driver_pin(0);
+      if (!pin2var.contains(dpin.get_class_index())) {
+        const auto out_name = get_unique_decl_name(get_scaped_name(pin_wire_name(dpin)));
+        const auto lat_name = get_unique_decl_name(get_scaped_name(absl::StrCat(out_name, "__en_latched")));
+        pin2var.emplace(dpin.get_class_index(), out_name);
+        pin2var_unsigned_.insert(dpin.get_class_index());
+        clock_latch_vars_.emplace(node.get_class_index(), lat_name);
+        note_src(fout, node);
+        fout->append("wire ", out_name, ";\n");
+        fout->append("reg ", lat_name, ";\n");
+      }
+      continue;
+    }
 
     if (!node.has_out_edges() && !is_type_register(node)) {
       continue;
@@ -3348,6 +3430,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   loop_instance_names_.clear();
   loop_output_vars_.clear();
   loop_input_exprs_.clear();
+  clock_latch_vars_.clear();
   first_array_block = true;
   map_segments_.clear();
   mem_wrappers_emitted_.clear();
@@ -3391,6 +3474,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   create_locals(fout, g);
   create_memories(fout, g);
   create_subs(fout, g);
+  create_clock_cells(fout, g);
 
   create_combinational(fout, g);
   create_outputs(fout, g);

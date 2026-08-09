@@ -152,25 +152,23 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
       continue;
     }
-    // A recognized CLOCK GATE (`Clock_cell`) in the control cone is NOT modelled
-    // here. This pass folds an INLINE `<clock> & <enables>` cone into the flop's
-    // enable (resolve_icg below), but a materialized cell carries the
-    // glitch-free SAMPLING CONTRACT -- the enable is sampled on the inactive
-    // phase before the cell's own active edge, which for the active-low flavour
-    // (`clk | ~en`) is the phase before the FALL. There is no sub-period in this
-    // lowering to sample in, so slotting the endpoint would silently drop the
-    // gate (commit every slot, ungated) or read it half a period early. Decline
-    // and let the formal phase schedule own it -- it models the sample point
-    // explicitly (todo/livehd/2f-lec, 2f-latch M10).
-    if (auto cr = lc::control_root(sink_driver(n, op == Ntype_op::Latch ? "enable" : "clock_pin"),
-                                   /*stop_at_clock_cell=*/true);
-        !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !gu::is_const_pin(cr.net)
-        && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell) {
-      plan.code = "clock-cell-unsupported";
-      plan.why  = "state element `" + label_of(n)
-                + "` is clocked through a recognized clock gate (Clock_cell), whose enable sample point has no "
-                  "representation in a slot lowering";
-      return plan;
+    const auto control            = sink_driver(n, op == Ntype_op::Latch ? "enable" : "clock_pin");
+    const auto cr                 = lc::control_root(control, /*stop_at_clock_cell=*/true);
+    const bool through_clock_cell = !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !gu::is_const_pin(cr.net)
+                                    && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell;
+    if (through_clock_cell) {
+      const auto cell = cr.net.get_master_node();
+      // The positive gate flavour (`clk & en_latched`) can be retimed exactly
+      // into the endpoint enable at the same reference edge. The active-low
+      // flavour samples before the falling edge and needs a sub-period the slot
+      // model does not have, so it remains a named refusal.
+      if (const auto inv = sink_driver(cell, "invert");
+          !inv.is_invalid() && (!gu::is_const_pin(inv) || !gu::hydrate_const(inv).is_known_false())) {
+        plan.code = "clock-cell-sample-phase";
+        plan.why  = "state element `" + label_of(n)
+                    + "` is clocked through an active-low Clock_cell whose enable sample phase cannot be represented";
+        return plan;
+      }
     }
     auto cc = lc::commit_class_of(n, &clocks);
     if (!cc) {
@@ -186,7 +184,12 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
       // A flop's gate lives on `clock_pin`; a LATCH's lives on `enable` (its
       // gate IS its enable). Same cone, same fold: the clock half becomes the
       // commit class, the data half becomes the flop enable.
-      e.icg = lc::resolve_icg(sink_driver(n, e.is_latch ? "enable" : "clock_pin"), clocks);
+      e.icg = through_clock_cell ? lc::clock_op_of(control, clocks) : lc::resolve_icg(control, clocks);
+      if (through_clock_cell && (!e.icg || e.icg->div != 1)) {
+        plan.code = "clock-cell-unsupported";
+        plan.why  = "state element `" + label_of(n) + "` has a Clock_cell that cannot be retimed to one endpoint enable";
+        return plan;
+      }
       if (e.icg) {
         // Resolve the ENABLE-LATCH BYPASS here, during ANALYSIS, because the
         // rewrite loop retypes latches into flops as it goes -- so by the time

@@ -273,26 +273,17 @@ grep -q "multi-clock-no-ratio" <<<"$out" \
   || { echo "$out" | tail -5; fail "the two-clock-with-latch refusal fired without its named diagnostic"; }
 echo "ok: a second clock domain that also holds a latch fails closed with a named diagnostic"
 
-# ---- an ASSUME on a P > 1 design rides the checked-assume discipline --------
+# ---- a top IO ASSUME on a P > 1 design constrains every microstep ------------
 # At P>1 the pass rewires each design ASSERT obligation's cond to
 # `boundary implies cond`, so asserts are only checked where a whole period has
 # settled; assume-kind conds are NOT wrapped (an environment constraint must
 # constrain EVERY step, and historically wrapping one silently freed the
 # mid-period steps — a FALSE REFUTED factory).
 #
-# Under the checked-assume discipline an input assume is a PROOF OBLIGATION,
-# and over a free input `!sel` can never be proven — so this design now
-# REFUTES its assume check, period or no period, and the failure points at
-# assume_nocheck. There is deliberately no green path here: formal blocks (the
-# assume_nocheck carrier) are refused at P>1 because a monitor cannot be gated
-# to the period boundary, so a P>1 design currently has NO free-env spelling.
-# What this case pins: the discipline is period-independent (the refutation
-# and its hint appear WITH normalization at P=2 in force), and the run still
-# reaches P=2 rather than dying earlier.
-#
-# `compile.formal.on_refute=warn` is needed because the in-compile gate treats a
-# bare input assume as a refutable obligation (its own documented policy, and
-# nothing to do with normalization).
+# A selected-top input assume has no parent that can discharge it. It therefore
+# warns and remains active with assume_nocheck semantics. What this case pins is
+# that the constraint is period-independent: it stays in force at every P=2
+# microstep while assertions are observed only at settled period boundaries.
 cat > "$W/asm.prp" <<'EOF'
 pub mod asm_tb(sel:bool) -> (ok:bool@[0]) {
   reg cyc:u3 = 0
@@ -311,17 +302,16 @@ pub mod asm_tb(sel:bool) -> (ok:bool@[0]) {
 }
 EOF
 out="$("$LHD" formal verify "$W/asm.prp" --top asm_tb --workdir "$W/aw" \
-        --set formal.bound=12 --set formal.simfail_run=false \
-        --set compile.formal.on_refute=warn 2>&1)"
+        --set formal.bound=12 --set formal.simfail_run=false 2>&1)"
 rc=$?
-[ "$rc" -ne 0 ] || { echo "$out" | tail -6; fail "an unprovable input assume must refute its check at P=2 too (got rc=0)"; }
+[ "$rc" -eq 0 ] || { echo "$out" | tail -6; fail "the top IO assume must remain active and prove the P=2 assertions (rc=$rc)"; }
 grep -q "pass.single_edge slots:2" <<<"$out" \
   || fail "the assume fixture did not reach P=2, so it pins nothing about normalization"
-grep -qE "assume at.*asm.prp.*REFUTED at cycle" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the input assume must get its own REFUTED row under P=2"; }
-grep -q "spell it assume_nocheck" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the refuted input assume must carry the assume_nocheck hint under P=2"; }
-echo "ok: the checked-assume discipline is period-independent (refutes with the hint at P=2)"
+grep -q "formal-top-assume" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the selected-top IO assume must emit its cannot-check warning"; }
+grep -q "in force (UNCHECKED top-level IO assume cannot be checked; treated as assume_nocheck" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the top IO assume must be disclosed as active under P=2"; }
+echo "ok: the top IO assume stays active at every P=2 microstep"
 
 # NON-VACUITY: the fixture's asserts are not self-satisfying -- without the
 # assume the design still REFUTES (now for the assert, not the assume check).

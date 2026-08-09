@@ -1,0 +1,24 @@
+/*
+:name: conditional_latch_call
+:type: equiv
+:verilog_top: conditional_latch_call.top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+// Latches have no clock edge to suppress, so a conditional instance must
+// transport activation into the callee and AND it with the latch enable.
+mod inner(gate:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  q = l
+  if gate {
+    l = d
+  }
+}
+
+pub mod top(active:bool, gate:bool, d:u8) -> (q:u8@[0]) {
+  q = 0
+  if active {
+    q = inner(gate=gate, d=d)
+  }
+}

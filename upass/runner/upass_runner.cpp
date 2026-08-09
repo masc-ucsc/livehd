@@ -5157,15 +5157,16 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   const bool is_call    = Lnast_ntype::is_func_call(t);
   const bool is_store   = Lnast_ntype::is_store(t);
   const bool is_declare = Lnast_ntype::is_declare(t);
+  const bool is_for     = Lnast_ntype::is_for(t);
   // Child 0 of a defining statement names its target, not a read.
-  const bool defines    = is_store || is_declare || is_call || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
+  const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
                           || Lnast_ntype::is_tuple_get(t);
 
   const auto target = ln.get_first_child(nid);
   const auto target_name
       = (!target.is_invalid() && Lnast_ntype::is_ref(ln.get_type(target))) ? ln.get_name(target) : std::string_view{};
   if (!target_name.empty() && !prp_is_tmp_name(target_name)) {
-    if (is_declare) {
+    if (is_declare || is_for) {
       out.declared.emplace(target_name);
     } else if (is_store && !parent_makes_keys) {
       out.written.emplace(target_name);  // a store under a call/tuple is a key
@@ -5276,6 +5277,130 @@ bool subtree_has_loop_control(const Lnast& ln, const Lnast_nid& nid) {
   return false;
 }
 
+// The default source-unroll path already handles a break/continue whose guard
+// becomes comptime after binding the iteration variable. Route only genuinely
+// runtime control through the activation representation when general rolling
+// is disabled. LNAST conditions are three-address refs, so follow temporary
+// producers back to their operands: `i == 6` depends only on the loop index,
+// while `stop#[i]` reaches the unresolved input `stop` and is runtime.
+bool subtree_has_runtime_loop_control(const Lnast& ln, const Lnast_nid& body_stmts, std::string_view ivar) {
+  absl::flat_hash_map<std::string, Lnast_nid> temp_defs;
+  std::function<void(const Lnast_nid&)>       collect_defs = [&](const Lnast_nid& nid) {
+    if (nid.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(nid))) {
+      return;
+    }
+    auto first = ln.get_first_child(nid);
+    if (!first.is_invalid() && Lnast_ntype::is_ref(ln.get_type(first))) {
+      const auto name = ln.get_name(first);
+      if (prp_is_tmp_name(name)) {
+        // SSA temporaries have one real producer. Control nodes (`if`, `for`,
+        // `break`, ...) may also happen to have a ref as child zero, but that
+        // ref is an operand/binding rather than a destination. Since the
+        // producer precedes every use in the body, keep the first statement
+        // that claims the name instead of letting a later control use replace
+        // it (notably `if %cond { break }`).
+        temp_defs.try_emplace(std::string(name), nid);
+      }
+    }
+    for (auto c : ln.children(nid)) {
+      collect_defs(c);
+    }
+  };
+  collect_defs(body_stmts);
+
+  absl::flat_hash_set<std::string>      visiting;
+  std::function<bool(const Lnast_nid&)> is_iteration_static = [&](const Lnast_nid& nid) -> bool {
+    if (nid.is_invalid()) {
+      return true;
+    }
+    const auto type = ln.get_type(nid);
+    if (Lnast_ntype::is_const(type)) {
+      return true;
+    }
+    if (Lnast_ntype::is_ref(type)) {
+      const auto name = ln.get_name(nid);
+      if (name == ivar) {
+        return true;
+      }
+      auto it = temp_defs.find(std::string(name));
+      if (it == temp_defs.end() || !visiting.insert(std::string(name)).second) {
+        return false;
+      }
+      const bool result = is_iteration_static(it->second);
+      visiting.erase(std::string(name));
+      return result;
+    }
+    int  child_index = 0;
+    bool result      = true;
+    for (auto c : ln.children(nid)) {
+      // A three-address statement's first child is its destination, not an
+      // operand. The condition itself may be a leaf, handled above.
+      if (child_index++ == 0 && Lnast_ntype::is_ref(ln.get_type(c))) {
+        continue;
+      }
+      result = result && is_iteration_static(c);
+    }
+    return result;
+  };
+
+  std::function<bool(const Lnast_nid&, bool)> scan = [&](const Lnast_nid& nid, bool runtime_guard) -> bool {
+    if (nid.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(nid))) {
+      return false;
+    }
+    const auto type = ln.get_type(nid);
+    if (Lnast_ntype::is_func_break(type) || Lnast_ntype::is_func_continue(type)) {
+      return runtime_guard;
+    }
+    // A nested range loop owns its control statements, but an enclosing loop
+    // that source-unrolls first would put the inner body in a salted frame;
+    // lifted definitions deliberately refuse to copy such frame-renamed names.
+    // Detect the inner loop with ITS iteration variable so the outer loop is
+    // lifted first, then the inner loop can lower normally in that generated
+    // definition. This is what makes nested runtime break compositional.
+    if (nid != body_stmts && Lnast_ntype::is_for(type)) {
+      Lnast_nid nested_ivar;
+      Lnast_nid nested_body;
+      int       child_index = 0;
+      for (auto c : ln.children(nid)) {
+        if (child_index == 0) {
+          nested_ivar = c;
+        } else if (child_index == 2) {
+          nested_body = c;
+          break;
+        }
+        ++child_index;
+      }
+      if (!nested_ivar.is_invalid() && !nested_body.is_invalid()) {
+        return subtree_has_runtime_loop_control(ln, nested_body, ln.get_name(nested_ivar));
+      }
+      return false;
+    }
+    if (nid != body_stmts && Lnast_ntype::is_while(type)) {
+      return false;
+    }
+    if (Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type)) {
+      bool any_runtime_cond = false;
+      for (auto c : ln.children(nid)) {
+        if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+          if (scan(c, runtime_guard || any_runtime_cond)) {
+            return true;
+          }
+        } else {
+          any_runtime_cond = any_runtime_cond || !is_iteration_static(c);
+        }
+      }
+      return false;
+    }
+    for (auto c : ln.children(nid)) {
+      if (scan(c, runtime_guard)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return scan(body_stmts, false);
+}
+
 }  // namespace
 
 bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
@@ -5308,10 +5433,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     return refuse("the loop is inside an inlined frame (its names are frame-renamed, the copied body's are raw)");
   }
 
-  const auto& ln = *lm->get_lnast();
-  if (subtree_has_loop_control(ln, body_stmts)) {
-    return refuse("body contains `break`/`continue` (needs the activation chain)");
-  }
+  const auto& ln       = *lm->get_lnast();
+  out.has_loop_control = subtree_has_loop_control(ln, body_stmts);
 
   Body_vars vars;
   collect_body_vars(ln, body_stmts, /*parent_is_call=*/false, vars);
@@ -5467,7 +5590,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
 
   // A compiler-owned port name must not collide with a source variable.
   for (const auto& n : out.carries) {
-    if (n.ends_with(kCarryInSuffix) || n.ends_with(kCarryOutSuffix)) {
+    if (n.ends_with(kCarryInSuffix) || n.ends_with(kCarryOutSuffix) || n == kLoopValid || n == kLoopExec || n == kLoopNextActive) {
       return refuse(std::format("variable `{}` collides with a reserved carry port suffix", n));
     }
   }
@@ -5489,7 +5612,9 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     auto st = body->add_child(parent, Lnast_ntype::create_store());
     body->add_child(st, Lnast_node::create_ref(name));
     body->add_child(st, Lnast_node::create_const("nil"));
-    if (!p.type_name.empty()) {
+    if (name == kLoopValid || name == kLoopNextActive) {
+      body->add_child(st, Lnast_ntype::create_prim_type_bool());
+    } else if (!p.type_name.empty()) {
       body->add_child(st, Lnast_node::create_ref(p.type_name));
     } else {
       auto pt = body->add_child(st, Lnast_ntype::create_prim_type_int());
@@ -5506,6 +5631,12 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   auto io_n = body->add_child(root, Lnast_ntype::create_io());
   auto ins  = body->add_child(io_n, Lnast_ntype::create_tuple_add());
   add_port(ins, plan.ivar, plan.types.at(plan.ivar), false);
+  const Spec_port bool_port{.inject = true, .max = *Dlop::from_pyrope("1"), .min = *Dlop::from_pyrope("0")};
+  // Every compiler-generated loop definition has the local activation ABI.
+  // Ordinary calls bind true; a conditional caller conjoins its path predicate
+  // in tolg. Bodies without control/effects need not consume the value, but the
+  // uniform append-only port keeps generated definitions composable.
+  add_port(ins, std::string(kLoopValid), bool_port, false);
   for (const auto& n : plan.invariants) {
     add_port(ins, n, plan.types.at(n), false);
   }
@@ -5513,11 +5644,29 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     add_port(ins, n + std::string(kCarryInSuffix), plan.types.at(n), false);
   }
   auto outs = body->add_child(io_n, Lnast_ntype::create_tuple_add());
+  if (plan.has_loop_control) {
+    add_port(outs, std::string(kLoopNextActive), bool_port, true);
+  }
   for (const auto& n : plan.carries) {
     add_port(outs, n + std::string(kCarryOutSuffix), plan.types.at(n), true);
   }
 
   auto stmts = body->add_child(root, Lnast_ntype::create_stmts());
+
+  if (plan.has_loop_control) {
+    auto dcl = body->add_child(stmts, Lnast_ntype::create_declare());
+    body->add_child(dcl, Lnast_node::create_ref(std::string(kLoopExec)));
+    body->add_child(dcl, Lnast_ntype::create_prim_type_bool());
+    body->add_child(dcl, Lnast_node::create_const("mut"));
+
+    auto seed_exec = body->add_child(stmts, Lnast_ntype::create_store());
+    body->add_child(seed_exec, Lnast_node::create_ref(std::string(kLoopExec)));
+    body->add_child(seed_exec, Lnast_node::create_ref(std::string(kLoopValid)));
+
+    auto seed_next = body->add_child(stmts, Lnast_ntype::create_store());
+    body->add_child(seed_next, Lnast_node::create_ref(std::string(kLoopNextActive)));
+    body->add_child(seed_next, Lnast_node::create_ref(std::string(kLoopValid)));
+  }
 
   // Prologue: seed each carry as an ordinary `mut` local from its input port,
   // so the copied body's reads and writes of that name need no substitution.
@@ -5539,10 +5688,91 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     body->add_child(seed, Lnast_node::create_ref(n + std::string(kCarryInSuffix)));
   }
 
-  // The loop body verbatim — `for` is an SSA scope barrier, so its names are
-  // raw source names and the port names above were chosen to match them.
-  for (auto c : src->children(body_stmts)) {
-    copy_subtree_into(src, c, body, stmts, nullptr);
+  // The ordinary case stays verbatim. A body with loop control is predicated
+  // statement-by-statement. `break` clears both the remainder-of-this-
+  // occurrence predicate and the value chained into later occurrences;
+  // `continue` clears only the former. Nested if/unique-if arms share the same
+  // mutable predicate, so a taken control statement suppresses the rest of its
+  // arm and every statement after the conditional while the untaken arms keep
+  // the pre-branch value through the normal tolg mux merge.
+  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_controlled_stmt;
+  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_controlled_stmts;
+
+  const auto copy_srcid = [&](const Lnast_nid& from, const Lnast_nid& to) {
+    if (const auto id = src->get_srcid(from); id != hhds::SourceId_invalid) {
+      body->set_srcid(to, body->source_locator().import_from(src->source_locator(), id));
+    }
+  };
+  const auto guarded_parent = [&](const Lnast_nid& parent, const Lnast_nid& anchor) {
+    auto guard = body->add_child(parent, Lnast_ntype::create_if());
+    copy_srcid(anchor, guard);
+    body->add_child(guard, Lnast_node::create_ref(std::string(kLoopExec)));
+    return body->add_child(guard, Lnast_ntype::create_stmts());
+  };
+
+  copy_controlled_stmts = [&](const Lnast_nid& source_stmts, const Lnast_nid& target_stmts) {
+    for (auto c : src->children(source_stmts)) {
+      copy_controlled_stmt(c, target_stmts);
+    }
+  };
+  copy_controlled_stmt = [&](const Lnast_nid& source_stmt, const Lnast_nid& target_stmts) {
+    const auto type        = src->get_type(source_stmt);
+    // Pure three-address computations and declarations are safe to evaluate
+    // while inactive and must remain outside the runtime predicate. Besides
+    // avoiding useless muxes, this preserves COMPTIME structure: a nested
+    // range's `4-1` and `range(0,3)` producers cannot sit under `if __valid`, or
+    // the inner `for` sees an uncertain iterable and is rejected as runtime.
+    // Observable writes/calls/properties and control nodes stay guarded.
+    const bool needs_guard = Lnast_ntype::is_store(type) || Lnast_ntype::is_func_call(type) || Lnast_ntype::is_cassert(type)
+                             || Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type) || Lnast_ntype::is_for(type)
+                             || Lnast_ntype::is_while(type) || Lnast_ntype::is_func_break(type)
+                             || Lnast_ntype::is_func_continue(type) || Lnast_ntype::is_func_return(type);
+    if (!needs_guard) {
+      copy_subtree_into(src, source_stmt, body, target_stmts, nullptr);
+      return;
+    }
+    auto dst = guarded_parent(target_stmts, source_stmt);
+    if (Lnast_ntype::is_func_break(type) || Lnast_ntype::is_func_continue(type)) {
+      auto stop = body->add_child(dst, Lnast_ntype::create_store());
+      copy_srcid(source_stmt, stop);
+      body->add_child(stop, Lnast_node::create_ref(std::string(kLoopExec)));
+      body->add_child(stop, Lnast_node::create_const("false"));
+      if (Lnast_ntype::is_func_break(type)) {
+        auto next = body->add_child(dst, Lnast_ntype::create_store());
+        copy_srcid(source_stmt, next);
+        body->add_child(next, Lnast_node::create_ref(std::string(kLoopNextActive)));
+        body->add_child(next, Lnast_node::create_const("false"));
+      }
+      return;
+    }
+    if (Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type)) {
+      auto copied_if = body->add_child(dst, type);
+      copy_srcid(source_stmt, copied_if);
+      for (auto c : src->children(source_stmt)) {
+        if (Lnast_ntype::is_stmts(src->get_type(c))) {
+          auto copied_arm = body->add_child(copied_if, Lnast_ntype::create_stmts());
+          copy_srcid(c, copied_arm);
+          copy_controlled_stmts(c, copied_arm);
+        } else {
+          copy_subtree_into(src, c, body, copied_if, nullptr);
+        }
+      }
+      return;
+    }
+    // A nested loop owns its own break/continue. Treat the whole node as one
+    // guarded statement; its runner invocation will lower its control at the
+    // inner loop boundary rather than stealing it for this loop.
+    copy_subtree_into(src, source_stmt, body, dst, nullptr);
+  };
+
+  if (plan.has_loop_control) {
+    copy_controlled_stmts(body_stmts, stmts);
+  } else {
+    // `for` is an SSA scope barrier, so its names are raw source names and the
+    // port names above were chosen to match them.
+    for (auto c : src->children(body_stmts)) {
+      copy_subtree_into(src, c, body, stmts, nullptr);
+    }
   }
 
   // Epilogue: publish each carry on its output port.
@@ -5564,6 +5794,11 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan) {
   }
   for (const auto& n : plan.carries) {
     actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref(n));
+  }
+  actuals.emplace_back(std::string(kLoopValid), Lnast_node::create_const("true"));
+  if (plan.has_loop_control) {
+    actuals.emplace_back("__replica_activation", Lnast_node::create_const(std::string(kLoopValid)));
+    actuals.emplace_back("__replica_next_active", Lnast_node::create_const(std::string(kLoopNextActive)));
   }
   actuals.emplace_back("__replica",
                        Lnast_node::create_const(std::format("first={};step={};count={}", plan.first, plan.step, plan.count)));
@@ -7217,11 +7452,17 @@ void uPass_runner::unroll_for() {
     // ROLL: keep the loop as one replicated instance instead of emitting one
     // body copy per iteration (compile.upass.roll). Declines back to unrolling
     // whenever the body is not eligible, so this is purely additive.
-    if (roll_enabled_) {
-      to_body();
-      const auto     body_nid = lm->get_current_nid();
+    // Runtime loop control cannot be represented by the ordinary source
+    // unroller: later iterations need the activation recurrence. Route any
+    // control-bearing body through the rolled form even while general rolling
+    // remains opt-in. Comptime-only breaks are folded inside the lifted body;
+    // a later eligibility refinement may keep those on the source-unroll path
+    // as a compactness choice, but both representations are semantic.
+    to_body();
+    const auto body_nid = lm->get_current_nid();
+    lm->restore_cursor(for_bm);
+    if (roll_enabled_ || subtree_has_runtime_loop_control(*lm->get_lnast(), body_nid, tagged_i)) {
       Loop_roll_plan plan;
-      lm->restore_cursor(for_bm);
       if (plan_loop_roll(body_nid, tagged_i, lo, hi, step, plan)) {
         plan.inst    = std::format("u_loop_{}", roll_seq_);
         plan.mangled = std::format("{}.__loop{}", lm->get_lnast()->get_top_module_name(), roll_seq_);

@@ -1017,8 +1017,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
     // cases below and fell into the bit-blast loop, aborting the whole region.
     const bool latch_boundary = op == Ntype_op::Latch;
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem && !flop_boundary
-        && !latch_boundary) {
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && op != Ntype_op::Div && op != Ntype_op::Rem
+        && !flop_boundary && !latch_boundary) {
       continue;
     }
     if (op == Ntype_op::Div) {
@@ -1118,7 +1118,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         continue;
       }
       auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Div
+          || op == Ntype_op::Rem) {
         continue;  // blackbox boundary (Sub instance / memory / divider / remainder) -- handled separately
       }
       if (gu::is_type_flop(n)) {

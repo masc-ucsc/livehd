@@ -1350,6 +1350,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
   if (!var.graphs.empty()) {
     Eprp_var::Eprp_dict labels;
     merge_sets(opts, "compile.formal", labels);
+    // formal.assume_check is the ONE canonical cross-flow option. Mirror it
+    // into the compile-only pass.formal label after the legacy compile.formal
+    // set so the shared spelling wins if both are present.
+    Eprp_var::Eprp_dict formal_labels;
+    merge_sets(opts, "formal", formal_labels);
+    if (auto it = formal_labels.find("assume_check"); it != formal_labels.end()) {
+      labels["assume_check"] = it->second;
+    }
     const std::string recipe = opts.recipe.empty() ? "O1" : opts.recipe;
     const std::string mode   = labels.count("mode") ? labels["mode"] : (recipe == "O0" ? "none" : "fast");
     if (mode != "none" && mode != "fast" && mode != "normal") {

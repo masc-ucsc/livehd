@@ -1,0 +1,23 @@
+/*
+:name: conditional_state_call
+:type: equiv
+:verilog_top: conditional_state_call.top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+// A stateful call under a runtime branch is an activation boundary: while en
+// is false the inner state holds, its raw output is not published, and reset
+// still reaches it. The caller-side branch merge defines the visible output.
+mod inner(a:u8) -> (out:u8@[0]) {
+  reg q:u8 = 0
+  q = q ^ a
+  out = q
+}
+
+pub mod top(en:bool, a:u8) -> (out:u8@[0]) {
+  out = 0
+  if en {
+    out = inner(a)
+  }
+}

@@ -1,0 +1,21 @@
+/*
+:name: loop_runtime_break_nested
+:type: equiv
+:verilog_top: loop_runtime_break_nested.top
+:pyrope_top: top
+*/
+
+// The outer loop remains on the ordinary comptime-unroll path. Each inner
+// loop owns an independent activation chain and break only terminates that
+// inner occurrence sequence.
+pub mod top(stop:u8) -> (total:u4@[0]) {
+  mut acc:u4 = 0
+  for outer in 0..<2 {
+    for i in 0..<4 {
+      const bit = outer * 4 + i
+      if stop#[bit] { break }
+      acc = acc + 1
+    }
+  }
+  total = acc
+}

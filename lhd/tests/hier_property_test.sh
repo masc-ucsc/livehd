@@ -23,11 +23,9 @@
 # is re-proving exactly the outstanding set. Case 0 below checks that removal on
 # its own, with no hierarchy involved.
 #
-# STATUS: every case currently fails. A PROVEN obligation is not removed (case
-# 0), and the assume is evaluated in module isolation only, so the parent's
-# actual binding is never considered: case 1 hard-fails ("assume is refuted ...
-# counterexample: a=0"), and cases 2 and 3 are indistinguishable — both emit one
-# `assume-deferred` warning and exit 0, so the a=4 violation goes unreported.
+# The top-rooted contract walk implements this without a second modular verify
+# driver: selected-top IO assumptions remain active/unchecked, while a parent
+# occurrence proves or refutes each child input obligation at its actual bind.
 set -u
 
 LHD="${LHD:-lhd/lhd}"
@@ -58,6 +56,12 @@ EOF
 cat > "$W/use_bad.prp" <<'EOF'
 const lib_sub = import("lib_sub")
 pub mod use_bad(x:u8) -> (o:u8@[0]) { o = lib_sub.sub(a=4).o }
+EOF
+cat > "$W/explicit_nocheck.prp" <<'EOF'
+pub mod explicit_nocheck(a:u8) -> (o:u8@[0]) {
+  assume_nocheck(a < 4)
+  o = a
+}
 EOF
 
 # Obligations still owed in an emitted library == fproperty Sub instances. NOT
@@ -113,6 +117,33 @@ if $LHD compile "$W/use_bad.prp" --top use_bad --emit-dir "lg:$W/BAD" \
   fail "parent binds a=4, violating assume(a==3), but the build PASSED"
 else
   echo "ok: parent binding a=4 was refuted"
+fi
+
+# --- 4. disabling checks keeps every assume active --------------------------
+if $LHD compile "$W/use_bad.prp" --top use_bad --set formal.assume_check=false \
+     --emit-dir "lg:$W/NOCHECK_ALL" --workdir "$W/w4" >"$W/l4.log" 2>&1; then
+  n=$(props "$W/NOCHECK_ALL")
+  if [ "$n" -ge 1 ]; then
+    echo "ok: formal.assume_check=false kept the violated child assume active ($n fproperty)"
+  else
+    fail "formal.assume_check=false dropped the assumption instead of retaining it"
+  fi
+else
+  fail "formal.assume_check=false must disable the check without removing the assume"
+fi
+grep -q 'formal-unchecked-assume' "$W/l4.log" \
+  || fail "formal.assume_check=false must warn that the assume is active and unchecked"
+
+# --- 5. design-body assume_nocheck is a first-class spelling ----------------
+if $LHD compile "$W/explicit_nocheck.prp" --top explicit_nocheck \
+     --emit-dir "lg:$W/EXPLICIT_NOCHECK" --workdir "$W/w5" >"$W/l5.log" 2>&1; then
+  n=$(props "$W/EXPLICIT_NOCHECK")
+  [ "$n" -ge 1 ] || fail "assume_nocheck compiled but its active fproperty was dropped"
+  grep -q 'formal-unchecked-assume' "$W/l5.log" \
+    || fail "assume_nocheck must be disclosed as active and unchecked"
+  echo "ok: design-body assume_nocheck remains active"
+else
+  fail "design-body assume_nocheck must compile"
 fi
 
 exit $rc

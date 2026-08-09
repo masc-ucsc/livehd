@@ -1387,13 +1387,28 @@ sh_test(
 # input is discharged (or refuted) by what the PARENT binds, not by the submodule
 # in isolation. Case 3 (a parent that violates the assume must FAIL) is what
 # keeps the test honest — without it, never checking anything would look correct.
-# Tagged fixme: today the assume is only evaluated in module isolation, so the
-# submodule cannot be compiled on its own and a violating parent still passes.
 sh_test(
     name = "hier_property_test",
     srcs = ["hier_property_test.sh"],
     data = ["//lhd"],
-    tags = ["fixme"],
+)
+
+# Design-body assumptions constrain the existing hierarchical LEC translation.
+# Assumption-bearing child cones stay transparent until box-boundary contracts
+# exist; contradictory unchecked contracts are rejected as vacuous.
+sh_test(
+    name = "lec_design_assume_test",
+    srcs = ["lec_design_assume_test.sh"],
+    data = ["//lhd"],
+)
+
+# A structural RCA with an unchecked carry_in==true top contract must match
+# a flat +1 adder in both hierarchical LEC and verify.  Removing the contract
+# must refute both flows.
+sh_test(
+    name = "formal_assume_rca_test",
+    srcs = ["formal_assume_rca_test.sh"],
+    data = ["//lhd"],
 )
 
 # LIVE fail-closed test: a variable BLOCKING-assigned in an EDGE-sensitive

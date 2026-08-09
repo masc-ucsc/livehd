@@ -18,6 +18,19 @@
   case splitting, a verdict cache, solver budgets, and witness generation. This
   page intentionally keeps only the work that remains relevant to LEC.</p>
 
+<h2 id="design-assumes">LANDED (2026-08-08) — design assumptions through hierarchy</h2>
+<p><code>lhd lec</code> now keeps design assumptions in the cvc5 translation. Checked
+  child/local assumptions are discharged once by the selected-top compile contract walk;
+  the surviving top-IO / explicit-nocheck constraints narrow both LEC sides and are
+  disclosed. <code>formal.assume_check=false</code> keeps all assumptions active while
+  disabling their checks. A contradictory active set yields Unknown/error rather than a
+  vacuous proof, and the policy participates in the cache key.</p>
+<p>A hierarchy box does not yet carry property ports. Therefore the current sound bridge
+  keeps any assumption-bearing cone transparent (virtual flatten at that boundary) while
+  unrelated definitions continue through the existing hierarchical-first box proof. This
+  preserves the assumption's real occurrence binding and is compatible with a future box
+  boundary-contract representation.</p>
+
 <h2 id="hier-order">LANDED (2026-08-02) — top-down hierarchy, premises discharged bottom-up</h2>
 
 <p><code>formal.lec.hier_order=top_down</code> is the DEFAULT. Every def is proved

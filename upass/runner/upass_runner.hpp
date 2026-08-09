@@ -985,9 +985,10 @@ protected:
     int64_t     first = 0;
     int64_t     step  = 1;
     uint64_t    count = 0;
-    std::string ivar;     // index port name == the iteration variable
-    std::string mangled;  // lifted definition name
-    std::string inst;     // instance name for the replicated Sub
+    std::string ivar;                      // index port name == the iteration variable
+    std::string mangled;                   // lifted definition name
+    std::string inst;                      // instance name for the replicated Sub
+    bool        has_loop_control = false;  // body owns break/continue and needs activation roles
 
     std::vector<std::string>                    invariants;
     std::vector<std::string>                    carries;
@@ -999,6 +1000,9 @@ protected:
   // `mut` local seeded from the input port and written back to the output port.
   static constexpr std::string_view kCarryInSuffix  = "__carry_in";
   static constexpr std::string_view kCarryOutSuffix = "__carry_out";
+  static constexpr std::string_view kLoopValid      = "__valid";
+  static constexpr std::string_view kLoopExec       = "__loop_exec";
+  static constexpr std::string_view kLoopNextActive = "__next_active";
 
   // Analysis only: decides whether this range loop can roll and fills `out`.
   // Returns false (with a debug-log reason) to fall back to unrolling.

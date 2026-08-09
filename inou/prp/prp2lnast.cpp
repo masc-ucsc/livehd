@@ -2103,7 +2103,8 @@ void Prp2lnast::process_statement(TSNode n) {
       // contract is worse than no contract. They are now ordinary undefined
       // calls — write `assume` for a precondition, `assert` for a
       // postcondition.
-      if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assert_always") {
+      if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assume_nocheck"
+          || fname == "assert_always") {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
           // The argument tuple is `(cond)` or `(cond, "msg")`. Lower the
@@ -2139,7 +2140,7 @@ void Prp2lnast::process_statement(TSNode n) {
           // kind to assert). `cassert` MUST carry one: it is an ELABORATION
           // check, not a design obligation — it never reaches pass.formal and
           // never becomes a runtime check, so tolg has to tell it from `assert`.
-          if (fname == "assume" || fname == "assert_always" || fname == "cassert") {
+          if (fname == "assume" || fname == "assume_nocheck" || fname == "assert_always" || fname == "cassert") {
             // UNQUOTED on purpose. A user message is always a STRING const
             // (`'…'`), so an unquoted spelling can never collide with one. The
             // old quoted form was matched downstream with an unanchored

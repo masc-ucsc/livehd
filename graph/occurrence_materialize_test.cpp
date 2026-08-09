@@ -273,9 +273,9 @@ TEST(ReplicaExpand, NoDescriptorIsALeftAlone) {
 
 // ── activation ──────────────────────────────────────────────────────────────
 //
-// No front end mints an activation port yet (design M2), but expansion already
-// implements the chain, so its shape is pinned here rather than left as
-// untested dead code.
+// The loop-control lowering now mints activation and next-active roles. Pin the
+// realized chain independently so a front-end change cannot mask a graph-level
+// regression.
 
 namespace {
 
@@ -364,6 +364,43 @@ TEST(ReplicaExpand, ActivationBuildsCumulativeEnableAndCarryBypass) {
       EXPECT_EQ(driver_of(mux, 2).get_port_id(), kPidAccOut);
     }
   }
+}
+
+TEST(ReplicaExpand, ZeroCountActivationPassesCarriesThrough) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_rexp_act_zero");
+  auto  bio = make_active_io(lib);
+  (void)bio->create_graph();
+
+  auto pio = lib.create_io("parent_act_zero");
+  pio->add_input("en", 0);
+  pio->add_input("seed", 1);
+  pio->add_output("total", 2);
+  pio->set_bits("en", 1);
+  pio->set_bits("seed", 12);
+  auto parent = pio->create_graph();
+  auto en     = parent->get_input_pin("en");
+  auto seed   = parent->get_input_pin("seed");
+  gu::set_bits(en, 1);
+  gu::set_bits(seed, 12);
+
+  auto compact = gu::create_typed_node(*parent, Ntype_op::Sub);
+  compact.set_name("lane");
+  en.connect_sink(compact.create_sink_pin(kPidAct));
+  seed.connect_sink(compact.create_sink_pin(kPidAccIn));
+  compact.create_driver_pin(kPidAccOut).connect_sink(parent->get_output_pin("total"));
+
+  hhds::Subnode_loop d;
+  d.count              = 0;
+  d.step               = 1;
+  d.index_input        = kPidIdx;
+  d.activation_input   = kPidAct;
+  d.next_active_output = kPidNext;
+  compact.set_subnode(bio, d);
+  compact.create_driver_pin(kPidAccOut).connect_sink(compact.create_sink_pin(kPidAccIn));
+
+  ASSERT_EQ(materialize_occurrences(parent.get(), "test"), 1);
+  EXPECT_TRUE(subs_of(parent.get()).empty());
+  EXPECT_EQ(driver_of(parent->get_output_node(), 2), seed);
 }
 
 TEST(ReplicaExpand, UnsizedCalleeOutputIsRefusedNotSilentlyOneBit) {

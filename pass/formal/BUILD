@@ -35,6 +35,7 @@ cc_library(
         ":formal",
         "//core",
         "//graph",
+        "//pass/lec:lec_query",
         "//pass/common:pass",
         "@hhds//hhds:graph",
     ],

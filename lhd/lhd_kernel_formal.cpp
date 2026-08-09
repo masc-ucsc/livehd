@@ -237,7 +237,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
   for (const auto& [mk, mv] : o.uncertain_match) {
     um_pairs.push_back(mk + "=" + mv);
   }
-  return std::format("{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];a={};sv={}",
+  return std::format("{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
                      dref.h0,
                      dref.h1,
                      dimpl.h0,
@@ -253,6 +253,8 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
                      sorted_join(match_pairs),
                      sorted_join(um_pairs),
                      sorted_join(o.collapse),
+                     o.assume_check ? 1 : 0,
+                     o.design_assumes ? 1 : 0,
                      o.assumption_key,
                      o.solver);
 }
@@ -366,6 +368,27 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
                     ? std::format("; PROVEN under {} unchecked assume(s)", o.unchecked_assumes)
                     : std::format("; under {} unchecked assume(s)", o.unchecked_assumes);
   }
+}
+
+static int design_assume_occurrences(hhds::Graph* top) {
+  if (top == nullptr) {
+    return 0;
+  }
+  int count = 0;
+  for (auto node : top->occurrences().nodes(hhds::Node_order::forward)) {
+    if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+      continue;
+    }
+    auto sio = node.get_subnode_io();
+    if (sio == nullptr || sio->get_name() != livehd::graph_util::fproperty_module_name) {
+      continue;
+    }
+    std::string_view raw = livehd::graph_util::node_name_of(node);
+    if (raw.rfind("assume\x1f", 0) == 0 || raw.rfind("assume_nocheck\x1f", 0) == 0) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 // Bottom-up hierarchical LEC driver (formal.lec.hier=true). Build the module-def
@@ -501,6 +524,44 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     order.push_back(n);
   };
   dfs(top_key);
+
+  // An active assumption inside a boxed child would disappear from the
+  // parent's cvc5 problem: a box exposes only IO, not the child's fproperty
+  // nodes. Until boundary-contract emission is added, keep every
+  // assumption-bearing cone transparent. The driver remains hierarchical for
+  // unrelated defs, and the normal CEGAR/inlining path carries each assumption
+  // at its real occurrence into the selected-top proof.
+  auto direct_assume = [](hhds::Graph* g) {
+    if (g == nullptr) {
+      return false;
+    }
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+      if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr || sio->get_name() != livehd::graph_util::fproperty_module_name) {
+        continue;
+      }
+      std::string_view raw = livehd::graph_util::node_name_of(node);
+      if (raw.rfind("assume\x1f", 0) == 0 || raw.rfind("assume_nocheck\x1f", 0) == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  absl::flat_hash_set<std::string> assume_cones;
+  for (const auto& name : order) {  // leaves first: child marks propagate up
+    bool active = direct_assume(ref_by_name[name]) || direct_assume(impl_by_name[name]);
+    if (auto it = children.find(name); it != children.end()) {
+      for (const auto& child : it->second) {
+        active = active || assume_cones.contains(child);
+      }
+    }
+    if (active) {
+      assume_cones.insert(name);
+    }
+  }
 
   // ── DESIGN-WIDE CLOCK FOREST (2f-lec, "Clock-graph propagation") ───────────
   // Resolve clocks ONCE, TOP-DOWN, before any def is proven. Per-endpoint
@@ -1102,6 +1163,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
     livehd::lec::Lec_options o = base;
+    o.design_assumes           = base.design_assumes && assume_cones.contains(name);
     if (budget_on && name != top_key) {
       // This def's per-query cap = the WALL budget remaining since the DAG
       // dispatch began (1s floor once spent; 0 would read as UNBOUNDED to the
@@ -1167,7 +1229,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // only what it has already discharged.
         //   `force_flat` overrides: an escalation round descends the ONE child
         // whose refutation this def has to absorb.
-        const bool want_box  = (top_down || is_proven) && force_flat[def_ix].count(c) == 0;
+        const bool want_box  = (top_down || is_proven) && force_flat[def_ix].count(c) == 0 && !assume_cones.contains(c);
         if (want_box) {
           // A child must NOT collapse when its ref/impl port sets diverge the
           // tuple-leaf <-> flat-bus way (Pyrope `req.a`/`req.b` leaves vs one
@@ -1205,7 +1267,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             if (auto gk = children.find(c); gk != children.end()) {
               for (const auto& g : gk->second) {
                 auto gi = order_ix.find(g);
-                if (gi == order_ix.end() || force_flat[def_ix].count(g) > 0 || refuted_snapshot[gi->second] != 0) {
+                if (gi == order_ix.end() || force_flat[def_ix].count(g) > 0 || refuted_snapshot[gi->second] != 0
+                    || assume_cones.contains(g)) {
                   continue;  // itself being absorbed, or known-different: descend it too
                 }
                 auto rg = ref_by_name.find(g);
@@ -1371,7 +1434,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // definitive. The obligations close exactly that hole. The predicate is
       // is_structural_identity (semdiff.hpp) -- the SAME one structural_identical()
       // and abc's reuse gate read, so this soundness-critical skip cannot drift.
-      if (o.semdiff != "none" && kids_proven && livehd::semdiff::is_structural_identity(m)) {
+      if (o.semdiff != "none" && kids_proven && !o.design_assumes && livehd::semdiff::is_structural_identity(m)) {
         livehd::lec::Query_result sr;
         sr.verdict         = Verdict::Proven;
         sr.engine          = "semdiff";
@@ -3082,10 +3145,19 @@ void lec_command(Options& opts, Result& res) {
                     "use `lhd formal verify <design> <sidecar> --formal <glob>`"};
   }
 
-  Eprp_var ref_var;
-  Eprp_var impl_var;
+  const bool assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
+  Eprp_var   ref_var;
+  Eprp_var   impl_var;
+  // pass.formal is still a compile pipeline stage with compile.formal.* labels.
+  // Bridge the ONE canonical public option into that load gate; no second user
+  // option is registered or documented.
+  const size_t assume_sets = opts.sets.size();
+  if (!assume_check) {
+    opts.sets.emplace_back("compile.formal.assume_check", "false");
+  }
   load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
+  opts.sets.resize(assume_sets);
 
   // Pick the top module on each side: explicit --{ref,impl}-top, else --top,
   // else the sole module (pick_top_graph: exact name or unambiguous entity
@@ -3099,10 +3171,18 @@ void lec_command(Options& opts, Result& res) {
   // non-cross path; in cross mode we additionally run lgcheck and assert
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
-  o.engine = label("engine", "auto");
-  o.solver = solver;  // cvc5 | bitwuzla
-  o.gold_x = label("gold_x", "ignore");
-  o.bound  = std::atoi(label("bound", "6").c_str());
+  o.assume_check      = assume_check;
+  // pass.formal has already proved and removed every checked child/local
+  // obligation.  What remains is active by contract (explicit nocheck,
+  // selected-top IO, or all assumptions when checking is disabled), and must
+  // constrain both the flat and hierarchical cvc5 translations.
+  o.unchecked_assumes = design_assume_occurrences(ref_g.get()) + design_assume_occurrences(impl_g.get());
+  o.design_assumes    = o.unchecked_assumes > 0;
+  o.assumption_key    = std::format("design:{}:{}", o.unchecked_assumes, assume_check ? 1 : 0);
+  o.engine            = label("engine", "auto");
+  o.solver            = solver;  // cvc5 | bitwuzla
+  o.gold_x            = label("gold_x", "ignore");
+  o.bound             = std::atoi(label("bound", "6").c_str());
   o.timeout
       = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness     = label("witness", "true") != "false" && label("witness", "true") != "0";
@@ -4379,6 +4459,8 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     std::string id = p.kind + "@" + (p.loc.empty() ? std::string{"?"} : p.loc);
     if (!p.block.empty()) {
       id += "[" + p.block + "]";
+    } else if (!p.instance.empty()) {
+      id += "[" + p.instance + "]";
     }
     return id;
   };
@@ -4393,7 +4475,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     if (p.kind != "assume") {
       continue;
     }
-    if (p.aclass == "unchecked") {
+    if (livehd::lec::is_unchecked_assume_class(p.aclass)) {
       ++n_unch;
     } else if (p.verdict == livehd::lec::Verdict::Proven) {
       ++n_cp;
@@ -4446,8 +4528,8 @@ static void emit_formal_report(const std::string& path, const std::string& desig
   if (o.stats) {
     j += std::format("    \"cvc5\": {},\n", livehd::lec::cvc5_stats_json(r.cvc5));
   }
-  // Every assume except "unchecked" is a checked obligation (prove-then-use),
-  // so the ledger is by-verdict; the input/internal class split stays visible
+  // Every assume outside the unchecked classes is a checked obligation
+  // (prove-then-use), so the ledger is by-verdict; the exact class stays visible
   // per obligation in its "aclass" field.
   j += std::format(
       "    \"assume_counts\": {{\"unchecked\": {}, \"checked_proven\": {}, \"checked_unproven\": {}, "
@@ -4465,7 +4547,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
       file = p.loc.substr(0, colon);
       line = p.loc.substr(colon + 1);
     }
-    const bool  env_assume = p.kind == "assume" && p.aclass == "unchecked";
+    const bool  env_assume = p.kind == "assume" && livehd::lec::is_unchecked_assume_class(p.aclass);
     const char* verdict    = env_assume                                   ? "in_force"
                              : p.verdict == livehd::lec::Verdict::Proven  ? "proven"
                              : p.verdict == livehd::lec::Verdict::Refuted ? "refuted"
@@ -4489,7 +4571,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     // the verdict is honestly "proven".
     j += std::format(
         "    {{\"id\": \"{}\", \"kind\": \"{}\", \"file\": \"{}\", \"line\": {}, \"msg\": \"{}\", "
-        "\"block\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", \"unbounded\": {}, \"proven_to\": {}, "
+        "\"block\": \"{}\", \"instance\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", \"unbounded\": {}, \"proven_to\": {}, "
         "\"refuted_at\": {}, \"unknown_at\": {}, \"unknown_why\": {}, \"solve_ms\": {}, "
         "\"in_timeout_core\": {}, \"guarded\": {}, \"vacuous_guard\": {}, \"witness\": {}}}{}\n",
         json_esc(prop_id(p)),
@@ -4498,6 +4580,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         line.empty() ? "0" : line,
         json_esc(p.msg),
         json_esc(p.block),
+        json_esc(p.instance),
         json_esc(p.aclass),
         verdict,
         p.unbounded ? "true" : "false",
@@ -4754,31 +4837,6 @@ void formal_verify_command(Options& opts, Result& res) {
     return;  // status stays pass (a pure query — nothing was proved)
   }
 
-  // The in-compile pass.formal gate keeps its normal FAIL policy on the USER'S
-  // design (user ruling, 2026-07-08): a root-module refutation — including an
-  // input `assume`, which the gate treats as a refutable obligation — fails the
-  // load. The escape hatches are explicit: move the assume into a formal block
-  // (blocks bypass the gate; the BMC engine adjudicates them), or pass
-  // --set compile.formal.on_refute=warn deliberately.
-
-  Eprp_var var;
-  {
-    // R1 Phase 2 — the verify tier RE-DERIVES antecedent vacuity per obligation
-    // (free frame, richer report, governed by formal.strict), so letting the
-    // in-compile gate also report it emitted `formal-vacuous-guard` TWICE per
-    // run with different wording. Silence the gate for this load only; the
-    // plain `lhd compile` flow keeps it. Same save/restore idiom the monitor
-    // compile below uses for compile.formal.mode.
-    const size_t saved_sets = opts.sets.size();
-    opts.sets.emplace_back("compile.formal.warn_vacuous", "false");
-    load_side_graphs(opts, res, kind, path, "impl", var);
-    opts.sets.resize(saved_sets);
-  }
-
-  // Top pick: --impl-top / --top, else the sole module; entity fallback like
-  // lec (pick_top_graph warns when the fallback substitutes the full name).
-  auto g = pick_top_graph(var, opts.impl_top, opts.top, "", "formal verify", "pass.formal");
-
   // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
   Eprp_var::Eprp_dict labels;
   merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
@@ -4788,6 +4846,27 @@ void formal_verify_command(Options& opts, Result& res) {
     return it == labels.end() ? std::string{def} : it->second;
   };
 
+  Eprp_var var;
+  {
+    // formal verify is the authoritative top-rooted property proof. Keep the
+    // established compile formal pass preparation, but skip its new hierarchy
+    // assumption preflight: otherwise the same assumption is proved twice and
+    // a shallow compile budget could reject it before verify reaches the user's
+    // requested bound. The local pass still emits the required top-IO warning.
+    const size_t saved_sets = opts.sets.size();
+    opts.sets.emplace_back("compile.formal.warn_vacuous", "false");
+    opts.sets.emplace_back("compile.formal.hier_preflight", "false");
+    if (label("assume_check", "true") == "false" || label("assume_check", "true") == "0") {
+      opts.sets.emplace_back("compile.formal.assume_check", "false");
+    }
+    load_side_graphs(opts, res, kind, path, "impl", var);
+    opts.sets.resize(saved_sets);
+  }
+
+  // Top pick: --impl-top / --top, else the sole module; entity fallback like
+  // lec (pick_top_graph warns when the fallback substitutes the full name).
+  auto g = pick_top_graph(var, opts.impl_top, opts.top, "", "formal verify", "pass.formal");
+
   livehd::lec::Lec_options o;
   // F3: verify gets the shared portfolio — engine=auto races two whole-run
   // strategies (bmc-first at the full bound | ind-first at a shallow base case
@@ -4795,6 +4874,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // per-obligation firsts. bmc / ind still select a single strategy directly.
   o.engine = label("engine", "auto");
   o.solver = label("solver", "cvc5");
+  o.assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
   // Same escape hatch as lec: both drivers instantiate the same Encoder, so a
   // memory it refuses to model (per-port clock edges) has to be excludable here
   // too, or `lhd formal verify` on that design has no way forward.
@@ -5503,6 +5583,8 @@ void formal_verify_command(Options& opts, Result& res) {
     std::string msg   = p.msg.empty() ? std::string{} : " \"" + p.msg + "\"";
     if (!p.block.empty()) {
       msg += " [" + p.block + "]";  // block (+@instance) attribution
+    } else if (!p.instance.empty()) {
+      msg += " [" + p.instance + "]";
     }
     // R1 Phase 2 — an obligation whose GUARD can never hold proved trivially: it
     // is honestly true and honestly useless. Printed as a CONTINUATION of the
@@ -5517,8 +5599,11 @@ void formal_verify_command(Options& opts, Result& res) {
             "branch is dead (fix the guard condition, or drop the branch)\n");
       }
     };
-    if (p.kind == "assume" && p.aclass == "unchecked") {
-      std::print("  assume{}{}: in force (UNCHECKED assume_nocheck; verdicts are conditional and unchecked)\n", where, msg);
+    if (p.kind == "assume" && livehd::lec::is_unchecked_assume_class(p.aclass)) {
+      const char* why = p.aclass == "top_input"      ? "top-level IO assume cannot be checked; treated as assume_nocheck"
+                        : p.aclass == "check_disabled" ? "formal.assume_check=false; treated as assume_nocheck"
+                                                       : "assume_nocheck";
+      std::print("  assume{}{}: in force (UNCHECKED {}; verdicts are conditional and unchecked)\n", where, msg, why);
       vacuity_note();  // an env assume whose guard never holds constrains nothing
       continue;
     }

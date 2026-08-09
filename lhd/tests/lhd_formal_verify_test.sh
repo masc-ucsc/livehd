@@ -7,11 +7,10 @@
 #     the bound, per-assert, with a per-cycle depth in the table;
 #   * a reachable violation is REFUTED at its cycle with the per-cycle input
 #     trace, carries the user message, and fails the run (exit != 0);
-#   * assume discipline: EVERY `assume` is a proof obligation (prove-then-use)
-#     — checked as an assert first; a true claim PROVES and constrains, a false
-#     one REFUTES the run (an input-only constraint like assume(op==7) can
-#     never hold over free inputs, so it refutes with the assume_nocheck hint);
-#     `assume_nocheck` is the explicit free UNCHECKED environment constraint
+#   * assume discipline: child/local `assume` is a prove-then-use obligation; a
+#     selected-top IO assume has no parent that could discharge it, so it warns
+#     and stays active with assume_nocheck semantics. `assume_nocheck` is the
+#     explicit free UNCHECKED environment constraint
 #     (disclosed; the fcore spelling assume_nocheck_formal also warns);
 #     assume_nocheck_synth is invisible to verify;
 #   * per-obligation timeout isolation: a hard obligation goes UNKNOWN on its
@@ -100,6 +99,16 @@ grep -q 'assume at.*cnt_assume.prp:4.*REFUTED at cycle' "$OUT" || fail "the fals
 grep -q 'checked assume(s):.*REFUTED' "$OUT" || fail "the headline must disclose the refuted assume: $(cat "$OUT")"
 grep -q 'cnt_assume.prp:5.*REFUTED' "$OUT" || fail "the companion assert must refute honestly (no masking): $(cat "$OUT")"
 
+# The single canonical opt-out disables the check but does not drop the
+# constraint: the same assume becomes an active unchecked environment fact and
+# the companion assertion is proved conditionally under it.
+verify cnt_assume assume_check_off --top cnt --set formal.bound=10 --set formal.assume_check=false
+[ "$RC" -eq 0 ] || fail "formal.assume_check=false must keep the assume active without checking it (rc=$RC): $(cat "$OUT")"
+grep -q 'formal-unchecked-assume' "$OUT" || fail "assume_check=false must warn about the unchecked constraint: $(cat "$OUT")"
+grep -q 'formal.assume_check=false; treated as assume_nocheck' "$OUT" \
+  || fail "the unchecked row must identify formal.assume_check=false: $(cat "$OUT")"
+grep -q 'cnt_assume.prp:5.*PROVEN' "$OUT" || fail "the assume must still constrain the companion assert: $(cat "$OUT")"
+
 # 2a. A TRUE state invariant assume PROVES (here: inductively) and is disclosed
 #     as used; the run stays green.
 cat >"$W/wrap_assume.prp" <<'EOF'
@@ -123,10 +132,9 @@ grep -q 'assume at.*wrap_assume.prp:4.*PROVEN' "$OUT" || fail "the true state as
 grep -q 'checked assume(s): 1 proven (used)' "$OUT" || fail "the headline must disclose the proven assume: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
-# 2b. INPUT assumes are proof obligations too: over free primary inputs
-#     `assume(a < 4)` can never be proven, so the deep prover REFUTES it and
-#     the failure names the sanctioned spelling (assume_nocheck). The
-#     sanctioned form — a formal-block assume_nocheck — is a free env
+# 2b. A selected-top INPUT assume has no parent/call site that can prove it.
+#     It warns, remains active, and is reported with assume_nocheck semantics.
+#     The explicit sanctioned form — a formal-block assume_nocheck — is a free env
 #     constraint in force at EVERY cycle, reset prologue included (SVA
 #     semantics): the block's assert_always is checked during the prologue too,
 #     so without prologue coverage it would run unconstrained and false-refute
@@ -143,18 +151,14 @@ mod always_env(a:u8, en:bool) -> (o:u8@[0]) {
   }
 }
 EOF
-# The compile gate keeps its normal FAIL policy on the user's design (user
-# ruling): a root-module INPUT assume refutes at the gate and fails the load.
+# The compile gate warns and retains the top IO assumption; verify uses it to
+# prove the companion assert_always.
 verify always_env always_env_gate --top always_env --set formal.bound=4
-[ "$RC" -ne 0 ] || fail "a design-inline input assume must hard-fail the load gate (got rc=0): $(cat "$OUT")"
-grep -q 'assume-refuted' "$OUT" || fail "the load failure must be the gate's assume-refuted: $(cat "$OUT")"
-# The explicit escape hatch runs the deep prover — which CHECKS the assume as
-# an assert, refutes it (free inputs), and points at assume_nocheck.
-verify always_env always_env --top always_env --set formal.bound=4 --set compile.formal.on_refute=warn
-[ "$RC" -ne 0 ] || fail "an unprovable input assume must REFUTE in the deep prover too (got rc=0): $(cat "$OUT")"
-grep -q 'assume at.*always_env.prp:4.*REFUTED at cycle' "$OUT" || fail "the input assume must get a REFUTED row: $(cat "$OUT")"
-grep -q 'spell it assume_nocheck' "$OUT" || fail "the refuted input assume must hint at assume_nocheck: $(cat "$OUT")"
-grep -q 'has an assume that fails its check' "$OUT" || fail "the exit headline must say the ASSUME failed, not a design violation: $(cat "$OUT")"
+[ "$RC" -eq 0 ] || fail "a top-level IO assume must remain active and prove the constrained assert (got rc=$RC): $(cat "$OUT")"
+grep -q 'formal-top-assume' "$OUT" || fail "the compile gate must warn that a top IO assume cannot be checked: $(cat "$OUT")"
+grep -q 'in force (UNCHECKED top-level IO assume cannot be checked; treated as assume_nocheck' "$OUT" \
+  || fail "verify must disclose the top IO assumption as active and unchecked: $(cat "$OUT")"
+grep -q 'assert_always.*PROVEN' "$OUT" || fail "the top IO assume must constrain the companion assert: $(cat "$OUT")"
 # The sanctioned spelling: a formal-block assume_nocheck. In force at every
 # cycle, prologue included, so the block's assert_always proves.
 cat >"$W/always_env2.prp" <<'EOF'

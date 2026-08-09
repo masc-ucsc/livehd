@@ -206,6 +206,19 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
     return dp;
   };
 
+  // An ordinary Sub occurrence must expose every declared callee output, even
+  // when that particular occurrence has no parent-side reader. HHDS's
+  // hierarchy view reaches a callee output from the body first and then asks
+  // for the matching site driver; leaving an unused output pin uncreated makes
+  // that read-only traversal assert instead of correctly resolving to an empty
+  // consumer set. Activation makes this visible on the last occurrence's
+  // `__next_active`, but the invariant applies to every output.
+  for (const auto& rep : reps) {
+    for (const auto& decl : gio->get_output_pin_decls()) {
+      (void)make_driver(rep, decl.port_id);
+    }
+  }
+
   std::vector<uint32_t> invariant_pids;
   invariant_pids.reserve(boundary.in_driver.size());
   for (const auto& [pid, drv] : boundary.in_driver) {

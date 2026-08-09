@@ -44,9 +44,10 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "bound",       "cache", "engine",       "jobs",   "mine",    "min_timeout", "partitions",
-    "phase",          "report",      "reset", "reset_cycles", "retry",  "rlimit",  "solver",      "spec_mining_timeout",
-    "simfail",        "simfail_run", "split", "stats",        "strict", "timeout", "witness",
+    "allow_oversize", "assume_check",        "bound",   "cache",       "engine", "hier_preflight", "jobs",   "mine",
+    "min_timeout",    "partitions",          "phase",   "report",      "reset",  "reset_cycles",   "retry",  "rlimit",
+    "solver",         "spec_mining_timeout", "simfail", "simfail_run", "split",  "stats",          "strict", "timeout",
+    "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
@@ -95,7 +96,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {     "compile.cprop",        "pass.cprop",     Set_pass::List::all},
     {  "compile.bitwidth",     "pass.bitwidth",     Set_pass::List::all},
     {   "compile.bitfuzz",      "pass.bitfuzz",     Set_pass::List::all},
-    {    "compile.formal",       "pass.formal",     Set_pass::List::all},
+    {    "compile.formal",       "pass.formal", Set_pass::List::specific},
     {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
     {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},
     {     "compile.yosys",   "inou.yosys.tolg",     Set_pass::List::all},

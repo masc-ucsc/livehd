@@ -41,6 +41,11 @@ void Pass_lec::setup() {
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
                        "cvc5");
+  m.add_label_optional("assume_check",
+                       "true|false check every non-top assumption before use. Top-level IO assumes cannot be "
+                       "checked and are treated as disclosed assume_nocheck constraints. false keeps every "
+                       "assume active but treats it as assume_nocheck",
+                       "true");
   m.add_label_optional("gold_reader",
                        "lgyosys backend only: reader for the REFERENCE side — verilog (default; yosys "
                        "read_verilog -sv) | slang (load the yosys-slang plugin and read_slang; needed for "
@@ -271,9 +276,10 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine         = std::string{var.get("engine", "auto")};
-  o.solver         = std::string{var.get("solver", "cvc5")};
-  o.gold_x         = std::string{var.get("gold_x", "ignore")};
+  o.engine       = std::string{var.get("engine", "auto")};
+  o.solver       = std::string{var.get("solver", "cvc5")};
+  o.assume_check = parse_bool(var.get("assume_check", "true"));
+  o.gold_x       = std::string{var.get("gold_x", "ignore")};
   o.bound          = str_tools::to_i(var.get("bound", "6"));
   o.timeout        = str_tools::to_i(var.get("timeout", "120"));
   o.witness        = parse_bool(var.get("witness", "true"));

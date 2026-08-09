@@ -697,6 +697,7 @@ std::string serialize_verify(const Verify_result& v) {
     put_str(b, p.loc);
     put_str(b, p.msg);
     put_str(b, p.block);
+    put_str(b, p.instance);
     put_str(b, p.aclass);
     // `scope` was missing since per-block assume scoping landed: without it the
     // parent of a forked run saw scope=="" for every obligation, so a block's
@@ -822,7 +823,8 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   v.props.clear();
   for (uint32_t i = 0; i < np; ++i) {
     Prop_result p;
-    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.aclass)
+    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.instance)
+        || !get_str(b, p.aclass)
         || !get_str(b, p.scope)) {
       return false;
     }
@@ -1955,6 +1957,33 @@ bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Enc
       error = "formal helper '" + mon.block + "' contains no encodable assumption";
       return false;
     }
+  }
+  return true;
+}
+
+// Assert every design-authored assume emitted by Encoder::set_emit_props().
+// Checked assumptions have already been discharged by the top-rooted formal
+// preflight; the remaining properties are environment constraints (an explicit
+// assume_nocheck, a selected-top IO assume, or any assume when
+// formal.assume_check=false).  Keeping this parser here avoids coupling the LEC
+// engine to the later per-property verify result machinery.
+bool assert_design_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, const Encoded& encoded) {
+  constexpr std::string_view pfx{"\x04prop:", 6};
+  for (const auto& [name, cond] : encoded.outputs) {
+    if (name.substr(0, pfx.size()) != pfx) {
+      continue;
+    }
+    std::string_view rest{name.data() + pfx.size(), name.size() - pfx.size()};
+    const auto       first  = rest.find('\x1f');
+    const auto       second = first == std::string_view::npos ? std::string_view::npos : rest.find('\x1f', first + 1);
+    const auto kind = first == std::string_view::npos
+                          ? std::string_view{}
+                          : rest.substr(first + 1, second == std::string_view::npos ? std::string_view::npos : second - first - 1);
+    if (!is_assume_kind(kind)) {
+      continue;
+    }
+    const int w = cond.width > 0 ? cond.width : 1;
+    solver.assertFormula(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, cond, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)}));
   }
   return true;
 }
@@ -4136,10 +4165,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                             bv.is_signed};
       }
       enc.set_shared_bbox(&step_bbox);
-      enc.set_emit_props(false);                  // helper encoding below enables it temporarily
+      enc.set_emit_props(opts.design_assumes);    // helpers temporarily enable it too
       enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
       enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
-      enc.set_phase_plan(use_plan ? &ref_plan : nullptr, ms);
+      // At P == 1 the plan only canonicalizes this design's own gate chain.
+      // Do not install the other side's need as an empty plan here: an empty
+      // plan would take ownership of ordinary inline-gated flops and suppress
+      // their legacy clock folding, making them commit unconditionally.  A
+      // true multi-phase run still installs both plans because both designs
+      // must advance on the shared microstep time base.
+      const bool ref_use_plan = use_phase || ref_plan.needs_plan();
+      enc.set_phase_plan(ref_use_plan ? &ref_plan : nullptr, ms);
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
       if (!re.ok) {
@@ -4149,7 +4185,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return res;
       }
       enc.set_box_keys(&impl_box_keys);
-      enc.set_phase_plan(use_plan ? &impl_plan : nullptr, ms);
+      const bool impl_use_plan = use_phase || impl_plan.needs_plan();
+      enc.set_phase_plan(impl_use_plan ? &impl_plan : nullptr, ms);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict      = Verdict::Unknown;
@@ -4169,6 +4206,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (const auto& [l, r] : ie.equalities) {
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+      }
+      if (opts.design_assumes) {
+        assert_design_assumptions(tm, solver, re);
+        assert_design_assumptions(tm, solver, ie);
       }
       if (opts.assumptions != nullptr) {
         std::string helper_error;
@@ -4194,8 +4235,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       auto              obligation_only = [&](const std::string& nm) { return !observe && !(nm.rfind("\x02", 0) == 0); };
       if (checking) {
         for (const auto& [name, rv] : re.outputs) {
-          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
-            continue;  // next-state / env-gated debug tap, not a primary output
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03' || name[0] == '\x04')) {
+            continue;  // next-state / env-gated debug tap / property, not a primary output
           }
           if (obligation_only(name)) {
             continue;
@@ -4231,7 +4272,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
         for (const auto& [name, iv] : ie.outputs) {
-          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03' || name[0] == '\x04')) {
             continue;
           }
           if (obligation_only(name)) {
@@ -4380,13 +4421,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
       res.detail += bbin_models_hint(res.unmatched_impl);
     }
-    if (opts.assumptions != nullptr) {
+    if (opts.assumptions != nullptr || opts.design_assumes) {
       arm_solve_budget();
       cvc5::Result ar = solver.checkSat();
       if (!ar.isSat()) {
         res.verdict  = Verdict::Unknown;
-        res.detail  += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
-                                    : "; formal helper consistency check returned unknown";
+        res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                    : "; active assumption consistency check returned unknown";
         return res;
       }
     }
@@ -4993,6 +5034,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_state_boxes(state_boxes_ptr);
     penc.set_comb_boxes(comb_boxes_ptr);
     penc.set_shared_bbox(&shared_bbox);
+    penc.set_emit_props(opts.design_assumes);
 
     // Two independent input snapshots per period (microsteps 0-1 share the
     // first, 2-3 the second), shared between REF and IMPL so the miter never
@@ -5090,14 +5132,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         for (const auto& [l, r] : e.equalities) {
           solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
         }
+        if (opts.design_assumes) {
+          assert_design_assumptions(tm, solver, e);
+        }
         Io_name_map<Val> nxt;
         for (const auto& [nm, v] : e.outputs) {
           if (nm.rfind("\x01nxt:", 0) == 0) {
             nxt[nm.substr(5)] = v;
             continue;
           }
-          if (!nm.empty() && nm[0] == '\x03') {
-            continue;  // env-gated debug tap
+          if (!nm.empty() && (nm[0] == '\x03' || nm[0] == '\x04')) {
+            continue;  // env-gated debug tap / property
           }
           if (si == 0 || si == pobs_b) {
             out.obs[std::to_string(si) + "\x1f" + nm] = v;
@@ -5226,6 +5271,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail  += "; incomplete correspondence";
       return res;
     }
+    if (opts.design_assumes) {
+      const auto ar = solver.checkSat();
+      if (!ar.isSat()) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                    : "; active assumption consistency check returned unknown";
+        return res;
+      }
+    }
     // LEC_PHASE_LOG=1: report which compare point survives, one query each. The
     // composed period has no cone pass behind it, so without this a SAT verdict
     // names nothing.
@@ -5261,9 +5315,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
+  enc.set_emit_props(opts.design_assumes);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
-  enc.set_phase_plan(ind_use_plan ? &ind_ref_plan : nullptr, -1);
+  enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
@@ -5273,7 +5328,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return res;
   }
   enc.set_box_keys(&impl_box_keys);
-  enc.set_phase_plan(ind_use_plan ? &ind_impl_plan : nullptr, -1);
+  enc.set_phase_plan(ind_impl_plan.needs_plan() ? &ind_impl_plan : nullptr, -1);
   Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
     res.verdict      = Verdict::Unknown;
@@ -5287,6 +5342,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
   for (const auto& [l, r] : ie.equalities) {
     solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+  }
+  if (opts.design_assumes) {
+    assert_design_assumptions(tm, solver, re);
+    assert_design_assumptions(tm, solver, ie);
   }
   if (opts.assumptions != nullptr) {
     std::string helper_error;
@@ -5349,8 +5408,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     ind_diffs.push_back({"bridge", t});
   }
   for (const auto& [name, rv] : re.outputs) {
-    if (!name.empty() && name[0] == '\x03') {
-      continue;  // env-gated debug tap, never a compare point
+    if (!name.empty() && (name[0] == '\x03' || name[0] == '\x04')) {
+      continue;  // env-gated debug tap / property, never a compare point
     }
     if (bridged_ref_out.count(name)) {
       continue;  // bank-flop next state -> compared via the memory bridge above
@@ -5385,7 +5444,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     ind_diffs.push_back({display_name(name), diff});
   }
   for (const auto& [name, iv] : ie.outputs) {
-    if (!name.empty() && name[0] == '\x03') {
+    if (!name.empty() && (name[0] == '\x03' || name[0] == '\x04')) {
       continue;  // env-gated debug tap, never a compare point
     }
     if (bridged_impl_out.count(name)) {
@@ -6060,13 +6119,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.detail += bbin_models_hint(res.unmatched_impl);
   }
 
-  if (opts.assumptions != nullptr) {
+  if (opts.assumptions != nullptr || opts.design_assumes) {
     arm_solve_budget();
     cvc5::Result ar = solver.checkSat();
     if (!ar.isSat()) {
       res.verdict  = Verdict::Unknown;
-      res.detail  += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
-                                  : "; formal helper consistency check returned unknown";
+      res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                  : "; active assumption consistency check returned unknown";
       return res;
     }
   }
@@ -6977,7 +7036,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     for (const auto& pr : m.props) {
       if (pr.kind == "assume") {
         ++m.n_assumes;
-        if (pr.aclass != "unchecked" && pr.verdict == Verdict::Refuted) {
+        if (!is_unchecked_assume_class(pr.aclass) && pr.verdict == Verdict::Refuted) {
           any_refuted = true;  // a refuted checked assume is a hard error (P1)
         }
         continue;
@@ -7034,7 +7093,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (b.verdict == Verdict::Refuted && a.verdict != Verdict::Refuted) {
           a = b;  // a during-reset violation dominates
         } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven
-                   && (a.kind != "assume" || a.aclass != "unchecked")) {
+                   && (a.kind != "assume" || !is_unchecked_assume_class(a.aclass))) {
           a.verdict    = Verdict::Unknown;
           a.unknown_at = b.unknown_at;
         }
@@ -7490,15 +7549,15 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // assume-kind obligation STRUCTURALLY before any cycle is asserted: a cond
   // whose transitive support (expanded through the probe's defining equalities)
   // reaches a state or memory symbol is INTERNAL; a cond over primary inputs
-  // only (free blackbox outputs count as inputs) is INPUT. BOTH are proof
-  // obligations under the prove-then-use discipline — every `assume` is checked
-  // as an assert before it may constrain anything, because asserting an
-  // unproven claim prunes reachable behaviors and can fake a PROVEN (an
-  // input-cone constraint like `assume(op == 7)` can never hold over free
-  // inputs, so it REFUTES — the honest verdict; `assume_nocheck` is the
-  // explicit spelling for a free environment constraint). The class label is
-  // kept for diagnostics only: a refuted INPUT assume earns the "spell it
-  // assume_nocheck" hint, an INTERNAL one is a real design claim gone wrong.
+  // only (free blackbox outputs count as inputs) is INPUT. Child input and
+  // local/state assumptions are proof obligations under the prove-then-use
+  // discipline: asserting an unproven claim could fake a PROVEN. A selected-top
+  // input assumption has no parent capable of discharging it, so it becomes a
+  // disclosed top_input environment constraint. `assume_nocheck` and
+  // formal.assume_check=false likewise keep constraints active without checks.
+  // The class label drives both solver policy and diagnostics: a refuted child
+  // INPUT assume earns the "spell it assume_nocheck" hint, while an INTERNAL one
+  // is a real design claim gone wrong.
   // Only a monitor statement listed in Monitor::nocheck_lines is exempt —
   // UNCHECKED by explicit user fiat.
   // Nothing from the probe is asserted into the solver; the extra encode is
@@ -7517,7 +7576,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (sio == nullptr || sio->get_name() != graph_util::fproperty_module_name) {
           continue;
         }
-        if (std::string_view nm = graph_util::node_name_of(node); nm.rfind("assume\x1f", 0) == 0) {
+        if (std::string_view nm = graph_util::node_name_of(node);
+            nm.rfind("assume\x1f", 0) == 0 || nm.rfind("assume_nocheck\x1f", 0) == 0) {
           return true;
         }
       }
@@ -7540,6 +7600,11 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       for (const auto& [key, a] : mem) {
         pmem[key] = tm.mkConst(a.getSort(), "pm_" + key);
       }
+      absl::flat_hash_set<uint64_t> input_targets;  // selected-top primary input symbol ids
+      for (const auto& [key, v] : psh) {
+        (void)key;
+        input_targets.insert(v.term.getId());
+      }
       absl::flat_hash_set<uint64_t> targets;  // the state/memory symbol ids
       for (const auto& [key, v] : pstate) {
         targets.insert(v.term.getId());
@@ -7559,7 +7624,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           defs.emplace(l.getId(), r);
         }
       };
-      auto cond_internal = [&](const cvc5::Term& root) {
+      auto cond_reaches = [&](const cvc5::Term& root, const absl::flat_hash_set<uint64_t>& sought) {
         absl::flat_hash_set<uint64_t> seen;
         std::vector<cvc5::Term>       stk{root};
         while (!stk.empty()) {
@@ -7568,7 +7633,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (!seen.insert(t.getId()).second) {
             continue;
           }
-          if (targets.contains(t.getId())) {
+          if (sought.contains(t.getId())) {
             return true;
           }
           if (auto it = defs.find(t.getId()); it != defs.end()) {
@@ -7583,18 +7648,33 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       auto classify = [&](const Encoded& eo, int occ_base, const Monitor* mon) {
         for (const auto& [name, v] : eo.outputs) {
           auto k = parse_prop_key(name);
-          if (!k || k->kind != "assume") {
+          if (!k || !is_assume_kind(k->kind)) {
             continue;
           }
           std::string cls;
-          if (mon != nullptr && !mon->nocheck_lines.empty()) {
+          if (!opts.assume_check) {
+            cls = "check_disabled";
+          } else if (k->kind == "assume_nocheck") {
+            cls = "unchecked";
+          } else if (mon != nullptr && !mon->nocheck_lines.empty()) {
             if (auto colon = k->loc.rfind(':');
                 colon != std::string::npos && mon->nocheck_lines.contains(std::atoi(k->loc.c_str() + colon + 1))) {
               cls = "unchecked";
             }
           }
           if (cls.empty()) {
-            cls = cond_internal(v.term) ? "internal" : "input";
+            if (cond_reaches(v.term, targets)) {
+              cls = "internal";
+            } else if (mon == nullptr && eo.prop_top.contains(k->occ) && cond_reaches(v.term, input_targets)) {
+              // The selected top has no parent capable of discharging an IO
+              // precondition. Keep it active, warn at the CLI, and disclose it
+              // exactly like assume_nocheck. A CHILD input assume stays
+              // checked: its actual binding in this top-rooted encode may prove
+              // or refute it.
+              cls = "top_input";
+            } else {
+              cls = "input";
+            }
           }
           occ_aclass[occ_base + k->occ] = cls;
         }
@@ -7809,7 +7889,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           ix = res.props.size();
           prop_ix.emplace(occ_key, ix);
           Prop_result pr;
-          pr.kind = ob.k.kind;
+          pr.kind = is_assume_kind(ob.k.kind) ? "assume" : ob.k.kind;
           pr.loc  = ob.k.loc;
           pr.msg  = ob.k.msg;
           if (pr.kind == "assume" && !opts.ignore_assumes) {
@@ -7818,6 +7898,11 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             // obligation, never a silent free constraint.
             auto ac   = occ_aclass.find(occ_key);
             pr.aclass = ac != occ_aclass.end() ? ac->second : std::string{"internal"};
+          }
+          if (mon == nullptr) {
+            if (auto pit = eo.prop_instance.find(ob.k.occ); pit != eo.prop_instance.end()) {
+              pr.instance = pit->second;
+            }
           }
           if (mon != nullptr) {
             pr.block = mon->block;
@@ -7857,7 +7942,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (opts.ignore_assumes) {
             continue;
           }
-          if (pr.aclass == "unchecked") {
+          if (is_unchecked_assume_class(pr.aclass)) {
             // assume_nocheck: a free environment constraint by explicit user
             // fiat, in force at EVERY cycle, reset prologue included (SVA
             // semantics — otherwise an assert_always checked during the
@@ -8402,7 +8487,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // Clean bounded-proven asserts AND clean checked assumes (input or
       // internal class) are candidates: a checked assume earns step-frame use
       // only by surviving the same Houdini fixpoint (rule E) — never by fiat.
-      if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
+      if ((pr.kind != "assume" || !is_unchecked_assume_class(pr.aclass)) && pr.refuted_at < 0 && pr.unknown_at < 0
+          && pr.proven_to >= 0) {
         cand.push_back(i);
       }
     }
@@ -8536,7 +8622,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         // compile tier does not use design assumes as hypotheses — see the
         // process_props note above).
         for (const auto& [occ_key, ix] : prop_ix) {
-          if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass != "unchecked") {
+          if (opts.ignore_assumes || res.props[ix].kind != "assume" || !is_unchecked_assume_class(res.props[ix].aclass)) {
             continue;
           }
           // Scoped exactly as in the BMC frame: a block's env assume constrains
@@ -8658,7 +8744,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   for (auto& pr : res.props) {
     if (pr.kind == "assume") {
       ++res.n_assumes;
-      if (pr.aclass == "unchecked") {
+      if (is_unchecked_assume_class(pr.aclass)) {
         continue;
       }
     }
@@ -8686,7 +8772,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   absl::flat_hash_map<std::string, int> env_assumes_by_scope;
   if (!opts.ignore_assumes) {
     for (const auto& pr : res.props) {
-      if (pr.kind == "assume" && pr.aclass == "unchecked") {
+      if (pr.kind == "assume" && is_unchecked_assume_class(pr.aclass)) {
         ++env_assumes_by_scope[pr.scope];
       }
     }
@@ -8740,7 +8826,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!design_tier_vacuous && pr.scope != scope) {
           continue;
         }
-        if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.verdict == Verdict::Proven) {
+        if ((pr.kind != "assume" || !is_unchecked_assume_class(pr.aclass)) && pr.verdict == Verdict::Proven) {
           pr.verdict   = Verdict::Unknown;
           pr.unbounded = false;
         }
@@ -8889,7 +8975,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       if (pr.kind != "assume") {
         continue;
       }
-      if (pr.aclass == "unchecked") {
+      if (is_unchecked_assume_class(pr.aclass)) {
         ++n_unch;
       } else if (pr.verdict == Verdict::Proven) {
         ++n_cp;
@@ -9024,7 +9110,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   if (solve_budget_on) {
     int n_units = 0;
     for (const auto& pr : res.props) {
-      n_units += (pr.kind == "assume" && pr.aclass == "unchecked") ? 0 : 1;
+      n_units += (pr.kind == "assume" && is_unchecked_assume_class(pr.aclass)) ? 0 : 1;
     }
     res.budget_target_s = opts.timeout;
     res.budget_spent_ms = solve_spent_ms;

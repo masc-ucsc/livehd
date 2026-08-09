@@ -1203,7 +1203,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // expression, not a `cg_N` temp), 2-arm muxes as a lazy C++ ternary, guarded
 // next-state and lazy write staging on gated state, and the Get_mask raw
 // width-adjust pass-through.
-static constexpr std::string_view kSimGenVersion = "simgen-11";
+static constexpr std::string_view kSimGenVersion = "simgen-12";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -2840,7 +2840,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         open_group = group;
       }
       if (group.empty()) {
-        hout->append("    Slop<", std::to_string(io.bits), "> ", io.field, "{};\n");
+        if (want_input && io.raw == "__valid") {
+          // Hidden activation is true for standalone use. Parent instances
+          // overwrite it from the transported call guard before evaluation.
+          hout->append("    Slop<1> ", io.field, " = Slop<1>::create_integer(1);\n");
+        } else {
+          hout->append("    Slop<", std::to_string(io.bits), "> ", io.field, "{};\n");
+        }
         if (want_input && clock_in_fields.contains(io.field)) {
           hout->append("    bool ", io.field, "__tick = true;  // did this clock port tick? false == the parent gated it off\n");
         }
@@ -4078,6 +4084,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     };
 
     absl::flat_hash_set<hhds::Class_index> emitted_subs;
+    // A child's clock input still carries the ROOT clock as a data member; a
+    // recognized Clock_cell's enables travel separately through `<port>__tick`
+    // below.  Asking operand() for the cell output is both unnecessary and
+    // forbidden (a Clock_cell has timing semantics, not a data value).
+    auto child_clock_data_driver = [&](const Sub& s, uint32_t port_id, const hhds::Pin_class& drv) {
+      auto cdef = s.node.get_subnode_graph();
+      if (!cdef || !clock_guard_ports(cdef).contains(port_id)) {
+        return drv;
+      }
+      auto cone = livehd::latch_contract::clock_op_of(drv, design_clocks);
+      if (cone && !cone->clock.is_invalid() && !cone->clock_inverted && cone->div == 1) {
+        return cone->clock;
+      }
+      return drv;  // unsupported timing shapes keep the existing loud refusal
+    };
     // A GATED CLOCK CROSSING INTO THE CHILD. If this port carries the child's
     // clock and we are driving it with a recognized gate, the child cannot see
     // that: inside it the port is an ordinary graph input, so it would commit
@@ -4092,7 +4113,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // negedge-only callee committed on gated-off periods (found by the
     // adversarial review of the ports-as-members redesign; the fresh-In flow
     // had the same hole, defaulting the guard true on every call).
-    auto                                   emit_child_tick
+    auto emit_child_tick
         = [&](auto&& ensure_fn, const Sub& s, std::string_view port_name, uint32_t port_id, const hhds::Pin_class& drv) -> void {
       const bool child_wants_tick = [&] {
         auto cdef = s.node.get_subnode_graph();
@@ -4169,17 +4190,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // Ports are members: write straight into the child's __in — no local In,
         // no by-value copy at the call.
         for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv = get_driver(find_sink_pin(node, d.name));
-          int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          auto drv       = get_driver(find_sink_pin(node, d.name));
+          int  wb        = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          auto value_drv = child_clock_data_driver(s, static_cast<uint32_t>(d.port_id), drv);
           // Emit any pending operand cone on demand (conservative: stops at
           // state elements / consts; another atomic Sub recurses through this
           // same helper). A genuinely cyclic cone stays unbound and falls
           // through to the loud Stage-0 diagnostic below.
-          ensure_fn(drv);
+          ensure_fn(value_drv);
           // Stage 0: a valid, non-const driver feeding this instance input that is
           // not yet bound is a combinational cycle threading THROUGH this atomic Sub
           // call (the false-loop-through-instance case). Report it precisely.
-          if (!drv.is_invalid() && !is_const_pin(drv) && !pin2var.contains(drv.get_class_index()) && !cycle_reported_) {
+          if (!value_drv.is_invalid() && !is_const_pin(value_drv) && !pin2var.contains(value_drv.get_class_index())
+              && !cycle_reported_) {
             livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
                 .msg(
                     "combinational loop through instance `{}` ({}::{}): input `{}` is fed by logic that depends on "
@@ -4203,7 +4226,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     ".__in.",
                                     cpp_port_path(d.name),
                                     ", ",
-                                    operand(drv, wb),
+                                    operand(value_drv, wb),
                                     ");\n"));
           emit_child_tick(ensure_fn, s, d.name, static_cast<uint32_t>(d.port_id), drv);
         }
@@ -5050,6 +5073,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         emit_sub_call(ensure_ready, node);
         continue;
       }
+      if (op == Ntype_op::Clock_cell) {
+        // Timing-only. Local state folds this cell into its commit guard, and a
+        // child clock port receives the root clock plus `<port>__tick` above.
+        // Emitting the cell as ordinary combinational data would either fatal
+        // in node_expr() or, worse, discard its enable.
+        continue;
+      }
       if (Ntype::has_multiple_driver_pins(op)) {
         continue;
       }
@@ -5130,6 +5160,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         // cpp_port_path for the same reason as the __pre read above: In mirrors a
         // tuple port as a nested struct, so the leaf is `io_data.instruction`.
+        auto value_drv = child_clock_data_driver(s, pid, e.driver);
+        ensure_ready(value_drv);
         fout->append(absl::StrCat("    ",
                                   s.inst,
                                   ".__gen += slop_update(",
@@ -5137,7 +5169,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                   ".__in.",
                                   cpp_port_path(it->second.first),
                                   ", ",
-                                  operand(e.driver, it->second.second),
+                                  operand(value_drv, it->second.second),
                                   ");\n"));
         emit_child_tick(ensure_ready, s, it->second.first, pid, e.driver);
       }
@@ -5848,9 +5880,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // Ports are members: rebuild the child's __in from the just-committed
         // parent state, then advance it (no local In, no by-value copy).
         for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv = get_driver(find_sink_pin(s.node, d.name));
-          int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
-          ensure_ready(drv);
+          auto drv       = get_driver(find_sink_pin(s.node, d.name));
+          int  wb        = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          auto value_drv = child_clock_data_driver(s, static_cast<uint32_t>(d.port_id), drv);
+          ensure_ready(value_drv);
           fout->append(absl::StrCat("    ",
                                     s.inst,
                                     ".__gen += slop_update(",
@@ -5858,7 +5891,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     ".__in.",
                                     cpp_port_path(d.name),
                                     ", ",
-                                    operand(drv, wb),
+                                    operand(value_drv, wb),
                                     ");\n"));
           emit_child_tick(ensure_ready, s, d.name, static_cast<uint32_t>(d.port_id), drv);
         }
@@ -6377,6 +6410,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                       io.bits,
                       ",\"signed\":",
                       uns ? "false" : "true",
+                      io.is_input && io.raw == "__valid" ? ",\"role\":\"activation\",\"default\":true" : "",
                       "}");
       first = false;
     }

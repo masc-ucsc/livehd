@@ -50,6 +50,12 @@ echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
+echo "$out" | grep -q '"name":"formal.assume_check","method":"pass.lec","default":"true"' \
+  || fail "formal.assume_check canonical default-true option missing: $out"
+echo "$out" | grep -q '"name":"formal.lec.assume_check"' \
+  && fail "assume_check must be shared as formal.assume_check, not formal.lec.assume_check: $out"
+echo "$out" | grep -q '"name":"compile.formal.assume_check"' \
+  && fail "the internal compile mirror must not be listed as a second canonical option: $out"
 echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
 echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"

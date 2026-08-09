@@ -68,17 +68,25 @@ grep -q 'assert (' "$VOUT" || fail "the failing assert must be KEPT as a runtime
 grep -q 'a and b must differ' "$VOUT" || fail "runtime assert must keep its \$error message: $(cat "$VOUT")"
 
 # ---------------------------------------------------------------------------
-# 2. A refuted `assume`: same FAIL policy. A refuted assume must NOT be turned
-#    into a synthesis hypothesis; it is kept as a runtime contract check.
+# 2. A child `assume` refuted at its real call-site binding: same FAIL policy.
+#    A selected-top IO assume is an unchecked environment constraint, so the
+#    checked negative case belongs at a hierarchy boundary where the parent can
+#    actually discharge (or refute) it.
 # ---------------------------------------------------------------------------
-cat >"$W/assume_fail.prp" <<'EOF'
-comb chk(a:u8, b:u8) -> (x:u8) {
+cat >"$W/assume_fail_sub.prp" <<'EOF'
+pub comb chk(a:u8, b:u8) -> (x:u8) {
   assume(a != b)
   x = a + b
 }
 EOF
+cat >"$W/assume_fail.prp" <<'EOF'
+const assume_fail_sub = import("assume_fail_sub")
+comb assume_fail(a:u8) -> (x:u8) {
+  x = assume_fail_sub.chk(a=0, b=0).x
+}
+EOF
 compile_o2 assume_fail
-[ "$RC" -ne 0 ] || fail "refuted assume must fail the build (got rc=0)"
+[ "$RC" -ne 0 ] || fail "a parent binding that refutes its child assume must fail the build (got rc=0)"
 grep -q '"code":"assume-refuted"' "$DIAG" || fail "missing assume-refuted diagnostic: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "compile must CONTINUE and still emit the netlist on a refuted assume"
 grep -q 'assume (' "$VOUT" || fail "the failing assume must be KEPT as a runtime check in the netlist: $(cat "$VOUT")"
@@ -264,10 +272,9 @@ compile_case dead_guard dead_guard_off --set compile.formal.warn_vacuous=false
 grep -q 'formal-vacuous-guard' "$DIAG" \
   && fail "compile.formal.warn_vacuous=false must silence it: $(cat "$DIAG")"
 
-# 11b. A property inside an INSTANTIATED callee never sees the caller's guard
-#      (the path condition is body-local), so the obligation is checked
-#      unconditionally — a stricter claim than the source makes, and one that
-#      flips with compile.upass.inline. That must be LOUD, not silent.
+# 11b. A property inside an INSTANTIATED callee sees the caller's guard through
+#      the hidden activation ABI. The property must be implication-guarded in
+#      the callee, matching the inlined form, with no former limitation warning.
 cat >"$W/gunit.prp" <<'EOF'
 pub mod gunit(a:u8) -> (o:u8@[0]) {
   o = a
@@ -285,10 +292,14 @@ pub mod gcaller(valid:bool, a:u8) -> (r:u8@[0]) {
 }
 EOF
 compile_case gcaller gcaller
-grep -q '"code":"guarded-instance-property"' "$DIAG" \
-  || fail "instantiating a property-carrying callee under a guard must warn that the guard does not cross: $(cat "$DIAG")"
-# Control: no guard, no warning — otherwise the check is just noise on every
-# instance of every module that happens to contain an assert.
+grep -q 'guarded-instance-property' "$DIAG" \
+  && fail "the guarded-instance-property limitation should be gone: $(cat "$DIAG")"
+grep -q '__valid' "$VOUT" || fail "conditional callee lacks its activation ABI: $(cat "$VOUT")"
+grep -q 'assert (' "$VOUT" || fail "callee property disappeared: $(cat "$VOUT")"
+grep -q '= (__valid ==' "$VOUT" \
+  || fail "callee property is not implication-guarded by activation: $(cat "$VOUT")"
+# Control: an unguarded call still compiles cleanly and binds activation true
+# when this same definition is activation-capable elsewhere in the registry.
 cat >"$W/gplain.prp" <<'EOF'
 const gunit = import("gunit.gunit")
 pub mod gplain(a:u8) -> (r:u8@[0]) {
