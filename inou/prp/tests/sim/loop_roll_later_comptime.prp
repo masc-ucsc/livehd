@@ -1,0 +1,28 @@
+/*
+:name: loop_roll_later_comptime
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: *=0
+*/
+// The first loop computes a comptime trip count for the second. Rolling it
+// would turn `n` into a hardware result and make the later range non-comptime,
+// so the roller must preserve source unrolling for this all-comptime class.
+
+mod loop_roll_later_comptime() -> (z:u8@[0]) {
+  mut n:u8 = 1
+  for i in 0..<4 {
+    n = n + 1
+  }
+
+  mut total:u8 = 0
+  for j in 0..<n {
+    total = total + 1
+  }
+  z = total
+}
+
+test loop_roll_later_comptime.preserved_fact {
+  mut dut = loop_roll_later_comptime
+  step
+  assert(dut.z == 5, "the second loop sees the first loop's comptime result")
+}

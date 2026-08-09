@@ -553,6 +553,9 @@ inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
 // Per-node formal-verification status (pass/formal, task 2f-formal). 0 == absent;
 // pass.formal sets a small non-zero enum (see Formal_status in pass/formal).
 inline void                   set_proven(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::proven).set(v); }
+// Every consumer tests PRESENCE (has_proven / `if (auto a = ...; a.has())`), so
+// retracting a proof must DELETE the attribute; set(0) would still read as proven.
+inline void                   clear_proven(const hhds::Node_class& node) { node.attr(livehd::attrs::proven).del(); }
 [[nodiscard]] inline bool     has_proven(const hhds::Node_class& node) { return node.attr(livehd::attrs::proven).has(); }
 [[nodiscard]] inline uint32_t proven_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::proven);

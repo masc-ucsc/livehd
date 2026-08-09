@@ -19,6 +19,7 @@
 #include "hlop/dlop.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
+#include "query.hpp"  // is_assume_kind -- one spelling table shared with the asserter
 
 namespace livehd::lec {
 
@@ -2694,6 +2695,24 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto        nm  = gu::node_name_of(node);
       std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
       out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
+      // Which assumes are ACTIVE hypotheses (see Encoded::prop_active_assume).
+      // Record the decision by occ so the design-assumption asserter never has to
+      // re-derive it from the name alone.
+      //   * `assume_nocheck` is an environment contract BY SPELLING: the user
+      //     declared it never to be checked, so it holds whether or not
+      //     pass.formal ran. Gating it on `proven` silently dropped every assume
+      //     on a side built at O0 (or a `lg:` library loaded straight into lec),
+      //     turning a contract-excluded input into a REFUTED counterexample.
+      //   * a CHECKED `assume` still needs the `proven` stamp — undischarged, it
+      //     would restrict the compared space without justification.
+      // Note the spelling rule deliberately survives pass.formal RETRACTING a
+      // jointly-contradictory set (which clears `proven` so the runtime checks
+      // come back): lec must still assert the pair, see the UNSAT hypothesis set
+      // and report CONTRADICTORY rather than hand out an ordinary verdict.
+      const std::string_view raw_kind{std::string_view{raw}.substr(0, raw.find('\x1f'))};
+      if (is_assume_kind(raw_kind) && (raw_kind == "assume_nocheck" || gu::has_proven(node.base_node()))) {
+        out.prop_active_assume.insert(occ);
+      }
       // A Sub occurrence's path includes the site itself.  Consequently a
       // property authored in the selected root has exactly one step (the
       // fproperty site), while a property in a child has the parent call-site

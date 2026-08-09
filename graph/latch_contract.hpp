@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
@@ -96,9 +97,22 @@ public:
   [[nodiscard]] static bool name_looks_like_clock(std::string_view name);
 
 private:
-  absl::flat_hash_set<hhds::Class_index> roots_;
-  absl::flat_hash_set<std::string>       input_names_;
-  bool                                   implicit_clock_ = false;
+  // A clock root, keyed by (owning body gid, class index). hhds::Class_index is
+  // unique only INSIDE one graph body, and the hier ctor fills this registry
+  // from EVERY body in the instance tree: with a bare Class_index key, an
+  // ordinary data net in a child whose pin index happens to equal a clock root
+  // recorded in another module answers `is_clock` — which picks the ENABLE of an
+  // `clk & en` ICG as the clock operand and schedules the wrong edges.
+  using Root_key = std::pair<hhds::Gid, uint64_t>;
+  template <typename Pin>
+  [[nodiscard]] static Root_key root_key(const Pin& p) {
+    auto* g = p.get_graph();
+    return {g == nullptr ? hhds::Gid_invalid : g->get_gid(), static_cast<uint64_t>(p.get_class_index().value)};
+  }
+
+  absl::flat_hash_set<Root_key>    roots_;
+  absl::flat_hash_set<std::string> input_names_;
+  bool                             implicit_clock_ = false;
 };
 
 // Root of a CONTROL cone (a `clock_pin` driver, or a latch's `enable`) plus the

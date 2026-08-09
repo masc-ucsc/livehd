@@ -1,0 +1,32 @@
+/*
+:name: loop_roll_inferred_bool
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: u_loop_0=1 *=1
+*/
+// `seen` is intentionally untyped. Its inferred boolean kind must survive as a
+// native bool on both sides of the lifted carry boundary.
+
+mod loop_roll_inferred_bool(sel:u3) -> (z:bool@[0]) {
+  mut seen = false
+  for i in 0..<6 {
+    seen = seen or (i == sel)
+  }
+  z = seen
+}
+
+test loop_roll_inferred_bool.bool_carry {
+  mut dut = loop_roll_inferred_bool
+
+  tick 3 {
+    if clock == 0 {
+      dut.sel = 0
+    } elif clock == 1 {
+      dut.sel = 5
+    } else {
+      dut.sel = 7
+    }
+    step
+    assert(dut.z == (clock != 2), "only selectors in the six-ordinal domain are seen")
+  }
+}

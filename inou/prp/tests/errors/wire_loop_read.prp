@@ -1,0 +1,15 @@
+/*
+:name: wire_loop_read
+:type: error
+:error: for-loop body may not read or write wire 'back'
+:help: move the combinational connection outside the loop
+*/
+mod wire_loop_read(a:u8) -> (z:u10@[0]) {
+  wire back:u8 = nil
+  mut acc:u10 = 0
+  for i in 0..<4 {
+    acc = acc + back  // locate_error_here
+  }
+  back = a
+  z = acc
+}

@@ -1048,7 +1048,7 @@ bool prp_wire_partial_store(const Lnast& ln, const Lnast_nid& nid, const Lnast_n
   if (c1.is_invalid() || !ln.get_sibling_next(c1).is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c1))) {
     return false;  // not a plain 2-child `w = <ref>` store
   }
-  auto d0 = ln.get_first_child(prev);              // set_mask dst (the %t temp)
+  auto d0 = ln.get_first_child(prev);                        // set_mask dst (the %t temp)
   auto d1 = d0.is_invalid() ? d0 : ln.get_sibling_next(d0);  // set_mask base
   if (d0.is_invalid() || d1.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(d1))) {
     return false;
@@ -1268,8 +1268,7 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
 // wires that have at least one WHOLE-value driver (so a >1 count on a wire
 // absent from `full` is a bit-field assembly, not a multiple-driver error).
 void gather_count_cover_wires(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
-                              absl::flat_hash_set<std::string>& cover, absl::flat_hash_set<std::string>& full,
-                              Wire_lanes& lanes) {
+                              absl::flat_hash_set<std::string>& cover, absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
   Lnast_nid prev;
   for (auto c = ln.get_first_child(stmts); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
     const auto t = ln.get_type(c);
@@ -1344,7 +1343,147 @@ void gather_count_cover_wires(const Lnast& ln, const Lnast_nid& stmts, absl::fla
 }
 }  // namespace
 
-void Prp2lnast::check_wire_drivers() const { check_wire_scope(lnast->get_root()); }
+void Prp2lnast::check_wire_drivers() const {
+  check_wire_scope(lnast->get_root());
+
+  // Compact-loop contract 20 is a SOURCE legality rule, independent of the
+  // roll knob: a loop body may not observe or drive a `wire`. A wire is a
+  // module-wide single-driver net, so allowing a rolled body's output to feed
+  // parent combinational logic that in turn feeds the next ordinal would
+  // require parent/body interleaving that one eager simulator loop cannot
+  // represent. Enforce the same rule on the unrolled path so changing the
+  // trip-count policy never changes program legality.
+  const auto                            root = lnast->get_root();
+  std::function<void(const Lnast_nid&)> check_unit;
+  check_unit = [&](const Lnast_nid& unit) {
+    const auto add_if_wire_decl = [&](const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+      if (!Lnast_ntype::is_declare(lnast->get_type(nid))) {
+        return;
+      }
+      auto name_n = lnast->get_first_child(nid);
+      auto type_n = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
+      auto mode_n = type_n.is_invalid() ? type_n : lnast->get_sibling_next(type_n);
+      if (!name_n.is_invalid() && !mode_n.is_invalid() && Lnast_ntype::is_const(lnast->get_type(mode_n))) {
+        const auto mode = lnast->get_name(mode_n);
+        if (mode == "wire" || mode.starts_with("wire ")) {
+          out.emplace(lnast->get_name(name_n));
+        }
+      }
+    };
+    // Every wire declared anywhere under `root` (any depth). Used for the loop
+    // BODY, where a body-local wire is banned by the same rule and is not
+    // visible to the enclosing scope.
+    std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> gather_subtree
+        = [&](const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+            if (nid.is_invalid() || Lnast_ntype::is_func_def(lnast->get_type(nid))) {
+              return;
+            }
+            add_if_wire_decl(nid, out);
+            for (auto c : lnast->children(nid)) {
+              gather_subtree(c, out);
+            }
+          };
+
+    std::function<std::optional<std::pair<Lnast_nid, std::string>>(const Lnast_nid&, bool,
+                                                                  const absl::flat_hash_set<std::string>&)>
+        find_use;
+    find_use = [&](const Lnast_nid&                        nid,
+                   bool                                    structural_key,
+                   const absl::flat_hash_set<std::string>& wires) -> std::optional<std::pair<Lnast_nid, std::string>> {
+      if (nid.is_invalid() || Lnast_ntype::is_func_def(lnast->get_type(nid))) {
+        return std::nullopt;
+      }
+      const auto type  = lnast->get_type(nid);
+      const bool keys  = Lnast_ntype::is_func_call(type) || Lnast_ntype::is_tuple_add(type) || Lnast_ntype::is_tuple_concat(type);
+      int        index = 0;
+      for (auto c : lnast->children(nid)) {
+        if (Lnast_ntype::is_ref(lnast->get_type(c))) {
+          const auto name        = std::string(lnast->get_name(c));
+          // Declaration targets and named-actual/tuple field labels are
+          // structural names. A store target outside those contexts is a real
+          // write; every other matching ref is a real read.
+          const bool decl_target = Lnast_ntype::is_declare(type) && index == 0;
+          const bool call_callee = Lnast_ntype::is_func_call(type) && index == 1;
+          const bool key_target  = structural_key && Lnast_ntype::is_store(type) && index == 0;
+          if (!decl_target && !call_callee && !key_target && wires.contains(name)) {
+            // Statement/operator nodes carry the source span; leaf refs often
+            // do not. Anchor on the containing node so line-pinned diagnostics
+            // remain stable as the file changes.
+            return std::pair{nid, name};
+          }
+        }
+        if (auto found = find_use(c, keys, wires); found) {
+          return found;
+        }
+        ++index;
+      }
+      return std::nullopt;
+    };
+
+    // Scope-aware walk. A `wire` is visible to the `stmts` scope that declares
+    // it and to the scopes NESTED inside it — never to a SIBLING scope. The
+    // earlier unit-wide gather rejected
+    //     if c { wire w:u8; w = a }
+    //     for i in 0..<4 { mut w:u8 = i; s = s + w }
+    // where the loop's `w` is an ordinary local that merely shares a name with a
+    // wire in an unrelated arm (legal today: siblings are not shadowing).
+    std::function<void(const Lnast_nid&, const absl::flat_hash_set<std::string>&)> scan;
+    scan = [&](const Lnast_nid& nid, const absl::flat_hash_set<std::string>& outer) {
+      if (nid.is_invalid() || (nid != unit && Lnast_ntype::is_func_def(lnast->get_type(nid)))) {
+        return;
+      }
+      absl::flat_hash_set<std::string>        scoped;
+      const absl::flat_hash_set<std::string>* visible = &outer;
+      if (Lnast_ntype::is_stmts(lnast->get_type(nid))) {
+        scoped = outer;
+        for (auto c : lnast->children(nid)) {
+          add_if_wire_decl(c, scoped);
+        }
+        visible = &scoped;
+      }
+      const auto type = lnast->get_type(nid);
+      // `while` covers BOTH `while cond { … }` and `loop { … }` (process_loop_statement
+      // desugars to the same node). The rule above is a SOURCE legality rule for loop
+      // bodies, so checking only `for` made the identical construct legal or illegal
+      // depending on how the loop was spelled.
+      if (Lnast_ntype::is_for(type) || Lnast_ntype::is_while(type)) {
+        for (auto body : lnast->children(nid)) {
+          if (!Lnast_ntype::is_stmts(lnast->get_type(body))) {
+            continue;  // for: value/iterable/mode/idx/key -- while: the cond
+          }
+          auto body_wires = *visible;
+          gather_subtree(body, body_wires);
+          if (auto use = find_use(body, false, body_wires); use) {
+            report_error(use->first,
+                         "wire-in-loop",
+                         "unsupported",
+                         std::format("{} body may not read or write wire '{}'",
+                                     Lnast_ntype::is_for(type) ? "for-loop" : "loop",
+                                     use->second),
+                         "move the combinational connection outside the loop and carry an ordinary typed value instead");
+          }
+        }
+      }
+      for (auto c : lnast->children(nid)) {
+        scan(c, *visible);
+      }
+    };
+    scan(unit, {});
+
+    // Nested definitions own independent scopes and may reuse wire names.
+    std::function<void(const Lnast_nid&)> nested = [&](const Lnast_nid& nid) {
+      for (auto c : lnast->children(nid)) {
+        if (Lnast_ntype::is_func_def(lnast->get_type(c))) {
+          check_unit(c);
+        } else {
+          nested(c);
+        }
+      }
+    };
+    nested(unit);
+  };
+  check_unit(root);
+}
 
 void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
   // At each `stmts` scope, enforce the single-driver rules on every `wire`
@@ -2103,8 +2242,7 @@ void Prp2lnast::process_statement(TSNode n) {
       // contract is worse than no contract. They are now ordinary undefined
       // calls — write `assume` for a precondition, `assert` for a
       // postcondition.
-      if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assume_nocheck"
-          || fname == "assert_always") {
+      if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assume_nocheck" || fname == "assert_always") {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
           // The argument tuple is `(cond)` or `(cond, "msg")`. Lower the

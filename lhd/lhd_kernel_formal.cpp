@@ -384,9 +384,19 @@ static int design_assume_occurrences(hhds::Graph* top) {
       continue;
     }
     std::string_view raw = livehd::graph_util::node_name_of(node);
-    if (raw.rfind("assume\x1f", 0) == 0 || raw.rfind("assume_nocheck\x1f", 0) == 0) {
-      ++count;
+    if (raw.rfind("assume\x1f", 0) != 0 && raw.rfind("assume_nocheck\x1f", 0) != 0) {
+      continue;
     }
+    // Count only what the encoder will actually ASSERT: an assume pass.formal
+    // stamped `proven` (assume_nocheck, a selected-top IO assume, or every
+    // assume under assume_check=false). A checked assume that was never
+    // discharged — a `lg:` library fed straight to `lhd lec`, or a side built
+    // at O0 where pass.formal does not run — carries no attribute, is not a
+    // hypothesis, and must not be disclosed as one either.
+    if (!livehd::graph_util::has_proven(node.base_node())) {
+      continue;
+    }
+    ++count;
   }
   return count;
 }

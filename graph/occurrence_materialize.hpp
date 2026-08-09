@@ -44,6 +44,12 @@
 
 namespace livehd::graph_util {
 
+// Materializes one compact Subnode_group in private scratch `g`. Returns true
+// when the selected node was expanded. This is for occurrence-aware consumers
+// that retain the shapes they implement natively and expand only their
+// documented fallback cases.
+bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass);
+
 // Materializes every compact Subnode_group in private scratch `g`. Returns the
 // number of groups realized, or -1 if a binding could not be represented.
 int materialize_occurrences(hhds::Graph* g, std::string_view from_pass);

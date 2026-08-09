@@ -563,6 +563,10 @@ protected:
     std::string         port_name = {};
     bool                is_named  = false;
     std::string         field     = {};
+    // Scalar bool needs its native LNAST type node. Encoding it as the integer
+    // range [0,1] loses Pyrope's bool-vs-int distinction and, for a rolled
+    // carry, used to let `true` widen inconsistently across the lifted boundary.
+    Io_kind             kind      = Io_kind::none;
   };
 
   // ── generic `<T,…>` per-call-site binding (2f-generics) ──────────────────
@@ -971,16 +975,10 @@ protected:
   // boundary port:
   //   index      — the iteration variable, one input port
   //   invariant  — read, never written: one input port
-  //   carry      — WRITTEN (whether or not it is also read): an input + an
-  //                output port plus a descriptor mapping, so ordinal r+1 reads
-  //                ordinal r's value
-  //
-  // A written-but-never-read variable is deliberately classified as a carry
-  // too, even though the doc allows a cheaper "final-only" port. Carrying it
-  // costs one unused input and is unconditionally correct; getting the
-  // distinction wrong is exactly the silent miscompile the design warns about
-  // (a conditionally-written value read on a later iteration), and the runner
-  // has no predicated form to decide it on.
+  //   carry      — may read an earlier value or may not write on every path: an
+  //                input/output pair plus a literal descriptor self-edge
+  //   final      — must-write, whole-value result with no incoming value: one
+  //                output read from the last occurrence
   struct Loop_roll_plan {
     int64_t     first = 0;
     int64_t     step  = 1;
@@ -992,7 +990,8 @@ protected:
 
     std::vector<std::string>                    invariants;
     std::vector<std::string>                    carries;
-    absl::flat_hash_map<std::string, Spec_port> types;  // boundary name -> declared type
+    std::vector<std::string>                    finals;  // must-written, no incoming ordinal-0 value
+    absl::flat_hash_map<std::string, Spec_port> types;   // boundary name -> declared type
   };
 
   // Suffixes for the two compiler-owned ports a carry needs. The body is copied
@@ -1013,8 +1012,9 @@ protected:
   // verbatim between a carry-seeding prologue and a carry-writeback epilogue.
   std::shared_ptr<Lnast> lift_loop_body(const Lnast_nid& body_stmts, const Loop_roll_plan& plan);
 
-  // Emits the single replicated call plus the per-carry read-backs.
-  void emit_rolled_loop_call(const Loop_roll_plan& plan);
+  // Emits one explicit rolled_for node containing the surviving source body
+  // and the hidden Sub-call/result transport consumed by tolg.
+  void emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast_nid& source_body);
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is

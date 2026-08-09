@@ -1,0 +1,36 @@
+/*
+:name: loop_roll_external_reg
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: lane__li*=4 *=4
+*/
+// An enclosing reg is deliberately not a value carry: every source-unrolled
+// iteration reads the same Q and rewrites the same D. Until Pyrope has a ref
+// mod boundary, the roller must decline this shape and preserve that behavior.
+
+mod reg_lane(x:u8) -> (z:u8@[0]) {
+  z = x + 1
+}
+
+mod loop_roll_external_reg(reset:bool, clock:bool) -> (z:u8@[0]) {
+  reg acc:u8 = 0
+  for i in 0..<4 {
+    acc = reg_lane::[name=lane](x=acc)
+  }
+  z = acc
+}
+
+test loop_roll_external_reg.ref_disposition {
+  mut dut = loop_roll_external_reg
+  dut.reset = true
+  dut.clock = false
+  step
+  dut.clock = true
+  step
+  dut.reset = false
+
+  tick 3 {
+    step
+    assert(dut.z == clock + 1, "all four writes read one shared Q; the last D wins")
+  }
+}

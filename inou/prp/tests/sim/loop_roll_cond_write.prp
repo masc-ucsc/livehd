@@ -12,9 +12,8 @@
 // write-only "final-only" result instead would drop every iteration but the
 // last, and would do so silently.
 //
-// The roller sidesteps the judgement call by making EVERY outer variable the
-// body writes a carry, conditionally or not. This fixture is what keeps that
-// true.
+// The roller proves only unconditional, whole-value writes are final-only;
+// this conditional write therefore remains a carry.
 //
 // One instance total: the lifted body holds only arithmetic, so the whole
 // design is the single replicated node.

@@ -1,0 +1,28 @@
+/*
+:name: loop_roll_named_alias
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: u_loop_0=1 *=1
+*/
+// The lifted definition cannot refer to a source-unit alias. The roller must
+// resolve Word to its concrete scalar range at the synthetic boundary.
+
+type Word = u12
+
+mod loop_roll_named_alias(x:u8) -> (z:u12@[0]) {
+  mut acc:Word = 0
+  for i in 0..<5 {
+    acc = acc + x
+  }
+  z = acc
+}
+
+test loop_roll_named_alias.resolved_width {
+  mut dut = loop_roll_named_alias
+
+  tick 3 {
+    dut.x = clock * 17
+    step
+    assert(dut.z == clock * 85, "five additions retain the alias width")
+  }
+}

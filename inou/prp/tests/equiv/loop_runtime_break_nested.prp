@@ -3,11 +3,11 @@
 :type: equiv
 :verilog_top: loop_runtime_break_nested.top
 :pyrope_top: top
+:set: compile.upass.roll=true
 */
 
-// The outer loop remains on the ordinary comptime-unroll path. Each inner
-// loop owns an independent activation chain and break only terminates that
-// inner occurrence sequence.
+// Nested rolling gives each inner loop an independent activation chain; break
+// terminates only that inner occurrence sequence.
 pub mod top(stop:u8) -> (total:u4@[0]) {
   mut acc:u4 = 0
   for outer in 0..<2 {

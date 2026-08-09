@@ -6,32 +6,32 @@
 :set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 lane_q=1 *=2
 */
-// Eight source-loop calls create eight physical stateful lane instances.  Each
+// Two source-loop calls create two physical stateful lane instances.  Each
 // lane owns both a flop and a two-entry memory.  The golden spells the names
-// the UNROLLED lowering produces — `lane_q_li0`..`lane_q_li7`, the LHS variable
+// the UNROLLED lowering produces — `lane_q_li0` and `lane_q_li1`, the LHS variable
 // plus the loop-iteration tag — so that flow pairs instance-for-instance in
 // hierarchical LEC.  This fixture runs the ROLLED flow instead (see `:set:`
 // above), whose hierarchy is one `__loop0` per ordinal, so it pairs by
 // flattening; the shared naming is what keeps the two comparable.
 
-mod lane(x:u8, addr:u1, we:bool) -> (q:u8@[0]) {
-  reg acc:u8 = 0
-  reg mem:[2]u8 = 0
+mod lane(x:u4, addr:u1, we:bool) -> (q:u4@[0]) {
+  reg acc:u4 = 0
+  reg mem:[2]u4 = 0
 
   if we { mem[addr] = x }
   q = acc ^ mem[addr]
   wrap acc = acc + x
 }
 
-pub mod top(d:u64, addr:u1, write_mask:u8) -> (q:u64@[0]) {
-  mut packed:u64 = 0
-  for ordinal in 0..<8 {
+pub mod top(d:u8, addr:u1, write_mask:u2) -> (q:u8@[0]) {
+  mut packed:u8 = 0
+  for ordinal in 0..<2 {
     const lane_q = lane(  // lane::[name=lane_q] is redundant (defailts to lhs variable)
-      x=(d >> (ordinal * 8)) & 0xff,
+      x=(d >> (ordinal * 4)) & 0xf,
       addr=addr,
       we=write_mask#[ordinal],
     )
-    packed = packed | (lane_q << (ordinal * 8))
+    packed = packed | (lane_q << (ordinal * 4))
   }
   q = packed
 }

@@ -3,19 +3,9 @@
 :type: simulation
 :expect_instances: stage__li*=6 *=6
 */
-// A source `for` loop kept ROLLED (`upass.roll=true`, todo_loop_cond_sub.md M4):
-// the body is lifted into one generated definition and the loop becomes a
-// single replicated `Sub`, so the graph is O(1) in the trip count instead of
-// O(6).
-//
-// `:expect_instances:` is what makes this fixture mean anything — without it a
-// silent fall back to unrolling would still pass the value assertions. Two
-// instances is the whole design: `u_loop_0` (the replicated node) in the top,
-// and the one `stage` call inside the lifted body.
-//
-// Its twin `loop_roll_carry_unrolled_unrolled.prp` is the SAME source with rolling off.
-// Both must produce the same value: that pair is the rolled-vs-unrolled
-// differential the representation change has to survive.
+// The source-unrolled twin of loop_roll_carry.prp. Six physical `stage`
+// instances must produce the same values as that fixture's one compact loop
+// node and runtime ordinal chain.
 
 mod acc_step(idx:u4, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
   acc_out = acc_in + x + idx

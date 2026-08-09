@@ -127,6 +127,9 @@ private:
   // runner could not monomorphize (the comptime unroll handles every concrete
   // instantiation); re-emitting it keeps that template lambda parseable.
   void      write_for();
+  // Explicit compact-loop transport: emit its surviving source domain/body;
+  // the final hidden stmts child is for tolg only.
+  void      write_rolled_for();
   void      write_tuple_add();
   // tuple_concat( dst, src0, src1, … ) -> `dst = (...src0, ...src1, …)` (spread
   // concatenation): each source tuple is splatted into one combined literal.
@@ -337,10 +340,10 @@ private:
   // Collect the body-variable names a defining statement READS (operands after
   // child0), following single-use folded temps into their definitions so a
   // `gclk = clk_b & inv` whose `& ` is an inlined temp still reports `inv`.
-  void                                         collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
+  void collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
   // Same fold-following read collection applied to `node` ITSELF (a condition
   // ref, an if arm, …) rather than a defining statement's operand tail.
-  void                                         collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const;
+  void collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,

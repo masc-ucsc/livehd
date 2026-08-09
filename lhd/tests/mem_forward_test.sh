@@ -10,7 +10,7 @@
 # dropped the forward, or ignored the write enable, would make the mutants
 # equivalent too, and a proof-only test would call that success.
 #
-# The pair is a MEMORY (Pyrope) against FOUR NAMED FLOPS + muxes (Verilog), with
+# The pair is a MEMORY (Pyrope) against TWO NAMED FLOPS + muxes (Verilog), with
 #   * a self-referential write (`t[wsel] = t[wsel] | a`) -- the write-data cone
 #     reads the array's own dout, which ABC sees as a free input; and
 #   * a forwarding read at a RUNTIME index -- the dout is a select of the
@@ -39,13 +39,11 @@ trap 'rm -rf "$W"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
 cat > "$W/rf.prp" <<'EOF'
-pub mod rf(rst:bool, a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
-  reg t:[4]u8
+pub mod rf(rst:bool, a:u4, wsel:u1, rsel:u1, we:bool) -> (z:u4@[0]) {
+  reg t:[2]u4
   if rst {
     t[0] = 0
     t[1] = 0
-    t[2] = 0
-    t[3] = 0
   } elif we {
     t[wsel] = t[wsel] | a
   }
@@ -53,25 +51,23 @@ pub mod rf(rst:bool, a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
 }
 EOF
 
-# The golden reference: four flops + muxes, forwarding written out by hand.
+# The golden reference: two flops + muxes, forwarding written out by hand.
 cat > "$W/ref.v" <<'EOF'
-module rf_ref(input clock, input rst, input [7:0] a, input [1:0] wsel,
-              input [1:0] rsel, input we, output [7:0] z);
-  reg [7:0] t0, t1, t2, t3;
-  wire [7:0] cur_w = (wsel==2'd0)?t0:(wsel==2'd1)?t1:(wsel==2'd2)?t2:t3;
-  wire [7:0] wdata = cur_w | a;
+module rf_ref(input clock, input rst, input [3:0] a, input wsel,
+              input rsel, input we, output [3:0] z);
+  reg [3:0] t0, t1;
+  wire [3:0] cur_w = wsel ? t1 : t0;
+  wire [3:0] wdata = cur_w | a;
   wire       wr    = we && !rst;
   always @(posedge clock) begin
-    if (rst) begin t0<=8'd0; t1<=8'd0; t2<=8'd0; t3<=8'd0; end
+    if (rst) begin t0<=4'd0; t1<=4'd0; end
     else begin
-      if (wr && wsel==2'd0) t0<=wdata;
-      if (wr && wsel==2'd1) t1<=wdata;
-      if (wr && wsel==2'd2) t2<=wdata;
-      if (wr && wsel==2'd3) t3<=wdata;
+      if (wr && !wsel) t0<=wdata;
+      if (wr &&  wsel) t1<=wdata;
     end
   end
-  wire [7:0] cur_r = (rsel==2'd0)?t0:(rsel==2'd1)?t1:(rsel==2'd2)?t2:t3;
-  assign z = rst ? 8'd0 : ((wr && (wsel==rsel)) ? wdata : cur_r);
+  wire [3:0] cur_r = rsel ? t1 : t0;
+  assign z = rst ? 4'd0 : ((wr && (wsel==rsel)) ? wdata : cur_r);
 endmodule
 EOF
 
@@ -108,9 +104,9 @@ echo "ok: a forwarding, self-written memory proves against a flop-array+mux impl
 #    the same-cycle write. If the encoder does not model forwarding, this looks
 #    identical to case 1 and the test above proved nothing.
 # ---------------------------------------------------------------------------
-sed 's|assign z = rst ? 8.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign z = rst ? 8'"'"'d0 : cur_r;|' \
+sed 's|assign z = rst ? 4.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign z = rst ? 4'"'"'d0 : cur_r;|' \
   "$W/ref.v" > "$W/ref_nofwd.v"
-grep -q "assign z = rst ? 8'd0 : cur_r;" "$W/ref_nofwd.v" || fail "case 2: the mutant sed did not apply"
+grep -q "assign z = rst ? 4'd0 : cur_r;" "$W/ref_nofwd.v" || fail "case 2: the mutant sed did not apply"
 build_v "$W/ref_nofwd.v" ref_nofwd
 lec ref_nofwd impl nofwd
 [ "$RC" -eq 0 ] && fail "case 2: a reference WITHOUT forwarding proved equal to a forwarding memory -- the forward is not modelled"
@@ -122,7 +118,7 @@ echo "ok: dropping the forward REFUTES -- the forwarding read is really compared
 # 3. MUTANT -- forward UNCONDITIONALLY, ignoring the write enable. The classic
 #    wrong forwarding model: right whenever we==1, wrong exactly when it is 0.
 # ---------------------------------------------------------------------------
-sed 's|assign z = rst ? 8.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign z = rst ? 8'"'"'d0 : ((wsel==rsel) ? wdata : cur_r);|' \
+sed 's|assign z = rst ? 4.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign z = rst ? 4'"'"'d0 : ((wsel==rsel) ? wdata : cur_r);|' \
   "$W/ref.v" > "$W/ref_ungated.v"
 grep -q "((wsel==rsel) ? wdata : cur_r)" "$W/ref_ungated.v" || fail "case 3: the mutant sed did not apply"
 build_v "$W/ref_ungated.v" ref_ungated
@@ -139,8 +135,8 @@ echo "ok: forwarding without the write enable REFUTES -- the enable gates the fo
 # ---------------------------------------------------------------------------
 # `#` as the sed delimiter: the pattern itself contains a `|` (the OR being
 # removed), which silently turns `s|...|` into a no-op edit.
-sed 's#wire \[7:0\] wdata = cur_w | a;#wire [7:0] wdata = a;#' "$W/ref.v" > "$W/ref_noself.v"
-grep -q "wire \[7:0\] wdata = a;" "$W/ref_noself.v" || fail "case 4: the mutant sed did not apply"
+sed 's#wire \[3:0\] wdata = cur_w | a;#wire [3:0] wdata = a;#' "$W/ref.v" > "$W/ref_noself.v"
+grep -q "wire \[3:0\] wdata = a;" "$W/ref_noself.v" || fail "case 4: the mutant sed did not apply"
 build_v "$W/ref_noself.v" ref_noself
 lec ref_noself impl noself
 [ "$RC" -eq 0 ] && fail "case 4: dropping the self-read from the write data proved equal"
@@ -154,7 +150,7 @@ echo "ok: dropping the write-data self-read REFUTES -- the read-modify-write is 
 #    non-forwarding flop array, which is the mirror of case 1 -- so the encoder
 #    is modelling the ORDERING and not just always-forward or never-forward.
 # ---------------------------------------------------------------------------
-sed 's|reg t:\[4\]u8|reg t:[4]u8:[ordering="old"]|' "$W/rf.prp" > "$W/rf_old.prp"
+sed 's|reg t:\[2\]u4|reg t:[2]u4:[ordering="old"]|' "$W/rf.prp" > "$W/rf_old.prp"
 grep -q 'ordering="old"' "$W/rf_old.prp" || fail "case 5: the ordering sed did not apply"
 build_prp "$W/rf_old.prp" impl_old
 

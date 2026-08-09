@@ -821,6 +821,43 @@ absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class&
   return pids;
 }
 
+// Same boundary question for a compact loop, excluding its descriptor carry
+// self-edges. Any remaining path from an external input driver back to this
+// node is a parent-level false ring; the native eager wrapper deliberately does
+// not solve those and the caller uses occurrence expansion as its backstop.
+bool compact_loop_has_external_ring(const hhds::Node_class& s) {
+  namespace gu = livehd::graph_util;
+  absl::flat_hash_set<hhds::Node_class> seen;
+  std::vector<hhds::Pin_class>          stk;
+  for (const auto& e : s.inp_edges()) {
+    if (e.driver.get_master_node() != s) {
+      stk.push_back(e.driver);
+    }
+  }
+  while (!stk.empty()) {
+    auto d = stk.back();
+    stk.pop_back();
+    if (d.is_invalid() || gu::is_const_pin(d)) {
+      continue;
+    }
+    auto n = d.get_master_node();
+    if (n == s) {
+      return true;
+    }
+    const auto op = gu::type_op_of(n);
+    if (gu::is_type_register(n) || op == Ntype_op::Memory || op == Ntype_op::IO) {
+      continue;
+    }
+    if (!seen.insert(n).second) {
+      continue;
+    }
+    for (const auto& e : n.inp_edges()) {
+      stk.push_back(e.driver);
+    }
+  }
+  return false;
+}
+
 // TRUE when NO output of the callee depends COMBINATIONALLY on any of its
 // inputs -- a Moore machine: every output is a pure function of state/consts
 // (the DivUnit/SRT16DividerDataModule handshake shape, where `ready` is a
@@ -1203,7 +1240,10 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // expression, not a `cg_N` temp), 2-arm muxes as a lazy C++ ternary, guarded
 // next-state and lazy write staging on gated state, and the Get_mask raw
 // width-adjust pass-through.
-static constexpr std::string_view kSimGenVersion = "simgen-12";
+// simgen-15: native rolled-loop ABI. The digest includes the complete HHDS
+// Subnode_loop descriptor so a warm workdir cannot reuse code for a different
+// count/domain/role mapping.
+static constexpr std::string_view kSimGenVersion = "simgen-15";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -1272,6 +1312,21 @@ uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
       auto cg = n.get_subnode_graph();
       h       = fnv1a_str(h, cg ? cg->get_name() : std::string_view{});
       h       = fold_groups(h, cg.get());
+      if (auto loop = n.subnode_loop()) {
+        h                            = fnv1a(h, 0x4c4f4f50ULL);  // "LOOP": distinguish descriptor absence
+        h                            = fnv1a(h, static_cast<uint64_t>(loop->first));
+        h                            = fnv1a(h, static_cast<uint64_t>(loop->step));
+        h                            = fnv1a(h, loop->count);
+        const auto fold_optional_pid = [&](uint64_t hh, const std::optional<hhds::Port_id>& pid) {
+          hh = fnv1a(hh, pid ? 1u : 0u);
+          return pid ? fnv1a(hh, static_cast<uint64_t>(*pid)) : hh;
+        };
+        h = fold_optional_pid(h, loop->index_input);
+        h = fold_optional_pid(h, loop->activation_input);
+        h = fold_optional_pid(h, loop->next_active_output);
+      } else {
+        h = fnv1a(h, 0);
+      }
     }
     if (op == Ntype_op::Nconst) {
       h = fnv1a_str(h, hydrate_const(n.get_driver_pin(0)).to_pyrope());
@@ -1583,7 +1638,7 @@ int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
     if (!cg) {
       continue;  // body-less black box (liberty cell / external IP): nothing to inline
     }
-    if (graph_node_count(cg.get()) <= flatten_budget) {
+    if (!n.is_loop_subnode() && graph_node_count(cg.get()) <= flatten_budget) {
       victims.emplace_back(n);
     }
   }
@@ -1641,15 +1696,20 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // reads as a combinational loop THROUGH the instance. Inlining the gate turns
   // both into the local AND cone icg_guards already folds into a flop enable,
   // which is the same treatment lec gives it.
-  // Expand a replicated Sub before any structural rewrite sees it. The compact
-  // runtime loop (design M3) is a later optimization; expanding keeps the
-  // rolled front end CORRECT today, at the unrolled form's code size.
-  // A failure here leaves a body that is NOT emittable (see expand_one: the
-  // refusal is atomic, so the compact node is still standing for `count`
-  // occurrences). Report it up so do_from_graph refuses to emit rather than
-  // generating a simulator with one lane where the design has `count`.
-  if (livehd::graph_util::materialize_occurrences(g, "inou.cgen.sim") < 0) {
-    return false;
+  // Activation/break descriptors still take the shared expansion fallback.
+  // Unconditional eager chains remain compact and are emitted below as one
+  // std::array plus a runtime ordinal loop. Snapshot in reverse storage order
+  // for the occurrence formatter's module-scoped ordinal accounting.
+  std::vector<hhds::Node_class> fallback_loops;
+  for (auto n : g->body().nodes()) {
+    if (auto d = n.subnode_loop(); d && (d->activation_input || compact_loop_has_external_ring(n))) {
+      fallback_loops.push_back(n);
+    }
+  }
+  for (auto it = fallback_loops.rbegin(); it != fallback_loops.rend(); ++it) {
+    if (!livehd::graph_util::materialize_occurrence(g, *it, "inou.cgen.sim")) {
+      return false;
+    }
   }
   // sim.flatten=N: absorb small sub-instances into this body first, so
   // everything below — the digest, the schedule, the emission — sees the
@@ -2160,11 +2220,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // reads `o.__gen` off the Out struct. Reserving here demotes the collider to
   // `<port>__i2` instead.
   if (gio) {
+    // Reserve the STRUCT MEMBER, which is the top-level name: a dotted tuple
+    // leaf (`io.data`) is emitted as a field of the GROUP member `io` (see
+    // cpp_port_path / emit_io_block), so reserving cpp_id("io.data") ==
+    // `io_data` would claim a name that is never a member — demoting an
+    // unrelated instance called `io_data` to `io_data__i2` — while leaving the
+    // real member `io` free for an instance to shadow.
+    const auto member_of = [](std::string_view n) {
+      const auto dot = n.find('.');
+      return cpp_id(dot == std::string_view::npos ? n : n.substr(0, dot));
+    };
     for (const auto& d : gio->get_input_pin_decls()) {
-      used_member_names.insert(cpp_id(d.name));
+      used_member_names.insert(member_of(d.name));
     }
     for (const auto& d : gio->get_output_pin_decls()) {
-      used_member_names.insert(cpp_id(d.name));
+      used_member_names.insert(member_of(d.name));
     }
   }
   auto unique_member = [&used_member_names](std::string base) -> std::string {
@@ -2631,10 +2701,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // ---- sub-module instances (Ntype_op::Sub -> nested struct member) ----
   struct Sub {
-    hhds::Node_class node;
-    std::string      inst;           // member name
-    std::string      callee_struct;  // cpp_id of the callee module name
-    bool             negedge_only;   // state advances in the fall half, after the parent's rise
+    hhds::Node_class                                 node;
+    std::string                                      inst;           // member name
+    std::string                                      callee_struct;  // cpp_id of the callee module name
+    bool                                             negedge_only;   // state advances in the fall half, after the parent's rise
+    std::optional<hhds::Subnode_loop>                loop;
+    std::vector<std::pair<std::string, std::string>> carries;  // callee input -> output
+    std::string                                      loop_struct;
   };
   std::vector<Sub>         subs;
   std::vector<std::string> sub_includes;  // distinct callee headers
@@ -2670,7 +2743,56 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         child_negedge |= !pos;
       }
     }
-    subs.push_back({node, unique_member(cpp_id(default_instance_name(node))), cpp_id(cname), child_negedge && !child_posedge});
+    const std::string                                inst = unique_member(cpp_id(default_instance_name(node)));
+    std::optional<hhds::Subnode_loop>                loop = node.subnode_loop();
+    std::vector<std::pair<std::string, std::string>> carries;
+    if (loop) {
+      try {
+        node.subnode_group().validate();
+      } catch (const std::exception& e) {
+        livehd::diag::err("inou.cgen.sim", "compact-loop-invalid", "unsupported")
+            .msg("cannot emit compact loop instance '{}': {}", inst, e.what())
+            .fatal();
+      }
+      for (const auto& c : node.subnode_group().carries()) {
+        std::string in_name;
+        std::string out_name;
+        for (const auto& d : sio->get_input_pin_decls()) {
+          if (d.port_id == c.input_port()) {
+            in_name = d.name;
+            break;
+          }
+        }
+        for (const auto& d : sio->get_output_pin_decls()) {
+          if (d.port_id == c.output_port()) {
+            out_name = d.name;
+            break;
+          }
+        }
+        if (in_name.empty() || out_name.empty()) {
+          livehd::diag::err("inou.cgen.sim", "compact-loop-carry", "internal")
+              .msg("compact loop instance '{}' has a carry whose callee port declaration is unavailable", inst)
+              .fatal();
+        }
+        carries.emplace_back(std::move(in_name), std::move(out_name));
+      }
+    }
+    subs.push_back({node,
+                    inst,
+                    cpp_id(cname),
+                    child_negedge && !child_posedge,
+                    loop,
+                    std::move(carries),
+                    // The wrapper struct is defined at GLOBAL scope in this
+                    // module's header, and the parent #includes every callee
+                    // header, so the name must be unique across the whole
+                    // include tree. `inst` alone is not: rolled-loop instances
+                    // are numbered by a PER-MODULE counter, so the first rolled
+                    // loop of every module is `u_loop_0` and two callee headers
+                    // would both define `struct __compact_u_loop_0`. The callee
+                    // struct name embeds the parent module (`<mod>.__loop<n>`),
+                    // so prefixing with it makes the name module-unique.
+                    loop ? absl::StrCat("__compact_", cpp_id(cname), "_", inst) : std::string{}});
     auto hdr = absl::StrCat(sim_file_stem(cname), ".hpp");
     if (std::find(sub_includes.begin(), sub_includes.end(), hdr) == sub_includes.end()) {
       sub_includes.push_back(hdr);
@@ -2679,6 +2801,183 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   for (const auto& h : sub_includes) {
     hout->append(absl::StrCat("#include \"", h, "\"\n"));
+  }
+
+  // A compact loop presents the exact public surface of one callee to the
+  // parent scheduler, but owns COUNT independent callee states. That keeps the
+  // mature scheduling/VCD/checkpoint machinery unchanged at the boundary while
+  // the wrapper performs the eager carry chain with a runtime ordinal loop.
+  for (const auto& s : subs) {
+    if (!s.loop) {
+      continue;
+    }
+    const auto& loop          = *s.loop;
+    auto        sio           = s.node.get_subnode_io();
+    const auto  carry_out_for = [&](std::string_view out) -> const std::string* {
+      for (const auto& [in_name, out_name] : s.carries) {
+        if (out_name == out) {
+          return &in_name;
+        }
+      }
+      return nullptr;
+    };
+    auto lane_prefix_expr = [](std::string_view base, std::string_view ordinal) {
+      return absl::StrCat("(",
+                          base,
+                          ".empty() ? std::string{} : ",
+                          base,
+                          ".substr(0, ",
+                          base,
+                          ".size() - 1)) + \"[\" + std::to_string(",
+                          ordinal,
+                          ") + \"].\"");
+    };
+    hout->append("\nstruct ", s.loop_struct, " {\n");
+    hout->append("  using Callee = ", s.callee_struct, ";\n");
+    hout->append("  using In = Callee::In;\n  using Out = Callee::Out;\n");
+    hout->append("  static constexpr std::size_t count = ", std::to_string(loop.count), ";\n");
+    hout->append("  std::array<Callee, count> lanes{};\n  In __in{};\n  Out __last_out{};\n  Out __out{};\n");
+    hout->append("  uint64_t __gen = 1, __kids = 0;\n");
+    if (vcd_on) {
+      hout->append("  std::shared_ptr<vcd::VCDWriter> __vcd;\n  std::string __vcd_path;\n");
+    }
+    hout->append(
+        "  void __sync_kids() { uint64_t n = 0; for (const auto& lane : lanes) n += lane.__gen; "
+        "if (n != __kids) { __kids = n; ++__gen; } }\n");
+    const auto emit_lane_inputs = [&](std::string_view lane, std::string_view ordinal) {
+      for (const auto& d : sio->get_input_pin_decls()) {
+        const std::string field = cpp_port_path(d.name);
+        std::string       rhs;
+        if (loop.index_input && d.port_id == *loop.index_input) {
+          rhs = absl::StrCat("Slop<",
+                             std::max<uint32_t>(1, d.bits),
+                             ">::create_integer(",
+                             loop.first,
+                             " + static_cast<int64_t>(",
+                             ordinal,
+                             ") * ",
+                             loop.step,
+                             ")");
+        } else {
+          for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+            if (s.carries[ci].first == d.name) {
+              rhs = absl::StrCat("__carry", ci);
+              break;
+            }
+          }
+          if (rhs.empty()) {
+            rhs = absl::StrCat("__in.", field);
+          }
+        }
+        hout->append(absl::StrCat("      ", lane, ".__gen += slop_update(", lane, ".__in.", field, ", ", rhs, ");\n"));
+        if (auto cg = s.node.get_subnode_graph(); cg && clock_guard_ports(cg).contains(static_cast<uint32_t>(d.port_id))) {
+          hout->append(
+              absl::StrCat("      ", lane, ".__gen += slop_update(", lane, ".__in.", field, "__tick, __in.", field, "__tick);\n"));
+        }
+      }
+    };
+    const auto emit_carry_decls = [&] {
+      for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+        hout->append("    auto __carry", std::to_string(ci), " = __in.", cpp_port_path(s.carries[ci].first), ";\n");
+      }
+    };
+    const auto emit_outputs = [&](std::string_view dst, std::string_view last) {
+      for (const auto& d : sio->get_output_pin_decls()) {
+        const std::string field = cpp_port_path(d.name);
+        if (const auto* carry_in = carry_out_for(d.name)) {
+          size_t ci = 0;
+          for (; ci < s.carries.size() && s.carries[ci].first != *carry_in; ++ci) {
+          }
+          hout->append(absl::StrCat("    __gen += slop_update(", dst, ".", field, ", __carry", ci, ");\n"));
+        } else if (loop.count != 0) {
+          hout->append(absl::StrCat("    __gen += slop_update(", dst, ".", field, ", ", last, ".", field, ");\n"));
+        }
+      }
+    };
+    hout->append("  void __settle() {\n");
+    emit_carry_decls();
+    hout->append("    for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[ordinal];\n");
+    emit_lane_inputs("lane", "ordinal");
+    hout->append("      lane.__settle();\n");
+    for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+      hout->append("      __carry", std::to_string(ci), " = lane.__out.", cpp_port_path(s.carries[ci].second), ";\n");
+    }
+    hout->append("    }\n");
+    emit_outputs("__out", "lanes[count - 1].__out");
+    hout->append("    __sync_kids();\n  }\n");
+    hout->append("  Out cycle() {\n");
+    emit_carry_decls();
+    if (loop.count != 0) {
+      hout->append("    Out __last{};\n");
+    }
+    hout->append("    for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[ordinal];\n");
+    emit_lane_inputs("lane", "ordinal");
+    hout->append("      auto __period = lane.cycle();\n");
+    for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+      hout->append("      __carry", std::to_string(ci), " = __period.", cpp_port_path(s.carries[ci].second), ";\n");
+    }
+    if (loop.count != 0) {
+      hout->append("      __last = __period;\n");
+    }
+    hout->append("    }\n");
+    emit_outputs("__last_out", "__last");
+    hout->append("    __sync_kids();\n    __settle();\n    return __last_out;\n  }\n");
+    hout->append("  void reset_cycle() { for (auto& lane : lanes) lane.reset_cycle(); ++__gen; __settle(); }\n");
+    if (vcd_on) {
+      hout->append(
+          "  void __vcd_hier(vcd::VCDWriter* w, const std::string& s) { for (std::size_t i = 0; i < count; ++i) { "
+          "lanes[i].__vcd.reset(); lanes[i].__vcd_path.clear(); lanes[i].__vcd_hier(w, s + \"[\" + std::to_string(i) + \"]\"); } "
+          "}\n");
+      hout->append("  void __vcd_clk(vcd::VCDWriter* w, bool rise) { for (auto& lane : lanes) lane.__vcd_clk(w, rise); }\n");
+      if (vcd_fakedelay) {
+        hout->append(
+            "  void __vcd_dump_x(vcd::VCDWriter* w, bool pos, bool root) { for (auto& lane : lanes) "
+            "lane.__vcd_dump_x(w, pos, root); }\n");
+      }
+      hout->append(
+          "  void __vcd_dump_data(vcd::VCDWriter* w, bool pos, bool root) { for (auto& lane : lanes) "
+          "lane.__vcd_dump_data(w, pos, root); }\n");
+    }
+    const std::string lp = lane_prefix_expr("p", "i");
+    hout->append(
+        "  void dump_state(const std::string& p, std::map<std::string, std::string>& r, const std::string& d) const { "
+        "for (std::size_t i = 0; i < count; ++i) lanes[i].dump_state(",
+        lp,
+        ", r, d); }\n");
+    hout->append(
+        "  void load_state(const std::string& p, const std::map<std::string, std::string>& r, const std::string& d) { "
+        "for (std::size_t i = 0; i < count; ++i) lanes[i].load_state(",
+        lp,
+        ", r, d); ++__gen; }\n");
+    hout->append(
+        "  std::uint64_t design_hash() const { std::uint64_t h = 14695981039346656037ULL; auto fold = [&](std::uint64_t v) { "
+        "for (int b = 0; b < 8; ++b) { h ^= (v >> (b * 8)) & 0xffU; h *= 1099511628211ULL; } }; fold(count); "
+        "for (const auto& lane : lanes) fold(lane.design_hash()); return h; }\n");
+    hout->append(
+        "  void describe_signals(const std::string& p, std::vector<hlop::ckpt::Signal>& v) const { for (std::size_t i = 0; i < "
+        "count; ++i) "
+        "lanes[i].describe_signals(",
+        lp,
+        ", v); }\n");
+    hout->append(
+        "  void probe_signals(const std::string& p, std::map<std::string, long>& m) const { for (std::size_t i = 0; i < count; "
+        "++i) "
+        "lanes[i].probe_signals(",
+        lp,
+        ", m); }\n");
+    hout->append(
+        "  void observe_signals(const std::string& p, std::map<std::string, std::string>& m) const { for (std::size_t i = 0; i < "
+        "count; ++i) "
+        "lanes[i].observe_signals(",
+        lp,
+        ", m); }\n");
+    hout->append(
+        "  bool observe_mem(const std::string& n, long i, std::string& o) const { if (n.empty() || n[0] != '[') return false; "
+        "const auto rb = n.find(\"]\"); if (rb == std::string::npos || rb + 1 >= n.size() || n[rb + 1] != '.') return false; "
+        "std::size_t ordinal = 0; try { ordinal = static_cast<std::size_t>(std::stoull(n.substr(1, rb - 1))); } catch (...) { "
+        "return false; } "
+        "return ordinal < count && lanes[ordinal].observe_mem(n.substr(rb + 2), i, o); }\n");
+    hout->append("};\n");
   }
   // The hlop::Memory_* type a memory lowers to. ordering="program" additionally
   // needs its per-read-port forwarding prefix as a non-type template argument,
@@ -2805,7 +3104,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   for (const auto& s : subs) {
-    hout->append(absl::StrCat("  ", s.callee_struct, " ", s.inst, ";  // sub instance\n"));
+    hout->append(absl::StrCat("  ",
+                              s.loop ? s.loop_struct : s.callee_struct,
+                              " ",
+                              s.inst,
+                              s.loop ? ";  // compact loop instance\n" : ";  // sub instance\n"));
   }
 
   // ---- In / Out ----
@@ -2982,7 +3285,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     for (const auto& io : ios) {
       if (!io.is_input) {
-        add(io.field, io.bits, absl::StrCat("o.", io.field));
+        add(io.field, io.bits, absl::StrCat("__o.", io.field));
       }
     }
     for (const auto& f : flops) {
@@ -3649,6 +3952,48 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     livehd::graph_util::word_level_cycle_nodes(g, /*strict=*/true, sched_cycle);
 
     for (const auto& s : subs) {
+      if (s.loop) {
+        // A descriptor carry self-edge is the eager chain inside the compact
+        // wrapper, not a parent-level combinational ring. A genuinely
+        // negedge-only callee still advances in the parent's fall half.
+        if (s.negedge_only) {
+          fall_deferred.insert(s.node.get_class_index());
+          // Deferring is only half of it. Every OTHER fall_deferred sub also
+          // gets the `__pre` snapshot + pin2var pre-binding below (it reaches
+          // that code with moore_capable true by construction), and skipping it
+          // here left the loop's outputs unbound during the rise: a parent cell
+          // reading one hits `raw_operand` with no pin2var entry, which sets
+          // cycle_unresolved_ and aborts emission with a bogus
+          // "combinational-cycle" refusal naming the loop instance — for a
+          // design that has no combinational cycle at all.
+          const std::string pre_base = settle ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__pre.");
+          if (!settle) {
+            fout->append(absl::StrCat("    auto ",
+                                      s.inst,
+                                      "__pre = ",
+                                      s.inst,
+                                      ".__out;  // negedge-only compact loop: advance after the parent's rise\n"));
+          }
+          auto                                       loop_sio = s.node.get_subnode_io();
+          absl::flat_hash_map<uint32_t, std::string> loop_pid2name;
+          for (const auto& d : loop_sio->get_output_pin_decls()) {
+            loop_pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
+          }
+          // Only pins that EXIST (walk the out-edges): a declared-but-unread
+          // output has no created pin and hhds' name lookup asserts on it.
+          for (const auto& e : s.node.out_edges()) {
+            auto opin = e.driver;
+            if (opin.is_invalid() || pin2var.contains(opin.get_class_index())) {
+              continue;
+            }
+            auto lit = loop_pid2name.find(static_cast<uint32_t>(opin.get_port_id()));
+            if (lit != loop_pid2name.end()) {
+              pin2var[opin.get_class_index()] = absl::StrCat(pre_base, cpp_port_path(lit->second));
+            }
+          }
+        }
+        continue;
+      }
       auto       fed_back      = sub_false_loop_output_pids(s.node, sub_out_is_state_only);
       const bool moore_capable = s.negedge_only || callee_is_moore(s.node.get_subnode_graph(), s.node.get_subnode_io());
       // A RING THROUGH SEVERAL INSTANCES. `sub_false_loop_output_pids` looks for
@@ -4084,6 +4429,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     };
 
     absl::flat_hash_set<hhds::Class_index> emitted_subs;
+    auto                                   sub_input_driver = [&](const Sub& s, std::string_view name, hhds::Port_id pid) {
+      auto sink = find_sink_pin(s.node, name);
+      if (!s.loop) {
+        return get_driver(sink);
+      }
+      if (s.loop->index_input && pid == *s.loop->index_input) {
+        return hhds::Pin_class{};  // occurrence-supplied by the wrapper
+      }
+      for (const auto& e : sink.inp_edges()) {
+        if (e.driver.get_master_node() != s.node) {
+          return e.driver;  // carry initial value or invariant
+        }
+      }
+      return hhds::Pin_class{};
+    };
     // A child's clock input still carries the ROOT clock as a data member; a
     // recognized Clock_cell's enables travel separately through `<port>__tick`
     // below.  Asking operand() for the cell output is both unnecessary and
@@ -4190,7 +4550,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // Ports are members: write straight into the child's __in — no local In,
         // no by-value copy at the call.
         for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv       = get_driver(find_sink_pin(node, d.name));
+          if (s.loop && s.loop->index_input && d.port_id == *s.loop->index_input) {
+            continue;  // the wrapper supplies first + ordinal*step
+          }
+          auto drv       = sub_input_driver(s, d.name, d.port_id);
           int  wb        = d.bits > 0 ? static_cast<int>(d.bits) : 1;
           auto value_drv = child_clock_data_driver(s, static_cast<uint32_t>(d.port_id), drv);
           // Emit any pending operand cone on demand (conservative: stops at
@@ -5880,7 +6243,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // Ports are members: rebuild the child's __in from the just-committed
         // parent state, then advance it (no local In, no by-value copy).
         for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv       = get_driver(find_sink_pin(s.node, d.name));
+          auto drv       = sub_input_driver(s, d.name, d.port_id);
           int  wb        = d.bits > 0 ? static_cast<int>(d.bits) : 1;
           auto value_drv = child_clock_data_driver(s, static_cast<uint32_t>(d.port_id), drv);
           ensure_ready(value_drv);
@@ -6342,8 +6705,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("    return true;\n  }\n");
   }
   for (const auto& s : subs) {
-    fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, ".\") == 0) {\n"));
-    fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size() + 1, "), _i, _o);\n  }\n"));
+    if (s.loop) {
+      fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, "[\") == 0) {\n"));
+      fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size(), "), _i, _o);\n  }\n"));
+    } else {
+      fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, ".\") == 0) {\n"));
+      fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size() + 1, "), _i, _o);\n  }\n"));
+    }
   }
   fout->append("  return false;\n}\n");
 
@@ -6505,7 +6873,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     absl::StrAppend(&j, " \"subs\":[");
     first = true;
     for (const auto& s : subs) {
-      absl::StrAppend(&j, first ? "" : ",\n        ", "{\"inst\":\"", s.inst, "\",\"module\":\"", s.callee_struct, "\"}");
+      absl::StrAppend(&j,
+                      first ? "" : ",\n        ",
+                      "{\"inst\":\"",
+                      s.inst,
+                      "\",\"module\":\"",
+                      s.callee_struct,
+                      "\"",
+                      // `loop` is what tells a consumer that this instance's state
+                      // is published per lane (`<inst>[<i>].<sig>`). `count` alone
+                      // cannot: a single-trip rolled loop and an ordinary Sub both
+                      // read as 1, and they are named differently.
+                      s.loop ? absl::StrCat(",\"loop\":true,\"count\":", s.loop->count) : std::string{},
+                      "}");
       first = false;
     }
     absl::StrAppend(&j, "]\n}\n");

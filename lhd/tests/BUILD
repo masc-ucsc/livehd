@@ -268,6 +268,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Native compact-loop cgen_sim: COUNT only sizes a std::array and runtime loop;
+# warm digests include the descriptor, and every occurrence-facing surface uses
+# stable `instance[ordinal]` paths.
+sh_test(
+    name = "lhd_sim_compact_loop_test",
+    size = "large",
+    srcs = ["lhd_sim_compact_loop_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2f-sim: the agent-oriented `lhd sim --query` API — cgen_sim's per-module
 # iface.json manifest and lossless observe_signals/observe_mem surface, the
 # per-test sim_catalog.json (now carrying outputs and memories, which the legacy
@@ -729,7 +739,7 @@ sh_test(
 # pin that the surviving edge now comes from every clocked port, not just the
 # write side.
 # MEMORY READ FORWARDING under cvc5, MUTANT-GATED. A memory (Pyrope) against
-# four named flops + muxes (Verilog), with a self-referential write and a
+# two named flops + muxes (Verilog), with a self-referential write and a
 # forwarding read at a RUNTIME index -- the `needs_array` shape. Every proof is
 # paired with a mutant that must still refute (forward dropped; forward not
 # gated by the write enable; write-data self-read dropped), because a model that

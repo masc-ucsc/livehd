@@ -2455,6 +2455,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
           }
 
           std::string expression = direct;
+          bool        composed   = false;  // a NEW composite over other cached entries
           if (has_inactive_bypass) {
             const auto desc = group.loop();
             I(desc && desc->activation_input && occurrence.ordinal() > 0);
@@ -2462,13 +2463,39 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
             auto               active_it = loop_input_exprs_.find(active_key);
             I(active_it != loop_input_exprs_.end() && !previous_output.empty() && !previous_input.empty());
             expression = absl::StrCat("(", active_it->second, " ? ", previous_output, " : ", previous_input, ")");
+            composed   = true;
           } else if (!activation_terms.empty()) {
             expression = activation_terms.front();
             for (size_t i = 1; i < activation_terms.size(); ++i) {
               expression = absl::StrCat("(", expression, " && ", activation_terms[i], ")");
+              composed   = true;
             }
           } else if (!previous_output.empty()) {
             expression = previous_output;
+          }
+          // A composite is built from the PREVIOUS ordinal's cached entry, so
+          // caching its TEXT nests one level per occurrence: activation and
+          // inactive-carry expressions grow O(ordinal) each and are re-pasted at
+          // every instantiation, which turns a 256-iteration loop into a
+          // multi-hundred-megabyte .v. Bind it to a real net instead and cache
+          // the NAME, exactly as loop_output_vars_ already does for the output
+          // half. Declared here, immediately ahead of the instance that reads it.
+          if (composed) {
+            auto* lib = group.target_io().get_library();
+            I(lib != nullptr);
+            auto base = hhds::format_occurrence_path(*lib, occurrence.path());
+            if (base.empty()) {
+              base = absl::StrCat("u_", sub_io->get_name(), "__li", occurrence.ordinal());
+            }
+            auto           wire_name = get_unique_decl_name(get_scaped_name(absl::StrCat(base, "_i", input.port_id)));
+            const uint32_t bits      = std::max<uint32_t>(input.bits, 1);
+            if (bits <= 1) {
+              fout->append("wire signed ", wire_name, ";\n");
+            } else {
+              fout->append("wire signed [", std::to_string(bits - 1), ":0] ", wire_name, ";\n");
+            }
+            fout->append("assign ", wire_name, " = ", expression, ";\n");
+            expression = std::move(wire_name);
           }
           if (!expression.empty()) {
             loop_input_exprs_.insert_or_assign(input_key, std::move(expression));

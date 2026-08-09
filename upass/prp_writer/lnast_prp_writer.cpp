@@ -545,18 +545,22 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
 void Lnast_prp_writer::write_node() {
   using N = Lnast_ntype;
   switch (current_ntype()) {
-    case N::Lnast_ntype_top         : write_top(); break;
-    case N::Lnast_ntype_stmts       : write_stmts(); break;
-    case N::Lnast_ntype_if          : write_if(); break;
-    case N::Lnast_ntype_unique_if   : write_if(); break;  // prints `unique if`
-    case N::Lnast_ntype_declare     : write_declare(); break;
-    case N::Lnast_ntype_store       : write_store(); break;
-    case N::Lnast_ntype_ref         : write_ref(); break;
-    case N::Lnast_ntype_const       : write_const(); break;
-    case N::Lnast_ntype_cassert     : write_cassert(); break;
-    case N::Lnast_ntype_func_call   : write_func_call(); break;
-    case N::Lnast_ntype_func_def    : write_func_def(); break;
-    case N::Lnast_ntype_for         : write_for(); break;
+    case N::Lnast_ntype_top          : write_top(); break;
+    case N::Lnast_ntype_stmts        : write_stmts(); break;
+    case N::Lnast_ntype_if           : write_if(); break;
+    case N::Lnast_ntype_unique_if    : write_if(); break;  // prints `unique if`
+    case N::Lnast_ntype_declare      : write_declare(); break;
+    case N::Lnast_ntype_store        : write_store(); break;
+    case N::Lnast_ntype_ref          : write_ref(); break;
+    case N::Lnast_ntype_const        : write_const(); break;
+    case N::Lnast_ntype_cassert      : write_cassert(); break;
+    case N::Lnast_ntype_func_call    : write_func_call(); break;
+    case N::Lnast_ntype_func_def     : write_func_def(); break;
+    case N::Lnast_ntype_for          : write_for(); break;
+    case N::Lnast_ntype_rolled_for   : write_rolled_for(); break;
+    case N::Lnast_ntype_func_break   : print("break"); break;
+    case N::Lnast_ntype_func_continue: print("continue"); break;
+    case N::Lnast_ntype_func_return  : print("return"); break;
     // timecheck (`x@[N]`) is an inert landing-cycle assertion. The timing it
     // carries is ALREADY re-emitted by the writer as the `stage[N]` declaration
     // and the `out:T@[N]` interface annotation, so the standalone statement is
@@ -565,41 +569,41 @@ void Lnast_prp_writer::write_node() {
     // would forward-reference an undeclared name on re-parse. Drop it (the
     // `@[]` opt-out) — sound (inert) and loses no timing. See emits_nothing_stmt
     // so the statement loop leaves no blank line.
-    case N::Lnast_ntype_timecheck   : break;
-    case N::Lnast_ntype_tuple_add   : write_tuple_add(); break;
-    case N::Lnast_ntype_tuple_concat: write_tuple_concat(); break;
-    case N::Lnast_ntype_attr_set    : write_attr_set(); break;
-    case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
-    case N::Lnast_ntype_set_mask    : write_set_mask(); break;
-    case N::Lnast_ntype_range       : write_range(); break;
-    case N::Lnast_ntype_type_spec   : write_type_spec(); break;
+    case N::Lnast_ntype_timecheck    : break;
+    case N::Lnast_ntype_tuple_add    : write_tuple_add(); break;
+    case N::Lnast_ntype_tuple_concat : write_tuple_concat(); break;
+    case N::Lnast_ntype_attr_set     : write_attr_set(); break;
+    case N::Lnast_ntype_delay_assign : write_delay_assign(); break;
+    case N::Lnast_ntype_set_mask     : write_set_mask(); break;
+    case N::Lnast_ntype_range        : write_range(); break;
+    case N::Lnast_ntype_type_spec    : write_type_spec(); break;
     // All value-producing ops share one statement wrapper; render_def_rhs()
     // spells the per-op RHS and inlines any single-use temp operands.
-    case N::Lnast_ntype_plus        :
-    case N::Lnast_ntype_minus       :
-    case N::Lnast_ntype_mult        :
-    case N::Lnast_ntype_div         :
-    case N::Lnast_ntype_mod         :
-    case N::Lnast_ntype_shl         :
-    case N::Lnast_ntype_sra         :
-    case N::Lnast_ntype_sext        :
-    case N::Lnast_ntype_get_mask    :
-    case N::Lnast_ntype_eq          :
-    case N::Lnast_ntype_ne          :
-    case N::Lnast_ntype_lt          :
-    case N::Lnast_ntype_le          :
-    case N::Lnast_ntype_gt          :
-    case N::Lnast_ntype_ge          :
-    case N::Lnast_ntype_log_and     :
-    case N::Lnast_ntype_log_or      :
-    case N::Lnast_ntype_log_not     :
-    case N::Lnast_ntype_bit_and     :
-    case N::Lnast_ntype_bit_or      :
-    case N::Lnast_ntype_bit_xor     :
-    case N::Lnast_ntype_bit_not     :
-    case N::Lnast_ntype_tuple_get   :
-    case N::Lnast_ntype_attr_get    : write_value_stmt(); break;
-    default                         : {
+    case N::Lnast_ntype_plus         :
+    case N::Lnast_ntype_minus        :
+    case N::Lnast_ntype_mult         :
+    case N::Lnast_ntype_div          :
+    case N::Lnast_ntype_mod          :
+    case N::Lnast_ntype_shl          :
+    case N::Lnast_ntype_sra          :
+    case N::Lnast_ntype_sext         :
+    case N::Lnast_ntype_get_mask     :
+    case N::Lnast_ntype_eq           :
+    case N::Lnast_ntype_ne           :
+    case N::Lnast_ntype_lt           :
+    case N::Lnast_ntype_le           :
+    case N::Lnast_ntype_gt           :
+    case N::Lnast_ntype_ge           :
+    case N::Lnast_ntype_log_and      :
+    case N::Lnast_ntype_log_or       :
+    case N::Lnast_ntype_log_not      :
+    case N::Lnast_ntype_bit_and      :
+    case N::Lnast_ntype_bit_or       :
+    case N::Lnast_ntype_bit_xor      :
+    case N::Lnast_ntype_bit_not      :
+    case N::Lnast_ntype_tuple_get    :
+    case N::Lnast_ntype_attr_get     : write_value_stmt(); break;
+    default                          : {
       // Unknown node — record it (the pass fails the compile unless debug) and
       // emit a comment so the output stays parseable.
       emit_unimplemented(
@@ -3317,6 +3321,82 @@ void Lnast_prp_writer::write_for() {
   print_indent();
   print("}");
   cur = forn;  // restore for the caller's move_to_sibling()
+}
+
+// rolled_for(ref(index), const(first), const(step), const(count),
+//            const(activation), const(next_active), tuple_add(carries),
+//            stmts(source_body), stmts(lowering_payload))
+//
+// Only the source half is public Pyrope. The lowering payload deliberately
+// stays invisible here; re-parsing this loop lets the roller rebuild it from
+// the same source instead of serializing compiler-reserved call actuals.
+void Lnast_prp_writer::write_rolled_for() {
+  const auto             rolled = cur;
+  std::vector<Lnast_nid> kids;
+  for (auto c = lnast->get_child(rolled); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    kids.emplace_back(c);
+  }
+  if (kids.size() != lnast_rolled_for::arity || !Lnast_ntype::is_ref(lnast->get_type(kids[lnast_rolled_for::index]))
+      || !Lnast_ntype::is_stmts(lnast->get_type(kids[lnast_rolled_for::source_body]))) {
+    emit_unimplemented("malformed rolled_for transport");
+    return;
+  }
+
+  int64_t  first = 0;
+  int64_t  step  = 0;
+  uint64_t count = 0;
+  try {
+    first = std::stoll(std::string(lnast->get_name(kids[lnast_rolled_for::first])));
+    step  = std::stoll(std::string(lnast->get_name(kids[lnast_rolled_for::step])));
+    count = std::stoull(std::string(lnast->get_name(kids[lnast_rolled_for::count])));
+  } catch (const std::exception&) {
+    emit_unimplemented("malformed rolled_for domain");
+    return;
+  }
+  if (step == 0) {
+    emit_unimplemented("invalid rolled_for domain");
+    return;
+  }
+  std::optional<int64_t> last;
+  if (count != 0) {
+    using i128     = __int128;
+    const i128 end = static_cast<i128>(first) + static_cast<i128>(count - 1) * step;
+    if (end < std::numeric_limits<int64_t>::min() || end > std::numeric_limits<int64_t>::max()) {
+      emit_unimplemented("overflowing rolled_for domain");
+      return;
+    }
+    last = static_cast<int64_t>(end);
+  }
+
+  print("for ");
+  print(strip_prefix(lnast->get_name(kids[lnast_rolled_for::index])));
+  print(" in ");
+  print(std::to_string(first));
+  if (count == 0) {
+    // `rolled_for` itself permits a zero-count descriptor. Preserve its
+    // source semantics with an empty exclusive range; there is no final
+    // ordinal whose inclusive endpoint could be printed.
+    print("..<");
+    print(std::to_string(first));
+  } else {
+    print("..=");
+    print(std::to_string(*last));
+    if (step != 1) {
+      print(" step ");
+      print(std::to_string(step));
+    }
+  }
+  print(" {\n");
+  ++depth;
+  nid_stack.push(rolled);
+  cur = kids[lnast_rolled_for::source_body];
+  write_node();
+  cur = nid_stack.top();
+  nid_stack.pop();
+  --depth;
+  print_indent();
+  print("}");
+  cur = rolled;
 }
 
 // ── Tuples ────────────────────────────────────────────────────────────────────

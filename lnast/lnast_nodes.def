@@ -25,6 +25,18 @@ LNAST_NODE( if, if )
 // Use Lnast_ntype::is_if_like() when if/unique_if are handled alike.
 LNAST_NODE( unique_if, uif )
 LNAST_NODE( for, for )
+// Surviving compact range loop. Unlike a normal `for` (which the runner must
+// unroll before hardware lowering), this compiler-internal node owns both the
+// source loop and a hidden lowered call payload:
+//   rolled_for(ref(index), const(first), const(step), const(count),
+//              const(activation-port-or-empty),
+//              const(next-active-port-or-empty),
+//              tuple_add(store(ref(carry-input), const(carry-output)), ...),
+//              stmts(source-body), stmts(lowering-payload))
+// prp_writer emits only the source loop. tolg consumes only the lowering
+// payload and attaches the native HHDS Subnode_loop descriptor from the
+// explicit fields above. No replication metadata rides reserved call actuals.
+LNAST_NODE( rolled_for, rolled_for )
 LNAST_NODE( while, while )
 // `tick [N] { … }` — the simulation cycle loop inside a `test` block. Unlike
 // `for`/`while` (comptime-only, always fully unrolled) a tick is a RUNTIME loop

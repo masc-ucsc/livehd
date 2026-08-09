@@ -764,6 +764,8 @@ private:
       // anything unresolvable (runtime wrap/sat, comb recursion) stays a
       // HARD error inside lower_func_call.
       lower_func_call(nid);
+    } else if (N::is_rolled_for(t)) {
+      lower_rolled_for(nid);
     } else if (N::is_attr_get(t)) {
       // Every attribute read folds in upass.attributes before tolg; one that
       // survives has no hardware lowering — a hard error inside.
@@ -4068,6 +4070,116 @@ private:
     return {};
   }
 
+  // rolled_for owns an ordinary call payload but transports replication in an
+  // explicit node, never in reserved actuals. Lower the hidden payload first,
+  // then attach the native HHDS descriptor and literal carry self-edges to the
+  // Sub that payload created.
+  void lower_rolled_for(const Lnast_nid& nid) {
+    std::vector<Lnast_nid> kids;
+    for (auto c : lnast_->children(nid)) {
+      kids.emplace_back(c);
+    }
+    if (kids.size() != lnast_rolled_for::arity || !Lnast_ntype::is_ref(lnast_->get_type(kids[lnast_rolled_for::index]))
+        || !Lnast_ntype::is_tuple_add(lnast_->get_type(kids[lnast_rolled_for::carries]))
+        || !Lnast_ntype::is_stmts(lnast_->get_type(kids[lnast_rolled_for::lowering_payload]))) {
+      error_here("upass.tolg: malformed rolled_for transport in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+
+    int64_t  domain_first = 0;
+    int64_t  domain_step  = 0;
+    uint64_t domain_count = 0;
+    if (!absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::first]), &domain_first)
+        || !absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::step]), &domain_step)
+        || !absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::count]), &domain_count) || domain_step == 0) {
+      error_here("upass.tolg: malformed rolled_for domain in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+
+    const std::string saved_index = std::exchange(rolled_index_port_, std::string(lnast_->get_name(kids[lnast_rolled_for::index])));
+    last_lowered_sub_             = {};
+    lower_stmts(kids[lnast_rolled_for::lowering_payload]);
+    rolled_index_port_ = saved_index;
+    auto sub           = last_lowered_sub_;
+    last_lowered_sub_  = {};
+    if (sub.is_invalid()) {
+      error_here("upass.tolg: rolled_for payload did not create an instance in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+    auto gio = sub.get_subnode_io();
+    if (!gio) {
+      error_here("upass.tolg: rolled_for instance has no callee interface in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+    const auto input_pid = [&](std::string_view name) -> std::optional<hhds::Port_id> {
+      for (const auto& d : gio->get_input_pin_decls()) {
+        if (d.name == name) {
+          return d.port_id;
+        }
+      }
+      return std::nullopt;
+    };
+    const auto output_pid = [&](std::string_view name) -> std::optional<hhds::Port_id> {
+      for (const auto& d : gio->get_output_pin_decls()) {
+        if (d.name == name) {
+          return d.port_id;
+        }
+      }
+      return std::nullopt;
+    };
+
+    hhds::Subnode_loop desc;
+    desc.first       = domain_first;
+    desc.step        = domain_step;
+    desc.count       = domain_count;
+    desc.index_input = input_pid(lnast_->get_name(kids[lnast_rolled_for::index]));
+    if (!desc.index_input) {
+      error_here("upass.tolg: rolled_for index port '{}' is not a callee input", lnast_->get_name(kids[lnast_rolled_for::index]));
+      return;
+    }
+    const auto activation_name = lnast_->get_name(kids[lnast_rolled_for::activation]);
+    const auto next_name       = lnast_->get_name(kids[lnast_rolled_for::next_active]);
+    if (!activation_name.empty()) {
+      desc.activation_input = input_pid(activation_name);
+      if (!desc.activation_input) {
+        error_here("upass.tolg: rolled_for activation port '{}' is not a callee input", activation_name);
+        return;
+      }
+    }
+    if (!next_name.empty()) {
+      desc.next_active_output = output_pid(next_name);
+      if (!desc.next_active_output || !desc.activation_input) {
+        error_here("upass.tolg: rolled_for next-active port '{}' is invalid", next_name);
+        return;
+      }
+    }
+    // hhds enforces distinct role inputs by THROWING (std::invalid_argument,
+    // "set_subnode(loop): role inputs must be distinct"). plan_loop_roll declines
+    // any loop whose source names collide with the reserved port names, so this
+    // is unreachable from source — but reaching hhds with two roles on one pid
+    // would abort the compiler instead of pointing at the offending loop.
+    if (desc.activation_input && desc.index_input && *desc.activation_input == *desc.index_input) {
+      error_here("upass.tolg: rolled_for index and activation resolve to the same callee input port '{}'", activation_name);
+      return;
+    }
+    sub.set_subnode(gio, desc);
+    for (auto map : lnast_->children(kids[lnast_rolled_for::carries])) {
+      if (!Lnast_ntype::is_store(lnast_->get_type(map))) {
+        error_here("upass.tolg: malformed rolled_for carry entry");
+        return;
+      }
+      auto in_n  = lnast_->get_first_child(map);
+      auto out_n = in_n.is_invalid() ? in_n : lnast_->get_sibling_next(in_n);
+      auto ip    = in_n.is_invalid() ? std::optional<hhds::Port_id>{} : input_pid(lnast_->get_name(in_n));
+      auto op    = out_n.is_invalid() ? std::optional<hhds::Port_id>{} : output_pid(lnast_->get_name(out_n));
+      if (!ip || !op) {
+        error_here("upass.tolg: rolled_for carry ports do not exist on the callee");
+        return;
+      }
+      sub.create_driver_pin(*op).connect_sink(sub.create_sink_pin(*ip));
+    }
+  }
+
   // func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub
   // instance of the callee's graph. Args are positional refs/consts (mapped
   // to the callee's io_meta input order) or named store(argname, value)
@@ -4237,6 +4349,7 @@ private:
     const Pin call_guard = effect_path_cond();
     auto      sub        = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
+    last_lowered_sub_ = sub;
     {
       // Name the Sub by its RTL INSTANCE name so hhds get_hier_name() yields
       // the Verilog-style hierarchy (foo.bar.xx). The name is the LHS VARIABLE
@@ -4289,134 +4402,9 @@ private:
       }
     }
 
-    // Replication descriptor (upass.roll). The roller passes the domain, the
-    // index PORT NAME and the carry mapping as reserved named actuals; port
-    // names are resolved to pids here, where the callee GraphIO is known. A
-    // malformed marker is a hard error: silently dropping it would turn a
-    // rolled loop into a single instance, i.e. drop count-1 replicas.
-    // Set when this call is replicated: the role-marked index input is supplied
-    // per OCCURRENCE by realization, so it is legitimately unconnected here.
-    std::string                                          replica_index_port;
-    std::vector<std::pair<hhds::Port_id, hhds::Port_id>> replica_carries;  // input, output
-    {
-      std::string dom_txt, idx_port, carry_txt, activation_port, next_active_port;
-      for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
-        if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
-          continue;
-        }
-        auto k = lnast_->get_first_child(a);
-        if (k.is_invalid()) {
-          continue;
-        }
-        const auto kn = lnast_->get_name(k);
-        auto       v  = lnast_->get_sibling_next(k);
-        if (v.is_invalid()) {
-          continue;
-        }
-        if (kn == "__replica") {
-          dom_txt = std::string(lnast_->get_name(v));
-        } else if (kn == "__replica_index") {
-          idx_port = std::string(lnast_->get_name(v));
-        } else if (kn == "__replica_carry") {
-          carry_txt = std::string(lnast_->get_name(v));
-        } else if (kn == "__replica_activation") {
-          activation_port = std::string(lnast_->get_name(v));
-        } else if (kn == "__replica_next_active") {
-          next_active_port = std::string(lnast_->get_name(v));
-        }
-      }
-      if (!dom_txt.empty()) {
-        // Pids live on the callee GraphIO (the LNAST io entry carries no pid).
-        const auto pid_of_input = [&](const std::string& nm) -> std::optional<hhds::Port_id> {
-          for (const auto& d : gio->get_input_pin_decls()) {
-            if (d.name == nm) {
-              return d.port_id;
-            }
-          }
-          return std::nullopt;
-        };
-        const auto pid_of_output = [&](const std::string& nm) -> std::optional<hhds::Port_id> {
-          for (const auto& d : gio->get_output_pin_decls()) {
-            if (d.name == nm) {
-              return d.port_id;
-            }
-          }
-          return std::nullopt;
-        };
-
-        hhds::Subnode_loop desc;
-        // `first=..;step=..;count=..`
-        for (const auto& field : absl::StrSplit(dom_txt, ';', absl::SkipEmpty())) {
-          const std::pair<std::string_view, std::string_view> kv = absl::StrSplit(field, absl::MaxSplits('=', 1));
-          int64_t                                             iv = 0;
-          if (!absl::SimpleAtoi(kv.second, &iv)) {
-            error_here("upass.tolg: malformed replication marker `{}` on call to '{}'", field, callee_full);
-            return;
-          }
-          if (kv.first == "first") {
-            desc.first = iv;
-          } else if (kv.first == "step") {
-            desc.step = iv;
-          } else if (kv.first == "count") {
-            if (iv < 0) {
-              error_here("upass.tolg: replication count must be non-negative on call to '{}'", callee_full);
-              return;
-            }
-            desc.count = static_cast<uint64_t>(iv);
-          } else {
-            error_here("upass.tolg: unknown replication marker `{}` on call to '{}'", kv.first, callee_full);
-            return;
-          }
-        }
-        if (!idx_port.empty()) {
-          replica_index_port = idx_port;
-          desc.index_input   = pid_of_input(idx_port);
-          if (!desc.index_input) {
-            error_here("upass.tolg: replicated call to '{}' names index port '{}', which is not a callee input",
-                       callee_full,
-                       idx_port);
-            return;
-          }
-        }
-        if (!activation_port.empty()) {
-          desc.activation_input = pid_of_input(activation_port);
-          if (!desc.activation_input) {
-            error_here("upass.tolg: replicated call to '{}' names activation port '{}', which is not a callee input",
-                       callee_full,
-                       activation_port);
-            return;
-          }
-        }
-        if (!next_active_port.empty()) {
-          desc.next_active_output = pid_of_output(next_active_port);
-          if (!desc.next_active_output) {
-            error_here("upass.tolg: replicated call to '{}' names next-active port '{}', which is not a callee output",
-                       callee_full,
-                       next_active_port);
-            return;
-          }
-          if (!desc.activation_input) {
-            error_here("upass.tolg: replicated call to '{}' declares next-active without an activation input", callee_full);
-            return;
-          }
-        }
-        for (const auto& item : absl::StrSplit(carry_txt, ',', absl::SkipEmpty())) {
-          const std::pair<std::string_view, std::string_view> oi      = absl::StrSplit(item, absl::MaxSplits('>', 1));
-          auto                                                out_pid = pid_of_output(std::string(oi.first));
-          auto                                                in_pid  = pid_of_input(std::string(oi.second));
-          if (!out_pid || !in_pid) {
-            error_here("upass.tolg: replicated call to '{}' declares carry `{}` whose ports do not exist", callee_full, item);
-            return;
-          }
-          replica_carries.emplace_back(*in_pid, *out_pid);
-        }
-        if (desc.step == 0) {
-          error_here("upass.tolg: replicated call to '{}' has a zero step", callee_full);
-          return;
-        }
-        sub.set_subnode(gio, desc);
-      }
-    }
+    // An explicit rolled_for supplies its index per occurrence, so that one
+    // input is intentionally absent from the hidden ordinary call.
+    const std::string supplied_index_port = rolled_index_port_;
 
     // Actuals → callee input sink pins. Named actuals (`port=value`, a `store`)
     // bind by port name; a bare positional actual binds the next declared input
@@ -4455,14 +4443,6 @@ private:
         // consumed for sub.set_name above; never a callee port (don't bind,
         // don't count toward arity).
         if (pname == "__inst_name" || pname == "__inst_suffix") {
-          continue;
-        }
-        // Reserved replication markers (upass.roll): the loop roller emits the
-        // descriptor's domain, its index port and its carry mapping as named
-        // actuals, exactly like `__inst_name`. They are consumed below into the
-        // node's Replica_desc; none of them is a callee port.
-        if (pname == "__replica" || pname == "__replica_index" || pname == "__replica_carry" || pname == "__replica_activation"
-            || pname == "__replica_next_active") {
           continue;
         }
       } else {
@@ -4540,7 +4520,7 @@ private:
         // A replicated instance's index input carries a different value per
         // ordinal, so realization (not the parent graph) drives it. That is the
         // ONLY input a call may leave unconnected.
-        if (!replica_index_port.empty() && ie.name == replica_index_port) {
+        if (!supplied_index_port.empty() && ie.name == supplied_index_port) {
           continue;
         }
         error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, ie.name);
@@ -4625,13 +4605,6 @@ private:
       for (const auto& [sink, raw_clock] : deferred_clocks) {
         sink.connect_driver(clock_gate(raw_clock, gate_en));
       }
-    }
-
-    // Carries are native literal self-edges on the compact Sub. They are not
-    // duplicated in the descriptor; HHDS derives Subnode_group::carries()
-    // from these edges and omits them only from compact topological ordering.
-    for (const auto& [input_pid, output_pid] : replica_carries) {
-      sub.create_driver_pin(output_pid).connect_sink(sub.create_sink_pin(input_pid));
     }
 
     std::string dst_name(lnast_->get_name(dst));
@@ -6548,6 +6521,11 @@ private:
     std::vector<Lnast_io_entry> outputs;
   };
   absl::flat_hash_map<std::string, Sub_result> sub_results_;
+  // Explicit rolled_for lowering hand-off. The index port is allowed to be
+  // absent from the hidden ordinary call; lower_rolled_for then attaches the
+  // descriptor to exactly the Sub created by that payload.
+  std::string                                  rolled_index_port_;
+  hhds::Node_class                             last_lowered_sub_;
 
   // Checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.

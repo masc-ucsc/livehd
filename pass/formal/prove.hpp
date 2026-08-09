@@ -61,6 +61,18 @@ public:
   // assumes cond != 0. Returns false if the assume cone is unsupported.
   bool assume(const hhds::Pin_class& cond);
 
+  // Are the registered hypotheses jointly satisfiable? A contradictory set makes
+  // EVERY later query vacuously Proven, so an obligation is "discharged" by an
+  // impossible environment. Only PROVEN assumes are sound by construction;
+  // unchecked ones (assume_nocheck / formal.assume_check=false) need this probe.
+  // Conservative: Unknown / solver-error answers true (never fail a build on a
+  // budget-out), so it only ever reports a CONFIRMED contradiction.
+  bool assumes_consistent();
+
+  // Drop every hypothesis (used after a confirmed contradiction: proving under an
+  // impossible environment is worse than proving nothing).
+  void clear_assumes() { assumes_.clear(); }
+
 private:
   // Demand-encode dpin's cone to a Val; nullopt if unsupported / over budget.
   std::optional<livehd::lec::Val> val_of(const hhds::Pin_class& dpin);

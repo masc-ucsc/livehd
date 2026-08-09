@@ -1961,25 +1961,64 @@ bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Enc
   return true;
 }
 
-// Assert every design-authored assume emitted by Encoder::set_emit_props().
-// Checked assumptions have already been discharged by the top-rooted formal
-// preflight; the remaining properties are environment constraints (an explicit
-// assume_nocheck, a selected-top IO assume, or any assume when
-// formal.assume_check=false).  Keeping this parser here avoids coupling the LEC
-// engine to the later per-property verify result machinery.
-bool assert_design_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, const Encoded& encoded) {
+// "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>" (encoder set_emit_props contract;
+// msg is last so it may contain anything).
+struct Prop_key {
+  int         occ = -1;
+  std::string kind{"assert"};
+  std::string loc, msg;
+};
+std::optional<Prop_key> parse_prop_key(std::string_view name) {
   constexpr std::string_view pfx{"\x04prop:", 6};
+  if (name.substr(0, pfx.size()) != pfx) {
+    return std::nullopt;
+  }
+  Prop_key         k;
+  std::string_view rest = name.substr(pfx.size());
+  auto             take = [&rest]() -> std::string_view {
+    auto p = rest.find('\x1f');
+    auto f = rest.substr(0, p);
+    rest   = p == std::string_view::npos ? std::string_view{} : rest.substr(p + 1);
+    return f;
+  };
+  auto occ_s = take();
+  k.occ      = 0;
+  for (char c : occ_s) {
+    if (c < '0' || c > '9') {
+      return std::nullopt;
+    }
+    k.occ = k.occ * 10 + (c - '0');
+  }
+  if (auto f = take(); !f.empty()) {
+    k.kind = std::string(f);
+  }
+  k.loc = std::string(take());
+  k.msg = std::string(rest);  // remainder: the user message, verbatim
+  return k;
+}
+
+// Assert the design-authored assumes that pass.formal accepted as ACTIVE
+// hypotheses (Encoded::prop_active_assume): an explicit assume_nocheck, a
+// selected-top IO assume, or any assume when formal.assume_check=false. A
+// checked assume is either discharged and deleted by the formal preflight or
+// left as a runtime check — never a hypothesis here.
+bool assert_design_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, const Encoded& encoded) {
   for (const auto& [name, cond] : encoded.outputs) {
-    if (name.substr(0, pfx.size()) != pfx) {
+    auto k = parse_prop_key(name);
+    if (!k || !is_assume_kind(k->kind)) {
       continue;
     }
-    std::string_view rest{name.data() + pfx.size(), name.size() - pfx.size()};
-    const auto       first  = rest.find('\x1f');
-    const auto       second = first == std::string_view::npos ? std::string_view::npos : rest.find('\x1f', first + 1);
-    const auto kind = first == std::string_view::npos
-                          ? std::string_view{}
-                          : rest.substr(first + 1, second == std::string_view::npos ? std::string_view::npos : second - first - 1);
-    if (!is_assume_kind(kind)) {
+    // Assert ONLY the assumes the encoder marked active (see the rule at
+    // encode.cpp: `assume_nocheck` by spelling, a plain `assume` only once
+    // pass.formal proved it). The spelling of a CHECKED assume does not say that:
+    // one that was never discharged (a `lg:` library loaded straight into `lhd
+    // lec`, or a side compiled at O0 where pass.formal does not run) reads
+    // identically, and asserting it would silently restrict the compared input
+    // space — two designs that differ everywhere the assume is false would come
+    // back PROVEN.
+    // The final contradiction checkSat catches only a fully UNSAT hypothesis
+    // set, never a merely over-restrictive one.
+    if (!encoded.prop_active_assume.contains(k->occ)) {
       continue;
     }
     const int w = cond.width > 0 ? cond.width : 1;
@@ -6741,42 +6780,6 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
 // lambdas (no cross-design width unification / correspondence); sharing them
 // is a follow-up refactor, not worth destabilizing prove_equal for.
 namespace {
-
-// "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>" (encoder set_emit_props contract;
-// msg is last so it may contain anything).
-struct Prop_key {
-  int         occ = -1;
-  std::string kind{"assert"};
-  std::string loc, msg;
-};
-std::optional<Prop_key> parse_prop_key(std::string_view name) {
-  constexpr std::string_view pfx{"\x04prop:", 6};
-  if (name.substr(0, pfx.size()) != pfx) {
-    return std::nullopt;
-  }
-  Prop_key         k;
-  std::string_view rest = name.substr(pfx.size());
-  auto             take = [&rest]() -> std::string_view {
-    auto p = rest.find('\x1f');
-    auto f = rest.substr(0, p);
-    rest   = p == std::string_view::npos ? std::string_view{} : rest.substr(p + 1);
-    return f;
-  };
-  auto occ_s = take();
-  k.occ      = 0;
-  for (char c : occ_s) {
-    if (c < '0' || c > '9') {
-      return std::nullopt;
-    }
-    k.occ = k.occ * 10 + (c - '0');
-  }
-  if (auto f = take(); !f.empty()) {
-    k.kind = std::string(f);
-  }
-  k.loc = std::string(take());
-  k.msg = std::string(rest);  // remainder: the user message, verbatim
-  return k;
-}
 
 // "\x04guard:<occ>" — R1 Phase 2. The RAW antecedent of a property written
 // inside an `if`/`match` arm, emitted alongside its "\x04prop:<occ>" so the

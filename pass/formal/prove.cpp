@@ -757,4 +757,33 @@ bool Prover::assume(const hhds::Pin_class& cond) {
   return true;
 }
 
+bool Prover::assumes_consistent() {
+  if (assumes_.empty()) {
+    return true;  // nothing to contradict
+  }
+  // A single hypothesis CAN be self-contradictory: assume_nocheck(x>4 and x<2)
+  // encodes to one `cond != 0` term that is UNSAT on its own, so check any
+  // non-empty set rather than short-circuiting at size()<2.
+  cvc5::Solver solver(tm_);
+  solver.setLogic("QF_BV");
+  solver.setOption("bv-solver", "bitblast-internal");
+  if (opts_.budget_k > 0) {
+    // Same deterministic, cone-scaled shape as solve(); memo_ is the set of
+    // driver pins encoded so far, i.e. the union of every assume cone.
+    long long rl = static_cast<long long>(opts_.budget_k) * static_cast<long long>(std::max<size_t>(1, memo_.size()));
+    solver.setOption("rlimit", std::to_string(rl));
+  }
+  for (const auto& a : assumes_) {
+    solver.assertFormula(a);
+  }
+  for (const auto& [l, r] : side_eqs_) {
+    solver.assertFormula(tm_.mkTerm(Kind::EQUAL, {l, r}));
+  }
+  try {
+    return !solver.checkSat().isUnsat();
+  } catch (...) {
+    return true;  // resource-out: no confirmed contradiction, so do not fail
+  }
+}
+
 }  // namespace livehd::formal

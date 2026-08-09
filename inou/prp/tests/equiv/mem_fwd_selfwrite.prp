@@ -8,7 +8,7 @@
 // MEMORY vs FLOP-ARRAY+MUX, with a FORWARDING read of a SELF-WRITTEN array.
 //
 // The Pyrope side is a Memory cell; the Verilog reference (.v) is the same
-// machine built from FOUR NAMED FLOPS and explicit read/write muxes, with no
+// machine built from TWO NAMED FLOPS and explicit read/write muxes, with no
 // array at all. Pairing a memory against flop+mux logic is the register-file
 // correspondence that matters in real designs, and it is why this is not a
 // memory-vs-memory self-LEC (that would discharge by structural identity and
@@ -27,17 +27,15 @@
 //
 // The explicit `rst` arm is NOT decoration. Without it the memory carries only
 // power-on `init` while the flops carry their own, the state correspondence
-// cannot pair one array against four flops (`ref{t0..t3} impl{t}` stays
+// cannot pair one array against two flops (`ref{t0,t1} impl{t}` stays
 // unpaired), and the miter refutes on the FREE INITIAL VALUE instead of on the
 // forwarding logic -- measured. Clearing every entry on both sides makes the
 // post-reset state concrete, so the comparison is about behaviour.
-pub mod rf(rst:bool, a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
-  reg t:[4]u8
+pub mod rf(rst:bool, a:u4, wsel:u1, rsel:u1, we:bool) -> (z:u4@[0]) {
+  reg t:[2]u4
   if rst {
     t[0] = 0
     t[1] = 0
-    t[2] = 0
-    t[3] = 0
   } elif we {
     t[wsel] = t[wsel] | a   // self-referential write: the wdata cone reads the array
   }

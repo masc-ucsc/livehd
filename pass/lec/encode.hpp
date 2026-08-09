@@ -72,6 +72,14 @@ struct Encoded {
   // hierarchical-verify scheduler.
   absl::flat_hash_set<int>              prop_top;
   absl::flat_hash_map<int, std::string> prop_instance;
+  // Assume occurrences pass.formal ACCEPTED as active hypotheses (it stamped the
+  // `proven` attr: assume_nocheck, a selected-top IO assume, or every assume
+  // under formal.assume_check=false). An assume it left as a runtime check —
+  // checked but never discharged — is NOT here, and neither is any assume in a
+  // library pass.formal never ran on (a `lg:` input, or an O0 side). Asserting
+  // one of those as a LEC hypothesis restricts the compared input space on no
+  // proof at all, which turns a real difference into a PROVEN verdict.
+  absl::flat_hash_set<int>              prop_active_assume;
 
   // M4 memory state. Each Memory cell is cut like a Flop: its current contents
   // are an SMT array symbol (shared across the two designs by mem_state_key, so

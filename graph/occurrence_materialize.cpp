@@ -3,6 +3,7 @@
 #include "occurrence_materialize.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <format>
 #include <string>
 #include <utility>
@@ -93,10 +94,22 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
   // there) is worse than an unexpanded one, because a caller that keeps going
   // on the -1 return then emits count+1 physical instances. The checks mirror
   // the wiring loops one-for-one, so the loops' own guards stay as a backstop.
-  if (desc.index_input) {
-    for (uint64_t r = 0; r < desc.count; ++r) {
-      (void)desc.index_at(r);  // the native descriptor validated the complete domain at attach/load
+  // HHDS reports a malformed descriptor by THROWING (Subnode_group::validate,
+  // which SubnodeOccurrenceRange::begin() calls below, and Subnode_loop::
+  // index_at), while this transform and every one of its callers signal failure
+  // by returning false/-1 and have no try/catch. Run both checks HERE, in the
+  // pre-flight, and convert: an escaping std::logic_error kills the whole `lhd`
+  // command with a bare message, no source location, and no `cannot expand
+  // replicated instance` diagnostic.
+  try {
+    inst.subnode_group().validate();
+    if (desc.index_input) {
+      for (uint64_t r = 0; r < desc.count; ++r) {
+        (void)desc.index_at(r);  // the native descriptor validated the complete domain at attach/load
+      }
     }
+  } catch (const std::exception& e) {
+    return fail(e.what());
   }
   for (const auto& c : carries) {
     if (!boundary.in_driver.contains(static_cast<uint32_t>(c.input_port()))) {
@@ -356,6 +369,27 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
 
 }  // namespace
 
+bool materialize_occurrence(hhds::Graph* g, const hhds::Node_class& inst, std::string_view from_pass) {
+  if (g == nullptr || !inst.is_loop_subnode()) {
+    return false;
+  }
+  auto desc = inst.subnode_loop();
+  if (!desc) {
+    livehd::diag::err(from_pass, "replica-desc-unreadable", "unsupported")
+        .msg("instance '{}' is marked as a loop Sub but has no native descriptor", default_instance_name(inst))
+        .emit();
+    return false;
+  }
+  try {
+    return expand_one(g, inst, *desc, from_pass);
+  } catch (const std::exception& e) {
+    livehd::diag::err(from_pass, "replica-expand", "internal")
+        .msg("cannot expand replicated instance '{}': {}", default_instance_name(inst), e.what())
+        .emit();
+    return false;
+  }
+}
+
 int materialize_occurrences(hhds::Graph* g, std::string_view from_pass) {
   if (g == nullptr) {
     return 0;
@@ -382,7 +416,18 @@ int materialize_occurrences(hhds::Graph* g, std::string_view from_pass) {
   // a site's module-scoped ordinal base from earlier compact loop sites; those
   // descriptors must still be present when a later site is formatted.
   for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
-    if (!expand_one(g, it->first, it->second, from_pass)) {
+    // Backstop for the same throw-vs-return mismatch expand_one's pre-flight
+    // converts: any HHDS descriptor accessor it reaches later must still surface
+    // as the documented -1 refusal, never as an exception through every pass.
+    bool ok = false;
+    try {
+      ok = expand_one(g, it->first, it->second, from_pass);
+    } catch (const std::exception& e) {
+      livehd::diag::err(from_pass, "replica-expand", "internal")
+          .msg("cannot expand replicated instance '{}': {}", default_instance_name(it->first), e.what())
+          .emit();
+    }
+    if (!ok) {
       return -1;
     }
     ++expanded;

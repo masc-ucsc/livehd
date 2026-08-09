@@ -396,7 +396,7 @@ Design_clocks::Design_clocks(hhds::Graph* g, bool hier, const ankerl::unordered_
     if (root.is_invalid()) {
       return;
     }
-    roots_.insert(root.get_class_index());
+    roots_.insert(root_key(root));
     if (gu::is_graph_input_pin(root)) {
       input_names_.insert(std::string(gu::pin_name_of(root)));
     }
@@ -434,7 +434,7 @@ bool Design_clocks::is_clock(const hhds::Pin_class& root) const {
   if (root.is_invalid()) {
     return false;
   }
-  if (roots_.contains(root.get_class_index())) {
+  if (roots_.contains(root_key(root))) {
     return true;
   }
   // Name fallback, ONLY for a graph input. An internal node's name is a
@@ -452,7 +452,10 @@ bool Design_clocks::is_clock(const hhds::Occurrence_pin& root) const {
   if (root.is_invalid()) {
     return false;
   }
-  if (roots_.contains(root.get_class_index())) {
+  // Keyed by (body gid, class index): the occurrence PATH is deliberately not
+  // part of the key — a clock root of body B is a clock root at every occurrence
+  // of B — but the body identity is, or bodies alias (see Root_key).
+  if (roots_.contains(root_key(root))) {
     return true;
   }
   return gu::is_graph_input_pin(root) && name_looks_like_clock(gu::pin_name_of(root));

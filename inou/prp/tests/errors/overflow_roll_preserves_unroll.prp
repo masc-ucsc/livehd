@@ -1,0 +1,14 @@
+/*
+:name: overflow_roll_preserves_unroll
+:type: error
+:set: compile.upass.roll=true
+:error: does not fit
+*/
+// The rolled body would be analyzed only once and hide the accumulated range.
+// An all-comptime carry therefore remains source-unrolled so the fourth write
+// still exposes 20 against u4 [0,15].
+
+mut acc:u4 = 0
+for i in 0..<4 {
+  acc = acc + 5
+}

@@ -140,7 +140,14 @@ private:
         do_timecheck(c);
       } else if (is_meet_op(t)) {
         do_meet_op(c);
-      } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t) || N::is_tick(t)) {
+      } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t) || N::is_rolled_for(t) || N::is_tick(t)) {
+        // `rolled_for` belongs here, not in the generic else: it is a `for` that
+        // upass.roll kept compact, so it writes every carry/final in its source
+        // body and its lowering payload calls the lifted module. The generic
+        // branch forgets only the first ref child — the loop INDEX — leaving the
+        // carries with their PRE-loop cycle, so a landing check like `acc@[2]`
+        // would be validated against the wrong cycle (the unrolled build of the
+        // same source gets it right).
         // Branch-written values need the LG checker's classification; mark
         // every name written inside as unknown. Checks inside stay for LG.
         forget_written(c);

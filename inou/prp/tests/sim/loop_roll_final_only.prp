@@ -1,0 +1,25 @@
+/*
+:name: loop_roll_final_only
+:type: simulation
+:set: compile.upass.roll=true
+:expect_instances: u_loop_0=1 *=1
+*/
+// `z` has no value entering ordinal zero. Every iteration defines it, and no
+// iteration reads an earlier value, so it is a final-only output sourced from
+// the last occurrence rather than a carry with an undriven seed.
+
+mod loop_roll_final_only(x:u8) -> (z:u9@[0]) {
+  for i in 0..<4 {
+    z = x + i
+  }
+}
+
+test loop_roll_final_only.last_occurrence {
+  mut dut = loop_roll_final_only
+
+  tick 3 {
+    dut.x = clock * 5
+    step
+    assert(dut.z == (clock * 5) + 3, "final-only output comes from ordinal three")
+  }
+}

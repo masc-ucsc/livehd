@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "diag.hpp"
@@ -305,13 +307,22 @@ void Pass_formal::work(Eprp_var& var) {
   // constraint; one refuted/unknown checked assumption is a build error.
   if (truthy(var.get("hier_preflight", "true"))) {
     struct Hier_prop_state {
-      int  total     = 0;
-      int  proven    = 0;
-      bool unchecked = false;
-      bool failed    = false;
+      hhds::Node_class node;       // the definition-level fproperty to discharge
+      int              total     = 0;
+      int              proven    = 0;
+      bool             unchecked = false;
+      bool             failed    = false;
     };
-    absl::flat_hash_map<hhds::Node_class, Hier_prop_state> hier_props;
-    absl::flat_hash_map<hhds::Gid, hhds::Graph*>           sub_lib;
+    // hhds::Node_class hashes and compares on raw_nid ALONE (nids are per-body
+    // and start small, so two module bodies collide routinely). Every other user
+    // keys within one graph; this is the one map filled from a CROSS-GRAPH
+    // occurrence walk, so key on (gid, nid) or unrelated properties alias into a
+    // single entry and only one of them is ever discharged.
+    using Prop_key  = std::pair<hhds::Gid, hhds::Nid>;
+    auto  prop_key  = [](const hhds::Node_class& n) { return Prop_key{n.get_graph()->get_gid(), n.get_debug_nid()}; };
+
+    absl::flat_hash_map<Prop_key, Hier_prop_state> hier_props;
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*>   sub_lib;
     for (auto& gp2 : var.graphs) {
       if (gp2) {
         sub_lib[gp2->get_gid()] = gp2.get();
@@ -324,26 +335,11 @@ void Pass_formal::work(Eprp_var& var) {
       return (!designated_top.empty() && (gname == designated_top || gmod == designated_top))
              || (designated_top.empty() && !instantiated_gids.contains(g->get_gid()));
     };
-    for (auto& root_sp : var.graphs) {
-      auto* root = root_sp.get();
-      if (root == nullptr || !is_designated_top(root)) {
-        continue;
-      }
-      livehd::lec::Lec_options ho;
-      ho.engine  = "bmc";
-      ho.solver  = "cvc5";
-      ho.bound   = bmc_bound;
-      ho.timeout = 0;
-      ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
-      ho.partitions     = 1;
-      ho.split          = "none";
-      ho.state_pairing  = false;
-      ho.assume_check   = truthy(var.get("assume_check", "true"));
-      ho.ignore_assumes = false;
-      auto hr           = livehd::lec::prove_properties(root, ho, &sub_lib);
-
-      std::vector<hhds::Occurrence_node> occurrences;
-      for (auto pn : root->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
+    // Every fproperty occurrence of `g` whose `cond` is actually driven, in the
+    // encoder's own occ walk order (what prove_properties correlates against).
+    auto prop_occurrences = [](hhds::Graph* g) {
+      std::vector<hhds::Occurrence_node> out;
+      for (auto pn : g->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
         if (gu::type_op_of(pn) != Ntype_op::Sub) {
           continue;
         }
@@ -360,15 +356,72 @@ void Pass_formal::work(Eprp_var& var) {
           }
         }
         if (connected) {
-          occurrences.push_back(pn);
+          out.push_back(pn);
         }
       }
+      return out;
+    };
+
+    // Design-wide occurrence census. The preflight below only SOLVES under the
+    // designated top, but a definition-level fproperty can also be reached
+    // through a DIFFERENT root; discharging it after proving one root's bindings
+    // would silently drop the constraint from the other (and from the module's
+    // own flat pass). The census walk is structural — no solver — so count every
+    // root and discharge only a definition whose every occurrence was proven.
+    absl::flat_hash_map<Prop_key, int> design_occ;
+    for (auto& root_sp : var.graphs) {
+      auto* root = root_sp.get();
+      if (root == nullptr || (instantiated_gids.contains(root->get_gid()) && !is_designated_top(root))) {
+        continue;
+      }
+      for (const auto& occ : prop_occurrences(root)) {
+        ++design_occ[prop_key(occ.base_node())];
+      }
+    }
+
+    for (auto& root_sp : var.graphs) {
+      auto* root = root_sp.get();
+      if (root == nullptr || !is_designated_top(root)) {
+        continue;
+      }
+      // Collect FIRST: a design with no contract at all must not pay for a
+      // whole-design SMT encode + solve, and that is the common compile.
+      auto occurrences = prop_occurrences(root);
+      if (occurrences.empty()) {
+        continue;
+      }
+      livehd::lec::Lec_options ho;
+      ho.engine  = "bmc";
+      ho.solver  = "cvc5";
+      ho.bound   = bmc_bound;
+      ho.timeout = 0;
+      ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      ho.partitions     = 1;
+      ho.split          = "none";
+      ho.state_pairing  = false;
+      ho.assume_check   = truthy(var.get("assume_check", "true"));
+      ho.ignore_assumes = false;
+      // Same reset spec as the assert path below: without it the preflight cuts
+      // the state free from cycle 0 and refutes true constraints (e.g. `cnt < 8`
+      // on a reset-to-zero counter) at an unreachable initial state — exactly
+      // what the `reset` knob exists to prevent.
+      ho.reset_cycles = 1;
+      ho.phase        = "after_reset";
+      ho.reset        = std::string{var.get("reset", "")};
+      auto hr         = livehd::lec::prove_properties(root, ho, &sub_lib);
+
       if (occurrences.size() != hr.props.size()) {
-        livehd::diag::err("pass.formal", "hier-property-correlation", "internal")
-            .msg("hierarchical property correlation failed for '{}': {} occurrence(s), {} result(s)",
+        // The encoder refused (oversize design, unorderable cone) or returned a
+        // partial result. The correlation is POSITIONAL, so a mismatch means we
+        // cannot say which verdict belongs to which property. Skipping the root
+        // is conservative — nothing is discharged, every contract stays live as
+        // a runtime check — so it must not fail an otherwise valid compile.
+        livehd::diag::warn("pass.formal", "hier-property-correlation", "internal")
+            .msg("hierarchy contract preflight skipped for '{}': {} occurrence(s), {} result(s)",
                  root->get_name(),
                  occurrences.size(),
                  hr.props.size())
+            .hint("contracts stay active; `lhd formal verify` / `lhd lec` still adjudicate them")
             .emit();
         continue;
       }
@@ -377,7 +430,8 @@ void Pass_formal::work(Eprp_var& var) {
         if (pr.kind != "assume") {
           continue;  // hierarchy preflight owns contract assumptions only
         }
-        auto& st = hier_props[occurrences[i].base_node()];
+        auto& st = hier_props[prop_key(occurrences[i].base_node())];
+        st.node  = occurrences[i].base_node();
         ++st.total;
         if (livehd::lec::is_unchecked_assume_class(pr.aclass)) {
           st.unchecked = true;
@@ -407,9 +461,15 @@ void Pass_formal::work(Eprp_var& var) {
       }
     }
     std::vector<hhds::Node_class> discharged;
-    for (const auto& [node, st] : hier_props) {
-      if (st.total > 0 && st.proven == st.total && !st.unchecked && !st.failed) {
-        discharged.push_back(node);
+    for (const auto& [key, st] : hier_props) {
+      const auto it           = design_occ.find(key);
+      const int  design_total = (it == design_occ.end()) ? st.total : it->second;
+      // st.total == design_total: every occurrence the design has was reached and
+      // proven here. Fewer means some parent outside the preflight roots still
+      // binds this contract, and deleting the definition would drop a live
+      // constraint from that parent (and from the module's own flat pass).
+      if (st.total > 0 && st.proven == st.total && st.total == design_total && !st.unchecked && !st.failed) {
+        discharged.push_back(st.node);
       }
     }
     for (auto& node : discharged) {
@@ -497,6 +557,16 @@ void Pass_formal::work(Eprp_var& var) {
     // self-proof). Only PROVEN assumes become hypotheses for the asserts below
     // (sound: proven facts) and are exposed to pass.abc as don't-cares.
     std::vector<hhds::Pin_class> proven_assumes;
+    // Set when a hypothesis was ACCEPTED WITHOUT PROOF (assume_nocheck, an
+    // unreachable top IO assume, or formal.assume_check=false). Such a hypothesis
+    // can be false — or jointly contradictory — so the elisions it enables are
+    // conditional and the obligations must stay in the persisted graph for
+    // `lhd formal verify` / `lhd lec` to re-adjudicate.
+    bool unchecked_hypotheses = false;
+    // The assume NODES stamped proven WITHOUT proof. Individually-proven assumes
+    // are all true in the design simultaneously, so a joint contradiction can only
+    // come from this set — and only this set has to be retracted below.
+    std::vector<hhds::Node_class> unchecked_assume_nodes;
     for (auto& node : props) {
       auto parts = fprop_parts(node);
       if (!livehd::lec::is_assume_kind(parts.kind)) {
@@ -510,6 +580,8 @@ void Pass_formal::work(Eprp_var& var) {
       if (!assume_check || explicit_nocheck) {
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);
+        unchecked_assume_nodes.push_back(node);
+        unchecked_hypotheses = true;
         if (warn_assume) {
           livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
               .msg("assume in '{}'{} is active but UNCHECKED ({})",
@@ -531,6 +603,8 @@ void Pass_formal::work(Eprp_var& var) {
         // verify/LEC and by the hierarchy-aware compile preflight below.
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);
+        unchecked_assume_nodes.push_back(node);
+        unchecked_hypotheses = true;
         if (warn_assume) {
           livehd::diag::warn("pass.formal", "formal-top-assume", "comptime")
               .msg("top-level IO assume in '{}'{} cannot be checked; treating it as assume_nocheck",
@@ -567,6 +641,32 @@ void Pass_formal::work(Eprp_var& var) {
     }
     for (auto& c : proven_assumes) {
       prover.assume(c);  // sound hypotheses for the assert queries
+    }
+    // A CONTRADICTORY hypothesis set proves EVERYTHING: `assume_nocheck(a < 4)`
+    // plus `assume_nocheck(a >= 4)` would discharge a knowingly-false assert and
+    // elide its runtime check. Proven assumes are consistent by construction (the
+    // design realizes them), but nothing establishes that for the unchecked ones,
+    // so probe once — the same guard pass/lec applies before trusting an
+    // assumption-conditioned verdict — and drop them all on a confirmed
+    // contradiction so every assert below stays a runtime check.
+    if (unchecked_hypotheses && !prover.assumes_consistent()) {
+      livehd::diag::err("pass.formal", "assume-contradiction", "comptime")
+          .msg("the active assumptions of '{}' are jointly unsatisfiable: every assertion would prove vacuously", g->get_name())
+          .hint("fix the contradicting assume(s); until then the assumptions are ignored and assertions stay runtime checks")
+          .deferred()
+          .emit();
+      prover.clear_assumes();
+      // Dropping the solver hypotheses is not enough: the unchecked assumes were
+      // already stamped `proven`, and EVERY downstream consumer reads that
+      // attribute off the persisted graph — cgen elides their runtime check
+      // (cgen_verilog.cpp), and pass/lec/encode.cpp seeds prop_active_assume from
+      // it, so a later `lhd lec` would assert this known-UNSAT pair. Retract the
+      // stamp so the promise made by the hint above ("the assumptions are ignored
+      // and assertions stay runtime checks") holds outside pass.formal too.
+      for (auto& an : unchecked_assume_nodes) {
+        gu::clear_proven(an);
+        gu::set_runtime_check(an, gu::kFormalAssume);
+      }
     }
 
     // R1 Phase 2 — ANTECEDENT vacuity at the COMPILE tier. A property written
@@ -792,7 +892,14 @@ void Pass_formal::work(Eprp_var& var) {
     // the occurrence-aware hierarchy preflight above, while an unchecked/top IO
     // assume is marked proven solely to make it an active hypothesis and must
     // remain in the design for verify and LEC.
-    if (truthy(var.get("hier_preflight", "true"))) {
+    //
+    // ...and only when NO unchecked hypothesis was in play: under an unproven
+    // assume the proof is conditional, so deleting the node would leave the
+    // emitted lg library with zero obligations (`lhd formal verify lg:X` green
+    // while proving nothing) and no runtime check either. There the `proven`
+    // attribute alone is the right outcome: cgen still elides, verify/LEC can
+    // still re-adjudicate against their own assumptions.
+    if (truthy(var.get("hier_preflight", "true")) && !unchecked_hypotheses) {
       std::vector<hhds::Node_class> proved_asserts;
       for (auto& node : props) {
         auto parts = fprop_parts(node);
