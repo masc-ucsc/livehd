@@ -458,11 +458,21 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
   }
 }
 
-static int design_assume_occurrences(hhds::Graph* top) {
+// One side's design-authored assume census. `active` is what the encoder will
+// actually ASSERT as a miter hypothesis; `undischarged` is the subset that
+// became a hypothesis without ever being PROVED, with `undischarged_loc` naming
+// the first one (see the refusal in run_lec).
+struct Design_assume_census {
+  int         active       = 0;
+  int         undischarged = 0;
+  std::string undischarged_loc;
+};
+
+static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
+  Design_assume_census census;
   if (top == nullptr) {
-    return 0;
+    return census;
   }
-  int count = 0;
   for (auto node : top->occurrences().nodes(hhds::Node_order::forward)) {
     if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
       continue;
@@ -484,9 +494,24 @@ static int design_assume_occurrences(hhds::Graph* top) {
     if (!livehd::graph_util::has_proven(node.base_node())) {
       continue;
     }
-    ++count;
+    ++census.active;
+    // pass.formal stamps an assume BOTH `proven` and `runtime_check` in exactly
+    // ONE case: a selected-top IO `assume` it could not discharge (see
+    // pass_formal.cpp — `proven` publishes the hypothesis, `runtime_check` keeps
+    // the still-unproved obligation in the netlist). Every other stamped assume
+    // — assume_nocheck, formal.assume_check=false, a genuinely proven one —
+    // carries `proven` ALONE, so the pair is an exact "accepted without proof"
+    // discriminator on a persisted graph.
+    if (livehd::graph_util::has_runtime_check(node.base_node())) {
+      ++census.undischarged;
+      if (census.undischarged_loc.empty()) {
+        const auto k            = raw.find('\x1f');  // "kind\x1floc\x1fmsg"
+        const auto l            = raw.find('\x1f', k + 1);
+        census.undischarged_loc = std::string{raw.substr(k + 1, l == std::string_view::npos ? std::string_view::npos : l - k - 1)};
+      }
+    }
   }
-  return count;
+  return census;
 }
 
 // Bottom-up hierarchical LEC driver (formal.lec.hier=true). Build the module-def
@@ -3335,7 +3360,36 @@ void lec_command(Options& opts, Result& res) {
   // obligation.  What remains is active by contract (explicit nocheck,
   // selected-top IO, or all assumptions when checking is disabled), and must
   // constrain both the flat and hierarchical cvc5 translations.
-  o.unchecked_assumes = design_assume_occurrences(ref_g.get()) + design_assume_occurrences(impl_g.get());
+  const auto ref_assumes  = design_assume_occurrences(ref_g.get());
+  const auto impl_assumes = design_assume_occurrences(impl_g.get());
+  // ...with ONE exception, and it is lec-specific. pass.formal promotes an
+  // UNDISCHARGED selected-top IO `assume` to an active hypothesis because a top
+  // has no parent that could establish it. That is defensible for `lhd formal
+  // verify`: the constraint conditions that ONE design's own assertions, and
+  // every verdict line discloses it. lec is a TWO-sided obligation over SHARED
+  // inputs, so the same promotion narrows the compared input space of a miter
+  // whose OTHER side never made the claim — `--ref golden.v --impl design.prp`
+  // with `assume(a < 4)` in the impl reports "PROVEN equivalent" and exits 0 for
+  // designs that differ at every a >= 4. A false PROVEN is the one verdict a LEC
+  // tool may never hand out, and the user asked for the constraint to be CHECKED,
+  // so refuse instead of guessing — the same "refuse loudly rather than silently
+  // ignore" rule the formal-block sidecar above follows. Both sanctioned
+  // spellings still constrain the miter, they just say so in the source.
+  if (ref_assumes.undischarged > 0 || impl_assumes.undischarged > 0) {
+    const bool  on_ref  = ref_assumes.undischarged > 0;
+    const bool  on_impl = impl_assumes.undischarged > 0;
+    std::string side    = on_ref && on_impl ? "ref and impl" : (on_ref ? "ref" : "impl");
+    std::string loc     = on_ref ? ref_assumes.undischarged_loc : impl_assumes.undischarged_loc;
+    throw Lhd_error{"unsupported",
+                    std::format("lec: the {} side has {} top-level IO assume(s) that were never discharged{} — accepting "
+                                "them as miter hypotheses would restrict the compared input space without proof",
+                                side,
+                                ref_assumes.undischarged + impl_assumes.undischarged,
+                                loc.empty() ? std::string{} : " (first at " + loc + ")"),
+                    "spell it assume_nocheck (a disclosed free environment contract) or pass --set "
+                    "formal.assume_check=false: either one keeps it in force over the whole miter, on the record"};
+  }
+  o.unchecked_assumes = ref_assumes.active + impl_assumes.active;
   o.design_assumes    = o.unchecked_assumes > 0;
   o.assumption_key    = std::format("design:{}:{}", o.unchecked_assumes, assume_check ? 1 : 0);
   o.engine            = label("engine", "auto");

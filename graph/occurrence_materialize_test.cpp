@@ -160,6 +160,22 @@ TEST(ReplicaExpand, ExpandsToOneInstancePerOrdinal) {
   }
 }
 
+// pass.color runs long before pass.partition/pass.abc copy the design into the
+// scratch they materialize, and both then key their regions off the color. An
+// uncolored replica would silently join the color-0 region instead.
+TEST(ReplicaExpand, ColorRidesEveryOccurrence) {
+  auto f = build_compact("lgdb_rexp_color", 4);
+  gu::set_color(f.compact, 7);
+
+  ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 1);
+
+  auto reps = subs_by_index(f.parent.get());
+  ASSERT_EQ(reps.size(), 4u);
+  for (std::size_t r = 0; r < reps.size(); ++r) {
+    EXPECT_EQ(gu::color_of(reps[r]), 7) << "ordinal " << r << " must stay in the region the compact node belonged to";
+  }
+}
+
 TEST(ReplicaExpand, MultipleSitesShareModuleOrdinalSpace) {
   auto f      = build_compact("lgdb_rexp_multi_site", 4);
   auto second = gu::create_typed_node(*f.parent, Ntype_op::Sub);

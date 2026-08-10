@@ -377,9 +377,11 @@ public:
   // traversal-order occurrence counters, whose order could disagree both with
   // the other design's encode and with query.cpp's own builders (the latter
   // silently degraded a stateful box to a stateless one — a false-PASS
-  // hazard). A node absent from the map gets a per-encode "?" key: its
-  // outputs stay UNSHARED and its obligations one-sided, which the miters
-  // gate to an incomplete correspondence (never a false verdict).
+  // hazard). Once this map is set, a box node ABSENT from it is a hard encode
+  // error (ok=false -> INCONCLUSIVE), not a degraded key: the builder walks the
+  // same hierarchy with the same predicate, so a miss means the two walks
+  // drifted apart and any key invented here could alias a different instance.
+  // Unset (a bare Encoder user) keeps the legacy per-encode occurrence counter.
   void set_box_keys(const Io_name_map<std::string>* k) { box_keys_ = k; }
 
   // Encode the combinational logic of `g`.

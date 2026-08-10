@@ -63,6 +63,56 @@ grep -q 'REFUTED' "$W/plain.out" \
   || { cat "$W/plain.out" >&2; fail "the no-assumption mismatch did not report REFUTED"; }
 echo "PASS: removing the assumption exposes the mismatch"
 
+# A CHECKED `assume` on a selected-top input is a different animal from the
+# assume_nocheck contract above. pass.formal cannot discharge it (a top has no
+# parent that could bind it) and promotes it to an active hypothesis anyway, so
+# that `lhd formal verify` can condition the design's OWN assertions on it. lec's
+# obligation is TWO-sided over SHARED inputs: taking the unproved promotion would
+# narrow the miter of a comparison whose ref never made the claim — `o = a & 3`
+# vs `o = a` differ at every a >= 4 and would come back "PROVEN equivalent" with
+# exit 0. lec must refuse instead, and name the spellings that DO constrain it.
+cat >"$W/uncheckable.prp" <<'EOF'
+pub comb dut(a:u8) -> (o:u8) {
+  assume(a < 4)
+  o = a & 3
+}
+EOF
+cat >"$W/golden.v" <<'EOF'
+module dut(input [7:0] a, output [7:0] o);
+  assign o = a;
+endmodule
+EOF
+if "$LHD" lec --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
+     --workdir "$W/uncheckable_w" >"$W/uncheckable.out" 2>&1; then
+  cat "$W/uncheckable.out" >&2
+  fail "an undischarged top IO assume must never become a LEC hypothesis"
+fi
+grep -q 'never discharged' "$W/uncheckable.out" \
+  || { cat "$W/uncheckable.out" >&2; fail "the refusal must say the assume was never discharged"; }
+grep -q 'assume_nocheck' "$W/uncheckable.out" \
+  || { cat "$W/uncheckable.out" >&2; fail "the refusal must name the sanctioned spelling"; }
+echo "PASS: lec refuses an undischarged top IO assume instead of proving under it"
+
+# ...and the refusal is about the missing DISCLOSURE, not about assumptions in
+# lec: either sanctioned spelling of the same constraint still narrows the miter
+# and proves it (a & 3 == a for every a < 4).
+sed 's/assume(/assume_nocheck(/' "$W/uncheckable.prp" >"$W/contracted.prp"
+if ! "$LHD" lec --ref "$W/golden.v" --impl "$W/contracted.prp" --top dut \
+     --workdir "$W/contracted_w" >"$W/contracted.out" 2>&1; then
+  cat "$W/contracted.out" >&2
+  fail "the assume_nocheck spelling must still constrain the miter and prove"
+fi
+grep -q 'PROVEN under 1 unchecked assume' "$W/contracted.out" \
+  || { cat "$W/contracted.out" >&2; fail "the disclosed contract run must report its active assumption"; }
+if ! "$LHD" lec --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
+     --set formal.assume_check=false --workdir "$W/nocheck_w" >"$W/nocheck.out" 2>&1; then
+  cat "$W/nocheck.out" >&2
+  fail "formal.assume_check=false must accept the same constraint"
+fi
+grep -q 'PROVEN under 1 unchecked assume' "$W/nocheck.out" \
+  || { cat "$W/nocheck.out" >&2; fail "the assume_check=false run must report its active assumption"; }
+echo "PASS: both sanctioned spellings still constrain the miter"
+
 # Even a structurally identical self-LEC must check its active environment:
 # two explicit constraints whose conjunction is empty may not be laundered by
 # the hierarchy's no-solver structural-identity shortcut.

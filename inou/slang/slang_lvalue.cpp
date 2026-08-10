@@ -483,21 +483,31 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
     r = &r->as<slang::ast::ConversionExpression>().operand();
   }
 
-  // `io = '{...}` assignment pattern: write each leaf from its corresponding
-  // field expression. A structured pattern's raw elements() are syntax order
-  // (`cause:`, `interrupt:`, `default:`), not declaration order, so resolve its
-  // member/type/default selectors first.
+  // `io = '{...}` assignment pattern: slang resolves elements in field order, so
+  // element[i] is field[i]'s value — including for a STRUCTURED (`cause:`,
+  // `interrupt_x:`, `default:`) pattern, whose named/type/default keys forStruct
+  // has already expanded into one per-field element, each re-bound at that
+  // field's type. Write each leaf from its element directly.
   std::span<const slang::ast::Expression* const> elems;
-  std::vector<const slang::ast::Expression*>     resolved_elems;
   bool                                           is_pattern = true;
   switch (r->kind) {
     case ExpressionKind::SimpleAssignmentPattern:
       elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements();
       break;
-    case ExpressionKind::StructuredAssignmentPattern:
-      resolved_elems = resolve_structured_pattern(r->as<slang::ast::StructuredAssignmentPatternExpression>());
-      elems          = resolved_elems;
+    case ExpressionKind::StructuredAssignmentPattern: {
+      // One exception to "element[i] is field[i]": an `index:` key, which only a
+      // packed-ARRAY pattern can carry and which slang orders ascending, not
+      // MSB-first (see the guard in lower_rvalue's StructuredAssignmentPattern
+      // case). Leave those to the whole-value slice below, which routes through
+      // lower_rvalue and emits that diagnostic instead of a wrong per-leaf write.
+      const auto& sap = r->as<slang::ast::StructuredAssignmentPatternExpression>();
+      if (sap.indexSetters.empty()) {
+        elems = sap.elements();
+      } else {
+        is_pattern = false;
+      }
       break;
+    }
     case ExpressionKind::ReplicatedAssignmentPattern:
       elems = r->as<slang::ast::ReplicatedAssignmentPatternExpression>().elements();
       break;

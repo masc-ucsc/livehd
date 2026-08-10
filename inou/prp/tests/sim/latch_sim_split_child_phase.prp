@@ -1,0 +1,45 @@
+/*
+:name: latch_sim_split_child_phase
+:type: simulation
+*/
+
+// A child with a transparent-low preview latch and a negedge commit register
+// needs both halves of the parent's period.  The latch must sample the parent's
+// PRE-rise state; the negedge register then commits at the fall.  Treating the
+// whole child as "negedge-only" delays its latch until after the parent posedge
+// and admits a newly-launched enable one period early.
+mod preview_commit(clk:bool, en_next:bool, d:u8) -> (q:u8@[0]) {
+  reg en_q:bool:[latch=true]
+  reg data_q:u8:[clock_pin=ref clk, posclk=false] = 0
+  q = data_q
+  if !clk {
+    en_q = en_next
+  }
+  if en_q {
+    data_q = d
+  }
+}
+
+pub mod split_child_top(clk:bool, launch:bool, d:u8)
+        -> (q:u8@[0], launch_q_o:bool@[]) {
+  reg launch_q:bool:[clock_pin=ref clk] = false
+  launch_q = launch
+  launch_q_o = launch_q
+  q = preview_commit(clk=clk, en_next=launch_q, d=d)
+}
+
+test split_child_top.latch_samples_before_parent_posedge {
+  mut acc = split_child_top
+  tick 6 {
+    acc.launch = clock == 2
+    acc.d = 100 + clock
+    step
+
+    assert(acc.launch_q_o == (clock == 2), "the parent posedge launch register is live")
+    if clock <= 2 {
+      assert(acc.q == 0, "the child latch does not see the parent's same-edge launch")
+    } elif clock >= 3 {
+      assert(acc.q == 103, "the following low window admits exactly the intended negedge write")
+    }
+  }
+}

@@ -520,15 +520,10 @@ private:
   void emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
-  // Resolve a named/type/default structured pattern to one expression per
-  // packed-struct field, in declaration (MSB-first) order. slang's raw
-  // elements() span is syntax order and is not field-expanded.
-  std::vector<const slang::ast::Expression*> resolve_structured_pattern(
-      const slang::ast::StructuredAssignmentPatternExpression& pattern) const;
   // Packed `'{...}` assignment pattern (simple/structured/replicated): elements
-  // passed here are resolved positionally MSB-first, so concatenate them like
-  // a concat. `type` must be integral (packed struct/array); unpacked targets
-  // are diagnosed by the caller.
+  // are already resolved positionally MSB-first, so concatenate them like a
+  // concat. `type` must be integral (packed struct/array); unpacked targets are
+  // diagnosed by the caller.
   std::string lower_assignment_pattern(const slang::ast::Expression& expr, std::span<const slang::ast::Expression* const> elems);
   std::string lower_conditional_expr(const slang::ast::ConditionalExpression& expr);
   // `{<<N{x}}` — slice into N-bit blocks and reverse their order (a byte swap

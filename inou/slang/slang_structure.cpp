@@ -246,7 +246,19 @@ struct Ff_blocking_collector : public slang::ast::ASTVisitor<Ff_blocking_collect
 // behaviour. So an unhandled statement kind reports every write beneath it as
 // definite, and only the shapes below — an `if` with no `else`, a `case` with no
 // `default` — actually produce a latch.
-void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out) {
+//
+// `strict` INVERTS that bias for a caller that needs a proof rather than a
+// guess: an unmodelled statement kind then reports NOTHING. The wire promotion
+// in lower_members is such a caller — there an over-report turns a
+// CONDITIONALLY stored net into a single-driver `wire`, the wrong direction.
+// `for (int i…) if (sel==i) s = …;` is the shape that separates the two modes:
+// the loop hits the `default` arm below, so the permissive mode calls that one
+// store definite even though `sel` may match no iteration and `s` then holds.
+// Neither mode models a `disable`-escape, the only control transfer that can
+// skip a write inside a modelled shape (`break`/`continue` need a loop, which is
+// unmodelled anyway, and `return` needs a function body, never descended into).
+void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out,
+                              bool strict = false) {
   using slang::ast::StatementKind;
   auto all_writes_below = [&](const slang::ast::Statement& s) {
     Write_collector wc;
@@ -258,10 +270,10 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       return;
     }
     absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
-    definite_blocking_writes(*arms.front(), acc);
+    definite_blocking_writes(*arms.front(), acc, strict);
     for (size_t i = 1; i < arms.size(); ++i) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
-      definite_blocking_writes(*arms[i], other);
+      definite_blocking_writes(*arms[i], other, strict);
       absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
       for (const auto* sym : acc) {
         if (other.contains(sym)) {
@@ -277,11 +289,11 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     case StatementKind::Empty: return;
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        definite_blocking_writes(*s, out);  // sequential: a later write still counts
+        definite_blocking_writes(*s, out, strict);  // sequential: a later write still counts
       }
       return;
-    case StatementKind::Block              : definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out); return;
-    case StatementKind::Timed              : definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out); return;
+    case StatementKind::Block              : definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, strict); return;
+    case StatementKind::Timed              : definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, strict); return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
       if (e.kind != ExpressionKind::Assignment) {
@@ -328,7 +340,12 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       intersect_into(arms);
       return;
     }
-    default: all_writes_below(stmt); return;  // bias to combinational (see above)
+    default:
+      if (strict) {
+        return;  // no proof this runs at all (a loop may iterate zero times)
+      }
+      all_writes_below(stmt);
+      return;  // bias to combinational (see above)
   }
 }
 
@@ -3497,7 +3514,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         proc_written.insert(d.writes.begin(), d.writes.end());
         const auto& pbs = d.member->as<slang::ast::ProceduralBlockSymbol>();
         pbs.getBody().visit(sc);
-        definite_blocking_writes(pbs.getBody(), definite_proc_written);
+        // STRICT: the wire promotion below treats "definitely written" as a
+        // licence to drop the accumulator, so it needs the proof, not the
+        // latch analysis' bias-to-combinational guess (which calls a store
+        // under an unmodelled statement — a loop, a `case … matches` — definite).
+        definite_blocking_writes(pbs.getBody(), definite_proc_written, /*strict=*/true);
       } else if (d.member->kind == SymbolKind::ContinuousAssign) {
         d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(sc);
       } else if (d.member->kind == SymbolKind::Instance) {
@@ -3623,11 +3644,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // partially / multiply written struct has no accumulator to fall back on: a
   // conditional write would branch-merge against the wire's own buffer output
   // (a self-loop), and co-writers would silently last-wins. Those keep `mut`.
-  // A single WHOLE procedural store that definite_blocking_writes proves runs
-  // on every path is also a valid one-driver wire; allowing it is essential for
-  // an always_comb struct value consumed by an earlier instance in a coarse
-  // false SCC. Instance-output and single-continuous-assign nets remain valid
-  // position-independent wires as before.
+  // A single WHOLE procedural store that STRICT definite_blocking_writes proves
+  // runs on every path is also a valid one-driver wire; allowing it is
+  // essential for an always_comb struct value consumed by an earlier instance
+  // in a coarse false SCC. Instance-output and single-continuous-assign nets
+  // remain valid position-independent wires as before.
   for (const auto& member : scope.members()) {
     if (member.kind != SymbolKind::Variable) {
       continue;

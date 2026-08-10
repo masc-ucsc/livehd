@@ -126,16 +126,22 @@ sh_test(
 # Named structured assignment patterns are resolved by field, with explicit
 # member setters overriding `default:`. This syntax is a slang-reader contract;
 # the legacy Yosys parser used by the other compile suite does not accept it.
+#
+# tests/sv/ is the home for slang-only POSITIVE fixtures, because neither sweep
+# directory can hold one: tests/verilog/ is swept at the `error` tier (a file
+# that compiles is a FAILURE there), and //inou/yosys:tests/*.v is globbed into
+# yosys_compile-* targets that this syntax would break. Pin new positive
+# slang-reader fixtures here, one explicit target each.
 sh_test(
     name = "slang_struct_pattern_named_default",
     size = "large",
     srcs = ["tests/slang_compile.sh"],
     args = [
         "lec",
-        "$(location tests/verilog/struct_pattern_named_default.v)",
+        "$(location tests/sv/struct_pattern_named_default.v)",
     ],
     data = [
-        "tests/verilog/struct_pattern_named_default.v",
+        "tests/sv/struct_pattern_named_default.v",
         "//lhd",
     ],
     deps = [

@@ -379,14 +379,28 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
     case ExpressionKind::SimpleAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::SimpleAssignmentPatternExpression>().elements());
     case ExpressionKind::StructuredAssignmentPattern: {
-      const auto& pattern = expr.as<slang::ast::StructuredAssignmentPatternExpression>();
-      auto        elems   = resolve_structured_pattern(pattern);
-      if (elems.empty()) {
-        emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
-                         "structured assignment pattern does not resolve to packed-struct fields");
-        return "0";
+      const auto& sap = expr.as<slang::ast::StructuredAssignmentPatternExpression>();
+      // slang's forFixedArray fills elements() ASCENDING (range.lower() ->
+      // range.upper()) while everything that consumes them — its own evalImpl's
+      // SVInt::concat, and lower_assignment_pattern below — reads elements()[0]
+      // as the MSB. The two only disagree when the elements DIFFER, i.e. when an
+      // `index:` key is present on a descending array: slang folds
+      // `logic [3:0][7:0] p = '{2: 8'hAA, default: '0}` to 0x0000_aa00, where
+      // verilator and the LRM (p[2] is bits [23:16]) say 0x00aa_0000. Refuse that
+      // shape instead of emitting the plausible-looking wrong bus — and refuse it
+      // here rather than "correcting" the order, since slang const-folds the same
+      // pattern in a localparam and the two spellings would then disagree.
+      // `default:`/`type:`-only patterns make every element identical, so their
+      // order cannot matter and they lower fine.
+      if (!sap.indexSetters.empty()) {
+        const auto& ct = expr.type->getCanonicalType();
+        if (ct.hasFixedRange() && ct.getFixedRange().isDescending() && sap.elements().size() > 1) {
+          emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
+                           "`index:` keys in a '{...} pattern over a descending packed array are not supported by --reader slang");
+          return "0";
+        }
       }
-      return lower_assignment_pattern(expr, elems);
+      return lower_assignment_pattern(expr, sap.elements());
     }
     case ExpressionKind::ReplicatedAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::ReplicatedAssignmentPatternExpression>().elements());
@@ -874,10 +888,21 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
 
 std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression&                     expr,
                                                     std::span<const slang::ast::Expression* const> elems) {
-  // `T'{...}` for a packed (integral) struct/array: elems is positional
-  // MSB-first, so the value is just the fields concatenated — same bit layout
-  // as a `{...}` concat. Unpacked targets (memories / unpacked-array vars) are
-  // a different lowering and stay unsupported here.
+  // `T'{...}` for a packed (integral) struct/array: slang resolves `elements()`
+  // positionally MSB-first, so the value is just the fields concatenated — same
+  // bit layout as a `{...}` concat of those fields. Unpacked targets (memories /
+  // unpacked-array vars) are a different lowering and stay unsupported here.
+  //
+  // Do NOT re-derive `elements()` from a structured pattern's member/type/default
+  // setters: slang's forStruct/forFixedArray already walk the fields (declaration
+  // order) or the indices and call matchElementValue for every one that no
+  // `name:`/`index:` key covered, which (a) applies the LAST matching `type:` key,
+  // per the LRM, and (b) re-BINDS the `default:` SYNTAX at the field type. That
+  // re-bind is the whole point: substituting the raw default expression makes each
+  // unset field contribute the default's self-determined width instead of its own
+  // (`cause_t'{cause: c, interrupt_x: i, default: '0}` then advances the offset by
+  // 1, not 58, and lands interrupt_x at bit 6 instead of 63 — silently wrong), and
+  // it drops packed-array patterns, which have no fields at all.
   if (!expr.type->isIntegral()) {
     emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
                      "only packed (integral) '{...} assignment patterns are supported by --reader slang yet");
@@ -897,42 +922,6 @@ std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression
   }
   return builder_.create_bit_or_stmts(parts);
 }
-
-std::vector<const slang::ast::Expression*> Slang_context::resolve_structured_pattern(
-    const slang::ast::StructuredAssignmentPatternExpression& pattern) const {
-  const auto& ct = pattern.type->getCanonicalType();
-  if (!ct.isStruct()) {
-    return {};
-  }
-
-  std::vector<const slang::ast::Expression*> resolved;
-  for (const auto& field : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
-    const slang::ast::Expression* value = nullptr;
-    for (const auto& setter : pattern.memberSetters) {
-      if (setter.member->name == field.name) {
-        value = setter.expr;
-        break;
-      }
-    }
-    if (value == nullptr) {
-      for (const auto& setter : pattern.typeSetters) {
-        if (setter.type->isMatching(field.getType())) {
-          value = setter.expr;
-          break;
-        }
-      }
-    }
-    if (value == nullptr) {
-      value = pattern.defaultSetter;
-    }
-    if (value == nullptr) {
-      return {};
-    }
-    resolved.push_back(value);
-  }
-  return resolved;
-}
-
 
 // `{<<N{x}}` / `{>>N{x}}` — the streaming (bit/byte reversal) operator.
 //

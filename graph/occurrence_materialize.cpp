@@ -181,11 +181,23 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       occurrence_name = std::format("{}__li{}", occ_base, r);
     }
     rep.set_name(occurrence_name);
-    // Carry the compact node's own annotations (srcid, color, ...) so
-    // provenance survives expansion; the descriptor itself must NOT ride along
+    // Carry the compact node's own annotations (srcid, color) so provenance and
+    // partitioning survive expansion; the descriptor itself must NOT ride along
     // (each occurrence is an ordinary instance now).
     if (auto s = inst.attr(hhds::attrs::srcid); s.has()) {
       rep.attr(hhds::attrs::srcid).set(s.get());
+    }
+    // pass.partition/pass.abc materialize into their own scratch copy AFTER
+    // pass.color ran, and then key regions off this attr (like flatten's
+    // carry_node_attrs does when it clones). An uncolored replica would join
+    // the color-0 region instead of the one the compact node belonged to.
+    // Flat `color` only: the per-instance `hier_color` is hier_storage, which a
+    // class-context handle cannot reach at all (its AttrRef asserts without a
+    // hierarchy context, the same reason clear_coloring clears that store
+    // wholesale), and its keys name occurrence paths this expansion is in the
+    // middle of dissolving.
+    if (has_color(inst)) {
+      set_color(rep, color_of(inst));
     }
     reps.emplace_back(rep);
   }

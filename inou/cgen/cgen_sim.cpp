@@ -1376,7 +1376,16 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // a nested negedge preview from retaining the prior cycle's input. Preserve a
 // Hotmux's full one-hot selector width independently of its result width. Let
 // reset_cycle(bool) supply zero for otherwise-uninitialized state (sim.init_zero).
-static constexpr std::string_view kSimGenVersion = "simgen-24";
+// simgen-25: the negedge refresh is STRUCTURAL (a callee whose only rise-half
+// state is a latch) rather than a whitelist of four port names, so every child
+// the latch classification moves out of `negedge_only` gets the compensating
+// refresh; a compact loop never propagates it (the wrapper declares no
+// refresh_negedge); a negedge-only child advanced in the parent's fall reads
+// its outputs from `__out`, not from a `cycle()` snapshot it never took; and an
+// unknown memory power-on fills per ENTRY instead of through one whole-array
+// Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
+// parent with a stale child that declares no `refresh_negedge()`.
+static constexpr std::string_view kSimGenVersion = "simgen-25";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -2863,31 +2872,35 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   std::vector<Sub>         subs;
   std::vector<std::string> sub_includes;  // distinct callee headers
   struct Phase_info {
-    bool posedge = false;
-    bool negedge = false;
-    bool refresh = false;
+    bool posedge = false;  // a FLOP that commits at the rise
+    bool negedge = false;  // a flop that commits at the fall
+    // LEVEL-SENSITIVE state. A Latch commits in the RISE sub-tick (the `flops`
+    // build above gives one posedge=true unconditionally: on a Latch `posclk`
+    // is the enable POLARITY, not an edge), so a child that owns one is not
+    // fall-only either. Tracked apart from `posedge` because the refresh
+    // predicate below has to tell the two apart.
+    bool latch   = false;
+    bool refresh = false;  // this graph has a descendant needing the refresh
   };
   absl::flat_hash_map<const hhds::Graph*, Phase_info> phase_memo;
   absl::flat_hash_set<const hhds::Graph*>             phase_visiting;
-  auto                                                is_two_read_preview = [](const hhds::Node_class& node) {
-    auto io = node.get_subnode_io();
-    if (!io) {
-      return false;
-    }
-    bool wr_data           = false;
-    bool wr_preview_enable = false;
-    bool rd_a              = false;
-    bool rd_b              = false;
-    for (const auto& d : io->get_input_pin_decls()) {
-      wr_data           |= d.name == "wr_data_i";
-      wr_preview_enable |= d.name == "wr_data_en_1p_next_i" && d.bits == 1;
-    }
-    for (const auto& d : io->get_output_pin_decls()) {
-      rd_a |= d.name == "rd_data_a_o";
-      rd_b |= d.name == "rd_data_b_o";
-    }
-    return wr_data && wr_preview_enable && rd_a && rd_b;
-  };
+  // Does this callee need the post-settle negedge refresh (`refresh_negedge`)?
+  // A child that owns BOTH rise-half and fall-half state runs its whole
+  // `cycle()` inside the parent's RISE, so its fall half samples inputs the
+  // parent has not committed yet -- one period stale, forever.
+  //
+  // Deliberately narrowed to the children whose rise-half state is a LATCH and
+  // nothing else, because those are EXACTLY the ones `latch` keeps out of
+  // `negedge_only` below: a fall-deferred child already sees post-rise inputs
+  // and needs no refresh, so the reclassification and its compensation always
+  // travel together (this used to be a whitelist of four port names, which
+  // compensated one of the three preview register files and left the other two
+  // reclassified-but-stale). A child that ALSO has a posedge flop was
+  // rise-scheduled long before any of this, and re-running its fall half is
+  // only sound while that half is a pure input capture -- a negedge flop whose
+  // next state reads its own Q would ADVANCE TWICE -- so that shape keeps the
+  // behavior it has always had.
+  const auto needs_neg_refresh = [](const Phase_info& i) { return i.negedge && i.latch && !i.posedge; };
   std::function<Phase_info(const std::shared_ptr<hhds::Graph>&)> graph_phases;
   graph_phases = [&](const std::shared_ptr<hhds::Graph>& pg) -> Phase_info {
     if (!pg) {
@@ -2902,7 +2915,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     Phase_info info;
     for (auto pn : pg->body().nodes()) {
       if (type_op_of(pn) == Ntype_op::Latch) {
-        info.posedge = true;
+        info.latch = true;
       } else if (is_type_flop(pn)) {
         bool pos = true;
         if (auto pc = get_driver(find_sink_pin(pn, "posclk")); !pc.is_invalid() && is_const_pin(pc)) {
@@ -2911,8 +2924,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         info.posedge |= pos;
         info.negedge |= !pos;
       } else if (is_type_sub(pn)) {
+        // MIRROR the filters the `subs` build below applies, or this summary
+        // and the callee's own `has_refresh` disagree and the parent emits a
+        // call to a `refresh_negedge()` the child never declares: a compact
+        // loop is dropped (`!loop` guards both refresh fields, and the wrapper
+        // struct has no refresh method at all), and so is anything that never
+        // becomes a `Sub` entry.
+        auto pio = pn.get_subnode_io();
+        if (!pio || pn.subnode_loop()) {
+          continue;
+        }
+        const std::string pname{pio->get_name()};
+        if (pname.empty() || pname == livehd::graph_util::lgassert_module_name
+            || pname == livehd::graph_util::fproperty_module_name) {
+          continue;
+        }
         const auto sub  = graph_phases(pn.get_subnode_graph());
-        info.refresh   |= (sub.posedge && sub.negedge && is_two_read_preview(pn)) || sub.refresh;
+        info.refresh   |= needs_neg_refresh(sub) || sub.refresh;
       }
     }
     phase_visiting.erase(pg.get());
@@ -2973,9 +3001,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     subs.push_back({node,
                     inst,
                     cpp_id(cname),
-                    !loop && child_phase.posedge && child_phase.negedge && is_two_read_preview(node),
+                    !loop && needs_neg_refresh(child_phase),
                     !loop && child_phase.refresh,
-                    child_phase.negedge && !child_phase.posedge,
+                    child_phase.negedge && !child_phase.posedge && !child_phase.latch,
                     loop,
                     std::move(carries),
                     // The wrapper struct is defined at GLOBAL scope in this
@@ -3931,24 +3959,27 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // reset. A runtime initializer counts as present but cannot be applied here,
     // so it receives an unspecified seeded value rather than being silently
     // replaced by zero.
+    //
+    // The unknown fill is PER ENTRY. A whole-array `apply_update(Slop<bits*size>
+    // ::unknown(...))` instantiates one Slop as wide as the array -- Slop<262144>
+    // for a 4096x64 memory -- so both host-compile time and stack footprint would
+    // scale with the array instead of with its entry width. Only the comptime
+    // `init` bus, which genuinely IS a whole-array value, keeps that shape.
+    const auto mem_unknown = absl::StrCat("Slop<", m.bits, ">::unknown(", m.bits, ")");
     if (!m.init.is_invalid() && is_const_pin(m.init)) {
       fout->append(absl::StrCat("    ", m.member, ".apply_update(", operand(m.init, m.bits * m.size), ");\n"));
     } else if (m.init.is_invalid() && m.reset.is_invalid()) {
-      const int W = m.bits * m.size;
       fout->append(absl::StrCat("    if (zero_uninitialized) ",
                                 m.member,
                                 ".fill(Slop<",
                                 m.bits,
-                                ">::create_integer(0)); else ",
+                                ">::create_integer(0)); else for (auto& __e : ",
                                 m.member,
-                                ".apply_update(Slop<",
-                                W,
-                                ">::unknown(",
-                                W,
-                                "));\n"));
+                                ") __e = ",
+                                mem_unknown,
+                                ";\n"));
     } else {
-      const int W = m.bits * m.size;
-      fout->append(absl::StrCat("    ", m.member, ".apply_update(Slop<", W, ">::unknown(", W, "));\n"));
+      fout->append(absl::StrCat("    for (auto& __e : ", m.member, ") __e = ", mem_unknown, ";\n"));
     }
     fout->append(absl::StrCat("    ", m.member, ".clear_pending();\n"));
     for (const auto& p : m.ports) {
@@ -4980,7 +5011,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } pop_a{&demand_stack};
         const std::string run_condition = sub_run_condition(ensure_fn, s);
         const bool        runtime_skip  = !run_condition.empty();
-        if (runtime_skip && !settle_mode) {
+        // A negedge-only child advances ONLY its fall half here (eval_negedge +
+        // a re-settle), never `cycle()`, so there is no `<inst>__o` snapshot to
+        // name: like settle mode, its outputs bind straight at `__out`, which
+        // the re-settle just refreshed. This IS reachable with `settle_mode`
+        // false -- the deferred_group advance clears it for exactly this case
+        // (advance = negedge_only ? Fall : Rise) -- and reading `<inst>__o`
+        // there named an undeclared identifier in the generated C++.
+        const bool        fall_advance  = fall && s.negedge_only;
+        const bool        out_is_member = settle_mode || fall_advance;
+        if (runtime_skip && !out_is_member) {
           // cycle() returns the pre-edge observation. Keep it outside the if so
           // downstream caller muxes can read a stable (masked) value when the
           // child is inactive.
@@ -5056,7 +5096,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // In settle mode the child is re-settled against the inputs just rebuilt
         // from the parent's COMMITTED state, and its outputs are read from its
         // own __out member. cycle() would advance it a second time in the period.
-        if (fall && s.negedge_only) {
+        if (fall_advance) {
           fout->append(absl::StrCat("    ", s.inst, ".eval_negedge();\n"));
           fout->append(absl::StrCat("    ", s.inst, ".__settle();\n"));
         } else if (settle_mode) {
@@ -5069,7 +5109,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (runtime_skip) {
           fout->append("    }\n");
         }
-        const std::string sub_out = settle_mode ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__o.");
+        const std::string sub_out = out_is_member ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__o.");
         for (const auto& d : sio->get_output_pin_decls()) {
           auto opin = find_driver_pin(node, d.name);
           if (!opin.is_invalid()) {

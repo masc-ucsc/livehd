@@ -2613,9 +2613,27 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // their boxes to correspond), else the full per-side name.
       const std::string defkey         = canon_def(in_ref, defname);
       const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
-      // Mirror encode.cpp exactly: a sub with a body is DESCENDED (not a box)
-      // unless force-collapsed; a sub_lib-resolvable combinational def is
-      // flattened inline (not a box); everything else is a box.
+      // Mirrors encode.cpp's Sub classification for every node THIS walk reaches:
+      // a sub with a body is DESCENDED (not a box) unless force-collapsed; a
+      // sub_lib-resolvable combinational def is flattened inline (not a box);
+      // everything else is a box. Two deliberate non-mirrors, both sound:
+      //   * The encoder's `sub_depth_ <= 32` flatten cap is NOT replicated, and
+      //     cannot differ here: occurrences() descends only get_subnode_graph()
+      //     (the design's OWN library), which is exactly the encoder's depth-0
+      //     walk — sub_depth_ is 0 for every node reachable from here, so the cap
+      //     always holds. It binds only inside the recursive sub_lib encode,
+      //     whose nodes this walk cannot reach at all (next bullet).
+      //   * This walk does NOT enter a sub_lib def the encoder flattens inline
+      //     (that def lives in a different library, so get_subnode_graph() is
+      //     null and occurrences() stops), so a blackbox NESTED inside one gets
+      //     no correspondence key. It could not be given a usable one: the
+      //     recursive encode() re-roots box_node_key at the DEF's gid, so two
+      //     instances of that def would hand their nested box ONE key and alias
+      //     two distinct instances — a false-PASS worse than the miss. The
+      //     encoder instead hard-errors on the absent key ("builder/encoder walk
+      //     drift"), which the engine reports as INCONCLUSIVE: a refusal, never
+      //     a verdict. Widening this walk means instance-qualifying the nested
+      //     key space in encode.cpp first.
       if (node.get_subnode_graph() != nullptr && !force_collapse) {
         continue;
       }
