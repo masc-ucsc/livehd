@@ -477,6 +477,15 @@ struct Ctx {
   size_t         cert_chunk_limit;
   std::string    output_dir;
 
+  // Bridge mode: internal nodes are referenced as `<top>_fv<id> i s` (top-level
+  // definitions, one per node) instead of `n_<id>` (a let-binding).  The bridge
+  // needs each node's value to have a NAME so its recurrence lemma can talk
+  // about it; it also removes the two monolithic `definition`s, which are single
+  // declarations and therefore single-threaded (measured 107 s + 83 s at DINO).
+  // Empty means the classic let-chain naming.
+  std::string    fv_args;      // " i s" (sequential) or " i" (combinational)
+  bool           fv_naming = false;
+
   // Field name registries.
   absl::flat_hash_set<std::string> used_fields;
 
@@ -775,6 +784,9 @@ std::string driver_expr(const Ctx& ctx, const Node_pin& dpin) {
       w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
     }
     return lit_const_at(ctx, driver_node, v, w);
+  }
+  if (ctx.fv_naming) {
+    return "(" + ctx.top_name + "_fv" + std::to_string(node_id(driver_node)) + ctx.fv_args + ")";
   }
   return "n_" + std::to_string(node_id(driver_node));
 }
@@ -2589,6 +2601,18 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
 
   bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
+  // Bridge mode.  Refused for memory-bearing designs: the certificate has no
+  // memory operator at all (they get a counts-only stub), so a bridge over one
+  // would be unprovable rather than merely slow.
+  if (emit_fast_bridge) {
+    if (!memory_nodes.empty()) {
+      fatal(ctx, "formal.isabelle.emit_fast_bridge is not supported for designs with memory nodes: "
+                 "the graph certificate has no memory operator.");
+    }
+    ctx.fv_naming = true;
+    ctx.fv_args   = sequential ? " i s" : " i";
+  }
+
   // ---- Compute root set for reachability -------------------------------
   std::vector<Node_pin>           roots;
   // (a) drivers of every graph output
@@ -2713,8 +2737,50 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     }
 
     // <top>_comb body: shared let-chain over the topo-ordered emit set.
+    // ---- bridge mode: one top-level definition per node ------------------
+    // Emitted in topological order, so each fv definition only mentions fv
+    // definitions already introduced.  Constants are `topo` nodes in the
+    // Isabelle certificate (unlike Lean, where they are sources), so every topo
+    // id gets an fv counterpart and the per-node recurrence stays uniform.
+    const bool bridge = ctx.fv_naming;
+    if (bridge) {
+      ofs << "(* Per-node fast values.  One definition per certificate topo node, so the\n"
+             "   bridge's recurrence lemmas can name each node's value.  Replaces the\n"
+             "   monolithic let-chain, which was a single declaration and therefore\n"
+             "   single-threaded. *)\n";
+      for (const auto& n : topo) {
+        const auto w = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
+        ofs << "definition " << ctx.top_name << "_fv" << node_id(n) << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
+        if (sequential) {
+          ofs << ctx.top_name << "_state \\<Rightarrow> ";
+        }
+        ofs << std::to_string(w) << " word\" where\n";
+        ofs << "  \"" << ctx.top_name << "_fv" << node_id(n) << ctx.fv_args << " = (" << emit_node_expr(ctx, n) << " "
+            << ty_word(w) << ")\"\n\n";
+      }
+    }
+
     auto emit_let_chain = [&]() -> std::string {
       std::ostringstream oss;
+      if (bridge) {
+        // bindings live in the fv definitions; emit only the output record
+        oss << "    (\\<lparr>";
+        bool bf = true;
+        for (auto& kv : ctx.output_field) {
+          if (!bf) { oss << ", "; }
+          bf                   = false;
+          const auto& out_name = kv.first;
+          auto        drv      = out_drivers.find(out_name);
+          if (drv == out_drivers.end()) {
+            oss << kv.second << " = " << lit_zero(ctx.output_width[out_name]);
+          } else {
+            oss << kv.second << " = " << ucast_pin_at(ctx, drv->second, ctx.output_width[out_name]);
+          }
+        }
+        if (ctx.output_field.empty()) { oss << "out_dummy = (0 :: 1 word)"; }
+        oss << "\\<rparr>)";
+        return oss.str();
+      }
       oss << "    (let\n";
       bool first = true;
       for (const auto& n : topo) {
