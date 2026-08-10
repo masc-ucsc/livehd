@@ -110,6 +110,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# sim.init_zero supplies a power-on zero only to state with neither an explicit
+# initializer nor a reset; declared initial/reset values remain unchanged. The
+# same generated driver supports both choices, including --run-only.
+sh_test(
+    name = "lhd_sim_init_zero_test",
+    size = "large",
+    srcs = ["lhd_sim_init_zero_test.sh"],
+    data = ["//lhd"],
+)
+
 # Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
 # Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
 # the module's .cpp but NOT its .hpp (else every parent's object is needlessly

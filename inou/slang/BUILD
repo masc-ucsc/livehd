@@ -122,3 +122,23 @@ sh_test(
         "slang_compile",
     ],
 )
+
+# Named structured assignment patterns are resolved by field, with explicit
+# member setters overriding `default:`. This syntax is a slang-reader contract;
+# the legacy Yosys parser used by the other compile suite does not accept it.
+sh_test(
+    name = "slang_struct_pattern_named_default",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/verilog/struct_pattern_named_default.v)",
+    ],
+    data = [
+        "tests/verilog/struct_pattern_named_default.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)

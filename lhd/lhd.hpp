@@ -313,6 +313,9 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
      "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
+    {"init_zero", "false", Sim_set_option::Kind::boolean,
+     "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
+     "Explicit initial values and runtime reset values are unchanged"},
     {"checkpoint", "true", Sim_set_option::Kind::boolean,
      "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
     {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,

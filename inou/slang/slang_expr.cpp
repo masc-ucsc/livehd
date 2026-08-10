@@ -378,8 +378,16 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
     case ExpressionKind::Call: return lower_call(expr.as<slang::ast::CallExpression>());
     case ExpressionKind::SimpleAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::SimpleAssignmentPatternExpression>().elements());
-    case ExpressionKind::StructuredAssignmentPattern:
-      return lower_assignment_pattern(expr, expr.as<slang::ast::StructuredAssignmentPatternExpression>().elements());
+    case ExpressionKind::StructuredAssignmentPattern: {
+      const auto& pattern = expr.as<slang::ast::StructuredAssignmentPatternExpression>();
+      auto        elems   = resolve_structured_pattern(pattern);
+      if (elems.empty()) {
+        emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
+                         "structured assignment pattern does not resolve to packed-struct fields");
+        return "0";
+      }
+      return lower_assignment_pattern(expr, elems);
+    }
     case ExpressionKind::ReplicatedAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::ReplicatedAssignmentPatternExpression>().elements());
     case ExpressionKind::Inside: {
@@ -866,10 +874,10 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
 
 std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression&                     expr,
                                                     std::span<const slang::ast::Expression* const> elems) {
-  // `T'{...}` for a packed (integral) struct/array: slang resolves `elements()`
-  // positionally MSB-first, so the value is just the fields concatenated — same
-  // bit layout as a `{...}` concat of those fields. Unpacked targets (memories /
-  // unpacked-array vars) are a different lowering and stay unsupported here.
+  // `T'{...}` for a packed (integral) struct/array: elems is positional
+  // MSB-first, so the value is just the fields concatenated — same bit layout
+  // as a `{...}` concat. Unpacked targets (memories / unpacked-array vars) are
+  // a different lowering and stay unsupported here.
   if (!expr.type->isIntegral()) {
     emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
                      "only packed (integral) '{...} assignment patterns are supported by --reader slang yet");
@@ -888,6 +896,41 @@ std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression
     return "0";
   }
   return builder_.create_bit_or_stmts(parts);
+}
+
+std::vector<const slang::ast::Expression*> Slang_context::resolve_structured_pattern(
+    const slang::ast::StructuredAssignmentPatternExpression& pattern) const {
+  const auto& ct = pattern.type->getCanonicalType();
+  if (!ct.isStruct()) {
+    return {};
+  }
+
+  std::vector<const slang::ast::Expression*> resolved;
+  for (const auto& field : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+    const slang::ast::Expression* value = nullptr;
+    for (const auto& setter : pattern.memberSetters) {
+      if (setter.member->name == field.name) {
+        value = setter.expr;
+        break;
+      }
+    }
+    if (value == nullptr) {
+      for (const auto& setter : pattern.typeSetters) {
+        if (setter.type->isMatching(field.getType())) {
+          value = setter.expr;
+          break;
+        }
+      }
+    }
+    if (value == nullptr) {
+      value = pattern.defaultSetter;
+    }
+    if (value == nullptr) {
+      return {};
+    }
+    resolved.push_back(value);
+  }
+  return resolved;
 }
 
 

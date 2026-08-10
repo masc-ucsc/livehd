@@ -1593,6 +1593,7 @@ void sim_command(Options& opts, Result& res) {
   // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
   // settings are forwarded to the driver, which owns the fork cadence + prune.
   bool        ckpt_on = true;
+  bool        init_zero = false;
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.checkpoint") {
@@ -1605,6 +1606,8 @@ void sim_command(Options& opts, Result& res) {
       ckpt_max_overhead = v;
     } else if (k == "sim.checkpoint_every") {
       ckpt_every = v;
+    } else if (k == "sim.init_zero") {
+      init_zero = (v == "true" || v == "1" || v == "on");
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
@@ -1728,7 +1731,15 @@ void sim_command(Options& opts, Result& res) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
     dss << dfs.rdbuf();
-    const bool baked_vcd = dss.str().find("vcd::global_timestamp") != std::string::npos;
+    const auto driver_source = dss.str();
+    const bool baked_vcd     = driver_source.find("vcd::global_timestamp") != std::string::npos;
+    if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = "this --run-only sim predates sim.init_zero; re-run --setup-only with the current lhd";
+      res.exit_code     = exit_code_for(res.error_class);
+      return;
+    }
     if (vcd_on && !baked_vcd) {
       res.status        = "fail";
       res.error_class   = "usage";
@@ -2145,6 +2156,9 @@ void sim_command(Options& opts, Result& res) {
   }
   if (opts.seed_explicit) {
     run_args += " --seed " + shell_quote(opts.seed);
+  }
+  if (init_zero) {
+    run_args += " --init-zero";
   }
   // Always ask the driver for its per-test result array (a sidecar JSON file);
   // it is read back below and embedded verbatim as the envelope's "tests" member

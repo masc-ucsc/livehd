@@ -884,7 +884,7 @@ public:
     // declaration (the seed is set once by main() before any test runs).
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
-      o << "  " << duts_.at(m).cls << " " << var << "; " << var << ".reset_cycle();\n";
+      o << "  " << duts_.at(m).cls << " " << var << "; " << var << ".reset_cycle(_init_zero);\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a
@@ -3229,6 +3229,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "long every = 0; std::string dir; long restart_at = -1; long vcd_from = -1; long vcd_to = -1; "
        "bool vcd_on_fail = false; long vcd_fail_window = 20; bool window_only = false; };\n";
   o << "static _CkptCfg _ckpt;\n";
+  o << "static bool _init_zero = false;\n";
   o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
 
   // ---- observability (--list-signals / --probe / --break-when) ----
@@ -3635,6 +3636,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  std::printf(\"  --seed N           hlop PRNG seed for random/unknown bits (default "
     << kDefaultSeedShown
     << ")\\n\");\n"
+       "  std::printf(\"  --init-zero        zero-initialize DUT state with no initializer or reset\\n\");\n"
        "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line} report\\n\");\n"
        "  std::printf(\"  --<param> N        bind a test parameter (see --list-tests)\\n\");\n"
        "  std::printf(\"  --help, -h         show this message and exit\\n\");\n"
@@ -3665,6 +3667,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    if (_key == \"--help\" || _key == \"-h\") { _usage(argv[0]); return 0; }\n"
        "    else if (_key == \"--list-tests\") { _list = true; }\n"
        "    else if (_key == \"--seed\") { _seed = _to_u64(\"seed\", _need()); }\n"
+       "    else if (_key == \"--init-zero\") { _init_zero = true; }\n"
        "    else if (_key == \"--result-json\") { _result_json = _need(); }\n"
        "    else if (_key == \"--ckpt-dir\") { _ckpt.dir = _need(); }\n"
        "    else if (_key == \"--no-checkpoint\") { _ckpt.enabled = false; }\n"

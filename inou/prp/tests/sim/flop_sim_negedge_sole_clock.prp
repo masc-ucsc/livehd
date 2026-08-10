@@ -1,0 +1,95 @@
+/*
+:name: flop_sim_negedge_sole_clock
+:type: simulation
+*/
+
+// SILENT SIM MISCOMPILE. A design whose ONLY clock is an explicit
+// `clock_pin=ref <net>` — i.e. NO register sits on the implicit reference
+// clock — gets no edge detection at all: `inou.cgen.sim` adopts that net as the
+// reference clock WAVEFORM instead of treating it as an edge-carrying signal,
+// so every register on it commits on EVERY tick. A `posclk=false` flop then
+// updates at the rises too, one commit per tick instead of one per fall.
+//
+// It reports 0 errors and 0 warnings. Nothing in the log says the edge was
+// dropped; the design simply runs a cycle fast.
+//
+// WHERE IT CAME FROM. minion's `prim_rf_1r1w_diff_preview` (the frontend
+// instruction buffer, `u_inst_data`) is exactly this shape — its only clocks
+// are the explicit ports `preview_clk_i` and `rf_clk_i`, and its write port is
+//     always_ff @(negedge rf_clk_i) if (wr_data_en_1p_q[j]) mem[..] <= ..
+// so the buffer write landed ONE CYCLE EARLY, capturing the previous (empty)
+// fetch line. The core then decoded a wrong instruction word, took a spurious
+// illegal-instruction trap at pc=0x4, and replayed pc=0 forever: 1,428 retired
+// instructions in 20k cycles where Verilator retires 12,240 on the same RTL.
+// Both `lhd sim` front ends (checked-in Pyrope and slang->lg:) were identical,
+// which is what placed the fault in cgen.sim rather than in either reader.
+//
+// THE DISCRIMINATOR, and why this file has no reference-clock register: adding
+// ONE reg on the implicit reference clock makes all of this correct. That
+// variant is already covered by flop_sim_secondary_negedge.prp, whose `a` reg
+// exists for exactly this reason ("with clkb as the only clock_pin net,
+// cgen_sim would pick it as the reference clock waveform instead and no edge
+// detection would be generated at all"). That comment describes the bug this
+// file pins: the condition is not hypothetical, minion hits it.
+//
+// The three flops are the SAME assertion under the three write shapes minion
+// actually uses, so a partial fix cannot go green: unconditional, enable from
+// an input, and enable through a transparent-LOW latch (the preview protocol).
+pub mod negsole(pclk:bool, rclk:bool, en:bool, d:u8)
+        -> (qa:u8@[1], qb:u8@[0], qc:u8@[0]) {
+  reg en_q:bool:[latch=true]                          // transparent while pclk is LOW
+  reg ma:u8:[clock_pin=ref rclk, posclk=false] = 0    // (a) unconditional
+  reg mb:u8:[clock_pin=ref rclk, posclk=false] = 0    // (b) enable from an input
+  reg mc:u8:[clock_pin=ref rclk, posclk=false] = 0    // (c) enable through the latch
+  qa = ma
+  qb = mb
+  qc = mc
+  if !pclk {
+    en_q = en
+  }
+  ma = d
+  if en {
+    mb = d
+  }
+  if en_q {
+    mc = d
+  }
+}
+
+test negsole.negedge_commits_only_on_falls {
+  mut acc = negsole
+  tick 10 {
+    // rclk is high on even ticks and low on odd, so it FALLS at every odd tick
+    // and RISES at every even one. pclk is its complement, so the latch is open
+    // on the even ticks — the preview/commit phasing minion uses.
+    acc.pclk = (clock & 1) == 1
+    acc.rclk = (clock & 1) == 0
+    acc.en   = (clock >= 4) and (clock <= 7)
+    acc.d    = 100 + clock
+    step
+    // (a) UNCONDITIONAL. A negedge flop must take d at the falls (odd ticks)
+    // and HOLD across the rises. The hold is the half that fails today: with no
+    // edge detection every tick commits, so an even tick shows 100+clock
+    // instead of the value latched one tick earlier.
+    if (clock & 1) == 1 {
+      assert(acc.qa == 100 + clock, "negedge flop takes d at the fall")
+    } elif clock >= 2 {
+      assert(acc.qa == 99 + clock, "negedge flop HOLDS across the rise")
+    }
+    // (b)/(c) the same flop with a write enable, from an input and from the
+    // transparent-LOW latch. en is high over ticks 4..7, so the only falls that
+    // may write are 5 and 7 — a rise-commit shows up as an early 104/106.
+    if clock <= 4 {
+      assert(acc.qb == 0, "enabled negedge flop has not written before the first enabled fall")
+      assert(acc.qc == 0, "latch-enabled negedge flop has not written before the first enabled fall")
+    }
+    if (clock == 5) or (clock == 6) {
+      assert(acc.qb == 105, "enabled negedge flop wrote at the fall of tick 5, and holds at 6")
+      assert(acc.qc == 105, "latch-enabled negedge flop wrote at the fall of tick 5, and holds at 6")
+    }
+    if clock >= 7 {
+      assert(acc.qb == 107, "enabled negedge flop wrote at the fall of tick 7 and stops when en drops")
+      assert(acc.qc == 107, "latch-enabled negedge flop wrote at the fall of tick 7 and stops when en drops")
+    }
+  }
+}

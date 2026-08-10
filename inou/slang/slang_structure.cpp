@@ -3483,6 +3483,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   absl::flat_hash_map<const slang::ast::ValueSymbol*, int> store_counts;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>      partial_writes;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>      proc_written;  // written by an always block
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>      definite_proc_written;
   {
     for (const auto& d : drivers) {
       Store_counter sc;
@@ -3494,7 +3495,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // "incompletely driven". Splitting gives the accumulator a poison init
         // that supplies X on the uncovered path, exactly like a comb `mut`.
         proc_written.insert(d.writes.begin(), d.writes.end());
-        d.member->as<slang::ast::ProceduralBlockSymbol>().getBody().visit(sc);
+        const auto& pbs = d.member->as<slang::ast::ProceduralBlockSymbol>();
+        pbs.getBody().visit(sc);
+        definite_blocking_writes(pbs.getBody(), definite_proc_written);
       } else if (d.member->kind == SymbolKind::ContinuousAssign) {
         d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(sc);
       } else if (d.member->kind == SymbolKind::Instance) {
@@ -3617,12 +3620,14 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // Promote to `wire` ONLY where a plain single-driver wire is valid — the SAME
   // test the split above uses to decide it needs no accumulator. The split
   // device is scalar-only (it skips structs at the `ct.isStruct()` guard), so a
-  // procedurally / partially / multiply written struct has no accumulator to
-  // fall back on: a conditional write would branch-merge against the wire's own
-  // buffer output (a self-loop), and co-writers would silently last-wins. Those
-  // keep `mut` — same behavior as before this change, no regression — while the
-  // instance-output and single-continuous-assign nets that carry the severed
-  // inter-module connections get their position-independent read.
+  // partially / multiply written struct has no accumulator to fall back on: a
+  // conditional write would branch-merge against the wire's own buffer output
+  // (a self-loop), and co-writers would silently last-wins. Those keep `mut`.
+  // A single WHOLE procedural store that definite_blocking_writes proves runs
+  // on every path is also a valid one-driver wire; allowing it is essential for
+  // an always_comb struct value consumed by an earlier instance in a coarse
+  // false SCC. Instance-output and single-continuous-assign nets remain valid
+  // position-independent wires as before.
   for (const auto& member : scope.members()) {
     if (member.kind != SymbolKind::Variable) {
       continue;
@@ -3639,7 +3644,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       const int driver_count = wit != writers_of.end() ? static_cast<int>(wit->second.size()) : 0;
       auto      scit         = store_counts.find(&vsym);
       const int store_count  = scit != store_counts.end() ? scit->second : 0;
-      if (driver_count > 1 || store_count > 1 || partial_writes.contains(&vsym) || proc_written.contains(&vsym)
+      if (driver_count > 1 || store_count > 1 || partial_writes.contains(&vsym)
+          || (proc_written.contains(&vsym) && !definite_proc_written.contains(&vsym))
           || wire_split_tmp_.contains(&vsym)) {
         wire_syms_.erase(&vsym);  // no scalar split to fall back on: keep `mut`
       }

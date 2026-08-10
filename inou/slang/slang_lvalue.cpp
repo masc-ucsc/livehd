@@ -483,16 +483,20 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
     r = &r->as<slang::ast::ConversionExpression>().operand();
   }
 
-  // `io = '{...}` assignment pattern: slang resolves elements in field order, so
-  // element[i] is field[i]'s value. Write each leaf from its element directly.
+  // `io = '{...}` assignment pattern: write each leaf from its corresponding
+  // field expression. A structured pattern's raw elements() are syntax order
+  // (`cause:`, `interrupt:`, `default:`), not declaration order, so resolve its
+  // member/type/default selectors first.
   std::span<const slang::ast::Expression* const> elems;
+  std::vector<const slang::ast::Expression*>     resolved_elems;
   bool                                           is_pattern = true;
   switch (r->kind) {
     case ExpressionKind::SimpleAssignmentPattern:
       elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements();
       break;
     case ExpressionKind::StructuredAssignmentPattern:
-      elems = r->as<slang::ast::StructuredAssignmentPatternExpression>().elements();
+      resolved_elems = resolve_structured_pattern(r->as<slang::ast::StructuredAssignmentPatternExpression>());
+      elems          = resolved_elems;
       break;
     case ExpressionKind::ReplicatedAssignmentPattern:
       elems = r->as<slang::ast::ReplicatedAssignmentPatternExpression>().elements();
