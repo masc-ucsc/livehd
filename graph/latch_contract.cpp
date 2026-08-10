@@ -1575,6 +1575,52 @@ namespace {
   return out;
 }
 
+// Does the cone driving `start` contain `target` (an activation guard's
+// control root)? A bounded reverse walk that -- unlike comb_reach above --
+// CROSSES state and instance boundaries on purpose: the MATERIALIZED form of
+// an activation gate keeps its enable behind a transparent latch
+// (`clk & latch(__valid|reset)` closing at the rise), and an instantiated ICG
+// cell hides the same cone behind a Sub, so stopping at either boundary would
+// un-recognize exactly the already-gated shapes this test exists to skip. The
+// walk answers reachability only -- never phase or polarity -- and a cone
+// larger than the cap answers false, which falls back to gating (the historic
+// behavior) rather than silently withholding a gate the state needs.
+//
+// The seed itself does not count as a hit: a clock port WIRED to the guard
+// net is not evidence of a gate, only a guard folded INSIDE the clock's
+// derivation is.
+[[nodiscard]] bool cone_reaches(const hhds::Pin_class& start, const hhds::Pin_class& target) {
+  if (start.is_invalid() || target.is_invalid()) {
+    return false;
+  }
+  constexpr size_t                       visit_cap = 512;
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Pin_class>           work{start};
+  while (!work.empty()) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid()) {
+      continue;
+    }
+    if (!same_pin(p, start) && same_pin(p, target)) {
+      return true;
+    }
+    if (gu::is_const_pin(p) || gu::is_graph_input_pin(p)) {
+      continue;
+    }
+    if (!seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    if (seen.size() > visit_cap) {
+      return false;
+    }
+    for (const auto& e : p.get_master_node().inp_edges()) {
+      work.push_back(e.driver);
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_port_cache& cache) {
@@ -1694,13 +1740,35 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       reset_active_low = rp.active_low;
     }
 
-    // No clock port is actually driven here, so the loop below rewires nothing.
-    // Building the enable anyway is the orphan case above.
-    const bool any_bound = std::any_of(clock_ports.begin(), clock_ports.end(), [&bound](uint32_t pid) {
+    // ROUND-TRIP idempotence (the second decline): a clock driver whose cone
+    // is ALREADY a function of this activation guard IS the activation gate,
+    // materialized as design text -- the emitted `clk & latch(__valid|reset)`
+    // read back through a Verilog front end reaches the clock port through the
+    // gate's own enable latch. Wrapping it again is not redundant but WRONG:
+    // the fresh cell latches the guard ALONE (a re-read callee folds its sync
+    // reset into a data mux, so reset_input_ports sees no reset port to OR
+    // in), which withholds every reset edge while the call is inactive --
+    // measured as the callee's state never leaving its power-on value
+    // (conditional_state_call: ref=0, impl=255 after reset). The pin-identity
+    // check inside the loop below cannot catch this: the re-read gate is body
+    // logic, not a Clock_cell carrying this exact enable pin. Decided per
+    // port BEFORE the enable cone is minted, so an all-ports-gated instance
+    // leaves no speculative orphan nodes behind.
+    const auto      guard_key = guard_root.is_invalid() ? guard : guard_root;
+    std::vector<uint32_t> ports_to_gate;
+    for (const auto pid : clock_ports) {
       auto it = bound.find(pid);
-      return it != bound.end() && !it->second.is_invalid();
-    });
-    if (!any_bound) {
+      if (it == bound.end() || it->second.is_invalid()) {
+        continue;
+      }
+      if (cone_reaches(it->second, guard_key)) {
+        continue;  // the design text already conditions this clock net on the guard
+      }
+      ports_to_gate.push_back(pid);
+    }
+    // No clock port needs (or has) a gate here, so the loop below would rewire
+    // nothing. Building the enable anyway is the orphan case above.
+    if (ports_to_gate.empty()) {
       continue;
     }
 
@@ -1713,7 +1781,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       enable = logical_or1(g, enable, reset_asserted);
     }
 
-    for (const auto pid : clock_ports) {
+    for (const auto pid : ports_to_gate) {
       auto bit = bound.find(pid);
       if (bit == bound.end() || bit->second.is_invalid()) {
         continue;

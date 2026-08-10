@@ -783,6 +783,52 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (e.size() < 3) {
         return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, -1);
       }
+
+      // A positive contiguous CONSTANT mask is the packed-field-write shape.
+      // Spell the splice as fixed-width bitwise operations
+      // instead of calling set_mask_op(): the generic method has to discover
+      // the range (get_bits + ctz/clz + a contiguity scan) on every execution,
+      // even though cgen already knows it here. Minion emits thousands of these
+      // tiny Set_mask cells (many Slop<2>); their range discovery was a large
+      // fraction of whole-design simulation time.
+      //
+      // Keep the optimization deliberately narrow and proof-friendly:
+      //   * is_just_i64() means the positive mask is exact in create_integer;
+      //   * me <= wbits means no selected bit is clipped by the node width;
+      // Multi-word results use the same algebra; clang unrolls the fixed-size
+      // Slop operations and cgen still avoids rediscovering the mask range.
+      if (is_const_pin(e[1].driver)) {
+        const auto mv = hydrate_const(e[1].driver);
+        if (!mv.has_unknowns() && !mv.is_negative() && mv.is_just_i64()) {
+          const auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
+          if (mb >= 0 && me > mb && me <= wbits) {
+            const auto base = operand(e[0].driver, wbits, -1);
+            const auto mask = operand(e[1].driver, wbits, -1);
+            const auto val  = operand(e[2].driver, wbits);
+            if (mb == 0 && me == wbits) {
+              return val;  // every result bit is replaced
+            }
+            const auto inserted = mb == 0 ? val : absl::StrCat("Slop<", tw, ">::shl_op(", val, ", ", mb, ")");
+            return absl::StrCat("Slop<",
+                                tw,
+                                ">::or_op(Slop<",
+                                tw,
+                                ">::and_op(",
+                                base,
+                                ", Slop<",
+                                tw,
+                                ">::not_op(",
+                                mask,
+                                ")), Slop<",
+                                tw,
+                                ">::and_op(",
+                                inserted,
+                                ", ",
+                                mask,
+                                "))");
+          }
+        }
+      }
       return absl::StrCat(operand(e[0].driver, wbits, -1),
                           ".set_mask_op(",
                           operand(e[1].driver, wbits, -1),
@@ -1376,6 +1422,19 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // a nested negedge preview from retaining the prior cycle's input. Preserve a
 // Hotmux's full one-hot selector width independently of its result width. Let
 // reset_cycle(bool) supply zero for otherwise-uninitialized state (sim.init_zero).
+// simgen-40: uninitialized reset-free memories power on zero under both
+// policies, and a posclk=false flop on a sole explicit clock net whose
+// spelling is not clock-like (Design_clocks::name_looks_like_clock) is
+// edge-detected via sec_clock instead of committing once per period.
+// simgen-39: group and state-boundary snapshots copy only demanded Slop fields,
+// never an entire child Out struct; cyclic children retain their full boundary
+// settle while acyclic children defer it to the root walk.
+// simgen-35: cycle() returns persistent __last_out by const reference; acyclic
+// child calls skip their private trailing settle because the root post-edge
+// walk will visit them. Cyclic boundaries retain it to publish post-commit
+// state-only outputs that break the parent's settle ring.
+// simgen-32: direct constant Set_mask splices also cover multi-word results.
+// simgen-26: constant one-word Set_mask cells emit direct scalar splices.
 // simgen-25: the negedge refresh is STRUCTURAL (a callee whose only rise-half
 // state is a latch) rather than a whitelist of four port names, so every child
 // the latch classification moves out of `negedge_only` gets the compensating
@@ -1385,7 +1444,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-25";
+static constexpr std::string_view kSimGenVersion = "simgen-40";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -2529,9 +2588,37 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         cd = ce[0].driver;
       }
-      if (!cd.is_invalid() && livehd::graph_util::is_graph_input_pin(cd) && std::string{pin_name_of(cd)} != ref_clock) {
-        f.sec_clock   = get_driver(find_sink_pin(node, "clock_pin"));
-        f.prev_member = absl::StrCat("__clkprev_", cpp_id(std::string{pin_name_of(cd)}));
+      if (!cd.is_invalid() && livehd::graph_util::is_graph_input_pin(cd)) {
+        const std::string cd_name{pin_name_of(cd)};
+        // A NEGEDGE flop whose net IS the adopted reference still needs a
+        // detected edge when that net is not conventionally SPELLED as a
+        // clock: clock_input_of() then adopted it only because no register
+        // sits on the implicit reference clock (flop_sim_negedge_sole_clock --
+        // `clock_pin=ref rclk` as the design's sole clock), and the net is
+        // really a signal the testbench drives, so a posclk=false flop would
+        // commit at every tick instead of holding across the rises.
+        //
+        // Deliberately NARROW on both axes, because each wider form breaks a
+        // pinned behavior:
+        //  * posedge flops keep the one-tick-one-period model even on an
+        //    unconventional sole net -- gate_through_wrapper/hier_gate_port
+        //    children commit per gated period on a `gclk` PORT through the
+        //    `<port>__tick` channel, never by a toggling port value;
+        //  * a conventionally spelled reference (clk, clock, clk_i, rf_clk_i,
+        //    ...) is never edge-detected -- conditional_state_named_clock pins
+        //    that a sole explicit `clk_i` commits once per tick. The spelling
+        //    test is the shared Design_clocks::name_looks_like_clock notion,
+        //    not a private list.
+        bool ref_needs_edge = false;
+        if (cd_name == ref_clock && !livehd::latch_contract::Design_clocks::name_looks_like_clock(cd_name)
+            && type_op_of(node) != Ntype_op::Latch) {
+          auto pc        = get_driver(find_sink_pin(node, "posclk"));
+          ref_needs_edge = !pc.is_invalid() && is_const_pin(pc) && hydrate_const(pc).is_known_false();
+        }
+        if (cd_name != ref_clock || ref_needs_edge) {
+          f.sec_clock   = get_driver(find_sink_pin(node, "clock_pin"));
+          f.prev_member = absl::StrCat("__clkprev_", cpp_id(cd_name));
+        }
       }
     }
     // posedge (default) vs negedge clock: the comptime `posclk` pin, known-false
@@ -3208,35 +3295,35 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append("    }\n");
     emit_outputs("__out", "lanes[count - 1].__out");
     hout->append("    __sync_kids();\n  }\n");
-    hout->append("  Out cycle() {\n");
+    hout->append("  const Out& cycle(bool __finish = true) {\n");
     emit_carry_decls();
     emit_activation_decl();
     if (loop.count != 0) {
-      hout->append("    Out __last{};\n");
+      hout->append("    const Out* __last = nullptr;\n");
     }
     hout->append("    for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[ordinal];\n");
     emit_lane_inputs("lane", "ordinal");
     if (loop.activation_input) {
       hout->append("      const bool __lane_active = (__active).is_known_true();\n");
-      hout->append("      auto __period = lane.__out;\n");
+      hout->append("      const Out* __period = &lane.__out;\n");
       if (activation_skip_safe) {
         hout->append("      if (__lane_active",
                      reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
-                     ") __period = lane.cycle();  // conditional activation (reset keeps it open)\n");
+                     ") __period = &lane.cycle(false);  // wrapper performs the post-edge lane settle as one walk\n");
       } else {
-        hout->append("      __period = lane.cycle();\n");
+        hout->append("      __period = &lane.cycle(false);\n");
       }
     } else {
-      hout->append("      auto __period = lane.cycle();\n");
+      hout->append("      const auto& __period = lane.cycle(false);\n");
     }
-    emit_carry_advances("__period");
-    emit_next_active("__period");
+    emit_carry_advances(loop.activation_input ? "(*__period)" : "__period");
+    emit_next_active(loop.activation_input ? "(*__period)" : "__period");
     if (loop.count != 0) {
-      hout->append("      __last = __period;\n");
+      hout->append(loop.activation_input ? "      __last = __period;\n" : "      __last = &__period;\n");
     }
     hout->append("    }\n");
-    emit_outputs("__last_out", "__last");
-    hout->append("    __sync_kids();\n    __settle();\n    return __last_out;\n  }\n");
+    emit_outputs("__last_out", "(*__last)");
+    hout->append("    __sync_kids();\n    if (__finish) __settle();\n    return __last_out;\n  }\n");
     hout->append(
         "  void reset_cycle(bool zero_uninitialized = false) { for (auto& lane : lanes) "
         "lane.reset_cycle(zero_uninitialized); ++__gen; __settle(); }\n");
@@ -3702,24 +3789,27 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (has_refresh) {
     hout->append("  void refresh_negedge();  // refresh nested mixed-edge state after post-rise inputs settle\n");
   }
-  // One clock edge is SETTLE -> COMMIT -> SETTLE, and cycle() is the whole of
-  // it: its body settles the comb cone from the pre-edge state (that is what
-  // computes both `o`/__last_out and every next-state), commits, and then calls
-  // __settle() to refresh __out from the just-committed state.
+  // One ROOT clock edge is SETTLE -> COMMIT -> SETTLE. cycle()'s body settles
+  // the comb cone from the pre-edge state (computing both `o`/__last_out and
+  // every next-state) and commits it. The hierarchy root owns the recursive
+  // post-edge settle. A child on a parent-level word cycle passes __finish=true
+  // too: its post-commit state-only outputs are the boundary values that break
+  // that settle ring. Acyclic children pass false and avoid computing the same
+  // post-edge outputs once privately and then again in the root walk.
   //
   // The trailing settle is what makes a `sigref` possible, and it must NOT be
   // hoisted to the front of the next cycle(): committing a next-state that was
   // settled against the PREVIOUS period's `__in` would make every driven input
   // land one cycle late (`acc.reset = clock < 2` would reset cycles 1-2, not
   // 0-1). Both settles are load-bearing and they settle against different state.
-  hout->append("  Out cycle() {  // one clock period (inputs already written into __in)\n");
+  hout->append("  const Out& cycle(bool __finish = true) {  // one clock period (inputs already written into __in)\n");
   hout->append("    eval_posedge();\n");
   if (has_fall) {
     hout->append("    eval_negedge();\n");
   }
-  hout->append("    __settle();  // refresh __out so a bound sigref reads the post-edge value\n");
+  hout->append("    if (__finish) __settle();  // cyclic boundaries and the root need a post-edge output view\n");
   if (has_refresh) {
-    hout->append("    refresh_negedge();  // sample nested post-rise inputs for the next period\n");
+    hout->append("    if (__finish) refresh_negedge();  // only after post-rise inputs have propagated\n");
   }
   hout->append("    return __last_out;  // the during-period outputs the rise recorded\n");
   hout->append("  }\n");
@@ -3969,15 +4059,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!m.init.is_invalid() && is_const_pin(m.init)) {
       fout->append(absl::StrCat("    ", m.member, ".apply_update(", operand(m.init, m.bits * m.size), ");\n"));
     } else if (m.init.is_invalid() && m.reset.is_invalid()) {
-      fout->append(absl::StrCat("    if (zero_uninitialized) ",
-                                m.member,
-                                ".fill(Slop<",
-                                m.bits,
-                                ">::create_integer(0)); else for (auto& __e : ",
-                                m.member,
-                                ") __e = ",
-                                mem_unknown,
-                                ";\n"));
+      // Uninitialized, reset-free memory powers on ZERO under BOTH policies.
+      // This is what cgen_memory_*.v under a 2-state simulator (Verilator)
+      // reads back, and mem_wensize_lanes pins it: a wensize lane the test
+      // never writes must read 0, which a PRNG fill turned into a
+      // seed-dependent value. The flop power-on PRNG ruling (2026-08-09) is
+      // about FLOPS and stands unchanged; sim.init_zero still exists to zero
+      // those. State WITH a runtime initializer or a reset keeps the seeded
+      // unknown fill below -- lhd_sim_init_zero_test pins that reset-only
+      // state stays unknown until its reset actually asserts.
+      fout->append(absl::StrCat("    ", m.member, ".fill(Slop<", m.bits, ">::create_integer(0));\n"));
     } else {
       fout->append(absl::StrCat("    for (auto& __e : ", m.member, ") __e = ", mem_unknown, ";\n"));
     }
@@ -4343,14 +4434,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // cycle_unresolved_ and aborts emission with a bogus
           // "combinational-cycle" refusal naming the loop instance — for a
           // design that has no combinational cycle at all.
-          const std::string pre_base = settle ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__pre.");
-          if (!settle) {
-            fout->append(absl::StrCat("    auto ",
-                                      s.inst,
-                                      "__pre = ",
-                                      s.inst,
-                                      ".__out;  // negedge-only compact loop: advance after the parent's rise\n"));
-          }
           auto                                       loop_sio = s.node.get_subnode_io();
           absl::flat_hash_map<uint32_t, std::string> loop_pid2name;
           for (const auto& d : loop_sio->get_output_pin_decls()) {
@@ -4365,7 +4448,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             }
             auto lit = loop_pid2name.find(static_cast<uint32_t>(opin.get_port_id()));
             if (lit != loop_pid2name.end()) {
-              pin2var[opin.get_class_index()] = absl::StrCat(pre_base, cpp_port_path(lit->second));
+              const auto field = cpp_port_path(lit->second);
+              if (settle) {
+                pin2var[opin.get_class_index()] = absl::StrCat(s.inst, ".__out.", field);
+              } else {
+                const auto var = absl::StrCat(s.inst, "__pre_p", static_cast<uint32_t>(opin.get_port_id()));
+                fout->append(absl::StrCat("    const auto ",
+                                          var,
+                                          " = ",
+                                          s.inst,
+                                          ".__out.",
+                                          field,
+                                          ";  // negedge-only compact-loop boundary\n"));
+                pin2var[opin.get_class_index()] = var;
+              }
             }
           }
         }
@@ -4482,22 +4578,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // The child's outputs for its CURRENT committed state are exactly what its
       // own trailing settle left in `__out` -- which is what the old
       // `peek({})` recomputed, at the price of snapshotting and restoring the
-      // whole child subtree. In the CYCLE pass this must be COPIED: the deferred
-      // `<inst>.cycle(...)` emitted after the walk refreshes `__out`, and these
-      // bindings have to keep reading the pre-call values. In the SETTLE pass
+      // whole child subtree. In the CYCLE pass each demanded FIELD must be
+      // snapshotted: the deferred `<inst>.cycle(...)` emitted after the walk
+      // refreshes `__out`, and these bindings have to keep reading the pre-call
+      // values. Copying the entire Out struct here is unnecessary and can be
+      // enormous. In the SETTLE pass
       // nothing advances the child, so bind straight at the member; the only
       // writer there is a Mealy sub's own `__settle`, and every pin bound here is
       // a pure state read, which a settle does not change.
-      const std::string pre_base = settle ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__pre.");
-      if (!settle) {
-        fout->append(absl::StrCat("    auto ",
-                                  s.inst,
-                                  "__pre = ",
-                                  s.inst,
-                                  s.negedge_only ? ".__out;  // negedge-only sub: advance after the parent's rise\n"
-                                  : moore ? ".__out;  // Moore sub: outputs from current state (call deferred)\n"
-                                          : ".__out;  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
-      }
       // Bind only pins that EXIST (enumerated via the instance's out-edges): a
       // declared-but-unread output has no created pin, and hhds' name lookup
       // asserts on it (find_pin "requested pin was not created" -- the DataPath
@@ -4522,7 +4610,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // the callee's Out struct (a NESTED struct, see emit_io_block), so
           // mangling the dot to `_` here named a member that does not exist —
           // `no member named 'io_data_instruction' in 'StageReg_StageReg::Out'`.
-          pin2var[opin.get_class_index()] = absl::StrCat(pre_base, cpp_port_path(it->second));
+          const auto field = cpp_port_path(it->second);
+          if (settle) {
+            pin2var[opin.get_class_index()] = absl::StrCat(s.inst, ".__out.", field);
+          } else {
+            const auto var = absl::StrCat(s.inst, "__pre_p", pid);
+            fout->append(absl::StrCat("    const auto ",
+                                      var,
+                                      " = ",
+                                      s.inst,
+                                      ".__out.",
+                                      field,
+                                      s.negedge_only ? ";  // negedge-only sub boundary\n"
+                                      : moore        ? ";  // Moore state-output boundary\n"
+                                                     : ";  // Mealy state-only output boundary\n"));
+            pin2var[opin.get_class_index()] = var;
+          }
         }
       }
     }
@@ -5024,7 +5127,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // cycle() returns the pre-edge observation. Keep it outside the if so
           // downstream caller muxes can read a stable (masked) value when the
           // child is inactive.
-          fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".__out;\n"));
+          fout->append(absl::StrCat("    const auto* ", s.inst, "__o = &", s.inst, ".__out;\n"));
         }
         if (runtime_skip) {
           // BIND the input cones before the guard opens. ensure_fn DECLARES
@@ -5102,14 +5205,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } else if (settle_mode) {
           fout->append(absl::StrCat("    ", s.inst, ".__settle();\n"));
         } else if (runtime_skip) {
-          fout->append(absl::StrCat("    ", s.inst, "__o = ", s.inst, ".cycle();\n"));
+          fout->append(
+              absl::StrCat("    ", s.inst, "__o = &", s.inst, sched_cycle.contains(node) ? ".cycle();\n" : ".cycle(false);\n"));
         } else {
-          fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle();\n"));
+          fout->append(absl::StrCat("    const auto& ",
+                                    s.inst,
+                                    "__o = ",
+                                    s.inst,
+                                    sched_cycle.contains(node) ? ".cycle();\n" : ".cycle(false);\n"));
         }
         if (runtime_skip) {
           fout->append("    }\n");
         }
-        const std::string sub_out = out_is_member ? absl::StrCat(s.inst, ".__out.") : absl::StrCat(s.inst, "__o.");
+        const std::string sub_out = out_is_member  ? absl::StrCat(s.inst, ".__out.")
+                                    : runtime_skip ? absl::StrCat(s.inst, "__o->")
+                                                   : absl::StrCat(s.inst, "__o.");
         for (const auto& d : sio->get_output_pin_decls()) {
           auto opin = find_driver_pin(node, d.name);
           if (!opin.is_invalid()) {
@@ -5352,8 +5462,50 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const std::string run_condition = sub_run_condition(ensure_ready_fn, s);
         const bool        runtime_skip  = !run_condition.empty();
         const std::string snap          = absl::StrCat(s.inst, "__g", gidx);
-        if (runtime_skip && any_whole) {
-          fout->append(absl::StrCat("    auto ", snap, " = ", s.inst, ".__out;  // inactive group value is caller-masked\n"));
+        struct Whole_out {
+          hhds::Pin_class pin;
+          std::string     field;
+          std::string     var;
+        };
+        std::vector<Whole_out>                     whole_outs;
+        absl::flat_hash_map<uint32_t, std::string> pid2name;
+        for (const auto& d : sio->get_output_pin_decls()) {
+          pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
+        }
+        if (any_whole) {
+          absl::flat_hash_set<pin_key_t> whole_seen;
+          for (const auto& e : node.out_edges()) {
+            auto opin = e.driver;
+            if (opin.is_invalid() || pin2var.contains(opin.get_class_index())
+                || !whole_seen.insert(opin.get_class_index()).second) {
+              continue;
+            }
+            const auto epid  = static_cast<uint32_t>(opin.get_port_id());
+            bool       whole = false;
+            for (const auto& o : grp.outs) {
+              if (o.pid == epid && o.len == 0) {
+                whole = true;
+                break;
+              }
+            }
+            if (!whole) {
+              continue;
+            }
+            if (auto itn = pid2name.find(epid); itn != pid2name.end()) {
+              whole_outs.push_back({opin, cpp_port_path(itn->second), absl::StrCat(snap, "_p", epid)});
+            }
+          }
+        }
+        if (runtime_skip) {
+          for (const auto& o : whole_outs) {
+            fout->append(absl::StrCat("    auto ",
+                                      o.var,
+                                      " = ",
+                                      s.inst,
+                                      ".__out.",
+                                      o.field,
+                                      ";  // inactive group value is caller-masked\n"));
+          }
         }
         // Ports are members: the group's support fields are written straight
         // into the child's persistent __in — one fill per distinct input pid;
@@ -5457,37 +5609,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           fout->append(f);
         }
         fout->append(absl::StrCat("    ", s.inst, ".__settle_g", gidx, "();\n"));
-        // WHOLE-port outs of this group bind from a `__out` snapshot (the group
-        // body wrote those fields; pre-advance values). This runs even in a
-        // MIXED group — signature merging happily fuses one pid's slices with
-        // another pid's whole out, and the whole out must still bind here.
-        if (any_whole) {
-          fout->append(
-              absl::StrCat("    ", runtime_skip ? "" : "auto ", snap, " = ", s.inst, ".__out;  // group ", gidx, " outputs\n"));
-          absl::flat_hash_map<uint32_t, std::string> pid2name;
-          for (const auto& d : sio->get_output_pin_decls()) {
-            pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
-          }
-          for (const auto& e : node.out_edges()) {
-            auto opin = e.driver;
-            if (opin.is_invalid() || pin2var.contains(opin.get_class_index())) {
-              continue;
-            }
-            const auto epid  = static_cast<uint32_t>(opin.get_port_id());
-            bool       whole = false;
-            for (const auto& o : grp.outs) {
-              if (o.pid == epid && o.len == 0) {
-                whole = true;
-                break;
-              }
-            }
-            if (!whole) {
-              continue;
-            }
-            if (auto itn = pid2name.find(epid); itn != pid2name.end()) {
-              pin2var[opin.get_class_index()] = absl::StrCat(snap, ".", cpp_port_path(itn->second));
-            }
-          }
+        // A whole output must remain stable after the deferred child cycle
+        // overwrites __out. Snapshot only the demanded Slop field, never the
+        // callee's entire Out struct (which can contain hundreds of unrelated
+        // ports). Mixed groups still publish their slice members separately.
+        for (const auto& o : whole_outs) {
+          fout->append(absl::StrCat("    ",
+                                    runtime_skip ? "" : "const auto ",
+                                    o.var,
+                                    " = ",
+                                    s.inst,
+                                    ".__out.",
+                                    o.field,
+                                    ";  // group ",
+                                    gidx,
+                                    " output\n"));
+          pin2var[o.pin.get_class_index()] = o.var;
         }
         if (runtime_skip) {
           fout->append("    }\n");

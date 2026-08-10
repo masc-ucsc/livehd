@@ -481,17 +481,27 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     if (sio == nullptr || sio->get_name() != livehd::graph_util::fproperty_module_name) {
       continue;
     }
-    std::string_view raw = livehd::graph_util::node_name_of(node);
-    if (raw.rfind("assume\x1f", 0) != 0 && raw.rfind("assume_nocheck\x1f", 0) != 0) {
+    std::string_view raw             = livehd::graph_util::node_name_of(node);
+    const bool       nocheck_by_name = raw.rfind("assume_nocheck\x1f", 0) == 0;
+    if (raw.rfind("assume\x1f", 0) != 0 && !nocheck_by_name) {
       continue;
     }
-    // Count only what the encoder will actually ASSERT: an assume pass.formal
-    // stamped `proven` (assume_nocheck, a selected-top IO assume, or every
-    // assume under assume_check=false). A checked assume that was never
-    // discharged — a `lg:` library fed straight to `lhd lec`, or a side built
-    // at O0 where pass.formal does not run — carries no attribute, is not a
-    // hypothesis, and must not be disclosed as one either.
-    if (!livehd::graph_util::has_proven(node.base_node())) {
+    // Count only what the encoder will actually ASSERT, mirroring
+    // pass/lec/encode.cpp's prop_active_assume rule exactly:
+    //   * `assume_nocheck` is an environment contract BY SPELLING — active
+    //     whether or not pass.formal ran or stamped anything. This deliberately
+    //     survives pass.formal RETRACTING a jointly-contradictory set (which
+    //     clears `proven`): the pair must still gate this census, or
+    //     o.design_assumes goes false and the hierarchy's no-solver
+    //     structural-identity shortcut hands out a PROVEN that the UNSAT
+    //     hypothesis set should have rejected as CONTRADICTORY.
+    //   * a CHECKED `assume` needs the `proven` stamp pass.formal put on it
+    //     (a selected-top IO assume, or every assume under assume_check=false).
+    //     One that was never discharged — a `lg:` library fed straight to
+    //     `lhd lec`, or a side built at O0 where pass.formal does not run —
+    //     carries no attribute, is not a hypothesis, and must not be disclosed
+    //     as one either.
+    if (!nocheck_by_name && !livehd::graph_util::has_proven(node.base_node())) {
       continue;
     }
     ++census.active;
@@ -501,8 +511,12 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     // the still-unproved obligation in the netlist). Every other stamped assume
     // — assume_nocheck, formal.assume_check=false, a genuinely proven one —
     // carries `proven` ALONE, so the pair is an exact "accepted without proof"
-    // discriminator on a persisted graph.
-    if (livehd::graph_util::has_runtime_check(node.base_node())) {
+    // discriminator on a persisted graph. An `assume_nocheck` is exempt by
+    // spelling: it is a sanctioned free contract, never the "undischarged
+    // promotion" this refusal exists for — including a retracted contradictory
+    // one, whose `runtime_check` stamp must reach pass.lec's CONTRADICTORY
+    // rejection rather than trip the wrong refusal here.
+    if (!nocheck_by_name && livehd::graph_util::has_runtime_check(node.base_node())) {
       ++census.undischarged;
       if (census.undischarged_loc.empty()) {
         const auto k            = raw.find('\x1f');  // "kind\x1floc\x1fmsg"

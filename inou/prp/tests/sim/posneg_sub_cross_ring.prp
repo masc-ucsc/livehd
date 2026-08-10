@@ -1,0 +1,52 @@
+/*
+:name: posneg_sub_cross_ring
+:type: simulation
+*/
+// todo/livehd/3d-sim-color: a posedge and a negedge register cross-coupled
+// through TWO occurrences of the SAME comb module, one in each direction. The
+// POS->NEG leg must execute in the post-rise window (the fall samples this
+// period's post-rise P: negedge_through_sub.prp pins the single-direction
+// case); the NEG->POS leg must execute against the post-fall N of the
+// PREVIOUS period (edge_negpos.prp pins that direction). Here BOTH legs exist
+// at once, so a single-window schedule cannot host both `mix` occurrences:
+// subtask B must place the two structurally identical colors in DIFFERENT
+// execution slots, and subtask C's coarsening must not merge them (or merge
+// either with the wrong register color) just because they are small, adjacent,
+// and identical. Subtask F sees two hash-identical views whose slots differ.
+//
+// FAILURE SIGNATURES. Evaluating the NEG->POS mix in the post-rise window
+// makes qp use this period's n (values run ahead); evaluating the POS->NEG mix
+// pre-rise makes qn lag a full period; an A->B->A repair evaluates a mix twice
+// and double-adds d. Each lands on a different exact value, and the golden
+// model below tracks the correct one (rise first, then fall, within a period).
+comb mix(x:u8, y:u8) -> (z:u8) {
+  wrap z = x + y
+}
+
+pub mod xring(d:u8) -> (qp:u8@[0], qn:u8@[0]) {
+  reg p:u8 = 0
+  reg n:u8:[posclk=false] = 0
+  qp = p
+  qn = n
+  mut fwd = mix(x=p, y=d)   // POS->NEG: the fall must see this period's post-rise p
+  n = fwd
+  mut bck = mix(x=n, y=d)   // NEG->POS: the rise samples the PREVIOUS fall's n
+  p = bck
+}
+
+test xring.both_windows {
+  mut acc = xring
+  mut pg = 0
+  mut ng = 0
+  tick 8 {
+    const dv = 11 + (17 * clock)   // distinct every cycle (max 130, fits u8)
+    acc.d = dv
+    // One period: the rise commits p from the OLD n, then the fall commits n
+    // from the JUST-committed p. Program order below mirrors exactly that.
+    pg = (ng + dv) & 0xFF
+    ng = (pg + dv) & 0xFF
+    step
+    assert(acc.qp == pg, "rise: p takes previous fall's n + d (NEG->POS window)")
+    assert(acc.qn == ng, "fall: n takes THIS period's post-rise p + d (POS->NEG window)")
+  }
+}

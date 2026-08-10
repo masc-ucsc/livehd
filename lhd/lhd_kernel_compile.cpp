@@ -323,12 +323,14 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
     auto s = p.rfind('/');
     return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
   };
-  // The unit name inou.prp gives a file: basename, cut at the first '.' (mirror
-  // inou_prp.cpp so our loaded-set keys line up with get_top_module_name()).
+  // The unit name inou.prp gives a file: basename minus its extension — the
+  // FULL stem, cut at the LAST '.' (mirror inou_prp.cpp so our loaded-set keys
+  // line up with get_top_module_name()). pass.prp_writer emits sibling units
+  // as `file.entity.prp`, so a stem may itself contain dots.
   auto unit_name_of = [](std::string_view p) -> std::string {
     auto s    = p.rfind('/');
     auto base = s == std::string_view::npos ? p : p.substr(s + 1);
-    auto d    = base.find('.');
+    auto d    = base.rfind('.');
     return std::string(d == std::string_view::npos ? base : base.substr(0, d));
   };
   auto abspath_of = [](std::string_view p) -> std::string {

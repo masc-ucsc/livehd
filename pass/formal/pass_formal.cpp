@@ -685,11 +685,22 @@ void Pass_formal::work(Eprp_var& var) {
     // so probe once — the same guard pass/lec applies before trusting an
     // assumption-conditioned verdict — and drop them all on a confirmed
     // contradiction so every assert below stays a runtime check.
+    //
+    // WARNING severity, deliberately: this tier fully degrades (the hypotheses
+    // are dropped and every stamp retracted below), so nothing unsound persists,
+    // and an error here would poison the diag sink and abort the recipe BEFORE
+    // the tier that must adjudicate — `lhd lec` compiles both sides through this
+    // very pass, and its second side's tolg gate trips on any recorded error, so
+    // pass.lec never got to reject the pair as CONTRADICTORY
+    // (lec_design_assume_test). The flows that consume the assumptions re-probe
+    // and hard-fail on their own: pass/lec/encode.cpp re-activates the
+    // assume_nocheck pair BY SPELLING (surviving the retraction), lec's queries
+    // reject the UNSAT set as CONTRADICTORY, and `lhd formal verify` turns the
+    // vacuous verdict into a usage error (lhd_kernel_formal.cpp).
     if (unchecked_hypotheses && !prover.assumes_consistent()) {
-      livehd::diag::err("pass.formal", "assume-contradiction", "comptime")
+      livehd::diag::warn("pass.formal", "assume-contradiction", "comptime")
           .msg("the active assumptions of '{}' are jointly unsatisfiable: every assertion would prove vacuously", g->get_name())
           .hint("fix the contradicting assume(s); until then the assumptions are ignored and assertions stay runtime checks")
-          .deferred()
           .emit();
       prover.clear_assumes();
       // Dropping the solver hypotheses is not enough: the unchecked assumes were

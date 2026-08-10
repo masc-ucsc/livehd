@@ -410,6 +410,19 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     auto newid = dst_lib->source_map().import_from(g_->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
   }
+  // Driver pin 0 rides with the NODE, not with the edge tables: a single-output
+  // cell whose output has zero fanout (a dead mux the input recipe's cprop
+  // bypassed but did not delete) never appears as an edge driver, so the
+  // edge-driven carry in emit_region_body* would clone it at bits==0 -- an
+  // unsized cell that trips debug_assert_cells_sized at the next compile's
+  // cprop entry. Port 0 is THE driver of every single-output op and
+  // create_driver_pin(0) is the non-allocating node-as-pin handle on both
+  // sides; live pins get the same values re-stamped by the edge path
+  // (idempotent). Multi-driver ops (Sub/Memory/IO) are excluded: their
+  // edge-less outputs are completed from the child IO decls instead.
+  if (!Ntype::has_multiple_driver_pins(gu::type_op_of(orig))) {
+    carry_driver_attrs(orig.create_driver_pin(0), neo.create_driver_pin(0));
+  }
 }
 
 void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {

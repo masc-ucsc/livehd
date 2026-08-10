@@ -23,8 +23,16 @@ void Inou_prp::parse_to_lnast(Eprp_var& var) {
   Inou_prp p(var);
 
   for (const auto& f : absl::StrSplit(p.files, ',')) {
-    auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
-    auto basename_noext = str_tools::get_str_before_first(basename, '.');
+    auto basename = str_tools::get_str_after_last_if_exists(f, '/');
+    // Unit name = the FULL stem (strip only the trailing extension, LAST dot).
+    // pass.prp_writer names an emitted sibling file by its full internal unit
+    // name (`file.entity.prp`) and the top imports it as
+    // `import("file.entity.entity")`; a first-dot cut collapses every sibling
+    // of a design into one unit name and no `file.entity` unit ever exists.
+    // Mirrors `lhd scan` (fs::path::stem) and discover_imports' unit_name_of
+    // in lhd_kernel_compile.cpp.
+    auto dot            = basename.rfind('.');
+    auto basename_noext = dot == std::string_view::npos ? basename : basename.substr(0, dot);
 
     Prp2lnast converter(f, basename_noext);
 

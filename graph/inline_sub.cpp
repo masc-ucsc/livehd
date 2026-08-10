@@ -115,6 +115,19 @@ void Sub_inliner::create_nodes() {
     }
     node_map_[n] = neo;
     carry_node_attrs(n, neo);
+    // Driver pin 0 rides with the NODE, not with the edge tables: a
+    // single-output cell whose output has zero fanout (a dead hold-mux cprop
+    // bypassed but did not delete) never appears as an edge driver, so the
+    // edge-driven carry in resolve_driver() would clone it at bits==0 -- an
+    // unsized cell that trips debug_assert_cells_sized at the next cprop
+    // entry (same bug class as pass_partition carry_node_attrs). Port 0 is
+    // THE driver of every single-output op and create_driver_pin(0) is the
+    // non-allocating node-as-pin handle on both sides; live pins get the same
+    // values re-stamped by resolve_driver (idempotent). Multi-driver ops
+    // (Sub/Memory/Flop) are excluded: their outputs carry per-port decls.
+    if (!Ntype::has_multiple_driver_pins(op)) {
+      carry_driver_attrs(n.create_driver_pin(0), neo.create_driver_pin(0));
+    }
   }
 }
 

@@ -1,0 +1,57 @@
+/*
+:name: same_module_shift_chain
+:type: simulation
+*/
+// todo/livehd/3d-sim-color: THREE occurrences of ONE module chained as a shift
+// register. This is the minimal design where canonical kernel reuse (subtask F)
+// and the direct state-update fast path (subtask E) meet: the three stages are
+// structurally identical (one verified equivalence class, one generated kernel,
+// three bound objects), and stage k+1's rise must read stage k's PRE-rise Q.
+//
+// WHAT CAN GO WRONG UNDER THE NEW PLAN. If the shared kernel directly updates
+// its register in one call (E) and the scheduler runs the three bound objects
+// in chain order without a staged commit or an old-value precedence edge, the
+// chain collapses into a wire (q3 == q2 == q1 == this tick's d). If kernel
+// dedup binds storage wrong (two objects sharing one slot), the stages alias
+// and the delayed values interleave. Both failures are exact-value visible.
+//
+// The per-cycle asserts compare against a golden 3-deep shift mirrored in test
+// locals, so a one-period lag, an alias, or a collapse each fail differently.
+//
+// SCOPE: this harness observes VALUES only. That kernel dedup actually
+// happened (one emitted class, three bound objects) is invisible here and
+// needs a generated-structure test on the lhd/tests side; `:expect_instances:`
+// counts LGraph Subs, not emitted C++ classes.
+mod stage8(d:u8) -> (q:u8@[1]) {
+  reg r:u8 = 0
+  q = r
+  r = d
+}
+
+pub mod chain3(d:u8) -> (q1:u8@[1], q2:u8@[2], q3:u8@[3]) {
+  mut a = stage8(d)
+  mut b = stage8(d=a)
+  mut c = stage8(d=b)
+  q1 = a
+  q2 = b
+  q3 = c
+}
+
+test chain3.delay3 {
+  mut acc = chain3
+  mut e1  = 0
+  mut e2  = 0
+  mut e3  = 0
+  tick 8 {
+    const dv = 7 + (13 * clock)   // distinct every cycle (max 98, fits u8)
+    acc.d = dv
+    // Golden non-blocking shift: each stage takes its predecessor's OLD value.
+    e3 = e2
+    e2 = e1
+    e1 = dv
+    step
+    assert(acc.q1 == e1, "stage 1 holds this tick's d")
+    assert(acc.q2 == e2, "stage 2 holds the previous tick's d, not this tick's (old-Q read between identical kernels)")
+    assert(acc.q3 == e3, "stage 3 lags by exactly three ticks (no alias between bound objects of one kernel)")
+  }
+}

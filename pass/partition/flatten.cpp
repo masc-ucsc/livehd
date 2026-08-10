@@ -123,6 +123,17 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
   }
+  // Driver pin 0 rides with the NODE: a single-output cell with zero fanout
+  // never reaches resolve_driver (the only carry_driver_attrs site), so its
+  // width/sign would be dropped and the flat clone lands at bits==0 -- the same
+  // dead-output hole as the Partitioner's edge-driven carry (see
+  // pass_partition.cpp carry_node_attrs). Port 0 is the sole driver of every
+  // single-output op; live pins get the same values re-stamped by
+  // resolve_driver (idempotent). Multi-driver ops (Sub/Memory/IO) keep their
+  // decl-based completion.
+  if (!Ntype::has_multiple_driver_pins(gu::type_op_of(orig))) {
+    carry_driver_attrs(ctx, orig.create_driver_pin(0), neo.create_driver_pin(0));
+  }
 }
 
 void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
