@@ -7,15 +7,25 @@ combiner) and every run was killed unfinished (worst: **2 d 8 h / 94 GB**).  Eac
 time the check got fast enough to reach further into the file, it exposed more
 real proof bugs.  **"0 sorries" ≠ "typechecks".**
 
-This document records **9 bugs** found this way, the fix for each, and the
+This document records **10 bugs** found this way, the fix for each, and the
 measured cost model.  Bugs 1–3 and 5 are constant-spelling / side-condition
 issues in the op bridges; 6–8 are structural (combiner shape, source-driven
 outputs, an asymmetric closer); 9 is an arity-dispatch gap that only bites at
 scale.  All fixes are in the emitter (`pass_lean.cpp`) plus `OpBridge.lean` /
 `GraphRefine.lean`.
 
-**RESOLVED.** With all 9 fixes in, **all three DINO variants** typecheck
-end-to-end — `exit 0`, 0 errors, 0 sorries, `_comb`/`_next`/`_step` all proven:
+**Bug 10 is different in kind** and came from **CVA6, not DINO**: bugs 1–9 are all
+defects in the *proof*, while 10 is a defect in the *model* — the fast view
+zero-extended a widening arithmetic shift, so it computed a different value from
+the design.  It was caught only because the certificate disagreed, which is the
+step-5 bridge working as a **differential test between two independent
+translations of the same graph** rather than merely as a proof obligation.
+
+**RESOLVED (DINO).** With bugs 1–9 fixed, **all three DINO variants** typecheck
+end-to-end — `exit 0`, 0 errors, 0 sorries, `_comb`/`_next`/`_step` all proven.
+Bug 10 does not affect them: it needs a *widening* SRA, and all 714 of
+`SingleCycleCPU`'s SRA nodes are truncating (re-confirmed on a freshly emitted
+file), so its fix leaves their emitted text byte-for-byte unchanged by design.
 
 | design | nodes | wall | peak RSS |
 |---|---|---|---|
@@ -322,3 +332,107 @@ Both re-proved with no regression on a quarter/half the cores.
 arity 2, because its closer has to unfold machinery the binary bridge never
 introduces.  Give every n-ary op a binary fast path, and audit the dispatch table
 for ops that lack one.
+
+---
+
+## Bug 10 — widening `SRA` zero-extends in the fast model (a real semantic divergence)
+
+**First bug found on CVA6 rather than DINO, and the first that is a mistranslation
+rather than a proof-engineering gap.**
+
+- **Symptom:** `cva6_alu_export_rec24564` (`Op_SRA`, width 192, operand `fv24616`
+  65 bits) fails with
+  ```
+  error: Tactic `decide` proved that the proposition
+    192 ≤ 65
+  is false
+  ```
+  **24 of 6,305** nodes in `cva6_alu_export`: 16 at `192 > 65`, 8 at `576 > 65`.
+
+- **Root cause — the FAST MODEL, not the certificate.**  The two models widen an
+  arithmetic shift differently, and only agree while the result is *truncated*:
+
+  | | expression | how it widens |
+  |---|---|---|
+  | fast (`emit_node_expr`) | `bv_zext (sem_sra a b) : BitVec w` | `sem_sra` shifts at the **operand** width `vw`, then **zero**-fills up to `w` |
+  | cert (`eval_op`) | `bv_sra w a b` = `mk_bv w (bv_sint a / 2^amt)` | reads `a` **signed**, so `mk_bv w` of a negative value **sign**-fills |
+
+  For `w ≤ vw` both keep the low `w` bits (`toNat % 2^w` = `toInt % 2^w` there), so
+  they coincide.  For `w > vw` with a negative operand they differ — zeros vs ones
+  in the extension.  Committed as a `native_decide` example in `OpBridge.lean`:
+  operand all-ones at 65 bits, shift 0 → `bv_zext` to 192 gives `2^65 - 1`,
+  `bv_sext` gives `2^192 - 1`.
+
+- **Which side is wrong:** the fast model.  `inou/cgen/cgen_sim.cpp` — LiveHD's own
+  simulator, and the artifact the LEC gate proves equivalent to the RTL — reads an
+  arithmetic shift's operand as **signed**
+  (`operand(e[0].driver, wbits, /*signed=*/1)`, commented "The shifted operand of an
+  ARITHMETIC shift must be read as signed") and materializes the result in
+  `Slop<tw>` at the **target** width.  That is sign-extension.  An arithmetic right
+  shift exists to preserve sign; widening its result with zeros discards exactly
+  that.  So the certificate was faithful and `bv_zext` was the defect: at those 24
+  nodes the generated Lean model computes a different value from the design whenever
+  the operand is negative.
+
+  Scope: the bug is in the **generated Lean model**, not in LiveHD's RTL path or
+  simulator — nothing downstream of `cgen_sim` is affected.  But anything concluded
+  by executing or reasoning about that Lean model at those nodes would have been.
+
+- **Fix:** emit `bv_sext` instead of `bv_zext` when `w > vw`, and add
+  `OpBridge.sra_bridge_sext`, which needs **no side condition at all** (
+  `mk_bv w V = bvenc (BitVec.ofInt w V)` holds at every width).  The bridge
+  dispatch mirrors the same `w > width_of(dep0)` test.
+  - The **truncating** case keeps `bv_zext` and `sra_bridge _ _ (by decide)`
+    *verbatim*, so every already-verified design's emitted text is unchanged and its
+    proof stands — deliberately, to avoid invalidating three green DINO runs for a
+    case they do not contain.
+
+- **Why DINO could not catch it:** **714/714** of `SingleCycleCPU`'s SRA nodes are
+  truncating (`w ≤ vw`) — re-confirmed on a *freshly emitted* file under current
+  cprop, not the stale artifact, precisely because the "DINO unaffected" claim
+  depends on it.  In that regime zext and sext coincide, the wrong extension is
+  invisible, and `sra_bridge`'s `w ≤ wa` hypothesis is always true.  A widening SRA
+  is required to observe it, and no DINO variant has one — which is also why all
+  three verified.
+
+  SRA is uniquely exposed: it is the only operator that takes a **signed** operand
+  and then widens it to the node width.  `Sext` widens too but handles sign
+  explicitly (and has its own two bridges); `SLT`/`SGT` read signed but emit 1 bit,
+  so there is no widening to get wrong.
+
+### The second, separate defect: an unchecked `by decide`
+
+`sra_bridge`'s `w ≤ wa` hypothesis was **honest** — it documented exactly the domain
+where the two models agree.  The emitter, though, discharged it with an
+unconditional `(by decide)`.  So outside that domain the symptom was
+`decide proved 192 ≤ 65 is false` **~30 minutes into a run**, instead of a clear
+diagnostic at emit time.
+
+Name the anti-pattern: **never emit `by decide` for a lemma hypothesis the emitter
+has not itself checked can hold.**  Either check it and dispatch (what Sext already
+does, and what SRA now does), or emit a flagged `sorry` so the static gate catches
+it.  `pass/lean/scripts/op_census.py` now reports the SRA arm **per node**
+(`sra_bridge (truncating)` vs `sra_bridge_sext (widening, 192>65)`), so a width
+regression is a seconds-long static check rather than a wasted run.
+
+That per-node reporting also fixed a fidelity bug in the census itself: it had been
+caching dispatch status per `(op, arity)`, which for a mixed population reports
+whichever node came first and can **hide a failing node behind a passing twin**.
+It now evaluates per node and prints one row per `(op, arity, dispatch)` — which is
+how the 864-truncating / 16+8-widening split became visible at all.
+
+### Back-port needed
+
+`pass/isabelle/pass_isabelle.cpp:2209` emits
+`((ucast (sem_sra <a> <amt>) :: <w> word))`.  `ucast` is zero-extend, so
+**`pass.isabelle` carries the identical bug** and needs `scast` when
+`w > value_w`.  (Third shared latent bug the Lean bridge has surfaced for
+`pass.isabelle`; see the README's memory-decode notes for the earlier two.)
+
+**Lesson:** the step-5 bridge is not only a proof obligation — it is a
+**differential test between two independent translations of the same graph**.  Bugs
+1–9 were all defects in the *proof*; this one was a defect in the *model*, caught
+only because the certificate disagreed.  When fast and cert disagree, first decide
+which one matches LiveHD's own simulator (`cgen_sim.cpp`) before reaching for a new
+lemma — the temptation here was to add a companion lemma for `192 ≤ 65` and move on,
+which would have *proven the wrong model correct*.

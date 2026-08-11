@@ -33,7 +33,7 @@ import sys
 
 # `op` here is the certificate spelling minus the "LGraphOp." prefix, e.g.
 # "Op_GetMask", "Op_Sum 2".  `arity` is len(deps).
-def dispatch_status(op, arity, dep_widths):
+def dispatch_status(op, arity, dep_widths, out_width=None):
     """Return (status, note).
 
     status is one of:
@@ -56,8 +56,15 @@ def dispatch_status(op, arity, dep_widths):
         return ("ok", "sum1_bridge")
     if op == "Op_And" and arity == 2:
         return ("ok", "and_bridge")
+    if op == "Op_And" and arity == 3:
+        return ("ok", "and3_bridge (fold-free)")
+    if op == "Op_Or" and arity == 2:
+        # Binary Or does NOT take the n-ary bridge: orn_bv_bridge is correct at
+        # arity 2 but its closer unfolds a List.foldl, which sent the kernel into
+        # unbounded recursion on deep operand chains (Bug 9).
+        return ("ok", "or_bridge (binary fast path)")
     if op == "Op_Or":
-        return ("ok", "orn_bv_bridge (any arity)")
+        return ("ok", "orn_bv_bridge (n-ary)")
     if op == "Op_Xor" and arity == 2:
         return ("ok", "xor_bridge")
     if op == "Op_Not" and arity == 1:
@@ -71,7 +78,14 @@ def dispatch_status(op, arity, dep_widths):
     if op == "Op_MuxN" and arity == 3:
         return ("ok", "muxn3_bridge")
     if op == "Op_SRA" and arity == 2:
-        return ("ok", "sra_bridge")
+        # A WIDENING SRA (out wider than operand) sign-extends and uses
+        # sra_bridge_sext; sra_bridge itself requires w <= wa and would leave
+        # `decide` proving a FALSE side condition. Report which arm applies so a
+        # width regression here is visible statically.
+        wa = dep_widths[0]
+        if wa is not None and out_width is not None and out_width > wa:
+            return ("ok", "sra_bridge_sext (widening, %d>%d)" % (out_width, wa))
+        return ("ok", "sra_bridge (truncating)")
     if op in ("Op_EQ", "Op_ULT", "Op_UGT") and arity == 2:
         return ("ok", "eq/ult/ugt_bridge")
     if op == "Op_Sext" and arity == 2:
@@ -225,21 +239,22 @@ def main():
         return 1
 
     # -- (op, arity) histogram + dispatch status -----------------------------
+    # Status is computed PER NODE, not per (op, arity): some conditions depend on
+    # this node's widths (a widening vs truncating SRA, SLT at equal vs unequal
+    # widths). Caching by (op, arity) would report whichever node happened to come
+    # first and could hide a failing one behind a passing twin.
     per_pair = collections.Counter()
     examples = {}
-    status_of = {}
-    for nid, (op, _w, deps) in nodes.items():
-        key = (op, len(deps))
+    for nid, (op, w, deps) in nodes.items():
+        st, note = dispatch_status(op, len(deps), [width_of.get(d) for d in deps], w)
+        key = (op, len(deps), st, note)
         per_pair[key] += 1
         examples.setdefault(key, nid)
-        if key not in status_of:
-            status_of[key] = dispatch_status(op, len(deps), [width_of.get(d) for d in deps])
 
-    print("\n(op, arity) histogram -- %d distinct pairs" % len(per_pair))
-    print("  %-22s %5s %6s  %-8s %s" % ("op", "arity", "count", "status", "note"))
-    for (op, ar), n in per_pair.most_common():
-        st, note = status_of[(op, ar)]
-        print("  %-22s %5d %6d  %-8s %s" % (op, ar, n, st, note))
+    print("\n(op, arity, dispatch) histogram -- %d distinct rows" % len(per_pair))
+    print("  %-22s %5s %6s  %-9s %s" % ("op", "arity", "count", "status", "note"))
+    for (op, ar, st, note), n in per_pair.most_common():
+        print("  %-22s %5d %6d  %-9s %s" % (op, ar, n, st, note))
 
     # -- width census --------------------------------------------------------
     widths = [w for _op, w, _d in nodes.values()]
@@ -303,7 +318,7 @@ def main():
             print("   linter.unreachableTactic on: the generic branch should report unreachable)")
 
     # -- verdict ------------------------------------------------------------
-    bad = [(k, n) for k, n in per_pair.items() if status_of[k][0] != "ok"]
+    bad = [(k, n) for k, n in per_pair.items() if k[2] != "ok"]
     print("")
     if gm_overwide:
         print("FAIL: %d GetMask node(s) have an all-ones mask WIDER than the output width."
@@ -319,14 +334,14 @@ def main():
             print("        ... and %d more" % (len(gm_overwide) - 8))
         return 1
     if not bad:
-        print("PASS: all %d (op, arity) pairs are handled by the step-5 dispatch." % len(per_pair))
+        print("PASS: all %d node(s) across %d (op, arity, dispatch) row(s) are handled."
+              % (sum(per_pair.values()), len(per_pair)))
         return 0
     n_bad_nodes = sum(n for _k, n in bad)
-    print("FAIL: %d node(s) across %d (op, arity) pair(s) are NOT handled:" % (n_bad_nodes, len(bad)))
-    for (op, ar), n in sorted(bad, key=lambda kv: -kv[1]):
-        st, note = status_of[(op, ar)]
+    print("FAIL: %d node(s) across %d dispatch row(s) are NOT handled:" % (n_bad_nodes, len(bad)))
+    for (op, ar, st, note), n in sorted(bad, key=lambda kv: -kv[1]):
         print("  %-22s arity %-3d %6d nodes  [%s] %s (e.g. nid %d)"
-              % (op, ar, n, st, note, examples[(op, ar)]))
+              % (op, ar, n, st, note, examples[(op, ar, st, note)]))
     print("\n'unhandled' -> emitter writes `sorry -- TODO(step5)`.")
     print("'trap'      -> emitter writes a bridge call that CANNOT unify; it fails only")
     print("               once the typecheck reaches it. Fix before any long run.")

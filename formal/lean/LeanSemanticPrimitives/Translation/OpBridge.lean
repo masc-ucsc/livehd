@@ -315,6 +315,30 @@ theorem and_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
   intro i hi
   simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
 
+/-- Arity-3 `And` bridge.  **Fold-free by construction**: the RHS is the same
+left-nested `&&&` chain `nary_op_inline` emits, so the default closer suffices and
+no `List.foldl` machinery is introduced.
+
+This is Bug 9's lesson applied preemptively: `andn_bridge` below is correct at
+arity 3, but its closer must unfold a `List.foldl`, and that rewriting sent the
+kernel into *unbounded* recursion for binary `Or` on deep operand chains.  Give
+each small arity a fold-free bridge rather than routing it through the fold. -/
+theorem and3_bridge {wa wb wc w : Nat} (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) :
+    eval_op LGraphOp.Op_And w [bvenc a, bvenc b, bvenc c]
+      = bvenc (((bv_zext a : BitVec w) &&& (bv_zext b : BitVec w)) &&& (bv_zext c : BitVec w)) := by
+  show bv_bitwise w (fun x y => x && y)
+        (bv_bitwise w (fun x y => x && y) (bv_resize w (bvenc a)) (bvenc b)) (bvenc c) = _
+  rw [bv_resize_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  have hin : bv_bit (bv_bitwise w (fun x y => x && y) (bvenc (bv_zext a : BitVec w)) (bvenc b)) i
+      = ((bv_zext a : BitVec w).getLsbD i && b.getLsbD i) := by
+    unfold bv_bitwise
+    rw [bv_bit_bitsToInt _ hi]
+    simp [bv_bit_bvenc]
+  rw [hin]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt b hi, getLsbD_zext_lt c hi]
+
 theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_Or w [bvenc a, bvenc b]
       = bvenc ((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) := by
@@ -456,6 +480,7 @@ theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ w
   rw [← hsra]
   exact mk_bv_toInt_zext (sem_sra a b) hw
 
+
 --------------------------------------------------------------------------------
 -- Shift left (SHL): the cert xor-fold-from-zero collapses to a masked shift.
 --------------------------------------------------------------------------------
@@ -536,6 +561,38 @@ theorem mk_bv_ofInt {w : Nat} (y : Int) : mk_bv w y = bvenc (BitVec.ofInt w y) :
   have hnn : 0 ≤ y % ((2 ^ w : Nat) : Int) := Int.emod_nonneg y (by positivity)
   rw [BitVec.toNat_ofInt, Int.ofNat_eq_natCast, Int.toNat_of_nonneg hnn,
       Int.emod_emod_of_dvd _ (dvd_refl _)]
+
+/-- **Widening SRA bridge.**  `sra_bridge` above assumes `w ≤ wa` and matches a fast
+model that `bv_zext`s the shifted result.  That is sound only when the result is
+TRUNCATED: the certificate `bv_sra` keeps the SIGNED value
+(`mk_bv w (bv_sint a / 2^amt)`), so at `w > wa` it sign-extends while `bv_zext`
+zero-extends -- genuinely different values for a negative operand.  A widening SRA
+must therefore sign-extend in the fast model, and then the bridge needs **no side
+condition at all**, since `mk_bv w V = bvenc (BitVec.ofInt w V)` holds at every
+width.
+
+This is the LiveHD-faithful direction: `inou/cgen/cgen_sim.cpp` reads an arithmetic
+shift's operand as *signed* and materializes the result at the target width. -/
+theorem sra_bridge_sext {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_SRA w [bvenc a, bvenc b]
+      = bvenc (bv_sext (sem_sra a b) : BitVec w) := by
+  have hsra : (sem_sra a b).toInt = a.toInt / (2:Int) ^ b.toNat := by
+    unfold sem_sra
+    rw [BitVec.toInt_sshiftRight, Int.shiftRight_eq_div_pow]; norm_num
+  show bv_sra w (bvenc a) (bvenc b) = _
+  unfold bv_sra
+  rw [bv_sint_bvenc, bv_uint_bvenc]
+  show mk_bv w (a.toInt / (2:Int) ^ b.toNat) = bvenc (bv_sext (sem_sra a b) : BitVec w)
+  rw [← hsra]
+  unfold bv_sext
+  exact mk_bv_ofInt _
+
+/-- The widening case really did diverge -- `zext` vs `sext` of the same shifted
+value are different at these widths, so the fix is a correctness fix, not a
+cosmetic one.  (a = all-ones 65 bits, shift 0.) -/
+example : (bv_zext (sem_sra (BitVec.allOnes 65) (0#7)) : BitVec 192)
+        ≠ (bv_sext (sem_sra (BitVec.allOnes 65) (0#7)) : BitVec 192) := by
+  native_decide
 
 theorem sext_bridge {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam) (hamt : amt.toNat = wa) :
     eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by

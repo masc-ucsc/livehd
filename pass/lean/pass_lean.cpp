@@ -862,7 +862,21 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
       if (pin_is_const(drivers[1])) {
         sw = std::max<uint32_t>(sw, minimal_unsigned_const_width(pin_const_value(drivers[1])));
       }
-      return "((bv_zext (sem_sra " + ucast_pin_at(ctx, drivers[0], vw) + " "
+      // An arithmetic shift keeps the SIGN.  When the node is WIDER than its
+      // operand the shifted result must be sign-extended, not zero-extended:
+      // `cgen_sim.cpp` reads an SRA operand as signed and materializes at the
+      // target width, and the certificate agrees (`bv_sra` = mk_bv w of the
+      // SIGNED quotient).  `bv_zext` there would zero-extend and silently compute
+      // a different value for a negative operand -- an RTL-faithfulness bug, not
+      // just a proof gap.  Found on the CVA6 ALU (node 24564: width 192 from a
+      // 65-bit operand); DINO has no widening SRA, which is why its three designs
+      // verified with the zext form.
+      //
+      // For w <= vw the two agree (both take the low w bits), so the truncating
+      // case keeps `bv_zext` verbatim -- that keeps every already-verified design's
+      // emitted text unchanged instead of invalidating its proof.
+      const char* sra_ext = (w > vw) ? "bv_sext" : "bv_zext";
+      return std::string("((") + sra_ext + " (sem_sra " + ucast_pin_at(ctx, drivers[0], vw) + " "
              + shift_amount_expr_at(ctx, drivers[1], sw) + ")) : BitVec " + std::to_string(w) + ")";
     }
 
@@ -1197,9 +1211,23 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
     case Ntype_op::SHL:
       op_expr = "LGraphOp.Op_SHL";
       {
+        // Port 0 (the shifted VALUE) must use the node width `w`, not the driver's
+        // pin width, because the fast model materializes it at `w`
+        // (`ucast_pin_at(drivers[0], w)` in emit_node_expr).  `cert_dep_id` only
+        // uses this width for CONSTANT deps, so the two models otherwise already
+        // agree; for a const they did not, and the mismatch is a bridge failure:
+        // cert leaf `BitVec.ofInt 1 1` vs fast `BitVec.ofInt 64 1` -- same value,
+        // two spellings, exactly the class of bug that `lit_const_at` delegating
+        // to `int_of_const` was meant to close (see STEP5_BRIDGE_BUGS bug 4).
+        // Found by const_parity on the CVA6 ALU (node 13284); DINO has no
+        // const-driven SHL port 0, which is why its three designs still passed.
+        // Semantically inert: eval_op Op_SHL reads `bv_uint a`, and widening a
+        // constant cannot change its unsigned value (it can only stop truncation).
+        // Note SRA does not need this -- its fast model already uses the pin width
+        // for port 0 (`vw`), so cert and fast agree there.
         size_t di = 0;
         for (const auto& e : inp_edges_ordered(node)) {
-          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : pin_width(ctx, e.driver, node);
+          const uint32_t dw = (di == 1) ? shift_dep_width(ctx, e.driver, node) : w;
           deps.push_back(cert_dep_id(ctx, build, e.driver, dw));
           ++di;
         }
@@ -2163,6 +2191,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
         bridge_call = "and_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 3) {
+        // Arity-3 And gets its own fold-free bridge for the same reason binary Or
+        // does (Bug 9): routing it through the n-ary fold would make the closer
+        // unfold List.foldl.  CVA6's ALU has 5 such nodes; DINO had none.
+        bridge_call = "and3_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 2) {
         // Binary Or takes the binary bridge, exactly as And/Xor/Sum do above.
         //
@@ -2200,7 +2233,10 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       } else if (info.op_expr == "LGraphOp.Op_MuxN" && info.deps.size() == 3) {
         bridge_call = "muxn3_bridge";
       } else if (info.op_expr == "LGraphOp.Op_SRA" && info.deps.size() == 2) {
-        bridge_call = "sra_bridge _ _ (by decide)";
+        // Mirror the fast model's extension choice (see Ntype_op::SRA above): a
+        // WIDENING SRA sign-extends and its bridge needs no side condition; the
+        // truncating case keeps the `w <= wa` form unchanged.
+        bridge_call = (info.width > width_of(info.deps[0])) ? "sra_bridge_sext" : "sra_bridge _ _ (by decide)";
       } else if ((info.op_expr == "LGraphOp.Op_EQ" || info.op_expr == "LGraphOp.Op_ULT"
                   || info.op_expr == "LGraphOp.Op_UGT") && info.deps.size() == 2) {
         // Compare width is the fast model's cmp/eq width = max(operand widths);
