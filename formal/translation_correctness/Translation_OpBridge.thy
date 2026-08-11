@@ -429,7 +429,25 @@ proof -
   then show ?thesis by (simp add: bv_bitwise_def)
 qed
 
-lemma sra_bridge:
+text \<open>
+  \<^bold>\<open>STALE with respect to the emitter -- do not use in a per-node
+  proof until re-proved.\<close>  \<open>emit_node_expr\<close>'s SRA arm now
+  emits \<open>scast (sem_sra ...) :: w word\<close>, not \<open>ucast\<close>:
+  \<open>sem_sra\<close> returns a word of the \<^emph>\<open>operand's\<close>
+  width, so widening to the node width must propagate the sign.  \<open>ucast\<close>
+  fills zeros, disagreeing with the certificate (@{term "mk_bv w"} of a negative
+  integer is its two's complement) and with the RTL (\<open>cgen_sim.cpp\<close>
+  reads the shifted operand as signed).
+
+  The lemma below still speaks about \<open>ucast\<close> and therefore no longer
+  matches what is emitted.  Re-proving it for \<open>scast\<close> needs
+  \<open>sint (word_of_int (sint x div 2 ^ k) :: 'v word) = sint x div 2 ^ k\<close>
+  --- lossless because @{term "sint x"} lies in the signed range and dividing by a
+  power of two keeps it there.  With that, \<^emph>\<open>no\<close> width side
+  condition is needed at all, unlike the version below.
+\<close>
+
+lemma sra_bridge_ucast_STALE:
   fixes x :: "'v::len word" and n :: "'n::len word"
   assumes wle: "LENGTH('w::len) \<le> LENGTH('v)"
   shows "eval_op Op_SRA LENGTH('w) [bvenc x, bvenc n]

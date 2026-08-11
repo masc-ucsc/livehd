@@ -1606,6 +1606,39 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   ofs << "      nodes = " << nodes_name << "\\<rparr>\"\n\n";
 
   const bool sequential = !flop_nodes.empty();
+  // ---- bridge: fast values for the synthesized Op_Const nodes ------------
+  // cprop folds constants onto operator PINS, so by certificate time there are
+  // no standalone Nconst nodes left (measured: 204 of 204 Op_Const in DINO, and
+  // 3 of 3 in add2, are synthesized).  The fast model inlines such a constant as
+  // a literal because it is built from terms; the certificate must give it an id
+  // because eval_op takes a dep list of ids.  So each one is a topo node with no
+  // counterpart among the per-node fv definitions, and the per-node recurrence
+  // would not be uniform without these.
+  //
+  // The literal MUST be spelled by lit_const_at -- the same renderer the fast
+  // model uses -- or the two sides would differ textually and the node's proof
+  // could not close.
+  if (ctx.fv_naming) {
+    const bool seq = !ctx.flop_field.empty();
+    ofs << "(* Fast values for constants promoted to certificate nodes.  Spelled by the\n"
+           "   same renderer the fast model inlines with, so the two agree textually. *)\n";
+    for (const auto& kv : build.const_pins) {
+      const auto id_it = build.const_ids.find(kv.first);
+      if (id_it == build.const_ids.end()) {
+        continue;  // already diagnosed above
+      }
+      const uint32_t cid = id_it->second;
+      const uint32_t cw  = kv.first.second;
+      ofs << "definition " << ctx.top_name << "_fv" << cid << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
+      if (seq) {
+        ofs << ctx.top_name << "_state \\<Rightarrow> ";
+      }
+      ofs << cw << " word\" where\n";
+      ofs << "  \"" << ctx.top_name << "_fv" << cid << ctx.fv_args << " = ("
+          << lit_const_at(ctx, pin_node(kv.second), pin_const_value(kv.second), cw) << ")\"\n\n";
+    }
+  }
+
   ofs << "definition " << source_env_name << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
   if (sequential) {
     ofs << ctx.top_name << "_state \\<Rightarrow> ";
@@ -2206,7 +2239,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       if (pin_is_const(b)) {
         shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
       }
-      return "((ucast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
+      // scast, NOT ucast.  sem_sra returns a word of the OPERAND's width, so
+      // widening to the node width must preserve the sign -- an arithmetic right
+      // shift exists precisely to propagate it.  ucast fills zeros, which for a
+      // negative shifted value disagrees with the certificate (mk_bv w of a
+      // negative int is its two's complement, i.e. sign-extended) and, more to
+      // the point, with the RTL: cgen_sim.cpp reads the shifted operand as
+      // signed.  For w <= value_w the two casts coincide (both keep the low w
+      // bits), so scast is correct in both directions.
+      return "((scast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
              + ") :: " + std::to_string(w) + " word))";
     }
 

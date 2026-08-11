@@ -638,3 +638,51 @@ graph before optimising an entry in a profile.
 
 (A full `graph_cert_wf` claim *does* still require distinctness — but `by eval`,
 never `by simp`.)
+
+---
+
+## Bug 5 — `SRA` widened with `ucast` (zero-extend) instead of `scast`
+
+Found in `pass.lean` first and confirmed identical here.
+
+- **Where:** `emit_node_expr`, `Ntype_op::SRA` arm.
+- **Symptom:** emitted `((ucast (sem_sra <a> <sh>) :: w word))`. `sem_sra`
+  returns a word of the **operand's** width `vw`, so widening to the node width
+  `w` is a separate cast — and `ucast` fills **zeros**.
+- **Why that is wrong:** an arithmetic right shift exists precisely to propagate
+  the sign; widening its result with zeros discards exactly what the operator is
+  for. Two independent confirmations that the *fast model* is the defective side,
+  not the certificate:
+  - the certificate computes `mk_bv w (bv_sint a div 2^amt)`, and `mk_bv w` of a
+    negative integer is its two's complement — i.e. sign-extended;
+  - `inou/cgen/cgen_sim.cpp`, LiveHD's own simulator and the artifact the LEC
+    gate proves equivalent to the RTL, reads the shifted operand as **signed**.
+- **When it bites:** only when `w > vw` *and* the shifted value is negative. For
+  `w \<le> vw` both casts keep the low `w` bits and agree.
+- **Fix:** `scast`. Correct in both directions, so no conditional is needed.
+- **Exposure:** DINO does **not** trigger it — 0 of 1420 SRA sites have
+  `out_w > operand_w`. It is live in the CVA6 ALU nodes where it was found.
+  Regenerated DINO now emits `scast` at all 1428 sites, `ucast` at none.
+
+**How it survived here is the part worth keeping.** While proving `sra_bridge` I
+hit this exact divergence and wrote, in the commit message: *"a wider output
+would zero-extend where the certificate sign-extends."* I then encoded it as a
+**side condition** on the lemma (`LENGTH('w) \<le> LENGTH('v)`) and moved on,
+rather than recognising that the fast model was wrong and the emitter needed
+fixing. A bridge lemma that cannot close is evidence about the *emitter*; adding
+a hypothesis to make it close suppresses that evidence. **When a bridge needs an
+unexpected side condition, suspect the emitter before weakening the lemma.**
+
+That is the third instance in this work of noting something and not acting on it
+(the others: the `bridge_src` keys-subset route, and whether `wf_distinct` was
+cited at all).
+
+### Follow-up owed
+
+`sra_bridge` is now **stale**: it still speaks about `ucast` while the emitter
+emits `scast`, so it is renamed `sra_bridge_ucast_STALE` and must not be used in
+a per-node proof. Re-proving it for `scast` needs
+`sint (word_of_int (sint x div 2^k) :: 'v word) = sint x div 2^k` — lossless
+because `sint x` lies in the signed range and dividing by a power of two keeps it
+there. With that, **no width side condition is needed at all**, which is itself
+the tell that the conditional version was papering over the bug.
