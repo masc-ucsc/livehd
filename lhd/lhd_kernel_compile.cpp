@@ -46,15 +46,17 @@ void validate_emits(const Options& opts) {
   reject_emit_kind(opts, "graphviz", {"unsupported", "--emit graphviz: is not implemented yet", ""});
   reject_emit_kind(opts, "metadata", {"unsupported", "--emit metadata: is not implemented yet (needs [3c] hashes)", ""});
 
-  // ln:/lg:/lnast-dump:/isabelle:/lean: outputs are directory containers (a Forest dir, a
+  // ln:/lg:/lnast-dump:/isabelle:/lean:/rocq: outputs are directory containers (a Forest dir, a
   // GraphLibrary dir, one file per unit) — directory form only, never a single
   // file. (pyrope: is allowed as a single file for a one-unit design; the
   // multi-unit check lives in emit_pyrope_single_file.)
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean") {
-      throw Lhd_error{"usage",
-                      std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
-                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle:/lean: one file per unit"};
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean"
+        || e.kind == "rocq") {
+      throw Lhd_error{
+          "usage",
+          std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
+          "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle:/lean:/rocq: one file per unit"};
     }
   }
 
@@ -95,12 +97,12 @@ void validate_emits(const Options& opts) {
   }
   if (opts.command == "lec" || is_pass_semdiff(opts)) {
     const std::string_view what = opts.command == "lec" ? "lec" : "pass semdiff";
-    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean"}) {
+    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean", "rocq"}) {
       reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", what), ""});
     }
   }
   if (opts.command == "tool") {
-    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean"}) {
+    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean", "rocq"}) {
       reject_emit_kind(
           opts,
                        k,
@@ -661,7 +663,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 bool emits_need_graphs(const Options& opts) {
   return find_slot(opts.emit_dirs, "lg") != nullptr || find_slot(opts.emits, "verilog") != nullptr
          || find_slot(opts.emit_dirs, "verilog") != nullptr || find_slot(opts.emit_dirs, "isabelle") != nullptr
-         || find_slot(opts.emit_dirs, "lean") != nullptr || find_slot(opts.emit_dirs, "sim") != nullptr || wants_dump(opts, "lg");
+         || find_slot(opts.emit_dirs, "lean") != nullptr || find_slot(opts.emit_dirs, "rocq") != nullptr
+         || find_slot(opts.emit_dirs, "sim") != nullptr || wants_dump(opts, "lg");
 }
 
 // True when any requested observable consumes the post-upass LNAST (gates the
@@ -1399,6 +1402,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
 
   emit_isabelle_outputs(opts, res, var);
   emit_lean_outputs(opts, res, var);
+  emit_rocq_outputs(opts, res, var);
   emit_verilog_outputs(opts, res, var);
   emit_sim_outputs(opts, res, var);  // --emit-dir sim:DIR/ (inou.cgen.sim, TODO 3d)
   // ln: emit is handled per-path by the caller (source publish vs plain forest),

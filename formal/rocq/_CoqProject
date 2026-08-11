@@ -1,0 +1,5 @@
+-R theories RocqSemanticPrimitives
+
+theories/SemanticPrimitives.v
+theories/Translation/LGraphModel.v
+theories/SemanticPrimitives_Test.v

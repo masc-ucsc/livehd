@@ -1674,6 +1674,34 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
+void emit_rocq_outputs(Options& opts, Result& res, Eprp_var& var) {
+  for (const auto& e : opts.emit_dirs) {
+    if (e.kind != "rocq") {
+      continue;
+    }
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", "no LGraphs to emit as Rocq", "the input produced no synthesizable modules"};
+    }
+    ensure_dir(e.path);
+    Eprp_var::Eprp_dict labels{
+        {"path", e.path}
+    };
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "formal.strict") {
+        labels["strict"] = v;
+      } else if (k == "formal.normalize") {
+        labels["normalize"] = v;
+      }
+    }
+    merge_sets(opts, "formal.rocq", labels);
+    run_step("pass.rocq", var, labels, opts, res);
+    res.outputs.push_back(e.path);
+  }
+}
+
 // Pyrope source emission (LNAST -> .prp via pass.prp_writer). Variable
 // cardinality is inherent (one .prp per unit), so only --emit-dir pyrope:DIR/
 // is supported; validate_emits rejects the single-file form.

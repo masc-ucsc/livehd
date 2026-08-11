@@ -62,6 +62,7 @@ inline constexpr Renamed_ns kRenamedSetPasses[] = {
     {     "compile.sim",             "sim", false},
     {"compile.isabelle", "formal.isabelle", false},
     {    "compile.lean",     "formal.lean", false},
+    {    "compile.rocq",     "formal.rocq", false},
 };
 inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] = {
     // `mine` read as "my own", and the one budget funds three SPECULATIVE
@@ -102,6 +103,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {     "compile.slang",        "inou.slang",     Set_pass::List::all},
     {   "formal.isabelle",     "pass.isabelle",     Set_pass::List::all},
     {       "formal.lean",         "pass.lean",     Set_pass::List::all},
+    {       "formal.rocq",         "pass.rocq",     Set_pass::List::all},
     {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},
     {        "pass.color",        "pass.color",     Set_pass::List::all},
     {    "pass.partition",    "pass.partition",     Set_pass::List::all},
@@ -174,6 +176,7 @@ std::string              sim_host_cxx();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_lean_outputs(Options& opts, Result& res, Eprp_var& var);
+void                     emit_rocq_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var);
 std::vector<std::string> harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units);

@@ -57,7 +57,10 @@ echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be sha
 echo "$out" | grep -q 'prpfail' && fail "removed prpfail vocabulary must not be listed: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
+echo "$out" | grep -q '"name":"formal.rocq.strict"' || fail "formal.rocq.strict missing: $out"
+echo "$out" | grep -q '"name":"formal.rocq.eval_engine"' || fail "formal.rocq.eval_engine missing: $out"
 echo "$out" | grep -q '"name":"compile.isabelle.' && fail "compile.isabelle.* must not exist (canonical is formal.isabelle.*): $out"
+echo "$out" | grep -q '"name":"compile.rocq.' && fail "compile.rocq.* must not exist (canonical is formal.rocq.*): $out"
 # The shared lhd.* kernel namespace (seed); the old per-pass top/seed are gone.
 echo "$out" | grep -q '"name":"lhd.seed"' || fail "shared lhd.seed missing: $out"
 echo "$out" | grep -q '"name":"pass.color.seed"' && fail "per-pass pass.color.seed must be gone (use lhd.seed): $out"

@@ -1370,3 +1370,12 @@ sh_test(
     srcs = ["blocking_ff_state_test.sh"],
     data = ["//lhd"],
 )
+
+# pass.rocq: `--emit-dir rocq:DIR/` emits a fast model + a graph certificate per
+# design. Text-only assertions, so this does NOT require Rocq to be installed;
+# typechecking the output is scripts/run_dino_lgraph_rocq.sh's job.
+sh_test(
+    name = "lhd_rocq_emit_test",
+    srcs = ["lhd_rocq_emit_test.sh"],
+    data = _FLOW_DATA,
+)

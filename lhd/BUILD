@@ -69,6 +69,7 @@ cc_library(
         "//pass/cprop:pass_cprop",
         "//pass/isabelle:pass_isabelle",
         "//pass/lean:pass_lean",
+        "//pass/rocq:pass_rocq",
         "//pass/lec:lec_query",
         "//pass/lec:pass_lec",
         "//pass/formal:pass_formal",

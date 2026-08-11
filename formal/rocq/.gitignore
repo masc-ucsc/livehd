@@ -1,0 +1,9 @@
+# Rocq build output (reproducible with `make`).
+*.vo
+*.vok
+*.vos
+*.glob
+.*.aux
+Makefile.coq
+Makefile.coq.conf
+.Makefile.coq.d
