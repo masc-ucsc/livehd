@@ -14,6 +14,7 @@ set -u
 
 LHD=lhd/lhd
 PRP=lhd/tests/setmask_bitread.prp
+IDENTITY_PRP=lhd/tests/setmask_identity.prp
 W="${TEST_TMPDIR:-/tmp/lhd_setmask_$$}"
 mkdir -p "$W"
 
@@ -49,4 +50,26 @@ folds_to() {  # <out> <src> : true when `out` is driven by `src` (bare or 1-bit 
 folds_to y0 a || fail "bit-0 read did not fold to a (Set_mask chain resolver regressed): $(cat "$W/bitread.gen.v")"
 folds_to y2 c || fail "bit-2 read did not fold to c (Set_mask chain resolver regressed): $(cat "$W/bitread.gen.v")"
 
-echo "PASS: setmask bit reads folded through try_find_single_driver_pin"
+# A computed unsigned u95 value is represented with bits=96 (95 magnitude bits
+# plus a zero sign bit). Writing it into low mask [0,95) over zero cannot alter
+# it. Cprop must remove that Set_mask instead of leaving a 95-bit mask/splice in
+# either generated Verilog or the simulator C++.
+"$LHD" compile "$IDENTITY_PRP" --recipe O1 \
+  --emit verilog:"$W/identity.gen.v" --workdir "$W/identity-w" --result-json "$W/identity.json" -q 2>/dev/null \
+  || fail "O1 compile of setmask_identity.prp failed"
+[ -s "$W/identity.gen.v" ] || fail "identity compile produced empty netlist"
+grep -q 'pass.cprop' "$W/identity.json" || fail "identity recipe did not run pass.cprop"
+grep -Eqi "95'h0?7f+|0*7fffffffffffffffffffffff" "$W/identity.gen.v" \
+  && fail "identity Set_mask survived cprop: $(cat "$W/identity.gen.v")"
+
+"$LHD" compile "$IDENTITY_PRP" --recipe O1 --emit-dir sim:"$W/identity-sim" \
+  --workdir "$W/identity-sim-w" -q 2>/dev/null || fail "sim cgen of setmask_identity.prp failed"
+grep -Rq 'set_mask_op_opt(64, 96,' "$W/identity-sim" \
+  || fail "contiguous dynamic write did not use set_mask_op_opt"
+grep -Rq 'clear_mask_op_opt(64, 96)' "$W/identity-sim" \
+  || fail "contiguous zero write did not use clear_mask_op_opt"
+if grep -R 'set_mask_op(.*from_pyrope' "$W/identity-sim" >/dev/null; then
+  fail "constant contiguous Set_mask still constructs/scans a runtime mask"
+fi
+
+echo "PASS: setmask reads, identities, and contiguous simulator writes optimized"

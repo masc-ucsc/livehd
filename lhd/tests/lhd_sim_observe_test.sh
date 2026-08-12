@@ -22,6 +22,10 @@ fail() {
   exit 1
 }
 
+lhd_sim() {
+  "$LHD" sim "$@"
+}
+
 # flop + stateful sub so the signal set spans the hierarchy.
 cat > "$W/obs.prp" <<'EOF'
 /*
@@ -42,13 +46,31 @@ test top.run {
 }
 EOF
 
-# ---- structural: cgen emits the snapshot methods; the driver has the modes ----
-"$LHD" sim "$W/obs.prp" --setup-only --workdir "$W/s" -q >/dev/null 2>&1 || fail "setup-only failed"
+# ---- structural: observation is compile-time instrumentation -----------------
+# A plain fast setup must not publish every child boundary in its hot colors.
+lhd_sim "$W/obs.prp" --setup-only --workdir "$W/fast" -q >/dev/null 2>&1 || fail "plain setup-only failed"
+FASTCPP="$W/fast/sim/obs.top.cpp"
+FASTHPP="$W/fast/sim/obs.top.hpp"
+! grep -q 'u_sub_sout_0.__last_out.o =' "$FASTCPP" || fail "plain setup retained child output observation"
+! grep -q 'u_sub_sout_0.__in.en =' "$FASTCPP" || fail "plain setup retained child input observation"
+! grep -q '__color_observation_active' "$FASTHPP" || fail "plain setup retained the runtime observation flag"
+! grep -q '__vcd_path' "$FASTHPP" || fail "plain setup retained disabled VCD storage"
+if lhd_sim "$W/obs.prp" --run-only --probe acc.u_sub_sout_0.c --workdir "$W/fast" -q >/dev/null 2>&1; then
+  fail "--run-only accepted a probe against an uninstrumented setup"
+fi
+
+# Requesting a probe at setup time emits the hierarchical mirrors it needs.
+lhd_sim "$W/obs.prp" --setup-only --probe acc.u_sub_sout_0.c --workdir "$W/s" -q >/dev/null 2>&1 \
+  || fail "instrumented setup-only failed"
 TOPCPP="$(ls "$W"/s/sim/obs.top.cpp 2>/dev/null)"
+TOPHPP="$W/s/sim/obs.top.hpp"
 DRV="$W/s/sim/drv.cpp"
 grep -q '::describe_signals' "$TOPCPP" || fail "cgen did not emit describe_signals"
 grep -q '::probe_signals'    "$TOPCPP" || fail "cgen did not emit probe_signals"
 grep -q '"flop"'             "$TOPCPP" || fail "describe_signals lacks the flop kind"
+grep -q 'color-direct eligible=true' "$TOPHPP" || fail "ordinary observation hierarchy did not select the color schedule"
+grep -q 'u_sub_sout_0.__last_out.o =' "$TOPCPP" || fail "child during-period output is not published by a color"
+grep -q 'u_sub_sout_0.__in.en = __in.en' "$TOPCPP" || fail "child input observation is not bound to its planned source"
 grep -q '_dbg.list_signals'  "$DRV"    || fail "driver lacks --list-signals"
 grep -q '_dbg_parse_break'   "$DRV"    || fail "driver lacks --break-when parsing"
 grep -q '"--probe"'          "$DRV"    || fail "driver does not accept --probe"
@@ -65,7 +87,7 @@ if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
 fi
 
 # (1) --list-signals: the hierarchical flop names are present
-"$LHD" sim "$W/obs.prp" --list-signals --result-json "$W/ls.json" --workdir "$W/run" -q >/dev/null 2>&1 \
+lhd_sim "$W/obs.prp" --list-signals --result-json "$W/ls.json" --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "--list-signals run failed"
 python3 - "$W/ls.json" <<'PY' || fail "--list-signals output wrong"
 import json, sys
@@ -77,7 +99,7 @@ print("  list-signals OK (%d signals)" % len(sigs))
 PY
 
 # (2) --probe: per-cycle trajectory over a window; acc += 2/cycle
-"$LHD" sim "$W/obs.prp" --probe "acc.acc,acc.u_sub_sout_0.c" --probe-from 8 --probe-to 11 \
+lhd_sim "$W/obs.prp" --probe "acc.acc,acc.u_sub_sout_0.c" --probe-from 8 --probe-to 11 \
   --result-json "$W/pr.json" --workdir "$W/run" -q >/dev/null 2>&1 || fail "--probe run failed"
 python3 - "$W/pr.json" <<'PY' || fail "--probe output wrong"
 import json, sys
@@ -92,8 +114,28 @@ assert all("acc.u_sub_sout_0.c" in r for r in p["rows"]), "sub signal not probed
 print("  probe OK (acc.acc = %s)" % accs)
 PY
 
+# The occurrence-wide path bypasses child cycle() calls. Its name registry must
+# nevertheless preserve both sides of that removed module boundary: the child
+# output is the pre-rise/during-period value and the child input is the settled
+# alias of the same producer slot the child color reads directly.
+Q='{"schema_version":1,"kind":"sim_query","queries":[
+  {"id":"child_out","op":"value","signal":"acc.u_sub_sout_0.o","at":{"cycle":5}},
+  {"id":"child_in","op":"value","signal":"acc.u_sub_sout_0.en","at":{"cycle":5}}
+]}'
+lhd_sim "$W/obs.prp" top.run --query "$Q" --result-json "$W/color-query.json" --workdir "$W/color-query" -q \
+  >/dev/null 2>&1 || fail "direct hierarchy observation query failed"
+python3 - "$W/color-query.json" <<'PY' || fail "direct hierarchy observation values are stale"
+import json, sys
+r = {x["id"]: x for x in json.load(open(sys.argv[1]))["query"]["results"]}
+assert r["child_out"]["ok"] and int(r["child_out"]["value"]["dec"]) == 5, r["child_out"]
+assert r["child_out"]["value"]["sampled"] == "during_period", r["child_out"]
+assert r["child_in"]["ok"] and int(r["child_in"]["value"]["dec"]) == 1, r["child_in"]
+assert r["child_in"]["value"]["sampled"] == "settled", r["child_in"]
+print("  direct hierarchy observation OK")
+PY
+
 # (3) --break-when: first cycle acc.acc > 15
-"$LHD" sim "$W/obs.prp" --break-when "acc.acc > 15" --result-json "$W/bw.json" --workdir "$W/run" \
+lhd_sim "$W/obs.prp" --break-when "acc.acc > 15" --result-json "$W/bw.json" --workdir "$W/run" \
   --diag-fmt pretty > "$W/bw.out" 2>&1 || fail "--break-when run failed"
 grep -q "break-when 'acc.acc > 15' first held at clock" "$W/bw.out" || fail "no break-when report: $(cat "$W/bw.out")"
 python3 - "$W/bw.json" <<'PY' || fail "--break-when output wrong"
@@ -107,7 +149,7 @@ print("  break-when OK (cycle %d, acc.acc=%d)" % (b["cycle"], b["state"]["acc.ac
 PY
 
 # a never-true condition reports hit=false
-"$LHD" sim "$W/obs.prp" --break-when "acc.acc > 9999" --result-json "$W/bw2.json" --workdir "$W/run" -q >/dev/null 2>&1
+lhd_sim "$W/obs.prp" --break-when "acc.acc > 9999" --result-json "$W/bw2.json" --workdir "$W/run" -q >/dev/null 2>&1
 python3 - "$W/bw2.json" <<'PY' || fail "--break-when never-true output wrong"
 import json, sys
 b = json.load(open(sys.argv[1]))["debug"]["break"]
@@ -116,7 +158,7 @@ print("  break-when never-true OK")
 PY
 
 # a break on a NONEXISTENT signal must NOT fire a spurious cycle-0 hit (review bug)
-"$LHD" sim "$W/obs.prp" --break-when "acc.nope == 0" --result-json "$W/bw3.json" --workdir "$W/run" -q >/dev/null 2>&1
+lhd_sim "$W/obs.prp" --break-when "acc.nope == 0" --result-json "$W/bw3.json" --workdir "$W/run" -q >/dev/null 2>&1
 python3 - "$W/bw3.json" <<'PY' || fail "--break-when on a missing signal fired a spurious hit"
 import json, sys
 b = json.load(open(sys.argv[1]))["debug"]["break"]
@@ -125,13 +167,13 @@ print("  break-when missing-signal OK (no spurious cycle-0 hit)")
 PY
 
 # an invalid break value / empty LHS is rejected loudly (not silently 0)
-"$LHD" sim "$W/obs.prp" --break-when "acc.acc == 0xZZ" --workdir "$W/run" -q 2>&1 | grep -q "not a valid integer" \
+lhd_sim "$W/obs.prp" --break-when "acc.acc == 0xZZ" --workdir "$W/run" -q 2>&1 | grep -q "not a valid integer" \
   || fail "an invalid --break-when value was not rejected"
-"$LHD" sim "$W/obs.prp" --break-when " > 5" --workdir "$W/run" -q 2>&1 | grep -q "needs a signal" \
+lhd_sim "$W/obs.prp" --break-when " > 5" --workdir "$W/run" -q 2>&1 | grep -q "needs a signal" \
   || fail "an empty --break-when LHS was not rejected"
 
 # a space after a comma in --probe must not drop the signal
-"$LHD" sim "$W/obs.prp" --probe "acc.acc, acc.u_sub_sout_0.c" --probe-from 5 --probe-to 5 \
+lhd_sim "$W/obs.prp" --probe "acc.acc, acc.u_sub_sout_0.c" --probe-from 5 --probe-to 5 \
   --result-json "$W/pr2.json" --workdir "$W/run" -q >/dev/null 2>&1
 python3 - "$W/pr2.json" <<'PY' || fail "--probe dropped a signal after a comma+space"
 import json, sys
@@ -150,10 +192,10 @@ mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if ena
 test a.x { mut acc = cnt; tick 3 { acc.enable = true; step }; assert(true) }
 test b.y { mut acc = cnt; tick 3 { acc.enable = true; step }; assert(true) }
 EOF
-"$LHD" sim "$W/two.prp" --list-signals --workdir "$W/two" -q 2>&1 | grep -q "single test" \
+lhd_sim "$W/two.prp" --list-signals --workdir "$W/two" -q 2>&1 | grep -q "single test" \
   || fail "multi-test observability was not rejected"
 # ...but the positional test selector narrows it to one and works
-"$LHD" sim "$W/two.prp" a.x --list-signals --result-json "$W/two.json" --workdir "$W/two" -q >/dev/null 2>&1 \
+lhd_sim "$W/two.prp" a.x --list-signals --result-json "$W/two.json" --workdir "$W/two" -q >/dev/null 2>&1 \
   || fail "single-test --list-signals failed"
 python3 -c 'import json,sys; assert json.load(open("'"$W"'/two.json"))["debug"]["signals"]' || fail "no signals for the selected test"
 

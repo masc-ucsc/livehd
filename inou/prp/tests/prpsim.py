@@ -34,7 +34,7 @@ def _sim_compiler():
 
 
 def _sim_include_dirs(tmp_dir):
-    # Locate the hlop + iassert header dirs. Under `bazel test` the
+    # Locate the hlop + iassert + exact OpenTimer Taskflow header dirs. Under `bazel test` the
     # `cc_direct_headers` data dep stages slop.hpp/blop.hpp (hlop) and
     # iassert.hpp (iassert) into the test runfiles; find them by name and
     # return their directories. Returns [] when not found (manual run with no
@@ -47,14 +47,17 @@ def _sim_include_dirs(tmp_dir):
     roots.append(tmp_dir)
     wanted = ('slop.hpp', 'iassert.hpp')
     found = {}
+    taskflow_root = None
     for root in roots:
         for dirpath, _dirs, files in os.walk(root):
             for w in wanted:
                 if w not in found and w in files:
                     found[w] = dirpath
-        if len(found) == len(wanted):
+            if taskflow_root is None and os.path.basename(dirpath) == 'taskflow' and 'taskflow.hpp' in files:
+                taskflow_root = os.path.dirname(dirpath)
+        if len(found) == len(wanted) and taskflow_root is not None:
             break
-    if len(found) != len(wanted):
+    if len(found) != len(wanted) or taskflow_root is None:
         return []
     # dedup while preserving order
     dirs, seen = [], set()
@@ -63,6 +66,8 @@ def _sim_include_dirs(tmp_dir):
         if d not in seen:
             seen.add(d)
             dirs.append(d)
+    if taskflow_root not in seen:
+        dirs.append(taskflow_root)
     return dirs
 
 
@@ -144,7 +149,7 @@ def run_simulation(runner, tmp_dir, test):
         return 0 if rc == 0 else 1
 
     cxx    = _sim_compiler()
-    cflags = ['-std=c++23', '-DNDEBUG', '-O1', '-I' + abs_simdir]
+    cflags = ['-std=c++23', '-DNDEBUG', '-O1', '-pthread', '-I' + abs_simdir]
     for d in incs:
         cflags.append('-I' + d)
 
@@ -169,6 +174,11 @@ def run_simulation(runner, tmp_dir, test):
             pending += re.findall(r'#include\s+"([^"]+\.hpp)"', hf.read())
     bodies = [os.path.join(abs_simdir, h[:-4] + '.cpp') for h in sorted(incs_h)
               if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
+    kernel_prefixes = tuple(h[:-4] + '.color-kernel-' for h in incs_h
+                            if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp')))
+    if kernel_prefixes:
+        bodies += [os.path.join(abs_simdir, fn) for fn in sorted(os.listdir(abs_simdir))
+                   if fn.endswith('.cpp') and fn.startswith(kernel_prefixes)]
     exe = os.path.join(abs_simdir, 'drv.bin')
     cc  = [cxx] + cflags + bodies + [drv, '-o', exe]
     cp  = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

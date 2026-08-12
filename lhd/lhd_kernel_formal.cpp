@@ -3131,7 +3131,9 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // them) — and the VCD style knob, so `lhd lec --set sim.vcd_fake_delay=false`
   // shapes the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.taskflow_dir" || k == "sim.vcd_fake_delay"
+         || k == "sim.workers")
+        && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -4545,7 +4547,9 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.taskflow_dir" || k == "sim.vcd_fake_delay"
+         || k == "sim.workers")
+        && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }

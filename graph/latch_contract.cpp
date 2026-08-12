@@ -599,8 +599,9 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
 
   Clock_input_ports   result;
   const Design_clocks clocks(def.get(), /*hier=*/false);
-  const auto          root_port = [&](const hhds::Pin_class& driver) -> std::optional<uint32_t> {
-    if (driver.is_invalid()) {
+  std::function<std::optional<uint32_t>(const hhds::Pin_class&, int)> root_port;
+  root_port = [&](const hhds::Pin_class& driver, int depth) -> std::optional<uint32_t> {
+    if (driver.is_invalid() || depth > 16) {
       return std::nullopt;
     }
     hhds::Pin_class root = driver;
@@ -611,6 +612,61 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     }
     if (!root.is_invalid() && gu::is_graph_input_pin(root)) {
       return static_cast<uint32_t>(root.get_port_id());
+    }
+
+    // A Pyrope `wire x = nil; x = source` is represented as an Or reduction.
+    // Once nil/constant arms disappear it has one live operand and is an
+    // identity wrapper. Clock-interface discovery must see through it before
+    // deciding whether the source is a declared port or an instantiated ICG.
+    if (!root.is_invalid() && !gu::is_const_pin(root) && !gu::is_graph_input_pin(root)) {
+      const auto aggregate = root.get_master_node();
+      if (gu::type_op_of(aggregate) == Ntype_op::Or) {
+        hhds::Pin_class only;
+        int             live_inputs = 0;
+        for (const auto& edge : aggregate.inp_edges()) {
+          if (edge.driver.is_invalid() || gu::is_const_pin(edge.driver)) {
+            continue;
+          }
+          only = edge.driver;
+          ++live_inputs;
+        }
+        if (live_inputs == 1) {
+          return root_port(only, depth + 1);
+        }
+      }
+    }
+
+    // A clock gate may still be an ordinary Sub at this pre-emission seam.
+    // State in one child then receives the output of a sibling ICG, and the
+    // local cone walk necessarily stops at the instance boundary.  Decode the
+    // strict ICG definition and continue from its bound reference-clock input;
+    // its enable is timing control, not the clock root.  This is the same
+    // structural match materialize_clock_cells uses later, but read-only here
+    // so activation analysis does not depend on graph rewrite order.
+    const auto rn
+        = root.is_invalid() || gu::is_const_pin(root) || gu::is_graph_input_pin(root) ? hhds::Node_class{} : root.get_master_node();
+    if (!rn.is_invalid() && gu::type_op_of(rn) == Ntype_op::Sub) {
+      auto gate_def = rn.get_subnode_graph();
+      auto gate_io  = rn.get_subnode_io();
+      auto gate     = match_icg_def(gate_def.get());
+      if (gate && gate_io && root.get_port_id() == gate->out.get_port_id()) {
+        uint32_t clock_pid = 0;
+        bool     found_pid = false;
+        for (const auto& decl : gate_io->get_input_pin_decls()) {
+          if (decl.name == gu::pin_name_of(gate->clk_in)) {
+            clock_pid = static_cast<uint32_t>(decl.port_id);
+            found_pid = true;
+            break;
+          }
+        }
+        if (found_pid) {
+          for (const auto& edge : rn.inp_edges()) {
+            if (static_cast<uint32_t>(edge.sink.get_port_id()) == clock_pid) {
+              return root_port(edge.driver, depth + 1);
+            }
+          }
+        }
+      }
     }
     return std::nullopt;
   };
@@ -623,7 +679,7 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     if (driver.is_invalid()) {
       return;
     }
-    if (auto pid = root_port(driver)) {
+    if (auto pid = root_port(driver, 0)) {
       result.ports.insert(*pid);
     } else {
       result.complete = false;
@@ -1081,6 +1137,33 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
       inner = e.driver;
       break;
     }
+    // The Pyrope round trip makes a one-bit output width explicit as
+    // `(value & 1)`.  That outer And is a mask, not the clock gate itself; if
+    // left in place it has one real operand and the strict two-arm gate test
+    // below rejects every generated prim_clk_gate (including Minion's). Peel
+    // only a known-one mask with exactly one non-constant operand. The real
+    // gate has two such operands and therefore remains the anchor.
+    for (int hops = 0; hops < 4 && !inner.is_invalid() && !gu::is_const_pin(inner) && !gu::is_graph_input_pin(inner); ++hops) {
+      auto node = inner.get_master_node();
+      if (gu::type_op_of(node) != Ntype_op::And) {
+        break;
+      }
+      hhds::Pin_class value;
+      int             values = 0;
+      bool            mask   = true;
+      for (const auto& e : node.inp_edges()) {
+        if (gu::is_const_pin(e.driver)) {
+          mask = mask && const_is(e.driver, 1);
+        } else if (!e.driver.is_invalid()) {
+          value = e.driver;
+          ++values;
+        }
+      }
+      if (!mask || values != 1) {
+        break;
+      }
+      inner = value;
+    }
     if (inner.is_invalid() || gu::is_const_pin(inner) || gu::is_graph_input_pin(inner)) {
       continue;
     }
@@ -1133,12 +1216,54 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
       continue;
     }
     // CONFIRM the latch is the enable sampler for THIS clock: it must be
-    // transparent on the opposite phase of the same port. Without this check a
-    // module that ANDs a clock with an unrelated latched data bit would match,
-    // and its "enable" would be sampled at the wrong time.
-    auto        latch_node = latched.get_master_node();
-    const Phase gate_ph    = resolve_phase(gu::get_driver_of_sink_name(latch_node, "enable"));
-    if (gate_ph.net.is_invalid() || gate_ph.net.get_class_index() != clk_port.get_class_index()) {
+    // transparent on the opposite phase of the same port. Conditional-call
+    // lowering may additionally qualify that enable with __valid, spelling the
+    // cone as `(!clk) & __valid`; search an And-only qualifier cone instead of
+    // requiring the whole expression to reduce to clk. Without the clock-phase
+    // leaf check a module that ANDs a clock with an unrelated latched data bit
+    // would match and sample its "enable" at an arbitrary time.
+    auto       latch_node   = latched.get_master_node();
+    const auto latch_enable = gu::get_driver_of_sink_name(latch_node, "enable");
+    // EVERY leaf of that And cone is checked, not just "one of them is the
+    // clock phase": the match result carries only `latch_transparent_arm`, so a
+    // qualifier operand is DROPPED, and the Clock_cell built from it re-samples
+    // its enable on every reference edge instead of holding while the qualifier
+    // is low. A vendor/DFT gate spelled `(!clk) & test_en` would therefore tick
+    // its gated clock on cycles the RTL holds, advancing downstream registers a
+    // cycle early -- wrong state, silently. Only the activation spelling this
+    // relaxation exists for (`(!clk) & __valid`, whose guard the caller-side
+    // Clock_cell already carries) is accepted; anything else falls back to the
+    // ordinary latch model, which is exact.
+    const auto is_activation_qualifier = [&](const hhds::Pin_class& pin) {
+      const auto root = control_root(pin).net;
+      return !root.is_invalid() && gu::is_graph_input_pin(root) && gu::pin_name_of(root) == "__valid";
+    };
+    std::function<bool(hhds::Pin_class, int, bool&)> scan_enable;
+    scan_enable = [&](hhds::Pin_class pin, int depth, bool& saw_clock) {
+      if (pin.is_invalid() || depth > 16) {
+        return false;
+      }
+      const auto phase = resolve_phase(pin);
+      if (!phase.net.is_invalid() && phase.net.get_class_index() == clk_port.get_class_index()
+          && phase.inverted == (gate_op == Ntype_op::And)) {
+        saw_clock = true;
+        return true;
+      }
+      if (gu::is_const_pin(pin)) {
+        return const_is(pin, 1) || const_is(pin, -1);  // an always-true And operand changes nothing
+      }
+      if (!gu::is_graph_input_pin(pin) && gu::type_op_of(pin.get_master_node()) == Ntype_op::And) {
+        for (const auto& edge : pin.get_master_node().inp_edges()) {
+          if (!scan_enable(edge.driver, depth + 1, saw_clock)) {
+            return false;
+          }
+        }
+        return true;
+      }
+      return is_activation_qualifier(pin);
+    };
+    bool saw_clock_phase = false;
+    if (!scan_enable(latch_enable, 0, saw_clock_phase) || !saw_clock_phase) {
       continue;
     }
     auto arm = latch_transparent_arm(latch_node);

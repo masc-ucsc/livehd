@@ -40,14 +40,11 @@
 // `ring` on the open cycles 1/2/5, and holds elsewhere. `up` moves on every
 // cycle, so a stuck `down` cannot be blamed on dead stimulus.
 //
-// WHAT THIS FIXTURE IS ACTUALLY GUARDING -- the per-definition output-cone
-// split has to compose THROUGH A NESTED SUB-INSTANCE. `mid` needs the same
-// treatment `hier_latch_split_ring.prp` gets (`t1` from {m1,m2}, `t2` from
-// {m3}, emitted as separate `__settle_g<N>` entries so the caller can compute
-// `ring` between them), but `mid` is not a leaf: it instantiates `leaf`, so
-// splitting it requires the inner Sub to contribute ITS out-port -> in-ports
-// summary to the outer one. If that composition is missing, `mid` stays atomic
-// and cgen.sim refuses the design outright:
+// WHAT THIS FIXTURE IS ACTUALLY GUARDING -- occurrence-wide dependencies must
+// compose THROUGH A NESTED SUB-INSTANCE. `mid.t1` depends on {m1,m2}, `mid.t2`
+// on {m3}, and the root color DAG must place `ring` between those cones without
+// treating either definition as an atomic call. If nested dependency discovery
+// is missing, the plan reports a spurious combinational SCC:
 //
 //     module `latch_sub_split_ring.midtop` has a combinational loop the
 //     single-pass sim schedule cannot order: `sub_32:u_mid_t1_0`

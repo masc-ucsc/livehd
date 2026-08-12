@@ -31,14 +31,19 @@ def sim_include_dirs(tmp_dir):
     roots.append(str(tmp_dir))
     wanted = ("slop.hpp", "iassert.hpp")
     found = {}
+    taskflow_root = None
     for root in roots:
         for dirpath, _dirs, files in os.walk(root):
             for name in wanted:
                 if name in files and name not in found:
                     found[name] = dirpath
-        if len(found) == len(wanted):
+            if taskflow_root is None and os.path.basename(dirpath) == "taskflow" and "taskflow.hpp" in files:
+                taskflow_root = os.path.dirname(dirpath)
+        if len(found) == len(wanted) and taskflow_root is not None:
             break
-    return [found[name] for name in wanted] if len(found) == len(wanted) else []
+    if len(found) != len(wanted) or taskflow_root is None:
+        return []
+    return [found[name] for name in wanted] + [taskflow_root]
 
 
 LHD = find_lhd()

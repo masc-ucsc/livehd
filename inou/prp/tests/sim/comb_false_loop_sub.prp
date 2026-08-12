@@ -21,11 +21,9 @@
 // pinning. `c` here is deliberately not a constant, so a dropped back edge
 // shows up as a wrong `prod`, not as a coincidence.
 //
-// It passes today through cgen_sim's stopgap (`flatten_false_loop_subs` inlines
-// the single pure-comb callee before scheduling). Step 5 of the plan replaces
-// that with per-partition callee methods — this fixture is what proves the
-// replacement keeps the same numbers, and `sum` is the control that stays
-// correct either way.
+// The occurrence-wide color DAG crosses the instance boundary without
+// flattening: it evaluates o1, caller `back`, then o2. This fixture proves that
+// ordering keeps the same numbers, and `sum` is the independent control.
 //
 // WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
 // node-level acyclicity check BEFORE any backend, and a `Sub` is an ordinary
@@ -36,11 +34,7 @@
 // minion's own generated Pyrope carries exactly these two annotations, for
 // exactly this reason.
 //
-// STATUS: LIVE since 2026-08-05, carried by cgen_sim's STOPGAP —
-// `flatten_false_loop_subs` inlines the callee before scheduling. That is
-// exactly why the VALUES are checked here: step 5 replaces the inliner with
-// per-partition callee methods, and this fixture is what proves the replacement
-// keeps the same numbers.
+// STATUS: LIVE. The values pin the non-flattened occurrence-wide schedule.
 comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
   o1 = a + b      // cone {a, b} only
   o2 = c * d      // cone {c, d} only

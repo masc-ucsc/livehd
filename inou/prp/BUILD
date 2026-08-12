@@ -9,6 +9,13 @@ exports_files([
     "tests/pyrope/proc_lambda.prp",
     "tests/pyrope/simple.prp",
     "tests/comptime/trivial_if.prp",
+    "tests/sim/flop_feeds_transparent_high_latch.prp",
+    "tests/sim/flop_sim_negedge_sole_clock.prp",
+    "tests/sim/mem_color_direct.prp",
+    "tests/sim/mem_none_color_random.prp",
+    "tests/sim/cond_call_always_consumer.prp",
+    "tests/sim/color_kernel_multiwrite.prp",
+    "tests/sim/loop_roll_conditional_state_call.prp",
 ])
 
 # The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).
@@ -359,6 +366,7 @@ cc_direct_headers(
     deps = [
         "@hlop//hlop",
         "@iassert",
+        "@opentimer//:taskflow",
     ],
     visibility = ["//visibility:private"],
 )

@@ -179,6 +179,7 @@ struct Options {
   // replay; the legacy flags above stay the low-ceremony spelling of the same
   // engine. Answers land in the envelope's "query" member.
   std::string sim_query;
+  bool        sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -277,55 +278,69 @@ struct Sim_set_option {
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
-    {"vcd", "false", Sim_set_option::Kind::bool_or_file,
+    {                    "vcd",
+     "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
      "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none"},
-    {"vcd_fake_delay", "true", Sim_set_option::Kind::boolean,
+     "FILE bakes that explicit path, false bakes none"                                                               },
+    {         "vcd_fake_delay",
+     "true",      Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
-    {"hlop_dir", "", Sim_set_option::Kind::bool_or_file,
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                                     },
+    {               "hlop_dir",
+     "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
      "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
-     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
-    {"iassert_dir", "", Sim_set_option::Kind::bool_or_file,
+     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"          },
+    {            "iassert_dir",
+     "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
-     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"},
-    {"cgen_color", "true", Sim_set_option::Kind::boolean,
-     "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
-     "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
-     "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
-    {"flatten", "0", Sim_set_option::Kind::non_neg_num,
-     "N — structurally inline a sub-instance into its parent when the callee's body has <= N nodes, applied "
-     "bottom-up so a def's own small children are absorbed before it is itself considered. 0 (the default) keeps "
-     "every instance as its own C++ struct reached through a cycle()/__settle() call. Inlining removes that call, "
-     "the In/Out structs copied across it, and the port-boundary width adjusts — but emits the body once per "
-     "instantiation SITE, so generated code and host C++ time grow with the instance count while simulation time "
-     "falls. A large N (e.g. 999999) flattens the whole hierarchy, which is the wrong trade on a big design; small "
-     "leaves are where it pays"},
-    {"ninja", "", Sim_set_option::Kind::bool_or_file,
+     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"               },
+    {           "taskflow_dir",
+     "", Sim_set_option::Kind::bool_or_file,
+     "DIR — include root containing taskflow/taskflow.hpp from OpenTimer's bundled fork. Empty = auto from lhd's "
+     "bazel runfiles. Generated simulators use this exact copy rather than resolving an independent Taskflow release"},
+    {                "flatten",
+     "0",  Sim_set_option::Kind::non_neg_num,
+     "N — structurally inline a sub-instance into its parent before occurrence-wide color planning when the "
+     "callee body has <= N nodes. 0 keeps hierarchy intact. Inlining may reduce storage-path depth but duplicates "
+     "the body per instantiation, so use it only for measured experiments"                                           },
+    {                  "ninja",
+     "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
      "its dependents); the built-in path always rebuilds every translation unit. A `build.ninja` reproducing the "
-     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
-    {"jobs", "0", Sim_set_option::Kind::non_neg_num,
+     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"                                 },
+    {                   "jobs",
+     "0",  Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
-     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
-    {"init_zero", "false", Sim_set_option::Kind::boolean,
+     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"                },
+    {                "workers",
+     "0",  Sim_set_option::Kind::non_neg_num,
+     "Color-scheduler workers used by one generated simulator instance. 0 or 1 selects the generated serial "
+     "topological backend; N>1 pins the reusable Taskflow root schedule to N workers. This controls simulation "
+     "execution, not sim.jobs host compilation"                                                                      },
+    {              "init_zero",
+     "false",      Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
-     "Explicit initial values and runtime reset values are unchanged"},
-    {"checkpoint", "true", Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
-    {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,
-     "wall-clock floor in seconds between checkpoints (a short run writes none)"},
-    {"checkpoint_max", "10", Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)"},
-    {"checkpoint_max_overhead", "0.10", Sim_set_option::Kind::non_neg_num,
-     "target checkpoint cost as a fraction of run time (caps how often they are taken)"},
-    {"checkpoint_every", "0", Sim_set_option::Kind::non_neg_num,
-     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"},
+     "Explicit initial values and runtime reset values are unchanged"                                                },
+    {             "checkpoint",
+     "true",      Sim_set_option::Kind::boolean,
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"              },
+    {    "checkpoint_min_secs",
+     "10",  Sim_set_option::Kind::non_neg_num,
+     "wall-clock floor in seconds between checkpoints (a short run writes none)"                                     },
+    {         "checkpoint_max",
+     "10",  Sim_set_option::Kind::non_neg_num,
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                          },
+    {"checkpoint_max_overhead",
+     "0.10",  Sim_set_option::Kind::non_neg_num,
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                              },
+    {       "checkpoint_every",
+     "0",  Sim_set_option::Kind::non_neg_num,
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                                },
 };
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of

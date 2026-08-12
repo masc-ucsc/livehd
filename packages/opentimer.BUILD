@@ -30,3 +30,12 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Source-form runtime payload for generated simulators. The lhd binary stages
+# these exact headers in its runfiles, so its host-compiled Taskflow scheduler
+# cannot accidentally pick a different upstream release than the OT fork used
+# by lhd itself.
+filegroup(
+    name = "sim_taskflow_hdrs",
+    srcs = glob(["ot/taskflow/**/*.hpp"]),
+    visibility = ["//visibility:public"],
+)

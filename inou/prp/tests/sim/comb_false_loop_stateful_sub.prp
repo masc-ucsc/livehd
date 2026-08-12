@@ -3,22 +3,10 @@
 :type: simulation
 */
 
-// todo_sim_pipeline.md Phase 0 (step 5 anchor) — the false-loop shape through a
-// callee that ALSO OWNS STATE. This is the variant that proves the current
-// workaround has to go, not just be relaxed.
-//
-// WHY IT IS THE HARD ONE. cgen_sim's stopgap for a false loop through an
-// instance is to INLINE the callee (`flatten_false_loop_subs`), and the
-// stateful case needs a fixpoint inliner that copies the whole body per site —
-// state identity and all. The alternative hack, marking a stateful Sub as a
-// loop break, is worse and silent: the boundary "breaks" the ring by feeding a
-// BOGUS value into the flop's next state, so the comb passthrough looks right
-// while the registered output is wrong ONE CYCLE LATER (the failure mode
-// inou/cgen/tests/comb_loop/var_b_stateful_passthru.v records).
-//
-// Step 5 dissolves it with no duplication at all: the caller invokes the
-// callee's `o1` partition, computes `back`, then invokes the `o2` partition,
-// and the callee's flop stays exactly one flop.
+// A false hierarchy loop through a callee that ALSO OWNS STATE. The
+// occurrence-wide plan must order the `o1` cone, caller `back`, and the state
+// update without cloning the callee or treating its state as a combinational
+// loop break. The callee's flop remains one occurrence-owned slot.
 //
 // THE VALUES. `acc` is the callee's own register, so `q_state` is a full period
 // behind `q_pass` — and it is fed BY the back edge, which is what makes a
@@ -34,10 +22,8 @@
 // which is the only way this fixture can be what it is for: a VALUE test, and
 // a Verilator differential. It is not a trick — minion's own generated Pyrope
 // carries exactly these two annotations for exactly this reason.
-// STATUS: LIVE since 2026-08-05, carried by the STATEFUL fixpoint inliner
-// (cgen_sim.cpp:1332-1405), which copies the whole callee body per site, state
-// and all — the machinery step 5 deletes. This is the sharpest of the four: it
-// passes today only because of the thing the plan is trying to remove.
+// STATUS: LIVE. This is the sharpest false-loop fixture because a bogus boundary
+// value becomes visible one cycle later through persistent state.
 mod statesplit::[timecheck=false](a:u8, b:u8, c:u8) -> (o1:u16@[], o2:u16@[]) {
   o1 = a + b        // pure comb passthrough, cone {a,b}
   reg acc:u16 = 0

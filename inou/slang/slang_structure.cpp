@@ -3666,8 +3666,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       auto      scit         = store_counts.find(&vsym);
       const int store_count  = scit != store_counts.end() ? scit->second : 0;
       if (driver_count > 1 || store_count > 1 || partial_writes.contains(&vsym)
-          || (proc_written.contains(&vsym) && !definite_proc_written.contains(&vsym))
-          || wire_split_tmp_.contains(&vsym)) {
+          || (proc_written.contains(&vsym) && !definite_proc_written.contains(&vsym)) || wire_split_tmp_.contains(&vsym)) {
         wire_syms_.erase(&vsym);  // no scalar split to fall back on: keep `mut`
       }
     }
@@ -4783,15 +4782,15 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // between two instances unions every field's cone into one node — the
   // false same-cycle ring that refused lhdsuite minion's core<->dcache and
   // core<->vpu control buses).
-  auto map_leaves = [&](const std::vector<Struct_info::Field>&                                       tgt,
-                        const std::vector<Struct_info::Field>&                                       src,
-                        const std::function<std::string(const Struct_info::Field&)>&                 read_src,
-                        const std::function<void(const Struct_info::Field&, const std::string&)>&    emit_tgt) -> bool {
+  auto map_leaves = [&](const std::vector<Struct_info::Field>&                                    tgt,
+                        const std::vector<Struct_info::Field>&                                    src,
+                        const std::function<std::string(const Struct_info::Field&)>&              read_src,
+                        const std::function<void(const Struct_info::Field&, const std::string&)>& emit_tgt) -> bool {
     std::vector<std::vector<const Struct_info::Field*>> tiled(tgt.size());
     std::vector<const Struct_info::Field*>              container(tgt.size(), nullptr);
     for (size_t i = 0; i < tgt.size(); ++i) {
-      const auto& tf   = tgt[i];
-      int64_t     sum  = 0;
+      const auto& tf  = tgt[i];
+      int64_t     sum = 0;
       for (const auto& sf : src) {
         if (sf.off >= tf.off && sf.off + sf.bits <= tf.off + tf.bits) {
           tiled[i].push_back(&sf);
@@ -4875,17 +4874,18 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       // A peeled Conversion may change the flat WIDTH (packed casts are
       // bit-pattern-preserving, so equal width means offsets line up); the
       // leaf routing below is offset-based, so gate on width equality.
-      if (pe->kind == ExpressionKind::NamedValue
-          && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(bport.getType()).bits) {
+      if (pe->kind == ExpressionKind::NamedValue && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(bport.getType()).bits) {
         const auto& asym     = pe->as<slang::ast::NamedValueExpression>().symbol;
         auto        emit_arg = [&](const Struct_info::Field& tf, const std::string& v) {
           in_args.emplace_back(absl::StrCat(bport.name, ".", tf.name), v);
         };
         if (const auto* bsi = bundle_port_of(asym)) {  // (b) the parent's OWN bundle port: per-leaf reads
-          const auto afields = bsi->fields;  // copy: builder calls can rehash the map
+          const auto afields = bsi->fields;            // copy: builder calls can rehash the map
           auto       aname   = bundle_port_body_base(asym);
           done               = map_leaves(
-              pfields, afields, [&](const Struct_info::Field& sf) { return read_leaf(absl::StrCat(aname, ".", sf.name)); },
+              pfields,
+              afields,
+              [&](const Struct_info::Field& sf) { return read_leaf(absl::StrCat(aname, ".", sf.name)); },
               emit_arg);
         } else if (is_scalar_struct_var(asym)) {  // (a) a local bundle struct var: per-leaf reads
           if (!declared_.contains(&asym)) {
@@ -4896,7 +4896,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
             const auto afields    = it->second.fields;  // copy: builder calls can rehash the map
             auto       aname      = lname_of(asym);
             done                  = map_leaves(
-                pfields, afields,
+                pfields,
+                afields,
                 [&](const Struct_info::Field& sf) {
                   return a_is_tuple ? read_struct_field_get(aname, sf.name) : read_leaf(absl::StrCat(aname, ".", sf.name));
                 },
@@ -4909,7 +4910,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       auto v  = to_int_value(lower_rvalue(*aexpr));
       auto pi = flat_or_tinfo(bport.getType());
       auto ei = flat_or_tinfo(*aexpr->type);
-      v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed);
+      v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed, value_width(*aexpr));
       auto p  = to_pattern(v, pi.bits, pi.is_signed);
       for (const auto& f : pfields) {
         auto fv = extract_field(p, f.off, f.bits);
@@ -4977,7 +4978,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       auto v  = to_int_value(lower_rvalue(*expr));
       auto pi = flat_or_tinfo(port.getType());
       auto ei = flat_or_tinfo(*expr->type);
-      v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed);
+      v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed, value_width(*expr));
       clear_pending_loc();
       in_args.emplace_back(std::string(port.name), v);
     }
@@ -5036,10 +5037,9 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           pe = &pe->as<slang::ast::ConversionExpression>().operand();
         }
         bool routed = false;
-        if (pe->kind == ExpressionKind::NamedValue
-            && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(oc.port->getType()).bits) {
-          const auto& asym  = pe->as<slang::ast::NamedValueExpression>().symbol;
-          bool        noted = false;
+        if (pe->kind == ExpressionKind::NamedValue && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(oc.port->getType()).bits) {
+          const auto& asym      = pe->as<slang::ast::NamedValueExpression>().symbol;
+          bool        noted     = false;
           auto        note_once = [&]() {
             if (!noted) {
               note_write(asym, current_assign_nonblocking_, oc.expr->sourceRange.start());
@@ -5049,7 +5049,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           if (const auto* bsi = bundle_port_of(asym)) {
             const auto afields = bsi->fields;  // copy: builder calls can rehash the map
             auto       base    = bundle_port_body_base(asym);
-            routed             = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
+            routed = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
               note_once();
               emit_leaf_store(absl::StrCat(base, ".", tf.name), v);
             });
@@ -5061,7 +5061,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
               const bool a_is_tuple = it->second.is_tuple;
               const auto afields    = it->second.fields;  // copy: builder calls can rehash the map
               auto       aname      = lname_of(asym);
-              routed                = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
+              routed = map_leaves(afields, pfields, read_out_leaf, [&](const Struct_info::Field& tf, const std::string& v) {
                 note_once();
                 if (a_is_tuple) {
                   emit_struct_field_set(aname, tf.name, v);

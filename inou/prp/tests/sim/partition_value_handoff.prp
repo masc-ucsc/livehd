@@ -3,27 +3,21 @@
 :type: simulation
 */
 
-// todo_sim_pipeline.md Phase 0 (step 5 anchor) — the partition ABI, pinned
-// WITHOUT a Sub in sight.
+// The color-boundary ABI, pinned WITHOUT a Sub in sight.
 //
 // WHY NO INSTANCE. Every other false-loop fixture in this directory checks the
-// hierarchical composition; this one checks the thing underneath it. Step 5
-// emits one `__settle_p<N>(In)` per partition and the values crossing those
-// calls can no longer live in the emitter's lambda-local `pin2var` — they need
-// a per-instance evaluation frame (or explicit generated members). A design
-// with a long chain of fanout≠1 nodes gets cut into several partitions by
-// `Color_acyclic` on its own, so this file exercises the handoff with no
-// instance boundary to hide behind.
+// hierarchical composition; this one checks the thing underneath it. Values
+// crossing colors need producer-owned slots rather than emitter-local C++
+// temporaries. This file exercises that handoff with no instance boundary to
+// hide behind.
 //
 // THE SHAPE. `s1` fans out to two consumers and `s2` fans out to two consumers,
 // so both are MFFC roots — the boundaries are exactly where a value must
-// survive from one partition method into the next. `tap1`/`tap2` publish those
+// survive from one color into the next. `tap1`/`tap2` publish those
 // boundary values as outputs, so a handoff that dropped or recomputed one shows
 // up as a wrong number rather than as a silently different schedule.
 //
-// It is green today under the degenerate one-partition emission (all of this
-// lives in one `cycle()` body); the point is that it must STAY green once the
-// same design is emitted as three methods.
+// The point is that these values remain correct under any legal coarsening.
 pub mod handoff(a:u8, b:u8, c:u8) -> (out:u16@[1], tap1:u16@[1], tap2:u16@[1]) {
   // Boundary 1: read by BOTH branches below -> fanout 2 -> its own partition.
   mut s1:u16 = (a + b) & 0xFF

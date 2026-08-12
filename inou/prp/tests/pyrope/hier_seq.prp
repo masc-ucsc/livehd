@@ -5,14 +5,15 @@
 
 // Sequential 3-level hierarchy fixture for the color / partition / abc passes.
 //
-//   top -> stage_unit (x2) -> delayer (one per stage_unit)
+//   top -> stage_unit (x2) -> delayer (two per stage_unit)
 //
 // A clean 2-deep pipeline: `delayer` is 1 cycle, `stage_unit` adds its own
 // flop for 2 cycles total, `top` combines two stage_units. Flops live in
 // `delayer` (reg r) and `stage_unit` (reg r), so `pass color synth` must split
 // each def at its registers, and the named flops exercise abc seq=true
-// flop-name preservation. Registers only store (no narrowing) because runtime
-// wrap/sat has no tolg lowering yet.
+// flop-name preservation. The shared `m` value also gives acyclic coloring a
+// real internal fanout, independent of frontend width/sign wrappers. Registers
+// only store (no narrowing) because runtime wrap/sat has no tolg lowering yet.
 
 mod delayer(din:u8) -> (q:u8@[1]) {
   reg r:u8 = 0
@@ -22,10 +23,12 @@ mod delayer(din:u8) -> (q:u8@[1]) {
 
 mod stage_unit(din:u8, k:u8) -> (y:u8@[2]) {
   const m = din & k
-  stage[1] d = delayer(din=m)
+  const n = m ^ k
+  stage[1] d1 = delayer(din=m)
+  stage[1] d2 = delayer(din=n)
   reg r:u8 = 0
   y = r
-  r = d
+  r = d1 ^ d2
 }
 
 mod top(din:u8, k1:u8, k2:u8) -> (o:u9@[2]) {

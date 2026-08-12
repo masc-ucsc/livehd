@@ -123,7 +123,10 @@ for shape in high low; do
   # a second boolean mux on enable. Re-reading that RTL nested another hold mux
   # around it and the latch-contract checker rejected ordinary latches as
   # transparent self-updates.
-  grep -Eq 'if \([^)]*\) l <= get_mask_[[:alnum:]_]+;' "$out" \
+  # An unsigned boundary used to retain a one-use get_mask wrapper here. With
+  # LGraph's unlimited signed value semantics, cprop may remove that redundant
+  # wrapper and emit `d` directly; either spelling is the same canonical raw D.
+  grep -Eq 'if \([^)]*\) l <= (d|get_mask_[[:alnum:]_]+);' "$out" \
     || { cat "$out"; fail "$shape: cprop did not canonicalize latch D to raw data + enable"; }
   grep -Eq 'mux_[[:alnum:]_]+[[:space:]]*=[[:space:]]*l;' "$out" \
     && { cat "$out"; fail "$shape: emitted a redundant Q hold arm before the latch D input"; }

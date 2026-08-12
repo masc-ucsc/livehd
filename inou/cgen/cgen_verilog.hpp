@@ -130,6 +130,21 @@ private:
   // signedness — but tolg's bind_result tags every op output unsigned, so a
   // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
   static bool    operand_reads_signed(const hhds::Pin_class& dpin);
+  // Is `dpin`'s emitted net DECLARED unsigned (`wire [W-1:0]`, no `signed`)?
+  // Only a declared net qualifies: the caller widens it with a concatenation,
+  // which self-determines its operand, and that is exact only for text that
+  // already carries its full declared width.
+  bool           declared_unsigned_net(const hhds::Pin_class& dpin) const;
+  // Read `dpin` as the SIGNED value the LGraph holds. Verilog turns a whole
+  // expression unsigned as soon as one operand is an unsigned net (1800
+  // §11.8.1), which makes a signed sibling zero-extend; and a bare
+  // `$signed(net)` on an unsigned net reinterprets its msb as a sign. Prepend
+  // a zero bit for an unsigned net so its non-negative value survives both.
+  std::string    signed_operand(const hhds::Pin_class& dpin, std::string_view expr) const;
+  // Does `node` mix a signed-reading operand with a declared-unsigned net? Only
+  // then does signed_operand() have to be applied; an all-unsigned expression is
+  // already exact and the extra concat would just obscure the emitted text.
+  bool           mixes_operand_signs(const hhds::Node_class& node) const;
   // Width the net for `dpin` was DECLARED with (see add_to_pin2var); 0 when
   // there is no net (constant / invalid pin) and 1 when it is a scalar `reg`
   // that cannot legally be indexed.

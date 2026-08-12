@@ -13,6 +13,10 @@
 #include "hhds/index.hpp"
 #include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
 
+namespace livehd::sim {
+class Color_plan;
+}
+
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
 // library (TODO 3d, inou.cgen.sim). Structural twin of Cgen_verilog (same
 // body().nodes(hhds::Node_order::forward) walk + Ntype_op dispatch via livehd::graph_util), but emits a
@@ -132,14 +136,19 @@ private:
   // `fallback_bits` is used only for the shapes with no variable to name: an
   // invalid pin, a constant, or an unresolved combinational cycle.
   std::string raw_operand(const hhds::Pin_class& dpin, int fallback_bits);
+  // The stored carrier with no signed/unsigned boundary canonicalization. This
+  // is only for an operation that masks the source itself (currently fused
+  // low-bit Get_mask), so bits outside the declared source width cannot leak.
+  std::string stored_operand(const hhds::Pin_class& dpin, int fallback_bits);
   // The RHS Slop<wbits> expression for one combinational node.
   bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
   std::string node_expr(const hhds::Node_class& node, int wbits);
 
-  std::string vcd_file;       // --set compile.sim.vcd=FILE ("" = no VCD)
-  std::string top;            // --top: only this module bakes the VCD path (avoids file collisions)
-  bool        vcd_fakedelay;  // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
-                              // false = plain edge-aligned updates (no X, no delay)
+  std::string vcd_file;        // --set compile.sim.vcd=FILE ("" = no VCD)
+  std::string top;             // --top: only this module bakes the VCD path (avoids file collisions)
+  bool        vcd_fakedelay;   // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
+                               // false = plain edge-aligned updates (no X, no delay)
+  bool        observation_on;  // compile-time hierarchical value instrumentation (VCD/probe/query)
   // --set sim.flatten=N: structurally inline a Sub whose callee body has <= N
   // nodes into its parent before emitting. 0 = off. See flatten_small_subs().
   int         flatten_budget = 0;
@@ -155,62 +164,6 @@ private:
   absl::flat_hash_set<hhds::Graph*>      flatten_walked_;  // defs already recursed into
 
 public:
-  // Per-output-group callee partitioning — the no-inlining answer to a false
-  // combinational loop through an atomic instance (2026-08-06 ruling). A
-  // definition instantiated on a word-level cycle emits, IN ITS OWN C++, one
-  // `__settle_g<k>(In)` method per GROUP of outputs sharing the same comb
-  // input-support; the parent calls exactly the group a demanded output needs,
-  // as soon as that group's inputs are bound, and defers the single atomic
-  // `cycle()` state advance to the end of the pass. No body is ever cloned:
-  // eight instances of one def stay one emitted class, and the emitted TU size
-  // stays proportional to the DEFINITION, not to the instance tree (the
-  // inliner it replaces produced a 77MB minion_top.cpp).
-  struct Split_group {
-    // One OUTPUT (or output SLICE) this group computes. len == 0 means the
-    // whole port; len > 0 is a bit range [lo, lo+len) with `leaf` the driver
-    // of that range (a concat leaf, or — when `shifted` — a sliced callee's
-    // whole-bundle output pin the range must be shifted out of). Slices are
-    // the 2026-08-06 bit-level ruling: refine only under loop pressure —
-    // slices sharing one support signature merge back into a single group,
-    // so an un-conflicted port keeps exactly one group.
-    struct Out {
-      uint32_t        pid = 0;
-      uint32_t        lo  = 0;
-      uint32_t        len = 0;
-      hhds::Pin_class leaf;
-      bool            shifted = false;
-    };
-    std::vector<Out> outs;
-    // Support atom: what the group's cones read of one input. len == 0 means
-    // the whole port; len > 0 a bit range — the parent then fills only those
-    // bits of the callee's In field, which is what lets two packed buses
-    // exchange disjoint fields in the same cycle without a false cycle.
-    struct In_atom {
-      uint32_t pid = 0;
-      uint32_t lo  = 0;
-      uint32_t len = 0;
-    };
-    std::vector<In_atom> support;
-
-    [[nodiscard]] bool covers_out(uint32_t pid) const {
-      for (const auto& o : outs) {
-        if (o.pid == pid) {
-          return true;
-        }
-      }
-      return false;
-    }
-    [[nodiscard]] bool sliced() const {
-      for (const auto& o : outs) {
-        if (o.len != 0) {
-          return true;
-        }
-      }
-      return false;
-    }
-  };
-  using Split_map = absl::node_hash_map<const hhds::Graph*, std::vector<Split_group>>;
-
   // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
   // when the cone is not a foldable ICG (2f-latch M5).
   // `clocks` is the design-wide clock-role analysis (the same `Design_clocks`
@@ -253,14 +206,20 @@ public:
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
-           const Split_map* _splits = nullptr)
+           const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, int _workers = 0,
+           bool _observation_on = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
       , vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off"))
+      , observation_on(_observation_on || !_vcd.empty())
       , flatten_budget(_flatten)
-      , splits_(_splits) {}
+      , color_plan_(_color_plan)
+      , compact_kernel_(_compact_kernel)
+      , workers_(_workers) {}
 
 private:
-  const Split_map* splits_ = nullptr;  // built once per pass run by to_cgen_sim
+  const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
+  bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
+  int                            workers_        = 0;
 };

@@ -10,11 +10,9 @@
 #   1. re-running setup with nothing changed rewrites NO generated file;
 #   2. a COMMENT-only Pyrope edit rewrites NO generated file (the digest is
 #      structural, so the change never reaches the emitter);
-#   3. a BODY-only edit to a leaf rewrites that leaf's .cpp and NOT its .hpp —
-#      which is what keeps every parent's object valid. That split is the whole
-#      reason the codegen puts the interface in a small separate header, and
-#      without the write-if-different check the untouched header still got a
-#      fresh mtime and every parent rebuilt anyway.
+#   3. a BODY-only edit to a leaf rewrites the occurrence-root color source and
+#      NOT the leaf storage interface. Ordinary children no longer own evaluator
+#      methods; the root color TU is where their logic lives.
 #
 # Plus, when `ninja` is available, the end-to-end consequence: a second build
 # with nothing changed compiles nothing at all.
@@ -95,28 +93,35 @@ setup
 got=$(rewritten)
 [ -z "$got" ] || fail "a comment-only Pyrope edit rewrote: $got"
 
-# ---- 3. body-only edit: the leaf's .cpp only, NOT its .hpp --------------------
+# ---- 3. body-only edit: root color source, NOT the leaf storage interface -----
 # `|` -> `&` keeps every port width identical, so the interface is untouched.
 cp "$W/wd/sim/leaf.leaf.cpp" "$W/leaf.cpp.before"
 cp "$W/wd/sim/leaf.leaf.hpp" "$W/leaf.hpp.before"
+cp "$W/wd/sim/top.top.cpp" "$W/top.cpp.before"
 sed -e 's/(a | b)/(a \& b)/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
 grep -q '(a & b)' "$W/leaf.prp" || fail "the body edit did not apply (test bug)"
 touch "$W/marker"
 setup
 
 # Content first, so a mechanism failure cannot be read as an emitter failure.
-if cmp -s "$W/leaf.cpp.before" "$W/wd/sim/leaf.leaf.cpp"; then
-  fail "the body edit produced identical C++ for the leaf — the emitter never saw it"
+if cmp -s "$W/top.cpp.before" "$W/wd/sim/top.top.cpp"; then
+  fail "the body edit produced identical root color C++ — occurrence lowering never saw it"
 fi
+cmp -s "$W/leaf.cpp.before" "$W/wd/sim/leaf.leaf.cpp" \
+  || fail "a body-only edit rewrote the leaf storage implementation; module-local evaluation returned"
 cmp -s "$W/leaf.hpp.before" "$W/wd/sim/leaf.leaf.hpp" \
-  || fail "a body-only edit changed the leaf's HEADER content; the interface/body split is broken"
+  || fail "a body-only edit changed the leaf's storage interface"
 
 got=$(rewritten)
 [ -n "$got" ] || fail "the leaf's .cpp content changed but no file registered as rewritten (mtime granularity?)"
 case "$got" in
 *.hpp*) fail "a body-only edit rewrote a HEADER, so every parent needlessly rebuilds; rewritten: $got" ;;
 esac
-echo "  body-only edit rewrote: $got"
+case "$got" in
+*top.top.cpp*) ;;
+*) fail "a body-only leaf edit did not rewrite the occurrence-root source: $got" ;;
+esac
+echo "  body-only edit rewrote root color sources: $got"
 
 # ---- 4. end-to-end: a second build compiles nothing (needs ninja + a cxx) -----
 if ! command -v ninja >/dev/null 2>&1; then

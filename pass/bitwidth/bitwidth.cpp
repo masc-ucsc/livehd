@@ -61,6 +61,46 @@ void sort_inp(EdgeVec& edges) {
 
 using livehd::graph_util::hydrate_const;
 
+// These cells have a complete value-range rule below.  Their pin `bits`
+// attribute is an output cache/materialization hint, not a finite-width
+// operation contract: LNAST and LGraph arithmetic is signed and unbounded.
+// Frontends may conservatively pre-stamp it (Slang commonly uses the width of
+// an enclosing expression), but feeding that stamp back as an input constraint
+// prevents bitwidth from discovering the actual range and leaves generated
+// Slop operations wider than their consumers.
+//
+// Cells absent from this list intentionally retain their pre-stamped width.
+// In particular LUT has a finite truth-table width, Div/Rem may explicitly
+// reduce precision, and Clock_cell is timing metadata rather than arithmetic.
+constexpr bool infer_internal_range(Ntype_op op) {
+  switch (op) {
+    case Ntype_op::Sum:
+    case Ntype_op::Mult:
+    case Ntype_op::And:
+    case Ntype_op::Or:
+    case Ntype_op::Xor:
+    case Ntype_op::Ror:
+    case Ntype_op::Not:
+    case Ntype_op::Get_mask:
+    case Ntype_op::Set_mask:
+    case Ntype_op::Sext:
+    case Ntype_op::LT:
+    case Ntype_op::GT:
+    case Ntype_op::EQ:
+    case Ntype_op::SHL:
+    case Ntype_op::SRA:
+    case Ntype_op::Mux:
+    case Ntype_op::Hotmux:
+    case Ntype_op::Memory:
+    case Ntype_op::Flop:
+    case Ntype_op::Latch:
+    case Ntype_op::Fflop:
+    case Ntype_op::Sub:
+    case Ntype_op::AttrSet: return true;
+    default: return false;
+  }
+}
+
 // Delete every edge incident to a sink pin (drivers feeding it).
 void clear_sink(const hhds::Pin_class& spin) {
   if (spin.is_invalid()) {
@@ -1660,7 +1700,9 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       if (op == Ntype_op::Nconst) {
         process_const(node);
         continue;
-      } else if (!Ntype::has_multiple_driver_pins(op)) {
+      } else if (!infer_internal_range(op) && !Ntype::has_multiple_driver_pins(op)) {
+        // Unsupported/finite-width cells have no value-range rule in this
+        // pass, so their existing annotation is the only available contract.
         auto dpin = node.create_driver_pin(0);
         auto bits = bits_of(dpin);
         if (bits) {

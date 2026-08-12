@@ -2,10 +2,8 @@
 
 #include "inou_cgen.hpp"
 
-#include <array>
 #include <charconv>
 #include <map>
-#include <tuple>
 
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
@@ -13,7 +11,7 @@
 #include "file_utils.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
-#include "port_reach.hpp"
+#include "sim_color_plan.hpp"
 #include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
@@ -47,9 +45,10 @@ void Inou_cgen::setup() {
                         "true");
   m2.add_label_optional("flatten",
                         "sim.flatten=N: structurally inline a sub-instance whose callee body has <= N nodes into "
-                        "its parent, bottom-up. 0 = never (every instance stays its own struct behind a "
-                        "cycle()/__settle() call)",
+                        "its parent before occurrence-wide color planning, bottom-up. 0 = never",
                         "0");
+  m2.add_label_optional("workers", "color scheduler workers (0/1 = generated serial, N>1 = Taskflow)", "0");
+  m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
   register_inou("cgen", m2);
 }
 
@@ -123,6 +122,15 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      vcd_out   = var.get("vcd");
   auto      top       = var.get("top");
   auto      fakedelay = var.get("vcd_fake_delay");
+  auto      observe_s = var.get("observe");
+  if (!observe_s.empty() && observe_s != "true" && observe_s != "1" && observe_s != "on" && observe_s != "false"
+      && observe_s != "0" && observe_s != "off") {
+    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+        .msg("observe expects true|false, got '{}'", observe_s)
+        .emit();
+    return;
+  }
+  const bool observe_on = observe_s == "true" || observe_s == "1" || observe_s == "on";
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but the sim.vcd_fake_delay knob reaches this label directly).
@@ -149,7 +157,19 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       return;
     }
   }
-
+  int  workers   = 0;
+  auto workers_s = var.get("workers");
+  if (!workers_s.empty()) {
+    const auto* b = workers_s.data();
+    const auto* e = b + workers_s.size();
+    auto [p, ec]  = std::from_chars(b, e, workers);
+    if (ec != std::errc{} || p != e || workers < 0) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+          .msg("sim.workers expects a non-negative worker count, got '{}'", workers_s)
+          .emit();
+      return;
+    }
+  }
   // Simulator lowering still performs backend-specific structural rewrites
   // (clock-gate folding, optional small-instance flattening, and compact-loop
   // realization). Build those into a private output library: the EPRP input
@@ -187,10 +207,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       }
     }
   }
-  // Drive prepare/pre-scan/emission from the LIBRARY, not from `var.graphs`:
+  // Drive preparation, planning, and emission from the LIBRARY, not from `var.graphs`:
   // the closure copy above makes a callee definition VISIBLE to the emitter
   // (get_subnode_io() resolves where it used to return null), so a parent now
-  // writes `#include "<callee>.hpp"` and `__settle_g<k>()` calls for it. A list
+  // writes `#include "<callee>.hpp"` and directly binds its storage. A list
   // built from `var.graphs` alone would never emit that header/struct and the
   // sim host-compile would die on the missing include. In the normal `lhd` flow
   // `var.graphs` IS the whole library, so this is the same set — and the emit
@@ -203,10 +223,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   }
 
   // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,
-  // BEFORE the pre-scan below measures anything. The pre-scan holds Pin_class
-  // handles into callee bodies, and the rewrites delete nodes and rewire edges
-  // in exactly those bodies — measuring first would hand the emitter class
-  // indices that no longer mean what was measured.
+  // BEFORE Color_plan retains occurrence handles. The rewrites delete nodes
+  // and rewire edges, so planning first would retain stale class indices.
   {
     Cgen_sim prep(dir, vcd_out, top, fakedelay, flatten_budget);
     for (const auto& g : sim_graphs) {
@@ -219,127 +237,95 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
   }
 
-  // PRE-SCAN for callee partitioning: any definition instantiated on a
-  // word-level cycle (a Sub the single-pass schedule sees on a strict-model
-  // cycle in SOME parent) emits per-output-group `__settle_g<k>` methods so
-  // the parent can evaluate it in pieces instead of inlining it. Groups are
-  // outputs sharing the same comb input-support, from the hierarchical
-  // port-reach summaries; support-free outputs stay on the cheaper prebind
-  // path and get no group.
-  Cgen_sim::Split_map splits;
-  {
-    livehd::port_reach::Cache                                             reach;
-    absl::node_hash_map<const hhds::Graph*, std::shared_ptr<hhds::Graph>> need;
-    absl::flat_hash_set<hhds::Node_class>                                 cyc;
-    for (const auto& g : sim_graphs) {
-      if (!g) {
-        continue;
-      }
-      cyc.clear();
-      livehd::graph_util::word_level_cycle_nodes(g.get(), /*strict=*/true, cyc);
-      for (const auto& n : cyc) {
-        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
-          continue;
-        }
-        if (auto cg = n.get_subnode_graph(); cg) {
-          need.emplace(cg.get(), cg);
+  // The replacement scheduler starts with a read-only occurrence-wide plan.
+  // Build it only after ALL simulator-private structural preparation above:
+  // retained HHDS occurrence handles assert if a later rewrite advances the
+  // library epoch.  Select roots rather than every definition, otherwise a
+  // large hierarchy would be rediscovered once per callee.
+  std::map<const hhds::Graph*, livehd::sim::Color_plan> root_color_plans;
+  absl::flat_hash_set<std::string>                      instantiated;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    for (const auto node : g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+        if (auto child = node.get_subnode_graph()) {
+          instantiated.insert(std::string(child->get_name()));
         }
       }
     }
-    for (const auto& [ptr, sp] : need) {
-      const auto&                                                           dr = reach.of(sp);
-      // signature (sorted support atoms) -> group under construction
-      std::map<std::vector<std::array<uint32_t, 3>>, Cgen_sim::Split_group> by_sig;
-      auto add_entry = [&](Cgen_sim::Split_group::Out out, const std::vector<std::array<uint32_t, 3>>& sig) {
-        auto& grp = by_sig[sig];
-        if (grp.support.empty() && !sig.empty()) {
-          for (const auto& a : sig) {
-            grp.support.push_back({a[0], a[1], a[2]});
-          }
-        }
-        grp.outs.push_back(std::move(out));
-      };
-      const bool noslice = ::getenv("LIVEHD_SIM_NOSLICE") != nullptr;  // bisect aid
-      for (const auto& [opid, ins] : dr.out2ins) {
-        if (auto sit = dr.out_slices.find(opid); !noslice && sit != dr.out_slices.end()) {
-          // SLICED output. If every slice is input-independent the whole port
-          // stays on the prebind path; a MIXED output puts ALL its slices into
-          // groups (the whole-pin value is then assembled from the exports).
-          bool any_dep = false;
-          for (const auto& sl : sit->second) {
-            if (!sl.ins.empty()) {
-              any_dep = true;
-              break;
-            }
-          }
-          if (!any_dep) {
-            continue;  // registry-verified state-only, slice-confirmed
-          }
-          for (const auto& sl : sit->second) {
-            std::vector<std::array<uint32_t, 3>> sig;
-            for (const auto& a : sl.ins) {
-              sig.push_back({a.pid, a.lo, a.len});
-            }
-            std::sort(sig.begin(), sig.end());
-            sig.erase(std::unique(sig.begin(), sig.end()), sig.end());
-            // `shifted` is per SLICE and comes from port_reach, which is the
-            // only place that knows which arm produced it: a decided-once-per-
-            // port guess mis-reads a concat that happens to replicate one
-            // instance output into two fields.
-            add_entry({opid, sl.lo, sl.len, sl.leaf, sl.shifted}, sig);
-          }
-          continue;
-        }
-        if (ins.empty()) {
-          continue;  // state-only output: the prebind path owns it
-        }
-        std::vector<std::array<uint32_t, 3>> sig;
-        for (const uint32_t ipid : ins) {
-          sig.push_back({ipid, 0, 0});
-        }
-        std::sort(sig.begin(), sig.end());
-        add_entry({opid, 0, 0, {}, false}, sig);
+  }
+  const auto file_stem = [](std::string_view name) {
+    std::string result(name);
+    for (auto& c : result) {
+      if (c == '/' || c == '\\') {
+        c = '_';
       }
-      std::vector<Cgen_sim::Split_group> groups;
-      for (auto& [sig, grp] : by_sig) {
-        std::sort(grp.outs.begin(), grp.outs.end(), [](const auto& a, const auto& b) {
-          return std::tie(a.pid, a.lo) < std::tie(b.pid, b.lo);
-        });
-        groups.push_back(std::move(grp));
-      }
-      if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-        auto                                       cio = sp->get_io();
-        absl::flat_hash_map<uint32_t, std::string> in_names, out_names;
-        if (cio) {
-          for (const auto& d : cio->get_input_pin_decls()) {
-            in_names[d.port_id] = d.name;
-          }
-          for (const auto& d : cio->get_output_pin_decls()) {
-            out_names[d.port_id] = d.name;
-          }
+    }
+    return result;
+  };
+  bool wrote_plan = false;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const std::string full(g->get_name());
+    const auto        pos      = full.find_last_of("./");
+    const std::string entity   = pos == std::string::npos ? full : full.substr(pos + 1);
+    const bool        selected = !top.empty() ? (top == full || top == entity) : !instantiated.contains(full);
+    if (!selected || (!entity.empty() && entity.front() == '%')) {
+      continue;
+    }
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty());
+    plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
+    if (!plan.complete()) {
+      livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
+          .msg("occurrence-wide simulator discovery is incomplete for '{}'", full)
+          .hint(plan.errors().empty() ? "inspect the generated .color-plan.txt report" : plan.errors().front())
+          .emit();
+      return;
+    }
+    root_color_plans.emplace(g.get(), std::move(plan));
+    wrote_plan = true;
+  }
+  if (!wrote_plan && !sim_graphs.empty()) {
+    livehd::diag::err("inou.cgen.sim", "color-plan-root", "usage")
+        .msg("could not select top '{}' for occurrence-wide simulator discovery", top)
+        .emit();
+    return;
+  }
+
+  // A compact loop is one outer color whose native ordinal walk currently
+  // calls a definition-local body kernel. Mark that callee closure so ordinary
+  // hierarchy definitions can be emitted as storage-only records, while the
+  // compact kernel and anything it directly invokes retain their body surface.
+  absl::flat_hash_set<const hhds::Graph*>   compact_kernel_defs;
+  std::vector<std::shared_ptr<hhds::Graph>> compact_work;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    for (const auto node : g->body().nodes()) {
+      if (node.subnode_loop()) {
+        if (auto child = node.get_subnode_graph()) {
+          compact_work.push_back(std::move(child));
         }
-        std::string dbg
-            = std::string("[splitdbg] ") + std::string(sp->get_name()) + ": " + std::to_string(groups.size()) + " group(s)\n";
-        for (size_t gi2 = 0; gi2 < groups.size(); ++gi2) {
-          dbg += "  g" + std::to_string(gi2) + " outs:";
-          for (const auto& o : groups[gi2].outs) {
-            dbg += " " + (out_names.contains(o.pid) ? out_names[o.pid] : std::to_string(o.pid));
-            if (o.len != 0) {
-              dbg += "[" + std::to_string(o.lo + o.len - 1) + ":" + std::to_string(o.lo) + "]";
-            }
-          }
-          dbg += " <- ins:";
-          for (const auto& a : groups[gi2].support) {
-            dbg += " " + (in_names.contains(a.pid) ? in_names[a.pid] : std::to_string(a.pid));
-            if (a.len != 0) {
-              dbg += "[" + std::to_string(a.lo + a.len - 1) + ":" + std::to_string(a.lo) + "]";
-            }
-          }
-          dbg += "\n";
-        }
-        std::fputs(dbg.c_str(), stderr);
       }
-      splits.emplace(ptr, std::move(groups));
+    }
+  }
+  while (!compact_work.empty()) {
+    auto definition = std::move(compact_work.back());
+    compact_work.pop_back();
+    if (!definition || !compact_kernel_defs.insert(definition.get()).second) {
+      continue;
+    }
+    for (const auto node : definition->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+        if (auto child = node.get_subnode_graph()) {
+          compact_work.push_back(std::move(child));
+        }
+      }
     }
   }
 
@@ -349,7 +335,9 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_sim p(dir, vcd_out, top, fakedelay, flatten_budget, &splits);
+    const auto  plan_it = root_color_plans.find(g.get());
+    const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
+    Cgen_sim    p(dir, vcd_out, top, fakedelay, flatten_budget, plan, compact_kernel_defs.contains(g.get()), workers, observe_on);
     p.do_from_graph(g);
   }
 }

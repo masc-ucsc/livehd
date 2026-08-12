@@ -864,6 +864,89 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# 3d-sim-color subtask B: settle the one semantic direction on which the old
+# module scheduler and a real event simulator disagree before assigning color
+# windows. The hand-written Icarus source has a load-bearing pre-commit negative
+# control; the Color_plan unit consumes this ruling as post-rise -> fall-commit.
+sh_test(
+    name = "sim_color_latch_oracle",
+    srcs = ["sim_color_latch_oracle.sh"],
+    data = [
+        "//inou/prp:tests/sim/flop_feeds_transparent_high_latch.prp",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
+# 3d-sim-color migration rung I: generated-structure plus live execution gate
+# for the first replacement emitter class (flat, ordinary-posedge state).
+sh_test(
+    name = "sim_color_staged_flat_test",
+    size = "large",
+    srcs = ["sim_color_staged_flat_test.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "sim_color_vcd_fall_test",
+    size = "large",
+    srcs = ["sim_color_vcd_fall_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_memory_test",
+    size = "large",
+    srcs = ["sim_color_memory_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/mem_color_direct.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_random_test",
+    size = "large",
+    srcs = ["sim_color_random_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/mem_none_color_random.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_conditional_test",
+    size = "large",
+    srcs = ["sim_color_conditional_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/cond_call_always_consumer.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_compact_loop_test",
+    size = "large",
+    srcs = ["sim_color_compact_loop_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/loop_roll_conditional_state_call.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_kernel_reuse_test",
+    size = "large",
+    srcs = ["sim_color_kernel_reuse_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//lhd",
+    ],
+)
+
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
 # latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
 # DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and
@@ -1345,7 +1428,10 @@ sh_test(
 sh_test(
     name = "lhd_setmask_bitread_test",
     srcs = ["lhd_setmask_bitread_test.sh"],
-    data = _FLOW_DATA + ["setmask_bitread.prp"],
+    data = _FLOW_DATA + [
+        "setmask_bitread.prp",
+        "setmask_identity.prp",
+    ],
 )
 
 # `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the

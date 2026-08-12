@@ -78,14 +78,9 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   sink.clear();
 }
 
-// The per-op bitwidth processors (process_mult / process_bit_* /
-// process_comparator / process_mux) only run on a node whose driver pin has
-// NO pre-stamped width — every lhd frontend (yosys-verilog, slang,
-// pyrope->tolg) emits fully width-annotated graphs, so bw_pass() takes the
-// "pin already has bits" early-continue (bitwidth.cpp:1369) and these
-// inference paths stay uncalled from any CLI flow. Construct the width-less
-// shape directly (bounded inputs, unbounded op node) and check the width
-// bitwidth infers on the op's driver pin.
+// Exercise the per-op value-range processors directly. Frontends may stamp
+// conservative widths on these nodes, but those annotations are caches rather
+// than finite-width operation contracts and must not suppress inference.
 
 [[nodiscard]] static std::shared_ptr<hhds::Graph> bounded_inputs(const char* name, int abits, int bbits) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
@@ -209,6 +204,27 @@ TEST(BitwidthInfer, MuxWithConstantArm) {
   mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_GE(run_and_read_driver(g, mux), 8) << "a mux with one constant arm must still infer the data-arm width";
+}
+
+// Slang can conservatively stamp a mux with the width of an enclosing
+// expression.  Internal mux semantics are unbounded and its selector does not
+// contribute to the result width, so two boolean-valued constant arms must
+// replace that stale annotation with their exact [0..1] range.
+TEST(BitwidthInfer, PrestampedMuxIsReinferredFromDataArms) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_mux_prestamped");
+  gio->add_input("sel", 1);
+  gio->set_bits("sel", 1);
+  gio->add_output("o", 2);
+  auto g = gio->create_graph();
+
+  auto mux = livehd::graph_util::create_typed_node(*g, Ntype_op::Mux, 66);
+  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(mux.create_sink_pin(1));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(mux.create_sink_pin(2));
+  mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, mux), 2) << "the mux range [0..1] needs two signed-unbounded storage bits";
 }
 
 // Get_mask over a SIGNED input must keep every selected bit. `a` declared 3

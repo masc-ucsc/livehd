@@ -44,8 +44,12 @@ compile_sim() {  # <file> <top>
 expect_loop_error() {  # <file> <top> <label>
   local rc; rc=$(compile_sim "$1" "$2")
   [ "$rc" -ne 0 ] || fail "$3: expected non-zero exit (silent wrong-sim not blocked)"
-  grep -qE '"code":"(comb-loop-through-instance|combinational-loop)"' "$W/out" \
+  grep -qE '"code":"(comb-loop-through-instance|combinational-loop|color-plan-not-lowerable)"' "$W/out" \
     || fail "$3: expected a comb-loop diagnostic; got: $(cat "$W/out")"
+  if grep -q '"code":"color-plan-not-lowerable"' "$W/out"; then
+    grep -q 'dependency cycle remains' "$W/out" \
+      || fail "$3: color-plan refusal did not identify the surviving dependency cycle: $(cat "$W/out")"
+  fi
   echo "ok: $3 blocked with a comb-loop diagnostic"
 }
 

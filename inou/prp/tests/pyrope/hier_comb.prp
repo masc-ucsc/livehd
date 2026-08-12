@@ -9,8 +9,9 @@
 // library has three module defs (top, adder, bitmix) with the adder def
 // instanced twice as Sub nodes under top. Output widths are chosen so nothing
 // narrows (runtime wrap/sat has no tolg lowering yet), keeping the design a
-// clean purely-combinational hierarchy (good for abc seq=false). Each leaf has
-// a few independent ops so `pass color synth` finds more than one region.
+// clean purely-combinational hierarchy (good for abc seq=false). `bitmix` has
+// a real internal fanout so acyclic coloring has multiple regions without
+// depending on frontend-inserted width/sign wrappers.
 
 mod adder(a:u8, b:u8) -> (s:u9@[0]) {
   s = a + b
@@ -18,9 +19,9 @@ mod adder(a:u8, b:u8) -> (s:u9@[0]) {
 
 mod bitmix(a:u8, b:u8) -> (x:u8@[0]) {
   const p = a & b
-  const q = a ^ b
-  const r = a | b
-  x = (p ^ q) & r
+  const q = p ^ a
+  const r = p | b
+  x = q & r
 }
 
 mod top(a:u8, b:u8, c:u8) -> (o:u12@[0]) {

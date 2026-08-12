@@ -84,7 +84,33 @@ struct Val {
 // truncate the wider ones. Returns 0 for an unstamped non-const pin.
 [[nodiscard]] int32_t pin_mw_of(const Pin& p) {
   if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
-    return bb;
+    // An unsigned LGraph value stores `mw + 1` bits: the magnitude plus an
+    // always-zero sign slot.  Returning the full carrier here makes every
+    // nested if merge count that slot as new magnitude and add another one in
+    // bind_result(): a boolean mux chain grows 2,3,...,66 bits even though its
+    // arms remain in [0,1].  Signed pins use every stored bit and therefore do
+    // not have a removable zero slot.
+    if (!livehd::graph_util::is_unsign(p)) {
+      return bb;
+    }
+    // Only a COMPUTED unsigned value has bind_result's explicit zero sign
+    // slot.  Graph inputs and state/hierarchy boundaries (Sub, Flop, Memory,
+    // ...) carry their literal physical W bits; reading one as a non-negative
+    // signed-unlimited integer needs W magnitude bits plus a NEW zero sign.
+    // This is the same boundary distinction cgen_sim's canonical_ set uses.
+    //
+    // Spelled as the BOUNDARY list, not as an `op <= Hotmux` ordinal range:
+    // Rem (54) and Clock_cell (52) sit past Hotmux (38) in the enum yet go
+    // through bind_result like every other computed op, so the range form
+    // counted `a % b`'s zero sign slot as magnitude and grew every enclosing
+    // if/match merge by one bit per level. Anything added to the enum later is
+    // computed too, which is the safe default here.
+    const auto producer = p.get_master_node();
+    const auto op       = producer.is_invalid() ? Ntype_op::Invalid : livehd::graph_util::type_op_of(producer);
+    const bool boundary = livehd::graph_util::is_graph_input_pin(p) || op == Ntype_op::Invalid || op == Ntype_op::IO
+                          || op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop
+                          || op == Ntype_op::Sub || op == Ntype_op::Nconst;
+    return boundary ? bb : std::max<int32_t>(1, bb - 1);
   }
   if (livehd::graph_util::is_const_pin(p)) {
     auto v = livehd::graph_util::hydrate_const(p);
@@ -271,17 +297,17 @@ private:
 public:
   void build() {
     index_mem_write_sites();
-    // Module anchor: io-time cells (the to-positive port masks below)
-    // are minted outside any statement — anchor them, and the graph io nodes
+    // Module anchor: graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
     // (stamped on the LNAST root by func_extract / the specialize clone).
     if (const auto id = lnast_->get_srcid(lnast_->get_root()); id != hhds::SourceId_invalid) {
       cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
 
-    // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
-    // Get_mask so signed-declared ports read with their unsigned value (e.g.
-    // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
+    // Inputs: from io_meta(). LGraph values are signed, unbounded integers;
+    // `unsign` records the non-negative range of an unsigned source port. The
+    // physical W-bit -> non-negative boundary conversion belongs in each
+    // backend, not in the graph as a Get_mask operation.
     for (const auto& e : lnast_->io_meta().inputs) {
       const std::string ename{canon_io_name(e.name)};    // strip slang's `` `ar.x` `` marker
       auto              raw = g_->get_input_pin(ename);  // body driver pin for the port
@@ -299,26 +325,19 @@ public:
           set_sign(raw);
           record(e.name, raw, 1);
         } else {
-          // 1-bit unsigned: same to-positive contract as the wide branch
-          // below, else `x + y` on 1-bit ports reads -1 (port decls are
-          // signed).
-          set_sign(raw);
-          record(e.name, to_positive(raw, 1), 1);
+          set_unsign(raw);
+          record(e.name, raw, 1);
         }
       } else if (e.is_signed) {
         set_bits(raw, mw);
         set_sign(raw);
         record(e.name, raw, mw);
       } else {
-        // Stamp width AND sign on the raw pin too: passes may reconnect
-        // consumers straight to the port (cprop mask folds), and a bits-less
-        // pin miscompiles in cgen (b[-1] sign-replicate). The raw port reads
-        // SIGNED (cgen declares every port signed) — only the to-positive
-        // wrapper provides the unsigned view, so mark raw signed to keep
-        // sign-sensitive folds (cprop get_mask rule 4) away from it.
+        // Stamp width and the non-negative range directly on the input pin.
+        // Backends still know the GraphIO declaration is physically W bits.
         set_bits(raw, mw);
-        set_sign(raw);
-        record(e.name, to_positive(raw, mw), mw);  // unsigned -> positive
+        set_unsign(raw);
+        record(e.name, raw, mw);
       }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
@@ -451,19 +470,6 @@ private:
   }
 
   [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Dlop::from_pyrope("0sb?")); }
-
-  // To-positive-signed: Get_mask(x, -1) -> same bits, guaranteed non-negative,
-  // marked unsigned with one extra (sign) bit. Lets unsigned values flow
-  // through signed LGraph arithmetic correctly.
-  [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
-    auto node = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(node, "a").connect_driver(src);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
-    auto drv = node.create_driver_pin(0);
-    set_bits(drv, mw + 1);
-    set_unsign(drv);
-    return drv;
-  }
 
   // Backtick is LiveHD's general quoted-string IDENTIFIER syntax: `` `id` `` is
   // a literal id whose content is any character (a literal backtick rides as
@@ -2088,7 +2094,7 @@ private:
     return d;
   }
 
-  // a OR b as a 1-bit unsigned pin; an invalid operand is the identity (returns
+  // a OR b as an unsigned Boolean value; an invalid operand is the identity (returns
   // the other), so an unguarded caller mints no cell at all.
   [[nodiscard]] Pin or2(const Pin& a, const Pin& b) {
     if (a.is_invalid()) {
@@ -2097,11 +2103,16 @@ private:
     if (b.is_invalid()) {
       return a;
     }
-    auto node = make_node(Ntype_op::Or);
-    node.create_sink_pin(0).connect_driver(a);
-    node.create_sink_pin(0).connect_driver(b);
+    // Logical producers carry the non-negative {0,1} range in two signed-
+    // unlimited storage bits. OR preserves that carrier; the eventual typed
+    // port/state boundary is where selecting a one-bit representation belongs.
+    const auto lhs  = nonzero1(a);
+    const auto rhs  = nonzero1(b);
+    auto       node = make_node(Ntype_op::Or);
+    node.create_sink_pin(0).connect_driver(lhs);
+    node.create_sink_pin(0).connect_driver(rhs);
     auto d = node.create_driver_pin(0);
-    set_bits(d, 1);
+    set_bits(d, std::max({1, livehd::graph_util::bits_of(lhs), livehd::graph_util::bits_of(rhs)}));
     set_unsign(d);
     return d;
   }
@@ -2826,7 +2837,12 @@ private:
       mux.create_sink_pin(1).connect_driver(mi.update_val);  // false / else = previous value
       mux.create_sink_pin(2).connect_driver(v);              // true / then = this store
       merged_val = mux.create_driver_pin(0);
-      set_bits(merged_val, static_cast<int>(mi.size * mi.elem_mw));
+      // The Memory sink is the declared-width storage boundary; the Mux is an
+      // ordinary unbounded operation and must first preserve the widest arm.
+      // Stamp the widest magnitude plus the unsigned zero-sign slot, exactly
+      // as bind_result does. Constants have no pin-width attribute, so sizing
+      // from bits_of alone collapsed an 80-bit fill value to a one-bit Mux.
+      set_bits(merged_val, std::max({1, pin_mw_of(mi.update_val), pin_mw_of(v)}) + 1);
       set_unsign(merged_val);
     }
     // Combined enable: always-on (invalid) if either contributor is always-on.
@@ -3423,8 +3439,8 @@ private:
           record(lnast_->get_name(dst), out_dpin, mw);
         } else {
           set_bits(out_dpin, mw);
-          set_sign(out_dpin);
-          record(lnast_->get_name(dst), to_positive(out_dpin, mw), mw);
+          set_unsign(out_dpin);
+          record(lnast_->get_name(dst), out_dpin, mw);
         }
         return;
       }
@@ -3450,7 +3466,7 @@ private:
         auto dout = mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
         set_bits(dout, mr.bits);
         set_unsign(dout);  // __memory data is raw bits — unsigned
-        record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
+        record(lnast_->get_name(dst), dout, mr.bits);
         return;
       }
       // A single-field read (`src.field`) of a name that is not yet a known
@@ -3501,8 +3517,7 @@ private:
     } else {
       set_bits(dout, mi.elem_mw);
       set_unsign(dout);
-      record(dst_name, to_positive(dout, mi.elem_mw),
-             mi.elem_mw);  // unsigned -> positive
+      record(dst_name, dout, mi.elem_mw);
     }
   }
 
@@ -4677,8 +4692,8 @@ private:
       record(dst_name, out_dpin, mw);
     } else {
       set_bits(out_dpin, mw);
-      set_sign(out_dpin);
-      record(dst_name, to_positive(out_dpin, mw), mw);
+      set_unsign(out_dpin);
+      record(dst_name, out_dpin, mw);
     }
     // Also expose the single output by name so an explicit field read of the
     // result (`f(...).out`) resolves through lower_tuple_get, exactly like the
@@ -5405,7 +5420,7 @@ private:
       auto v  = leaf(c);
       max_mw  = std::max(max_mw, v.mw);
       sum_mw += v.mw;
-      if (wmode == OpW::andw && Lnast_ntype::is_const(lnast_->get_type(c))) {
+      if (wmode == OpW::andw && livehd::graph_util::is_const_pin(v.pin)) {
         // A bitwise AND is bounded by its NARROWEST NON-NEGATIVE operand: `x & m`
         // can only keep bits that `m` has set, so the result never exceeds m --
         // whatever x is, and however wide.
@@ -5425,8 +5440,10 @@ private:
         // better on minion (-16.2% vs -15.1% of op words); the win is dominated
         // by the constant masks, which are exact.
         //
-        // The value comes from the const PIN leaf() already created, not from a
-        // second Dlop::from_pyrope of the same literal text.
+        // Test the lowered PIN rather than the LNAST leaf kind: cprop can prove
+        // a reference temporary constant before tolg, and that constant is just
+        // as valid a mask. The value comes from that pin, so there is no second
+        // Dlop parse.
         const auto cv = livehd::graph_util::hydrate_const(v.pin);
         if (cv.is_numeric() && !cv.is_negative() && (!any_nonneg || v.mw < min_nonneg_mw)) {
           min_nonneg_mw = v.mw;
@@ -6047,19 +6064,9 @@ private:
     return v < 0 ? -v : v;
   }
 
-  // Published value range of an operand: exact for a comptime const, else the
-  // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
-  // input port — its declared envelope from io_meta. nullopt = unbounded.
-  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) {
-    if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
-      if (c->is_just_i64()) {
-        const int64_t v = c->to_just_i64();
-        return std::make_pair(v, v);
-      }
-      return std::nullopt;
-    }
-    const std::string nm{lnast_->get_name(nid)};
+  // Published bounded range by LNAST name. nullopt = unbounded / unavailable.
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_name(std::string_view name) const {
+    const std::string nm{name};
     const auto&       meta = lnast_->bw_meta();
     auto              it   = meta.ranges.find(nm);
     if (it == meta.ranges.end()) {
@@ -6071,7 +6078,7 @@ private:
     // A read-only input param has no derived bw_meta entry — fall back to its
     // declared envelope (io_meta), mirroring
     // uPass_bitwidth::envelope_of_operand.
-    std::string_view base = canon_io_name(nm);
+    std::string_view base = canon_io_name(name);
     if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
       base = base.substr(0, pos);
     }
@@ -6092,6 +6099,21 @@ private:
       break;
     }
     return std::nullopt;
+  }
+
+  // Published value range of an operand: exact for a comptime const, else the
+  // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
+  // input port — its declared envelope from io_meta. nullopt = unbounded.
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) const {
+    if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
+      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (c->is_just_i64()) {
+        const int64_t v = c->to_just_i64();
+        return std::make_pair(v, v);
+      }
+      return std::nullopt;
+    }
+    return range_of_name(lnast_->get_name(nid));
   }
 
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
@@ -6261,7 +6283,12 @@ private:
       // wider arms. Take the max over every contributing pin's stamped bits
       // (bits >= mw by construction, so this only ever widens). pin_mw_of
       // shares this with the Hotmux path (lower_unique_merge).
-      int32_t mw         = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
+      // Size from VALUES, not the destination variable's declared envelope.
+      // In unbounded LNAST/LGraph semantics a declaration is a boundary
+      // contract, not a request to inflate every internal mux. The eventual
+      // store/GraphIO/register landing performs a lossless widen; a real wide
+      // pre-value or arm is already represented by its pin below.
+      int32_t mw         = std::max<int32_t>(1, pin_mw_of(cur));
       int     n          = static_cast<int>(branches.size());
       int     last_cond  = has_else ? n - 2 : n - 1;
       // A merge is only as unsigned as its ARMS. bind_result stamps UNSIGNED
@@ -6273,7 +6300,7 @@ private:
       // unsigned: `(-s1) + (c ? -2 : s7)` evaluated to 2 where the golden says
       // 6 (vloghammer wideexpr_00093, confirmed against iverilog). Collect the
       // sign over the same sources the width is collected over.
-      bool    any_signed = pin_can_be_negative(cur) || pin_can_be_negative(pre);
+      bool    any_signed = pin_can_be_negative(cur);
       // Finalize the merged width BEFORE building the chain so every mux in it
       // (not only the outermost one bind_result stamps) carries it. An if/elif
       // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
@@ -6285,6 +6312,13 @@ private:
         if (wr != branches[i].writes.end()) {
           mw         = std::max(mw, pin_mw_of(wr->second));
           any_signed = any_signed || pin_can_be_negative(wr->second);
+        } else {
+          // Only a NON-WRITING conditional arm can select the pre-if value.
+          // When every condition and the explicit else write `var`, `pre` is
+          // not connected to this mux at all and must not inflate its carrier
+          // (a u64 declaration around `c ? 1 : 0` used to make Slop<66>).
+          mw         = std::max(mw, pin_mw_of(pre));
+          any_signed = any_signed || pin_can_be_negative(pre);
         }
       }
       for (int i = last_cond; i >= 0; --i) {
@@ -6337,7 +6371,12 @@ private:
         or_node.create_sink_pin(0).connect_driver(branches[i].cond);
       }
       or_all = or_node.create_driver_pin(0);
-      set_bits(or_all, 1);
+      // The Or is mathematically boolean, but its comparator inputs use the
+      // unsigned {0,1} carrier (two signed-unlimited bits: value plus zero sign
+      // slot). Keep that carrier width. Stamping one bit made generated
+      // Slop<1>::or_op consume Slop<2> inputs, an illegal precision-reducing
+      // result that HLOP now rejects at compile time.
+      set_bits(or_all, 2);
       set_unsign(or_all);
     }
     auto none_node = make_node(Ntype_op::EQ);
@@ -6394,30 +6433,51 @@ private:
       // Hotmux to 65 bits and truncate the real arms back down. Size from real
       // sources only, then drive the none-of slot with a width-correct
       // don't-care.
-      int32_t mw         = mw_lookup(var);
+      // As in the ordinary Mux path, derive the Hotmux carrier from its real
+      // values. A wide declaration around narrow arms is not an arithmetic
+      // operand and must not widen the internal selection tree.
+      int32_t mw         = 1;
       // Same arm-signedness rule as the Mux chain in lower_if_merge: an
       // unsigned stamp promises an always-0 top bit, so a negative arm has to
       // re-sign the merge or every widening consumer zero-fills it.
       bool    any_signed = false;
-      if (has_pre) {
-        mw         = std::max(mw, pin_mw_of(pre));
-        any_signed = any_signed || pin_can_be_negative(pre);
-      }
       if (has_ev) {
         mw         = std::max(mw, pin_mw_of(else_val));
         any_signed = any_signed || pin_can_be_negative(else_val);
+      } else if (has_pre) {
+        // No explicit else: none-of selects the pre-if value.
+        mw         = std::max(mw, pin_mw_of(pre));
+        any_signed = any_signed || pin_can_be_negative(pre);
+      }
+
+      // Collect first, connect second: a non-writing arm of a fresh match
+      // result has no pre-value.  Its placeholder is a don't-care and must be
+      // minted only AFTER the real arms establish `mw`; using nil_pin() here
+      // leaked the typeless signed unknown into cgen, where deterministic-X=0
+      // materialized it as a 65-bit negative sentinel in an otherwise 1-bit
+      // Hotmux.
+      std::vector<Pin> arm_values;
+      arm_values.reserve(n_conds);
+      for (int i = 0; i < n_conds; ++i) {
+        auto wr  = branches[i].writes.find(var);
+        // A non-writing arm keeps the pre-match value; only real writes size.
+        Pin  val = wr != branches[i].writes.end() ? wr->second : (has_pre ? pre : Pin{});
+        if (wr != branches[i].writes.end()) {
+          mw         = std::max(mw, pin_mw_of(val));
+          any_signed = any_signed || pin_can_be_negative(val);
+        } else if (has_pre) {
+          // This condition does not write `var`, so its real value arm is the
+          // pre-if value even when a separate explicit else exists.
+          mw         = std::max(mw, pin_mw_of(pre));
+          any_signed = any_signed || pin_can_be_negative(pre);
+        }
+        arm_values.push_back(val);
       }
 
       auto hot = make_node(Ntype_op::Hotmux);
       hot.create_sink_pin(0).connect_driver(sel);
       for (int i = 0; i < n_conds; ++i) {
-        auto wr  = branches[i].writes.find(var);
-        // A non-writing arm keeps the pre-match value; only real writes size.
-        Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
-        if (wr != branches[i].writes.end()) {
-          mw         = std::max(mw, pin_mw_of(val));
-          any_signed = any_signed || pin_can_be_negative(val);
-        }
+        const Pin val = arm_values[i].is_invalid() ? create_const(*g_, *Dlop::unknown(mw)) : arm_values[i];
         hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
       }
       // none-of slot: explicit else / pre value when present; otherwise an

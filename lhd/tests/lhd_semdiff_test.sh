@@ -57,19 +57,23 @@ compile "$W/o1.prp" "$W/o1"
 echo "PASS: identical/commutative -> full match, similarity 1.000"
 
 # ---------------------------------------------------------------------------
-# 2. Real difference: (a&b)+c vs (a|b)+c. The &/| node and the dependent sum
-#    diverge; the shared get_mask on c is still matched (surrounding logic).
+# 2. Real difference: (a&b)+(c*3) vs (a|b)+(c*3). The &/| node and the
+#    dependent sum diverge; the real shared multiply is still matched. This
+#    deliberately does not rely on a redundant unsigned Get_mask wrapper being
+#    present in the IR.
 # ---------------------------------------------------------------------------
 cat > "$W/g2.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
+mod m(a:u8, b:u8, c:u8) -> (y:u10@[0]) {
   const t = a & b
-  y = t + c
+  const u = c * 3
+  y = t + u
 }
 EOF
 cat > "$W/o2.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
+mod m(a:u8, b:u8, c:u8) -> (y:u10@[0]) {
   const t = a | b
-  y = t + c
+  const u = c * 3
+  y = t + u
 }
 EOF
 compile "$W/g2.prp" "$W/g2"

@@ -49,7 +49,7 @@ struct Test_info {
 // `err`. `vcd_dir` (empty = no VCD): each test points its DUT at
 // `<vcd_dir>/<test_name>.vcd` so every test dumps its own waveform.
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             std::vector<Test_info>& tests, std::string& err);
+             bool observation_on, std::vector<Test_info>& tests, std::string& err);
 
 // Parse `file` for its `test` blocks (matching `test_sel`, empty = all) and fill
 // `tests` with their dotted names + parameters — without lowering any DUT. On

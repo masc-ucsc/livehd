@@ -1,0 +1,61 @@
+/*
+:name: conditional_internal_icg_call
+:type: simulation
+*/
+
+// A conditionally called wrapper whose state is clocked from the OUTPUT of a
+// sibling ICG instance.  The activation analysis must trace that clock through
+// the gate cell to the wrapper's declared clk input; stopping at the Sub output
+// used to reject this shape before simulation code generation (Minion's
+// vpu_lane -> vpu_txfma_trans_top path has the same topology).
+mod conditional_icg_cell(clk:bool, en:bool) -> (g:bool@[]) {
+  reg held:bool:[latch=true]
+  if !clk {
+    held = en
+  }
+  g = clk and held
+}
+
+mod conditional_icg_leaf(gclk:bool, d:u8) -> (q:u8@[]) {
+  reg acc:u8:[clock_pin=ref gclk] = 0
+  acc = acc + d
+  q = acc
+}
+
+mod conditional_icg_wrapper(clk:bool, gate:bool, d:u8) -> (q:u8@[]) {
+  wire gclk:bool = nil
+  gclk = conditional_icg_cell(clk=clk, en=gate)
+  q = conditional_icg_leaf(gclk=gclk, d=d)
+}
+
+pub mod conditional_icg_top(clk:bool, active:bool, gate:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
+  q = 0
+  if active {
+    q = conditional_icg_wrapper(clk=clk, gate=gate, d=d)
+  }
+
+  reg every:u8:[clock_pin=ref clk] = 0
+  every = every + d
+  ctl = every
+}
+
+test conditional_icg_top.activation_crosses_an_internal_sibling_clock_gate {
+  mut dut = conditional_icg_top
+  mut bad = 0
+  mut ctl = 0
+  tick 5 {
+    dut.active = (clock <= 1) or (clock == 4)
+    dut.gate = true
+    dut.d = 1 << clock
+    ctl = ctl + (1 << clock)
+    step
+
+    if dut.ctl != ctl { bad = bad + 1 }
+    mut want:u8 = 0
+    if clock == 0 { want = 1 }
+    if clock == 1 { want = 3 }
+    if clock == 4 { want = 19 }
+    if dut.q != want { bad = bad + 1 }
+  }
+  assert(bad == 0, "conditional state holds even when its clock crosses an internal ICG instance")
+}

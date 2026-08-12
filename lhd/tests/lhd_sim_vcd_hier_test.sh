@@ -27,6 +27,10 @@ fail() {
   exit 1
 }
 
+lhd_sim() {
+  "$LHD" sim "$@"
+}
+
 # The lecfail dut-pair shape: a FLOPLESS wrapper with an explicit clock port
 # passed through to two stateful children (one nested two-deep).
 cat > "$W/h.prp" <<'EOF'
@@ -64,12 +68,19 @@ test h {
 EOF
 
 # ---- default mode (sim.vcd_fake_delay=true): settle window + X ------------------
-"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd=true --workdir "$W/fd" -q >/dev/null 2>&1 \
+lhd_sim "$W/h.prp" --setup-only --set sim.vcd=true --workdir "$W/fd" -q >/dev/null 2>&1 \
   || fail "default-mode setup failed"
 WRAP="$W/fd/sim/h.pair.cpp"
 WRAPH="$W/fd/sim/h.pair.hpp"
 LEAF="$W/fd/sim/h.leaf.cpp"
 [ -f "$WRAP" ] && [ -f "$LEAF" ] || fail "expected per-module sim bodies not generated"
+
+# This ordinary acyclic hierarchy is a live replacement-path regression. Its
+# explicit clock is threaded through two wrapper levels and width/identity
+# shaping, but still resolves structurally to the top clock input.
+grep -q 'color-direct eligible=true' "$WRAPH" || fail "ordinary hierarchy did not select the color-direct scheduler"
+grep -q 'vcd-pre-rise-barrier' "$WRAP" || fail "direct VCD lacks the pre-rise Taskflow barrier"
+grep -q '__vcd_publish_period' "$WRAP" || fail "direct VCD lacks ordered root publication"
 
 # the flopless wrapper resolves its pass-through clock port: real label, no uniquify
 grep -q '__clk_name = "clock"' "$WRAPH" || fail "wrapper clock label is not the real port"
@@ -90,7 +101,7 @@ grep -q 'same_repr' "$WRAP" || fail "X window is not change-gated (same_repr)"
 grep -q '__b + 3' "$WRAP" || fail "default mode lacks the +3 settle offset"
 
 # ---- traditional mode (sim.vcd_fake_delay=false): edge-aligned, no X ------------
-"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/tr" -q >/dev/null 2>&1 \
+lhd_sim "$W/h.prp" --setup-only --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/tr" -q >/dev/null 2>&1 \
   || fail "vcdfakedelay=false setup failed"
 TWRAP="$W/tr/sim/h.pair.cpp"
 [ -f "$TWRAP" ] || fail "traditional-mode body not generated"
@@ -100,7 +111,7 @@ grep -q '__b + 3' "$TWRAP" && fail "vcdfakedelay=false must not offset data from
 grep -q '\.__vcd_hier(__w, __s + "\.' "$TWRAP" || fail "traditional mode lost the hierarchy"
 
 # the knob validates like any sim.* boolean
-"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd_fake_delay=bogus --workdir "$W/bad" -q >/dev/null 2>&1 \
+lhd_sim "$W/h.prp" --setup-only --set sim.vcd_fake_delay=bogus --workdir "$W/bad" -q >/dev/null 2>&1 \
   && fail "--set sim.vcd_fake_delay=bogus must be rejected"
 
 # ---- runtime: real VCD with nested scopes + X settle window -------------------
@@ -114,7 +125,7 @@ if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
   exit 0
 fi
 
-"$LHD" sim "$W/h.prp" --set sim.vcd=true --workdir "$W/run" -q >/dev/null 2>&1 \
+lhd_sim "$W/h.prp" --set sim.vcd=true --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "default-mode run failed"
 VCD="$W/run/h.vcd"
 [ -s "$VCD" ] || fail "no VCD produced"
@@ -141,7 +152,7 @@ grep -q 'clock_vcd' "$VCD" && fail "VCD clock label was uniquified"
 # the settle window shows X between the edge and the settled data
 grep -qE '^(x.|bx )' "$VCD" || fail "no X settle window in the default-mode VCD"
 
-"$LHD" sim "$W/h.prp" --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/run2" -q >/dev/null 2>&1 \
+lhd_sim "$W/h.prp" --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/run2" -q >/dev/null 2>&1 \
   || fail "vcdfakedelay=false run failed"
 VCD2="$W/run2/h.vcd"
 [ -s "$VCD2" ] || fail "no traditional-mode VCD produced"
@@ -174,7 +185,7 @@ test two {
   }
 }
 EOF
-"$LHD" sim "$W/two.prp" --set sim.vcd=true --workdir "$W/run3" -q >/dev/null 2>&1 \
+lhd_sim "$W/two.prp" --set sim.vcd=true --workdir "$W/run3" -q >/dev/null 2>&1 \
   || fail "two-instance VCD run failed (second writer registration aborts?)"
 [ -s "$W/run3/two.x.vcd" ] && [ -s "$W/run3/two.y.vcd" ] \
   || fail "expected one VCD per instance (two.x.vcd + two.y.vcd)"

@@ -8,17 +8,13 @@
 // NEGEDGE flop sampling its output. Three properties in one design that
 // `hier_latch_split_ring.prp` and `latch_sub_split_ring.prp` do not reach:
 //
-//  1. RE-SETTLE AFTER A CALLER-SIDE LATCH COMMITS, not a callee split. The
+//  1. POST-COMMIT VERSION AFTER A CALLER-SIDE LATCH COMMITS. The
 //     latch `lo` is state OWNED BY THE CALLER, so `ba` is a plain Q read that is
-//     available before either call and the ORDERING ring dissolves on its own --
-//     the emitter calls both instances atomically (verified in the emitted
-//     `duotop.cpp`: two plain `cycle()` calls, no `__settle_g<N>`). That makes
-//     this the complement of `hier_latch_split_ring.prp`, where the ring is
-//     closed by pure comb and the callee genuinely must be split. What can still
-//     go wrong here is the VALUE: `lo` commits during the period, so every
+//     available before either occurrence and the ordering ring dissolves on its
+//     own. What can still go wrong is the VALUE: `lo` commits during the period, so every
 //     consumer of `ba` -- including the output of an INSTANCE -- has to be
-//     recomputed against the post-commit latch, in the negedge pass and in the
-//     final settle. An emitter that binds `ea2` once from the pre-edge Q reports
+//     represented against the post-commit latch in the fall and public-output
+//     versions. A plan that binds `ea2` only from the pre-edge Q reports
 //     the previous period's `rb` on every open cycle and is right on every
 //     closed one.
 //  2. TWO INSTANCES OF ONE DEFINITION. `u_b` sits outside the ring entirely, so

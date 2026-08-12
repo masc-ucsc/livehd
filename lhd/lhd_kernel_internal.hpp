@@ -172,6 +172,7 @@ void                     emit_verilog_outputs(Options& opts, Result& res, Eprp_v
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& output_dir);
 std::string              sim_hlop_include_dir(const Options& opts);
 std::string              sim_iassert_include_dir(const Options& opts);
+std::string                         sim_taskflow_include_dir(const Options& opts);
 std::string              sim_host_cxx();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var);

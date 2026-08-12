@@ -18,12 +18,10 @@
 //     single-pass sim schedule cannot order: `sub_28:u_pack_bus_0`
 //     (a combinational-cycle back-edge) was read before it could be computed
 //
-// WHY THIS IS THE NEXT PARTITION STEP AND NOT A NEW CLASS. cgen.sim already
-// splits a callee by OUTPUT: `hier_latch_split_ring.prp` gets `lane` cut into
-// `__settle_g0/g1/g2` so the caller can interleave. The unit of that split is a
-// whole output port, so a definition whose two independent cones land in two
-// SLICES of ONE port has exactly one group and cannot be cut -- the
-// packed-bus/`req`-`resp`-in-one-word shape that real designs use constantly.
+// WHY THIS NEEDS SLICE-GRANULAR COLOR SLOTS. The two independent cones land in
+// different SLICES of one output port. A whole-word dependency invents a cycle;
+// bit-level producer ownership exposes the acyclic order used by the root DAG --
+// the packed-bus/`req`-`resp`-in-one-word shape that real designs use constantly.
 //
 // THE CONTROL IS IN THE DESIGN. `ctl` is the SAME ring with the SAME arithmetic
 // written inline, with no instance in it at all -- the `wire` packed-update

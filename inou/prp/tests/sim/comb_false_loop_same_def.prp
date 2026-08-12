@@ -6,15 +6,10 @@
 // todo_sim_pipeline.md Phase 0 (step 4 anchor) — ONE definition, TWO instances,
 // only ONE of them inside a false loop.
 //
-// WHY THIS SHAPE EXISTS. Step 4 rules that the emitted partition boundaries are
-// PER DEFINITION (a def emits the UNION of the boundaries any site needs) while
-// the SCHEDULE stays per instance. This fixture is the smallest design where
-// those two grains disagree: `sfree` runs with all four inputs available and may
-// call the callee's partitions back to back, while `sloop` needs the o1
-// partition, then the caller's `back`, then the o2 partition. If the boundaries
-// were computed per INSTANCE the shared def would need two bodies; if the
-// SCHEDULE were per definition the free instance would be forced through the
-// looped instance's interleave.
+// WHY THIS SHAPE EXISTS. Canonical kernels are shared by DEFINITION shape while
+// storage bindings and schedules stay per occurrence. `sfree` has all inputs
+// available; `sloop` needs o1, then caller `back`, then o2. The two sites may
+// reuse code but must retain distinct occurrence ordering and storage.
 //
 // The values are the property: both instances must agree with an evaluation
 // order that respects each one's own wiring, and `sum_free`/`sum_loop` are the
@@ -29,10 +24,8 @@
 // which is the only way this fixture can be what it is for: a VALUE test, and
 // a Verilator differential. It is not a trick — minion's own generated Pyrope
 // carries exactly these two annotations for exactly this reason.
-// STATUS: LIVE since 2026-08-05. Both sites are correct today via the inliner,
-// which duplicates the callee body per site — the cost step 4 exists to remove.
-// The values are what must survive the move to shared per-definition partitions
-// with per-instance scheduling.
+// STATUS: LIVE. The values pin canonical-kernel reuse with per-occurrence
+// bindings and scheduling.
 comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
   o1 = a + b      // cone {a, b} only
   o2 = c * d      // cone {c, d} only

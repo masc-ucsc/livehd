@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -50,6 +51,78 @@ livehd::graph_util::Edge_vec ordered_inp_edges(const hhds::Node_class& node) {
 
 using livehd::graph_util::hydrate_const;
 using livehd::graph_util::setup_sink_by_name;
+
+// A finite Get_mask is an EXPLICIT precision-changing operation: its value has
+// exactly popcount(mask) packed magnitude bits, independent of the width of the
+// source or of an enclosing typed expression.  Keep that fact on the result pin
+// even when a frontend conservatively stamped the destination wider.  In the
+// unbounded LGraph semantics this is the operation's range contract, not a
+// range-analysis guess.
+void restamp_finite_get_mask(hhds::Node_class& node, const Dlop& mask) {
+  if (mask.is_negative() || mask.has_unknowns()) {
+    return;
+  }
+  const auto magnitude_bits = mask.popcount();
+  I(magnitude_bits < static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+  auto       out      = node.create_driver_pin(0);
+  const auto capacity = static_cast<int32_t>(magnitude_bits + 1);
+  const auto current  = bits_of(out);
+  // A preceding range pass may prove that fewer carrier bits suffice. Keep
+  // that stronger fact; this repair is only for a stale enclosing/source width
+  // that exceeds the explicit selection's capacity.
+  if (current == 0 || current > capacity) {
+    livehd::graph_util::set_bits(out, capacity);
+  }
+  // Do not rewrite signedness here. Get_mask is also the real finite-width
+  // landing for a typed signed wire: tolg deliberately stamps that result
+  // signed so its selected top bit is the sign bit. Ordinary slice results are
+  // already stamped unsigned by their producer. Turning every finite mask
+  // unsigned here changed a signed field value such as 8'hff from -1 to 255.
+}
+
+// Copy propagation can replace a narrow operand with a wider equivalent
+// carrier (most visibly when a packed-field read folds to a constant), and the
+// finite Get_mask normalization above can also correct an input's stale width.
+// Keep ordinary unlimited-precision operations lossless after those rewrites:
+// their result carrier may be wider than the range estimate, never narrower
+// than a value input. HLOP repeats this as a consteval assertion in generated
+// C++; this graph repair makes the producer metadata satisfy the same contract.
+//
+// Explicitly reducing/selecting operations are intentionally absent: And may
+// be a mask, SRA drops shifted bits, and Get_mask/Ror/Rem select or reduce.
+void enforce_lossless_carriers(hhds::Graph* g) {
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+      const auto op = type_op_of(node);
+      if (op != Ntype_op::Sum && op != Ntype_op::Mult && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Not
+          && op != Ntype_op::SHL && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
+        continue;
+      }
+      auto out = node.create_driver_pin(0);
+      if (out.is_invalid()) {
+        continue;
+      }
+      int required = std::max(bits_of(out), 1);
+      for (const auto& e : node.inp_edges()) {
+        const auto pid = e.sink.get_port_id();
+        if ((op == Ntype_op::SHL && pid != 0) || ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && pid == 0)) {
+          continue;  // shift count / selector widths are independent
+        }
+        int input_bits = bits_of(e.driver);
+        if (is_const_pin(e.driver)) {
+          input_bits = std::max(input_bits, static_cast<int>(hydrate_const(e.driver).get_bits()));
+        }
+        required = std::max(required, input_bits);
+      }
+      if (required > bits_of(out)) {
+        livehd::graph_util::set_bits(out, required);
+        changed = true;
+      }
+    }
+  }
+}
 
 // "Is there an edge from `driver` to `sink`?"
 [[nodiscard]] bool is_driver_connected_to_sink(const hhds::Pin_class& driver, const hhds::Pin_class& sink) {
@@ -431,7 +504,11 @@ constexpr int                 kPackedSliceFanInLimit = 64;
     return {fb, lb + 1};
   }
   if (is_graph_input_pin(p)) {
-    return kFpBail;  // a port reads SIGNED whatever its unsign metadata says
+    if (!livehd::graph_util::is_unsign(p)) {
+      return kFpBail;
+    }
+    const int bits = bits_of(p);
+    return bits > 0 ? std::pair<int, int>{0, bits} : kFpBail;
   }
   auto m = p.get_master_node();
   if (m.is_invalid()) {
@@ -605,8 +682,22 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
 bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
   auto new_bits = bits_of(new_dpin);
   for (const auto& out : node.out_edges()) {  // read-only width check
-    auto out_bits = bits_of(out.driver);
-    if (out_bits > 0 && new_bits > 0 && out_bits != new_bits) {
+    auto       out_bits = bits_of(out.driver);
+    // LGraph values are unlimited-precision integers; `bits` is materialization
+    // metadata. Replacing a wider unsigned identity wrapper with its narrower
+    // non-negative source loses no value bits—the source's range is already
+    // exact. Still reject every narrowing of the source range and every signed
+    // mismatch, where the removed node may have supplied a sign boundary.
+    //
+    // is_unsign() is attribute ABSENCE, so this rule is only as sound as the
+    // frontends' promise to stamp every SIGNED driver pin: an unstamped signed
+    // pin reads as a non-negative range here and its wrapper is dropped. That
+    // promise is the IR contract (`unsign` == value-range guarantee), not an
+    // assumption to be re-derived per pass — fix a violation at its producer
+    // (see lgyosys_tolg's instance-output stamping) rather than by weakening it.
+    const bool lossless_unsigned_widen
+        = livehd::graph_util::is_unsign(new_dpin) && new_bits > 0 && out_bits > 0 && new_bits <= out_bits;
+    if (out_bits > 0 && new_bits > 0 && out_bits != new_bits && !lossless_unsigned_widen) {
       return false;
     }
   }
@@ -1356,15 +1447,33 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       continue;
     }
 
+    if (op == Ntype_op::SRA) {
+      int k = const_shl_amount(m);
+      if (k < 0) {
+        break;
+      }
+      auto x = drv_at(m, 0);
+      if (x.is_invalid()) {
+        break;
+      }
+      cur  = x;
+      lo  += k;
+      hi  += k;
+      continue;
+    }
+
     if (op == Ntype_op::Get_mask) {
       auto r = const_mask_range(m);
       if (r.first < 0) {
         break;
       }
       int w = r.second - r.first;
-      // A 1-bit Get_mask yields the SIGNED -1/0, so bits above it read the sign
-      // rather than zero -- re-basing through it would be unsound.
-      if (w <= 1 || hi > w) {
+      // Get_mask is an explicit zero-extension/select operation, so even a
+      // one-bit result is the non-negative magnitude 0/1. It composes with a
+      // following low slice exactly like every wider Get_mask. Dlop's legacy
+      // one-bit -1 representation is corrected by bitwidth and must not leak
+      // into the LGraph transform (cgen likewise emits the 0/1 magnitude).
+      if (w <= 0 || hi > w) {
         break;
       }
       auto x = drv_at(m, 0);
@@ -1458,6 +1567,14 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
   }
   I(hi > lo, "packed-slice fold produced an empty range");
 
+  // Selecting every declared bit of an unsigned source is an identity in the
+  // signed unlimited-width IR: its range already guarantees a zero sign. This
+  // is the terminal form of a one-bit read walked through SRA/Set_mask chains.
+  const int cur_bits = bits_of(cur);
+  if (lo == 0 && cur_bits > 0 && hi >= cur_bits && livehd::graph_util::is_unsign(cur) && collapse_forward_for_pin(node, cur)) {
+    return true;
+  }
+
   // Every rule preserves (hi-lo), so the mask popcount is invariant and the
   // pin's existing bits (= magnitude+1) stays correct: do NOT re-stamp bits/sign.
   auto old_master = a_now.get_master_node();
@@ -1493,6 +1610,8 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 
   auto mask_const = hydrate_const(mask_pin);
 
+  restamp_finite_get_mask(node, mask_const);
+
   // Rule 4: get_mask(a, -1) == a — only when `a` is provably non-negative.
   // get_mask always yields a non-negative value (it zero-extends the selected
   // bits), so it is the to-positive wrapper for signed-read pins (e.g. module
@@ -1508,19 +1627,9 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       // bit reads negative, which stays conservative for Rule 4.
       nonneg = v.is_positive();
     } else if (is_graph_input_pin(a_pin)) {
-      // A module port always reads SIGNED in the LGraph/cgen model; its
-      // unsign attr (when present) is source-interface metadata, not a
-      // value-range guarantee. Never bypass the to-positive wrapper here.
-      //
-      // Measured 2026-08-04: trusting is_unsign here removes ZERO cells anyway.
-      // The wrapper on a port CHANGES THE DECLARED WIDTH (a u8 port is 8 bits;
-      // its to-positive form is 9 -- magnitude 8 plus the sign slot the internal
-      // representation needs), so collapse_forward_for_pin refuses it on width
-      // grounds. That width change IS the semantic content of the cell: it
-      // re-expresses a literal-width unsigned PORT as the magnitude+1 signed
-      // form every internal net uses. It is a boundary conversion, not a
-      // redundant constraint.
-      nonneg = false;
+      // `unsign` is a value-range guarantee in LGraph. The physical W-bit port
+      // representation is a backend boundary concern, not an IR Get_mask.
+      nonneg = livehd::graph_util::is_unsign(a_pin);
     } else {
       auto a_master = a_pin.get_master_node();
       nonneg = (!a_master.is_invalid() && type_op_of(a_master) == Ntype_op::Get_mask) || livehd::graph_util::is_unsign(a_pin);
@@ -1610,6 +1719,42 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   return scalar_get_mask_packed(node, mask_const);
 }
 
+bool Cprop::scalar_set_mask(hhds::Node_class& node) {
+  auto base_pin  = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
+  auto value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
+  if (base_pin.is_invalid() || mask_pin.is_invalid() || value_pin.is_invalid() || !is_const_pin(base_pin)
+      || !is_const_pin(mask_pin)) {
+    return false;
+  }
+
+  const auto base = hydrate_const(base_pin);
+  const auto mask = hydrate_const(mask_pin);
+  if (!base.is_known_zero() || mask.has_unknowns() || mask.is_negative()) {
+    return false;
+  }
+
+  const auto [mb, me] = mask.get_mask_range();
+  if (mb != 0 || me <= 0 || !livehd::graph_util::is_unsign(value_pin) || is_const_pin(value_pin) || is_graph_input_pin(value_pin)) {
+    return false;
+  }
+
+  // set_mask(0, ones[0,n), value) == value when the value is already known to
+  // fit below bit n. Computed unsigned LGraph outputs use the magnitude+sign
+  // width convention: bits=W means value < 2^(W-1). The mask therefore clears
+  // nothing when W-1 <= n. Boundary/state pins use literal physical widths and
+  // are deliberately excluded, as in scalar_get_mask's width-no-op rule.
+  auto       vm       = value_pin.get_master_node();
+  const auto vmo      = type_op_of(vm);
+  const bool computed = !vm.is_invalid() && vmo != Ntype_op::Invalid && vmo <= Ntype_op::Hotmux;
+  const int  vbits    = bits_of(value_pin);
+  if (!computed || vbits <= 0 || (vbits - 1) > me) {
+    return false;
+  }
+
+  return collapse_forward_for_pin(node, value_pin);
+}
+
 // Canonicalize every constant-mask Get_mask into ONE shape:
 //     Get_mask(x, ones[lo,hi))  ->  Get_mask(SRA(x, lo), 2^(hi-lo)-1)
 //
@@ -1664,6 +1809,12 @@ void Cprop::normalize_get_mask_slices(hhds::Graph* g) {
     }
     auto       a_pin      = a_edge.driver;
     const auto mask_const = hydrate_const(m_edge.driver);
+    // The scalar walk can encounter this node before its mask expression has
+    // folded to a constant.  Normalize runs after that whole sweep, so enforce
+    // the finite-select capacity again here.  This is what prevents a 6-bit
+    // packed field from surviving as a Slop<65> merely because its source word
+    // was 64 bits wide.
+    restamp_finite_get_mask(node, mask_const);
     if (mask_const.is_negative() || mask_const.has_unknowns()) {
       continue;
     }
@@ -1743,6 +1894,10 @@ void Cprop::scalar_pass(hhds::Graph* g) {
       // The packed-slice fold can rewire `a`/`mask` in place and return false,
       // which would leave the vector captured above stale.
       inp_edges_ordered = ordered_inp_edges(node);
+    } else if (op == Ntype_op::Set_mask) {
+      if (scalar_set_mask(node)) {
+        continue;
+      }
     } else if (!node.has_out_edges()) {
       bwd_del_node(node);
       continue;
@@ -1886,6 +2041,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // Canonicalize Get_mask AFTER the packed-slice folds have consumed the
   // original shapes (see normalize_get_mask_slices).
   normalize_get_mask_slices(current_graph);
+  enforce_lossless_carriers(current_graph);
   // The front ends sometimes spell an unconditional latch write as a
   // tautological enable cone (for example, a full case/default).  The scalar
   // sweep above reduces that cone to a constant; revisit latches so the now

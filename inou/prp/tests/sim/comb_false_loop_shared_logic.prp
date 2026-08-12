@@ -7,16 +7,16 @@
 // an internal fanout cone, while only ONE of them participates in caller
 // feedback.
 //
-// WHY THIS SHAPE EXISTS. Step 5's partition ABI says a shared value has ONE
-// owner and must survive ACROSS partition calls: `mid` here is read by both
-// outputs, so it cannot live as a C++ local inside whichever partition method
+// WHY THIS SHAPE EXISTS. The color ABI says a shared value has ONE producer
+// and must survive across colors: `mid` here is read by both outputs, so it
+// cannot live as a C++ local inside whichever color
 // runs first. The naive repairs both show up as wrong numbers rather than as a
 // refusal — recomputing `mid` in the second partition is only invisible while
 // it is cheap and pure, and dropping it emits a 0.
 //
 // The caller closes the ring on `o2` only, so `o1` (and therefore `mid`) is
 // ready before the back edge exists. That is exactly the ordering a per-
-// partition schedule must find and an atomic call cannot.
+// occurrence-wide schedule must find and an atomic module call cannot.
 //
 //
 // WHY `::[timecheck=false]` AND `@[]` OUTPUTS. upass.tolg runs its own
@@ -27,10 +27,8 @@
 // which is the only way this fixture can be what it is for: a VALUE test, and
 // a Verilator differential. It is not a trick — minion's own generated Pyrope
 // carries exactly these two annotations for exactly this reason.
-// STATUS: LIVE since 2026-08-05 via the inliner, which sidesteps the question by
-// making `mid` an ordinary local. Step 5 has to answer it for real — ONE owner
-// for a value that crosses two partition calls — and this fixture is the
-// regression that says whether it did.
+// STATUS: LIVE. It pins one producer-owned slot for a value consumed by two
+// colors across a hierarchy boundary.
 comb sharer(a:u8, b:u8, c:u8) -> (o1:u16, o2:u16) {
   // ONE shared cone read by BOTH outputs.
   mut mid:u16 = (a + b) & 0xFF

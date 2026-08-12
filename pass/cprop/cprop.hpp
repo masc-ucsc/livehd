@@ -39,6 +39,7 @@ protected:
   void            scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
   hhds::Pin_class try_find_single_driver_pin(hhds::Node_class& node, int64_t pos);
   bool            scalar_get_mask(hhds::Node_class& node);
+  bool            scalar_set_mask(hhds::Node_class& node);
   // Constant slice of a packed (Or-of-shifted-disjoint-fields) wire -> the one
   // operand that drives it. true = node deleted (folded to a constant); false
   // may still have rewired the node in place.

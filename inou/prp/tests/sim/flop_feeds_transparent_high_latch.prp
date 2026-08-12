@@ -1,0 +1,32 @@
+/*
+:name: flop_feeds_transparent_high_latch
+:type: simulation
+*/
+
+// todo/livehd/3d-sim-color B: event-semantics carve-out from the retired
+// module scheduler. At the rising edge `f` takes d. The high-transparent latch
+// remains open after that edge, so it observes the NEW f and closes with that
+// value at the fall. Sampling f before its rise commit makes h one period late.
+// The matching independent always_ff/always_latch Icarus oracle lives in
+// //lhd/tests:sim_color_latch_oracle.
+pub mod flop_high_latch(clk:bool, d:u8) -> (qf:u8@[1], qh:u8@[1]) {
+  reg f:u8:[clock_pin=ref clk] = 0
+  reg h:u8:[latch=true] = 0
+  qf = f
+  qh = h
+  f = d
+  if clk {
+    h = f
+  }
+}
+
+test flop_high_latch.post_rise_value_flows_through_open_latch {
+  mut acc = flop_high_latch
+  tick 6 {
+    const dv = 11 + (17 * clock)
+    acc.d = dv
+    step
+    assert(acc.qf == dv, "posedge flop captured this period's input")
+    assert(acc.qh == dv, "transparent-high latch observed the flop's post-rise value before closing")
+  }
+}

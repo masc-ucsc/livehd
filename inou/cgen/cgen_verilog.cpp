@@ -657,6 +657,36 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   return "'hx /*cgen-miss*/";
 }
 
+bool Cgen_verilog::declared_unsigned_net(const hhds::Pin_class& dpin) const {
+  if (dpin.is_invalid() || is_const_pin(dpin)) {
+    return false;
+  }
+  return pin2var.contains(dpin.get_class_index()) && pin2var_unsigned_.contains(dpin.get_class_index());
+}
+
+std::string Cgen_verilog::signed_operand(const hhds::Pin_class& dpin, std::string_view expr) const {
+  if (!declared_unsigned_net(dpin)) {
+    return std::string{expr};
+  }
+  // `{1'b0, x}` is self-determined at x's declared width + 1 (safe: x IS a
+  // declared net here), and $signed of that is the same non-negative value in a
+  // signed expression. `$signed(x)` alone would read 8'hff as -1.
+  return absl::StrCat("$signed({1'b0,", expr, "})");
+}
+
+bool Cgen_verilog::mixes_operand_signs(const hhds::Node_class& node) const {
+  bool saw_signed   = false;
+  bool saw_unsigned = false;
+  for (const auto& e : node.inp_edges()) {
+    if (operand_reads_signed(e.driver)) {
+      saw_signed = true;
+    } else if (declared_unsigned_net(e.driver)) {
+      saw_unsigned = true;
+    }
+  }
+  return saw_signed && saw_unsigned;
+}
+
 std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) {
   auto expr = get_expression(dpin);
 
@@ -734,7 +764,10 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::N
 // `!enable` (e.g. prim_clk_gate's `if (!clk_i)`).
 void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   auto dpin_q = node.get_driver_pin(0);
-  auto name   = get_scaped_name(pin_wire_name(dpin_q));
+  // create_locals may have de-collided Q from a directly connected module
+  // output (for example `q_cgen1`).  Write the declared storage variable,
+  // then let create_outputs publish it, exactly as the flop path does.
+  auto name = get_wire_or_const(dpin_q);
 
   auto din_dpin = get_driver(find_sink_pin(node, "din"));
   auto en_dpin  = get_driver(find_sink_pin(node, "enable"));
@@ -1562,11 +1595,21 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
   if (op == Ntype_op::Sum) {
     std::string add_seq;
     std::string sub_seq;
+    // One unsigned operand makes the WHOLE Verilog expression unsigned, so a
+    // signed sibling zero-extends: `a + b` with `input [7:0] a; input signed
+    // [7:0] b` returned 255 for a=0, b=-1 where the LGraph value is -1. Ports
+    // now carry their declared sign (they used to be a blanket `input signed`
+    // compensated by a to_positive Get_mask), so read the unsigned ones as the
+    // non-negative signed values they are.
+    const bool mixed_signs = mixes_operand_signs(node);
     for (auto e : node.inp_edges()) {
+      const auto operand = mixed_signs ? signed_operand(e.driver, get_expression(e.driver)) : std::string{};
       if (e.sink.get_port_id() == 0) {
-        add_seq = add_expression(add_seq, "+", e.driver);
+        add_seq = operand.empty() ? add_expression(add_seq, "+", e.driver)
+                                  : (add_seq.empty() ? operand : absl::StrCat(add_seq, " + ", operand));
       } else {
-        sub_seq = add_expression(sub_seq, "+", e.driver);
+        sub_seq = operand.empty() ? add_expression(sub_seq, "+", e.driver)
+                                  : (sub_seq.empty() ? operand : absl::StrCat(sub_seq, " + ", operand));
       }
     }
     if (sub_seq.empty()) {
@@ -1867,10 +1910,24 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
           // The int overload is hlop-internal; the public one takes the position
           // as a Dlop (same idiom as upass/bitwidth/wrap_sat.hpp).
           final_expr = const_to_verilog(*hydrate_const(a_dpin).sext_op(*Dlop::create_integer(static_cast<int>(keep) - 1)));
-        } else if (keep <= 0 || decl <= 1 || keep >= decl) {
+        } else if (keep <= 0) {
           final_expr = lhs;
+        } else if (decl > 0 && keep > decl) {
+          // Widen before changing signedness.  A bare unsigned RHS is
+          // zero-extended by the signed destination's assignment context; a
+          // signed RHS is sign-extended.  Casting the narrow value first would
+          // instead reinterpret its current msb as a sign and then extend it
+          // (u3 3'b111 -> -1 rather than the required widened +7).
+          final_expr = lhs;
+        } else if (decl <= 1 || keep == decl) {
+          // Sext is also the explicit finite-vector signed reinterpretation
+          // used by the Yosys reader. An unsigned one-bit/full-width source is
+          // not a no-op here: $signed(1'b1) is -1 in unlimited LGraph terms.
+          final_expr = is_unsign(a_dpin) ? absl::StrCat("$signed(", lhs, ")") : lhs;
         } else {
-          final_expr = absl::StrCat(lhs, "[", keep - 1, ":0]");
+          // A Verilog part-select is unsigned regardless of its base. Cast the
+          // kept finite vector before the surrounding context widens it.
+          final_expr = absl::StrCat("$signed(", lhs, "[", keep - 1, ":0])");
         }
       }
     }
@@ -1915,7 +1972,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
 
       auto expr = get_expression(cmp_dpin);
       if (signed_compare) {
-        return absl::StrCat("$signed(", expr, ")");
+        // A declared-UNSIGNED net needs the zero-bit pad: bare `$signed(x)`
+        // reinterprets its msb as a sign, so an unsigned 8'hff compares as -1.
+        return declared_unsigned_net(cmp_dpin) ? signed_operand(cmp_dpin, expr) : absl::StrCat("$signed(", expr, ")");
       }
       return expr;
     };
@@ -2063,7 +2122,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       return {};
     }
 
+    // Mult and EQ are VALUE ops: a mixed-sign expression must stay signed (see
+    // the Sum arm). And/Or/Xor are bitwise and width-preserving, so padding
+    // their operands would only widen the result.
+    const bool mixed_signs = (op == Ntype_op::Mult || op == Ntype_op::EQ) && mixes_operand_signs(node);
     for (auto e : node.inp_edges()) {
+      if (mixed_signs) {
+        auto operand = signed_operand(e.driver, get_expression(e.driver));
+        final_expr   = final_expr.empty() ? operand : absl::StrCat(final_expr, " ", txt_op, " ", operand);
+        continue;
+      }
       final_expr = add_expression(final_expr, txt_op, e.driver);
     }
   }
@@ -2171,15 +2239,16 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
   struct IoEntry {
     std::string name;
     uint32_t    bits;
+    bool        unsign;
     bool        is_input;
     uint32_t    port_id;
   };
   std::vector<IoEntry> entries;
   for (const auto& d : gio->get_input_pin_decls()) {
-    entries.push_back({d.name, d.bits, true, static_cast<uint32_t>(d.port_id)});
+    entries.push_back({d.name, d.bits, d.unsign, true, static_cast<uint32_t>(d.port_id)});
   }
   for (const auto& d : gio->get_output_pin_decls()) {
-    entries.push_back({d.name, d.bits, false, static_cast<uint32_t>(d.port_id)});
+    entries.push_back({d.name, d.bits, d.unsign, false, static_cast<uint32_t>(d.port_id)});
   }
   std::sort(entries.begin(), entries.end(), [](const IoEntry& a, const IoEntry& b) { return a.port_id < b.port_id; });
 
@@ -2207,29 +2276,14 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     hhds::Pin_class pin  = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
     const auto      bits = pin.is_invalid() ? e.bits : livehd::graph_util::bits_of(pin, *gio, e.name);
 
-    // INPUT ports are declared `signed` unconditionally: that is the contract
-    // upass.tolg lowers against — it wraps every unsigned input's body read in a
-    // to_positive Get_mask precisely because "cgen declares every port signed"
-    // (see upass_tolg.cpp's io_meta().inputs loop). Declaring them unsigned here
-    // would double-compensate.
-    //
-    // OUTPUT ports have no such compensation, and a `signed` lie is not harmless
-    // for them: an `output reg` that is also READ inside the module — the shape
-    // of every registered counter, since a flop whose Q drives an output reuses
-    // the port as its storage — then SIGN-extends. `cv == 8'hff` on an unsigned
-    // u8 counter became `cv == 9'shff` with `cv` signed [7:0], i.e. -1 == 255,
-    // so the terminal-count output was stuck at 0 (a silent miscompile, LEC
-    // refuted). Follow the driver's sign instead; an undriven output keeps the
-    // old `signed` spelling.
-    bool out_unsigned = false;
-    if (!e.is_input && !pin.is_invalid()) {
-      auto drv     = get_driver(pin);
-      out_unsigned = !drv.is_invalid() && livehd::graph_util::is_unsign(drv);
-    }
+    // GraphIO is the source-language port contract. LGraph's internal values
+    // are signed unbounded integers and an unsigned port is a non-negative
+    // range, so preserve the declared Verilog sign at this physical boundary
+    // instead of inserting a Get_mask node into the graph.
     if (e.is_input) {
-      fout->append("input signed ");
+      fout->append(e.unsign ? "input " : "input signed ");
     } else {
-      fout->append(out_unsigned ? "output reg " : "output reg signed ");
+      fout->append(e.unsign ? "output reg " : "output reg signed ");
     }
 
     if (bits > 1) {
@@ -2241,7 +2295,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // Map the corresponding HHDS pin (driver for inputs, sink for outputs) into pin2var.
     if (!pin.is_invalid()) {
       pin2var.emplace(pin.get_class_index(), name);
-      if (out_unsigned) {
+      if (e.unsign) {
         pin2var_unsigned_.insert(pin.get_class_index());
       }
     }
@@ -2926,9 +2980,23 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
   if (pin2var.contains(dpin.get_class_index())) {
     return;
   }
-  auto unique_name = get_unique_decl_name(name);
-  pin2var.insert({dpin.get_class_index(), unique_name});
-  name = unique_name;
+
+  // A simple driver may intentionally use the spelling already owned by the
+  // output port it drives.  Detect that before asking for a unique name: the
+  // port was pre-reserved, so uniquifying first would turn `q` into `q_cgen1`
+  // and defeat the direct-output case below.
+  bool redeclares_output = false;
+  if (!dpin.is_invalid()) {
+    for (const auto& e : dpin.out_edges()) {
+      if (is_graph_output_pin(e.sink) && get_scaped_name(pin_wire_name(e.sink)) == name) {
+        redeclares_output = true;
+        break;
+      }
+    }
+  }
+  std::string declared_name = redeclares_output ? std::string{name} : get_unique_decl_name(name);
+  pin2var.insert({dpin.get_class_index(), declared_name});
+  name = declared_name;
 
   // Anchor the wire declaration line at its defining cell.
   note_src(fout, dpin.get_master_node());
@@ -2953,16 +3021,6 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
   // the name; an `output reg` is itself readable) but skip the duplicate
   // declaration. (The Sub/Memory output path instead renames to a dedicated
   // net; a simple node keeps the port name and assigns it in place.)
-  bool redeclares_output = false;
-  if (!dpin.is_invalid()) {
-    for (const auto& e : dpin.out_edges()) {
-      if (is_graph_output_pin(e.sink) && get_scaped_name(pin_wire_name(e.sink)) == name) {
-        redeclares_output = true;
-        break;
-      }
-    }
-  }
-
   if (!redeclares_output) {
     if (bits <= 1) {
       fout->append(reg_str, name, ";\n");
@@ -3160,24 +3218,40 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
                   bits2 = static_cast<int>(mb * ms);
                 }
               }
+              // Follow the dout pin's sign, exactly like the Sub-output net
+              // below. upass.tolg stamps every memory read `set_unsign` unless
+              // the element type is signed, and it no longer wraps the read in
+              // a to_positive Get_mask, so a `signed` net here would make
+              // Verilog sign-extend unsigned memory data (`mem[i] + 1` with
+              // 8'hff came out 0 instead of 256).
+              const bool dout_unsigned = is_unsign(dout);
+              if (dout_unsigned) {
+                pin2var_unsigned_.insert(dout.get_class_index());
+              }
+              const char* dout_decl = is_array_mem ? (dout_unsigned ? "reg " : "reg signed ")
+                                                   : (dout_unsigned ? "wire " : "wire signed ");
               if (bits2 <= 1) {
-                fout->append(is_array_mem ? "reg signed " : "wire signed ", name2, ";\n");
+                fout->append(dout_decl, name2, ";\n");
               } else {
-                fout->append(is_array_mem ? "reg signed [" : "wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+                fout->append(dout_decl, "[", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
               }
             }
           }
           continue;
         }
-        for (auto& dpin2 : node.out_pins()) {
-          if (dpin2.out_edges().empty()) {
+        absl::flat_hash_set<hhds::Port_id> declared_sub_outputs;
+        for (const auto& output_edge : node.out_edges()) {
+          const auto pid = output_edge.driver.get_port_id();
+          if (!declared_sub_outputs.insert(pid).second) {
             continue;
           }
           // Re-fetch the canonical driver handle (driver bit set) so this keys
           // pin2var identically to the edge.driver a consumer's inp_edges loop
-          // uses — otherwise the same instance-output net is declared twice
-          // (once here, once by the consumer) and lookups miss this entry.
-          auto cdpin = node.create_driver_pin(dpin2.get_port_id());
+          // uses. Iterate out_edges rather than out_pins: HHDS out_pins can omit
+          // a multi-driver node's pid-0 driver, leaving the instance connection
+          // to create an implicit one-bit Verilog wire and silently truncate the
+          // whole Sub output.
+          auto cdpin = node.create_driver_pin(pid);
           // Use a DEDICATED net name (like the Memory dout above), never the wire
           // name: a Sub output that drives a module output directly is otherwise
           // named after that port, and declaring it here re-declares the port
@@ -3193,13 +3267,17 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // bound would burn a `_cgenN` counter on a name never declared.
           if (!pin2var.contains(cdpin.get_class_index())) {
             auto name2
-                = get_unique_decl_name(get_scaped_name(absl::StrCat(default_instance_name(node), "_o", dpin2.get_port_id())));
+                = get_unique_decl_name(get_scaped_name(absl::StrCat(default_instance_name(node), "_o", pid)));
             pin2var.insert({cdpin.get_class_index(), name2});
+            const bool out_unsigned = is_unsign(cdpin);
+            if (out_unsigned) {
+              pin2var_unsigned_.insert(cdpin.get_class_index());
+            }
             int bits2 = bits_of(cdpin);
             if (bits2 <= 1) {
-              fout->append("wire signed ", name2, ";\n");
+              fout->append(out_unsigned ? "wire " : "wire signed ", name2, ";\n");
             } else {
-              fout->append("wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+              fout->append(out_unsigned ? "wire [" : "wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
             }
           }
         }

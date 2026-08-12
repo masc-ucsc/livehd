@@ -1,0 +1,26 @@
+/*
+:name: mem_none_color_random
+:type: simulation
+*/
+
+// A same-address ordering="none" read must take a real seeded unknown draw.
+// `last` makes that draw observable without asserting a particular random
+// value; the lhd-side structure/runtime test compares complete traces across
+// worker counts and seeds.
+pub mod random_color_mem(clk:bool, a:u1, d:u8) -> (q:u8@[]) {
+  reg mem:[2]u8:[ordering="none"] = 0
+  mem[a] = d
+  q = mem[a]
+
+  reg last:u8:[clock_pin=ref clk] = 0
+  last = q
+}
+
+test random_color_mem.draws {
+  mut dut = random_color_mem
+  tick 4 {
+    dut.a = 0
+    dut.d = clock + 1
+    step
+  }
+}

@@ -53,7 +53,7 @@ DRV="$W/cr/sim/drv.cpp"
 [ -f "$DRV" ] || fail "expected driver not generated: $DRV"
 # the DUT body is the single non-driver .cpp in the sim dir; its interface the .hpp
 BODY="$(ls "$W"/cr/sim/*.cpp | grep -v '/drv' | head -1)"
-HDR="$(ls "$W"/cr/sim/*.hpp | head -1)"
+HDR="$(ls "$W"/cr/sim/*cnt.hpp | head -1)"
 [ -n "$BODY" ] && [ -f "$BODY" ] || fail "DUT sim body not generated"
 [ -n "$HDR" ]  && [ -f "$HDR" ]  || fail "DUT sim header not generated"
 

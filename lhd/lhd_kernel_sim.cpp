@@ -1586,6 +1586,10 @@ void sim_command(Options& opts, Result& res) {
   if (opts.sim_vcd_from >= 0 || opts.sim_vcd_on_fail) {
     vcd_on = true;
   }
+  // Hierarchical combinational port mirrors are compile-time instrumentation.
+  // Keep them out of the ordinary fast binary; emit them only for a run that
+  // actually requests waveform or value observation.
+  opts.sim_observe = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
   // --set sim.checkpoint* : periodic editable checkpoints of DUT + testbench state
@@ -1663,7 +1667,7 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
     std::string err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, tests, err) != 0) {
+    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, opts.sim_observe, tests, err) != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
@@ -1676,7 +1680,8 @@ void sim_command(Options& opts, Result& res) {
     std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
     bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
     bf << std::format(
-        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\"],\n"
+        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\", \"-pthread\"],\n"
+        "    linkopts = [\"-pthread\"],\n"
         "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
         prp_sim::kDriverBasename);
     bf.close();
@@ -1733,6 +1738,8 @@ void sim_command(Options& opts, Result& res) {
     dss << dfs.rdbuf();
     const auto driver_source = dss.str();
     const bool baked_vcd     = driver_source.find("vcd::global_timestamp") != std::string::npos;
+    const bool baked_observation = driver_source.find("hierarchical-observation: true") != std::string::npos;
+    const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
     if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
       res.error_class   = "usage";
@@ -1746,6 +1753,14 @@ void sim_command(Options& opts, Result& res) {
       res.error_message
           = "this --run-only sim was generated without VCD; re-run without --run-only (or "
                           "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
+      res.exit_code     = exit_code_for(res.error_class);
+      return;
+    }
+    if (observation_requested && !baked_observation) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
+                          "--probe/--break-when/--query instrumentation is generated";
       res.exit_code     = exit_code_for(res.error_class);
       return;
     }
@@ -1788,18 +1803,47 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
   }
-  const std::string hlop_inc    = sim_hlop_include_dir(opts);
-  const std::string iassert_inc = sim_iassert_include_dir(opts);
-  if (hlop_inc.empty() || iassert_inc.empty()) {
+  const std::string hlop_inc     = sim_hlop_include_dir(opts);
+  const std::string iassert_inc  = sim_iassert_include_dir(opts);
+  // ABSOLUTE, for the same reason as the -I block below: `--workdir` is routinely
+  // relative and the compile runs with its cwd set to the sim dir, so a relative
+  // `-I<simdir>/runtime/taskflow` resolves against the WRONG directory and the
+  // staged copy is invisible ("'taskflow/taskflow.hpp' file not found" on the
+  // first color-runtime TU, with the payload sitting right there).
+  std::string taskflow_inc = fs::absolute(simdir).string() + "/runtime/taskflow";
+  if (::access((taskflow_inc + "/taskflow/taskflow.hpp").c_str(), R_OK) != 0) {
+    taskflow_inc = sim_taskflow_include_dir(opts);  // older --run-only tree
+  }
+  // `<name>.color-runtime.hpp` is the only emitted header that pulls in
+  // <taskflow/taskflow.hpp>, so its presence is exactly "this tree needs
+  // taskflow" — the same signal the emit-dir stager uses.
+  bool needs_taskflow = false;
+  {
+    std::error_code ec;
+    for (const auto& de : fs::directory_iterator(simdir, ec)) {
+      if (de.path().filename().string().ends_with(".color-runtime.hpp")) {
+        needs_taskflow = true;
+        break;
+      }
+    }
+  }
+  // Taskflow is checked with the same fail-fast as slop.hpp/iassert.hpp: every
+  // generated simulator `#include <taskflow/taskflow.hpp>` unconditionally (the
+  // serial sim.workers=0 backend included), so a missing include dir is a
+  // DEPENDENCY failure, not an -I to quietly skip. Without this the host
+  // compile dies with a raw "'taskflow/taskflow.hpp' file not found" buried in
+  // build.log instead of the actionable diagnostic below.
+  if (hlop_inc.empty() || iassert_inc.empty() || (needs_taskflow && taskflow_inc.empty())) {
     res.status        = "fail";
     res.error_class   = "dependency";
-    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
+    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {}, taskflow.hpp: {})",
                                     hlop_inc.empty() ? "<not found>" : hlop_inc,
-                                    iassert_inc.empty() ? "<not found>" : iassert_inc);
+                                    iassert_inc.empty() ? "<not found>" : iassert_inc,
+                                    taskflow_inc.empty() ? "<not found>" : taskflow_inc);
     res.exit_code     = exit_code_for(res.error_class);
     if (pretty) {
       std::print(
-          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp), or export "
+          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp/taskflow), or export "
           "RUNFILES_DIR=<...>/lhd.runfiles to run it by hand; a source checkout resolves them from the sibling "
           "../hlop and ../iassert, and --set sim.hlop_dir=DIR / "
           "--set sim.iassert_dir=DIR point at an explicit checkout\n");
@@ -1859,10 +1903,13 @@ void sim_command(Options& opts, Result& res) {
   // with its cwd set to the sim dir (so its .ninja_deps/.ninja_log land there),
   // where a relative `-Iw/sim` would resolve to nothing.
   const std::string simdir_abs = fs::absolute(simdir).string();
-  const std::string cflags     = std::format("-std=c++23 -DNDEBUG -O2 -I{} -I{} -I{}",
+  std::string       cflags     = std::format("-std=c++23 -DNDEBUG -O2 -pthread -I{} -I{} -I{}",
                                              shell_quote(simdir_abs),
                                              shell_quote(hlop_inc),
                                              shell_quote(iassert_inc));
+  if (!taskflow_inc.empty()) {
+    cflags += " -I" + shell_quote(taskflow_inc);
+  }
 
   // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
@@ -1970,7 +2017,8 @@ void sim_command(Options& opts, Result& res) {
        << "# Regenerated on every build, so edits here are lost.\n"
        << "ninja_required_version = 1.3\n\n"
        << "cxx = " << cxx << "\n"
-       << "cflags = " << nflags << "\n\n"
+       << "cflags = " << nflags
+       << "\n\n"
        // $in/$out are NOT shell-quoted here: ninja already shell-escapes each
        // path as it expands them into `command`, so wrapping them would hand
        // the compiler an argument containing literal quote characters. The
@@ -1984,7 +2032,7 @@ void sim_command(Options& opts, Result& res) {
        << "  depfile = $out.d\n"
        << "  deps = gcc\n\n"
        << "rule link\n"
-       << "  command = $cxx $in -o $out\n"
+       << "  command = $cxx $in -pthread -o $out\n"
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
       nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
@@ -2137,7 +2185,7 @@ void sim_command(Options& opts, Result& res) {
     for (const auto& o : objs) {
       link += " " + shell_quote(o);
     }
-    link += " -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
+    link          += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
     int  link_rc  = 0;
     auto link_out = capture(link, link_rc);
     if (link_rc != 0) {

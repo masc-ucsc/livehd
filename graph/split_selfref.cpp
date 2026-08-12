@@ -948,7 +948,8 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   return total;
 }
 
-void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out) {
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
+                            const absl::flat_hash_set<hhds::Class_index>* allowed) {
   namespace gu = livehd::graph_util;
   auto comb    = [strict](const hhds::Node_class& n) {
     const auto op = gu::type_op_of(n);
@@ -967,7 +968,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
   absl::flat_hash_map<hhds::Node_class, int>                           indeg;
   absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
   for (auto n : g->body().nodes()) {
-    if (comb(n)) {
+    if ((allowed == nullptr || allowed->contains(n.get_class_index())) && comb(n)) {
       nodes.push_back(n);
       indeg.try_emplace(n, 0);
     }
@@ -979,7 +980,7 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
         continue;
       }
       auto m = d.get_master_node();
-      if (!comb(m) || !indeg.contains(m)) {
+      if (!indeg.contains(m)) {
         continue;  // the `contains` guard also drops boundary masters fast_class never lists
       }
       ++indeg[n];

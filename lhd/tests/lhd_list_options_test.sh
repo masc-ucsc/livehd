@@ -173,6 +173,8 @@ echo "$out" | grep -q '"name":"sim.checkpoint_min_secs","method":"sim","default"
 # in the code or as an alias, and the codegen reads the same sim.vcd knob.
 echo "$out" | grep -q '"name":"compile.sim.vcd"' && fail "compile.sim.* must not exist: $out"
 echo "$out" | grep -q '"name":"sim.vcd_fake_delay","method":"sim","default":"true"' || fail "sim.vcd_fake_delay missing: $out"
+echo "$out" | grep -q '"name":"sim.workers","method":"sim","default":"0"' || fail "sim.workers missing: $out"
+echo "$out" | grep -q 'sim.legacy_scheduler' && fail "retired sim.legacy_scheduler still listed: $out"
 # the old vcdfakedelay spelling is DELETED: setting it errors with the rename hint
 "$LHD" sim "$PRP" --set sim.vcdfakedelay=false --workdir "$W/w11c" -q >"$W/r11c.json" 2>/dev/null && fail "--set sim.vcdfakedelay must fail (renamed)"
 grep -q "use --set sim.vcd_fake_delay=false instead" "$W/r11c.json" || fail "vcdfakedelay rename hint missing: $(cat "$W/r11c.json")"

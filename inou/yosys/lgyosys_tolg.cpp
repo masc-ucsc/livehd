@@ -131,12 +131,14 @@ namespace {
 
 // Declare a graph input on the GraphIO and return its driver pin on the
 // materialized body. Mirrors `Lgraph::add_graph_input(name, port_id, bits)`.
-[[nodiscard]] hhds::Pin_class add_graph_input(hhds::Graph* g, std::string_view name, hhds::Port_id port_id, uint32_t bits) {
+[[nodiscard]] hhds::Pin_class add_graph_input(hhds::Graph* g, std::string_view name, hhds::Port_id port_id, uint32_t bits,
+                                              bool unsign) {
   auto gio = g->get_io();
   if (!gio->has_input(name) && !gio->has_output(name)) {
     gio->add_input(name, port_id);
   }
   gio->set_bits(name, bits);
+  gio->set_unsign(name, unsign);
   auto pin = g->get_input_pin(name);
   // Stamp the width on the body pin attr too (not only the GraphIO decl):
   // downstream consumers size derived nodes from bits_of(pin) — e.g. the
@@ -146,12 +148,14 @@ namespace {
   return pin;
 }
 
-[[nodiscard]] hhds::Pin_class add_graph_output(hhds::Graph* g, std::string_view name, hhds::Port_id port_id, uint32_t bits) {
+[[nodiscard]] hhds::Pin_class add_graph_output(hhds::Graph* g, std::string_view name, hhds::Port_id port_id, uint32_t bits,
+                                               bool unsign) {
   auto gio = g->get_io();
   if (!gio->has_output(name) && !gio->has_input(name)) {
     gio->add_output(name, port_id);
   }
   gio->set_bits(name, bits);
+  gio->set_unsign(name, unsign);
   return g->get_output_pin(name);  // sink counterpart (for internal -> output connections)
 }
 
@@ -267,7 +271,7 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
       // tposs wrappers size themselves from bits_of(pin)).
       set_bits(pin, static_cast<int32_t>(wire->width));
     } else {
-      pin = add_graph_input(g, wname, wire->port_id, wire->width);
+      pin = add_graph_input(g, wname, wire->port_id, wire->width, !wire->is_signed);
     }
     if (wire->start_offset) {
       set_pin_offset(pin, wire->start_offset);
@@ -348,9 +352,6 @@ static absl::flat_hash_map<Pick_ID, hhds::Pin_class> picks;
 
 static hhds::Pin_class create_pick_operator(const hhds::Pin_class& wide_dpin, int offset, int width, bool is_signed) {
   if (offset == 0 && (int)bits_of(wide_dpin) == width && !is_signed) {
-    return wide_dpin;
-  }
-  if (offset == 0 && width == 1 && (int)bits_of(wide_dpin) == 1) {
     return wide_dpin;
   }
 
@@ -450,7 +451,12 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
 
 static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* wire, int offset, int width, bool is_signed) {
   if (wire->width == width && offset == 0) {
-    return get_edge_pin(g, wire, is_signed);
+    auto dpin = get_edge_pin(g, wire, is_signed);
+    // A_SIGNED/B_SIGNED reinterpret the finite RTLIL vector before extending
+    // it.  The LGraph input may correctly hold the same bits as a non-negative
+    // unlimited integer, so a full-width signed use still needs an explicit
+    // Sext boundary (including the important one-bit 1 -> -1 case).
+    return is_signed ? create_pick_operator(dpin, 0, width, true) : dpin;
   }
   if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
@@ -530,7 +536,16 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
 
   hhds::Pin_class dpin;
   if (inp_pins.size() > 1) {
-    auto or_node = create_typed_node(*g, Ntype_op::Or, ss.size());
+    // Build a concatenation as a non-negative packed value first. Every
+    // shifted chunk may need the zero sign slot at bit ss.size(), so an
+    // ordinary Or cannot legally land directly in a signed ss.size()-bit
+    // carrier. For a signed use, reinterpret the finished finite vector with
+    // one explicit Sext boundary below.
+    const int packed_bits = ss.size() + (is_signed ? 1 : 0);
+    auto      or_node     = create_typed_node(*g, Ntype_op::Or, packed_bits);
+    if (is_signed) {
+      set_unsign(or_node.create_driver_pin(0));
+    }
 
     int offset = 0;
     for (auto i = 0u; i < chunk_list.size(); ++i) {
@@ -560,6 +575,13 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
       offset += chunk_list[i].width;
     }
     dpin = or_node.create_driver_pin(0);
+    if (is_signed) {
+      auto sext_node = create_typed_node(*g, Ntype_op::Sext, ss.size());
+      setup_sink_by_name(sext_node, "a").connect_driver(dpin);
+      setup_sink_by_name(sext_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(ss.size())));
+      dpin = sext_node.create_driver_pin(0);
+      set_sign(dpin);
+    }
   } else {
     I(!inp_pins.empty());
     dpin = inp_pins[0];
@@ -1077,6 +1099,26 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
 
       if (ss.chunks().size() > 0) {
         set_bits(driver_pin, ss.size());
+      }
+
+      // An instance output's SIGN is the CALLEE port's, not any one connected
+      // wire's. Only the single-full-width-chunk case below reaches
+      // mark_pin_sign_from_wire for this pin; a multi-chunk connection stamps
+      // the derived pick pins and leaves this one bare. Bare reads as UNSIGNED
+      // (is_unsign is attribute ABSENCE), and cprop now treats unsigned as a
+      // non-negative RANGE guarantee, so an unstamped signed instance output
+      // would let collapse_forward_for_pin drop the wrapper that carries its
+      // sign. Stamp it from the declaration; the per-chunk pass may refine it.
+      if (sub_gio != nullptr && type_op_of(node) == Ntype_op::Sub) {
+        const std::string port_name(&(conn.first.c_str()[1]));
+        if (sub_gio->has_output(port_name)) {
+          if (sub_gio->is_unsign(port_name)) {
+            set_unsign(driver_pin);
+          } else {
+            set_sign(driver_pin);
+          }
+          explicit_pin_signs.insert(driver_pin.get_class_index());
+        }
       }
 
       uint32_t offset = 0;
@@ -1726,7 +1768,7 @@ static void process_connect_outputs(RTLIL::Module* mod, hhds::Graph* g) {
     std::string wname(&wire->name.c_str()[1]);
 
     if (!has_graph_output(g, wname)) {
-      (void)add_graph_output(g, wname, wire->port_id, wire->width);
+      (void)add_graph_output(g, wname, wire->port_id, wire->width, !wire->is_signed);
     }
 
     if (wire2pin.find(wire) == wire2pin.end()) {
@@ -1878,21 +1920,28 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
     } else if (std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       I(get_input_size(cell) == get_output_size(cell));
-      set_type_op(exit_node, Ntype_op::Not);
-      set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
-      connect_all_inputs(exit_node.create_sink_pin(0), cell);
+      const auto y_bits  = get_output_size(cell);
+      auto       bit_not = create_typed_node(*g, Ntype_op::Not, y_bits);
+      connect_all_inputs(bit_not.create_sink_pin(0), cell);
+
+      // LGraph Not is an unlimited signed operation. RTLIL $not is a finite
+      // vector operation, so make its legal precision reduction explicit.
+      set_type_op(exit_node, Ntype_op::And);
+      set_bits(exit_node.create_driver_pin(0), y_bits);
+      exit_node.create_sink_pin(0).connect_driver(bit_not.create_driver_pin(0));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
     } else if (std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
       auto entry_node = create_typed_node(*g, Ntype_op::Ror, 1);
+      auto not_node   = create_typed_node(*g, Ntype_op::Not, 1);
+      not_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
 
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
       if (y_bits == 1) {
-        set_type_op(exit_node, Ntype_op::Not);
+        set_type_op(exit_node, Ntype_op::And);
         set_bits(exit_node.create_driver_pin(0), 1);
-        exit_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
+        exit_node.create_sink_pin(0).connect_driver(not_node.create_driver_pin(0));
+        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
-        auto not_node = create_typed_node(*g, Ntype_op::Not, 1);
-        not_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
-
         set_type_op(exit_node, Ntype_op::Get_mask);
         setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
@@ -2931,6 +2980,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             gio->add_input(wire_name, wire->port_id);
           }
           gio->set_bits(wire_name, wire->width);
+          gio->set_unsign(wire_name, !wire->is_signed);
         } else if (!wire->port_input && wire->port_output) {
           cell_port_outputs.insert(cell_port);
           if (gio->has_input(wire_name) || gio->has_output(wire_name)) {
@@ -2944,6 +2994,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             gio->add_output(wire_name, wire->port_id);
           }
           gio->set_bits(wire_name, wire->width);
+          gio->set_unsign(wire_name, !wire->is_signed);
         } else {
           log_error("inou.yosys.tolg: mod:%s bidirectional:%s NOT supported by livehd\n", mod->name.c_str(), wire->name.c_str());
         }

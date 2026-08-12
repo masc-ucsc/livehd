@@ -45,6 +45,7 @@ int flatten_false_loop_subs(hhds::Graph* g);
 // single-pass `forward_class` walk does — so a node reported under `strict` but
 // not otherwise is on a cycle the SCHEDULE manufactures rather than one the
 // design has. Registers always cut: a q is last period's value.
-void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out);
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
+                            const absl::flat_hash_set<hhds::Class_index>* allowed = nullptr);
 
 }  // namespace livehd::graph_util

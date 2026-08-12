@@ -2,21 +2,10 @@
 :name: negedge_through_sub
 :type: simulation
 */
-// A PARENT negedge flop whose data crosses a SUB-INSTANCE — the exact shape
-// `inou.cgen.sim` used to refuse with `negedge-through-instance`.
-//
-// WHY IT WAS REFUSED. The two halves of a tick used to be one monolithic
-// `cycle()` body: the fall re-evaluated the combinational region after the rise
-// by dropping the pin2var bindings reachable from a posedge Q and re-emitting
-// them. Re-emitting a Sub in that cone meant calling `child.cycle()` a second
-// time, which ADVANCES the child's state — so the pass failed closed rather than
-// double-advance it silently.
-//
-// WHY IT WORKS NOW. A period is three methods (eval_posedge / eval_negedge /
-// __settle). The child already ran its whole `cycle()` during the parent's rise,
-// so the fall only needs its outputs re-evaluated against the inputs the rise
-// just committed — `child.__settle(...)`, a comb re-settle with no advance.
-// There is no longer any way for the fall to step a child twice.
+// A PARENT negedge flop whose data crosses a SUB-INSTANCE. The occurrence-wide
+// plan gives the child's combinational cone a post-rise version and orders that
+// color before the parent's fall commit. No module call or second state advance
+// exists at the hierarchy boundary.
 //
 // THE VALUE THIS PINS. `thru` is pure combinational, so the half-cycle transfer
 // must land IN THE SAME PERIOD: at the rise `a` takes `d`; at the fall `n`

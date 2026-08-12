@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <print>
 #include <string>
 #include <tuple>
@@ -21,8 +22,9 @@
 #include "latch_contract.hpp"  // //graph — inline_clock_gate_cells (ICG gate -> local AND cone)
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
-#include "split_selfref.hpp"           // //graph — word-level false-loop splitter (also run by pass/cprop)
-#include "str_tools.hpp"               // str_tools::ends_with
+#include "sim_color_plan.hpp"
+#include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
+#include "str_tools.hpp"      // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::debug_name;
@@ -142,8 +144,8 @@ std::string_view declared_temp(std::string_view line) {
   return rest.substr(0, n);
 }
 
-// A single-line declaration whose initializer has no side effect. Child calls
-// (`cycle`/`__settle`) and memory reads are the exceptions; staged writes are
+// A single-line declaration whose initializer has no side effect. Root/compact
+// evaluator calls and memory reads are the exceptions; staged writes are
 // statements, never initializers, but reject them too so a future emission
 // shape cannot silently become removable.
 bool pure_temp_decl(std::string_view line) {
@@ -151,7 +153,7 @@ bool pure_temp_decl(std::string_view line) {
   if (code.find(';') == std::string_view::npos) {
     return false;  // not a complete statement on this line
   }
-  for (auto bad : {".read<", ".read(", ".read_all(", ".cycle(", "__settle", "slop_update", "apply_update"}) {
+  for (auto bad : {".read<", ".read(", ".read_all(", ".cycle(", "__compact_", "slop_update", "apply_update"}) {
     if (line.find(bad) != std::string_view::npos) {
       return false;
     }
@@ -177,7 +179,8 @@ std::string discard_dead_call(std::string_view line, std::string_view name) {
   return absl::StrCat("    ", rhs, tag, "\n");
 }
 
-void strip_dead_temps(std::string& body) {
+// One line per element, each keeping its trailing '\n'.
+std::vector<std::string> split_body_lines(const std::string& body) {
   std::vector<std::string> lines;
   for (size_t pos = 0; pos < body.size();) {
     const auto nl  = body.find('\n', pos);
@@ -185,31 +188,54 @@ void strip_dead_temps(std::string& body) {
     lines.emplace_back(body, pos, end - pos);
     pos = end;
   }
+  return lines;
+}
 
-  std::vector<bool> alive(lines.size(), true);
-  bool              changed = true;
-  bool              any     = false;
-  while (changed) {
-    changed = false;
-    absl::flat_hash_map<std::string_view, int> uses;  // identifier -> occurrences in the LIVE body
-    for (size_t i = 0; i < lines.size(); ++i) {
-      if (!alive[i]) {
+// identifier -> occurrences in the LIVE body.
+template <typename Key>
+void count_identifier_uses(const std::vector<std::string>& lines, const std::vector<bool>& alive,
+                           absl::flat_hash_map<Key, int>& uses) {
+  uses.clear();
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (!alive[i]) {
+      continue;
+    }
+    const std::string_view l = lines[i];
+    for (size_t p = 0; p < l.size();) {
+      if (std::isalpha(static_cast<unsigned char>(l[p])) == 0 && l[p] != '_') {
+        ++p;
         continue;
       }
-      const std::string_view l = lines[i];
-      for (size_t p = 0; p < l.size();) {
-        if (std::isalpha(static_cast<unsigned char>(l[p])) == 0 && l[p] != '_') {
-          ++p;
-          continue;
-        }
-        size_t n = p + 1;
-        while (n < l.size() && (std::isalnum(static_cast<unsigned char>(l[n])) != 0 || l[n] == '_')) {
-          ++n;
-        }
-        ++uses[l.substr(p, n - p)];
-        p = n;
+      size_t n = p + 1;
+      while (n < l.size() && (std::isalnum(static_cast<unsigned char>(l[n])) != 0 || l[n] == '_')) {
+        ++n;
       }
+      ++uses[Key{l.substr(p, n - p)}];
+      p = n;
     }
+  }
+}
+
+std::string join_live_lines(const std::vector<std::string>& lines, const std::vector<bool>& alive) {
+  std::string out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (alive[i]) {
+      out.append(lines[i]);
+    }
+  }
+  return out;
+}
+
+void strip_dead_temps(std::string& body) {
+  std::vector<std::string> lines = split_body_lines(body);
+
+  std::vector<bool>                          alive(lines.size(), true);
+  bool                                       changed = true;
+  bool                                       any     = false;
+  absl::flat_hash_map<std::string_view, int> uses;
+  while (changed) {
+    changed = false;
+    count_identifier_uses(lines, alive, uses);
     for (size_t i = 0; i < lines.size(); ++i) {
       if (!alive[i]) {
         continue;
@@ -235,14 +261,161 @@ void strip_dead_temps(std::string& body) {
   if (!any) {
     return;
   }
-  std::string out;
-  out.reserve(body.size());
-  for (size_t i = 0; i < lines.size(); ++i) {
-    if (alive[i]) {
-      out.append(lines[i]);
+  body = join_live_lines(lines, alive);
+}
+
+// ---- Single-use temporary inlining over ONE finished method body ----
+//
+// Binding is per-node, so a value read exactly once still costs its own named
+// `Slop<W>` local -- and a color body of a large design is mostly such one-shot
+// locals. Fold the definition into its use when that use is the very NEXT live
+// statement: ADJACENCY is what makes the move legal, because no other statement
+// can run (and therefore no operand can change) in between. That is the whole
+// safety argument, so do not relax it to "the single use, wherever it is": a
+// `__rt.__color_slot_*` read folded past the write of that slot, or a memory
+// read folded past a staged write, would change the value.
+
+// Position of `id` in `text` as a WHOLE identifier, or npos.
+size_t find_identifier(std::string_view text, std::string_view id) {
+  for (auto at = text.find(id); at != std::string_view::npos; at = text.find(id, at + 1)) {
+    const auto after = at + id.size();
+    const bool left  = at == 0 || (std::isalnum(static_cast<unsigned char>(text[at - 1])) == 0 && text[at - 1] != '_');
+    const bool right = after == text.size() || (std::isalnum(static_cast<unsigned char>(text[after])) == 0 && text[after] != '_');
+    if (left && right) {
+      return at;
     }
   }
-  body = std::move(out);
+  return std::string_view::npos;
+}
+
+// The text that replaces the folded name: the declaration's own initializer.
+// The declared type has to be RESTATED unless the initializer already carries
+// it -- the `Slop<W> v{e}` spelling IS a width conversion, and a copy
+// initializer only provably yields `Slop<W>` when it is that same type's static
+// factory (`Slop<W>::add_op(...)`, the shape node_expr emits). `auto` is
+// decltype(e) by definition and needs nothing. Empty when the line is not a
+// single-statement declaration this sweep can fold.
+std::string inlined_initializer(std::string_view line, std::string_view name) {
+  auto code = line.substr(0, line.find("//"));
+  while (!code.empty() && (code.back() == '\n' || code.back() == '\r' || code.back() == ' ' || code.back() == '\t')) {
+    code.remove_suffix(1);
+  }
+  if (code.empty() || code.back() != ';') {
+    return {};
+  }
+  code.remove_suffix(1);
+
+  auto             head = code.substr(std::min(code.find_first_not_of(" \t"), code.size()));
+  std::string_view type;
+  if (head.starts_with("Slop<")) {
+    const auto gt = head.find('>');  // the width is an integer literal, never nested
+    if (gt == std::string_view::npos) {
+      return {};
+    }
+    type = head.substr(0, gt + 1);
+  } else if (!head.starts_with("auto ")) {
+    return {};
+  }
+
+  const auto at = find_identifier(code, name);
+  if (at == std::string_view::npos) {
+    return {};
+  }
+  auto init       = code.substr(at + name.size());
+  init            = init.substr(std::min(init.find_first_not_of(" \t"), init.size()));
+  bool brace_form = false;
+  if (init.starts_with('=')) {
+    init.remove_prefix(1);
+  } else if (init.starts_with('{')) {
+    if (!init.ends_with('}')) {
+      return {};
+    }
+    init.remove_prefix(1);
+    init.remove_suffix(1);
+    brace_form = true;
+  } else {
+    return {};
+  }
+  init = init.substr(std::min(init.find_first_not_of(" \t"), init.size()));
+  if (init.empty()) {
+    return {};
+  }
+  if (type.empty() || (!brace_form && init.starts_with(absl::StrCat(type, "::")))) {
+    return absl::StrCat("(", init, ")");
+  }
+  return absl::StrCat(type, "{", init, "}");
+}
+
+void inline_single_use_temps(std::string& body) {
+  std::vector<std::string> lines = split_body_lines(body);
+
+  std::vector<bool>                     alive(lines.size(), true);
+  bool                                  changed = true;
+  bool                                  any     = false;
+  // OWNING keys: a fold rewrites the use line, which would dangle views into
+  // it. A fold never changes any OTHER identifier's count (the initializer's
+  // operands merely move from the dropped line into the use line), so the
+  // counts stay valid for the rest of the pass.
+  absl::flat_hash_map<std::string, int> uses;
+  while (changed) {
+    changed = false;
+    count_identifier_uses(lines, alive, uses);
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (!alive[i]) {
+        continue;
+      }
+      const std::string name{declared_temp(lines[i])};
+      // Exactly two occurrences: this declaration, and the one read.
+      if (name.empty() || uses[name] != 2 || !pure_temp_decl(lines[i])) {
+        continue;
+      }
+      size_t use = i + 1;
+      while (use < lines.size() && !alive[use]) {
+        ++use;
+      }
+      if (use == lines.size()) {
+        continue;
+      }
+      const std::string_view use_line = lines[use];
+      const auto             at       = find_identifier(use_line, name);
+      if (at == std::string_view::npos) {
+        continue;  // the single read is not the next statement
+      }
+      // A loop header would re-evaluate the folded expression once per
+      // iteration: same value, more work.
+      if (find_identifier(use_line, "for") != std::string_view::npos
+          || find_identifier(use_line, "while") != std::string_view::npos) {
+        continue;
+      }
+      auto replacement = inlined_initializer(lines[i], name);
+      if (replacement.empty()) {
+        continue;
+      }
+      // Folding a long chain end to end builds ONE deeply nested expression,
+      // which costs the host compiler more than the named temporaries it
+      // replaces. Stop growing a line past this budget and leave the rest of
+      // the chain in SSA form.
+      constexpr size_t kMaxFoldedLine = 4000;
+      if (use_line.size() + replacement.size() > kMaxFoldedLine) {
+        continue;
+      }
+      lines[use] = absl::StrCat(use_line.substr(0, at), replacement, use_line.substr(at + name.size()));
+      alive[i]   = false;
+      changed    = true;
+      any        = true;
+    }
+  }
+  if (!any) {
+    return;
+  }
+  body = join_live_lines(lines, alive);
+}
+
+// Both peepholes over one finished body: drop what nothing reads, then fold
+// what exactly one adjacent statement reads.
+void compact_body_temps(std::string& body) {
+  strip_dead_temps(body);
+  inline_single_use_temps(body);
 }
 }  // namespace
 
@@ -370,6 +543,58 @@ std::string sim_const_text(const Dlop& c) {
   }
   return txt;
 }
+
+// The emitted C++ for a compile-time constant of `width` bits.
+//
+// create_integer(N) is a constexpr array fill the compiler always folds;
+// from_pyrope is a digit-by-digit parse that it must constant-evaluate (and, as
+// a bare sub-expression in a hot loop, is free NOT to -- 27.8% of simulation
+// time on the dino CPU before the constexpr-local wrapper below). Take the
+// integer path whenever the SIMULATED value fits an int64: that includes the
+// unknown-bit constants, because simulation forces every `?` to 0 and the
+// forced value is usually a small integer (`0ub??0` -> `0ub000` -> 0). Only
+// genuinely wide values and the non-Integer types (Boolean/String/Nil, which
+// create_integer would flatten) still need the parse.
+std::string sim_const_expr(std::string_view pyrope_text, std::string_view width) {
+  // Same bits by construction: create_integer and from_pyrope both leave the
+  // value UNMASKED in base_[0] and sign-extend into the upper words, and
+  // is_just_i64() (<= 62 bits, no unknowns) makes the int64 round-trip exact.
+  if (const auto v = Dlop::from_pyrope(std::string{pyrope_text}); v && v->is_integer() && v->is_just_i64()) {
+    return absl::StrCat("Slop<", width, ">::create_integer(", v->to_just_i64(), ")");
+  }
+  // Folded at COMPILE time via a constexpr local. Only legal because the caller
+  // has already forced unknown bits to 0; a literal still carrying `?` is not
+  // constant-evaluable.
+  return absl::StrCat("([]{ constexpr auto _k = Slop<", width, ">::from_pyrope(\"", pyrope_text, "\"); return _k; }())");
+}
+
+std::string cpp_string_literal(std::string_view text) {
+  std::string result{"\""};
+  result.reserve(text.size() + 2);
+  for (const unsigned char ch : text) {
+    switch (ch) {
+      case '\\': result += "\\\\"; break;
+      case '"' : result += "\\\""; break;
+      case '\n': result += "\\n"; break;
+      case '\r': result += "\\r"; break;
+      case '\t': result += "\\t"; break;
+      default:
+        if (ch < 0x20 || ch == 0x7f) {
+          // Exactly three octal digits cannot consume a following source
+          // character. A C++ `\\xNN` escape has no fixed length, so a literal
+          // byte followed by [0-9a-fA-F] could silently become another value.
+          result += '\\';
+          result += static_cast<char>('0' + ((ch >> 6) & 0x7));
+          result += static_cast<char>('0' + ((ch >> 3) & 0x7));
+          result += static_cast<char>('0' + (ch & 0x7));
+        } else {
+          result += static_cast<char>(ch);
+        }
+    }
+  }
+  result += '"';
+  return result;
+}
 }  // namespace
 
 std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int sign_mode) {
@@ -379,24 +604,10 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   }
   if (is_const_pin(dpin)) {
     const auto c = hydrate_const(dpin);
-    // Fast path -- the overwhelmingly common case. A plain Integer that fits an
-    // int64 emits as create_integer(N): a constexpr array fill the compiler
-    // always folds, versus from_pyrope's digit-by-digit parse (constexpr, but
-    // only actually evaluated at compile time when the compiler chooses to).
-    // Same bits by construction: both leave the value UNMASKED in base_[0] and
-    // sign-extend into the upper words, and is_just_i64() (<= 62 bits, no
-    // unknowns) guarantees the round-trip through int64 is exact.
-    if (c.is_integer() && c.is_just_i64()) {
+    if (c.is_integer() && c.is_just_i64()) {  // fast path -- the overwhelmingly common case
       return absl::StrCat("Slop<", tw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    // Exact via the shared pyrope codec: wide constants, unknown (`?`) bits, and
-    // the non-Integer types (Boolean/String/Nil) that create_integer would flatten.
-    // Folded at COMPILE time via a constexpr local. As a plain sub-expression in
-    // a hot loop the compiler is free to keep from_pyrope's digit-by-digit parse
-    // at runtime -- and it did: 27.8% of simulation time on the dino CPU. This is
-    // only legal because sim_const_text() has already forced unknown bits to 0;
-    // a literal still carrying `?` is not constant-evaluable.
-    return absl::StrCat("([]{ constexpr auto _k = Slop<", tw, ">::from_pyrope(\"", sim_const_text(c), "\"); return _k; }())");
+    return sim_const_expr(sim_const_text(c), tw);
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -430,6 +641,19 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   }
   const bool unsigned_ = !sum_with_sub && ((sign_mode == -1) || (sign_mode == 0 && is_unsign(dpin)));
   if (unsigned_) {
+    // Computed unsigned values are already canonical non-negative integers: the
+    // stored width includes their zero sign slot. Widening those through the
+    // signed cross-width constructor preserves the value and avoids a redundant
+    // zext/getmask in the hot path. Boundary carriers (ports, memories and Sub
+    // outputs) are deliberately not canonical and retain the required physical
+    // W-bit -> non-negative conversion here.
+    const int source_bits = wbits_of(dpin);
+    if (canonical_.contains(dpin.get_class_index()) && source_bits > 0 && source_bits <= target_bits) {
+      if (source_bits == target_bits) {
+        return base;
+      }
+      return absl::StrCat("Slop<", tw, ">{", base, "}");
+    }
     return absl::StrCat(base, ".zext_to<", tw, ">()");  // zero-extend / mask
   }
   return absl::StrCat("Slop<", tw, ">{", base, "}");  // signed sext via the hlop cross-width ctor
@@ -445,7 +669,7 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    return absl::StrCat("([]{ constexpr auto _k = Slop<", fw, ">::from_pyrope(\"", sim_const_text(c), "\"); return _k; }())");
+    return sim_const_expr(sim_const_text(c), fw);
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -464,6 +688,29 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     return operand(dpin, fallback_bits);
   }
   return it->second;  // BARE value -- the op deduces its width
+}
+
+std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_bits) {
+  const std::string fw = std::to_string(fallback_bits);
+  if (dpin.is_invalid()) {
+    return absl::StrCat("Slop<", fw, ">::create_integer(0)");
+  }
+  if (is_const_pin(dpin)) {
+    const auto c = hydrate_const(dpin);
+    if (c.is_integer() && c.is_just_i64()) {
+      return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
+    }
+    return sim_const_expr(sim_const_text(c), fw);
+  }
+  auto it = pin2var.find(dpin.get_class_index());
+  if (it == pin2var.end()) {
+    cycle_unresolved_ = true;
+    if (cycle_first_label_.empty()) {
+      cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
+    }
+    return absl::StrCat("Slop<", fw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");
+  }
+  return it->second;
 }
 
 // Can a Get_mask WIDTH-ADJUST of `drv` to `wbits` be dropped and the source
@@ -500,15 +747,23 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   const auto tw = std::to_string(wbits);
   auto       e  = sorted_inp(node);
 
+  const auto operation_width = [&](const hhds::Pin_class& pin) {
+    if (is_const_pin(pin)) {
+      return std::max({wbits_of(pin), static_cast<int>(hydrate_const(pin).get_bits()), 1});
+    }
+    return std::max(wbits_of(pin), 1);
+  };
+  const auto operation_operand = [&](const hhds::Pin_class& pin) { return raw_operand(pin, operation_width(pin)); };
+
   // 1-to-1 fold: `Slop<W>::op(a, b, ...)` over operands read at their OWN widths.
   // Left-associated to match the previous member-chain result exactly.
   auto fold = [&](const char* method) -> std::string {
     if (e.empty()) {
       return absl::StrCat("Slop<", tw, ">::create_integer(0)");
     }
-    std::string s = raw_operand(e[0].driver, wbits);
+    std::string s = operation_operand(e[0].driver);
     for (size_t i = 1; i < e.size(); ++i) {
-      s = absl::StrCat("Slop<", tw, ">::", method, "(", s, ", ", raw_operand(e[i].driver, wbits), ")");
+      s = absl::StrCat("Slop<", tw, ">::", method, "(", s, ", ", operation_operand(e[i].driver), ")");
     }
     if (e.size() == 1) {
       // A single operand still has to land at the node width.
@@ -519,15 +774,19 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
 
   switch (op) {
     case Ntype_op::Sum: {
-      std::string adds, subs;
+      std::string result = absl::StrCat("Slop<", tw, ">::create_integer(0)");
       for (const auto& ed : e) {
-        auto& tgt = (ed.sink.get_port_id() == 0) ? adds : subs;
-        if (!tgt.empty()) {
-          tgt += ", ";
-        }
-        tgt += operand(ed.driver, wbits);
+        result = absl::StrCat("Slop<",
+                              tw,
+                              ">::",
+                              ed.sink.get_port_id() == 0 ? "add_op" : "sub_op",
+                              "(",
+                              result,
+                              ", ",
+                              operation_operand(ed.driver),
+                              ")");
       }
-      return absl::StrCat("Slop<", tw, ">::sum_op({", adds, "}, {", subs, "})");
+      return result;
     }
     case Ntype_op::And : return fold("and_op");
     case Ntype_op::Or  : return fold("or_op");
@@ -580,7 +839,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       return absl::StrCat("(", s, ").zext_to<", tw, ">()");
     }
     case Ntype_op::Not:
-      return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : absl::StrCat(operand(e[0].driver, wbits), ".not_op()");
+      return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
+                       : absl::StrCat("Slop<", tw, ">::not_op(", operation_operand(e[0].driver), ")");
     case Ntype_op::LT:
     case Ntype_op::GT:
     case Ntype_op::EQ: {
@@ -610,10 +870,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     }
     case Ntype_op::SHL:
     case Ntype_op::SRA: {
-      const bool is_shl = op == Ntype_op::SHL;
+      const bool is_shl          = op == Ntype_op::SHL;
+      const int  value_sign_mode = is_shl ? 0 : (!e.empty() && is_unsign(e[0].driver) ? -1 : 1);
       if (e.size() < 2) {
-        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
-                         : operand(e[0].driver, wbits, is_shl ? 0 : /*signed=*/1);
+        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, value_sign_mode);
       }
       // A shift AMOUNT is a count, not a value in the datapath. When it is
       // constant, hand the int64 overload the number directly instead of
@@ -627,19 +887,24 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                               ">::",
                               is_shl ? "shl_op" : "sra_op",
                               "(",
-                              raw_operand(e[0].driver, wbits),
+                              operation_operand(e[0].driver),
                               ", ",
                               amt.to_just_i64(),
                               ")");
         }
       }
-      // Runtime amount: keep the member form (it reads amount.base_[0]).
-      // The shifted operand of an ARITHMETIC shift must be read as signed.
-      return absl::StrCat(operand(e[0].driver, wbits, is_shl ? 0 : /*signed=*/1),
-                          ".",
-                          is_shl ? "shl_op" : "sra_op",
-                          "(",
-                          operand(e[1].driver, wbits),
+      // Runtime amount width is independent of the datapath width. SRA is
+      // arithmetic for signed inputs and logical for unsigned inputs, just as
+      // cgen.verilog selects $signed only for a signed driver.
+      if (is_shl) {
+        return absl::StrCat("Slop<", tw, ">::shl_op(", operation_operand(e[0].driver), ", ", operation_operand(e[1].driver), ")");
+      }
+      return absl::StrCat("Slop<",
+                          tw,
+                          ">::sra_op(",
+                          operand(e[0].driver, wbits, value_sign_mode),
+                          ", ",
+                          operation_operand(e[1].driver),
                           ")");
     }
     case Ntype_op::Get_mask: {
@@ -716,10 +981,17 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
               // The read is zero-extended to `me` first, so the value is
               // non-negative and sra_op degenerates to a logical shift -- no
               // sign bits can leak down into the extracted field.
-              auto expr = operand(e[0].driver, me, /*unsigned=*/-1);
-              if (mb > 0) {
-                expr = absl::StrCat(expr, ".sra_op(", mb, ")");
+              // A low slice needs two facts at once: keep only [0,me), then
+              // land in the node's magnitude+sign carrier. zext_to<Keep,W>()
+              // performs both in one copy/mask instead of emitting
+              // `.zext_to<me>().zext_to<W>()`. It is safe to read the stored
+              // carrier directly because this operation itself masks every bit
+              // outside the source's declared width / selected range.
+              if (mb == 0) {
+                return absl::StrCat(stored_operand(e[0].driver, operation_width(e[0].driver)), ".zext_to<", me, ", ", tw, ">()");
               }
+              auto expr = operand(e[0].driver, me, /*unsigned=*/-1);
+              expr      = absl::StrCat(expr, ".sra_op(", mb, ")");
               // The trailing widen is replaceable by the cross-width ctor
               // (`Slop<tw>{expr}` — one landing instead of truncate-then-
               // widen) ONLY when the expression's top STORED bit is provably
@@ -729,8 +1001,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
               // goldens, bit_sel_sext first). After `.sra_op(mb)` with mb > 0
               // the top mb bits are zero, so bit me-1 is clear and the two
               // agree; me-mb < tw keeps the landed value inside tw's positive
-              // range. mb == 0 keeps the explicit zext pair.
-              if (mb > 0 && me - mb < static_cast<int64_t>(wbits)) {
+              // range. The mb == 0 case returned above uses the fused
+              // zero-extension/carrier landing instead.
+              if (me - mb < static_cast<int64_t>(wbits)) {
                 return absl::StrCat("Slop<", tw, ">{", expr, "}");
               }
               return absl::StrCat(expr, ".zext_to<", tw, ">()");
@@ -785,47 +1058,23 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
 
       // A positive contiguous CONSTANT mask is the packed-field-write shape.
-      // Spell the splice as fixed-width bitwise operations
-      // instead of calling set_mask_op(): the generic method has to discover
-      // the range (get_bits + ctz/clz + a contiguity scan) on every execution,
-      // even though cgen already knows it here. Minion emits thousands of these
-      // tiny Set_mask cells (many Slop<2>); their range discovery was a large
-      // fraction of whole-design simulation time.
-      //
-      // Keep the optimization deliberately narrow and proof-friendly:
-      //   * is_just_i64() means the positive mask is exact in create_integer;
-      //   * me <= wbits means no selected bit is clipped by the node width;
-      // Multi-word results use the same algebra; clang unrolls the fixed-size
-      // Slop operations and cgen still avoids rediscovering the mask range.
+      // Emit its literal half-open bounds instead of materializing a mask and
+      // asking set_mask_op() to rediscover the range on every execution. This
+      // works for wide masks too: no from_pyrope constant, get_bits, ctz/clz,
+      // or contiguity scan remains in the generated program.
       if (is_const_pin(e[1].driver)) {
         const auto mv = hydrate_const(e[1].driver);
-        if (!mv.has_unknowns() && !mv.is_negative() && mv.is_just_i64()) {
+        if (!mv.has_unknowns() && !mv.is_negative()) {
           const auto [mb, me] = mv.get_mask_range();  // half-open; {-1,-1} = noncontiguous
           if (mb >= 0 && me > mb && me <= wbits) {
-            const auto base = operand(e[0].driver, wbits, -1);
-            const auto mask = operand(e[1].driver, wbits, -1);
-            const auto val  = operand(e[2].driver, wbits);
             if (mb == 0 && me == wbits) {
-              return val;  // every result bit is replaced
+              return operand(e[2].driver, wbits);  // every result bit is replaced
             }
-            const auto inserted = mb == 0 ? val : absl::StrCat("Slop<", tw, ">::shl_op(", val, ", ", mb, ")");
-            return absl::StrCat("Slop<",
-                                tw,
-                                ">::or_op(Slop<",
-                                tw,
-                                ">::and_op(",
-                                base,
-                                ", Slop<",
-                                tw,
-                                ">::not_op(",
-                                mask,
-                                ")), Slop<",
-                                tw,
-                                ">::and_op(",
-                                inserted,
-                                ", ",
-                                mask,
-                                "))");
+            const auto base = operand(e[0].driver, wbits, -1);
+            if (is_const_pin(e[2].driver) && hydrate_const(e[2].driver).is_known_zero()) {
+              return absl::StrCat(base, ".clear_mask_op_opt(", mb, ", ", me, ")");
+            }
+            return absl::StrCat(base, ".set_mask_op_opt(", mb, ", ", me, ", ", operand(e[2].driver, wbits), ")");
           }
         }
       }
@@ -874,14 +1123,27 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // population in the dino emission), and ANY call-based mux
         // evaluates BOTH arms eagerly — with single-use forestation the
         // arms are whole inlined expression trees, so lazy arm evaluation
-        // is the point, exactly like cgen_verilog's `sel ? a : b`. Both
-        // arm strings come from operand(..., wbits), which always lands
-        // them at Slop<tw>, so the ternary's types agree.
+        // is the point, exactly like cgen_verilog's `sel ? a : b`. Each arm is
+        // read at its own carrier width, then losslessly promoted
+        // to the result width in the selected branch. Cgen checks those known
+        // widths before emitting the ternary; the generic HLOP mux/hotmux APIs
+        // independently keep the same consteval contract for their callers.
         //
         // Returned BEFORE the arm list / selector below are built: with
         // forestation each arm is a whole inlined tree, and the call form's
         // `vals` + result-width `sel` would be built and thrown away for every
         // one of the 2-arm muxes that dominate a real design.
+        const int false_w = std::max(wbits_of(e[1].driver), 1);
+        const int true_w  = std::max(wbits_of(e[2].driver), 1);
+        if (wbits < false_w || wbits < true_w) {
+          livehd::diag::err("inou.cgen.sim", "mux-width-loss", "internal")
+              .msg("Mux '{}' result carrier {} is narrower than data arms {} and {}; code generation would lose precision",
+                   debug_name(node),
+                   wbits,
+                   false_w,
+                   true_w)
+              .fatal();
+        }
         return absl::StrCat("((",
                             raw_operand(e[0].driver, std::max(wbits_of(e[0].driver), 1)),
                             ").is_known_true() ? ",
@@ -891,43 +1153,22 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                             ")");
       }
 
-      if (op == Ntype_op::Hotmux) {
-        // A Hotmux selector is a one-hot BIT VECTOR, not a value at the
-        // result width.  A wide decode table can therefore select a 1-bit
-        // result (for example, `id_vpu_insn`) with bit 100+.  Reading the
-        // selector as Slop<tw> discarded every arm above tw and silently
-        // selected invalid/default.  The emitted mixed-width helper preserves
-        // the selector's declared width without widening every data arm.
-        const int   sel_w = std::max(wbits_of(e[0].driver), 1);
-        std::string vals;
-        for (size_t i = 1; i < e.size(); ++i) {
-          if (!vals.empty()) {
-            vals += ", ";
-          }
-          vals += operand(e[i].driver, wbits);
-        }
-        const auto sel = operand(e[0].driver, sel_w, /*unsigned=*/-1);
-        return absl::StrCat("__lhd_hotmux<", tw, ">(", sel, ", {", vals, "})");
-      }
-
+      // Mux and Hotmux selectors have widths independent of their result. A
+      // Hotmux uses one selector bit per arm; a 3+-arm Mux uses the full integer
+      // index so an out-of-range high bit must not be truncated into range.
+      const int   sel_w = is_const_pin(e[0].driver) ? std::max({wbits_of(e[0].driver), hydrate_const(e[0].driver).get_bits(), 1})
+                                                    : std::max(wbits_of(e[0].driver), 1);
+      const auto  sel   = operand(e[0].driver, sel_w, /*unsigned=*/-1);
       std::string vals;
       for (size_t i = 1; i < e.size(); ++i) {
         if (!vals.empty()) {
           vals += ", ";
         }
-        vals += operand(e[i].driver, wbits);
+        const int arm_w  = is_const_pin(e[i].driver) ? std::max({wbits_of(e[i].driver), hydrate_const(e[i].driver).get_bits(), 1})
+                                                     : std::max(wbits_of(e[i].driver), 1);
+        vals            += operand(e[i].driver, arm_w);
       }
-      std::string sel   = operand(e[0].driver, wbits);  // Slop<tw> selector
-      // 3+ arms: the selector IS an index (0..n-1). Keep only the
-      // ceil(log2(n)) low index bits, then re-widen to tw.
-      int         sel_w = 1;
-      while ((static_cast<size_t>(1) << sel_w) < n_vals) {
-        ++sel_w;
-      }
-      if (sel_w < wbits) {
-        sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
-      }
-      return absl::StrCat("Slop<", tw, ">::mux_op(", sel, ", {", vals, "})");
+      return absl::StrCat("Slop<", tw, ">::", op == Ntype_op::Hotmux ? "hotmux_op" : "mux_op", "(", sel, ", ", vals, ")");
     }
     case Ntype_op::Clock_cell:
       // FAIL CLOSED, never fall into the pass-through below. A Clock_cell's
@@ -1394,8 +1635,6 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // simgen-8: recursive clock-guard ports — `<field>__tick` is declared for
 // every input port whose SUBTREE clocks state on it (stateless wrappers
 // included) and FORWARDED at call sites, composing with local gate folds.
-// simgen-9: callee partitioning — per-output-group `__settle_g<k>` methods on
-// split defs, group-scheduled parents, and NO false-loop inlining.
 // simgen-11: single-use forestation (a fan-out-1 comb node binds as a pasted
 // expression, not a `cg_N` temp), 2-arm muxes as a lazy C++ ternary, guarded
 // next-state and lazy write staging on gated state, and the Get_mask raw
@@ -1422,6 +1661,35 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // a nested negedge preview from retaining the prior cycle's input. Preserve a
 // Hotmux's full one-hot selector width independently of its result width. Let
 // reset_cycle(bool) supply zero for otherwise-uninitialized state (sim.init_zero).
+// simgen-56: delegate mixed-selector-width Hotmux evaluation to HLOP's
+// Slop<ResultWidth>::hotmux_op instead of emitting a private helper.
+// simgen-57: hierarchical value mirrors are compile-time instrumentation.
+// A normal non-VCD/non-probe/non-query build has no observation boundary
+// slots, publication assignments, runtime observation branches, VCD storage,
+// or VCD tick updates.
+// simgen-53: verified canonical bodies are digest-named translation units with
+// stale-file pruning; the root keeps only occurrence binding/schedule code.
+// simgen-52: canonical color calls use persistent type-erased binding tables,
+// so one shared body serves every verified occurrence without a case per call.
+// simgen-51: direct-color runtime metadata uses compact indexed arrays and
+// verified repeated pure-data colors call one canonical typed kernel body.
+// simgen-50: discovery structural seeds hash canonical typed fields directly;
+// large occurrence plans no longer allocate formatted node descriptions.
+// simgen-46: the color runtime is a source-only implementation detail and one
+// indexed dispatcher replaces plan-sized method declarations in the module ABI.
+// simgen-45: direct clock eligibility resolves identity/width shaping through
+// the hierarchy-aware structural control root; checkpoint design hashes bind
+// the color schedule, boundary ABI, Taskflow runtime, and generator version.
+// simgen-44: occurrence-bound hierarchy state joins the direct color path and
+// every color skips on unchanged input/state slot generations.
+// simgen-43: flat ordinary-register roots execute the plan's real per-color
+// kernels over producer-owned ABI slots in a reusable Taskflow color DAG.
+// simgen-42: every generated module exposes the uniform checkpoint quiesce
+// hook; a Taskflow root drops its runtime so worker threads are joined before
+// the driver forks a checkpoint child.
+// simgen-41: a fully legal staged hierarchy root owns a lazily constructed,
+// reusable Taskflow phase schedule; its digest also includes the exact color
+// plan so a warm workdir cannot retain a stale root ABI.
 // simgen-40: uninitialized reset-free memories power on zero under both
 // policies, and a posclk=false flop on a sole explicit clock net whose
 // spelling is not clock-like (Design_clocks::name_looks_like_clock) is
@@ -1444,7 +1712,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-40";
+static constexpr std::string_view kSimGenVersion = "simgen-57";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -1462,31 +1730,8 @@ static inline uint64_t fnv1a_str(uint64_t h, std::string_view s) {
 }
 
 uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
-  namespace gu         = livehd::graph_util;
-  uint64_t h           = 0xcbf29ce484222325ULL;
-  // The emitted shape depends on the SPLIT REGISTRY: this def's own group
-  // methods, and (for a parent) the group scheduling of its callees. Fold both
-  // so a structural change anywhere that flips a split re-emits the right defs.
-  auto     fold_groups = [this](uint64_t hh, const hhds::Graph* def) -> uint64_t {
-    if (splits_ == nullptr) {
-      return hh;
-    }
-    auto it = splits_->find(def);
-    if (it == splits_->end()) {
-      return fnv1a(hh, 0);
-    }
-    hh = fnv1a(hh, static_cast<uint64_t>(it->second.size()) + 1);
-    for (const auto& sg : it->second) {
-      for (const auto& o : sg.outs) {
-        hh = fnv1a(hh, ((static_cast<uint64_t>(o.pid) << 24) ^ (static_cast<uint64_t>(o.lo) << 10) ^ o.len) * 2 + 1);
-      }
-      for (const auto& a : sg.support) {
-        hh = fnv1a(hh, ((static_cast<uint64_t>(a.pid) << 24) ^ (static_cast<uint64_t>(a.lo) << 10) ^ a.len) * 2);
-      }
-    }
-    return hh;
-  };
-  h = fold_groups(h, g);
+  namespace gu                                       = livehd::graph_util;
+  uint64_t                                         h = 0xcbf29ce484222325ULL;
   absl::flat_hash_map<hhds::Class_index, uint32_t> seq;
   uint32_t                                         ni = 0;
   for (auto n : g->body().nodes()) {
@@ -1512,7 +1757,6 @@ uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
     if (op == Ntype_op::Sub) {
       auto cg = n.get_subnode_graph();
       h       = fnv1a_str(h, cg ? cg->get_name() : std::string_view{});
-      h       = fold_groups(h, cg.get());
       if (auto loop = n.subnode_loop()) {
         h                            = fnv1a(h, 0x4c4f4f50ULL);  // "LOOP": distinguish descriptor absence
         h                            = fnv1a(h, static_cast<uint64_t>(loop->first));
@@ -1858,11 +2102,7 @@ int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
 // Every STRUCTURAL rewrite the emitter makes to a body, factored out of
 // do_from_graph so the caller can run it over the WHOLE library first.
 //
-// This ordering is not cosmetic. to_cgen_sim's partition pre-scan captures
-// Pin_class handles INTO callee bodies (Split_group::Out::leaf), and each step
-// here deletes nodes or rewires edges in those same bodies — so a pre-scan
-// interleaved with the rewrites hands the emitter class indices that no longer
-// mean what the scan measured. Run once per graph, before any measuring.
+// Run once per graph, before occurrence planning retains any graph handles.
 bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hhds::Graph* g      = graph.get();
   const auto   gname  = std::string{graph->get_name()};
@@ -1922,13 +2162,10 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
         .msg("`{}`: inlined {} sub-instance(s) with <= {} nodes (sim.flatten)", gname, nin, flatten_budget)
         .emit();
   }
-  // NO false-loop inlining (2026-08-06 ruling). A false combinational loop
-  // through an atomic instance is dissolved by CALLEE PARTITIONING instead:
-  // the callee emits per-output-group `__settle_g<k>` methods (see Split_group)
-  // and the parent evaluates exactly the group a demanded output needs, so no
-  // body is ever cloned. The inliners this block used to run multiplied cloned
-  // subtrees up the hierarchy (77 MB minion_top.cpp, hour-plus host-clang) —
-  // the only structural inlining left is the CLOCK-GATE CELL fold, whose
+  // No false-loop inlining: the occurrence-wide color plan resolves hierarchy
+  // crossings without cloning. The old inliners multiplied cloned subtrees up
+  // the hierarchy (77 MB minion_top.cpp, hour-plus host-clang). The only
+  // structural inlining left is the CLOCK-GATE CELL fold, whose
   // bodies are a latch and an AND, and the sim.flatten budget the user opts
   // into. Gate cells can sit behind gate cells, so iterate until quiet.
   int inlined_gate_cells = 0;
@@ -1991,11 +2228,25 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // The shared clock-role analysis -- the same `Design_clocks` that pass/lec's
   // phase schedule and pass.single_edge build. Built AFTER the rewrites above,
   // which change the graph.
-  const livehd::latch_contract::Design_clocks design_clocks(g, /*hier=*/false);
+  const livehd::latch_contract::Design_clocks                              design_clocks(g, /*hier=*/false);
+  absl::flat_hash_map<hhds::Graph*, livehd::latch_contract::Design_clocks> local_clock_cache;
+  const auto local_clocks_for = [&](hhds::Graph* body) -> const livehd::latch_contract::Design_clocks& {
+    if (body == g) {
+      return design_clocks;
+    }
+    return local_clock_cache.try_emplace(body, body, /*hier=*/false).first->second;
+  };
+  std::optional<livehd::latch_contract::Design_clocks> hierarchy_clock_cache;
+  const auto hierarchy_clocks_for_root = [&]() -> const livehd::latch_contract::Design_clocks& {
+    if (!hierarchy_clock_cache.has_value()) {
+      hierarchy_clock_cache.emplace(g, /*hier=*/true);
+    }
+    return *hierarchy_clock_cache;
+  };
   // Structural clock/reset interface memo for this emission only. Same reason
   // as design_clocks above: it answers about the graph AS PREPARED, so it must
   // not outlive the body it was measured on.
-  livehd::latch_contract::Clock_port_cache    port_cache;
+  livehd::latch_contract::Clock_port_cache port_cache;
 
   // `is_top` = the testbench-driven module (vs an instantiated sub-module); it
   // only gates which module BAKES the VCD file path (avoids two modules opening
@@ -2005,7 +2256,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // one VCD carries the whole design tree, not just the top's io.
   // `top` may be the bare entity or the full internal `file.entity` name — the
   // full form is the only spelling that disambiguates two same-entity modules.
-  const bool is_top = top.empty() || entity == top || gname == top;
+  const bool is_top             = top.empty() || entity == top || gname == top;
+  const bool color_root         = is_top && color_plan_ != nullptr;
+  const bool color_storage_only = !color_root && !compact_kernel_;
 
   // Liveness: only logic something REAL consumes gets emitted — backward BFS
   // from the sinks (IO nodes cover the graph outputs; state elements, Memory
@@ -2044,10 +2297,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
   }
-  const bool vcd_on = !vcd_file.empty();
-
-  const std::string fstem = sim_file_stem(gname);
-  const std::string base  = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
+  const bool        vcd_on = !vcd_file.empty();
+  const std::string fstem  = sim_file_stem(gname);
+  const std::string base   = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
 
   // Incremental generation: matching structural digest + existing outputs ->
   // this module's C++ is already up to date, skip the emission (and the file
@@ -2061,11 +2313,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     gd          = fnv1a_str(gd, vcd_file);
     gd          = fnv1a_str(gd, top);
     gd          = fnv1a(gd, (is_top ? 2u : 0u) | (vcd_fakedelay ? 1u : 0u));
+    gd          = fnv1a(gd, compact_kernel_ ? 1u : 0u);
+    if (color_root) {
+      gd = fnv1a(gd, observation_on ? 1u : 0u);
+    }
+    gd = fnv1a(gd, static_cast<uint64_t>(workers_));
+    if (color_root) {
+      gd = fnv1a_str(gd, color_plan_->report());
+    }
     char hex[17];
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
     auto            it = gen_digests_.find(gname);
     std::error_code ec;
-    if (it != gen_digests_.end() && it->second == hex && std::filesystem::exists(base + ".hpp", ec)
+    if (!color_root && it != gen_digests_.end() && it->second == hex && std::filesystem::exists(base + ".hpp", ec)
         && std::filesystem::exists(base + ".cpp", ec) && std::filesystem::exists(base + ".iface.json", ec)) {
       return;
     }
@@ -2083,6 +2343,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append(
       "#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
       "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
+  if (color_root) {
+    hout->append("#include <memory>\n");
+  }
   // Forward-declare the signal record (full definition in checkpoint.hpp, included
   // by the .cpp); the header only needs it for the describe_signals() signature.
   hout->append("namespace hlop::ckpt { struct Signal; }\n");
@@ -2096,22 +2359,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   fout->append("// Generated by inou.cgen.sim (LiveHD, TODO 3d). Do not edit.\n");
   fout->append(absl::StrCat("#include \"", fstem, ".hpp\"\n"));
   fout->append("#include \"checkpoint.hpp\"  // name-keyed dump_state/load_state helpers\n");
-  fout->append("#include <cassert>\n#include <cstddef>\n#include <initializer_list>\n\n");
-  fout->append(
-      "template <int W, int SW>\n"
-      "static Slop<W> __lhd_hotmux(const Slop<SW>& sel, std::initializer_list<Slop<W>> values) {\n"
-      "  assert(values.size() != 0);\n"
-      "  if (sel.popcount() != 1) { assert(false && \"hotmux select must be one-hot\"); return Slop<W>::invalid(); }\n"
-      "  const int bit = sel.get_first_bit_set();\n"
-      "  if (bit < 0 || static_cast<size_t>(bit) >= values.size()) return Slop<W>::invalid();\n"
-      "  return *(values.begin() + bit);\n"
-      "}\n\n");
-
+  fout->append("#include <cassert>\n#include <cstddef>\n");
+  fout->append("\n");
+  if (color_root) {
+    fout->append("#include <algorithm>\n#include <thread>\n#include <taskflow/taskflow.hpp>\n\n");
+    if (color_plan_->summary().runtime_random) {
+      fout->append("#include <atomic>\n\n");
+    }
+  }
   // ---- IO decls (sorted by port_id) ----
   struct Io {
     std::string field;
     std::string raw;
     int         bits;
+    bool        unsign;
     bool        is_input;
     uint32_t    port_id;
   };
@@ -2121,10 +2382,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   std::vector<Io> ios;
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, true, static_cast<uint32_t>(d.port_id)});
+      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, d.unsign, true, static_cast<uint32_t>(d.port_id)});
     }
     for (const auto& d : gio->get_output_pin_decls()) {
-      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, false, static_cast<uint32_t>(d.port_id)});
+      ios.push_back({cpp_port_path(d.name), std::string{d.name}, 0, d.unsign, false, static_cast<uint32_t>(d.port_id)});
     }
   }
   for (auto& io : ios) {
@@ -2609,7 +2870,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         //    that a sole explicit `clk_i` commits once per tick. The spelling
         //    test is the shared Design_clocks::name_looks_like_clock notion,
         //    not a private list.
-        bool ref_needs_edge = false;
+        bool              ref_needs_edge = false;
         if (cd_name == ref_clock && !livehd::latch_contract::Design_clocks::name_looks_like_clock(cd_name)
             && type_op_of(node) != Ntype_op::Latch) {
           auto pc        = get_driver(find_sink_pin(node, "posclk"));
@@ -3275,7 +3536,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
     };
-    hout->append("  void __settle() {\n");
+    hout->append("  void __compact_publish() {\n");
     emit_carry_decls();
     emit_activation_decl();
     hout->append("    for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[ordinal];\n");
@@ -3286,16 +3547,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (loop.activation_input && activation_skip_safe) {
       hout->append("      if (__lane_active",
                    reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
-                   ") lane.__settle();  // conditional activation (reset keeps it open)\n");
+                   ") lane.__compact_publish();  // conditional activation (reset keeps it open)\n");
     } else {
-      hout->append("      lane.__settle();\n");
+      hout->append("      lane.__compact_publish();\n");
     }
     emit_carry_advances("lane.__out");
     emit_next_active("lane.__out");
     hout->append("    }\n");
     emit_outputs("__out", "lanes[count - 1].__out");
     hout->append("    __sync_kids();\n  }\n");
-    hout->append("  const Out& cycle(bool __finish = true) {\n");
+    hout->append("  const Out& __compact_advance() {\n");
     emit_carry_decls();
     emit_activation_decl();
     if (loop.count != 0) {
@@ -3309,12 +3570,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (activation_skip_safe) {
         hout->append("      if (__lane_active",
                      reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
-                     ") __period = &lane.cycle(false);  // wrapper performs the post-edge lane settle as one walk\n");
+                     ") __period = &lane.__compact_advance();\n");
       } else {
-        hout->append("      __period = &lane.cycle(false);\n");
+        hout->append("      __period = &lane.__compact_advance();\n");
       }
     } else {
-      hout->append("      const auto& __period = lane.cycle(false);\n");
+      hout->append("      const auto& __period = lane.__compact_advance();\n");
     }
     emit_carry_advances(loop.activation_input ? "(*__period)" : "__period");
     emit_next_active(loop.activation_input ? "(*__period)" : "__period");
@@ -3323,10 +3584,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     hout->append("    }\n");
     emit_outputs("__last_out", "(*__last)");
-    hout->append("    __sync_kids();\n    if (__finish) __settle();\n    return __last_out;\n  }\n");
+    hout->append("    __sync_kids();\n    return __last_out;\n  }\n");
     hout->append(
         "  void reset_cycle(bool zero_uninitialized = false) { for (auto& lane : lanes) "
-        "lane.reset_cycle(zero_uninitialized); ++__gen; __settle(); }\n");
+        "lane.reset_cycle(zero_uninitialized); ++__gen; __compact_publish(); }\n");
     if (vcd_on) {
       hout->append(
           "  void __vcd_hier(vcd::VCDWriter* w, const std::string& s) { for (std::size_t i = 0; i < count; ++i) { "
@@ -3341,6 +3602,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       hout->append(
           "  void __vcd_dump_data(vcd::VCDWriter* w, bool pos, bool root) { for (auto& lane : lanes) "
           "lane.__vcd_dump_data(w, pos, root); }\n");
+      // The parent's snapshot barrier recurses into EVERY sub-instance, loop
+      // wrappers included, so this forwarder is what keeps `--set sim.vcd=true`
+      // compiling on a design with a rolled `for`.
+      hout->append("  void __vcd_snapshot(bool pos) { for (auto& lane : lanes) lane.__vcd_snapshot(pos); }\n");
     }
     const std::string lp = lane_prefix_expr("p", "i");
     hout->append(
@@ -3456,8 +3721,553 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   const bool has_refresh
       = std::any_of(subs.begin(), subs.end(), [](const auto& s) { return s.refresh_negedge || s.child_refresh_negedge; });
+  absl::flat_hash_set<const hhds::Graph*>                        staged_visiting;
+  std::function<bool(const std::shared_ptr<hhds::Graph>&, bool)> staged_child_tree;
+  staged_child_tree = [&](const std::shared_ptr<hhds::Graph>& pg, bool mixed_edges) {
+    if (!pg || !staged_visiting.insert(pg.get()).second) {
+      return false;
+    }
+    bool              staged          = true;
+    const std::string child_ref_clock = clock_input_of(pg.get());
+    for (const auto node : pg->body().nodes()) {
+      const auto op = type_op_of(node);
+      if (op == Ntype_op::Memory || (!mixed_edges && op == Ntype_op::Latch)) {
+        staged = false;
+        break;
+      }
+      if (is_type_flop(node)) {
+        const auto posclk = get_driver(find_sink_pin(node, "posclk"));
+        if (!mixed_edges && !posclk.is_invalid() && is_const_pin(posclk) && hydrate_const(posclk).is_known_false()) {
+          staged = false;
+          break;
+        }
+        const auto clock = get_driver(find_sink_pin(node, "clock_pin"));
+        if (clock.is_invalid() || !livehd::graph_util::is_graph_input_pin(clock) || pin_name_of(clock) != child_ref_clock) {
+          staged = false;  // derived/secondary clocks cross in a later rung
+          break;
+        }
+        continue;
+      }
+      if (op != Ntype_op::Sub) {
+        continue;
+      }
+      if (node.subnode_loop()) {
+        staged = false;
+        break;
+      }
+      if (auto sio = node.get_subnode_io()) {
+        for (const auto& decl : sio->get_input_pin_decls()) {
+          if (decl.name != "__valid") {
+            continue;
+          }
+          const auto guard = get_driver(find_sink_pin(node, decl.name));
+          if (!mixed_edges && !guard.is_invalid() && (!is_const_pin(guard) || !hydrate_const(guard).is_known_true())) {
+            staged = false;
+          }
+          break;
+        }
+      }
+      auto child = node.get_subnode_graph();
+      if (!staged || !staged_child_tree(child, mixed_edges)) {
+        staged = false;
+        break;
+      }
+    }
+    staged_visiting.erase(pg.get());
+    return staged;
+  };
+  const bool staged_bridge_children = std::ranges::all_of(subs, [&](const auto& s) {
+    auto child = s.node.get_subnode_graph();
+    return !s.loop && child && staged_child_tree(child, false);
+  });
+
+  // C++ storage layout by definition node. The occurrence-wide root emitter
+  // reaches child state directly, so it must reproduce the exact member names
+  // each child definition emits (including collision suffixes). Keep this one
+  // deterministic allocator shared by root occurrence access below; it mirrors
+  // the category order used above: ports, state, memories, then instances.
+  struct Direct_layout {
+    absl::flat_hash_map<hhds::Class_index, std::string> member;
+  };
+  absl::flat_hash_map<const hhds::Graph*, Direct_layout> direct_layout_cache;
+  const auto direct_layout = [&](const hhds::Graph* definition) -> const Direct_layout& {
+    if (const auto it = direct_layout_cache.find(definition); it != direct_layout_cache.end()) {
+      return it->second;
+    }
+    Direct_layout                    layout;
+    absl::flat_hash_set<std::string> used;
+    const auto                       reserve_port = [&](std::string_view name) {
+      const auto dot = name.find('.');
+      used.insert(cpp_id(dot == std::string_view::npos ? name : name.substr(0, dot)));
+    };
+    if (const auto io = definition->get_io()) {
+      for (const auto& decl : io->get_input_pin_decls()) {
+        reserve_port(decl.name);
+      }
+      for (const auto& decl : io->get_output_pin_decls()) {
+        reserve_port(decl.name);
+      }
+    }
+    const auto unique = [&](std::string base) {
+      if (base.empty()) {
+        base = "u";
+      }
+      std::string name = base;
+      for (int suffix = 2; !used.insert(name).second; ++suffix) {
+        name = absl::StrCat(base, "__i", suffix);
+      }
+      return name;
+    };
+    for (const auto node : definition->body().nodes()) {
+      if (is_type_flop(node) || type_op_of(node) == Ntype_op::Latch) {
+        layout.member[node.get_class_index()] = unique(cpp_id(wire_name(node.get_driver_pin(0))));
+      }
+    }
+    for (const auto node : definition->body().nodes()) {
+      if (type_op_of(node) == Ntype_op::Memory) {
+        layout.member[node.get_class_index()] = unique(cpp_id(default_instance_name(node)));
+      }
+    }
+    for (const auto node : definition->body().nodes()) {
+      if (!is_type_sub(node)) {
+        continue;
+      }
+      const auto sub_io = node.get_subnode_io();
+      if (!sub_io) {
+        continue;
+      }
+      const std::string name{sub_io->get_name()};
+      if (name.empty() || name == livehd::graph_util::lgassert_module_name || name == livehd::graph_util::fproperty_module_name) {
+        continue;
+      }
+      layout.member[node.get_class_index()] = unique(cpp_id(default_instance_name(node)));
+    }
+    return direct_layout_cache.emplace(definition, std::move(layout)).first->second;
+  };
+  absl::flat_hash_map<hhds::Occurrence_path, std::string> occurrence_prefix_cache;
+  const auto occurrence_prefix = [&](const hhds::Occurrence_node& occurrence) -> const std::string& {
+    if (const auto cached = occurrence_prefix_cache.find(occurrence.path()); cached != occurrence_prefix_cache.end()) {
+      return cached->second;
+    }
+    std::string prefix;
+    auto*       library = gio ? gio->get_library() : nullptr;
+    if (library == nullptr) {
+      return occurrence_prefix_cache.emplace(occurrence.path(), std::move(prefix)).first->second;
+    }
+    for (const auto& step : occurrence.path().steps()) {
+      if (step.ordinal) {
+        prefix.clear();  // compact loops are excluded from the direct rung
+        break;
+      }
+      const auto parent = library->get_graph(step.subnode.gid);
+      if (!parent) {
+        prefix.clear();
+        break;
+      }
+      const auto& layout = direct_layout(parent.get());
+      const auto  it     = layout.member.find(hhds::Class_index{step.subnode.value});
+      if (it == layout.member.end()) {
+        prefix.clear();
+        break;
+      }
+      prefix += it->second + ".";
+    }
+    return occurrence_prefix_cache.emplace(occurrence.path(), std::move(prefix)).first->second;
+  };
+  const auto occurrence_member = [&](const livehd::sim::Color_plan::Site& site) {
+    const auto& layout = direct_layout(site.node.get_graph());
+    const auto  it     = layout.member.find(site.node.get_class_index());
+    return it == layout.member.end() ? std::string{} : occurrence_prefix(site.node) + it->second;
+  };
+  absl::flat_hash_map<std::pair<hhds::Gid, uint64_t>, Mem> direct_memory_cache;
+  const auto direct_memory = [&](const livehd::sim::Color_plan::Site& site) -> const Mem* {
+    const auto node = site.node.base_node();
+    for (const auto& memory : mems) {
+      if (memory.node.get_graph() == node.get_graph() && memory.node.get_class_index() == node.get_class_index()) {
+        return &memory;
+      }
+    }
+    const auto key = std::pair{node.get_graph()->get_gid(), static_cast<uint64_t>(node.get_class_index().value)};
+    if (const auto it = direct_memory_cache.find(key); it != direct_memory_cache.end()) {
+      return &it->second;
+    }
+
+    Mem                  memory;
+    std::vector<MemPort> ports_by_id;
+    memory.node = node;
+    for (const auto& edge : node.inp_edges()) {
+      const int  raw  = static_cast<int>(edge.sink.get_port_id());
+      const auto name = Ntype::get_sink_name(Ntype_op::Memory, raw);
+      const auto port = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
+      if (name == "bits") {
+        memory.bits = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+      } else if (name == "size") {
+        memory.size = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+      } else if (name == "type") {
+        memory.type = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+      } else if (name == "fwd") {
+        memory.fwd = Dlop::clone(hydrate_const(edge.driver));
+      } else if (name == "undef") {
+        memory.undef = Dlop::clone(hydrate_const(edge.driver));
+      } else if (name == "update") {
+        memory.update = edge.driver;
+      } else if (name == "update_enable") {
+        memory.update_enable = edge.driver;
+      } else if (name == "reset") {
+        memory.reset = edge.driver;
+      } else if (name == "init") {
+        memory.init = edge.driver;
+      } else if (name == "wensize") {
+        memory.wensize = static_cast<int>(hydrate_const(edge.driver).to_just_i64());
+      } else {
+        if (ports_by_id.size() <= port) {
+          ports_by_id.resize(port + 1);
+        }
+        if (str_tools::ends_with(name, "clock_pin")) {
+          memory.clock = edge.driver;
+        } else if (str_tools::ends_with(name, "addr")) {
+          ports_by_id[port].addr = edge.driver;
+        } else if (str_tools::ends_with(name, "enable")) {
+          ports_by_id[port].enable = edge.driver;
+        } else if (str_tools::ends_with(name, "din")) {
+          ports_by_id[port].din = edge.driver;
+        } else if (str_tools::ends_with(name, "rdport")) {
+          ports_by_id[port].rd = !hydrate_const(edge.driver).is_known_false();
+        }
+      }
+    }
+    for (const auto& edge : node.out_edges()) {
+      if (edge.driver.get_port_id() == Ntype::Memory_readall_pid) {
+        memory.has_read_all = true;
+        break;
+      }
+    }
+    memory.bits = std::max(memory.bits, 1);
+    if (memory.wensize < 1 || memory.bits % memory.wensize != 0) {
+      return nullptr;
+    }
+    int n_write = 0;
+    for (const auto& port : ports_by_id) {
+      n_write += !port.addr.is_invalid() && !port.rd;
+    }
+    int read  = 0;
+    int write = 0;
+    for (auto& port : ports_by_id) {
+      if (port.addr.is_invalid() && port.din.is_invalid() && port.enable.is_invalid()) {
+        continue;
+      }
+      if (port.rd) {
+        port.dout_pid = n_write + read;
+        port.rdidx    = read++;
+      } else {
+        port.wridx = write++;
+      }
+      memory.ports.push_back(port);
+    }
+    memory.n_wr           = write;
+    memory.n_rd           = read;
+    const auto row_prefix = [&](const spool_ptr<Dlop>& matrix, int row) {
+      if (!matrix) {
+        return 0;
+      }
+      int prefix = 0;
+      while (prefix < memory.n_wr && matrix->bit_test(row * memory.n_wr + prefix)) {
+        ++prefix;
+      }
+      for (int bit = prefix; bit < memory.n_wr; ++bit) {
+        if (matrix->bit_test(row * memory.n_wr + bit)) {
+          return -1;
+        }
+      }
+      return prefix;
+    };
+    if (!memory.registered()) {
+      memory.order     = Mem::Order::fwd;
+      memory.n_user_wr = memory.n_wr;
+    } else {
+      std::vector<int> fwd_upto(static_cast<size_t>(memory.n_rd), 0);
+      int              max_fwd   = 0;
+      int              max_undef = 0;
+      bool             uniform   = true;
+      for (int row = 0; row < memory.n_rd; ++row) {
+        const int fwd   = row_prefix(memory.fwd, row);
+        const int undef = row_prefix(memory.undef, row);
+        if (fwd < 0 || undef < 0) {
+          return nullptr;
+        }
+        fwd_upto[static_cast<size_t>(row)]  = fwd;
+        max_fwd                             = std::max(max_fwd, fwd);
+        max_undef                           = std::max(max_undef, undef);
+        uniform                            &= row == 0 || fwd == fwd_upto[0];
+      }
+      if (max_fwd > 0 && max_undef > 0) {
+        return nullptr;
+      }
+      if (max_undef > 0) {
+        memory.order     = Mem::Order::none;
+        memory.n_user_wr = max_undef;
+      } else if (max_fwd == 0) {
+        memory.order     = Mem::Order::old;
+        memory.n_user_wr = memory.n_wr;
+      } else if (uniform) {
+        memory.order     = Mem::Order::fwd;
+        memory.n_user_wr = max_fwd;
+      } else {
+        memory.order     = Mem::Order::program;
+        memory.n_user_wr = max_fwd;
+        memory.fwd_upto  = std::move(fwd_upto);
+      }
+    }
+    memory.member = direct_layout(node.get_graph()).member.at(node.get_class_index());
+    return &direct_memory_cache.emplace(key, std::move(memory)).first->second;
+  };
+  const auto conditional_occurrence = [&](const hhds::Occurrence_node& occurrence) {
+    if (occurrence.path().steps().empty() || gio == nullptr || gio->get_library() == nullptr) {
+      return false;
+    }
+    const auto sub = gio->get_library()->get_node(occurrence.path().steps().back().subnode);
+    const auto sio = sub.get_subnode_io();
+    if (!sio || !sio->has_input("__valid")) {
+      return false;
+    }
+    const auto guard = get_driver(find_sink_pin(sub, "__valid"));
+    if (guard.is_invalid() || (is_const_pin(guard) && hydrate_const(guard).is_known_true())) {
+      return false;
+    }
+    // A definition forwarding its own activation is inside the same region,
+    // not a nested condition boundary.
+    return !livehd::graph_util::is_graph_input_pin(guard) || pin_name_of(guard) != "__valid";
+  };
+  // The direct rung consumes the plan's execution slots over the complete
+  // ordinary occurrence tree. Unsupported state protocols fail closed here;
+  // no state class is silently approximated by the retired module scheduler.
+  const bool staged_flat            = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
+                                      && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
+  bool       direct_color_supported = color_root;
+  if (direct_color_supported) {
+    const bool  color_debug      = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
+    const auto& hierarchy_clocks = hierarchy_clocks_for_root();
+    for (const auto& color : color_plan_->colors()) {
+      for (const size_t member : color.members) {
+        const auto& version = color_plan_->version_sites()[member];
+        const auto& site    = color_plan_->sites()[version.base_site];
+        const auto  op      = type_op_of(site.node.base_node());
+        if (op == Ntype_op::Sub) {
+          const bool supported = site.kind == livehd::sim::Color_plan::Site_kind::loop_control
+                                 && site.node.base_node().is_loop_subnode() && site.node.get_graph() == g
+                                 && !occurrence_member(site).empty();
+          if (color_debug && !supported) {
+            std::fprintf(stderr,
+                         "[color-direct] unsupported sub version role=%u depth=%zu loop=%s\n",
+                         static_cast<unsigned>(version.role),
+                         site.node.path().steps().size(),
+                         site.node.base_node().is_loop_subnode() ? "yes" : "no");
+          }
+          direct_color_supported &= supported;
+          continue;
+        }
+        if (version.role == livehd::sim::Color_plan::Version_role::state_read
+            || version.role == livehd::sim::Color_plan::Version_role::state_update) {
+          direct_color_supported
+              &= (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory)
+                 && !occurrence_member(site).empty();
+          if (op == Ntype_op::Memory) {
+            const auto* memory      = direct_memory(site);
+            direct_color_supported &= memory != nullptr && memory->registered();
+          }
+          if (op == Ntype_op::Latch) {
+            const auto& local_clocks = local_clocks_for(site.node.get_graph());
+            const auto  commit       = livehd::latch_contract::commit_class_of(site.node.base_node(), &local_clocks);
+            if (!commit.has_value()) {
+              direct_color_supported = false;
+            }
+          } else if (op != Ntype_op::Memory) {
+            const auto clock = livehd::latch_contract::sink_driver_hier(site.node, "clock_pin");
+            if (!clock.is_invalid()) {
+              const auto& local_clocks = local_clocks_for(site.node.get_graph());
+              if (type_op_of(clock.get_master_node().base_node()) == Ntype_op::Clock_cell) {
+                const auto reference    = livehd::latch_contract::sink_driver_hier(clock.get_master_node(), "clk_ref");
+                const auto root         = livehd::latch_contract::control_root(reference);
+                direct_color_supported &= !root.net.is_invalid() && hierarchy_clocks.is_clock(root.net);
+              } else if (const auto gate = livehd::latch_contract::clock_op_of(clock.base_pin(), local_clocks)) {
+                const auto root         = livehd::latch_contract::control_root(clock);
+                direct_color_supported &= gate->div == 1 && !root.net.is_invalid() && hierarchy_clocks.is_clock(root.net);
+              } else {
+                const auto root         = livehd::latch_contract::control_root(clock);
+                direct_color_supported &= !root.net.is_invalid() && hierarchy_clocks.is_clock(root.net);
+              }
+            }
+          }
+          continue;
+        }
+        auto output = site.node.base_node().get_driver_pin(0);
+        if (output.is_invalid()) {
+          for (const auto& candidate : site.node.base_node().out_pins()) {
+            output = candidate;
+            break;
+          }
+        }
+        direct_color_supported &= !output.is_invalid();
+      }
+    }
+  }
+  const bool taskflow_root = direct_color_supported && color_plan_->summary().versioning_complete
+                             && color_plan_->summary().version_dag_acyclic && color_plan_->summary().color_dag_acyclic
+                             && color_plan_->summary().boundary_one_writer && color_plan_->summary().boundary_dominance;
+
+  if (color_root) {
+    hout->append(absl::StrCat("// color-direct eligible=",
+                              taskflow_root ? "true" : "false",
+                              " staged=",
+                              staged_flat ? "true" : "false",
+                              " subs=",
+                              subs.size(),
+                              " vcd=",
+                              vcd_file.empty() ? "false" : "true",
+                              " local-shape=",
+                              direct_color_supported ? "true" : "false",
+                              " versioning=",
+                              color_plan_->summary().versioning_complete ? "true" : "false",
+                              " version-dag=",
+                              color_plan_->summary().version_dag_acyclic ? "true" : "false",
+                              " color-dag=",
+                              color_plan_->summary().color_dag_acyclic ? "true" : "false",
+                              " one-writer=",
+                              color_plan_->summary().boundary_one_writer ? "true" : "false",
+                              " dominance=",
+                              color_plan_->summary().boundary_dominance ? "true" : "false",
+                              " random=",
+                              color_plan_->summary().runtime_random ? "true" : "false",
+                              "\n"));
+    if (!taskflow_root) {
+      livehd::diag::err("inou.cgen.sim", "color-plan-not-lowerable", "unsupported")
+          .msg("module `{}` cannot be lowered by the occurrence-wide color scheduler", gname)
+          .hint(!direct_color_supported
+                    ? "the selected hierarchy contains a state or operation protocol without a direct color kernel"
+                    : (color_plan_->errors().empty() ? "inspect the generated .color-plan.txt report"
+                                                     : color_plan_->errors().front()))
+          .emit();
+      return;
+    }
+  }
+
+  // The direct emitter visits these relations once while planning generated
+  // source. Keeping the indices here avoids rescanning every boundary slot for
+  // every color/member (a quadratic code-generation cost on large designs).
+  std::vector<std::vector<size_t>>                                    direct_consumed_slots;
+  std::vector<std::vector<size_t>>                                    direct_dirty_slots;
+  std::vector<std::vector<size_t>>                                    direct_produced_slots;
+  std::vector<std::vector<size_t>>                                    direct_state_current_slots;
+  std::vector<std::vector<const livehd::sim::Color_plan::Value_use*>> direct_value_uses_by_consumer;
+  std::vector<std::string>                                            direct_slot_storage;
+  std::vector<std::string>                                            direct_input_prev_storage;
+  std::map<uint32_t, size_t>                                          direct_slot_width_counts;
+  std::map<uint32_t, size_t>                                          direct_input_width_counts;
+  size_t                                                              direct_seen_count         = 0;
+  size_t                                                              direct_state_commit_count = 0;
+  std::vector<bool>                                                   direct_random_color;
+  if (taskflow_root) {
+    direct_consumed_slots.resize(color_plan_->colors().size());
+    direct_dirty_slots.resize(color_plan_->colors().size());
+    direct_produced_slots.resize(color_plan_->version_sites().size());
+    direct_state_current_slots.resize(color_plan_->sites().size());
+    direct_value_uses_by_consumer.resize(color_plan_->version_sites().size());
+    direct_slot_storage.resize(color_plan_->boundary_slots().size());
+    direct_input_prev_storage.resize(color_plan_->boundary_slots().size());
+    for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
+      const auto& slot = color_plan_->boundary_slots()[slot_index];
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+        const size_t position           = direct_slot_width_counts[slot.width]++;
+        direct_slot_storage[slot_index] = absl::StrCat("__rt.__color_slot_", slot.width, "[", position, "]");
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input) {
+        const size_t position                 = direct_input_width_counts[slot.width]++;
+        direct_input_prev_storage[slot_index] = absl::StrCat("__rt.__color_input_prev_", slot.width, "[", position, "]");
+      }
+      if (slot.producer_version != livehd::sim::Color_plan::invalid_index) {
+        I(slot.producer_version < direct_produced_slots.size());
+        direct_produced_slots[slot.producer_version].push_back(slot_index);
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
+        I(slot.owner_site != livehd::sim::Color_plan::invalid_index && slot.owner_site < direct_state_current_slots.size());
+        direct_state_current_slots[slot.owner_site].push_back(slot_index);
+      }
+      absl::flat_hash_set<size_t> seen_colors;
+      for (const auto& consumer : slot.consumers) {
+        if (consumer.color == livehd::sim::Color_plan::invalid_index || !seen_colors.insert(consumer.color).second) {
+          continue;
+        }
+        I(consumer.color < direct_consumed_slots.size());
+        direct_consumed_slots[consumer.color].push_back(slot_index);
+        if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+            || slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input
+            || slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
+          direct_dirty_slots[consumer.color].push_back(slot_index);
+        }
+      }
+    }
+    for (const auto& slots : direct_dirty_slots) {
+      direct_seen_count += slots.size();
+    }
+    for (const auto& use : color_plan_->value_uses()) {
+      I(use.consumer_version < direct_value_uses_by_consumer.size());
+      direct_value_uses_by_consumer[use.consumer_version].push_back(&use);
+    }
+    direct_random_color.assign(color_plan_->colors().size(), false);
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      for (const size_t member : color_plan_->colors()[color_index].members) {
+        if (color_plan_->version_sites()[member].role == livehd::sim::Color_plan::Version_role::state_update) {
+          direct_state_commit_count = std::max(direct_state_commit_count, member + 1);
+        }
+        const auto& site = color_plan_->sites()[color_plan_->version_sites()[member].base_site];
+        if (type_op_of(site.node.base_node()) == Ntype_op::Memory) {
+          if (const auto* memory = direct_memory(site); memory != nullptr && memory->order == Mem::Order::none) {
+            direct_random_color[color_index] = true;
+          }
+        }
+        for (const auto& edge : site.node.inp_edges()) {
+          if (!is_const_pin(edge.driver)) {
+            continue;
+          }
+          const auto literal = hydrate_const(edge.driver.base_pin()).to_string();
+          direct_random_color[color_index]
+              = direct_random_color[color_index] || literal.find_first_of("?xXzZ") != std::string::npos;
+        }
+      }
+    }
+  }
+
+  // Very large occurrence plans can still have only a few hundred colors, but
+  // each color may contain thousands of straight-line operations. Keeping all
+  // of those cases in the root module .cpp makes one enormous host-compiler
+  // action (Minion was 119 MB). Partition contiguous color ranges into bounded
+  // member-count shards; the root dispatcher and runtime remain single-copy.
+  std::vector<std::pair<size_t, size_t>> direct_color_eval_shards;
+  if (taskflow_root && color_plan_->version_sites().size() > 65536) {
+    constexpr size_t kTargetMembersPerShard = 16384;
+    size_t           begin                  = 0;
+    size_t           members                = 0;
+    for (size_t color = 0; color < color_plan_->colors().size(); ++color) {
+      const size_t color_members = color_plan_->colors()[color].members.size();
+      if (color != begin && members + color_members > kTargetMembersPerShard) {
+        direct_color_eval_shards.emplace_back(begin, color);
+        begin   = color;
+        members = 0;
+      }
+      members += color_members;
+    }
+    if (begin < color_plan_->colors().size()) {
+      direct_color_eval_shards.emplace_back(begin, color_plan_->colors().size());
+    }
+  }
 
   hout->append("struct ", mod, " {\n");
+  if (taskflow_root) {
+    // The plan's slots, generations, tasks, and worker pool are body details.
+    // Keeping the nested type incomplete here makes a leaf body edit rewrite
+    // generated .cpp files only; a parent sees the same module ABI/header.
+    hout->append("  struct __Color_runtime;\n  std::shared_ptr<__Color_runtime> __color_runtime;\n");
+  }
   // Each state element carries its Q and, alongside it, the D it will take at
   // the next edge (`_din`) plus the boolean saying whether that edge fires for
   // it (`_cen`). Both are DERIVED: the settle recomputes them from Q and the
@@ -3506,7 +4316,30 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1) {  // sync read: registered dout
         hout->append(absl::StrCat("  Slop<", m.bits, "> ", m.member, "_q", p.rdidx, "{};  // sync read reg\n"));
+        if (taskflow_root) {
+          hout->append(absl::StrCat("  Slop<", m.bits, "> ", m.member, "_q", p.rdidx, "_din{};  // staged sync read\n"));
+        }
       }
+    }
+  }
+  if (taskflow_root) {
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      const auto& site = color_plan_->sites()[site_index];
+      if (type_op_of(site.node.base_node()) != Ntype_op::Memory) {
+        continue;
+      }
+      const auto* memory = direct_memory(site);
+      if (memory == nullptr || !memory->is_whole()) {
+        continue;
+      }
+      hout->append("  Slop<",
+                   std::to_string(memory->bits * memory->size),
+                   "> __color_whole_",
+                   std::to_string(site_index),
+                   "_din{};  // staged whole-array update\n");
+      hout->append("  bool __color_whole_",
+                   std::to_string(site_index),
+                   "_cen = false;  // whole-array update/reset fires at the phase barrier\n");
     }
   }
   for (const auto& s : subs) {
@@ -3591,17 +4424,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // entry value), so the run is skipped. This is what lets an idle or
   // clock-gated cone quiesce to a couple of integer compares per cycle.
   hout->append("  uint64_t __gen = 1;  // observable-change generation (inputs + state commits)\n");
-  hout->append("  uint64_t __done_pos = 0, __kids_pos = 0;\n");
-  if (has_fall) {
-    hout->append("  uint64_t __done_neg = 0, __kids_neg = 0;\n");
+  if (staged_flat && !subs.empty()) {
+    hout->append("  uint64_t __color_kids_before = 0;  // child generation snapshot across pre-rise -> commit\n");
   }
-  hout->append("  uint64_t __done_settle = 0, __kids_settle = 0;\n");
-  if (splits_ != nullptr) {
-    if (auto sitg = splits_->find(g); sitg != splits_->end()) {
-      for (size_t gi0 = 0; gi0 < sitg->second.size(); ++gi0) {
-        hout->append("  uint64_t __done_g", std::to_string(gi0), " = 0, __kids_g", std::to_string(gi0), " = 0;\n");
-      }
+  if (!color_storage_only) {
+    hout->append("  uint64_t __done_pos = 0, __kids_pos = 0;\n");
+    if (has_fall) {
+      hout->append("  uint64_t __done_neg = 0, __kids_neg = 0;\n");
     }
+    hout->append("  uint64_t __done_settle = 0, __kids_settle = 0;\n");
   }
   // 2f-sim B: the outputs this instance last computed DURING the period --
   // recorded by cycle() before it commits, so it is the value the output drove
@@ -3613,42 +4444,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // design_hash — it is recomputed by the next cycle() and must not change the
   // checkpoint layout or its compatibility hash.
   hout->append("  Out __last_out{};\n");
-  // The SETTLED outputs of the CURRENT committed state: what the design drives
-  // once this period's edge has been taken. __settle() recomputes it from the
-  // committed members, and cycle() calls __settle() on its way out, so a
-  // testbench read after `step` observes the post-edge value -- exactly what the
+  // The POST-FALL outputs of the CURRENT committed state: what the design drives
+  // once this period's color schedule has completed. A testbench read after
+  // `step` observes this post-edge value -- exactly what the
   // old peek(__in) returned, but as a plain member a `sigref` can bind ONCE and
   // hold for the whole run instead of an O(total design state) snapshot/restore
   // per read. Also DERIVED: out of dump_state/load_state/design_hash for the
   // same reason as __last_out (reset_cycle() re-settles it after a load).
   hout->append("  Out __out{};\n");
-  // Slice-group EXPORT members: one Slop per published bit range (see the
-  // slice-export block in the period body). Written only by `__settle_g<k>`.
-  if (splits_ != nullptr) {
-    if (auto sit0 = splits_->find(g); sit0 != splits_->end()) {
-      for (size_t gi0 = 0; gi0 < sit0->second.size(); ++gi0) {
-        const auto& sg0 = sit0->second[gi0];
-        for (size_t j0 = 0; j0 < sg0.outs.size(); ++j0) {
-          if (sg0.outs[j0].len == 0) {
-            continue;
-          }
-          hout->append(absl::StrCat("  Slop<",
-                                    sg0.outs[j0].len,
-                                    "> __ps_g",
-                                    gi0,
-                                    "_",
-                                    j0,
-                                    "{};  // slice export, out pid ",
-                                    sg0.outs[j0].pid,
-                                    " [",
-                                    sg0.outs[j0].lo + sg0.outs[j0].len - 1,
-                                    ":",
-                                    sg0.outs[j0].lo,
-                                    "]\n"));
-        }
-      }
-    }
-  }
 
   // ---- VCD trace state (compile.sim.vcd): traces In, Out, and flop state of
   // EVERY module -- the root instance (the one the driver hands a __vcd_path)
@@ -3695,9 +4498,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     for (const auto& f : flops) {
-      add(f.member, f.bits, f.member, f.posedge);
+      bool vcd_posedge = f.posedge;
+      if (f.is_latch) {
+        const auto commit = livehd::latch_contract::commit_class_of(f.node, &design_clocks);
+        if (commit.has_value() && commit->role == livehd::latch_contract::Net_role::Clock) {
+          const auto enable = get_driver(find_sink_pin(f.node, "enable"));
+          const auto root   = livehd::latch_contract::control_root(enable);
+          vcd_posedge       = root.inverted;  // transparent-low closes on rise; transparent-high on fall
+        }
+      }
+      add(f.member, f.bits, f.member, vcd_posedge);
       for (const auto& s : f.stages) {
-        add(s, f.bits, s, f.posedge);
+        add(s, f.bits, s, vcd_posedge);
       }
     }
     // shared_ptr (not unique_ptr) so a DUT struct stays COPYABLE: a hierarchical
@@ -3743,9 +4555,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   };
   const std::string clk_name_baked = uniquify_label(clk_label);
 
-  // Clock waveform config + the VCD path / period counter. Plain scalars on every
-  // module; the driver sets the path + clock ratio/name on each instance.
-  {
+  // Clock waveform config exists only in a VCD build. An ordinary simulator
+  // must not carry per-instance strings/counters for a disabled feature.
+  if (vcd_on) {
     // A baked FILE path lands only on the --top module: with the machinery now on
     // every module, baking it everywhere would have each sub-instance lazily open
     // the same file as its own root writer.
@@ -3762,17 +4574,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     hout->append("  void __vcd_hier(vcd::VCDWriter* __w, const std::string& __s);\n");
     hout->append("  void __vcd_clk(vcd::VCDWriter* __w, bool __rise);\n");
     hout->append("  void __vcd_dump_in(vcd::VCDWriter* __w);\n");
+    hout->append("  void __vcd_snapshot(bool __pos);  // occurrence-wide pre-commit observation barrier\n");
+    hout->append("  void __vcd_publish_period();  // root timestamp-ordered publish after Taskflow quiesces\n");
     if (vcd_fakedelay) {
       hout->append("  void __vcd_dump_x(vcd::VCDWriter* __w, bool __pos, bool __root);\n");
     }
     hout->append("  void __vcd_dump_data(vcd::VCDWriter* __w, bool __pos, bool __root);\n");
   }
   hout->append("  void reset_cycle(bool zero_uninitialized = false);\n");
-  // The two halves of a tick, each callable on its own so a PARENT can order a
-  // child's phases (a negedge consumer in the parent needs the child's fall to
-  // have happened, but not its rise a second time). `eval_negedge` is emitted
-  // only for a module that has negedge state -- dino has none, so it runs one
-  // pass per tick exactly as before.
+  if (taskflow_root) {
+    hout->append("  void __color_quiesce() { __color_runtime.reset(); }  // join workers before fork-based checkpoints\n");
+  } else {
+    hout->append("  void __color_quiesce() {}  // uniform root checkpoint hook\n");
+  }
+  // Compact-loop definitions expose phase-specific body kernels so the one
+  // native ordinal task can bind and run each state version without expanding
+  // the loop. Ordinary hierarchy definitions expose storage only; their logic
+  // belongs exclusively to the root occurrence-wide color DAG.
   // PORTS ARE MEMBERS (`__in`): a caller writes `child.__in.<field> = ...`
   // directly and the eval methods take NO argument — no fresh In per call, no
   // by-value struct copy at each boundary, and every instance's checkpoint
@@ -3782,12 +4600,30 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // to hardware, and the direction that made the whole-array In-drop loud
   // instead of silently-zero. This is also the substrate for change-gated
   // evaluation (an unchanged `__in` + unadvanced state can skip a settle).
-  hout->append("  void eval_posedge();  // rise: comb from pre-edge state, then commit posedge state\n");
-  if (has_fall) {
-    hout->append("  void eval_negedge();  // fall: the negedge cones, re-read post-rise, then commit them\n");
+  if (!taskflow_root && !color_storage_only && staged_flat) {
+    hout->append("  void __color_pre_rise();  // evaluate pre-rise colors and park pending state\n");
+    hout->append("  void __color_rise_commit();  // state-only rise action; no combinational evaluation\n");
+    hout->append("  void __color_post_fall();  // publish the post-fall output versions\n");
+  } else if (!taskflow_root && !color_storage_only) {
+    hout->append("  void __compact_pre_rise();  // rise: comb from pre-edge state, then commit posedge state\n");
   }
-  if (has_refresh) {
-    hout->append("  void refresh_negedge();  // refresh nested mixed-edge state after post-rise inputs settle\n");
+  if (taskflow_root) {
+    hout->append("  void __color_prepare_taskflow();  // bind storage and construct persistent Taskflow graphs once\n");
+    hout->append("  void __color_refresh_inputs();  // publish root inputs into versioned boundary generations\n");
+    hout->append("  void __color_reset_settle();  // publish post-fall colors without advancing state\n");
+    hout->append("  void __color_run_serial();  // generated topological backend for the default/single-worker path\n");
+    hout->append("  void __color_run_taskflow();  // lazily build once, then run the reusable root schedule\n");
+    hout->append("  void __color_eval(std::size_t color);  // indexed body-private color dispatcher\n");
+    for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
+      hout->append("  void __color_eval_part_", std::to_string(shard), "(std::size_t color);\n");
+    }
+    hout->append("  void __color_commit_taskflow(std::size_t slot);  // commit staged state at a phase barrier\n");
+  }
+  if (has_fall && !taskflow_root && !color_storage_only) {
+    hout->append("  void __compact_fall();  // fall: the negedge cones, re-read post-rise, then commit them\n");
+  }
+  if (has_refresh && !taskflow_root && !color_storage_only) {
+    hout->append("  void __compact_refresh();  // refresh nested mixed-edge state after post-rise inputs settle\n");
   }
   // One ROOT clock edge is SETTLE -> COMMIT -> SETTLE. cycle()'s body settles
   // the comb cone from the pre-edge state (computing both `o`/__last_out and
@@ -3802,32 +4638,48 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // settled against the PREVIOUS period's `__in` would make every driven input
   // land one cycle late (`acc.reset = clock < 2` would reset cycles 1-2, not
   // 0-1). Both settles are load-bearing and they settle against different state.
-  hout->append("  const Out& cycle(bool __finish = true) {  // one clock period (inputs already written into __in)\n");
-  hout->append("    eval_posedge();\n");
-  if (has_fall) {
-    hout->append("    eval_negedge();\n");
-  }
-  hout->append("    if (__finish) __settle();  // cyclic boundaries and the root need a post-edge output view\n");
-  if (has_refresh) {
-    hout->append("    if (__finish) refresh_negedge();  // only after post-rise inputs have propagated\n");
-  }
-  hout->append("    return __last_out;  // the during-period outputs the rise recorded\n");
-  hout->append("  }\n");
-  // The testbench writes __in fields directly (no compare-on-write), so step()
-  // force-bumps __gen: the top instance always evaluates; gating lives at the
-  // instance boundaries below it.
-  hout->append("  void step() { ++__gen; cycle(); }  // drive __in, then advance one clock\n");
-  hout->append("  void __settle();  // recompute __out from the CURRENT committed state; no commit, no VCD, no state change\n");
-  // Per-output-group settle methods (callee partitioning): declared only for
-  // definitions some parent instantiates on a word-level cycle.
-  if (splits_ != nullptr) {
-    if (auto sit = splits_->find(g); sit != splits_->end()) {
-      for (size_t gi = 0; gi < sit->second.size(); ++gi) {
-        hout->append("  void __settle_g",
-                     std::to_string(gi),
-                     "();  // group settle: only the output cones sharing one input-support\n");
+  if (!color_storage_only) {
+    hout->append("  const Out& ",
+                 compact_kernel_ ? "__compact_advance()" : "cycle(bool __finish = true)",
+                 " {  // one clock period (inputs already written into __in)\n");
+    if (taskflow_root) {
+      hout->append("    (void)__finish;  // selected hierarchy roots always own the complete period\n");
+      if (workers_ <= 1) {
+        hout->append("    __color_run_serial();  // auto/one worker avoids per-period Taskflow dispatch overhead\n");
+      } else {
+        hout->append("    __color_run_taskflow();\n");
       }
+      hout->append("    return __last_out;\n");
+    } else {
+      if (staged_flat) {
+        hout->append("    __color_pre_rise();\n");
+        hout->append("    __color_rise_commit();\n");
+      } else {
+        hout->append("    __compact_pre_rise();\n");
+      }
+      if (has_fall) {
+        hout->append("    __compact_fall();\n");
+      }
+      hout->append("    return __last_out;  // the during-period outputs the rise recorded\n");
     }
+    hout->append("  }\n");
+    // The testbench writes __in fields directly (no compare-on-write), so step()
+    // force-bumps __gen: the top instance always evaluates; gating lives at the
+    // instance boundaries below it.
+    if (compact_kernel_) {
+      hout->append("  void __compact_publish() { ", staged_flat ? "__color_post_fall" : "__compact_post_fall", "();");
+      if (has_refresh) {
+        hout->append(" __compact_refresh();");
+      }
+      hout->append(" }\n");
+    } else {
+      hout->append("  void step() { ++__gen; cycle(); }  // drive __in, then advance one clock\n");
+    }
+  }
+  if (!taskflow_root && !color_storage_only && staged_flat) {
+    // __compact_publish() above directly calls the staged post-fall body.
+  } else if (!taskflow_root && !color_storage_only) {
+    hout->append("  void __compact_post_fall();  // publish CURRENT committed-state outputs without another advance\n");
   }
   // Editable, name-keyed checkpoint (sim_checkpoint_debug_plan): flops/regs ->
   // the `_r` map keyed by the hierarchical `_p`+member name (pyrope literal),
@@ -3851,6 +4703,61 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  void observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const;\n");
   hout->append("  bool observe_mem(const std::string& _n, long _i, std::string& _o) const;\n");
   hout->append("};\n");
+
+  if (taskflow_root) {
+    const std::string worker_count        = workers_ <= 1 ? "1" : std::to_string(workers_);
+    const std::string runtime_header_name = fstem + ".color-runtime.hpp";
+    auto              runtime_header
+        = std::make_shared<File_output>(odir.empty() ? runtime_header_name : absl::StrCat(odir, "/", runtime_header_name));
+    runtime_header->append("// Generated simulator color runtime. Do not edit.\n#pragma once\n");
+    runtime_header->append("#include \"", fstem, ".hpp\"\n");
+    runtime_header->append("#include <atomic>\n#include <mutex>\n#include <taskflow/taskflow.hpp>\n\n");
+    runtime_header->append("struct ", mod, "::__Color_runtime {\n");
+    if (workers_ > 1) {
+      runtime_header->append("  tf::Executor executor;\n");
+    }
+    runtime_header->append(
+        "  tf::Taskflow graph;\n"
+        "  std::vector<std::unique_ptr<tf::Taskflow>> __conditional_graphs;\n"
+        "  std::vector<std::unique_ptr<tf::Taskflow>> __conditional_region_graphs;\n"
+        "  const void* owner = nullptr;\n"
+        "  bool __color_input_changed = false;\n"
+        "  bool __color_quiescent = false;\n");
+    if (color_plan_->summary().runtime_random && workers_ > 1) {
+      runtime_header->append(
+          "  tf::Executor __random_executor{1};  // deterministic PRNG partition, independent of sim.workers\n"
+          "  std::vector<std::unique_ptr<tf::Taskflow>> __random_graphs;\n"
+          "  std::atomic<uint64_t> __random_draws{0};\n");
+    }
+    if (workers_ > 1) {
+      runtime_header->append("  std::mutex __memory_eval_mutex;\n");
+    }
+    for (const auto& [width, count] : direct_slot_width_counts) {
+      runtime_header->append(absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_slot_", width, "{};\n"));
+    }
+    for (const auto& [width, count] : direct_input_width_counts) {
+      runtime_header->append(absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_input_prev_", width, "{};\n"));
+    }
+    runtime_header->append("  std::array<uint64_t, ", std::to_string(color_plan_->boundary_slots().size()), "> __color_gen{};\n");
+    runtime_header->append("  std::array<uint64_t, ", std::to_string(direct_seen_count), "> __color_seen{};\n");
+    runtime_header->append("  bool __color_state_changed = false;\n");
+    runtime_header->append("  std::array<bool, ", std::to_string(color_plan_->colors().size()), "> __color_dirty{};\n");
+    runtime_header->append("  std::array<bool, ", std::to_string(direct_state_commit_count), "> __state_commit{};\n");
+    runtime_header->append("  std::array<uint64_t (*)(void**), ",
+                           std::to_string(color_plan_->colors().size()),
+                           "> __color_kernel{};\n");
+    runtime_header->append("  std::array<std::vector<void*>, ",
+                           std::to_string(color_plan_->colors().size()),
+                           "> __color_bindings{};\n");
+    if (workers_ > 1) {
+      runtime_header->append("  __Color_runtime() : executor(",
+                             worker_count,
+                             ") { __color_gen.fill(1); __color_dirty.fill(true); }\n};\n");
+    } else {
+      runtime_header->append("  __Color_runtime() { __color_gen.fill(1); __color_dirty.fill(true); }\n};\n");
+    }
+    fout->append("#include \"", runtime_header_name, "\"\n");
+  }
 
   // ---- VCD method definitions (source): __vcd_init (root-only entry) plus the
   // recursive registration/dump walkers every module carries. The root's writer
@@ -4007,6 +4914,44 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append(absl::StrCat("  ", s.inst, ".__vcd_dump_data(__w, __pos, false);\n"));
     }
     fout->append("}\n");
+
+    // Direct-color execution no longer enters each child's cycle(), so the
+    // pre-commit snapshots are one explicit occurrence-wide barrier. Outputs
+    // have already been captured in __last_out by their pre-rise colors.
+    fout->append("void ", mod, "::__vcd_snapshot(bool __pos) {\n");
+    for (const auto& v : vsig) {
+      std::string accessor = v.accessor;
+      if (accessor.starts_with("__o.")) {
+        accessor.replace(0, 4, "__last_out.");
+      }
+      fout->append(absl::StrCat("  if (__pos == ", v.posedge ? "true" : "false", ") ", v.snap, " = ", accessor, ";\n"));
+    }
+    for (const auto& s : subs) {
+      fout->append("  ", s.inst, ".__vcd_snapshot(__pos);\n");
+    }
+    fout->append("}\n");
+
+    fout->append("void ", mod, "::__vcd_publish_period() {\n");
+    fout->append("  if (!__vcd && !__vcd_path.empty()) __vcd_init();\n");
+    fout->append("  if (__vcd) {\n");
+    fout->append("    const unsigned __b = __vcd_tick * 10;\n");
+    fout->append("    const unsigned __half = (__clk_ratio > 0 ? __clk_ratio : 1) * 5;\n");
+    fout->append("    vcd::global_timestamp = __b;\n");
+    fout->append("    __vcd_clk(__vcd.get(), true);\n");
+    fout->append("    __vcd_dump_in(__vcd.get());\n");
+    if (vcd_fakedelay) {
+      fout->append("    __vcd_dump_x(__vcd.get(), true, true);\n");
+      fout->append("    vcd::global_timestamp = __b + 3;\n");
+    }
+    fout->append("    __vcd_dump_data(__vcd.get(), true, true);\n");
+    fout->append("    vcd::global_timestamp = __b + __half;\n");
+    fout->append("    __vcd_clk(__vcd.get(), false);\n");
+    if (vcd_fakedelay) {
+      fout->append("    __vcd_dump_x(__vcd.get(), false, true);\n");
+      fout->append("    vcd::global_timestamp = __b + __half + 3;\n");
+    }
+    fout->append("    __vcd_dump_data(__vcd.get(), false, true);\n");
+    fout->append("  }\n}\n");
   }
 
   // ---- reset_cycle: establish each state element's power-on value (using the
@@ -4099,15 +5044,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // covers load_state(): __out is derived, absent from the checkpoint, and this
   // is what re-derives it after a restore.
   fout->append("    ++__gen;  // state re-initialized: every gated evaluation must recompute\n");
-  fout->append("    __settle();\n");
+  if (taskflow_root) {
+    fout->append("    __color_reset_settle();\n");
+  } else if (compact_kernel_) {
+    fout->append("    __compact_publish();\n");
+  }
   fout->append("}\n");
 
-  // ---- cycle() and __settle(): ONE emitter, run twice ----
-  // A clock period is settle -> commit -> settle. The body below IS the first
-  // settle plus the commit (it binds flop Q to the pre-edge member, walks the
-  // comb cone, then commits); running the SAME emitter with `settle` set drops
-  // every state-mutating statement and retargets the outputs at the `__out`
-  // member, which is the trailing settle. cycle() calls it as its last act.
+  // ---- compact-loop body kernels ----
+  // Ordinary hierarchy never reaches this emitter: it is storage-only and the
+  // root color DAG owns evaluation. A compact loop instead reuses one generated
+  // definition body across ordinals. The body below emits its pre-rise/fall and
+  // post-fall versions as dedicated compact kernels; the outer loop control
+  // color walks each required version once per ordinal without source unrolling.
   //
   // Emitting one body twice (rather than a hand-written second walker) is what
   // keeps the two passes from drifting: the ordering rules here -- the false-loop
@@ -4127,63 +5076,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // them would leave the output cone unbound and operand() would quietly
   // substitute a constant 0.
   //
-  // Set while emitting __settle(): a sub-instance must be SETTLED (comb only),
-  // never cycled, or the trailing settle of every period would advance the whole
-  // sub-tree a second time.
-  bool settle_mode = false;
+  // In the post-fall version a nested compact kernel publishes combinational
+  // outputs only; it must never advance state a second time.
+  bool        settle_mode     = false;
+  std::string staged_kids_sum = "0ULL";
+  for (const auto& s : subs) {
+    absl::StrAppend(&staged_kids_sum, " + ", s.inst, ".__gen");
+  }
   // The three emissions of one clock period. Rise and Fall are the two halves of
   // the tick; Settle is the trailing comb refresh that keeps `__out` (and any
   // `sigref` bound to it) current. A module with no negedge state emits no Fall
   // at all, so dino stays exactly one pass per tick.
   enum class Pass { Rise, Fall, Settle };
-  // OUTPUT-GROUP emission state (the no-inlining callee partitioning). When a
-  // group is active, the settle body is restricted to that group's output
-  // cones and writes only that group's `__out` fields, emitted as
-  // `__settle_g<idx>(In)`. `nullptr` = the ordinary full passes.
-  const Split_group*                         active_group     = nullptr;
-  int                                        active_group_idx = -1;
-  // Output field -> port id (the group tables speak pids; `ios` speaks names).
-  absl::flat_hash_map<std::string, uint32_t> out_field2pid;
-  if (gio) {
-    for (const auto& d : gio->get_output_pin_decls()) {
-      for (const auto& io : ios) {
-        if (!io.is_input && io.raw == d.name) {
-          out_field2pid[io.field] = static_cast<uint32_t>(d.port_id);
-          break;
-        }
-      }
-    }
-  }
   absl::flat_hash_set<hhds::Class_index> settle_cone;
-  auto                                   build_settle_cone = [&](const Split_group* group) {
+  auto                                   build_settle_cone = [&] {
     settle_cone.clear();
     std::vector<hhds::Pin_class> work;
-    if (group != nullptr) {
-      for (const auto& o : group->outs) {
-        if (o.len != 0 && !o.leaf.is_invalid()) {
-          work.push_back(o.leaf);  // slice: only THIS range's producing cone
-          continue;
-        }
-        for (const auto& d : gio->get_output_pin_decls()) {
-          if (static_cast<uint32_t>(d.port_id) != o.pid) {
-            continue;
-          }
-          auto spin = g->get_output_pin(d.name);
-          if (!spin.is_invalid()) {
-            work.push_back(get_driver(spin));
-          }
-          break;
-        }
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        continue;
       }
-    } else {
-      for (const auto& io : ios) {
-        if (io.is_input) {
-          continue;
-        }
-        auto spin = g->get_output_pin(io.raw);
-        if (!spin.is_invalid()) {
-          work.push_back(get_driver(spin));
-        }
+      auto spin = g->get_output_pin(io.raw);
+      if (!spin.is_invalid()) {
+        work.push_back(get_driver(spin));
       }
     }
     absl::flat_hash_set<pin_key_t> seen;
@@ -4203,7 +5118,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
   };
-  build_settle_cone(nullptr);
+  build_settle_cone();
 
   // Every operand port a state element's next-value/guard emission reads.
   static constexpr std::array<const char*, 4> flop_operand_ports{"din", "enable", "reset_pin", "initial"};
@@ -4275,15 +5190,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
+  // The word-level cycle classification depends only on the module graph.  In
+  // particular, it is identical for rise/fall/settle and for every split-output
+  // settle body.  Keep it outside emit_period_body: large generated designs can
+  // have hundreds of output groups, and recomputing this whole-graph analysis
+  // for each group made simulator emission scale with groups * graph-size.
+  absl::flat_hash_set<hhds::Node_class> sched_cycle;
+  livehd::graph_util::word_level_cycle_nodes(g, /*strict=*/true, sched_cycle, &live_);
+
   auto emit_period_body = [&](Pass pass_) -> bool {
     const bool settle     = pass_ == Pass::Settle;
     const bool fall       = pass_ == Pass::Fall;
-    // Where this method's text begins: the dead-temporary sweep detaches and
-    // rewrites exactly this region once the body is closed (see strip_dead_temps).
+    // Where this method's text begins: the temporary sweeps detach and rewrite
+    // exactly this region once the body is closed (see compact_body_temps).
     const auto body_mark  = fout->mark();
     auto       close_body = [&] {  // call on EVERY successful exit (the settle closes early, below)
       auto body = fout->detach_from(body_mark);
-      strip_dead_temps(body);
+      compact_body_temps(body);
       fout->append(body);
     };
     // `settle_mode` means "do NOT advance a child" -- true for the fall as well as
@@ -4304,13 +5227,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       pin2var.clear();
       canonical_.clear();
       seq_volatile_.clear();
-      if (active_group != nullptr) {
-        fout->append("void ", mod, "::__settle_g", std::to_string(active_group_idx), "() {\n");
-      } else {
-        fout->append("void ", mod, "::", settle ? "__settle" : "eval_negedge", "() {\n");
-      }
+      fout->append("void ",
+                   mod,
+                   "::",
+                   settle && staged_flat ? "__color_post_fall"
+                   : settle              ? "__compact_post_fall"
+                                         : "__compact_fall",
+                   "() {\n");
     } else {
-      fout->append("void ", mod, "::eval_posedge() {\n");
+      fout->append("void ", mod, "::", staged_flat ? "__color_pre_rise" : "__compact_pre_rise", "() {\n");
     }
     // ---- CHANGE-GATED evaluation (see the __gen comment in the header). Skip
     // when this method last ENTERED with the same (own __gen, sum of child
@@ -4322,10 +5247,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // under VCD (a skipped body would freeze __vcd_tick and the waveform). ----
     std::string gate_done, gate_kids, gate_ksum;
     if (vcd_file.empty() && ::getenv("LIVEHD_SIM_NOGATE") == nullptr) {
-      if (active_group != nullptr) {
-        gate_done = absl::StrCat("__done_g", active_group_idx);
-        gate_kids = absl::StrCat("__kids_g", active_group_idx);
-      } else if (pass_ == Pass::Rise) {
+      if (pass_ == Pass::Rise) {
         gate_done = "__done_pos";
         gate_kids = "__kids_pos";
       } else if (fall) {
@@ -4371,14 +5293,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // are untouched). ----
     absl::flat_hash_set<hhds::Class_index>                                 moore_deferred;
     std::vector<const Sub*>                                                deferred_moore;
-    // GROUP-SCHEDULED instances (callee partitioning): outputs bind on demand
-    // through `__settle_g<k>` calls, the atomic advance defers to after the walk.
-    absl::flat_hash_set<hhds::Class_index>                                 group_sched;
-    std::vector<const Sub*>                                                deferred_group;
-    // (instance, group) pairs already evaluated this pass, and the subset whose
-    // emission is CURRENTLY on the demand stack (a re-entry = the genuine cycle).
-    absl::flat_hash_set<std::pair<hhds::Class_index, int>>                 emitted_groups;
-    absl::flat_hash_set<std::pair<hhds::Class_index, int>>                 inflight_groups;
     absl::flat_hash_set<hhds::Class_index>                                 fall_deferred;
     std::vector<const Sub*>                                                deferred_fall;
     // Per-OUTPUT-cone deferral (Stage-2): a MEALY callee (some comb in->out path,
@@ -4414,11 +5328,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return it->second.contains(pid);
     };
-    // Nodes the SINGLE-PASS schedule sees on a word-level cycle (Sub and Memory as
-    // ordinary nodes — exactly what `forward_class` does below).
-    absl::flat_hash_set<hhds::Node_class> sched_cycle;
-    livehd::graph_util::word_level_cycle_nodes(g, /*strict=*/true, sched_cycle);
-
     for (const auto& s : subs) {
       if (s.loop) {
         // A descriptor carry self-edge is the eager chain inside the compact
@@ -4511,69 +5420,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       const bool                    moore = moore_capable;
       absl::flat_hash_set<uint32_t> state_only;
-      const bool                    groups_avail = splits_ != nullptr && [&] {
-        auto cg2 = s.node.get_subnode_graph();
-        return cg2 && splits_->contains(cg2.get());
-      }();
-      // A NEGEDGE-ONLY callee ON A RING takes the GROUP path (its comb cones
-      // answer demands per group in every pass), with the atomic advance placed
-      // in the parent's FALL by the deferred_group emission — the fall_deferred
-      // path would pre-bind its ring-feeding comb output one period STALE (the
-      // fall rebuilds inputs from `__out` refreshed at the PREVIOUS period's
-      // fall; tests/sim/neg_flop_in_callee_ring.prp).
-      const bool neg_group = s.negedge_only && on_cycle && groups_avail;
-      if (s.negedge_only && !neg_group) {
+      if (s.negedge_only) {
         fall_deferred.insert(s.node.get_class_index());
-      } else if (moore && !neg_group) {
+      } else if (moore) {
         moore_deferred.insert(s.node.get_class_index());
       } else {
-        state_only = callee_state_only_outputs(s.node.get_subnode_graph(), s.node.get_subnode_io());
-        if (on_cycle && groups_avail) {
-          // Callee partitioning owns the ordering: outputs bind on demand via
-          // `__settle_g<k>`, the atomic advance defers, and the INPUT-INDEPENDENT
-          // outputs take the cheaper `__pre` prebind below. The prebind set comes
-          // from the REGISTRY (an output in no group has empty comb support per
-          // the hierarchical port-reach summaries), NOT from the local
-          // classifier: that one conservatively disqualifies any output whose
-          // cone passes through a nested Sub, and minion's txfmactl reaches its
-          // state-only control decodes through comb ROM-lookup callees — leaving
-          // them neither prebound nor group-callable refused the whole cone.
-          group_sched.insert(s.node.get_class_index());
-          auto                          cg2 = s.node.get_subnode_graph();
-          auto                          sit = splits_->find(cg2.get());
-          absl::flat_hash_set<uint32_t> grouped;
-          for (const auto& sg : sit->second) {
-            for (const auto& o : sg.outs) {
-              grouped.insert(o.pid);
-            }
+        state_only          = callee_state_only_outputs(s.node.get_subnode_graph(), s.node.get_subnode_io());
+        bool all_state_only = true;
+        for (auto pid : fed_back) {
+          if (!state_only.contains(pid)) {
+            all_state_only = false;
+            break;
           }
-          state_only.clear();
-          if (auto sio2 = s.node.get_subnode_io(); sio2) {
-            for (const auto& od : sio2->get_output_pin_decls()) {
-              if (!grouped.contains(static_cast<uint32_t>(od.port_id))) {
-                state_only.insert(static_cast<uint32_t>(od.port_id));
-              }
-            }
-          }
-          if (state_only.empty()) {
-            continue;  // nothing to prebind
-          }
-        } else {
-          bool all_state_only = true;
-          for (auto pid : fed_back) {
-            if (!state_only.contains(pid)) {
-              all_state_only = false;
-              break;
-            }
-          }
-          if (!all_state_only) {
-            continue;  // genuine comb feedback -> the loud Stage-0 diagnostic below
-          }
-          if (fed_back.empty() && state_only.empty()) {
-            continue;  // on-cycle Mealy with nothing pre-bindable: nothing to gain
-          }
-          mealy_prebound.insert(s.node.get_class_index());
         }
+        if (!all_state_only) {
+          continue;  // genuine comb feedback -> the loud Stage-0 diagnostic below
+        }
+        if (fed_back.empty() && state_only.empty()) {
+          continue;  // on-cycle Mealy with nothing pre-bindable: nothing to gain
+        }
+        mealy_prebound.insert(s.node.get_class_index());
       }
       // The child's outputs for its CURRENT committed state are exactly what its
       // own trailing settle left in `__out` -- which is what the old
@@ -5118,9 +5984,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // a re-settle), never `cycle()`, so there is no `<inst>__o` snapshot to
         // name: like settle mode, its outputs bind straight at `__out`, which
         // the re-settle just refreshed. This IS reachable with `settle_mode`
-        // false -- the deferred_group advance clears it for exactly this case
-        // (advance = negedge_only ? Fall : Rise) -- and reading `<inst>__o`
-        // there named an undeclared identifier in the generated C++.
+        // false for a fall-only child, and reading `<inst>__o` there would name
+        // an undeclared identifier in the generated C++.
         const bool        fall_advance  = fall && s.negedge_only;
         const bool        out_is_member = settle_mode || fall_advance;
         if (runtime_skip && !out_is_member) {
@@ -5200,19 +6065,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // from the parent's COMMITTED state, and its outputs are read from its
         // own __out member. cycle() would advance it a second time in the period.
         if (fall_advance) {
-          fout->append(absl::StrCat("    ", s.inst, ".eval_negedge();\n"));
-          fout->append(absl::StrCat("    ", s.inst, ".__settle();\n"));
+          fout->append(absl::StrCat("    ", s.inst, ".__compact_fall();\n"));
+          fout->append(absl::StrCat("    ", s.inst, ".__compact_publish();\n"));
         } else if (settle_mode) {
-          fout->append(absl::StrCat("    ", s.inst, ".__settle();\n"));
+          fout->append(absl::StrCat("    ", s.inst, ".__compact_publish();\n"));
+        } else if (staged_flat) {
+          // This parent was admitted only when every child is an ordinary,
+          // acyclic staged definition on the same reference rise. Evaluate
+          // its pre-rise colors in the parent's window and bind the preserved
+          // pre-rise observation directly. The recursive commit happens only
+          // after the whole parent cone has parked its pending values.
+          fout->append(absl::StrCat("    ", s.inst, ".__color_pre_rise();\n"));
+          fout->append(absl::StrCat("    const auto& ", s.inst, "__o = ", s.inst, ".__last_out;\n"));
         } else if (runtime_skip) {
-          fout->append(
-              absl::StrCat("    ", s.inst, "__o = &", s.inst, sched_cycle.contains(node) ? ".cycle();\n" : ".cycle(false);\n"));
+          fout->append(absl::StrCat("    ", s.inst, "__o = &", s.inst, ".__compact_advance();\n"));
         } else {
-          fout->append(absl::StrCat("    const auto& ",
-                                    s.inst,
-                                    "__o = ",
-                                    s.inst,
-                                    sched_cycle.contains(node) ? ".cycle();\n" : ".cycle(false);\n"));
+          fout->append(absl::StrCat("    const auto& ", s.inst, "__o = ", s.inst, ".__compact_advance();\n"));
         }
         if (runtime_skip) {
           fout->append("    }\n");
@@ -5227,687 +6095,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         break;
-      }
-    };
-
-    // ---- GROUP evaluation of a group-scheduled instance (slice-aware) ----
-    // A demanded output pin triggers exactly the group(s) that compute it. A
-    // whole-port group binds the pin from a `__out` snapshot as before; SLICE
-    // groups publish `__ps_g<k>_<j>` exports, and a whole-pin demand assembles
-    // them once every covering group has run. In-fills are per SUPPORT ATOM:
-    // a (pid, lo, len) atom fills only those bits of the callee's In field,
-    // sliced out of the parent net by `slice_operand` — this is what lets two
-    // packed buses exchange disjoint fields in one cycle without a false cycle.
-    std::function<bool(const hhds::Node_class&, int)>                           emit_one_group;
-    std::function<std::string(const hhds::Pin_class&, uint32_t, uint32_t, int)> slice_operand;
-    std::function<void(const hhds::Pin_class&)>                                 ensure_ready_fn;  // set below
-
-    // Slice [lo, lo+len) of the value a pin carries, as a Slop<len> expression.
-    // Returns "" when the shape cannot be sliced (caller falls back to a whole
-    // read, which may in turn refuse loudly on a genuine cycle).
-    slice_operand = [&](const hhds::Pin_class& pin, uint32_t lo, uint32_t len, int depth) -> std::string {
-      if (pin.is_invalid() || len == 0 || depth > 32) {
-        return {};
-      }
-      auto whole_slice = [&]() -> std::string {
-        auto w = operand(pin, static_cast<int>(lo + len));
-        if (lo == 0) {
-          return absl::StrCat("(", w, ").zext_to<", len, ">()");
-        }
-        return absl::StrCat("Slop<", len, ">::sra_op(", w, ", ", lo, ")");
-      };
-      if (is_const_pin(pin) || pin2var.contains(pin.get_class_index()) || livehd::graph_util::is_graph_input_pin(pin)) {
-        return whole_slice();
-      }
-      auto       n  = pin.get_master_node();
-      const auto op = type_op_of(n);
-      if (op == Ntype_op::Sub) {
-        if (!group_sched.contains(n.get_class_index()) || splits_ == nullptr) {
-          return {};
-        }
-        auto cg = n.get_subnode_graph();
-        if (!cg) {
-          return {};
-        }
-        auto sit = splits_->find(cg.get());
-        if (sit == splits_->end()) {
-          return {};
-        }
-        const auto want_pid = static_cast<uint32_t>(pin.get_port_id());
-        for (size_t gi = 0; gi < sit->second.size(); ++gi) {
-          const auto& sg = sit->second[gi];
-          for (size_t oj = 0; oj < sg.outs.size(); ++oj) {
-            const auto& o = sg.outs[oj];
-            if (o.pid != want_pid || o.len == 0 || o.lo > lo || lo + len > o.lo + o.len) {
-              continue;
-            }
-            if (!emit_one_group(n, static_cast<int>(gi))) {
-              return {};
-            }
-            std::string inst;
-            for (const auto& s : subs) {
-              if (s.node.get_class_index() == n.get_class_index()) {
-                inst = s.inst;
-                break;
-              }
-            }
-            if (inst.empty()) {
-              return {};
-            }
-            const std::string mem = absl::StrCat(inst, ".__ps_g", gi, "_", oj);
-            if (o.lo == lo && o.len == len) {
-              return absl::StrCat("(", mem, ")");
-            }
-            return absl::StrCat("Slop<", len, ">::sra_op(", mem, ".zext_to<", o.len, ">(), ", lo - o.lo, ")");
-          }
-        }
-        return {};
-      }
-      if (op == Ntype_op::SHL) {
-        hhds::Pin_class val, amt;
-        for (const auto& e : n.inp_edges()) {
-          if (e.sink.get_port_id() == 0) {
-            val = e.driver;
-          } else {
-            amt = e.driver;
-          }
-        }
-        if (val.is_invalid() || amt.is_invalid() || !is_const_pin(amt)) {
-          return {};
-        }
-        auto av = hydrate_const(amt);
-        if (!av.is_just_i64() || av.to_just_i64() < 0) {
-          return {};
-        }
-        const auto k = static_cast<uint32_t>(av.to_just_i64());
-        if (lo >= k) {
-          return slice_operand(val, lo - k, len, depth + 1);
-        }
-        if (lo + len <= k) {
-          return absl::StrCat("Slop<", len, ">::create_integer(0)");
-        }
-        return {};
-      }
-      if (op == Ntype_op::Or) {
-        // bitwise: a slice of an OR is the OR of the slices — unconditionally
-        std::string acc;
-        for (const auto& e : n.inp_edges()) {
-          auto part = slice_operand(e.driver, lo, len, depth + 1);
-          if (part.empty()) {
-            return {};
-          }
-          acc = acc.empty() ? part : absl::StrCat("Slop<", len, ">::or_op(", acc, ", ", part, ")");
-        }
-        return acc;
-      }
-      if (op == Ntype_op::Set_mask) {
-        // A wire built field by field is a SET_MASK CHAIN (the producer idiom
-        // concat_leaves decodes for the registry): value bits land LSB-aligned
-        // in the contiguous masked range, everything else shows the base. A
-        // requested slice fully INSIDE the range is a slice of the value; fully
-        // OUTSIDE, a slice of the base; straddling the boundary is not the
-        // disjoint-field idiom and fails to the caller's whole-read path.
-        hhds::Pin_class base, msk, value;
-        for (const auto& e : n.inp_edges()) {
-          switch (e.sink.get_port_id()) {
-            case 0 : base = e.driver; break;
-            case 2 : msk = e.driver; break;
-            case 4 : value = e.driver; break;
-            default: break;
-          }
-        }
-        if (msk.is_invalid() || !is_const_pin(msk)) {
-          return {};
-        }
-        auto smv = hydrate_const(msk);
-        if (smv.has_unknowns() || smv.is_negative()) {
-          return {};
-        }
-        auto [smb, sme] = smv.get_mask_range();
-        if (smb < 0 || sme <= smb) {
-          return {};
-        }
-        const auto wlo = static_cast<uint32_t>(smb), whi = static_cast<uint32_t>(sme);
-        if (lo >= wlo && lo + len <= whi) {
-          return value.is_invalid() ? std::string{} : slice_operand(value, lo - wlo, len, depth + 1);
-        }
-        if (lo + len <= wlo || lo >= whi) {
-          return base.is_invalid() ? std::string{} : slice_operand(base, lo, len, depth + 1);
-        }
-        return {};
-      }
-      if (op == Ntype_op::Get_mask) {
-        hhds::Pin_class val, msk;
-        for (const auto& e : n.inp_edges()) {
-          if (e.sink.get_port_id() == 0) {
-            val = e.driver;
-          } else {
-            msk = e.driver;
-          }
-        }
-        if (val.is_invalid()) {
-          return {};
-        }
-        if (msk.is_invalid()) {  // unary width adjust: identity for slicing
-          return slice_operand(val, lo, len, depth + 1);
-        }
-        if (!is_const_pin(msk)) {
-          return {};
-        }
-        auto mv = hydrate_const(msk);
-        if (mv.has_unknowns()) {
-          return {};
-        }
-        if (mv.is_just_i64() && mv.to_just_i64() == -1) {  // to-positive idiom: identity
-          return slice_operand(val, lo, len, depth + 1);
-        }
-        if (mv.is_negative()) {
-          return {};
-        }
-        auto [mb, me] = mv.get_mask_range();
-        if (mb < 0 || me <= mb) {
-          return {};
-        }
-        const auto avail = static_cast<uint32_t>(me - mb);
-        if (lo >= avail) {
-          return absl::StrCat("Slop<", len, ">::create_integer(0)");
-        }
-        const uint32_t eff = std::min(len, avail - lo);
-        auto           e2  = slice_operand(val, static_cast<uint32_t>(mb) + lo, eff, depth + 1);
-        if (e2.empty()) {
-          return {};
-        }
-        if (eff == len) {
-          return e2;
-        }
-        return absl::StrCat("(", e2, ").zext_to<", len, ">()");  // bits past the mask read 0
-      }
-      return {};
-    };
-
-    // Emit ONE group of one instance (guarded per pass). Returns false only on
-    // an in-flight re-entry — the genuine slice-grain cycle.
-    emit_one_group = [&](const hhds::Node_class& node, int gidx) -> bool {
-      auto        cg  = node.get_subnode_graph();
-      auto        sit = splits_->find(cg.get());
-      const auto& grp = sit->second[static_cast<size_t>(gidx)];
-      const auto  key = std::pair<hhds::Class_index, int>{node.get_class_index(), gidx};
-      if (emitted_groups.contains(key)) {
-        return !inflight_groups.contains(key);
-      }
-      emitted_groups.insert(key);
-      inflight_groups.insert(key);
-      bool ok = true;
-      for (const auto& s : subs) {
-        if (s.node.get_class_index() != node.get_class_index()) {
-          continue;
-        }
-        auto sio = node.get_subnode_io();
-        if (!sio) {
-          break;
-        }
-        demand_stack.push_back(absl::StrCat(s.inst, ".g", gidx));
-        struct Pop {
-          std::vector<std::string>* v;
-          ~Pop() { v->pop_back(); }
-        } pop_{&demand_stack};
-        absl::flat_hash_map<uint32_t, std::pair<std::string, int>> pid2in;
-        for (const auto& d : sio->get_input_pin_decls()) {
-          pid2in[static_cast<uint32_t>(d.port_id)] = {d.name, d.bits > 0 ? static_cast<int>(d.bits) : 1};
-        }
-        bool any_whole = false;
-        for (const auto& o : grp.outs) {
-          any_whole = any_whole || o.len == 0;
-        }
-        const std::string run_condition = sub_run_condition(ensure_ready_fn, s);
-        const bool        runtime_skip  = !run_condition.empty();
-        const std::string snap          = absl::StrCat(s.inst, "__g", gidx);
-        struct Whole_out {
-          hhds::Pin_class pin;
-          std::string     field;
-          std::string     var;
-        };
-        std::vector<Whole_out>                     whole_outs;
-        absl::flat_hash_map<uint32_t, std::string> pid2name;
-        for (const auto& d : sio->get_output_pin_decls()) {
-          pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
-        }
-        if (any_whole) {
-          absl::flat_hash_set<pin_key_t> whole_seen;
-          for (const auto& e : node.out_edges()) {
-            auto opin = e.driver;
-            if (opin.is_invalid() || pin2var.contains(opin.get_class_index())
-                || !whole_seen.insert(opin.get_class_index()).second) {
-              continue;
-            }
-            const auto epid  = static_cast<uint32_t>(opin.get_port_id());
-            bool       whole = false;
-            for (const auto& o : grp.outs) {
-              if (o.pid == epid && o.len == 0) {
-                whole = true;
-                break;
-              }
-            }
-            if (!whole) {
-              continue;
-            }
-            if (auto itn = pid2name.find(epid); itn != pid2name.end()) {
-              whole_outs.push_back({opin, cpp_port_path(itn->second), absl::StrCat(snap, "_p", epid)});
-            }
-          }
-        }
-        if (runtime_skip) {
-          for (const auto& o : whole_outs) {
-            fout->append(absl::StrCat("    auto ",
-                                      o.var,
-                                      " = ",
-                                      s.inst,
-                                      ".__out.",
-                                      o.field,
-                                      ";  // inactive group value is caller-masked\n"));
-          }
-        }
-        // Ports are members: the group's support fields are written straight
-        // into the child's persistent __in — one fill per distinct input pid;
-        // atoms of the same pid OR together. A field NO group writes keeps its
-        // last value (construction default until first written), which is the
-        // stale-not-zero semantics of the member-port design.
-        //
-        // The fills are COLLECTED, not appended, so the guard `if` can be
-        // opened after them: building an operand binds its cone HERE, and a
-        // `Slop<W> cg_N` (or a demanded group's declaration) emitted inside
-        // that nested C++ block would be out of scope at the later consumers
-        // pin2var still names it for. Only the settle and the snapshot need
-        // the guard.
-        const std::string             gin = absl::StrCat(s.inst, ".__in");
-        std::vector<std::string>      fills;
-        absl::flat_hash_set<uint32_t> filled;
-        for (const auto& a : grp.support) {
-          if (!filled.insert(a.pid).second) {
-            continue;
-          }
-          auto it = pid2in.find(a.pid);
-          if (it == pid2in.end()) {
-            continue;  // undeclared/unconnected: the member's default models it
-          }
-          auto      drv   = get_driver(find_sink_pin(node, it->second.first));
-          const int wb    = it->second.second;
-          // whole-port atom for this pid anywhere in the support?
-          bool      whole = false;
-          for (const auto& a2 : grp.support) {
-            if (a2.pid == a.pid && a2.len == 0) {
-              whole = true;
-              break;
-            }
-          }
-          std::string expr;
-          if (!whole) {
-            // partial fill: OR of (slice << lo) per atom; any failure -> whole
-            std::string acc = absl::StrCat("Slop<", wb, ">::create_integer(0)");
-            bool        all = true;
-            for (const auto& a2 : grp.support) {
-              if (a2.pid != a.pid) {
-                continue;
-              }
-              auto se = slice_operand(drv, a2.lo, a2.len, 0);
-              if (se.empty()) {
-                all = false;
-                break;
-              }
-              acc = absl::StrCat("Slop<", wb, ">::or_op(", acc, ", Slop<", wb, ">::shl_op(", se, ", ", a2.lo, "))");
-            }
-            if (all) {
-              expr = acc;
-            }
-          }
-          if (expr.empty()) {
-            ensure_ready_fn(drv);
-            if (!drv.is_invalid() && !is_const_pin(drv) && !pin2var.contains(drv.get_class_index()) && !cycle_reported_) {
-              if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-                std::string chain;
-                for (const auto& d2 : demand_stack) {
-                  chain += d2 + " -> ";
-                }
-                std::fprintf(stderr,
-                             "[splitdbg] DEMAND CHAIN: %sinput %s (blocked at %s)\n",
-                             chain.c_str(),
-                             it->second.first.c_str(),
-                             debug_name(drv.get_master_node()).c_str());
-              }
-              livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
-                  .msg(
-                      "combinational loop through instance `{}` ({}::{}): input `{}` is needed by output group {} and "
-                      "is fed by logic that depends on that same group",
-                      s.inst,
-                      gname,
-                      s.callee_struct,
-                      it->second.first,
-                      gidx)
-                  .hint(
-                      "the callee is split by output group and bit slice, so this cycle is REAL at the finest grain "
-                      "the analysis can express: the demanded output's own cone reads an input that depends on it")
-                  .emit();
-              cycle_reported_ = true;
-              ok              = false;
-            }
-            expr = operand(drv, wb);
-          }
-          fills.push_back(absl::StrCat("    ",
-                                       s.inst,
-                                       ".__gen += slop_update(",
-                                       gin,
-                                       ".",
-                                       cpp_port_path(it->second.first),
-                                       ", ",
-                                       expr,
-                                       ");\n"));
-        }
-        if (runtime_skip) {
-          fout->append(absl::StrCat("    if (", run_condition, ") {  // conditional activation (reset keeps it open)\n"));
-        }
-        for (const auto& f : fills) {
-          fout->append(f);
-        }
-        fout->append(absl::StrCat("    ", s.inst, ".__settle_g", gidx, "();\n"));
-        // A whole output must remain stable after the deferred child cycle
-        // overwrites __out. Snapshot only the demanded Slop field, never the
-        // callee's entire Out struct (which can contain hundreds of unrelated
-        // ports). Mixed groups still publish their slice members separately.
-        for (const auto& o : whole_outs) {
-          fout->append(absl::StrCat("    ",
-                                    runtime_skip ? "" : "const auto ",
-                                    o.var,
-                                    " = ",
-                                    s.inst,
-                                    ".__out.",
-                                    o.field,
-                                    ";  // group ",
-                                    gidx,
-                                    " output\n"));
-          pin2var[o.pin.get_class_index()] = o.var;
-        }
-        if (runtime_skip) {
-          fout->append("    }\n");
-        }
-        break;
-      }
-      inflight_groups.erase(key);
-      return ok;
-    };
-
-    // A `Get_mask(sub_out, contiguous-const)` consumer of a group-scheduled
-    // instance binds from the SLICE that computes those bits — the whole-pin
-    // path would demand every slice and manufacture a ring whenever a sibling
-    // slice is mid-fill. Returns true when the node's value was bound.
-    auto try_slice_read = [&](const hhds::Node_class& node) -> bool {
-      // Decode the three slice-read idioms a packed field access lowers to —
-      // Get_mask(x, contiguous), And(x, low-mask) (cprop's rewrite of a low
-      // Get_mask), SRA(x, k), and the And(SRA(x, k), low-mask) composition —
-      // the SAME set graph/port_reach's input_atom_of accepts, so a slice the
-      // registry could refine is also a slice this consumer bind can serve.
-      const auto      nop = type_op_of(node);
-      hhds::Pin_class val;
-      int64_t         lo = 0, len = 0;
-      // Peel tolg's identity wrappers (unary Get_mask width adjust, the
-      // to-positive `mask == -1` idiom, Sext) so the Sub-pin check below sees
-      // the instance output itself — mirrors port_reach's peel_ident, which is
-      // how the REGISTRY refined the very slice this consumer wants to bind.
-      auto            peel_ident = [&](hhds::Pin_class p) -> hhds::Pin_class {
-        for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
-          if (is_const_pin(p) || livehd::graph_util::is_graph_input_pin(p)) {
-            break;
-          }
-          auto       pn  = p.get_master_node();
-          const auto pop = type_op_of(pn);
-          if (pop == Ntype_op::Sext) {
-            p = livehd::graph_util::first_value_driver(pn);
-            continue;
-          }
-          if (pop == Ntype_op::Get_mask) {
-            hhds::Pin_class v2, m2;
-            for (const auto& e : pn.inp_edges()) {
-              if (e.sink.get_port_id() == 0) {
-                v2 = e.driver;
-              } else {
-                m2 = e.driver;
-              }
-            }
-            if (m2.is_invalid()) {
-              p = v2;  // unary width adjust
-              continue;
-            }
-            if (is_const_pin(m2)) {
-              auto m2v = hydrate_const(m2);
-              if (m2v.is_just_i64() && m2v.to_just_i64() == -1) {
-                p = v2;  // to-positive idiom
-                continue;
-              }
-            }
-            break;
-          }
-          break;
-        }
-        return p;
-      };
-      if (nop == Ntype_op::Get_mask || nop == Ntype_op::And) {
-        hhds::Pin_class v, msk;
-        int             n_ops = 0;
-        for (const auto& e : node.inp_edges()) {
-          ++n_ops;
-          if (nop == Ntype_op::Get_mask ? e.sink.get_port_id() == 0 : !is_const_pin(e.driver)) {
-            v = e.driver;
-          } else {
-            msk = e.driver;
-          }
-        }
-        if (v.is_invalid() || msk.is_invalid() || !is_const_pin(msk) || (nop == Ntype_op::And && n_ops != 2)) {
-          return false;
-        }
-        auto mv = hydrate_const(msk);
-        if (mv.has_unknowns() || mv.is_negative()) {
-          return false;
-        }
-        auto [mb, me] = mv.get_mask_range();
-        if (mb < 0 || me <= mb || (nop == Ntype_op::And && mb != 0)) {
-          return false;  // And only stands in for a LOW slice
-        }
-        val = peel_ident(v);
-        lo  = mb;
-        len = me - mb;
-        // And(SRA(x, k), low-mask): compose to the [k, k+me) slice of x.
-        if (nop == Ntype_op::And && !val.is_invalid() && !is_const_pin(val) && !livehd::graph_util::is_graph_input_pin(val)) {
-          auto vn = val.get_master_node();
-          if (type_op_of(vn) == Ntype_op::SRA) {
-            hhds::Pin_class v2, amt;
-            for (const auto& e : vn.inp_edges()) {
-              if (e.sink.get_port_id() == 0) {
-                v2 = e.driver;
-              } else {
-                amt = e.driver;
-              }
-            }
-            if (!v2.is_invalid() && !amt.is_invalid() && is_const_pin(amt)) {
-              auto av = hydrate_const(amt);
-              if (av.is_just_i64() && av.to_just_i64() >= 0) {
-                val  = peel_ident(v2);
-                lo  += av.to_just_i64();
-              }
-            }
-          }
-        }
-      } else if (nop == Ntype_op::SRA) {
-        hhds::Pin_class v, amt;
-        for (const auto& e : node.inp_edges()) {
-          if (e.sink.get_port_id() == 0) {
-            v = e.driver;
-          } else {
-            amt = e.driver;
-          }
-        }
-        if (v.is_invalid() || amt.is_invalid() || !is_const_pin(amt)) {
-          return false;
-        }
-        auto av = hydrate_const(amt);
-        if (!av.is_just_i64() || av.to_just_i64() < 0) {
-          return false;
-        }
-        auto dp0 = node.get_driver_pin(0);
-        if (dp0.is_invalid()) {
-          return false;
-        }
-        val = peel_ident(v);
-        lo  = av.to_just_i64();
-        len = wbits_of(dp0);
-      } else {
-        return false;
-      }
-      if (val.is_invalid() || is_const_pin(val) || livehd::graph_util::is_graph_input_pin(val) || len <= 0) {
-        return false;
-      }
-      if (type_op_of(val.get_master_node()) != Ntype_op::Sub || !group_sched.contains(val.get_master_node().get_class_index())) {
-        return false;
-      }
-      // And/SRA are width-sensitive on a SIGNED source (high bits would be sign
-      // copies, not stored bits): only bind a slice that lies fully inside the
-      // pin. Get_mask keeps its historical extract semantics unguarded, and an
-      // UNKNOWN width (wbits_of can be 0 on a not-yet-bound Sub pin) defers to
-      // slice_operand's own per-slice range check rather than rejecting here.
-      if (nop != Ntype_op::Get_mask) {
-        const int vw = wbits_of(val);
-        if (vw > 0 && lo + len > vw) {
-          if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-            std::fprintf(stderr,
-                         "[splitdbg] slice-read MISS: %s wants [%lld+%lld) but %s is only %d bits\n",
-                         debug_name(node).c_str(),
-                         static_cast<long long>(lo),
-                         static_cast<long long>(len),
-                         debug_name(val.get_master_node()).c_str(),
-                         vw);
-          }
-          return false;
-        }
-      }
-      auto se = slice_operand(val, static_cast<uint32_t>(lo), static_cast<uint32_t>(len), 0);
-      if (se.empty()) {
-        if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-          std::fprintf(stderr,
-                       "[splitdbg] slice-read MISS: %s wants [%lld+%lld) of %s (no covering export)\n",
-                       debug_name(node).c_str(),
-                       static_cast<long long>(lo),
-                       static_cast<long long>(len),
-                       debug_name(val.get_master_node()).c_str());
-        }
-        return false;
-      }
-      auto dp = node.get_driver_pin(0);
-      if (dp.is_invalid()) {
-        return false;
-      }
-      if (!pin2var.contains(dp.get_class_index())) {
-        const int wb  = wbits_of(dp);
-        auto      var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-        fout->append(
-            absl::StrCat("    Slop<", wb, "> ", var, " = (", se, ").zext_to<", wb, ">();  // slice read via group export\n"));
-        pin2var[dp.get_class_index()] = var;
-        canonical_.insert(dp.get_class_index());
-      }
-      return true;
-    };
-
-    auto emit_group_call = [&](auto&& /*ensure_fn (recursion uses the captured ensure_ready)*/,
-                               const hhds::Node_class& node,
-                               const hhds::Pin_class&  want) -> void {
-      if (splits_ == nullptr) {
-        return;
-      }
-      auto cg = node.get_subnode_graph();
-      if (!cg) {
-        return;
-      }
-      auto sit = splits_->find(cg.get());
-      if (sit == splits_->end()) {
-        return;
-      }
-      const auto want_pid = static_cast<uint32_t>(want.get_port_id());
-      bool       any = false, sliced = false;
-      for (size_t gi = 0; gi < sit->second.size(); ++gi) {
-        if (!sit->second[gi].covers_out(want_pid)) {
-          continue;
-        }
-        any = true;
-        for (const auto& o : sit->second[gi].outs) {
-          if (o.pid == want_pid && o.len != 0) {
-            sliced = true;  // decided per PID: a merged group can hold other pids' slices
-          }
-        }
-        emit_one_group(node, static_cast<int>(gi));
-      }
-      if (!any) {
-        return;  // a prebound state-only output, or a genuine cycle -> loud diagnostic elsewhere
-      }
-      if (sliced && !pin2var.contains(want.get_class_index())) {
-        // Assemble the whole pin from the published slices, in range order.
-        auto        sio = node.get_subnode_io();
-        std::string inst;
-        for (const auto& s : subs) {
-          if (s.node.get_class_index() == node.get_class_index()) {
-            inst = s.inst;
-            break;
-          }
-        }
-        int wb = 1;
-        if (sio) {
-          for (const auto& d : sio->get_output_pin_decls()) {
-            if (static_cast<uint32_t>(d.port_id) == want_pid && d.bits > 0) {
-              wb = static_cast<int>(d.bits);
-            }
-          }
-        }
-        std::string acc      = absl::StrCat("Slop<", wb, ">::create_integer(0)");
-        bool        complete = true;
-        for (size_t gi = 0; gi < sit->second.size() && complete; ++gi) {
-          const auto& sg = sit->second[gi];
-          for (size_t oj = 0; oj < sg.outs.size(); ++oj) {
-            const auto& o = sg.outs[oj];
-            if (o.pid != want_pid) {
-              continue;
-            }
-            if (o.len == 0) {
-              if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-                std::fprintf(stderr, "[splitdbg]   assembly: pid %u group %zu has WHOLE out\n", want_pid, gi);
-              }
-              complete = false;  // mixed whole+slice for one pid: whole path owns it
-              break;
-            }
-            const auto key = std::pair<hhds::Class_index, int>{node.get_class_index(), static_cast<int>(gi)};
-            if (inflight_groups.contains(key) || !emitted_groups.contains(key)) {
-              if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-                std::fprintf(stderr,
-                             "[splitdbg]   assembly: pid %u group %zu inflight=%d emitted=%d\n",
-                             want_pid,
-                             gi,
-                             inflight_groups.contains(key) ? 1 : 0,
-                             emitted_groups.contains(key) ? 1 : 0);
-              }
-              complete = false;  // a covering group could not run: leave unbound (loud path)
-              break;
-            }
-            acc = absl::
-                StrCat("Slop<", wb, ">::or_op(", acc, ", Slop<", wb, ">::shl_op(", inst, ".__ps_g", gi, "_", oj, ", ", o.lo, "))");
-          }
-        }
-        if (complete && !inst.empty()) {
-          auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
-          fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", acc, ";  // assembled from slice exports\n"));
-          pin2var[want.get_class_index()] = var;
-        } else if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-          std::fprintf(stderr,
-                       "[splitdbg] ASSEMBLY FAILED: %s out pid %u (complete=%d inst='%s')\n",
-                       gname.c_str(),
-                       want_pid,
-                       complete ? 1 : 0,
-                       inst.c_str());
-        }
       }
     };
 
@@ -5999,16 +6186,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (::getenv("LIVEHD_SIM_SPLIT_DEBUG2") != nullptr && !demand_stack.empty()) {
         std::fprintf(stderr, "[splitdbg]   walk %s (%s)\n", debug_name(n).c_str(), op_name(nop));
       }
-      if ((nop == Ntype_op::Get_mask || nop == Ntype_op::And || nop == Ntype_op::SRA) && try_slice_read(n)) {
-        return;  // bound from the slice export that computes exactly those bits
-      }
       if (nop == Ntype_op::Sub) {
-        // A GROUP-SCHEDULED instance answers a demanded output with exactly the
-        // group that computes it; the atomic call stays deferred.
-        if (group_sched.contains(n.get_class_index())) {
-          emit_group_call([&](const hhds::Pin_class& p) { self(self, p); }, n, drv);
-          return;
-        }
         // A deferred-Moore instance's outputs are pre-bound (peek) -- nothing to
         // emit. Any other atomic call is emitted on demand, its own input cones
         // first (prefetch_seen above already broke re-entry on a real cycle).
@@ -6041,7 +6219,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       bind_comb(n, dp, " (mem-operand prefetch)");
     };
     auto ensure_ready = [&](const hhds::Pin_class& drv) { ensure_ready_impl(ensure_ready_impl, drv); };
-    ensure_ready_fn   = ensure_ready;
 
     // combinational SSA bindings, in dependency order
     for (auto node : g->body().nodes(hhds::Node_order::forward)) {
@@ -6086,18 +6263,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
           continue;
         }
-        if (group_sched.contains(node.get_class_index())) {
-          // outputs bind on demand through `__settle_g<k>` calls; the single
-          // atomic call — advance in the rise, refresh in fall/settle — is
-          // emitted after the walk, when every input operand is bound.
-          for (const auto& s : subs) {
-            if (s.node.get_class_index() == node.get_class_index()) {
-              deferred_group.push_back(&s);
-              break;
-            }
-          }
-          continue;
-        }
         emit_sub_call(ensure_ready, node);
         continue;
       }
@@ -6126,9 +6291,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (pin2var.contains(dpin.get_class_index())) {
         continue;  // already emitted via a memory-operand prefetch
       }
-      if ((op == Ntype_op::Get_mask || op == Ntype_op::And || op == Ntype_op::SRA) && try_slice_read(node)) {
-        continue;  // a field read of a group-scheduled bundle: bound from its slice export
-      }
       // forward_class built its order on the RAW graph; once a false
       // instance-level cycle has been dissolved (Moore-deferral / state-only
       // pre-binding above), a comb node can still be SCHEDULED before one of
@@ -6149,26 +6311,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     //
     // Nothing to do in the settle pass: it never advances a child, and the
     // pre-binding above already pointed these outputs straight at `<inst>.__out`.
-    // GROUP-SCHEDULED instances: the single atomic call, now that every input
-    // operand is bound. In the RISE this is the state advance (`cycle(in)`,
-    // returning pre-edge outputs, value-equal to the group snapshots); in FALL /
-    // SETTLE it is a full `__settle(in)` so `__out` leaves the pass COHERENT —
-    // group calls refreshed only their own fields, and the next period's
-    // prebinds (and any bound sigref) read the whole struct. emit_sub_call
-    // carries the gated-clock `__tick` writes with it.
-    for (const auto* sp : deferred_group) {
-      // The advance follows the child's edge: a negedge-only child samples at
-      // the parent's FALL (its ring inputs are rebuilt post-rise, and the walk
-      // above answered them from fresh __settle_g<k> exports); every other
-      // child advances at the RISE as before. All remaining passes refresh with
-      // a full __settle so `__out` leaves the pass coherent.
-      const bool advance = sp->negedge_only ? (pass_ == Pass::Fall) : (pass_ == Pass::Rise);
-      const bool save    = settle_mode;
-      settle_mode        = !advance;
-      emit_sub_call(ensure_ready, sp->node);
-      settle_mode = save;
-    }
-
     for (const auto* sp : (pass_ == Pass::Rise) ? deferred_moore : std::vector<const Sub*>{}) {
       const auto& s    = *sp;
       auto        dsio = s.node.get_subnode_io();
@@ -6219,7 +6361,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                   ");\n"));
         emit_child_tick(ensure_ready, s, it->second.first, pid, e.driver);
       }
-      fout->append(absl::StrCat("    ", s.inst, ".cycle();  // deferred Moore-sub state advance\n"));
+      fout->append(absl::StrCat("    ", s.inst, ".__compact_advance();  // deferred compact-kernel state advance\n"));
       if (!run_condition.empty()) {
         fout->append("    }\n");
       }
@@ -6278,9 +6420,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // path into `_cen` — an unready cone would otherwise reach operand() as
       // `0 /*UNRESOLVED-CYCLE*/` and the flop would silently never load.
       for (const auto& gp : f.clock_guards) {
-        ensure_ready_fn(gp);
+        ensure_ready(gp);
       }
-      ensure_ready_fn(f.sec_clock);
+      ensure_ready(f.sec_clock);
       std::string cen;
       for (const auto& gp : f.clock_guards) {
         absl::StrAppend(&cen, cen.empty() ? "" : " && ", "(", operand(gp, 1), ").is_known_true()");
@@ -6622,21 +6764,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (io.is_input) {
           continue;
         }
-        if (active_group != nullptr) {
-          auto it            = out_field2pid.find(io.field);
-          bool whole_covered = false;
-          if (it != out_field2pid.end()) {
-            for (const auto& o : active_group->outs) {
-              if (o.pid == it->second && o.len == 0) {
-                whole_covered = true;
-                break;
-              }
-            }
-          }
-          if (!whole_covered) {
-            continue;  // another group's output, or a SLICE (exports below write it)
-          }
-        }
         auto spin = g->get_output_pin(io.raw);
         auto drv  = spin.is_invalid() ? hhds::Pin_class{} : get_driver(spin);
         if (drv.is_invalid()) {
@@ -6655,39 +6782,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           ensure_ready(drv);
           fout->append(out_dst, io.field, " = ", operand(drv, io.bits), ";\n");
         }
-      }
-    }
-    // SLICE EXPORTS: a bit-range group publishes each range's value into its
-    // generated `__ps_g<k>_<j>` member — the parent assembles whole-pin reads
-    // from these and slices partial In-fills out of them. `__out` stays owned
-    // by the full settle, so no partial read-modify-write of a field ever
-    // happens.
-    if (active_group != nullptr) {
-      for (size_t j = 0; j < active_group->outs.size(); ++j) {
-        const auto& o = active_group->outs[j];
-        if (o.len == 0 || o.leaf.is_invalid()) {
-          continue;
-        }
-        ensure_ready(o.leaf);
-        std::string expr;
-        if (o.shifted) {
-          expr = absl::StrCat("Slop<", o.len, ">::sra_op(", operand(o.leaf, static_cast<int>(o.lo + o.len)), ", ", o.lo, ")");
-        } else {
-          expr = absl::StrCat("(", operand(o.leaf, static_cast<int>(o.len)), ")");
-        }
-        fout->append(absl::StrCat("    __ps_g",
-                                  active_group_idx,
-                                  "_",
-                                  j,
-                                  " = ",
-                                  expr,
-                                  ";  // slice [",
-                                  o.lo + o.len - 1,
-                                  ":",
-                                  o.lo,
-                                  "] of out pid ",
-                                  o.pid,
-                                  "\n"));
       }
     }
 
@@ -6765,10 +6859,33 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("      __vcd_dump_data(__vcd.get(), false, true);\n");
         fout->append("    }\n");
       }
-      // Advance the period counter every cycle -- independent of VCD and of is_top,
-      // so the reset window (read at the top of cycle()) tracks identically whether
-      // or not a trace is dumped. The member exists on every module.
-      fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
+      // A VCD build advances every module's trace clock even while its window
+      // is closed. A non-VCD build has neither the counter nor this hot update.
+      if (vcd_on) {
+        fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
+      }
+
+      if (staged_flat) {
+        // The pre-rise output is an observation version, not a value the commit
+        // is allowed to reconstruct after overwriting Q. Close the evaluation
+        // color here; everything below is a state action over parked members.
+        fout->append("    __last_out = __o;  // preserve the pre-rise observation version\n");
+        if (!gate_done.empty()) {
+          fout->append("    ", gate_done, " = __g0;\n");
+          fout->append("    ", gate_kids, " = __k0;\n");
+        }
+        if (!subs.empty()) {
+          fout->append("    __color_kids_before = ", staged_kids_sum, ";\n");
+        }
+        fout->append("}\n");
+        fout->append("void ", mod, "::__color_rise_commit() {\n");
+        for (const auto& s : subs) {
+          fout->append("    ", s.inst, ".__color_rise_commit();\n");
+        }
+        if (!subs.empty()) {
+          fout->append("    if ((", staged_kids_sum, ") != __color_kids_before) ++__gen;\n");
+        }
+      }
 
       // Memories are posedge state.  Stage and commit them while every operand is
       // still the PRE-RISE binding, alongside the posedge flops below.  The old
@@ -6957,7 +7074,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                     ");\n"));
           emit_child_tick(ensure_ready, s, d.name, static_cast<uint32_t>(d.port_id), drv);
         }
-        fout->append(absl::StrCat("    ", s.inst, ".cycle();\n"));
+        fout->append(absl::StrCat("    ", s.inst, ".__compact_advance();\n"));
         if (!run_condition.empty()) {
           fout->append("    }\n");
         }
@@ -7047,12 +7164,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       return false;
     }
 
-    if (!fall) {
+    if (!fall && !staged_flat) {
       // The during-period outputs, recorded before any commit -- the value the
       // query engine publishes as `"sampled":"during_period"`.
       fout->append("    __last_out = __o;  // 2f-sim B: free output observation for the query engine\n");
     }
-    if (!gate_done.empty()) {
+    if (!gate_done.empty() && !staged_flat) {
       // TRANSITIVE change propagation: my direct-kids sum only sees children's
       // OWN __gen, and a stateless wrapper never bumps its own — so a
       // grandchild's still-moving pipeline would be invisible to MY parent and
@@ -7069,14 +7186,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     close_body();
     return true;
   };
-  if (!emit_period_body(Pass::Rise)) {
-    return;
+  if (!taskflow_root && !color_storage_only) {
+    if (!emit_period_body(Pass::Rise)) {
+      return;
+    }
+    if (has_fall && !emit_period_body(Pass::Fall)) {
+      return;
+    }
   }
-  if (has_fall && !emit_period_body(Pass::Fall)) {
-    return;
-  }
-  if (!emit_period_body(Pass::Settle)) {
-    return;
+  if (!taskflow_root && !color_storage_only) {
+    if (!emit_period_body(Pass::Settle)) {
+      return;
+    }
   }
 
   // The ordinary trailing settle above has rebuilt every nested input from the
@@ -7085,41 +7206,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Do not re-settle this module afterward; its externally observed output must
   // retain the established during-period phase, while the corrected nested
   // state is ready for the next rise.
-  if (has_refresh) {
-    fout->append("void ", mod, "::refresh_negedge() {\n");
+  if (has_refresh && !taskflow_root && !color_storage_only) {
+    fout->append("void ", mod, "::__compact_refresh() {\n");
     for (const auto& s : subs) {
       if (s.refresh_negedge) {
-        fout->append("    ", s.inst, ".eval_negedge();\n");
-        fout->append("    ", s.inst, ".__settle();\n");
+        fout->append("    ", s.inst, ".__compact_fall();\n");
+        fout->append("    ", s.inst, ".__compact_publish();\n");
       }
       if (s.child_refresh_negedge) {
-        fout->append("    ", s.inst, ".refresh_negedge();\n");
-        fout->append("    ", s.inst, ".__settle();\n");
+        fout->append("    ", s.inst, ".__compact_refresh();\n");
+        fout->append("    ", s.inst, ".__compact_publish();\n");
       }
     }
     fout->append("}\n");
-  }
-
-  // The per-output-group settle methods (see Split_group in the header): one
-  // restricted settle body per distinct comb input-support, so a parent can
-  // evaluate exactly the cone a demanded output needs while the rest of this
-  // instance's inputs are still unresolved. Emitted only for definitions some
-  // parent instantiates on a word-level cycle.
-  if (splits_ != nullptr) {
-    if (auto sit = splits_->find(g); sit != splits_->end()) {
-      for (size_t gi = 0; gi < sit->second.size(); ++gi) {
-        active_group     = &sit->second[gi];
-        active_group_idx = static_cast<int>(gi);
-        build_settle_cone(active_group);
-        const bool ok    = emit_period_body(Pass::Settle);
-        active_group     = nullptr;
-        active_group_idx = -1;
-        if (!ok) {
-          return;
-        }
-      }
-      build_settle_cone(nullptr);
-    }
   }
 
   // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
@@ -7238,6 +7337,31 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // (editable checkpoints are cross-version on purpose), never a hard reject. ----
   fout->append("std::uint64_t ", mod, "::design_hash() const {\n");
   fout->append("  std::uint64_t _h = hlop::ckpt::kFnvOffset;\n");
+  if (color_root) {
+    // Keep checkpoint compatibility diagnostic-only, but make the diagnostic
+    // exact enough to explain a stale execution contract. The schedule digest
+    // deliberately excludes the observation-name suffix; the full binding
+    // digest retains it so renamed/direct observation slots still warn.
+    const std::string report      = color_plan_->report();
+    const size_t      observation = report.find("observation-map begin");
+    const auto        schedule
+        = observation == std::string::npos ? std::string_view{report} : std::string_view{report}.substr(0, observation);
+    const uint64_t schedule_digest = fnv1a_str(0xcbf29ce484222325ULL, schedule);
+    const uint64_t binding_digest  = fnv1a_str(0xcbf29ce484222325ULL, report);
+    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, ",
+                              cpp_string_literal("sim-color-boundary-abi-v2"),
+                              ");\n",
+                              "  _h = hlop::ckpt::fnv1a(_h, ",
+                              cpp_string_literal(kSimGenVersion),
+                              ");\n",
+                              "  _h = hlop::ckpt::fnv1a_u64(_h, TF_VERSION);\n",
+                              "  _h = hlop::ckpt::fnv1a_u64(_h, ",
+                              schedule_digest,
+                              "ULL);\n",
+                              "  _h = hlop::ckpt::fnv1a_u64(_h, ",
+                              binding_digest,
+                              "ULL);\n"));
+  }
   for (const auto& f : flops) {
     for (const auto& s : f.stages) {
       fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", s, "\"), ", f.bits, ");\n"));
@@ -7439,6 +7563,2514 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   fout->append("  return false;\n}\n");
 
+  if (taskflow_root) {
+    const auto find_site_output = [&](size_t site_index, hhds::Port_id port) {
+      const auto node = color_plan_->sites()[site_index].node.base_node();
+      for (const auto& output : node.out_pins()) {
+        if (output.get_port_id() == port) {
+          return output;
+        }
+      }
+      return node.get_driver_pin(port);
+    };
+    const auto find_local_flop = [&](size_t site_index) -> const Flop* {
+      const auto node = color_plan_->sites()[site_index].node.base_node();
+      for (const auto& flop : flops) {
+        if (flop.node.get_graph() == node.get_graph() && flop.node.get_class_index() == node.get_class_index()) {
+          return &flop;
+        }
+      }
+      return nullptr;
+    };
+    const auto find_local_mem = [&](size_t site_index) -> const Mem* { return direct_memory(color_plan_->sites()[site_index]); };
+    const auto whole_pending  = [&](size_t site_index) { return absl::StrCat("__color_whole_", site_index); };
+    const auto output_field   = [&](hhds::Port_id port) -> std::string {
+      for (const auto& io : ios) {
+        if (!io.is_input && io.port_id == static_cast<uint32_t>(port)) {
+          return io.field;
+        }
+      }
+      return {};
+    };
+    const auto input_field = [&](hhds::Port_id port) -> std::string {
+      for (const auto& io : ios) {
+        if (io.is_input && io.port_id == static_cast<uint32_t>(port)) {
+          return io.field;
+        }
+      }
+      return {};
+    };
+    absl::flat_hash_map<hhds::Occurrence_index, size_t> direct_site_index;
+    direct_site_index.reserve(color_plan_->sites().size());
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      direct_site_index.emplace(color_plan_->sites()[site_index].node.get_occurrence_index(), site_index);
+    }
+    std::vector<size_t> direct_version_color(color_plan_->version_sites().size(), livehd::sim::Color_plan::invalid_index);
+    std::vector<size_t> direct_state_update(color_plan_->sites().size(), livehd::sim::Color_plan::invalid_index);
+    std::vector<std::vector<size_t>> direct_site_colors(color_plan_->sites().size());
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      absl::flat_hash_set<size_t> color_sites;
+      for (const size_t version : color_plan_->colors()[color_index].members) {
+        direct_version_color[version] = color_index;
+        const auto& version_site      = color_plan_->version_sites()[version];
+        color_sites.insert(version_site.base_site);
+        if (version_site.role == livehd::sim::Color_plan::Version_role::state_update) {
+          direct_state_update[version_site.base_site] = version;
+        }
+      }
+      for (const size_t site : color_sites) {
+        direct_site_colors[site].push_back(color_index);
+      }
+    }
+    const auto& direct_hierarchy_clocks = hierarchy_clocks_for_root();
+    const auto  state_update_version    = [&](size_t site_index) { return direct_state_update[site_index]; };
+    std::function<std::optional<hhds::Occurrence_pin>(const hhds::Occurrence_pin&, const hhds::Pin_class&, int)>
+        resolve_occurrence_pin;
+    resolve_occurrence_pin =
+        [&](const hhds::Occurrence_pin& root_pin, const hhds::Pin_class& target, int depth) -> std::optional<hhds::Occurrence_pin> {
+      if (root_pin.is_invalid() || target.is_invalid() || depth > 32) {
+        return std::nullopt;
+      }
+      if (root_pin.base_pin().get_definition_index() == target.get_definition_index()) {
+        return root_pin;
+      }
+      const auto occurrence_node = root_pin.get_master_node();
+      const auto base_node       = root_pin.base_pin().get_master_node();
+      const auto occurrence_in   = occurrence_node.inp_edges();
+      const auto base_in         = base_node.inp_edges();
+      if (occurrence_in.size() != base_in.size()) {
+        return std::nullopt;
+      }
+      auto occurrence_edge = occurrence_in.begin();
+      for (size_t input = 0; input < base_in.size(); ++input, ++occurrence_edge) {
+        if (base_in[input].driver.get_definition_index() == target.get_definition_index()) {
+          return occurrence_edge->driver;
+        }
+        if (base_in[input].driver.is_invalid() || is_const_pin(base_in[input].driver)
+            || livehd::graph_util::is_graph_input_pin(base_in[input].driver)) {
+          continue;
+        }
+        if (auto found = resolve_occurrence_pin(occurrence_edge->driver, target, depth + 1)) {
+          return found;
+        }
+      }
+      return std::nullopt;
+    };
+    std::function<std::string(const hhds::Occurrence_pin&, int)> occurrence_bool_expr;
+    occurrence_bool_expr = [&](const hhds::Occurrence_pin& pin, int depth) -> std::string {
+      if (pin.is_invalid() || depth > 32) {
+        return {};
+      }
+      if (is_const_pin(pin)) {
+        return operand(pin.base_pin(), 1);
+      }
+      if (livehd::graph_util::is_graph_input_pin(pin) && pin.get_graph() == g) {
+        const auto field = input_field(pin.get_port_id());
+        return field.empty() ? std::string{} : "__in." + field;
+      }
+      if (const auto it = direct_site_index.find(pin.get_master_node().get_occurrence_index());
+          it != direct_site_index.end() && color_plan_->sites()[it->second].kind == livehd::sim::Color_plan::Site_kind::state) {
+        return occurrence_member(color_plan_->sites()[it->second]);
+      }
+      const auto node = pin.get_master_node();
+      const auto op   = type_op_of(node.base_node());
+      if (op == Ntype_op::Clock_cell) {
+        auto       occurrence_edge = node.inp_edges().begin();
+        const auto base_in         = node.base_node().inp_edges();
+        for (size_t input = 0; input < base_in.size(); ++input, ++occurrence_edge) {
+          if (Ntype::get_sink_name(Ntype_op::Clock_cell, static_cast<int>(base_in[input].sink.get_port_id())) == "en") {
+            return occurrence_bool_expr(occurrence_edge->driver, depth + 1);
+          }
+        }
+        return "Slop<1>::create_integer(1)";
+      }
+      std::vector<std::string> inputs;
+      for (const auto& edge : node.inp_edges()) {
+        inputs.push_back(occurrence_bool_expr(edge.driver, depth + 1));
+        if (inputs.back().empty()) {
+          return {};
+        }
+      }
+      if (inputs.empty()) {
+        return {};
+      }
+      if (op == Ntype_op::Not) {
+        return "(" + inputs.front() + ").not_op()";
+      }
+      if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
+        const char* method = op == Ntype_op::And ? "and_op" : op == Ntype_op::Or ? "or_op" : "xor_op";
+        std::string result = inputs.front();
+        for (size_t input = 1; input < inputs.size(); ++input) {
+          result = absl::StrCat("Slop<1>::", method, "(", result, ", ", inputs[input], ")");
+        }
+        return result;
+      }
+      if (op == Ntype_op::EQ && inputs.size() >= 2) {
+        return absl::StrCat("Slop<1>::eq_op(", inputs[0], ", ", inputs[1], ")");
+      }
+      if ((op == Ntype_op::Get_mask || op == Ntype_op::Sext) && !inputs.empty()) {
+        return inputs.front();
+      }
+      return {};
+    };
+    std::function<std::string(const hhds::Occurrence_pin&, const hhds::Pin_class&, livehd::sim::Color_plan::Execution_slot, int)>
+        occurrence_guard_expr;
+    occurrence_guard_expr = [&](const hhds::Occurrence_pin&             pin,
+                                const hhds::Pin_class&                  clock_root,
+                                livehd::sim::Color_plan::Execution_slot target_slot,
+                                int                                     depth) -> std::string {
+      if (pin.is_invalid() || depth > 32) {
+        return {};
+      }
+      if (is_const_pin(pin)) {
+        return operand(pin.base_pin(), 1);
+      }
+      if (livehd::graph_util::is_graph_input_pin(pin) && pin.get_graph() == g) {
+        if ((!clock_root.is_invalid() && pin.base_pin().get_definition_index() == clock_root.get_definition_index())
+            || direct_hierarchy_clocks.is_clock(pin.base_pin())) {
+          return "Slop<1>::create_integer(1)";
+        }
+        const auto field = input_field(pin.get_port_id());
+        return field.empty() ? std::string{} : "__in." + field;
+      }
+      if (const auto it = direct_site_index.find(pin.get_master_node().get_occurrence_index());
+          it != direct_site_index.end() && type_op_of(color_plan_->sites()[it->second].node.base_node()) == Ntype_op::Latch) {
+        // Clock-enable latches are sampled at their closing edge. The planner
+        // adds the matching same-edge state-update dependency, so the pending
+        // member is ready before this guard is evaluated.
+        return occurrence_member(color_plan_->sites()[it->second]) + "_din";
+      }
+      const auto node = pin.get_master_node();
+      const auto op   = type_op_of(node.base_node());
+      if (op == Ntype_op::Clock_cell) {
+        auto       occurrence_edge = node.inp_edges().begin();
+        const auto base_in         = node.base_node().inp_edges();
+        for (size_t input = 0; input < base_in.size(); ++input, ++occurrence_edge) {
+          if (Ntype::get_sink_name(Ntype_op::Clock_cell, static_cast<int>(base_in[input].sink.get_port_id())) == "en") {
+            return occurrence_guard_expr(occurrence_edge->driver, clock_root, target_slot, depth + 1);
+          }
+        }
+        return "Slop<1>::create_integer(1)";
+      }
+      std::vector<std::string> inputs;
+      for (const auto& edge : node.inp_edges()) {
+        inputs.push_back(occurrence_guard_expr(edge.driver, clock_root, target_slot, depth + 1));
+        if (inputs.back().empty()) {
+          return {};
+        }
+      }
+      if (inputs.empty()) {
+        return {};
+      }
+      if (op == Ntype_op::Not) {
+        return "(" + inputs.front() + ").not_op()";
+      }
+      if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
+        const char* method = op == Ntype_op::And ? "and_op" : op == Ntype_op::Or ? "or_op" : "xor_op";
+        std::string result = inputs.front();
+        for (size_t input = 1; input < inputs.size(); ++input) {
+          result = absl::StrCat("Slop<1>::", method, "(", result, ", ", inputs[input], ")");
+        }
+        return result;
+      }
+      if (op == Ntype_op::EQ && inputs.size() >= 2) {
+        return absl::StrCat("Slop<1>::eq_op(", inputs[0], ", ", inputs[1], ")");
+      }
+      if ((op == Ntype_op::Get_mask || op == Ntype_op::Sext || op == Ntype_op::Set_mask) && !inputs.empty()) {
+        return inputs.front();
+      }
+      return {};
+    };
+    const auto conditional_activation_expr = [&](const hhds::Occurrence_node& occurrence) {
+      std::string activation;
+      const auto& occurrence_steps = occurrence.path().steps();
+      for (const auto& candidate : color_plan_->sites()) {
+        if (candidate.kind != livehd::sim::Color_plan::Site_kind::conditional_control) {
+          continue;
+        }
+        const auto& candidate_steps = candidate.node.path().steps();
+        if (occurrence_steps.size() < candidate_steps.size()) {
+          continue;
+        }
+        bool prefix = true;
+        for (size_t step = 0; step < candidate_steps.size(); ++step) {
+          if (occurrence_steps[step] != candidate_steps[step]) {
+            prefix = false;
+            break;
+          }
+        }
+        if (!prefix) {
+          continue;
+        }
+        hhds::Occurrence_pin guard;
+        const auto           valid_sink = candidate.node.get_sink_pin("__valid");
+        if (!valid_sink.is_invalid()) {
+          for (const auto& edge : candidate.node.inp_edges()) {
+            if (edge.sink.get_port_id() == valid_sink.get_port_id()) {
+              guard = edge.driver;
+              break;
+            }
+          }
+        }
+        const auto guard_value = occurrence_bool_expr(guard, 0);
+        if (guard_value.empty()) {
+          continue;
+        }
+        const auto test = absl::StrCat("(", guard_value, ").is_known_true()");
+        activation      = activation.empty() ? test : absl::StrCat("(", activation, " && ", test, ")");
+      }
+      return activation;
+    };
+    // Taskflow condition successors are weak-edge tasks in the bundled 4.0
+    // runtime. They must not also be ordinary DAG joins: the selected
+    // successor's join counter is force-cleared, while a skipped successor
+    // contributes no decrement. Keep each condition in a reusable nested graph
+    // and make one ordinary outer task own the complete region phase. The outer
+    // color DAG can then join before/after that task with normal strong edges.
+    struct Direct_condition_phase {
+      size_t              control_site = livehd::sim::Color_plan::invalid_index;
+      uint8_t             slot         = 0;
+      std::string         predicate;
+      std::vector<size_t> colors;
+    };
+    const auto conditional_run_expr = [&](const livehd::sim::Color_plan::Site& control) -> std::string {
+      hhds::Occurrence_pin guard;
+      const auto           valid_sink = control.node.get_sink_pin("__valid");
+      if (!valid_sink.is_invalid()) {
+        for (const auto& edge : control.node.inp_edges()) {
+          if (edge.sink.get_port_id() == valid_sink.get_port_id()) {
+            guard = edge.driver;
+            break;
+          }
+        }
+      }
+      const auto guard_value = occurrence_bool_expr(guard, 0);
+      if (guard_value.empty()) {
+        return {};
+      }
+      std::string predicate = absl::StrCat("(", guard_value, ").is_known_true()");
+
+      const auto child = control.node.get_subnode_graph();
+      const auto sio   = control.node.get_subnode_io();
+      if (!child || !sio) {
+        return {};
+      }
+      const auto& resets = reset_guard_ports(child, port_cache);
+      if (!resets.complete || resets.ports.size() > 1) {
+        return {};  // exact-representability fallback: evaluate unconditionally
+      }
+      if (resets.ports.empty()) {
+        return predicate;
+      }
+
+      const auto&          reset_port = resets.ports.front();
+      hhds::Occurrence_pin reset;
+      for (const auto& edge : control.node.inp_edges()) {
+        if (static_cast<uint32_t>(edge.sink.get_port_id()) == reset_port.port_id) {
+          reset = edge.driver;
+          break;
+        }
+      }
+      const auto reset_value = occurrence_bool_expr(reset, 0);
+      if (reset_value.empty()) {
+        return {};
+      }
+      absl::StrAppend(&predicate, " || (", reset_value, reset_port.active_low ? ").is_known_false()" : ").is_known_true()");
+      return predicate;
+    };
+
+    std::vector<std::string> direct_condition_predicate(color_plan_->sites().size());
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      if (color_plan_->sites()[site_index].kind == livehd::sim::Color_plan::Site_kind::conditional_control) {
+        direct_condition_predicate[site_index] = conditional_run_expr(color_plan_->sites()[site_index]);
+      }
+    }
+    // A nested conditional region cannot be an independent outer-DAG join:
+    // its colors also belong to the enclosing region's selected branch. Cache
+    // the outermost representable owner per occurrence path instead of doing a
+    // sites-by-sites prefix scan (quadratic on Minion's occurrence plan).
+    const auto parent_occurrence_prefix = [](std::string prefix) {
+      if (!prefix.empty() && prefix.back() == '.') {
+        prefix.pop_back();
+      }
+      const auto separator = prefix.rfind('.');
+      return separator == std::string::npos ? std::string{} : prefix.substr(0, separator + 1);
+    };
+    absl::flat_hash_map<std::string, size_t> condition_by_path;
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      if (!direct_condition_predicate[site_index].empty()) {
+        condition_by_path.try_emplace(occurrence_prefix(color_plan_->sites()[site_index].node), site_index);
+      }
+    }
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      if (direct_condition_predicate[site_index].empty()) {
+        continue;
+      }
+      const std::string path = occurrence_prefix(color_plan_->sites()[site_index].node);
+      if (path.empty()) {
+        continue;
+      }
+      std::string prefix = parent_occurrence_prefix(path);
+      while (true) {
+        if (condition_by_path.contains(prefix)) {
+          direct_condition_predicate[site_index].clear();
+          break;
+        }
+        if (prefix.empty()) {
+          break;
+        }
+        prefix = parent_occurrence_prefix(std::move(prefix));
+      }
+    }
+    condition_by_path.clear();
+    for (size_t site_index = 0; site_index < color_plan_->sites().size(); ++site_index) {
+      if (!direct_condition_predicate[site_index].empty()) {
+        condition_by_path.try_emplace(occurrence_prefix(color_plan_->sites()[site_index].node), site_index);
+      }
+    }
+    absl::flat_hash_map<std::string, size_t> condition_owner_cache;
+    const auto                               condition_owner = [&](const livehd::sim::Color_plan::Site& site) {
+      const std::string path = occurrence_prefix(site.node);
+      if (const auto cached = condition_owner_cache.find(path); cached != condition_owner_cache.end()) {
+        return cached->second;
+      }
+      std::string prefix = path;
+      while (true) {
+        if (const auto found = condition_by_path.find(prefix); found != condition_by_path.end()) {
+          condition_owner_cache.emplace(path, found->second);
+          return found->second;
+        }
+        if (prefix.empty()) {
+          break;
+        }
+        prefix = parent_occurrence_prefix(std::move(prefix));
+      }
+      condition_owner_cache.emplace(path, livehd::sim::Color_plan::invalid_index);
+      return livehd::sim::Color_plan::invalid_index;
+    };
+    std::vector<size_t> direct_color_condition(color_plan_->colors().size(), livehd::sim::Color_plan::invalid_index);
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      size_t owner             = livehd::sim::Color_plan::invalid_index;
+      bool   owner_initialized = false;
+      for (const size_t version_index : color_plan_->colors()[color_index].members) {
+        const auto&  member_site  = color_plan_->sites()[color_plan_->version_sites()[version_index].base_site];
+        const size_t member_owner = condition_owner(member_site);
+        if (!owner_initialized) {
+          owner             = member_owner;
+          owner_initialized = true;
+        } else if (owner != member_owner) {
+          owner = livehd::sim::Color_plan::invalid_index;
+          break;  // a coarsened color crossing the control boundary runs unconditionally
+        }
+      }
+      direct_color_condition[color_index] = owner;
+    }
+    std::vector<Direct_condition_phase> direct_condition_phases;
+    std::vector<size_t> direct_color_condition_phase(color_plan_->colors().size(), livehd::sim::Color_plan::invalid_index);
+    absl::flat_hash_map<std::pair<size_t, uint8_t>, size_t> condition_phase_index;
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      const size_t owner = direct_color_condition[color_index];
+      if (owner == livehd::sim::Color_plan::invalid_index) {
+        continue;
+      }
+      const auto slot                 = static_cast<uint8_t>(color_plan_->colors()[color_index].slot);
+      const auto [phase_it, inserted] = condition_phase_index.try_emplace({owner, slot}, direct_condition_phases.size());
+      const size_t phase              = phase_it->second;
+      if (inserted) {
+        direct_condition_phases.push_back({owner, slot, direct_condition_predicate[owner], {}});
+      }
+      direct_condition_phases[phase].colors.push_back(color_index);
+      direct_color_condition_phase[color_index] = phase;
+    }
+    const auto observation_output = [&](const livehd::sim::Color_plan::Boundary_slot& slot) -> std::string {
+      if (slot.owner_site == livehd::sim::Color_plan::invalid_index) {
+        return {};
+      }
+      const auto& site = color_plan_->sites()[slot.owner_site];
+      const auto  io   = site.node.get_graph()->get_io();
+      if (!io) {
+        return {};
+      }
+      for (const auto& decl : io->get_output_pin_decls()) {
+        if (decl.port_id != slot.public_port) {
+          continue;
+        }
+        const char* surface = slot.version == livehd::sim::Color_plan::State_version::pre_rise ? "__last_out." : "__out.";
+        return occurrence_prefix(site.node) + surface + cpp_port_path(decl.name);
+      }
+      return {};
+    };
+    const auto observation_input = [&](const livehd::sim::Color_plan::Boundary_slot& slot) -> std::string {
+      if (slot.owner_site == livehd::sim::Color_plan::invalid_index) {
+        return {};
+      }
+      const auto& site = color_plan_->sites()[slot.owner_site];
+      const auto  io   = site.node.get_graph()->get_io();
+      if (!io) {
+        return {};
+      }
+      for (const auto& decl : io->get_input_pin_decls()) {
+        if (decl.port_id == slot.public_port) {
+          return occurrence_prefix(site.node) + "__in." + cpp_port_path(decl.name);
+        }
+      }
+      return {};
+    };
+
+    struct Direct_kernel_read {
+      size_t                                                                         slot_index = 0;
+      size_t                                                                         rank       = 0;
+      livehd::sim::Color_plan::Boundary_consumer                                     consumer;
+      std::tuple<size_t, uint8_t, hhds::Port_id, uint32_t, uint32_t, uint32_t, bool> key;
+    };
+    struct Direct_kernel_write {
+      size_t                                                               slot_index = 0;
+      size_t                                                               rank       = 0;
+      size_t                                                               version    = 0;
+      std::tuple<size_t, uint8_t, hhds::Port_id, uint32_t, uint32_t, bool> key;
+    };
+    struct Direct_kernel_abi {
+      std::vector<Direct_kernel_read>  reads;
+      std::vector<Direct_kernel_write> writes;
+    };
+    const auto direct_read_expr = [&](const livehd::sim::Color_plan::Boundary_slot& slot, size_t slot_index) {
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+        return direct_slot_storage[slot_index];
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
+        const auto& state = color_plan_->sites()[slot.owner_site];
+        auto        value = occurrence_member(state);
+        const auto  pin   = state.node.base_node().get_driver_pin(slot.producer_port);
+        const int   width = std::max(wbits_of(pin), 1);
+        if (slot.producer_shift != 0) {
+          return absl::StrCat("Slop<", slot.width, ">::shl_op(", value, ", ", slot.producer_shift, ")");
+        }
+        if (static_cast<uint32_t>(width) != slot.width) {
+          return slot.unsign ? absl::StrCat(value, ".zext_to<", slot.width, ">()")
+                             : absl::StrCat("Slop<", slot.width, ">{", value, "}");
+        }
+        return value;
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input) {
+        const auto field = input_field(slot.public_port);
+        return field.empty() ? std::string{} : "__in." + field;
+      }
+      return std::string{};
+    };
+    const auto direct_write_expr = [&](const livehd::sim::Color_plan::Boundary_slot& slot, size_t slot_index) {
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+        return direct_slot_storage[slot_index];
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_output) {
+        const auto field = output_field(slot.public_port);
+        if (field.empty()) {
+          return std::string{};
+        }
+        const char* surface = slot.version == livehd::sim::Color_plan::State_version::pre_rise ? "__last_out." : "__out.";
+        return surface + field;
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::observation_output) {
+        return observation_output(slot);
+      }
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::observation_input) {
+        return observation_input(slot);
+      }
+      return std::string{};
+    };
+    const auto direct_consumer_expr = [&](const livehd::sim::Color_plan::Boundary_slot&     slot,
+                                          size_t                                            slot_index,
+                                          const livehd::sim::Color_plan::Boundary_consumer& consumer) {
+      auto value = direct_read_expr(slot, slot_index);
+      if (value.empty() || slot.width == consumer.width) {
+        return value;
+      }
+      // Do not narrow a color-boundary carrier immediately before a low-bit
+      // Get_mask that performs the same narrowing itself. The old sequence
+      // became `slot.zext_to<K>().zext_to<K,W>()` after node lowering. Reading
+      // the stored carrier is exact when the selected range [0,me) lies inside
+      // the consumer's boundary width: every bit the skipped conversion could
+      // have cleared is outside the mask and therefore unobservable.
+      const auto& consumer_version = color_plan_->version_sites()[consumer.version_site];
+      const auto  consumer_node    = color_plan_->sites()[consumer_version.base_site].node.base_node();
+      if (type_op_of(consumer_node) == Ntype_op::Get_mask && consumer.port == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+        for (const auto& edge : consumer_node.inp_edges()) {
+          if (edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") || !is_const_pin(edge.driver)) {
+            continue;
+          }
+          const auto mask = hydrate_const(edge.driver);
+          if (!mask.is_negative() && !mask.has_unknowns()) {
+            const auto [mb, me] = mask.get_mask_range();
+            if (mb == 0 && me > 0 && static_cast<uint32_t>(me) <= consumer.width) {
+              return value;
+            }
+          }
+          break;
+        }
+      }
+      return slot.unsign ? absl::StrCat(value, ".zext_to<", consumer.width, ">()")
+                         : absl::StrCat("Slop<", consumer.width, ">{", value, "}");
+    };
+    const auto emit_serial_dirty_consumers = [&](size_t slot_index, std::string_view indent) {
+      if (workers_ > 1) {
+        return;
+      }
+      absl::flat_hash_set<size_t> emitted;
+      for (const auto& consumer : color_plan_->boundary_slots()[slot_index].consumers) {
+        if (consumer.color == livehd::sim::Color_plan::invalid_index || !emitted.insert(consumer.color).second) {
+          continue;
+        }
+        fout->append(indent, "__rt.__color_dirty[", std::to_string(consumer.color), "] = true;\n");
+      }
+    };
+    const auto emit_serial_dirty_site_colors = [&](size_t site_index, std::string_view indent) {
+      if (workers_ > 1) {
+        return;
+      }
+      for (const size_t color_index : direct_site_colors[site_index]) {
+        fout->append(indent, "__rt.__color_dirty[", std::to_string(color_index), "] = true;\n");
+      }
+    };
+    const auto build_direct_kernel_abi = [&](size_t color_index) {
+      Direct_kernel_abi                   abi;
+      absl::flat_hash_map<size_t, size_t> rank_of;
+      rank_of.reserve(color_plan_->canonical_members()[color_index].size());
+      for (size_t rank = 0; rank < color_plan_->canonical_members()[color_index].size(); ++rank) {
+        rank_of.emplace(color_plan_->canonical_members()[color_index][rank], rank);
+      }
+      for (const size_t slot_index : direct_consumed_slots[color_index]) {
+        const auto& slot = color_plan_->boundary_slots()[slot_index];
+        if (direct_read_expr(slot, slot_index).empty()) {
+          continue;
+        }
+        for (const auto& consumer : slot.consumers) {
+          if (consumer.color != color_index || consumer.version_site == livehd::sim::Color_plan::invalid_index) {
+            continue;
+          }
+          const auto rank_it = rank_of.find(consumer.version_site);
+          I(rank_it != rank_of.end());
+          const size_t rank = rank_it->second;
+          abi.reads.push_back({
+              slot_index,
+              rank,
+              consumer,
+              {rank, static_cast<uint8_t>(slot.kind), consumer.port, consumer.input, slot.width, consumer.width, slot.unsign}
+          });
+        }
+      }
+      for (size_t rank = 0; rank < color_plan_->canonical_members()[color_index].size(); ++rank) {
+        const size_t version = color_plan_->canonical_members()[color_index][rank];
+        for (const size_t slot_index : direct_produced_slots[version]) {
+          const auto& slot = color_plan_->boundary_slots()[slot_index];
+          if (direct_write_expr(slot, slot_index).empty()) {
+            continue;
+          }
+          abi.writes.push_back({
+              slot_index,
+              rank,
+              version,
+              {rank, static_cast<uint8_t>(slot.kind), slot.producer_port, slot.producer_shift, slot.width, slot.unsign}
+          });
+        }
+      }
+      std::ranges::sort(abi.reads, {}, &Direct_kernel_read::key);
+      std::ranges::sort(abi.writes, {}, &Direct_kernel_write::key);
+      return abi;
+    };
+    const auto kernel_name = [&](std::string_view signature) {
+      std::string name = absl::StrCat("__lhd_color_kernel_", mod, "_");
+      for (const char c : signature) {
+        name += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+      }
+      return name;
+    };
+    const auto kernel_file_stem = [&](std::string_view signature) {
+      std::string name = absl::StrCat(fstem, ".color-kernel-");
+      for (const char c : signature) {
+        name += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+      }
+      return name;
+    };
+    const auto pure_data_color = [&](size_t color_index) {
+      return std::ranges::all_of(color_plan_->colors()[color_index].members, [&](const size_t member) {
+        const auto& version = color_plan_->version_sites()[member];
+        const auto& site    = color_plan_->sites()[version.base_site];
+        const auto  op      = type_op_of(site.node.base_node());
+        if (version.role != livehd::sim::Color_plan::Version_role::data || op == Ntype_op::Memory || op == Ntype_op::Clock_cell
+            || op == Ntype_op::Sub) {
+          return false;
+        }
+        const auto definition_inputs = site.node.base_node().inp_edges();
+        const auto occurrence_inputs = site.node.inp_edges();
+        if (definition_inputs.size() != occurrence_inputs.size()) {
+          return false;
+        }
+        auto        occurrence_input = occurrence_inputs.begin();
+        const auto& local_clocks     = local_clocks_for(site.node.get_graph());
+        for (size_t input = 0; input < definition_inputs.size(); ++input, ++occurrence_input) {
+          if (livehd::graph_util::is_graph_input_pin(definition_inputs[input].driver)
+              && local_clocks.is_clock(definition_inputs[input].driver)) {
+            return false;  // clock levels are scheduler slot values, not bound ABI inputs
+          }
+          if (is_const_pin(occurrence_input->driver) && !is_const_pin(definition_inputs[input].driver)) {
+            return false;  // occurrence-specific parameter: not part of the boundary ABI yet
+          }
+        }
+        return true;
+      });
+    };
+    const auto single_occurrence_body_color = [&](size_t color_index) {
+      const auto& members = color_plan_->colors()[color_index].members;
+      if (members.empty()) {
+        return true;
+      }
+      const auto& path = color_plan_->sites()[color_plan_->version_sites()[members.front()].base_site].node.path();
+      return std::ranges::all_of(members, [&](size_t member) {
+        return color_plan_->sites()[color_plan_->version_sites()[member].base_site].node.path() == path;
+      });
+    };
+    std::vector<const livehd::sim::Color_plan::Kernel_class*> shared_kernel(color_plan_->colors().size(), nullptr);
+    std::vector<Direct_kernel_abi>                            shared_abi(color_plan_->colors().size());
+    for (const auto& kernel : color_plan_->kernel_classes()) {
+      if (kernel.colors.size() < 2 || !pure_data_color(kernel.representative)
+          || !single_occurrence_body_color(kernel.representative)) {
+        continue;
+      }
+      auto         representative_abi = build_direct_kernel_abi(kernel.representative);
+      const size_t changed_outputs    = std::ranges::count_if(representative_abi.writes, [&](const auto& write) {
+        return color_plan_->boundary_slots()[write.slot_index].kind == livehd::sim::Color_plan::Boundary_kind::color_value;
+      });
+      if (changed_outputs > 64) {
+        continue;
+      }
+      bool verified = true;
+      for (const size_t color_index : kernel.colors) {
+        if (!pure_data_color(color_index) || !single_occurrence_body_color(color_index)) {
+          verified = false;
+          break;
+        }
+        auto abi = build_direct_kernel_abi(color_index);
+        if (abi.reads.size() != representative_abi.reads.size() || abi.writes.size() != representative_abi.writes.size()) {
+          verified = false;
+          break;
+        }
+        for (size_t i = 0; i < abi.reads.size(); ++i) {
+          verified &= abi.reads[i].key == representative_abi.reads[i].key;
+        }
+        for (size_t i = 0; i < abi.writes.size(); ++i) {
+          verified &= abi.writes[i].key == representative_abi.writes[i].key;
+        }
+        if (!verified) {
+          break;
+        }
+        shared_abi[color_index] = std::move(abi);
+      }
+      if (!verified) {
+        for (const size_t color_index : kernel.colors) {
+          shared_abi[color_index] = {};
+        }
+        continue;
+      }
+      for (const size_t color_index : kernel.colors) {
+        shared_kernel[color_index] = &kernel;
+      }
+    }
+
+    // One digest-named TU per verified canonical class. Occurrence-specific
+    // storage is supplied only through the ordered boundary ABI below.
+    const std::string kernel_header_name = fstem + ".color-kernels.hpp";
+    auto              kernel_header
+        = std::make_shared<File_output>(odir.empty() ? kernel_header_name : absl::StrCat(odir, "/", kernel_header_name));
+    kernel_header->append("// Generated canonical simulator kernels. Do not edit.\n#pragma once\n#include <cstdint>\n");
+    fout->append("#include \"", kernel_header_name, "\"\n");
+    absl::flat_hash_set<std::string> expected_kernel_files;
+    for (const auto* kernel : shared_kernel) {
+      if (kernel != nullptr) {
+        expected_kernel_files.insert(kernel_file_stem(kernel->signature) + ".cpp");
+      }
+    }
+    if (!odir.empty()) {
+      std::error_code   ec;
+      const std::string prefix = fstem + ".color-kernel-";
+      for (const auto& entry : std::filesystem::directory_iterator(std::string(odir), ec)) {
+        const auto filename = entry.path().filename().string();
+        if (!entry.is_regular_file() || !filename.starts_with(prefix) || !filename.ends_with(".cpp")
+            || expected_kernel_files.contains(filename)) {
+          continue;
+        }
+        std::filesystem::remove(entry.path(), ec);
+      }
+    }
+    absl::flat_hash_set<std::string> emitted_kernels;
+    for (size_t color_index = 0; color_index < shared_kernel.size(); ++color_index) {
+      const auto* kernel = shared_kernel[color_index];
+      if (kernel == nullptr || !emitted_kernels.insert(kernel->signature).second) {
+        continue;
+      }
+      const size_t representative = kernel->representative;
+      const auto&  abi            = shared_abi[representative];
+      kernel_header->append("std::uint64_t ", kernel_name(kernel->signature), "(void**);\n");
+      const std::string kernel_path = kernel_file_stem(kernel->signature) + ".cpp";
+      auto kernel_out = std::make_shared<File_output>(odir.empty() ? kernel_path : absl::StrCat(odir, "/", kernel_path));
+      kernel_out->append(
+          "// Generated canonical simulator kernel. Do not edit.\n"
+          "#include <cassert>\n#include <cstddef>\n#include <cstdint>\n");
+      kernel_out->append("#include \"slop.hpp\"\n\n");
+      kernel_out->append("std::uint64_t ", kernel_name(kernel->signature), "(void** __bind) {\n");
+      for (size_t i = 0; i < abi.reads.size(); ++i) {
+        const auto& slot = color_plan_->boundary_slots()[abi.reads[i].slot_index];
+        if (abi.reads[i].consumer.width == slot.width) {
+          kernel_out->append(absl::StrCat("  [[maybe_unused]] const auto& __k_in_",
+                                          i,
+                                          " = *static_cast<const Slop<",
+                                          slot.width,
+                                          ">*>(__bind[",
+                                          i,
+                                          "]);\n"));
+        } else {
+          kernel_out->append(absl::StrCat("  [[maybe_unused]] const auto __k_in_",
+                                          i,
+                                          " = static_cast<const Slop<",
+                                          slot.width,
+                                          ">*>(__bind[",
+                                          i,
+                                          "])->zext_to<",
+                                          abi.reads[i].consumer.width,
+                                          ">();\n"));
+        }
+      }
+      for (size_t i = 0; i < abi.writes.size(); ++i) {
+        const auto& slot = color_plan_->boundary_slots()[abi.writes[i].slot_index];
+        kernel_out->append(absl::StrCat("  [[maybe_unused]] auto& __k_out_",
+                                        i,
+                                        " = *static_cast<Slop<",
+                                        slot.width,
+                                        ">*>(__bind[",
+                                        abi.reads.size() + i,
+                                        "]);\n"));
+      }
+      kernel_out->append("  std::uint64_t __changed = 0;\n");
+      pin2var.clear();
+      canonical_.clear();
+      seq_volatile_.clear();
+      for (size_t i = 0; i < abi.reads.size(); ++i) {
+        const auto& read             = abi.reads[i];
+        const auto& slot             = color_plan_->boundary_slots()[read.slot_index];
+        const auto& consumer_version = color_plan_->version_sites()[read.consumer.version_site];
+        const auto  consumer_node    = color_plan_->sites()[consumer_version.base_site].node.base_node();
+        uint32_t    consumer_input   = 0;
+        for (const auto& edge : consumer_node.inp_edges()) {
+          if (consumer_input++ != read.consumer.input) {
+            continue;
+          }
+          I(edge.sink.get_port_id() == read.consumer.port);
+          pin2var[edge.driver.get_class_index()] = absl::StrCat("__k_in_", i);
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+              && (!slot.unsign || slot.width <= read.consumer.width)) {
+            canonical_.insert(edge.driver.get_class_index());
+          }
+          break;
+        }
+      }
+      auto members = color_plan_->colors()[representative].members;
+      std::ranges::sort(members, [&](size_t a, size_t b) {
+        const auto& av = color_plan_->version_sites()[a];
+        const auto& bv = color_plan_->version_sites()[b];
+        return std::tie(av.execution_order, av.structural_id) < std::tie(bv.execution_order, bv.structural_id);
+      });
+      std::vector<size_t> changed_bit_of_write(abi.writes.size(), livehd::sim::Color_plan::invalid_index);
+      size_t              changed_bits = 0;
+      for (size_t write_index = 0; write_index < abi.writes.size(); ++write_index) {
+        const auto& slot = color_plan_->boundary_slots()[abi.writes[write_index].slot_index];
+        if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+          changed_bit_of_write[write_index] = changed_bits++;
+        }
+      }
+      I(changed_bits <= 64);
+      const auto kernel_mark = kernel_out->mark();
+      size_t     temporary   = 0;
+      for (const size_t member : members) {
+        const auto&     version = color_plan_->version_sites()[member];
+        const auto      node    = color_plan_->sites()[version.base_site].node.base_node();
+        hhds::Pin_class output;
+        for (const auto& candidate : node.out_pins()) {
+          output = candidate;
+          break;
+        }
+        if (output.is_invalid()) {
+          output = node.get_driver_pin(0);
+        }
+        I(!output.is_invalid());
+        sub_width_expr_  = false;
+        const int  width = wbits_of(output);
+        const auto expr  = node_expr(node, width);
+        const auto temp  = absl::StrCat("__k_tmp_", temporary++);
+        kernel_out->append(
+            absl::StrCat("  Slop<", width, "> ", temp, sub_width_expr_ ? "{" : " = ", expr, sub_width_expr_ ? "};\n" : ";\n"));
+        pin2var[output.get_class_index()] = temp;
+        canonical_.insert(output.get_class_index());
+        for (size_t write_index = 0; write_index < abi.writes.size(); ++write_index) {
+          const auto& write = abi.writes[write_index];
+          if (write.version != member) {
+            continue;
+          }
+          const auto& slot   = color_plan_->boundary_slots()[write.slot_index];
+          const auto  source = find_site_output(version.base_site, slot.producer_port);
+          I(!source.is_invalid());
+          std::string source_expr = operand(source, slot.width);
+          if (slot.producer_shift != 0) {
+            source_expr = absl::StrCat("Slop<", slot.width, ">::shl_op(", source_expr, ", ", slot.producer_shift, ")");
+          }
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+            I(changed_bit_of_write[write_index] != livehd::sim::Color_plan::invalid_index);
+            kernel_out->append(absl::StrCat("  if (slop_update(__k_out_",
+                                            write_index,
+                                            ", ",
+                                            source_expr,
+                                            ")) __changed |= std::uint64_t{1} << ",
+                                            changed_bit_of_write[write_index],
+                                            ";\n"));
+          } else {
+            kernel_out->append(absl::StrCat("  __k_out_", write_index, " = ", source_expr, ";\n"));
+          }
+        }
+      }
+      {
+        auto body = kernel_out->detach_from(kernel_mark);
+        compact_body_temps(body);
+        kernel_out->append(body);
+      }
+      kernel_out->append("  return __changed;\n}\n");
+    }
+
+    std::vector<std::shared_ptr<File_output>> color_eval_outputs;
+    if (!direct_color_eval_shards.empty()) {
+      absl::flat_hash_set<std::string> expected_color_eval_files;
+      for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
+        expected_color_eval_files.insert(absl::StrCat(fstem, ".color-eval-", shard, ".cpp"));
+      }
+      if (!odir.empty()) {
+        std::error_code   ec;
+        const std::string prefix = fstem + ".color-eval-";
+        for (const auto& entry : std::filesystem::directory_iterator(std::string(odir), ec)) {
+          const auto filename = entry.path().filename().string();
+          if (!entry.is_regular_file() || !filename.starts_with(prefix) || !filename.ends_with(".cpp")
+              || expected_color_eval_files.contains(filename)) {
+            continue;
+          }
+          std::filesystem::remove(entry.path(), ec);
+        }
+      }
+      color_eval_outputs.reserve(direct_color_eval_shards.size());
+      for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
+        const std::string filename = absl::StrCat(fstem, ".color-eval-", shard, ".cpp");
+        auto              out      = std::make_shared<File_output>(odir.empty() ? filename : absl::StrCat(odir, "/", filename));
+        const auto [begin, end]    = direct_color_eval_shards[shard];
+        out->append("// Generated simulator color evaluator shard. Do not edit.\n");
+        out->append("#include \"", fstem, ".color-runtime.hpp\"\n");
+        out->append("#include <cassert>\n#include <cstddef>\n");
+        out->append("\n");
+        out->append("void ", mod, "::__color_eval_part_", std::to_string(shard), "(std::size_t __color_index) {\n");
+        out->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n  switch (__color_index) {\n");
+        color_eval_outputs.push_back(std::move(out));
+      }
+    } else if (!odir.empty()) {
+      std::error_code   ec;
+      const std::string prefix = fstem + ".color-eval-";
+      for (const auto& entry : std::filesystem::directory_iterator(std::string(odir), ec)) {
+        const auto filename = entry.path().filename().string();
+        if (entry.is_regular_file() && filename.starts_with(prefix) && filename.ends_with(".cpp")) {
+          std::filesystem::remove(entry.path(), ec);
+        }
+      }
+    }
+
+    // Emit one body-private indexed dispatcher over all planned colors. This
+    // keeps the generated module header independent of the plan's color count
+    // while Taskflow still owns one independently schedulable task per color.
+    // This direct-kernel shape
+    // admits ordinary rising-edge state throughout an acyclic occurrence tree;
+    // latch, memory, derived/gated-clock, compact-loop, conditional, and random
+    // designs do not select taskflow_root above and therefore cannot
+    // silently enter an incomplete lowering. Every cross-color value lands in
+    // its producer-owned slot; state reads bind the occurrence's existing Q
+    // member and state updates write its existing `_din` member before commit.
+    fout->append("void ", mod, "::__color_eval(std::size_t __color_index) {\n");
+    fout->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
+    if (workers_ > 1) {
+      fout->append("  static constexpr std::array<uint32_t, ",
+                   std::to_string(color_plan_->colors().size() + 1),
+                   "> __dirty_offsets{");
+      size_t dirty_offset = 0;
+      for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+        fout->append(color_index == 0 ? "" : ",", std::to_string(dirty_offset));
+        dirty_offset += direct_dirty_slots[color_index].size();
+      }
+      fout->append(color_plan_->colors().empty() ? "" : ",", std::to_string(dirty_offset), "};\n");
+      fout->append("  static constexpr std::array<uint32_t, ", std::to_string(dirty_offset), "> __dirty_slots{");
+      bool first_dirty = true;
+      for (const auto& slots : direct_dirty_slots) {
+        for (const size_t slot : slots) {
+          fout->append(first_dirty ? "" : ",", std::to_string(slot));
+          first_dirty = false;
+        }
+      }
+      fout->append("};\n");
+      fout->append("  bool __dirty = __dirty_offsets[__color_index] == __dirty_offsets[__color_index + 1];\n");
+      fout->append(
+          "  for (size_t __use = __dirty_offsets[__color_index]; __use < __dirty_offsets[__color_index + 1]; ++__use) {\n"
+          "    const size_t __slot = __dirty_slots[__use];\n"
+          "    if (__rt.__color_seen[__use] != __rt.__color_gen[__slot]) {\n"
+          "      __rt.__color_seen[__use] = __rt.__color_gen[__slot];\n"
+          "      __dirty = true;\n"
+          "    }\n"
+          "  }\n");
+      fout->append("  static constexpr std::array<bool, ", std::to_string(color_plan_->colors().size()), "> __always_run{");
+      for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+        const auto& color = color_plan_->colors()[color_index];
+        const bool  always_run
+            = direct_random_color[color_index] || std::ranges::any_of(color.members, [&](size_t member) {
+                const auto& version = color_plan_->version_sites()[member];
+                const auto  node    = color_plan_->sites()[version.base_site].node.base_node();
+                if (version.role == livehd::sim::Color_plan::Version_role::data && type_op_of(node) == Ntype_op::Memory) {
+                  return true;
+                }
+                if (version.role != livehd::sim::Color_plan::Version_role::state_update) {
+                  return false;
+                }
+                const auto pipe_min = get_driver(find_sink_pin(node, "pipe_min"));
+                return !pipe_min.is_invalid() && is_const_pin(pipe_min) && hydrate_const(pipe_min).to_just_i64() > 1;
+              });
+        fout->append(color_index == 0 ? "" : ",", always_run ? "true" : "false");
+      }
+      fout->append("};\n  if (!__dirty && !__always_run[__color_index]) return;\n");
+    }
+    fout->append("  static constexpr std::array<uint32_t, ",
+                 std::to_string(color_plan_->colors().size() + 1),
+                 "> __shared_output_offsets{");
+    size_t shared_output_offset = 0;
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      fout->append(color_index == 0 ? "" : ",", std::to_string(shared_output_offset));
+      if (shared_kernel[color_index] != nullptr) {
+        shared_output_offset += std::ranges::count_if(shared_abi[color_index].writes, [&](const auto& write) {
+          return color_plan_->boundary_slots()[write.slot_index].kind == livehd::sim::Color_plan::Boundary_kind::color_value;
+        });
+      }
+    }
+    fout->append(color_plan_->colors().empty() ? "" : ",", std::to_string(shared_output_offset), "};\n");
+    fout->append("  static constexpr std::array<uint32_t, ", std::to_string(shared_output_offset), "> __shared_output_slots{");
+    bool first_shared_output = true;
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      if (shared_kernel[color_index] == nullptr) {
+        continue;
+      }
+      for (const auto& write : shared_abi[color_index].writes) {
+        const auto& slot = color_plan_->boundary_slots()[write.slot_index];
+        if (slot.kind != livehd::sim::Color_plan::Boundary_kind::color_value) {
+          continue;
+        }
+        fout->append(first_shared_output ? "" : ",", std::to_string(write.slot_index));
+        first_shared_output = false;
+      }
+    }
+    fout->append("};\n");
+    fout->append(
+        "  if (const auto __kernel = __rt.__color_kernel[__color_index]; __kernel != nullptr) {\n"
+        "    const uint64_t __changed = __kernel(__rt.__color_bindings[__color_index].data());\n"
+        "    const size_t __begin = __shared_output_offsets[__color_index];\n"
+        "    const size_t __end = __shared_output_offsets[__color_index + 1];\n"
+        "    for (size_t __output = __begin; __output < __end; ++__output) {\n"
+        "      if ((__changed & (uint64_t{1} << (__output - __begin))) != 0) "
+        "++__rt.__color_gen[__shared_output_slots[__output]];\n"
+        "    }\n"
+        "    return;\n"
+        "  }\n");
+    if (direct_color_eval_shards.empty()) {
+      fout->append("  switch (__color_index) {\n");
+    } else {
+      for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
+        fout->append("  if (__color_index < ",
+                     std::to_string(direct_color_eval_shards[shard].second),
+                     ") { __color_eval_part_",
+                     std::to_string(shard),
+                     "(__color_index); return; }\n");
+      }
+      fout->append("  assert(false && \"invalid color index\");\n}\n");
+    }
+    const auto root_fout        = fout;
+    size_t     color_eval_shard = 0;
+    for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
+      const auto& color = color_plan_->colors()[color_index];
+      if (shared_kernel[color_index] != nullptr) {
+        continue;
+      }
+      if (!color_eval_outputs.empty()) {
+        while (color_eval_shard + 1 < direct_color_eval_shards.size()
+               && color_index >= direct_color_eval_shards[color_eval_shard].second) {
+          ++color_eval_shard;
+        }
+        fout = color_eval_outputs[color_eval_shard];
+      }
+      fout->append("  case ", std::to_string(color_index), ": {\n");
+      // One color body is one straight-line region: sweep its temporaries the
+      // same way a period body is swept (dead ones dropped, single-use ones
+      // folded into the next statement).
+      const auto case_fout  = fout;
+      const auto case_mark  = case_fout->mark();
+      const auto close_case = [&] {
+        auto body = case_fout->detach_from(case_mark);
+        compact_body_temps(body);
+        case_fout->append(body);
+      };
+      if (workers_ > 1 && std::ranges::any_of(color.members, [&](const size_t member) {
+            const auto& version = color_plan_->version_sites()[member];
+            return version.role == livehd::sim::Color_plan::Version_role::data
+                   && type_op_of(color_plan_->sites()[version.base_site].node.base_node()) == Ntype_op::Memory;
+          })) {
+        fout->append("  std::scoped_lock __memory_eval_guard(__rt.__memory_eval_mutex);\n");
+      }
+      pin2var.clear();
+      canonical_.clear();
+      seq_volatile_.clear();
+      for (const size_t slot_index : direct_consumed_slots[color_index]) {
+        const auto& slot = color_plan_->boundary_slots()[slot_index];
+        std::string slot_expr;
+        if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+            || slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
+          slot_expr = direct_read_expr(slot, slot_index);
+        } else if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input) {
+          const auto field = input_field(slot.public_port);
+          if (!field.empty()) {
+            slot_expr = "__in." + field;
+          }
+        }
+        if (slot_expr.empty()) {
+          continue;
+        }
+        for (const auto& consumer : slot.consumers) {
+          if (consumer.color != color_index) {
+            continue;
+          }
+          const auto  consumer_expr    = direct_consumer_expr(slot, slot_index, consumer);
+          const auto& consumer_version = color_plan_->version_sites()[consumer.version_site];
+          // The state-current slot also wakes the zero-work state-read
+          // availability task. That consumer has no graph operand to bind;
+          // actual downstream q reads appear as their own exact Value_use.
+          if (consumer_version.role == livehd::sim::Color_plan::Version_role::state_read) {
+            continue;
+          }
+          const auto& consumer_site = color_plan_->sites()[consumer_version.base_site];
+          const auto  consumer_node = consumer_site.node.base_node();
+          if (consumer_site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+            for (const auto& edge : consumer_node.inp_edges()) {
+              if (edge.sink.get_port_id() == consumer.port && edge.driver.get_master_node() != consumer_node) {
+                pin2var[edge.driver.get_class_index()] = consumer_expr;
+                if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+                    && (!slot.unsign || slot.width <= consumer.width)) {
+                  canonical_.insert(edge.driver.get_class_index());
+                }
+                break;
+              }
+            }
+            continue;
+          }
+          uint32_t consumer_input = 0;
+          for (const auto& edge : consumer_node.inp_edges()) {
+            if (consumer_input++ != consumer.input) {
+              continue;
+            }
+            I(edge.sink.get_port_id() == consumer.port);
+            pin2var[edge.driver.get_class_index()] = consumer_expr;
+            if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+                && (!slot.unsign || slot.width <= consumer.width)) {
+              canonical_.insert(edge.driver.get_class_index());
+            }
+          }
+        }
+      }
+
+      auto members = color.members;
+      std::ranges::sort(members, [&](size_t a, size_t b) {
+        const auto& av = color_plan_->version_sites()[a];
+        const auto& bv = color_plan_->version_sites()[b];
+        return std::tie(av.execution_order, av.structural_id) < std::tie(bv.execution_order, bv.structural_id);
+      });
+      absl::flat_hash_map<size_t, std::string> local_version_value;
+      local_version_value.reserve(members.size());
+      size_t temporary = 0;
+      for (const size_t member : members) {
+        const auto& version = color_plan_->version_sites()[member];
+        const auto& site    = color_plan_->sites()[version.base_site];
+        const auto  node    = site.node.base_node();
+        const auto  op      = type_op_of(node);
+        std::string member_value;
+
+        // Class_index is definition-local, and the same definition can occur
+        // many times in one hierarchy-crossing color. Rebuild the expression
+        // bindings for exactly this occurrence member instead of allowing a
+        // sibling's numerically-equal pin index to leak across the fused body.
+        pin2var.clear();
+        canonical_.clear();
+        seq_volatile_.clear();
+        for (const size_t slot_index : direct_consumed_slots[color_index]) {
+          const auto& slot = color_plan_->boundary_slots()[slot_index];
+          std::string slot_expr;
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+              || slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
+            slot_expr = direct_read_expr(slot, slot_index);
+          } else if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input) {
+            const auto field = input_field(slot.public_port);
+            if (!field.empty()) {
+              slot_expr = "__in." + field;
+            }
+          }
+          if (slot_expr.empty()) {
+            continue;
+          }
+          for (const auto& consumer : slot.consumers) {
+            if (consumer.color != color_index || consumer.version_site != member
+                || version.role == livehd::sim::Color_plan::Version_role::state_read) {
+              continue;
+            }
+            const auto consumer_expr     = direct_consumer_expr(slot, slot_index, consumer);
+            const auto definition_inputs = node.inp_edges();
+            uint32_t   consumer_input    = 0;
+            for (const auto& edge : definition_inputs) {
+              if (consumer_input++ != consumer.input) {
+                continue;
+              }
+              I(edge.sink.get_port_id() == consumer.port);
+              pin2var[edge.driver.get_class_index()] = consumer_expr;
+              if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value
+                  && (!slot.unsign || slot.width <= consumer.width)) {
+                canonical_.insert(edge.driver.get_class_index());
+              }
+              break;
+            }
+          }
+        }
+        for (const auto* use : direct_value_uses_by_consumer[member]) {
+          if (use->top_input || use->producer_version == livehd::sim::Color_plan::invalid_index
+              || direct_version_color[use->producer_version] != color_index) {
+            continue;
+          }
+          const auto value_it = local_version_value.find(use->producer_version);
+          I(value_it != local_version_value.end() && !value_it->second.empty());
+          std::string value              = value_it->second;
+          // `use->consumer_width` is the value width AFTER any erased GraphIO
+          // boundary, while local_version_value names the actual producer
+          // temporary. A
+          // fused hierarchy color can therefore hold a Slop<4> child-internal
+          // packed expression whose public unsigned-u2 boundary is Slop<3>.
+          // Canonicalize the materialized producer to the consumer ABI before
+          // the next ordinary operation; otherwise fusion bypasses the module
+          // boundary and HLOP correctly rejects (for example) Slop<3>::or over
+          // that Slop<4> temporary.
+          uint32_t    materialized_width = use->width;
+          const auto& producer_version   = color_plan_->version_sites()[use->producer_version];
+          const auto  producer_output    = find_site_output(producer_version.base_site, producer_version.output_port);
+          if (!producer_output.is_invalid()) {
+            materialized_width = static_cast<uint32_t>(std::max(1, wbits_of(producer_output)));
+          }
+          if (materialized_width != use->consumer_width) {
+            value = use->unsign ? absl::StrCat(value, ".zext_to<", use->consumer_width, ">()")
+                                : absl::StrCat("Slop<", use->consumer_width, ">{", value, "}");
+          }
+          if (use->producer_shift != 0) {
+            value = absl::StrCat("Slop<", use->consumer_width, ">::shl_op(", value, ", ", use->producer_shift, ")");
+          }
+          uint32_t input_index = 0;
+          for (const auto& edge : node.inp_edges()) {
+            if (input_index++ != use->consumer_input) {
+              continue;
+            }
+            I(edge.sink.get_port_id() == use->consumer_port);
+            pin2var[edge.driver.get_class_index()] = std::move(value);
+            if (!use->unsign || use->width <= use->consumer_width) {
+              canonical_.insert(edge.driver.get_class_index());
+            }
+            break;
+          }
+        }
+        if (const auto member_io = node.get_graph()->get_io()) {
+          const auto& local_clocks = local_clocks_for(node.get_graph());
+          const bool  clock_high   = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
+                                     || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
+          for (const auto& decl : member_io->get_input_pin_decls()) {
+            const auto  input           = node.get_graph()->get_input_pin(decl.name);
+            // The definition's reference clock is a scheduler event, so its
+            // Boolean level is the phase level even when an observation slot
+            // also exposes that port. Secondary clocks and latch-only data
+            // clocks remain their exact driven boundary value.
+            const auto* member_flop     = find_local_flop(version.base_site);
+            const bool  secondary_state = member_flop != nullptr && !member_flop->sec_clock.is_invalid();
+            if (!input.is_invalid() && local_clocks.is_clock(input) && !secondary_state
+                && pin_name_of(input) == clock_input_of(node.get_graph())) {
+              pin2var[input.get_class_index()] = absl::StrCat("Slop<1>::create_integer(", clock_high ? "1" : "0", ")");
+              canonical_.insert(input.get_class_index());
+            }
+          }
+        }
+        if (op == Ntype_op::Sub) {
+          I(site.kind == livehd::sim::Color_plan::Site_kind::loop_control);
+          const auto loop = node.subnode_loop();
+          const auto sio  = node.get_subnode_io();
+          I(loop.has_value() && sio != nullptr);
+          const auto loop_layout = direct_layout(node.get_graph()).member.find(node.get_class_index());
+          I(loop_layout != direct_layout(node.get_graph()).member.end());
+          const auto& loop_member = loop_layout->second;
+          for (const auto& decl : sio->get_input_pin_decls()) {
+            if (loop->index_input && decl.port_id == *loop->index_input) {
+              continue;  // supplied as first + ordinal*step by the native wrapper
+            }
+            const auto sink = find_sink_pin(node, decl.name);
+            if (sink.is_invalid()) {
+              continue;
+            }
+            hhds::Pin_class driver;
+            for (const auto& edge : sink.inp_edges()) {
+              if (edge.driver.get_master_node() != node) {
+                driver = edge.driver;
+                break;
+              }
+            }
+            if (driver.is_invalid()) {
+              continue;  // descriptor-only carry/activation input
+            }
+            const int width = decl.bits > 0 ? static_cast<int>(decl.bits) : 1;
+            fout->append(absl::StrCat("  ",
+                                      loop_member,
+                                      ".__gen += slop_update(",
+                                      loop_member,
+                                      ".__in.",
+                                      cpp_port_path(decl.name),
+                                      ", ",
+                                      operand(driver, width),
+                                      ");\n"));
+            if (const auto child = node.get_subnode_graph();
+                child && clock_guard_ports(child, port_cache).contains(static_cast<uint32_t>(decl.port_id))) {
+              const auto root_pin = livehd::latch_contract::control_root(driver).net;
+              I(!root_pin.is_invalid() && livehd::graph_util::is_graph_input_pin(root_pin));
+              const auto field = input_field(root_pin.get_port_id());
+              I(!field.empty());
+              fout->append(absl::StrCat("  ",
+                                        loop_member,
+                                        ".__gen += slop_update(",
+                                        loop_member,
+                                        ".__in.",
+                                        cpp_port_path(decl.name),
+                                        "__tick, __in.",
+                                        field,
+                                        "__tick);\n"));
+            }
+          }
+          if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
+            fout->append("  ", loop_member, ".__compact_advance();  // compact-loop control: one native ordinal walk\n");
+          } else {
+            fout->append("  ", loop_member, ".__compact_publish();  // compact-loop post-edge version: one native ordinal walk\n");
+          }
+          const char* surface = version.version == livehd::sim::Color_plan::State_version::pre_rise ? ".__last_out." : ".__out.";
+          for (const auto& decl : sio->get_output_pin_decls()) {
+            const auto output = find_driver_pin(node, decl.name);
+            if (!output.is_invalid()) {
+              const auto value                  = loop_member + surface + cpp_port_path(decl.name);
+              pin2var[output.get_class_index()] = value;
+              canonical_.insert(output.get_class_index());
+              if (decl.port_id == version.output_port) {
+                member_value = value;
+              }
+            }
+          }
+        } else {
+          // Expression lowering works on definition pins, while the color plan
+          // works on resolved occurrence edges. A child GraphIO input driven by
+          // a parent literal therefore needs an explicit definition-pin binding;
+          // otherwise a raw Class_index collision with a root input can silently
+          // substitute the wrong signal. Non-constant cross-boundary sources are
+          // already bound through the exact Boundary_consumer records above.
+          const auto occurrence_inputs = site.node.inp_edges();
+          const auto definition_inputs = node.inp_edges();
+          I(occurrence_inputs.size() == definition_inputs.size());
+          auto occurrence_input = occurrence_inputs.begin();
+          for (size_t input = 0; input < definition_inputs.size(); ++input, ++occurrence_input) {
+            if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
+              const auto producer_it = direct_site_index.find(occurrence_input->driver.get_master_node().get_occurrence_index());
+              if (producer_it != direct_site_index.end()
+                  && type_op_of(color_plan_->sites()[producer_it->second].node.base_node()) == Ntype_op::Latch) {
+                const size_t producer_update = state_update_version(producer_it->second);
+                if (producer_update != livehd::sim::Color_plan::invalid_index
+                    && color_plan_->version_sites()[producer_update].slot == version.slot) {
+                  pin2var[definition_inputs[input].driver.get_class_index()]
+                      = occurrence_member(color_plan_->sites()[producer_it->second]) + "_din";
+                  canonical_.insert(definition_inputs[input].driver.get_class_index());
+                  continue;
+                }
+              }
+            }
+            if (!is_const_pin(occurrence_input->driver) || is_const_pin(definition_inputs[input].driver)) {
+              continue;
+            }
+            const auto width = std::max<int32_t>(1, wbits_of(definition_inputs[input].driver));
+            pin2var[definition_inputs[input].driver.get_class_index()] = operand(occurrence_input->driver.base_pin(), width);
+          }
+          if (version.role == livehd::sim::Color_plan::Version_role::state_read) {
+            const auto qpin                 = node.get_driver_pin(0);
+            member_value                    = occurrence_member(site);
+            pin2var[qpin.get_class_index()] = member_value;
+          }
+          if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
+            const auto* local_flop = find_local_flop(version.base_site);
+            const auto  state      = occurrence_member(site);
+            if (op == Ntype_op::Memory) {
+              const auto* memory = find_local_mem(version.base_site);
+              I(memory != nullptr && !state.empty());
+              if (memory->is_whole()) {
+                const int         width   = memory->bits * memory->size;
+                const std::string pending = whole_pending(version.base_site);
+                const std::string update  = operand(memory->update, width);
+                const std::string init    = memory->init.is_invalid() ? absl::StrCat("Slop<", width, ">::create_integer(0)")
+                                                                      : operand(memory->init, width);
+                std::string       enable;
+                if (!memory->update_enable.is_invalid()) {
+                  enable = absl::StrCat("(", operand(memory->update_enable, 1), ").is_known_true()");
+                }
+                if (const auto gate = mem_gate_cond(*memory); !gate.empty()) {
+                  enable = enable.empty() ? gate : absl::StrCat("(", enable, " && ", gate, ")");
+                }
+                if (enable.empty()) {
+                  enable = "true";
+                }
+                std::string reset;
+                if (!memory->reset.is_invalid()) {
+                  reset = absl::StrCat("(", operand(memory->reset, 1), ").is_known_true()");
+                }
+                if (reset.empty()) {
+                  fout->append("  ", pending, "_din = ", update, ";\n");
+                  fout->append("  ", pending, "_cen = ", enable, ";\n");
+                } else {
+                  fout->append(absl::StrCat("  ", pending, "_din = ", reset, " ? ", init, " : ", update, ";\n"));
+                  fout->append(absl::StrCat("  ", pending, "_cen = ", reset, " || ", enable, ";\n"));
+                }
+                fout->append("  __rt.__state_commit[", std::to_string(member), "] = true;\n");
+              }
+              for (const auto& guard : memory->clock_guards) {
+                auto resolved_input = occurrence_inputs.begin();
+                for (size_t input = 0; input < definition_inputs.size(); ++input, ++resolved_input) {
+                  if (definition_inputs[input].sink.get_port_id() != Ntype::get_sink_pid(op, "clock_pin")) {
+                    continue;
+                  }
+                  if (const auto occurrence_guard = resolve_occurrence_pin(resolved_input->driver, guard, 0)) {
+                    const auto guard_value = occurrence_bool_expr(*occurrence_guard, 0);
+                    if (!guard_value.empty()) {
+                      pin2var[guard.get_class_index()] = guard_value;
+                      canonical_.insert(guard.get_class_index());
+                    }
+                  }
+                  break;
+                }
+              }
+              fout->append("  ", state, ".clear_pending();\n");
+              for (const auto& port : memory->ports) {
+                if (port.rd || port.addr.is_invalid() || port.din.is_invalid()) {
+                  continue;
+                }
+                if (!port.enable.is_invalid() && is_const_pin(port.enable) && hydrate_const(port.enable).is_known_false()) {
+                  continue;
+                }
+                fout->append(absl::StrCat("  ",
+                                          state,
+                                          ".stage_write<",
+                                          port.wridx,
+                                          ">(",
+                                          emit_wen(*memory, port),
+                                          ", ",
+                                          operand(port.addr, std::max(1, bits_of(port.addr))),
+                                          ", ",
+                                          operand(port.din, memory->bits),
+                                          ");\n"));
+              }
+              fout->append("  __rt.__state_commit[", std::to_string(member), "] = true;\n");
+              for (const auto& port : memory->ports) {
+                if (!port.rd || memory->type != 1 || port.addr.is_invalid()) {
+                  continue;
+                }
+                const std::string q    = absl::StrCat(state, "_q", port.rdidx);
+                const std::string gate = mem_gate_cond(*memory);
+                const std::string read
+                    = absl::StrCat(state, ".read<", port.rdidx, ">(", operand(port.addr, std::max(1, bits_of(port.addr))), ")");
+                fout->append(absl::StrCat("  ",
+                                          q,
+                                          "_din = ",
+                                          gate.empty() ? read : absl::StrCat("(", gate, " ? ", read, " : ", q, ")"),
+                                          ";\n"));
+              }
+              continue;
+            }
+            const int state_bits = wbits_of(node.get_driver_pin(0));
+            I(!state.empty());
+            const auto din      = get_driver(find_sink_pin(node, "din"));
+            const auto rstp     = get_driver(find_sink_pin(node, "reset_pin"));
+            const auto initp    = get_driver(find_sink_pin(node, "initial"));
+            const auto enp      = get_driver(find_sink_pin(node, "enable"));
+            bool       negreset = false;
+            if (const auto np = get_driver(find_sink_pin(node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
+              negreset = !hydrate_const(np).is_known_false();
+            }
+            const std::string rstval
+                = initp.is_invalid() ? absl::StrCat("Slop<", state_bits, ">::create_integer(0)") : operand(initp, state_bits);
+            bool        reset_always = false;
+            std::string rtest;
+            if (!rstp.is_invalid()) {
+              if (is_const_pin(rstp)) {
+                reset_always = !hydrate_const(rstp).is_known_false();
+              } else {
+                rtest = absl::StrCat(operand(rstp, 1), negreset ? ".is_known_false()" : ".is_known_true()");
+              }
+            }
+            bool phase_window_latch = false;
+            if (op == Ntype_op::Latch) {
+              const auto& local_clocks = local_clocks_for(node.get_graph());
+              const auto  commit       = livehd::latch_contract::commit_class_of(node, &local_clocks);
+              if (commit.has_value() && commit->role == livehd::latch_contract::Net_role::Clock) {
+                const auto root    = livehd::latch_contract::control_root(enp);
+                phase_window_latch = !root.net.is_invalid() && livehd::graph_util::is_graph_input_pin(root.net)
+                                     && pin_name_of(root.net) == clock_input_of(node.get_graph());
+              }
+            }
+            std::string etest;
+            if (!phase_window_latch && !enp.is_invalid() && !is_const_pin(enp)) {
+              etest = absl::StrCat(operand(enp, 1),
+                                   local_flop != nullptr && local_flop->neg_enable ? ".is_known_false()" : ".is_known_true()");
+            } else if (!phase_window_latch && !enp.is_invalid() && is_const_pin(enp) && local_flop != nullptr
+                       && local_flop->neg_enable && !hydrate_const(enp).is_known_false()) {
+              etest = "false";
+            }
+            const std::string din_expr = din.is_invalid() ? state : operand(din, state_bits);
+            const auto        next_of  = [&](const std::string& source, const std::string& hold) {
+              std::string next = etest.empty() ? source : absl::StrCat("(", etest, " ? ", source, " : ", hold, ")");
+              if (reset_always) {
+                next = rstval;
+              } else if (!rtest.empty()) {
+                next = absl::StrCat("(", rtest, " ? ", rstval, " : ", next, ")");
+              }
+              return next;
+            };
+            int pipe_depth = 1;
+            if (const auto pipe_min = get_driver(find_sink_pin(node, "pipe_min"));
+                !pipe_min.is_invalid() && is_const_pin(pipe_min)) {
+              pipe_depth = std::max<int>(1, static_cast<int>(hydrate_const(pipe_min).to_just_i64()));
+            }
+            if (pipe_depth == 1) {
+              fout->append("  ", state, "_din = ", next_of(din_expr, state), ";\n");
+            } else {
+              const auto stage = [&](int index) { return absl::StrCat(state, "_p", index); };
+              fout->append("  ", stage(0), "_din = ", next_of(din_expr, stage(0)), ";\n");
+              for (int index = 1; index < pipe_depth - 1; ++index) {
+                fout->append("  ", stage(index), "_din = ", next_of(stage(index - 1), stage(index)), ";\n");
+              }
+              fout->append("  ", state, "_din = ", next_of(stage(pipe_depth - 2), state), ";\n");
+            }
+            std::string commit_test;
+            const auto  guard_expr = [&](const hhds::Pin_class& guard) {
+              if (is_const_pin(guard)) {
+                return operand(guard, 1);
+              }
+              const auto guard_root = livehd::latch_contract::control_root(guard);
+              if (!guard_root.net.is_invalid() && type_op_of(guard_root.net.get_master_node()) == Ntype_op::Latch) {
+                for (const auto& candidate_site : color_plan_->sites()) {
+                  if (type_op_of(candidate_site.node.base_node()) != Ntype_op::Latch
+                      || candidate_site.node.path() != site.node.path()) {
+                    continue;
+                  }
+                  const auto qpin = candidate_site.node.base_node().get_driver_pin(0);
+                  if (!qpin.is_invalid() && qpin.get_definition_index() == guard_root.net.get_definition_index()) {
+                    return occurrence_member(candidate_site) + "_din";
+                  }
+                }
+              }
+              if (guard.get_graph() == g && livehd::graph_util::is_graph_input_pin(guard)) {
+                const auto field = input_field(guard.get_port_id());
+                if (!field.empty()) {
+                  return "__in." + field;
+                }
+              }
+              for (const auto& candidate_site : color_plan_->sites()) {
+                if (type_op_of(candidate_site.node.base_node()) != Ntype_op::Latch
+                    || candidate_site.node.path() != site.node.path()) {
+                  continue;
+                }
+                const auto qpin = candidate_site.node.base_node().get_driver_pin(0);
+                if (!qpin.is_invalid() && qpin.get_definition_index() == guard.get_definition_index()) {
+                  return occurrence_member(candidate_site) + "_din";
+                }
+              }
+              for (const auto& candidate : flops) {
+                const auto qpin = candidate.node.get_driver_pin(0);
+                if (!qpin.is_invalid() && qpin.get_class_index() == guard.get_class_index()) {
+                  return candidate.is_latch ? candidate.member + "_din" : candidate.member;
+                }
+              }
+              if (const auto it = pin2var.find(guard.get_class_index()); it != pin2var.end()) {
+                return it->second;
+              }
+              return operand(guard, 1);
+            };
+            const auto state_clock = get_driver(find_sink_pin(node, "clock_pin"));
+            if (!state_clock.is_invalid() && type_op_of(state_clock.get_master_node()) == Ntype_op::Clock_cell) {
+              // A Clock_cell color produces its normalized activation enable;
+              // the reference edge itself is represented by the execution-slot
+              // barrier rather than by a driven Boolean clock value.
+              auto resolved_input = occurrence_inputs.begin();
+              for (size_t input = 0; input < definition_inputs.size(); ++input, ++resolved_input) {
+                if (definition_inputs[input].sink.get_port_id() != Ntype::get_sink_pid(op, "clock_pin")) {
+                  continue;
+                }
+                const auto root       = livehd::latch_contract::control_root(resolved_input->driver);
+                const auto activation = occurrence_guard_expr(resolved_input->driver, root.net.base_pin(), version.slot, 0);
+                commit_test = absl::StrCat("(", activation.empty() ? operand(state_clock, 1) : activation, ").is_known_true()");
+                break;
+              }
+            } else if (local_flop != nullptr && !local_flop->clock_guards.empty()) {
+              // The implicit reference clock is a scheduler event; testbenches
+              // need not drive its value high.  Therefore test the recursively
+              // resolved gate leaves, not the complete `clk & guards` net.  A
+              // direct color has no legacy pin2var forest for those leaves, so
+              // bind graph inputs and state Qs explicitly before falling back to
+              // the ordinary expression resolver.
+              for (const auto& guard : local_flop->clock_guards) {
+                const std::string test = absl::StrCat("(", guard_expr(guard), ").is_known_true()");
+                commit_test            = commit_test.empty() ? test : absl::StrCat("(", commit_test, " && ", test, ")");
+              }
+            }
+            if (commit_test.empty() && node.get_graph() != g) {
+              // A conditional call may transport its activation Clock_cell as a
+              // rewritten child reference-clock input rather than leave an
+              // explicit Clock_cell on the state endpoint. Resolve the exact
+              // occurrence edge: a plain root-clock forwarding is only the slot
+              // event and needs no predicate, while (__valid || reset) is a real
+              // commit guard already bound in this color's pin2var table.
+              I(definition_inputs.size() == occurrence_inputs.size());
+              auto resolved_input = occurrence_inputs.begin();
+              for (size_t input = 0; input < definition_inputs.size(); ++input, ++resolved_input) {
+                if (definition_inputs[input].sink.get_port_id() != Ntype::get_sink_pid(op, "clock_pin")) {
+                  continue;
+                }
+                const auto resolved = resolved_input->driver;
+                if (conditional_occurrence(site.node)) {
+                  const auto activation = occurrence_bool_expr(resolved, 0);
+                  commit_test = absl::StrCat("(",
+                                             activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
+                                             ").is_known_true()");
+                  break;
+                }
+                const auto resolved_root              = livehd::latch_contract::control_root(resolved);
+                const bool definition_reference_clock = livehd::graph_util::is_graph_input_pin(state_clock)
+                                                        && pin_name_of(state_clock) == clock_input_of(node.get_graph());
+                if (((local_flop != nullptr && local_flop->sec_clock.is_invalid()) || definition_reference_clock)
+                    && !resolved_root.net.is_invalid()) {
+                  const auto activation = occurrence_guard_expr(resolved, resolved_root.net.base_pin(), version.slot, 0);
+                  commit_test           = activation.empty() ? std::string{} : absl::StrCat("(", activation, ").is_known_true()");
+                  break;
+                }
+                bool       resolved_fall   = false;
+                const auto resolved_guards = icg_guards(resolved.base_pin(), clock_input_of(g), &design_clocks, &resolved_fall);
+                if (!resolved_guards.empty()) {
+                  // The occurrence edge carries the complete clock value
+                  // (`clk & enables`).  The reference clock is an execution
+                  // event, however, and is normally low while pre-edge colors
+                  // run.  Testing the transported value would therefore close
+                  // every parent-side gate.  Reuse the structural clock answer
+                  // and test only its enable leaves, exactly as a local gated
+                  // state element does above.
+                  for (const auto& guard : resolved_guards) {
+                    std::string guard_value;
+                    if (const auto occurrence_guard = resolve_occurrence_pin(resolved, guard, 0)) {
+                      guard_value = occurrence_bool_expr(*occurrence_guard, 0);
+                    }
+                    if (guard_value.empty()) {
+                      guard_value = guard_expr(guard);
+                    }
+                    const auto test = absl::StrCat("(", guard_value, ").is_known_true()");
+                    commit_test     = commit_test.empty() ? test : absl::StrCat("(", commit_test, " && ", test, ")");
+                  }
+                  break;
+                }
+                const auto root             = livehd::latch_contract::control_root(resolved);
+                const bool plain_root_clock = !root.inverted && !root.net.is_invalid()
+                                              && livehd::graph_util::is_graph_input_pin(root.net.base_pin())
+                                              && root.net.get_graph() == g && pin_name_of(root.net.base_pin()) == clock_input_of(g);
+                if (!plain_root_clock) {
+                  const auto activation = occurrence_bool_expr(resolved, 0);
+                  commit_test = absl::StrCat("(",
+                                             activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
+                                             ").is_known_true()");
+                }
+                break;
+              }
+            }
+            if (const auto activation = conditional_activation_expr(site.node); !activation.empty()) {
+              commit_test = commit_test.empty() ? activation : absl::StrCat("(", commit_test, " && ", activation, ")");
+            }
+            if (local_flop != nullptr && !local_flop->sec_clock.is_invalid()) {
+              const std::string current = absl::StrCat("(", guard_expr(local_flop->sec_clock), ").is_known_true()");
+              const std::string edge    = local_flop->posedge ? absl::StrCat("(", current, " && !", local_flop->prev_member, ")")
+                                                              : absl::StrCat("(!", current, " && ", local_flop->prev_member, ")");
+              commit_test               = commit_test.empty() ? edge : absl::StrCat("(", commit_test, " && ", edge, ")");
+            }
+            if (local_flop != nullptr && !local_flop->tick_field.empty()) {
+              const std::string tick = absl::StrCat("__in.", local_flop->tick_field, "__tick");
+              commit_test            = commit_test.empty() ? tick : absl::StrCat("(", commit_test, " && ", tick, ")");
+            }
+            // A folded ICG may leave its enable latch behind a transparent cast
+            // or a Clock_cell output. Normalize any same-occurrence/same-edge Q
+            // reference in the final guard to the staged latch value. The plan's
+            // explicit latch-update -> state-update edge makes that pending value
+            // ready before this color runs.
+            for (size_t candidate_index = 0; candidate_index < color_plan_->sites().size(); ++candidate_index) {
+              const auto& candidate_site = color_plan_->sites()[candidate_index];
+              if (type_op_of(candidate_site.node.base_node()) != Ntype_op::Latch
+                  || candidate_site.node.path() != site.node.path()) {
+                continue;
+              }
+              const size_t update = state_update_version(candidate_index);
+              if (update == livehd::sim::Color_plan::invalid_index || color_plan_->version_sites()[update].slot != version.slot) {
+                continue;
+              }
+              const std::string current = occurrence_member(candidate_site);
+              const std::string pending = current + "_din";
+              if (commit_test.find(pending) != std::string::npos) {
+                continue;
+              }
+              const auto identifier_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+              for (size_t at = commit_test.find(current); at != std::string::npos;) {
+                const bool left_bound = at == 0 || !identifier_char(commit_test[at - 1]);
+                const bool right_bound
+                    = at + current.size() == commit_test.size() || !identifier_char(commit_test[at + current.size()]);
+                if (!left_bound || !right_bound) {
+                  at = commit_test.find(current, at + current.size());
+                  continue;
+                }
+                commit_test.replace(at, current.size(), pending);
+                at = commit_test.find(current, at + pending.size());
+              }
+            }
+            // Reset is asynchronous with respect to a secondary/gated edge. A
+            // reference-clock update has an empty commit_test (one edge per
+            // period), so it is already unconditional and needs no extra OR.
+            if (reset_always) {
+              commit_test.clear();
+            } else if (!rtest.empty() && !commit_test.empty()) {
+              commit_test = absl::StrCat("(", rtest, " || ", commit_test, ")");
+            }
+            fout->append(absl::StrCat("  __rt.__state_commit[", member, "] = ", commit_test.empty() ? "true" : commit_test, ";\n"));
+          } else if (version.role == livehd::sim::Color_plan::Version_role::data) {
+            if (op == Ntype_op::Clock_cell) {
+              const auto& local_clocks = local_clocks_for(node.get_graph());
+              const auto  cone         = livehd::latch_contract::clock_cell_cone(node, local_clocks);
+              I(cone.has_value());
+              std::string enabled;
+              for (const auto& enable : cone->enables) {
+                const auto test = absl::StrCat("(", operand(enable, 1), ").is_known_true()");
+                enabled         = enabled.empty() ? test : absl::StrCat("(", enabled, " && ", test, ")");
+              }
+              const auto output = node.get_driver_pin(0);
+              I(!output.is_invalid());
+              const auto temp_name = absl::StrCat("__color_tmp_", temporary++);
+              fout->append(absl::StrCat("  Slop<1> ",
+                                        temp_name,
+                                        " = Slop<1>::create_integer(",
+                                        enabled.empty() ? "1" : absl::StrCat("(", enabled, ") ? 1 : 0"),
+                                        ");\n"));
+              pin2var[output.get_class_index()] = temp_name;
+              canonical_.insert(output.get_class_index());
+              member_value = temp_name;
+            } else if (op == Ntype_op::Memory) {
+              const auto* memory = find_local_mem(version.base_site);
+              const auto  state  = occurrence_member(site);
+              I(memory != nullptr && !state.empty());
+              if (memory->is_whole() && !memory->registered()) {
+                fout->append("  ",
+                             state,
+                             ".apply_update(",
+                             operand(memory->update, memory->bits * memory->size),
+                             ");  // combinational whole-array contents for this version\n");
+              }
+              int        staged        = 0;
+              const auto stage_through = [&](int upto) {
+                if (version.version != livehd::sim::Color_plan::State_version::pre_rise || memory->type == 1 || upto <= staged) {
+                  staged = std::max(staged, upto);
+                  return;
+                }
+                if (staged == 0) {
+                  fout->append("  ", state, ".clear_pending();\n");
+                }
+                for (const auto& port : memory->ports) {
+                  if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx < staged || port.wridx >= upto) {
+                    continue;
+                  }
+                  if (!port.enable.is_invalid() && is_const_pin(port.enable) && hydrate_const(port.enable).is_known_false()) {
+                    continue;
+                  }
+                  fout->append(absl::StrCat("  ",
+                                            state,
+                                            ".stage_write<",
+                                            port.wridx,
+                                            ">(",
+                                            emit_wen(*memory, port),
+                                            ", ",
+                                            operand(port.addr, std::max(1, bits_of(port.addr))),
+                                            ", ",
+                                            operand(port.din, memory->bits),
+                                            ");\n"));
+                }
+                staged = upto;
+              };
+              for (const auto& port : memory->ports) {
+                if (!port.rd || port.addr.is_invalid() || static_cast<hhds::Port_id>(port.dout_pid) != version.output_port) {
+                  continue;
+                }
+                int prefix = 0;
+                if (memory->type != 1) {
+                  if (memory->order == Mem::Order::fwd || memory->order == Mem::Order::none) {
+                    prefix = memory->n_user_wr;
+                  } else if (memory->order == Mem::Order::program) {
+                    prefix = memory->fwd_upto[static_cast<size_t>(port.rdidx)];
+                  }
+                }
+                stage_through(prefix);
+                const auto output = node.get_driver_pin(static_cast<hhds::Port_id>(port.dout_pid));
+                I(!output.is_invalid());
+                const auto temp_name = absl::StrCat("__color_tmp_", temporary++);
+                if (memory->type == 1) {
+                  fout->append(absl::StrCat("  Slop<", memory->bits, "> ", temp_name, " = ", state, "_q", port.rdidx, ";\n"));
+                } else {
+                  fout->append(absl::StrCat("  Slop<",
+                                            memory->bits,
+                                            "> ",
+                                            temp_name,
+                                            " = ",
+                                            state,
+                                            ".read<",
+                                            port.rdidx,
+                                            ">(",
+                                            operand(port.addr, std::max(1, bits_of(port.addr))),
+                                            ");\n"));
+                }
+                pin2var[output.get_class_index()] = temp_name;
+                canonical_.insert(output.get_class_index());
+                member_value = temp_name;
+              }
+              if (memory->has_read_all && version.output_port == Ntype::Memory_readall_pid) {
+                const auto output = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+                I(!output.is_invalid());
+                const auto temp_name = absl::StrCat("__color_tmp_", temporary++);
+                fout->append("  auto ", temp_name, " = ", state, ".read_all();\n");
+                pin2var[output.get_class_index()] = temp_name;
+                canonical_.insert(output.get_class_index());
+                member_value = temp_name;
+              }
+            } else {
+              hhds::Pin_class output;
+              for (const auto& candidate : node.out_pins()) {
+                output = candidate;
+                break;
+              }
+              if (output.is_invalid()) {
+                output = node.get_driver_pin(0);
+              }
+              I(!output.is_invalid());
+              sub_width_expr_      = false;
+              const int  width     = wbits_of(output);
+              const auto expr      = node_expr(node, width);
+              const auto temp_name = absl::StrCat("__color_tmp_", temporary++);
+              fout->append(absl::StrCat("  Slop<",
+                                        width,
+                                        "> ",
+                                        temp_name,
+                                        sub_width_expr_ ? "{" : " = ",
+                                        expr,
+                                        sub_width_expr_ ? "};\n" : ";\n"));
+              pin2var[output.get_class_index()] = temp_name;
+              canonical_.insert(output.get_class_index());
+              member_value = temp_name;
+            }
+          }
+        }
+
+        if (!member_value.empty()) {
+          local_version_value.insert_or_assign(member, member_value);
+        }
+
+        for (const size_t slot_index : direct_produced_slots[member]) {
+          const auto& slot   = color_plan_->boundary_slots()[slot_index];
+          const auto  source = find_site_output(version.base_site, slot.producer_port);
+          if (source.is_invalid()) {
+            continue;
+          }
+          std::string source_expr;
+          if (op == Ntype_op::Sub) {
+            const auto sio = node.get_subnode_io();
+            I(sio != nullptr);
+            const auto loop_layout = direct_layout(node.get_graph()).member.find(node.get_class_index());
+            I(loop_layout != direct_layout(node.get_graph()).member.end());
+            for (const auto& decl : sio->get_output_pin_decls()) {
+              if (decl.port_id == slot.producer_port) {
+                const char* surface
+                    = version.version == livehd::sim::Color_plan::State_version::pre_rise ? ".__last_out." : ".__out.";
+                source_expr = loop_layout->second + surface + cpp_port_path(decl.name);
+                break;
+              }
+            }
+            I(!source_expr.empty());
+          } else if (op == Ntype_op::Memory && slot.producer_port == Ntype::Memory_readall_pid) {
+            I(direct_memory(site) != nullptr);
+            source_expr = absl::StrCat(occurrence_member(site), ".read_all()");
+          } else if (!member_value.empty() && slot.producer_port == version.output_port) {
+            // The value was materialized by this exact version just above. Use
+            // that occurrence-local temporary directly: looking the definition
+            // pin up again is ambiguous for multi-output cells (notably Memory,
+            // whose canonical read pin need not appear in out_pins()).
+            const int source_width = wbits_of(source);
+            if (source_width == static_cast<int>(slot.width)) {
+              source_expr = member_value;
+            } else if (is_unsign(source)) {
+              source_expr = absl::StrCat(member_value, ".zext_to<", slot.width, ">()");
+            } else {
+              source_expr = absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
+            }
+          } else {
+            source_expr = operand(source, slot.width);
+          }
+          if (slot.producer_shift != 0) {
+            source_expr = absl::StrCat("Slop<", slot.width, ">::shl_op(", source_expr, ", ", slot.producer_shift, ")");
+          }
+          if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
+            if (workers_ <= 1) {
+              fout->append(absl::StrCat("  if (slop_update(", direct_slot_storage[slot_index], ", ", source_expr, ")) {\n"));
+              emit_serial_dirty_consumers(slot_index, "    ");
+              fout->append("  }\n");
+            } else {
+              fout->append(absl::StrCat("  if (slop_update(",
+                                        direct_slot_storage[slot_index],
+                                        ", ",
+                                        source_expr,
+                                        ")) ++__rt.__color_gen[",
+                                        slot_index,
+                                        "];\n"));
+            }
+          } else if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_output) {
+            const auto field = output_field(slot.public_port);
+            I(!field.empty());
+            const char* surface = slot.version == livehd::sim::Color_plan::State_version::pre_rise ? "__last_out." : "__out.";
+            fout->append("  ", surface, field, " = ", source_expr, ";\n");
+          } else if (slot.kind == livehd::sim::Color_plan::Boundary_kind::observation_output) {
+            const auto destination = observation_output(slot);
+            I(!destination.empty());
+            fout->append("  ", destination, " = ", source_expr, ";\n");
+          } else if (slot.kind == livehd::sim::Color_plan::Boundary_kind::observation_input) {
+            const auto destination = observation_input(slot);
+            I(!destination.empty());
+            fout->append("  ", destination, " = ", source_expr, ";\n");
+          }
+        }
+      }
+      close_case();
+      fout->append("    return;\n  }\n");
+    }
+    if (color_eval_outputs.empty()) {
+      fout->append("  default: assert(false && \"invalid color index\"); return;\n  }\n}\n");
+    } else {
+      for (auto& out : color_eval_outputs) {
+        out->append("  default: assert(false && \"color index routed to wrong evaluator shard\"); return;\n  }\n}\n");
+      }
+      fout = root_fout;
+    }
+
+    // State-update colors only sample their pending value and edge predicate.
+    // The phase barrier performs the small commit after every old-Q reader in
+    // that edge class has finished, preserving coincident-edge/NBA semantics
+    // without a second evaluation of any color.
+    fout->append("void ", mod, "::__color_commit_taskflow(std::size_t __slot) {\n");
+    fout->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
+    for (const auto slot :
+         {livehd::sim::Color_plan::Execution_slot::rise_commit, livehd::sim::Color_plan::Execution_slot::fall_commit}) {
+      fout->append("  if (__slot == ", std::to_string(static_cast<size_t>(slot)), ") {\n");
+      for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
+        const auto& version = color_plan_->version_sites()[member];
+        if (version.role != livehd::sim::Color_plan::Version_role::state_update || version.slot != slot) {
+          continue;
+        }
+        const size_t color_index = direct_version_color[member];
+        I(color_index != livehd::sim::Color_plan::invalid_index);
+        const auto& site  = color_plan_->sites()[version.base_site];
+        const auto  state = occurrence_member(site);
+        const auto  op    = type_op_of(site.node.base_node());
+        I(!state.empty());
+        fout->append("    if (__rt.__state_commit[", std::to_string(member), "]) {\n");
+        if (op == Ntype_op::Memory) {
+          const auto* memory = find_local_mem(version.base_site);
+          I(memory != nullptr);
+          fout->append("      bool __changed = false;\n");
+          if (memory->is_whole()) {
+            const auto pending = whole_pending(version.base_site);
+            fout->append(
+                absl::StrCat("      if (", pending, "_cen) __changed |= ", state, ".apply_update(", pending, "_din) != 0;\n"));
+          }
+          for (const auto& port : memory->ports) {
+            if (!port.rd || memory->type != 1 || port.addr.is_invalid()) {
+              continue;
+            }
+            const auto q = absl::StrCat(state, "_q", port.rdidx);
+            fout->append("      __changed |= slop_update(", q, ", ", q, "_din) != 0;\n");
+          }
+          fout->append("      __changed |= ", state, ".tick() != 0;\n");
+          fout->append("      __rt.__color_state_changed |= __changed;\n");
+        } else {
+          int pipe_depth = 1;
+          if (const auto pipe_min = get_driver(find_sink_pin(site.node.base_node(), "pipe_min"));
+              !pipe_min.is_invalid() && is_const_pin(pipe_min)) {
+            pipe_depth = std::max<int>(1, static_cast<int>(hydrate_const(pipe_min).to_just_i64()));
+          }
+          fout->append("      bool __changed = false;\n");
+          for (int index = 0; index < pipe_depth - 1; ++index) {
+            const auto stage = absl::StrCat(state, "_p", index);
+            fout->append("      __changed |= slop_update(", stage, ", ", stage, "_din) != 0;\n");
+          }
+          fout->append("      __changed |= slop_update(", state, ", ", state, "_din) != 0;\n");
+          fout->append("      __rt.__color_state_changed |= __changed;\n");
+        }
+        if (workers_ <= 1) {
+          fout->append("      if (__changed) {\n");
+          fout->append("        __rt.__color_dirty[", std::to_string(color_index), "] = true;\n");
+          if (op == Ntype_op::Memory) {
+            emit_serial_dirty_site_colors(version.base_site, "        ");
+          }
+          fout->append("      }\n");
+        }
+        for (const size_t state_slot : direct_state_current_slots[version.base_site]) {
+          const auto& current = color_plan_->boundary_slots()[state_slot];
+          I(current.kind == livehd::sim::Color_plan::Boundary_kind::state_current && current.owner_site == version.base_site);
+          if (workers_ <= 1) {
+            fout->append("      if (__changed) {\n");
+            fout->append("        ++__rt.__color_gen[", std::to_string(state_slot), "];\n");
+            emit_serial_dirty_consumers(state_slot, "        ");
+            fout->append("      }\n");
+          } else {
+            fout->append("      if (__changed) ++__rt.__color_gen[", std::to_string(state_slot), "];\n");
+          }
+        }
+        fout->append("    }\n");
+      }
+      fout->append("    return;\n  }\n");
+    }
+    fout->append("}\n");
+
+    const auto emit_color_refresh_inputs = [&] {
+      for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
+        const auto& slot = color_plan_->boundary_slots()[slot_index];
+        if (slot.kind != livehd::sim::Color_plan::Boundary_kind::top_input) {
+          continue;
+        }
+        const auto field = input_field(slot.public_port);
+        I(!field.empty());
+        fout->append(absl::StrCat("  if (slop_update(", direct_input_prev_storage[slot_index], ", __in.", field, ")) {\n"));
+        fout->append("    ++__rt.__color_gen[", std::to_string(slot_index), "];\n");
+        fout->append("    __rt.__color_input_changed = true;\n");
+        emit_serial_dirty_consumers(slot_index, "    ");
+        fout->append("  }\n");
+      }
+      for (const auto& slot : color_plan_->boundary_slots()) {
+        if ((slot.kind == livehd::sim::Color_plan::Boundary_kind::top_output
+             || slot.kind == livehd::sim::Color_plan::Boundary_kind::observation_output)
+            && slot.producer_version == livehd::sim::Color_plan::invalid_index) {
+          const auto destination = direct_write_expr(slot, 0);
+          I(!destination.empty());
+          const auto guard = "";
+          if (!slot.literal.empty()) {
+            // Runs every cycle: take the create_integer fast path when the
+            // simulated value fits an int64 (see sim_const_expr).
+            auto literal = slot.literal;
+            std::replace(literal.begin(), literal.end(), '?', '0');
+            fout->append(absl::StrCat("  ", guard, destination, " = ", sim_const_expr(literal, std::to_string(slot.width)), ";\n"));
+          } else {
+            const auto field = input_field(slot.producer_port);
+            I(!field.empty());
+            fout->append(absl::StrCat("  ",
+                                      guard,
+                                      destination,
+                                      " = ",
+                                      slot.unsign ? absl::StrCat("__in.", field, ".zext_to<", slot.width, ">()")
+                                                  : absl::StrCat("Slop<", slot.width, ">{__in.", field, "}"),
+                                      ";\n"));
+          }
+          continue;
+        }
+        if (slot.kind != livehd::sim::Color_plan::Boundary_kind::observation_input
+            || slot.producer_version != livehd::sim::Color_plan::invalid_index) {
+          continue;
+        }
+        const auto destination = observation_input(slot);
+        I(!destination.empty());
+        if (!slot.literal.empty()) {
+          auto literal = slot.literal;
+          std::replace(literal.begin(), literal.end(), '?', '0');
+          fout->append(absl::StrCat("  ", destination, " = ", sim_const_expr(literal, std::to_string(slot.width)), ";\n"));
+        } else {
+          const auto field = input_field(slot.producer_port);
+          I(!field.empty());
+          fout->append(absl::StrCat("  ", destination, " = __in.", field, ".zext_to<", slot.width, ">();\n"));
+        }
+      }
+    };
+
+    // Construction is lazy and persistent. Copies rebuild because the owner
+    // pointer changes. The five tasks are slot barriers (the rise barrier also
+    // captures VCD observation slots when tracing); planned
+    // value/state edges are added directly between color tasks, while each
+    // barrier supplies the design-wide state-version precedence without a
+    // quadratic all-to-all edge set.
+    fout->append("void ", mod, "::__color_prepare_taskflow() {\n");
+    fout->append(
+        "  if (__color_runtime && __color_runtime->owner == this) return;\n"
+        "  __color_runtime = std::make_shared<__Color_runtime>();\n"
+        "  __color_runtime->owner = this;\n"
+        "  auto runtime = __color_runtime;\n"
+        "  [[maybe_unused]] auto& __rt = *runtime;\n");
+    for (size_t color_index = 0; color_index < shared_kernel.size(); ++color_index) {
+      const auto* kernel = shared_kernel[color_index];
+      if (kernel == nullptr) {
+        continue;
+      }
+      const auto& abi = shared_abi[color_index];
+      fout->append("    runtime->__color_kernel[", std::to_string(color_index), "] = &", kernel_name(kernel->signature), ";\n");
+      fout->append("    runtime->__color_bindings[", std::to_string(color_index), "] = {");
+      bool first_binding = true;
+      for (const auto& read : abi.reads) {
+        const auto& slot = color_plan_->boundary_slots()[read.slot_index];
+        const auto  expr = direct_read_expr(slot, read.slot_index);
+        I(!expr.empty());
+        fout->append(first_binding ? "" : ",", "static_cast<void*>(&", expr, ")");
+        first_binding = false;
+      }
+      for (const auto& write : abi.writes) {
+        const auto& slot = color_plan_->boundary_slots()[write.slot_index];
+        const auto  expr = direct_write_expr(slot, write.slot_index);
+        I(!expr.empty());
+        fout->append(first_binding ? "" : ",", "static_cast<void*>(&", expr, ")");
+        first_binding = false;
+      }
+      fout->append("};\n");
+    }
+    fout->append(
+        "    std::vector<tf::Task> slots;\n"
+        "    slots.reserve(5);\n");
+    for (size_t slot = 0; slot < 5; ++slot) {
+      if (slot == 2) {
+        fout->append(
+            "    slots.push_back(runtime->graph.emplace([this] { __color_commit_taskflow(1); }).name(\"rise-commit-barrier\"));\n");
+      } else if (slot == 4) {
+        fout->append(
+            "    slots.push_back(runtime->graph.emplace([this] { __color_commit_taskflow(3); }).name(\"fall-commit-barrier\"));\n");
+      } else if (vcd_on && slot == 1) {
+        fout->append(
+            "    slots.push_back(runtime->graph.emplace([this] { __vcd_snapshot(true); }).name(\"vcd-pre-rise-barrier\"));\n");
+      } else if (vcd_on && slot == 3) {
+        fout->append(
+            "    slots.push_back(runtime->graph.emplace([this] { __vcd_snapshot(false); }).name(\"vcd-pre-fall-barrier\"));\n");
+      } else {
+        fout->append("    slots.push_back(runtime->graph.emplace([] {}).name(\"slot-barrier\"));\n");
+      }
+    }
+    fout->append("    static constexpr std::array<uint8_t, ", std::to_string(color_plan_->colors().size()), "> __task_slots{");
+    for (size_t i = 0; i < color_plan_->colors().size(); ++i) {
+      fout->append(i == 0 ? "" : ",", std::to_string(static_cast<size_t>(color_plan_->colors()[i].slot)));
+    }
+    fout->append("};\n");
+    fout->append("    static constexpr std::array<std::pair<uint32_t, uint32_t>, ",
+                 std::to_string(color_plan_->color_dependencies().size()),
+                 "> __task_edges{{");
+    for (size_t i = 0; i < color_plan_->color_dependencies().size(); ++i) {
+      const auto& edge = color_plan_->color_dependencies()[i];
+      fout->append(i == 0 ? "" : ",", "{", std::to_string(edge.producer), ",", std::to_string(edge.consumer), "}");
+    }
+    fout->append("}};\n");
+    fout->append("    static constexpr std::array<int32_t, ",
+                 std::to_string(direct_color_condition_phase.size()),
+                 "> __condition_phase{");
+    for (size_t color = 0; color < direct_color_condition_phase.size(); ++color) {
+      fout->append(color == 0 ? "" : ",",
+                   direct_color_condition_phase[color] == livehd::sim::Color_plan::invalid_index
+                       ? "-1"
+                       : std::to_string(direct_color_condition_phase[color]));
+    }
+    fout->append("};\n");
+    if (color_plan_->summary().runtime_random && workers_ > 1) {
+      fout->append("    static constexpr std::array<bool, ", std::to_string(direct_random_color.size()), "> __random_color{");
+      for (size_t color = 0; color < direct_random_color.size(); ++color) {
+        fout->append(color == 0 ? "" : ",", direct_random_color[color] ? "true" : "false");
+      }
+      fout->append("};\n");
+      fout->append("    runtime->__random_graphs.resize(__random_color.size());\n");
+      for (size_t color = 0; color < direct_random_color.size(); ++color) {
+        if (!direct_random_color[color]) {
+          continue;
+        }
+        fout->append("    runtime->__random_graphs[", std::to_string(color), "] = std::make_unique<tf::Taskflow>();\n");
+        fout->append("    runtime->__random_graphs[",
+                     std::to_string(color),
+                     "]->emplace([this, __runtime = runtime.get()] {\n"
+                     "      const uint64_t __before = hlop_random_draws();\n"
+                     "      __color_eval(",
+                     std::to_string(color),
+                     ");\n"
+                     "      __runtime->__random_draws.fetch_add(hlop_random_draws() - __before, std::memory_order_relaxed);\n"
+                     "    }).name(\"deterministic-random-color\");\n");
+      }
+    }
+    if (!direct_condition_phases.empty()) {
+      fout->append("    runtime->__conditional_graphs.resize(", std::to_string(direct_condition_phases.size()), ");\n");
+      fout->append("    runtime->__conditional_region_graphs.resize(", std::to_string(direct_condition_phases.size()), ");\n");
+      for (size_t phase_index = 0; phase_index < direct_condition_phases.size(); ++phase_index) {
+        const auto& phase = direct_condition_phases[phase_index];
+        fout->append("    runtime->__conditional_graphs[", std::to_string(phase_index), "] = std::make_unique<tf::Taskflow>();\n");
+        fout->append("    runtime->__conditional_region_graphs[",
+                     std::to_string(phase_index),
+                     "] = std::make_unique<tf::Taskflow>();\n");
+        fout->append("    {\n");
+        fout->append("      auto& __region_graph = *runtime->__conditional_region_graphs[", std::to_string(phase_index), "];\n");
+        fout->append("      std::vector<tf::Task> __region_colors(", std::to_string(color_plan_->colors().size()), ");\n");
+        for (const size_t color : phase.colors) {
+          if (direct_random_color[color] && workers_ > 1) {
+            fout->append("      __region_colors[",
+                         std::to_string(color),
+                         "] = __region_graph.emplace([__runtime = runtime.get()] {\n"
+                         "        __runtime->__random_executor.run(*__runtime->__random_graphs[",
+                         std::to_string(color),
+                         "]).wait();\n"
+                         "      }).name(\"conditional-random-region-color\");\n");
+          } else {
+            fout->append("      __region_colors[",
+                         std::to_string(color),
+                         "] = __region_graph.emplace([this] { __color_eval(",
+                         std::to_string(color),
+                         "); }).name(\"conditional-region-color\");\n");
+          }
+        }
+        for (const auto& edge : color_plan_->color_dependencies()) {
+          if (direct_color_condition_phase[edge.producer] == phase_index
+              && direct_color_condition_phase[edge.consumer] == phase_index) {
+            fout->append("      __region_colors[",
+                         std::to_string(edge.producer),
+                         "].precede(__region_colors[",
+                         std::to_string(edge.consumer),
+                         "]);\n");
+          }
+        }
+        auto random_phase_colors = phase.colors;
+        std::ranges::sort(random_phase_colors, {}, [&](const size_t color) {
+          return color_plan_->colors()[color].execution_order;
+        });
+        size_t previous_random = livehd::sim::Color_plan::invalid_index;
+        for (const size_t color : random_phase_colors) {
+          if (!direct_random_color[color]) {
+            continue;
+          }
+          if (previous_random != livehd::sim::Color_plan::invalid_index) {
+            fout->append("      __region_colors[",
+                         std::to_string(previous_random),
+                         "].precede(__region_colors[",
+                         std::to_string(color),
+                         "]);  // deterministic PRNG draw order\n");
+          }
+          previous_random = color;
+        }
+        fout->append("      auto& __condition_graph = *runtime->__conditional_graphs[", std::to_string(phase_index), "];\n");
+        fout->append("      auto __condition = __condition_graph.emplace([this] { return (",
+                     phase.predicate,
+                     ") ? 0 : 1; }).name(\"condition-__valid-or-reset\");\n");
+        fout->append(
+            "      auto __active = __condition_graph.composed_of(__region_graph).name(\"condition-active-region\");\n"
+            "      auto __inactive = __condition_graph.emplace([] {}).name(\"condition-inactive-region\");\n"
+            "      __condition.precede(__active, __inactive);  // successors have no other strong in-edge\n"
+            "    }\n");
+      }
+    }
+    fout->append(
+        "    std::vector<tf::Task> colors(__task_slots.size());\n"
+        "    for (size_t color = 0; color < __task_slots.size(); ++color) {\n"
+        "      if (__condition_phase[color] >= 0) continue;\n");
+    if (color_plan_->summary().runtime_random && workers_ > 1) {
+      fout->append(
+          "      if (__random_color[color]) {\n"
+          "        auto* random_graph = runtime->__random_graphs[color].get();\n"
+          "        auto* random_executor = &runtime->__random_executor;\n"
+          "        colors[color] = runtime->graph.emplace([random_graph, random_executor] {\n"
+          "          random_executor->run(*random_graph).wait();\n"
+          "        }).name(\"random-color-partition\");\n"
+          "      } else {\n"
+          "        colors[color] = runtime->graph.emplace([this, color] { __color_eval(color); }).name(\"color\");\n"
+          "      }\n");
+    } else {
+      fout->append("      colors[color] = runtime->graph.emplace([this, color] { __color_eval(color); }).name(\"color\");\n");
+    }
+    fout->append(
+        "      const size_t slot = __task_slots[color];\n"
+        "      slots[slot].precede(colors[color]);\n"
+        "      if (slot + 1 < slots.size()) colors[color].precede(slots[slot + 1]);\n"
+        "    }\n"
+        "    std::vector<tf::Task> regions;\n"
+        "    regions.reserve(runtime->__conditional_graphs.size());\n"
+        "    for (size_t region = 0; region < runtime->__conditional_graphs.size(); ++region) {\n"
+        "      auto* condition_graph = runtime->__conditional_graphs[region].get();\n"
+        "      regions.push_back(runtime->graph.emplace([condition_graph](tf::Runtime& rt) {\n"
+        "        rt.executor().corun(*condition_graph);\n"
+        "      }).name(\"conditional-region-control\"));\n"
+        "    }\n");
+    for (size_t phase_index = 0; phase_index < direct_condition_phases.size(); ++phase_index) {
+      const auto slot = direct_condition_phases[phase_index].slot;
+      fout->append("    slots[", std::to_string(slot), "].precede(regions[", std::to_string(phase_index), "]);\n");
+      if (slot + 1 < 5) {
+        fout->append("    regions[", std::to_string(phase_index), "].precede(slots[", std::to_string(slot + 1), "]);\n");
+      }
+    }
+    if (color_plan_->summary().runtime_random) {
+      std::vector<std::pair<uint64_t, std::string>> random_tasks;
+      for (size_t color = 0; color < direct_random_color.size(); ++color) {
+        if (!direct_random_color[color] || direct_color_condition_phase[color] != livehd::sim::Color_plan::invalid_index) {
+          continue;
+        }
+        random_tasks.emplace_back(color_plan_->colors()[color].execution_order, absl::StrCat("colors[", color, "]"));
+      }
+      for (size_t phase_index = 0; phase_index < direct_condition_phases.size(); ++phase_index) {
+        uint64_t first_order = std::numeric_limits<uint64_t>::max();
+        for (const size_t color : direct_condition_phases[phase_index].colors) {
+          if (direct_random_color[color]) {
+            first_order = std::min(first_order, color_plan_->colors()[color].execution_order);
+          }
+        }
+        if (first_order != std::numeric_limits<uint64_t>::max()) {
+          random_tasks.emplace_back(first_order, absl::StrCat("regions[", phase_index, "]"));
+        }
+      }
+      std::ranges::sort(random_tasks);
+      for (size_t task = 1; task < random_tasks.size(); ++task) {
+        fout->append("    ",
+                     random_tasks[task - 1].second,
+                     ".precede(",
+                     random_tasks[task].second,
+                     ");  // stable single-partition PRNG order\n");
+      }
+    }
+    fout->append(
+        "    for (size_t slot = 0; slot + 1 < slots.size(); ++slot) slots[slot].precede(slots[slot + 1]);\n"
+        "    for (const auto [producer, consumer] : __task_edges) {\n"
+        "      const int32_t producer_region = __condition_phase[producer];\n"
+        "      const int32_t consumer_region = __condition_phase[consumer];\n"
+        "      if (producer_region >= 0 && producer_region == consumer_region) continue;\n"
+        "      tf::Task producer_task = producer_region >= 0 ? regions[producer_region] : colors[producer];\n"
+        "      tf::Task consumer_task = consumer_region >= 0 ? regions[consumer_region] : colors[consumer];\n"
+        "      producer_task.precede(consumer_task);\n"
+        "    }\n");
+    fout->append("}\n");
+
+    fout->append("void ", mod, "::__color_refresh_inputs() {\n");
+    fout->append("  assert(__color_runtime);\n  [[maybe_unused]] auto& __rt = *__color_runtime;\n");
+    emit_color_refresh_inputs();
+    fout->append("}\n");
+
+    fout->append("void ", mod, "::__color_reset_settle() {\n");
+    fout->append(
+        "  __color_prepare_taskflow();\n"
+        "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
+        "  __rt.__color_state_changed = false;\n"
+        "  __rt.__state_commit.fill(false);\n"
+        "  __rt.__color_seen.fill(0);  // reset/load invalidates every cached boundary generation\n"
+        "  __color_refresh_inputs();\n");
+    if (workers_ <= 1) {
+      fout->append("  __rt.__color_dirty.fill(true);  // reset/load invalidates the serial activation cache\n");
+    }
+    std::vector<size_t> reset_colors;
+    reset_colors.reserve(color_plan_->colors().size());
+    std::vector<bool> reset_required(color_plan_->colors().size(), false);
+    for (size_t color = 0; color < color_plan_->colors().size(); ++color) {
+      reset_colors.push_back(color);
+      reset_required[color] = color_plan_->colors()[color].slot == livehd::sim::Color_plan::Execution_slot::post_fall_publish;
+    }
+    bool reset_changed = true;
+    while (reset_changed) {
+      reset_changed = false;
+      for (const auto& edge : color_plan_->color_dependencies()) {
+        if (reset_required[edge.consumer] && !reset_required[edge.producer] && pure_data_color(edge.producer)) {
+          reset_required[edge.producer] = true;
+          reset_changed                 = true;
+        }
+      }
+    }
+    std::ranges::sort(reset_colors, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
+    for (const size_t color : reset_colors) {
+      if (reset_required[color]) {
+        fout->append("  __color_eval(", std::to_string(color), ");\n");
+      }
+    }
+    fout->append("  __last_out = __out;\n}\n");
+
+    const auto emit_color_period_finish = [&] {
+      if (color_plan_->summary().runtime_random && workers_ > 1) {
+        fout->append(
+            "  hlop_random_draws() += __rt.__random_draws.exchange(0, std::memory_order_relaxed);\n"
+            "  // worker-thread draws are now visible to checkpoint/restart accounting\n");
+      }
+      absl::flat_hash_set<std::string> advanced;
+      for (const auto& flop : flops) {
+        if (flop.prev_member.empty() || !advanced.insert(flop.prev_member).second) {
+          continue;
+        }
+        auto clock = flop.sec_clock;
+        for (int hops = 0; hops < 8 && !clock.is_invalid() && !livehd::graph_util::is_graph_input_pin(clock); ++hops) {
+          const auto node = clock.get_master_node();
+          if (type_op_of(node) != Ntype_op::Get_mask && type_op_of(node) != Ntype_op::Sext
+              && type_op_of(node) != Ntype_op::Set_mask) {
+            break;
+          }
+          clock = livehd::graph_util::first_value_driver(node);
+        }
+        I(!clock.is_invalid() && livehd::graph_util::is_graph_input_pin(clock));
+        const auto field = input_field(clock.get_port_id());
+        I(!field.empty());
+        fout->append("  ", flop.prev_member, " = (__in.", field, ").is_known_true();\n");
+      }
+      if (vcd_on) {
+        fout->append("  __vcd_publish_period();\n");
+      }
+      fout->append(
+          "  const bool __any_state_changed = __rt.__color_state_changed;\n"
+          "  __gen += __any_state_changed ? 1 : 0;\n");
+      // A full period with stable inputs and no committed state change is a
+      // fixed point, including for stateful designs: the same state and inputs
+      // produce the same pending values on the next period. Runtime-random and
+      // VCD modes remain active because they have observable per-period work.
+      if (!color_plan_->summary().runtime_random && !vcd_on) {
+        fout->append("  __rt.__color_quiescent = !__any_state_changed;\n");
+      } else {
+        fout->append("  __rt.__color_quiescent = false;\n");
+      }
+      if (vcd_on) {
+        fout->append("  __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
+      }
+    };
+
+    std::vector<size_t> serial_colors(color_plan_->colors().size());
+    std::iota(serial_colors.begin(), serial_colors.end(), 0);
+    std::ranges::sort(serial_colors, {}, [&](const size_t color) { return color_plan_->colors()[color].execution_order; });
+
+    if (color_plan_->colors().size() <= 256) {
+      fout->append("__attribute__((flatten)) ");
+    }
+    fout->append("void ", mod, "::__color_run_serial() {\n");
+    fout->append(
+        "  __color_prepare_taskflow();\n"
+        "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
+        "  __rt.__color_state_changed = false;\n"
+        "  __rt.__state_commit.fill(false);\n"
+        "  __rt.__color_input_changed = false;\n"
+        "  __color_refresh_inputs();\n"
+        "  if (__rt.__color_quiescent && !__rt.__color_input_changed) {\n");
+    if (vcd_on) {
+      fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
+    }
+    fout->append("    return;\n  }\n");
+    for (size_t slot = 0; slot < 5; ++slot) {
+      for (const size_t color : serial_colors) {
+        if (static_cast<size_t>(color_plan_->colors()[color].slot) != slot) {
+          continue;
+        }
+        const size_t condition_phase = direct_color_condition_phase[color];
+        if (condition_phase != livehd::sim::Color_plan::invalid_index) {
+          fout->append("  if (", direct_condition_phases[condition_phase].predicate, ") {\n");
+        }
+        const std::string indent      = condition_phase == livehd::sim::Color_plan::invalid_index ? "  " : "    ";
+        const bool        dirty_guard = !direct_random_color[color];
+        if (dirty_guard) {
+          fout->append(indent, "if (__rt.__color_dirty[", std::to_string(color), "]) {\n");
+          fout->append(indent, "  __rt.__color_dirty[", std::to_string(color), "] = false;\n");
+        }
+        const std::string call_indent = dirty_guard ? indent + "  " : indent;
+        if (color_plan_->summary().runtime_random && direct_random_color[color] && workers_ > 1) {
+          fout->append(call_indent,
+                       "__rt.__random_executor.run(*__rt.__random_graphs[",
+                       std::to_string(color),
+                       "]).wait();  // deterministic random partition\n");
+        } else if (shared_kernel[color] != nullptr) {
+          fout->append(absl::StrCat(call_indent,
+                                    "const uint64_t __changed_",
+                                    color,
+                                    " = __rt.__color_kernel[",
+                                    color,
+                                    "](__rt.__color_bindings[",
+                                    color,
+                                    "].data());\n"));
+          size_t changed_bit = 0;
+          for (const auto& write : shared_abi[color].writes) {
+            const auto& write_slot = color_plan_->boundary_slots()[write.slot_index];
+            if (write_slot.kind != livehd::sim::Color_plan::Boundary_kind::color_value) {
+              continue;
+            }
+            fout->append(call_indent,
+                         "if ((__changed_",
+                         std::to_string(color),
+                         " & (uint64_t{1} << ",
+                         std::to_string(changed_bit++),
+                         ")) != 0) {\n");
+            fout->append(call_indent, "  ++__rt.__color_gen[", std::to_string(write.slot_index), "];\n");
+            emit_serial_dirty_consumers(write.slot_index, call_indent + "  ");
+            fout->append(call_indent, "}\n");
+          }
+        } else {
+          fout->append(call_indent, "__color_eval(", std::to_string(color), ");\n");
+        }
+        if (dirty_guard) {
+          fout->append(indent, "}\n");
+        }
+        if (condition_phase != livehd::sim::Color_plan::invalid_index) {
+          fout->append("  }\n");
+        }
+      }
+      if (vcd_on && slot == 0) {
+        fout->append("  __vcd_snapshot(true);\n");
+      }
+      if (slot == 1) {
+        fout->append("  __color_commit_taskflow(1);\n");
+      }
+      if (vcd_on && slot == 2) {
+        fout->append("  __vcd_snapshot(false);\n");
+      }
+      if (slot == 3) {
+        fout->append("  __color_commit_taskflow(3);\n");
+      }
+    }
+    emit_color_period_finish();
+    fout->append("}\n");
+
+    fout->append("void ", mod, "::__color_run_taskflow() {\n");
+    if (workers_ <= 1) {
+      fout->append("  __color_run_serial();\n}\n");
+    } else {
+      fout->append(
+          "  __color_prepare_taskflow();\n"
+          "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
+          "  __rt.__color_state_changed = false;\n"
+          "  __rt.__state_commit.fill(false);\n"
+          "  __rt.__color_input_changed = false;\n"
+          "  __color_refresh_inputs();\n"
+          "  if (__rt.__color_quiescent && !__rt.__color_input_changed) {\n");
+      if (vcd_on) {
+        fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
+      }
+      fout->append("    return;\n  }\n  __color_runtime->executor.run(__color_runtime->graph).wait();\n");
+      emit_color_period_finish();
+      fout->append("}\n");
+    }
+  }
+
   // ---- <stem>.iface.json — the machine-readable module manifest (2f-sim B0) ----
   // Replaces the historical TEXT SCRAPE of this module's generated .hpp
   // (prp_sim.cpp's parse_hpp), which silently bit-rotted the day memories stopped
@@ -7467,29 +10099,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     "\",\"module\":\"",
                     mod,
                     "\",\n");
+    // Is this class an executable simulator (does it have step()/cycle())?
+    // Only a Color_plan ROOT is. An ordinary hierarchy definition is emitted as
+    // a storage-only record owned by its root's occurrence-wide DAG, so a
+    // testbench cannot drive it directly — a `test` naming one used to reach
+    // the host compiler as `no member named 'step'`. prp_sim reads this to
+    // refuse with an actionable diagnostic instead.
+    absl::StrAppend(&j, " \"executable\":", (!color_storage_only && !compact_kernel_) ? "true" : "false", ",\n");
 
     // IO, in port_id order (the order the In/Out structs are emitted in).
     absl::StrAppend(&j, " \"io\":[");
     bool first = true;
     for (const auto& io : ios) {
-      // Port signedness, following cgen_verilog's rule because the LGraph's own
-      // answer differs by direction. An INPUT pin is marked signed by
-      // CONVENTION ("cgen declares every port signed", upass_tolg's io_meta
-      // inputs loop, to compensate a to-positive Get_mask), so its attr says
-      // nothing about the source-declared sign — reading it made every `u8`
-      // input come back signed, which would render `dec` negative for any value
-      // above half range. The declared sign lives in LNAST io_meta, which this
-      // LGraph-level emitter cannot see, so inputs are published unsigned and
-      // the catalog does not claim otherwise. An OUTPUT has no such
-      // compensation: follow its DRIVER's sign, exactly as cgen_verilog does.
-      bool uns = true;
-      if (!io.is_input) {
-        auto pin = g->get_output_pin(io.raw);
-        if (!pin.is_invalid()) {
-          auto drv = get_driver(pin);
-          uns      = drv.is_invalid() ? is_unsign(pin) : is_unsign(drv);
-        }
-      }
       absl::StrAppend(&j,
                       first ? "" : ",\n      ",
                       "{\"name\":\"",
@@ -7501,7 +10122,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                       ",\"declared_bits\":",
                       io.bits,
                       ",\"signed\":",
-                      uns ? "false" : "true",
+                      io.unsign ? "false" : "true",
                       io.is_input && io.raw == "__valid" ? ",\"role\":\"activation\",\"default\":true" : "",
                       "}");
       first = false;

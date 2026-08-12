@@ -1,0 +1,44 @@
+/*
+:name: color_kernel_multiwrite
+:type: simulation
+*/
+// Two occurrences of one connected, two-output combinational definition. The
+// occurrence-wide schedule must emit one canonical kernel and bind it twice.
+// Both results cross color boundaries into state, so the kernel changed-mask
+// has two ABI write bits whose canonical order must match each bound object.
+mod pair(x:u8) -> (lo:u8@[0], hi:u8@[0]) {
+  const base = x * 3
+  lo = base + 1
+  hi = lo + 8
+}
+
+pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1], b_hi:u8@[1]) {
+  const a = pair(d)
+  const b = pair(e)
+  reg ar0:u8 = 0
+  reg ar1:u8 = 0
+  reg br0:u8 = 0
+  reg br1:u8 = 0
+  ar0 = a.lo
+  ar1 = a.hi
+  br0 = b.lo
+  br1 = b.hi
+  a_lo = ar0
+  a_hi = ar1
+  b_lo = br0
+  b_hi = br1
+}
+
+test kernel_multiwrite.changed_mask_order {
+  mut dut = kernel_multiwrite
+  tick 10 {
+    const dv = 2 + (clock * 7)
+    dut.d = dv
+    dut.e = dv + 5
+    step
+    assert(dut.a_lo == ((dv * 3) + 1) & 0xFF)
+    assert(dut.a_hi == ((dv * 3) + 9) & 0xFF)
+    assert(dut.b_lo == (((dv + 5) * 3) + 1) & 0xFF)
+    assert(dut.b_hi == (((dv + 5) * 3) + 9) & 0xFF)
+  }
+}

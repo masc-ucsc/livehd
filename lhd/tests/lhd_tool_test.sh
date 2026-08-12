@@ -51,9 +51,11 @@ grep -q "^lg/$TOP " "$W/g0.out" || fail "grep lines must be prefixed lib/module:
 "$LHD" tool grep lg:"$W/lg" --top "$TOP" -q >"$W/ge.json" 2>/dev/null
 grep -q '"class":"usage"' "$W/ge.json" || fail "grep without a filter must be a usage error: $(cat "$W/ge.json")"
 
-# 5. numeric filter: bits:>8 over pins finds the 9-bit signals.
-P grep 'bits:>8' --target pin lg:"$W/lg" --top "$TOP" >"$W/gb.out" || fail "grep bits:>8 nonzero"
-grep -q 'bits=9' "$W/gb.out" || fail "grep bits:>8 must surface bits=9 pins: $(head -1 "$W/gb.out")"
+# 5. numeric filter: bits:>7 over pins finds the fixture's real 8-bit
+# signals. Do not rely on a redundant unsigned-widening wrapper to manufacture
+# an otherwise unused 9-bit pin.
+P grep 'bits:>7' --target pin lg:"$W/lg" --top "$TOP" >"$W/gb.out" || fail "grep bits:>7 nonzero"
+grep -q 'bits=8' "$W/gb.out" || fail "grep bits:>7 must surface bits=8 pins: $(head -1 "$W/gb.out")"
 
 # 5b. '=' is equivalent to ':' as a separator (Pyrope reads ':' as a type, so
 #     '=' is the preferred filter spelling). color=nil must equal color:nil.
@@ -61,9 +63,9 @@ P grep color=nil lg:"$W/lg" --top "$TOP" --target node >"$W/geq.out" || fail "gr
 [ "$(wc -l <"$W/geq.out")" -eq "$n0" ] \
   || fail "grep color=nil must equal grep color:nil ($n0 vs $(wc -l <"$W/geq.out"))"
 
-# 5c. a relational op may lead directly: bits>8 must match the same as bits:>8.
-P grep 'bits>8' --target pin lg:"$W/lg" --top "$TOP" >"$W/gbd.out" || fail "grep bits>8 nonzero"
-cmp -s <(sort "$W/gb.out") <(sort "$W/gbd.out") || fail "bits>8 must match bits:>8"
+# 5c. a relational op may lead directly: bits>7 must match the same as bits:>7.
+P grep 'bits>7' --target pin lg:"$W/lg" --top "$TOP" >"$W/gbd.out" || fail "grep bits>7 nonzero"
+cmp -s <(sort "$W/gb.out") <(sort "$W/gbd.out") || fail "bits>7 must match bits:>7"
 
 # 5d. a bare term (no field) matches anywhere it appears: grepping a node kind
 #     finds those cells the way `cat` shows them (the get_mask scenario).
