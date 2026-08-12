@@ -34,8 +34,12 @@ grep -q 'w = 20' "$TOP" || fail "emitted top unit lost the unrolled while-loop w
 # Tuple-concat scaffolding survives to the emitted source.
 grep -q '(3, 4)' "$TOP" || fail "emitted top unit lost the tuple literal"
 
-# One emitted unit per lambda (rich + helper).
-[ -f "$W/out/writer_rich.rich.prp" ] || fail "missing emitted unit for comb rich"
-[ -f "$W/out/writer_rich.helper.prp" ] || fail "missing emitted unit for comb helper"
+# One .prp per SOURCE FILE: both lambdas of writer_rich.prp land in the one
+# emitted writer_rich.prp (below the file-scope statements), and a same-file
+# callee takes no import.
+grep -q '^pub comb helper(' "$TOP" || fail "missing emitted lambda comb helper"
+grep -q '^pub mod rich(' "$TOP" || fail "missing emitted lambda mod rich"
+[ -f "$W/out/writer_rich.rich.prp" ] && fail "per-lambda file writer_rich.rich.prp came back"
+grep -q 'import("writer_rich' "$TOP" && fail "same-file callee must not be imported"
 
 echo "PASS lhd_prp_writer_test"

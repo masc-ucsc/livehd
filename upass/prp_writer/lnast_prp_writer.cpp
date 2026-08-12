@@ -21,11 +21,147 @@ Lnast_prp_writer::Lnast_prp_writer(std::ostream& _os, std::shared_ptr<Lnast> _ln
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-void Lnast_prp_writer::write_all() {
+void Lnast_prp_writer::prepare() {
+  if (prepared_) {
+    return;
+  }
+  prepared_ = true;
   depth     = 0;
   nid_stack = {};
-  analyze_folding();  // decide which single-use temps to inline
+  scan_nested_defs();       // feeds both statement drops below
+  scan_dead_init_stores();  // BEFORE analyze_folding: a dropped dead store makes
+                            // the surviving def single, hence inlinable
+  analyze_folding();        // decide which single-use temps to inline
   index_store_timechecks();
+  scan_file_imports();
+}
+
+// Dead initial stores. uPass hands the writer a body that seeds a name and then
+// immediately overwrites it:
+//
+//   t194 = 0            <- dead: nothing reads t194 before the next def
+//   t194 = tt194_97
+//
+// and, for a re-nested bundle, the same shape per field (`sig.cmd = 0` right
+// after the tuple literal already set `mut cmd = 0`). Emitting the seed costs a
+// dead line, re-initializes a field the tuple literal just initialized, and — the
+// expensive part — makes the name look MULTI-DEF, which blocks analyze_folding
+// from inlining an otherwise single-use temp. Drop a def when a LATER def of the
+// same name follows with no read in between.
+//
+// Deliberately narrow: top-level statements only (the ordering below is a
+// top-level index), and only a def whose value is a CONSTANT — a seed, never
+// content whose evaluation could matter.
+// Names stored inside a NESTED scope (an if arm, a loop body). For those, the
+// top-level declaration/seed is NOT redundant, however dead its value looks —
+// it is the unconditional binding the nested store writes to:
+//
+//   cin_o = 0ub????                      <- a seed, overwritten below, never read
+//   cin_o = cin_o__w1
+//   if ph__w1 != 0 { cin_o = t526 }
+//
+//   mut `ret_s36.ssip` = 0               <- a declare whose value the next def kills
+//   `ret_s36.ssip` = (t13573 >> 1) & 1
+//   if … { `ret_s36.ssip` = … }
+//
+// Drop the first line of either and the second becomes the binding def, making
+// the third a rebind: `const `cin_o` rebind (assigned 2 times)`. Neither can be
+// repaired downstream — an output port cannot be re-declared `mut` later — so
+// both statement drops below leave these names alone.
+void Lnast_prp_writer::scan_nested_defs() {
+  auto stmts = body_stmts_nid();
+  if (stmts.is_invalid()) {
+    return;
+  }
+  std::vector<Lnast_nid> work;
+  auto                   push_kids = [&](Lnast_nid n) {
+    for (auto g = lnast->get_child(n); !g.is_invalid(); g = lnast->get_sibling_next(g)) {
+      work.push_back(g);
+    }
+  };
+  for (auto c = lnast->get_child(stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    push_kids(c);  // start BELOW each top-level statement: only nested defs count
+  }
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    const auto t = lnast->get_type(n);
+    auto       v = lnast->get_child(n);
+    if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v)) && defines_child0(t) && !Lnast_ntype::is_declare(t)) {
+      nested_def_names_.insert(std::string(strip_prefix(lnast->get_name(v))));
+    }
+    push_kids(n);
+  }
+}
+
+void Lnast_prp_writer::scan_dead_init_stores() {
+  auto stmts = body_stmts_nid();
+  if (stmts.is_invalid()) {
+    return;
+  }
+  absl::flat_hash_map<std::string, Lnast_nid> pending;  // name -> its last un-read const def
+  size_t                                      idx = 0;
+  for (auto c = lnast->get_child(stmts); !c.is_invalid(); c = lnast->get_sibling_next(c), ++idx) {
+    const auto t = lnast->get_type(c);
+    auto       v = lnast->get_child(c);
+
+    // Any READ of a pending name keeps that def alive.
+    std::unordered_set<std::string> reads;
+    if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v)) && defines_child0(t) && !Lnast_ntype::is_declare(t)) {
+      collect_driver_reads(c, reads);
+    } else {
+      collect_node_reads(c, reads);
+    }
+    for (const auto& r : reads) {
+      pending.erase(r);
+    }
+
+    if (v.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(v)) || !defines_child0(t) || Lnast_ntype::is_declare(t)) {
+      continue;
+    }
+    const std::string nm(strip_prefix(lnast->get_name(v)));
+    // This def supersedes a pending one: that earlier store is dead.
+    if (auto it = pending.find(nm); it != pending.end()) {
+      if (nested_def_names_.count(nm) == 0) {
+        dead_init_stmts_.insert(it->second.get_class_index().value);
+      }
+      pending.erase(it);
+    }
+    // A plain `X = <const>` scalar store becomes the next candidate.
+    if (t != Lnast_ntype::Lnast_ntype_store) {
+      continue;
+    }
+    auto val = lnast->get_sibling_next(v);
+    if (val.is_invalid() || !lnast->is_last_child(val) || lnast->get_type(val) != Lnast_ntype::Lnast_ntype_const) {
+      continue;
+    }
+    pending.emplace(nm, c);
+  }
+}
+
+// The body `stmts` of this unit: the sibling after `io` for an extracted lambda,
+// the file scope's own `stmts` otherwise.
+Lnast_nid Lnast_prp_writer::body_stmts_nid() const {
+  auto root = lnast->get_root();
+  for (auto c = lnast->get_child(root); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_io) {
+      auto b = lnast->get_sibling_next(c);
+      return (!b.is_invalid() && lnast->get_type(b) == Lnast_ntype::Lnast_ntype_stmts) ? b : Lnast_nid{};
+    }
+    if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_stmts) {
+      return c;
+    }
+  }
+  return {};
+}
+
+void Lnast_prp_writer::collect_header() {
+  prepare();
+  write_module_imports();  // routed to header_sink_ (set by the group emit)
+}
+
+void Lnast_prp_writer::write_all() {
+  prepare();
   cur = lnast->get_root();
   write_node();
 }
@@ -78,6 +214,24 @@ void Lnast_prp_writer::println(std::string_view s) {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+
+// The `t<N>` / `tt<N>_<M>` names emit_name_for mints for `%`-prefixed compiler
+// temps. Re-reading a generated file turns them back into ordinary source names,
+// so the fold policy needs to recognise the spelling to keep treating them as
+// the temps they are.
+bool Lnast_prp_writer::is_writer_temp_name(std::string_view name) {
+  auto digits = [](std::string_view s) {
+    return !s.empty() && s.find_first_not_of("0123456789") == std::string_view::npos;
+  };
+  if (name.size() > 1 && name[0] == 't' && digits(name.substr(1))) {
+    return true;  // t157
+  }
+  if (name.size() > 3 && name.substr(0, 2) == "tt") {
+    const auto us = name.find('_', 2);
+    return us != std::string_view::npos && digits(name.substr(2, us - 2)) && digits(name.substr(us + 1));  // tt343_0
+  }
+  return false;
+}
 
 bool Lnast_prp_writer::is_tmp(std::string_view name) const {
   // A raw compiler temp (`%`-prefix), OR a name strip_prefix already mapped to
@@ -254,7 +408,9 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
       return {};
     }
     declared_.insert(std::string(lhs));
-    return "const ";
+    // …unless it is written more than once after all (a lane write
+    // `t#[hi..=lo] = v` is a second def), in which case `const` is a rebind.
+    return multi_def_tmp_.count(std::string(lhs)) ? "mut " : "const ";
   }
   if (declared_.count(std::string(lhs))) {
     return {};
@@ -481,6 +637,12 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     // it again yields `` ``ar.x`` `` which the Pyrope lexer rejects (the v2prp
     // round-trip then fails to re-parse). Only a bare `.`-name needs quoting.
     if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+      // …unless collect_body_bundles re-nested this leaf: the escaped
+      // `` `sig.cmd` `` IS a field of the rebuilt bundle now, so emit the bare
+      // dotted path (`sig.cmd`) that reads it back out of the tuple.
+      if (const auto inner = s.substr(1, s.size() - 2); is_bundle_field(inner)) {
+        return quote_kw_path(inner);
+      }
       return s;
     }
     // Same quoted name, but with a VERSION SUFFIX pasted after its closing backtick
@@ -625,27 +787,13 @@ void Lnast_prp_writer::emit_unimplemented(std::string_view what) {
 // ── Structural ────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_top() {
+  write_module_imports();
   // A package namespace unit (slang provenance flow): emit the exports straight
   // from the pub list — `pub comptime const NAME[:type] = <defining expr |
   // folded value>`. The general const-declare path drops a comptime const's
   // folded value to `= 0`; the defining-expression/type riders come from the
   // reader (get_package_const_exprs/types), pub order IS source order.
   if (lnast->is_package_unit()) {
-    // cross-package defining exprs need their imports at file scope
-    if (!lnast->get_imported_packages().empty()) {
-      for (const auto& pkg : lnast->get_imported_packages()) {
-        // Same escaping as the module-import binding below: an SV package can
-        // be named for a Pyrope keyword (`match`, `mut`, `step`, …) or be a
-        // Verilog escaped id, neither of which lexes bare.  The PATH is a
-        // string literal, so it takes escape_string.
-        print("const ");
-        print(quote_module_path(pkg));
-        print(" = import(\"");
-        print(escape_string(pkg));
-        print("\")\n");
-      }
-      print("\n");
-    }
     absl::flat_hash_map<std::string, std::string> vals;
     for (const auto& [path, text] : lnast->get_pub_values()) {
       vals.emplace(path, text);
@@ -681,7 +829,6 @@ void Lnast_prp_writer::write_top() {
     }
     return;
   }
-  write_module_imports();
   if (!move_to_child()) {
     return;
   }
@@ -706,9 +853,12 @@ void Lnast_prp_writer::write_top() {
 // lambda braces (NOT brace-wrapped again — its parent is `top`, so write_stmts
 // would not wrap it, but we walk it directly here to control indentation).
 void Lnast_prp_writer::write_module_imports() {
-  if (known_modules_ == nullptr && lnast->get_external_modules().empty()) {
-    return;
+  if (header_done_) {
+    return;  // already produced (a group emit collected it before the bodies)
   }
+  header_done_ = true;
+
+  std::vector<std::string> lines;
 
   struct Import {
     std::string call_name;
@@ -717,7 +867,12 @@ void Lnast_prp_writer::write_module_imports() {
   };
   const std::string   self(lnast->get_top_module_name());
   std::vector<Import> imports;
+  // No emitted siblings and no blackbox list ⇒ nothing a callee could resolve to.
+  const bool          resolvable = known_modules_ != nullptr || !lnast->get_external_modules().empty();
   for (const auto& call : func_call_callees_) {
+    if (!resolvable) {
+      break;
+    }
     std::string resolved;
     bool        emitted_sibling = false;
     if (known_modules_ != nullptr) {
@@ -741,9 +896,18 @@ void Lnast_prp_writer::write_module_imports() {
     if (resolved.empty() && lnast->has_external_module(call)) {
       resolved = call;
     }
-    if (!resolved.empty() && resolved != self) {
-      imports.push_back({call, resolved, emitted_sibling});
+    if (resolved.empty() || resolved == self) {
+      continue;
     }
+    // A callee emitted into the SAME .prp (both units came from one source
+    // file) needs no import — it is a sibling lambda in this file's scope, and
+    // `const helper = import("f.helper")` next to `pub comb helper` in the same
+    // file is a redeclaration.
+    if (emitted_sibling && resolved.substr(0, resolved.find('.')) == self.substr(0, self.find('.'))) {
+      same_file_callee_.emplace(call, resolved);
+      continue;
+    }
+    imports.push_back({call, resolved, emitted_sibling});
   }
   std::sort(imports.begin(), imports.end(), [](const Import& lhs, const Import& rhs) {
     return std::tie(lhs.module_name, lhs.call_name) < std::tie(rhs.module_name, rhs.call_name);
@@ -756,6 +920,15 @@ void Lnast_prp_writer::write_module_imports() {
     }
   }
   import_alias_.clear();
+  // A same-file sibling is referred to by its BARE lambda name — the qualified
+  // `file.entity` spelling only resolves through an import const, and there is
+  // none (nor may there be: it would redeclare the lambda).
+  for (const auto& [call, resolved] : same_file_callee_) {
+    const auto  dot   = resolved.rfind('.');
+    std::string alias = dot == std::string::npos ? resolved : resolved.substr(dot + 1);
+    import_alias_[call]     = alias;
+    import_alias_[resolved] = alias;
+  }
   for (const auto& imp : imports) {
     const auto  dot   = imp.module_name.rfind('.');
     std::string alias = dot == std::string::npos ? imp.module_name : imp.module_name.substr(dot + 1);
@@ -765,40 +938,85 @@ void Lnast_prp_writer::write_module_imports() {
       } while (inst_names.contains(alias) || (known_modules_ != nullptr && known_modules_->contains(alias)));
     }
 
-    // pass.prp_writer names an emitted sibling file with its full internal
-    // unit name (`file.entity.prp`). The final `.entity` selects the pub lambda
-    // inside that file, hence `file.entity.entity`. External source modules
-    // retain the ordinary `file.entity` import spelling.
-    std::string path;
-    if (imp.emitted_sibling) {
-      const std::string entity = dot == std::string::npos ? imp.module_name : imp.module_name.substr(dot + 1);
-      path                     = imp.module_name + "." + entity;
-    } else {
-      path = dot == std::string::npos ? imp.module_name + "." + imp.module_name : imp.module_name;
-    }
+    // `import("<file>.<entity>")` — the file the sibling lands in, then the pub
+    // lambda inside it. pass.prp_writer groups every unit of one source file
+    // into `<file>.prp`, so a Pyrope-origin unit is ALREADY spelled
+    // `file.entity` and needs no suffix; a slang-origin unit is the bare module
+    // name and its file holds a lambda of the same name (`m` -> `m.m`). Getting
+    // this wrong grows the path one level per round trip.
+    const std::string path = dot == std::string::npos ? imp.module_name + "." + imp.module_name : imp.module_name;
     import_alias_[imp.call_name]   = alias;
     import_alias_[imp.module_name] = alias;
-    os << "const " << quote_module_path(alias) << " = import(\"" << escape_string(path) << "\")\n";
+    lines.emplace_back("const " + quote_module_path(alias) + " = import(\"" + escape_string(path) + "\")\n");
   }
-  if (!imports.empty()) {
+
+  // File-scope package imports (provenance flow): one `const pkg = import("pkg")`
+  // per referenced package, so the `pkg.PARAM` refs resolve on recompile. A
+  // lambda-body import does not lower, so these MUST sit at file scope. An SV
+  // package can be named for a Pyrope keyword (`match`, `mut`, `step`, …) or be
+  // a Verilog escaped id, neither of which lexes bare — hence quote_module_path
+  // on the binding and escape_string on the (string-literal) path.
+  for (const auto& pkg : lnast->get_imported_packages()) {
+    lines.emplace_back("const " + quote_module_path(pkg) + " = import(\"" + escape_string(pkg) + "\")\n");
+  }
+
+  // A Pyrope FILE-level unit carries the source's own `const X = import("…")`
+  // bindings as elaboration residue (scan_file_imports). Re-emit them from the
+  // recovered (alias, path) so the file keeps its imports; the body drops the
+  // residue statements.
+  for (const auto& [alias, path] : file_imports_) {
+    lines.emplace_back("const " + quote_module_path(alias) + " = import(\"" + escape_string(path) + "\")\n");
+  }
+
+  if (header_sink_ != nullptr) {
+    // Group emit: the pass hoists one deduped header above every unit of the
+    // file (two lambdas in one file share their submodule imports). An IDENTICAL
+    // line is the same binding and is dropped. A line that reuses a bound name
+    // for a DIFFERENT path is not — alias selection runs per unit and never sees
+    // the shared sink, so one unit importing `a.mul` and a sibling importing
+    // `b.mul` both pick `mul`; keeping only the first would silently instantiate
+    // the wrong submodule. Give the loser a fresh, sink-unique alias and rewrite
+    // this unit's call sites through import_alias_.
+    for (auto& l : lines) {
+      if (std::find(header_sink_->begin(), header_sink_->end(), l) != header_sink_->end()) {
+        continue;  // byte-identical binding already present
+      }
+      const auto  eq    = l.find(" = ");
+      std::string bound = eq == std::string::npos ? l : l.substr(0, eq);  // "const <alias>"
+      auto        clashes = [&](const std::string& b) {
+        return std::any_of(header_sink_->begin(), header_sink_->end(), [&](const std::string& have) {
+          return have.compare(0, b.size(), b) == 0 && have.size() > b.size() && have[b.size()] == ' ';
+        });
+      };
+      if (eq != std::string::npos && clashes(bound)) {
+        const std::string alias = bound.substr(std::string_view("const ").size());
+        std::string       fresh = alias;
+        std::string       fresh_bound;
+        do {
+          fresh      += "_i";
+          fresh_bound = "const " + fresh;
+        } while (clashes(fresh_bound));
+        for (auto& [call, a] : import_alias_) {
+          if (a == alias) {
+            a = fresh;
+          }
+        }
+        l = fresh_bound + l.substr(eq);
+      }
+      header_sink_->emplace_back(std::move(l));
+    }
+    return;
+  }
+  for (const auto& l : lines) {
+    os << l;
+  }
+  if (!lines.empty()) {
     os << "\n";
   }
 }
 
 void Lnast_prp_writer::write_module() {
   Lnast_nid io_nid = cur;
-
-  // File-scope package imports (provenance flow): one `const pkg = import("pkg")`
-  // per referenced package, so the `pkg.PARAM` refs resolve on recompile. A
-  // lambda-body import does not lower, so these MUST sit at file scope here.
-  if (!lnast->get_imported_packages().empty()) {
-    for (const auto& pkg : lnast->get_imported_packages()) {
-      // Escaped exactly like the module-import binding above (a package named
-      // for a Pyrope keyword, or a Verilog escaped id, does not lex bare).
-      os << "const " << quote_module_path(pkg) << " = import(\"" << escape_string(pkg) << "\")\n";
-    }
-    os << "\n";
-  }
 
   const bool verilog_origin = lnast->is_verilog_origin();
   const bool is_pipe        = !verilog_origin && lnast->get_lambda_kind() == "pipe";
@@ -809,6 +1027,7 @@ void Lnast_prp_writer::write_module() {
   // emit_port_group, plus bundle_fields_/declared_ so body accesses print the
   // bare dotted path and never re-declare a leaf.
   collect_port_groups(io_nid, is_mod && !is_pipe);
+  collect_body_bundles(lnast->get_sibling_next(io_nid));
   print("pub ");
   if (is_pipe) {
     print("pipe");
@@ -1235,6 +1454,26 @@ void Lnast_prp_writer::write_module() {
       // Counting only `store`s would MISS an op-node def and wrongly call a
       // twice-written name single-store (yielding a duplicate declaration).
       std::unordered_map<std::string, int>        def_count;
+      // Names written from a NESTED scope (inside an if/loop arm). Paired with
+      // def_count it identifies a compiler temp the reader's mux lowering writes
+      // from sibling arms — see the hoist below.
+      std::unordered_set<std::string>             nested_def;
+      // SCOPE FOOTPRINT per name: the `stmts` node each def / read sits under.
+      // A name whose whole footprint fits inside the scope of its FIRST def needs
+      // no hoisted `mut X = 0` prologue — that def declares it in place, which
+      // also leaves a single-use temp foldable at its use. Only a name reached
+      // from a SIBLING (or enclosing) scope needs the function-top seed.
+      absl::flat_hash_map<std::string, Lnast_nid>              first_def_scope;
+      absl::flat_hash_map<std::string, std::vector<Lnast_nid>> touch_scope;
+      auto                                                     note_scope = [&](const std::string& nm, Lnast_nid sc, bool is_def) {
+        if (is_def && first_def_scope.find(nm) == first_def_scope.end()) {
+          first_def_scope.emplace(nm, sc);
+        }
+        auto& v = touch_scope[nm];
+        if (std::find(v.begin(), v.end(), sc) == v.end()) {
+          v.push_back(sc);
+        }
+      };
       auto                                        scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
         for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
           const auto t     = lnast->get_type(c);
@@ -1244,7 +1483,29 @@ void Lnast_prp_writer::write_module() {
           // `store` under a `func_call` is a named ARGUMENT (`mul(a=in1)`), and a
           // `tuple_add` child is a named field — neither defines a body net.
           if (v_ref && lnast->get_type(n) == Lnast_ntype::Lnast_ntype_stmts && defines_child0(t) && !Lnast_ntype::is_declare(t)) {
-            ++def_count[std::string(strip_prefix(lnast->get_name(v)))];
+            auto dn = std::string(strip_prefix(lnast->get_name(v)));
+            ++def_count[dn];
+            note_scope(dn, n, /*is_def=*/true);
+            if (!top) {
+              nested_def.insert(std::move(dn));
+            }
+          }
+          // Reads of this statement belong to THIS scope (an if/loop's own
+          // sub-scopes are visited by the recursion below with their own `n`).
+          {
+            std::unordered_set<std::string> rr;
+            if (Lnast_ntype::is_declare(t)) {
+              collect_node_reads(c, rr);
+            } else if (v_ref && defines_child0(t)) {
+              collect_driver_reads(c, rr);
+            } else if (t != Lnast_ntype::Lnast_ntype_if && t != Lnast_ntype::Lnast_ntype_unique_if) {
+              collect_node_reads(c, rr);
+            } else if (auto cond = lnast->get_child(c); !cond.is_invalid()) {
+              collect_node_reads(cond, rr);  // an if's CONDITION only; arms recurse
+            }
+            for (const auto& r : rr) {
+              note_scope(r, n, /*is_def=*/false);
+            }
           }
           if (v_ref && Lnast_ntype::is_declare(t)) {
             auto        nm     = std::string(strip_prefix(lnast->get_name(v)));
@@ -1301,6 +1562,7 @@ void Lnast_prp_writer::write_module() {
         }
       };
       scan(scan, stmts_nid, true);
+      def_count_ = def_count;  // write_declare needs it (a stored `const` declare is a `mut`)
       // Position every top-level statement in EMIT order, so a name's single store
       // can be checked to precede every read of it.  Body emit order is: the
       // hoisted prologue (mut seeds + wire pre-declares, incl. the pin wires),
@@ -1333,6 +1595,10 @@ void Lnast_prp_writer::write_module() {
                 pkg_valued_tmp.insert(std::string(strip_prefix(lnast->get_name(c0))));
               }
             }
+          }
+          if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && defines_child0(ct)
+              && !Lnast_ntype::is_declare(ct)) {
+            def_idx_.emplace(std::string(strip_prefix(lnast->get_name(c0))), idx);  // FIRST wins
           }
           if (Lnast_ntype::is_store(ct) && !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
             // Only a SCALAR store (exactly 2 children: the ref and the value) can
@@ -1371,6 +1637,7 @@ void Lnast_prp_writer::write_module() {
             if (Lnast_ntype::is_declare(ct)) {
               decl_read.insert(r);
             } else if (auto it = first_read.find(r); it == first_read.end()) {
+              read_idx_.emplace(r, idx);
               first_read.emplace(r, idx);
             } else if (idx < it->second) {
               it->second = idx;
@@ -1408,6 +1675,30 @@ void Lnast_prp_writer::write_module() {
       // The map's value is the declaration to rebuild: empty for a store-driven var
       // (no declare to take a type/init from — its width comes from the store's
       // RHS, and `0` is just a seed), the nested declare's own type/init otherwise.
+      // True when `nm`'s whole def/read footprint fits inside the scope of its
+      // FIRST def, i.e. declaring it at that def is visible everywhere it is
+      // used. Walks parents because a nested scope is still covered by an
+      // enclosing one (`stmts` nest inside `if` inside `stmts`).
+      auto scope_contained = [&](const std::string& nm) {
+        auto fit = first_def_scope.find(nm);
+        auto tit = touch_scope.find(nm);
+        if (fit == first_def_scope.end() || tit == touch_scope.end()) {
+          return false;  // no def seen: keep the conservative hoist
+        }
+        for (const auto& sc : tit->second) {
+          bool covered = false;
+          for (auto up = sc; !up.is_invalid(); up = lnast->get_parent(up)) {
+            if (up == fit->second) {
+              covered = true;
+              break;
+            }
+          }
+          if (!covered) {
+            return false;
+          }
+        }
+        return true;
+      };
       std::unordered_map<std::string, Nested_mut> need;
       for (const auto& nm : store_lhs) {
         if (bool_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
@@ -1429,8 +1720,47 @@ void Lnast_prp_writer::write_module() {
         }
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !instance_output_inlined_.count(nm)
             && !dead_signals_.count(nm)) {
+          // A COMPILER TEMP whose def and every read live inside one scope needs
+          // no prologue: its def declares it in place (`const t = a & 1`), which
+          // also keeps a single-use temp inlinable at its use. Hoisting it
+          // instead emitted a dead `mut t = 0` seed AND blocked the fold.
+          // `decl.init == "0"` is a SEED, not content: the name has a real def
+          // (def_count == 1) that overwrites it, and a compiler temp is
+          // def-before-use by construction. A typed declare still hoists — the
+          // in-place `const t = …` the def mints carries no width pin.
+          if (is_tmp(nm) && def_count[nm] == 1 && decl.ty.empty() && (decl.init.empty() || decl.init == "0")
+              && scope_contained(nm)) {
+            suppress_decl_.insert(nm);  // drop the declare; the def mints the keyword
+            continue;
+          }
           need[nm] = decl;            // the declare's type/init outrank a store-driven empty
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
+        }
+      }
+      // A compiler temp is normally single-assignment, so decl_prefix declares it
+      // in place at its first write (`const t_x = …`). One written from SIBLING
+      // scopes — the reader's mux lowering, `if c { t = a } else { t = b }` —
+      // breaks that: the `const` lands inside the first arm, and the other arm's
+      // write plus every later read are then out of scope ("assignment to
+      // undeclared variable 't_mux_31_0'" on recompile). Seed those at the
+      // function top like any other cross-scope `mut`. Single-def temps keep the
+      // in-place `const` (the overwhelmingly common shape).
+      for (const auto& [nm, cnt] : def_count) {
+        if (cnt < 2 || !is_tmp(nm)) {
+          continue;
+        }
+        if (bool_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u || declared_.count(nm) != 0u
+            || top_decl.count(nm) != 0u || nonmut_decl.count(nm) != 0u) {
+          continue;
+        }
+        // Written more than once, so decl_prefix must not call it `const` — a
+        // `const t = v` followed by a lane write `t#[1..=1] = w` is a rebind
+        // ("const `t` rebind (assigned 2 times)"). A same-scope multi-def keeps
+        // its in-place declaration (now `mut`); one written across SIBLING
+        // scopes also needs the top-level seed.
+        multi_def_tmp_.insert(nm);
+        if (nested_def.count(nm) != 0u) {
+          need.try_emplace(nm);
         }
       }
       std::vector<std::string> pre;
@@ -1591,8 +1921,16 @@ void Lnast_prp_writer::write_module() {
             continue;
           }
         }
+        // As in write_stmts: a statement that decides to emit nothing only once
+        // it is being written must not leave a whitespace-only line behind.
+        const auto before = os.tellp();
         print_indent();
+        const auto after_indent = os.tellp();
         write_node();
+        if (before != std::streampos(-1) && os.tellp() == after_indent) {
+          os.seekp(before);
+          continue;
+        }
         os << "\n";
       }
       move_to_parent();  // cur -> stmts, pop
@@ -1835,6 +2173,268 @@ void Lnast_prp_writer::collect_port_groups(Lnast_nid io_nid, bool is_mod) {
   harvest(out_tup, /*is_output=*/true);
 }
 
+// Re-nest a struct LOCAL the front end flattened into per-field leaves. The
+// slang reader splits a packed-struct var into one net per field and spells each
+// as ONE escaped identifier (`` `sigs_qual_exa_h.cmd` ``), so the body reads
+//
+//   mut `sigs_qual_exa_h.cmd` = 0
+//   mut `sigs_qual_exa_h.txfma` = 0        (x35)
+//   `sigs_qual_exa_h.ldst` = …
+//
+// where the source had one struct. Rebuild the bundle at emit time:
+//
+//   mut sigs_qual_exa_h = (mut cmd = 0, mut txfma = 0, …)
+//   sigs_qual_exa_h.ldst = …
+//
+// The dot inside an escaped id is NOT normally a field separator (a Verilog
+// `\a.b ` is one name), so the regroup is deliberately conservative — it fires
+// only on a base with SEVERAL leaves, every one of them a plain identifier
+// path, none of them state, and the base never used as a bare name. Under those
+// conditions the rewrite only renames private combinational locals, which is
+// exactly the flattening this undoes.
+void Lnast_prp_writer::collect_body_bundles(Lnast_nid body_nid) {
+  if (body_nid.is_invalid()) {
+    return;
+  }
+  auto plain_ident = [](std::string_view s) {
+    if (s.empty() || (std::isalpha(static_cast<unsigned char>(s.front())) == 0 && s.front() != '_')) {
+      return false;
+    }
+    for (char c : s) {
+      if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_') {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  struct Leaf {
+    std::string field;  // path after the base, dots intact
+    std::string decl;   // rendered `:type` suffix, or ""
+    int64_t     nid{0};
+  };
+  std::vector<std::string>                       order;
+  std::unordered_map<std::string, std::vector<Leaf>> groups;
+  std::unordered_set<std::string>                bare;    // names used WITHOUT a dot
+  std::unordered_set<std::string>                vetoed;  // base cannot be regrouped
+
+  std::function<void(Lnast_nid)> scan = [&](Lnast_nid n) {
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (Lnast_ntype::is_ref(lnast->get_type(c))) {
+        std::string raw(lnast->get_name(c));
+        if (raw.size() >= 2 && raw.front() == '`' && raw.back() == '`') {
+          const std::string inner = raw.substr(1, raw.size() - 2);
+          const auto        dot   = inner.find('.');
+          if (dot != std::string::npos && plain_ident(std::string_view(inner).substr(0, dot))) {
+            bool ok = true;
+            for (size_t s = dot + 1, e = 0; ok; s = e + 1) {
+              e = inner.find('.', s);
+              ok = plain_ident(std::string_view(inner).substr(s, e == std::string::npos ? std::string::npos : e - s));
+              if (e == std::string::npos) {
+                break;
+              }
+            }
+            if (!ok) {
+              vetoed.insert(inner.substr(0, dot));
+            }
+          } else if (dot != std::string::npos) {
+            vetoed.insert(inner.substr(0, dot));
+          }
+        } else if (raw.find('.') == std::string::npos) {
+          bare.insert(raw);
+        }
+      }
+      // A declare of an escaped dotted leaf is the regroup candidate.
+      if (Lnast_ntype::is_declare(lnast->get_type(c))) {
+        auto v = lnast->get_child(c);
+        if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v))) {
+          std::string raw(lnast->get_name(v));
+          if (raw.size() >= 2 && raw.front() == '`' && raw.back() == '`') {
+            const std::string inner = raw.substr(1, raw.size() - 2);
+            const auto        dot   = inner.find('.');
+            if (dot != std::string::npos) {
+              const std::string base = inner.substr(0, dot);
+              // ONE level only. A multi-level leaf (`` `s.inner.x` ``) would emit
+              // its whole dotted remainder as a single tuple FIELD NAME
+              // (`mut inner.x = 0`), which is not legal and does not re-parse.
+              // Nested regrouping needs a nested literal; until then leave the
+              // whole base alone rather than emit something unreadable.
+              if (inner.find('.', dot + 1) != std::string::npos) {
+                vetoed.insert(base);
+                scan(c);
+                continue;
+              }
+              auto              ty   = lnast->get_sibling_next(v);
+              auto              qual = ty.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(ty);
+              const std::string mode = qual.is_invalid() ? std::string("mut") : std::string(lnast->get_name(qual));
+              // Only plain combinational storage: a reg/latch leaf is STATE, and
+              // renaming state breaks cross-design name correspondence.
+              if (mode != "mut" && mode != "wire") {
+                vetoed.insert(base);
+              } else if (!find_stages_child(c).is_invalid() || !is_declare_with_value(c)) {
+                if (!find_stages_child(c).is_invalid()) {
+                  vetoed.insert(base);
+                } else {
+                  if (groups.find(base) == groups.end()) {
+                    order.push_back(base);
+                  }
+                  groups[base].push_back(
+                      {inner.substr(dot + 1), ty.is_invalid() ? std::string{} : render_type_at(ty), c.get_class_index().value});
+                }
+              } else {
+                vetoed.insert(base);  // an inline initializer: not the flat-leaf shape
+              }
+            }
+          }
+        }
+      }
+      scan(c);
+    }
+  };
+  scan(body_nid);
+
+  std::vector<std::string> rebuilt;
+  for (const auto& base : order) {
+    const auto& leaves = groups[base];
+    if (leaves.size() < 2 || vetoed.count(base) != 0u || bare.count(base) != 0u || declared_.count(base) != 0u
+        || bundle_fields_.count(base) != 0u) {
+      continue;  // ambiguous, already a real name, or already a port bundle
+    }
+    std::unordered_set<std::string> seen;
+    bool                            dup = false;
+    for (const auto& l : leaves) {
+      dup = dup || !seen.insert(l.field).second;
+    }
+    if (dup) {
+      continue;
+    }
+    std::string text = "mut " + base + " = (";
+    bool        first = true;
+    for (const auto& l : leaves) {
+      if (!first) {
+        text += ", ";
+      }
+      first  = false;
+      text  += "mut " + quote_kw_path(l.field);
+      if (!l.decl.empty()) {
+        text += ":" + l.decl;
+      }
+      text += " = 0";
+    }
+    text += ")";
+    body_bundle_text_.emplace(leaves.front().nid, std::move(text));
+    for (size_t i = 1; i < leaves.size(); ++i) {
+      body_bundle_skip_.insert(leaves[i].nid);
+    }
+    rebuilt.push_back(base);
+    declared_.insert(base);
+    for (const auto& l : leaves) {
+      bundle_fields_[base].insert(l.field);
+      if (auto q = quote_kw_path(l.field); q != l.field) {
+        bundle_fields_[base].insert(q);
+      }
+      declared_.insert(base + "." + l.field);
+    }
+  }
+  std::vector<std::string> zero_fields;
+  for (const auto& base : rebuilt) {
+    for (const auto& l : groups[base]) {
+      zero_fields.push_back(base + "." + l.field);
+    }
+  }
+  drop_redundant_bundle_zeros(body_nid, zero_fields);
+}
+
+// The rebuilt literal already initializes every field to 0:
+//
+//   mut sigs_qual_exa_h = (mut cmd = 0, mut add = 0, …)
+//   sigs_qual_exa_h.add = 0     <- the front end's flat per-leaf seed: 0 over 0
+//   sigs_qual_exa_h.cmd = 0
+//
+// so those seeds are pure duplication (6186 lines in one minion re-emit). Drop
+// each while its field is still KNOWN zero — a `= 0` that lands AFTER any other
+// write to the field is a real reset and stays. A write anywhere inside a
+// nested scope counts, since it may or may not have run.
+void Lnast_prp_writer::drop_redundant_bundle_zeros(Lnast_nid body_nid, const std::vector<std::string>& zero_fields) {
+  if (zero_fields.empty()) {
+    return;
+  }
+  // "base.field" still holding the literal's 0
+  absl::flat_hash_set<std::string> zero(zero_fields.begin(), zero_fields.end());
+  auto                             unquote = [](std::string_view s) {
+    return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? std::string(s.substr(1, s.size() - 2)) : std::string(s);
+  };
+  // Any def of `base.field` — or of the whole `base` — ends its known-zero run.
+  std::function<void(Lnast_nid)> kill = [&](Lnast_nid n) {
+    auto v = lnast->get_child(n);
+    // A DECLARE is not a write: the per-leaf declares are precisely what the
+    // literal absorbed, so counting them here would clear every field before
+    // the first store is even reached.
+    if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v)) && defines_child0(lnast->get_type(n))
+        && !Lnast_ntype::is_declare(lnast->get_type(n))) {
+      const std::string nm = unquote(strip_prefix(lnast->get_name(v)));
+      zero.erase(nm);
+      if (nm.find('.') == std::string::npos) {
+        const std::string pfx = nm + ".";
+        absl::erase_if(zero, [&](const std::string& k) { return k.compare(0, pfx.size(), pfx) == 0; });
+      }
+    }
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      kill(c);
+    }
+  };
+  // Statement walk. An `if` is followed INTO each arm — a decoder writes whole
+  // bundles arm by arm (`unique if … { sigs.add = 0, sigs.cmd = 20, … }`), and an
+  // arm's `= 0` is just as redundant as a top-level one when the field is still
+  // zero where the arm starts. After the if, a field counts as zero only if
+  // EVERY arm left it zero: an arm may not run, but any arm may.
+  std::function<void(Lnast_nid)> process = [&](Lnast_nid stmts_nid) {
+    for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      const auto t = lnast->get_type(c);
+      if (t == Lnast_ntype::Lnast_ntype_store) {
+        auto v = lnast->get_child(c);
+        if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v))) {
+          auto val = lnast->get_sibling_next(v);
+          if (!val.is_invalid() && lnast->is_last_child(val) && lnast->get_type(val) == Lnast_ntype::Lnast_ntype_const
+              && lnast->get_name(val) == "0" && zero.count(unquote(strip_prefix(lnast->get_name(v)))) != 0) {
+            dead_init_stmts_.insert(c.get_class_index().value);
+            continue;  // the field is still zero: nothing was written
+          }
+        }
+        kill(c);
+        continue;
+      }
+      if (t == Lnast_ntype::Lnast_ntype_if || t == Lnast_ntype::Lnast_ntype_unique_if) {
+        for (auto a = lnast->get_child(c); !a.is_invalid(); a = lnast->get_sibling_next(a)) {
+          if (!Lnast_ntype::is_stmts(lnast->get_type(a))) {
+            kill(a);  // a condition can define too; it runs before every arm
+          }
+        }
+        const absl::flat_hash_set<std::string> entry = zero;
+        absl::flat_hash_set<std::string>       merged;
+        bool                                   first_arm = true;
+        for (auto a = lnast->get_child(c); !a.is_invalid(); a = lnast->get_sibling_next(a)) {
+          if (!Lnast_ntype::is_stmts(lnast->get_type(a))) {
+            continue;
+          }
+          zero = entry;
+          process(a);
+          if (first_arm) {
+            merged    = zero;
+            first_arm = false;
+          } else {
+            absl::erase_if(merged, [&](const std::string& k) { return zero.count(k) == 0; });
+          }
+        }
+        zero = first_arm ? entry : merged;
+        continue;
+      }
+      kill(c);  // anything else (a loop body included): every def it holds counts
+    }
+  };
+  process(body_nid);
+}
+
 // Emit `(in0:T0, in1:T1, …) -> (out0:T0, …)` from the io node.  The io node has
 // two `tuple_add` children: the first groups input ports, the second outputs.
 // Each port is `store(ref(name), const(init|nil), type, [stages])`.
@@ -1894,6 +2494,7 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
           print(":");
           print(t);
           emitted_type = true;
+          note_port_width(pname, t);
         }
       }
       if (!emitted_type) {
@@ -2480,6 +3081,15 @@ void Lnast_prp_writer::write_if_chain(bool continuation) {
 // write) is what keeps value-less declares — bare `var x:u8`, fully-folded
 // `const z` — present so later reads still resolve.
 void Lnast_prp_writer::write_declare() {
+  // A re-nested struct local (collect_body_bundles): the base's FIRST leaf
+  // declare prints the whole rebuilt `mut base = (mut f = 0, …)`, the rest print
+  // nothing (their field already exists in the literal).
+  if (const auto key = cur.get_class_index().value; body_bundle_skip_.count(key) != 0u) {
+    return;
+  } else if (auto bit = body_bundle_text_.find(key); bit != body_bundle_text_.end()) {
+    print(bit->second);
+    return;
+  }
   // This var's declaration was hoisted to a `mut X = 0` at the function top
   // (it is written across sibling scopes); drop the in-place nested declare.
   if (auto vc = lnast->get_child(cur); !vc.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(vc))
@@ -2503,7 +3113,19 @@ void Lnast_prp_writer::write_declare() {
     return;
   }
   auto lhs = strip_prefix(current_text());  // ref(var)
-  declared_.insert(std::string(lhs));       // an explicit declare; later writes skip the `mut`
+  // A value-less declare of a COMPILER TEMP whose value arrives as a later store:
+  // emitting it standalone forces a seed (`mut t = 0`), and the store then either
+  // rebinds a `const` or changes the kind ("cannot assign boolean value to
+  // `t2920` (it is integer)"). uPass emits that pair adjacent and in one scope, so
+  // drop the declaration and let decl_prefix mint it on the store instead. Note
+  // this must run BEFORE the `declared_` insert, or decl_prefix would see the
+  // name as already declared and emit a bare re-assignment.
+  // An inline `= 0` seed is the same trap: uPass emits `declare(%t, …, mut,
+  // const 0)` right before the op that defines %t, so the seed pins the temp to
+  // INTEGER and a boolean-valued definition then fails the kind check. Only a
+  // plain-const seed is dropped (a tuple/array initializer is real content), and
+  // only for an UNTYPED declare — a typed one pins a width the def would lose.
+  declared_.insert(std::string(lhs));  // an explicit declare; later writes skip the `mut`
 
   std::string type_suffix;
   if (move_to_sibling()) {
@@ -2518,7 +3140,76 @@ void Lnast_prp_writer::write_declare() {
     }
   }
 
+  // A file-scope `pub type T = u7` reaches here as `declare(T, prim_type_int,
+  // 'type')` with no value: the alias IS the type, so `type T:u7 = 0` (what the
+  // generic path printed) is both wrong and unparseable.
+  if (kw == "type" && !type_suffix.empty()) {
+    move_to_parent();
+    if (is_pub_export(lhs)) {
+      print("pub ");
+    }
+    print("type ");
+    print(lhs);
+    print(" = ");
+    print(type_suffix);
+    return;
+  }
+  // A file-scope `pub const K = <expr>` is folded by the time the writer runs —
+  // the declare keeps no value and constprop parked the comptime result in
+  // pub_values. Print THAT, not the generic path's `= 0`: this file is a
+  // package, and a zeroed export silently changes every importer's arithmetic.
+  if (file_level_ && kw.starts_with("const") && is_pub_export(lhs)) {
+    for (const auto& [path, text] : lnast->get_pub_values()) {
+      if (path != lhs) {
+        continue;
+      }
+      move_to_parent();
+      // The qualifier arrives as `const` or `const comptime`; Pyrope spells the
+      // modifier FIRST (`pub comptime const NAME`).
+      print(kw.find("comptime") == std::string::npos ? "pub const " : "pub comptime const ");
+      print(lhs);
+      if (!type_suffix.empty()) {
+        print(":");
+        print(type_suffix);
+      }
+      print(" = ");
+      print(text);
+      return;
+    }
+  }
+
   const bool has_value = move_to_sibling();  // optional inline init
+
+  // A REDUNDANT declaration: `mut`/`const` only (never a `reg`/`wire`/`latch`,
+  // whose declaration IS the storage element), untyped (the def carries no width
+  // pin), value-less or a plain const seed, and superseded by a real def that
+  // PRECEDES every read. Emitting it forces a `mut t194 = 0` line that the next
+  // statement overwrites — the noise this removes is ~6% of a generated file —
+  // and it also pre-declares the name so its def cannot mint the keyword.
+  // Verilog-generated Pyrope carries real source names (`t194`) in this shape,
+  // so this is deliberately NOT limited to compiler temps.
+  if ((kw == "mut" || kw.starts_with("const")) && type_suffix.empty() && !is_pub_export(lhs)
+      && (!has_value || current_ntype() == Lnast_ntype::Lnast_ntype_const) && nested_def_names_.count(std::string(lhs)) == 0) {
+    const std::string nm(lhs);
+    auto              di = def_idx_.find(nm);
+    auto              ri = read_idx_.find(nm);
+    if (di != def_idx_.end() && (ri == read_idx_.end() || di->second < ri->second)) {
+      declared_.erase(nm);  // the def mints the keyword instead
+      move_to_parent();
+      return;
+    }
+  }
+
+  // A value-less `const` declare whose value arrives as a LATER store (uPass
+  // splits `const x = e` into declare + store) cannot keep the `const`: the
+  // generic path seeds it `= 0` and the store is then a rebind ("const `x`
+  // rebind (assigned 2 times)"). Demote to `mut` — a single-assignment net is
+  // the same hardware either way, and the declared type survives.
+  if (!has_value && kw.starts_with("const")) {
+    if (auto dc = def_count_.find(std::string(lhs)); dc != def_count_.end() && dc->second > 0) {
+      kw = "mut";
+    }
+  }
 
   // A `const 'nil'` value is the slang reader's "no reset / no initializer"
   // sentinel — emit a bare declaration (`reg r:u8`) so tolg gives the flop no
@@ -2795,6 +3486,44 @@ std::string Lnast_prp_writer::render_comptime_init(Lnast_nid n) {
   }
   out += ")";
   return out;
+}
+
+// A port declared `uN` is N bits wide, so `p#[0..=N-1]` selects the whole value
+// and is a no-op the emitted source is better without. Recorded as the signature
+// prints (which precedes the body, so every body reader sees it). ONLY a plain
+// unsigned `uN`: on a signed `sN` the same mask REINTERPRETS the value as
+// unsigned, which is a real operation.
+// True when [lo..=hi] covers every bit of `src`, so the mask selects the value
+// unchanged. Only decided for a REF naming a `uN` PORT — that is where the width
+// is known for certain, and where the redundant mask actually shows up
+// (`a_i#[0..=51]` on `a_i:u52`). Anything else stays as written.
+bool Lnast_prp_writer::is_whole_width_mask(Lnast_nid src, int lo, int hi) const {
+  if (lo != 0 || src.is_invalid() || lnast->get_type(src) != Lnast_ntype::Lnast_ntype_ref) {
+    return false;
+  }
+  auto it = port_bits_.find(std::string(strip_prefix(lnast->get_name(src))));
+  return it != port_bits_.end() && it->second == hi + 1;
+}
+
+void Lnast_prp_writer::note_port_width(std::string_view name, std::string_view type_txt) {
+  if (type_txt.size() < 2 || type_txt.front() != 'u') {
+    return;
+  }
+  int w = 0;
+  for (char c : type_txt.substr(1)) {
+    if (c < '0' || c > '9' || w > 100000) {
+      return;
+    }
+    w = w * 10 + (c - '0');
+  }
+  if (w > 0) {
+    port_bits_.emplace(std::string(name), w);
+  }
+}
+
+// `x#[3..=3]` is one bit — spell it `x#[3]`.
+std::string Lnast_prp_writer::fmt_bit_range(std::string_view s, int lo, int hi) {
+  return lo == hi ? std::format("{}#[{}]", s, lo) : std::format("{}#[{}..={}]", s, lo, hi);
 }
 
 std::string Lnast_prp_writer::render_type() { return render_type_at(cur); }
@@ -3625,14 +4354,21 @@ void Lnast_prp_writer::write_set_mask() {
   // from the source value, copy it in first.
   std::string target   = dst;
   bool        need_sep = false;
+  auto        runs     = mask_runs(mask_txt);
   if (dst != val) {
+    // The copy is followed by one lane write per run, so the target is assigned
+    // TWICE even though the LNAST defines it once — it must not be declared
+    // `const` ("const `t` rebind (assigned 2 times)" on recompile).
+    if (!runs.empty()) {
+      multi_def_tmp_.insert(target);
+      single_store_.erase(target);
+    }
     print(decl_prefix(target));
     print(target);
     os << std::format(" = {}", val);
     need_sep = true;
   }
 
-  auto runs = mask_runs(mask_txt);
   if (runs.empty()) {
     // Zero / unparsable mask: nothing to overwrite.  Emit a base copy if we
     // haven't already (keeps the statement non-empty and the value flowing).
@@ -3651,9 +4387,9 @@ void Lnast_prp_writer::write_set_mask() {
     int w = hi - lo + 1;
     if (ins_off == 0 && runs.size() == 1) {
       // Single run from bit 0 of `ins`: the slice width truncates `ins` itself.
-      os << std::format("{}#[{}..={}] = {}", target, lo, hi, ins);
+      os << std::format("{} = {}", fmt_bit_range(target, lo, hi), ins);
     } else {
-      os << std::format("{}#[{}..={}] = {}#[{}..={}]", target, lo, hi, ins, ins_off, ins_off + w - 1);
+      os << std::format("{} = {}", fmt_bit_range(target, lo, hi), fmt_bit_range(ins, ins_off, ins_off + w - 1));
     }
     ins_off  += w;
     need_sep  = true;
@@ -3834,6 +4570,17 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
       auto&       fi = fold_info_[nm];
       if (def0 && pos == 0) {
         fi.def_count++;
+        // A `declare` is not a VALUE def — it introduces the name, the following
+        // op/store produces the value. Counting it made every declared-then-
+        // assigned name look multi-def, which blocked the single-def fold below.
+        fi.decl_defs += (t == Lnast_ntype::Lnast_ntype_declare) ? 1 : 0;
+        if (t == Lnast_ntype::Lnast_ntype_declare) {
+          // `mut x:u8` NARROWS. Inlining the value at its use would drop the
+          // annotation (the declare emits nothing on its own), so remember it.
+          if (auto ty = lnast->get_sibling_next(c); !ty.is_invalid() && !render_type_at(ty).empty()) {
+            fi.decl_typed = true;
+          }
+        }
         fi.def_node  = nid;
         fi.def_type  = t;
         fi.def_index = my_index;
@@ -4507,8 +5254,15 @@ void Lnast_prp_writer::analyze_folding() {
   //       - a BARE real name (no SSA version) is NEVER folded: it may be a module
   //         port / reg / output whose externally-visible driver must remain.
   for (auto& [name, fi] : fold_info_) {
-    if (fi.def_count != 1) {
-      continue;  // must be written exactly once
+    if (fi.def_count - fi.decl_defs != 1) {
+      continue;  // must be written exactly once (a bare `declare` is not a write)
+    }
+    // A `:T` annotation (on the declare or a standalone type_spec) and a
+    // `stage[N]` depth both render on the DECLARATION, which inlining deletes —
+    // and a narrowing type changes the value. Keep those names on their own line.
+    if (fi.decl_typed || type_specs_.count(std::string(strip_prefix(name))) != 0u
+        || stage_decls_.count(std::string(strip_prefix(name))) != 0u) {
+      continue;
     }
     const bool pure_index = (fi.def_type == Lnast_ntype::Lnast_ntype_tuple_get || fi.def_type == Lnast_ntype::Lnast_ntype_get_mask);
     const bool ssa_ver    = ends_with_ssa_version(name);
@@ -4525,8 +5279,14 @@ void Lnast_prp_writer::analyze_folding() {
         continue;  // bare real name (possible port/reg/output) — keep
       }
     } else {
-      if (!is_tmp(name)) {
-        continue;  // expression: only `%`/`___` compiler temps fold
+      // EXPRESSION def: a compiler temp only. `%`/`___` are the raw spellings;
+      // `t<N>` / `tt<N>_<M>` are what THIS writer mints for them, and they come
+      // back as ordinary source names whenever a generated file is compiled
+      // again (a Verilog->Pyrope tree re-read, which is the normal flow) — 8043
+      // single-use expressions in one minion emit sat on their own line for
+      // exactly that reason. A port/export keeps its driver either way.
+      if (!is_tmp(name) && !(is_writer_temp_name(strip_prefix(name)) && !is_pub_export(strip_prefix(name)))) {
+        continue;
       }
       max_uses = 1;
     }
@@ -4808,12 +5568,25 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
         if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
           auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
           if (rit != range_lohi_.end()) {
+            // The bounds are TEXT here (a range temp's operands need not be
+            // literals); only a numeric pair can be simplified.
+            const auto lo = parse_int_const(rit->second.first);
+            const auto hi = parse_int_const(rit->second.second);
+            if (lo && hi && *lo >= 0 && *hi >= *lo) {
+              if (is_whole_width_mask(src, static_cast<int>(*lo), static_cast<int>(*hi))) {
+                return s;  // selects every bit of a `uN` source: a no-op
+              }
+              return fmt_bit_range(s, static_cast<int>(*lo), static_cast<int>(*hi));  // tight
+            }
             return std::format("{}#[{}..={}]", s, rit->second.first, rit->second.second);  // tight
           }
         } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
           std::string mt(lnast->get_name(mask));
           if (auto run = contiguous_run(mt)) {
-            return std::format("{}#[{}..={}]", s, run->first, run->second);  // tight
+            if (is_whole_width_mask(src, run->first, run->second)) {
+              return s;  // selects every bit of a `uN` source: a no-op
+            }
+            return fmt_bit_range(s, run->first, run->second);  // tight
           }
           return wrap(std::format("{} & {}", s, mt), /*loose=*/true);
         }
@@ -4935,6 +5708,12 @@ bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
   if (t == Lnast_ntype::Lnast_ntype_type_spec) {
     return true;  // folded into a declaration
   }
+  if (drops_as_import_residue(nid)) {
+    return true;  // an elaborated `const X = import("…")` — the header re-emits it
+  }
+  if (!dead_init_stmts_.empty() && dead_init_stmts_.count(nid.get_class_index().value) != 0) {
+    return true;  // seed overwritten before any read (see scan_dead_init_stores)
+  }
   if (t == Lnast_ntype::Lnast_ntype_timecheck) {
     return true;  // inert; dropped (timing already carried by stage[N]/@[N])
   }
@@ -4956,6 +5735,147 @@ bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
     }
   }
   return false;
+}
+
+// A Pyrope FILE-level unit (`top` with a `stmts` and no `io`) reaches the
+// writer AFTER elaboration, so its `const pkg = import("pkg")` lines survive
+// only as residue: an `import` func_call into a `%tmp`, a `declare`, and a
+// `store` — or, when import_defer already consumed the binding, a bare
+// value-less `declare`. Printed literally that reads back as
+// ``const t_0 = `import`("'pkg'")`` / `const pkg = 0`, i.e. neither the import
+// nor a usable const. Recognise the shape here so write_stmts can drop it and
+// the header re-emits the binding from (alias, path).
+void Lnast_prp_writer::scan_file_imports() {
+  auto      root = lnast->get_root();
+  Lnast_nid stmts;
+  for (auto c = lnast->get_child(root); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_io) {
+      stmts = Lnast_nid{};  // an extracted lambda: no file scope, but still scan for residue
+      break;
+    }
+    if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_stmts) {
+      stmts = c;
+    }
+  }
+  file_level_ = !stmts.is_invalid();
+
+  // The binding can sit at file scope OR inside a lambda (func_extract carries a
+  // captured `const pkg = import(…)` into the extracted body, where an import
+  // does not lower anyway) — so scan the WHOLE tree and hoist every one of them
+  // to the file header.
+  absl::flat_hash_map<std::string, std::string> tmp_path;  // %tmp -> import path
+  for (const auto& s : lnast->depth_preorder()) {
+    const auto t = lnast->get_type(s);
+    if (t == Lnast_ntype::Lnast_ntype_func_call) {
+      auto lhs = lnast->get_child(s);
+      if (lhs.is_invalid()) {
+        continue;
+      }
+      auto callee = lnast->get_sibling_next(lhs);
+      if (callee.is_invalid() || unquote_callee(lnast->get_name(callee)) != "import") {
+        continue;
+      }
+      auto arg = lnast->get_sibling_next(callee);
+      if (arg.is_invalid()) {
+        continue;
+      }
+      import_tmps_.emplace(lnast->get_name(lhs));
+      tmp_path.emplace(std::string(lnast->get_name(lhs)), std::string(unquote_callee(lnast->get_name(arg))));
+      continue;
+    }
+    if (t != Lnast_ntype::Lnast_ntype_store) {
+      continue;
+    }
+    auto lhs = lnast->get_child(s);
+    if (lhs.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(lhs))) {
+      continue;
+    }
+    auto        rhs = lnast->get_sibling_next(lhs);
+    std::string nm(strip_prefix(lnast->get_name(lhs)));
+    if (!rhs.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(rhs))) {
+      if (auto it = tmp_path.find(std::string(lnast->get_name(rhs))); it != tmp_path.end()) {
+        import_bound_.emplace(nm);
+        if (std::find_if(file_imports_.begin(), file_imports_.end(), [&](const auto& p) { return p.first == nm; })
+            == file_imports_.end()) {
+          file_imports_.emplace_back(nm, it->second);
+        }
+        continue;
+      }
+    }
+    if (file_level_ && lnast->get_parent(s) == stmts) {
+      file_stored_.emplace(nm);
+    }
+  }
+}
+
+// True for the statements that make up an elaborated file-scope
+// `const X = import("path")` (see scan_file_imports), plus the value-less
+// `const` declares constprop left behind for a file-private const it folded
+// away — a name with no value, no store and no `pub` export has nothing left to
+// emit, and `const X = 0` would be a wrong (and, for an import binding,
+// actively misleading) reconstruction.
+// `declare( ref, type, const(qualifier), [value] )` — true when the optional
+// 4th child (the inline initializer) is present.
+bool Lnast_prp_writer::is_declare_with_value(Lnast_nid nid) const {
+  auto c = lnast->get_child(nid);
+  for (int i = 0; i < 3 && !c.is_invalid(); ++i) {
+    c = lnast->get_sibling_next(c);
+  }
+  return !c.is_invalid();
+}
+
+bool Lnast_prp_writer::is_pub_export(std::string_view name) const {
+  for (const auto& p : lnast->get_pub_list()) {
+    if (p.name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Lnast_prp_writer::drops_as_import_residue(Lnast_nid nid) const {
+  const auto t = lnast->get_type(nid);
+  if (t == Lnast_ntype::Lnast_ntype_func_call) {
+    auto lhs = lnast->get_child(nid);
+    return !lhs.is_invalid() && import_tmps_.contains(std::string(lnast->get_name(lhs)));
+  }
+  if (t == Lnast_ntype::Lnast_ntype_store) {
+    auto lhs = lnast->get_child(nid);
+    auto rhs = lhs.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(lhs);
+    return !rhs.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(rhs))
+           && import_tmps_.contains(std::string(lnast->get_name(rhs)));
+  }
+  if (t != Lnast_ntype::Lnast_ntype_declare) {
+    return false;
+  }
+  auto var = lnast->get_child(nid);
+  if (var.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(var))) {
+    return false;
+  }
+  const std::string nm(strip_prefix(lnast->get_name(var)));
+  if (import_bound_.contains(nm)) {
+    return true;
+  }
+  if (!file_level_) {
+    return false;  // the rest is file-scope elaboration residue only
+  }
+  auto type_nid = lnast->get_sibling_next(var);
+  auto qual     = type_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(type_nid);
+  if (qual.is_invalid() || lnast->get_name(qual) != "const") {
+    return false;  // `mut`/`reg`/`type`/… keep their declaration
+  }
+  if (!lnast->get_sibling_next(qual).is_invalid()) {
+    return false;  // has an inline value
+  }
+  if (file_stored_.contains(nm)) {
+    return false;  // a later store still needs the declaration
+  }
+  for (const auto& p : lnast->get_pub_list()) {
+    if (p.name == nm) {
+      return false;  // an export: write_top re-emits it from the pub values
+    }
+  }
+  return true;
 }
 
 std::string Lnast_prp_writer::format_stages(Lnast_nid stages_nid) const {

@@ -1039,10 +1039,43 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
   // producer drives it. (Materialize-only: comptime folding never reaches here
   // — it reads the ST directly via current_prim_value.)
   if (folded && !folded->is_invalid() && !folded->is_nil()) {
+    // Keep a named package constant SYMBOLIC when the flow asked for it (see
+    // set_preserve_param_provenance): `0x78` loses which constant it was, and
+    // the re-emitted Pyrope should read `vpu_defs_pkg.VPU_TRANS_SIN_P2`.
+    if (preserve_param_provenance_) {
+      if (auto sym = pkg_origin_of(name); !sym.empty()) {
+        emit_leaf(Lnast_node::create_ref(sym));
+        return;
+      }
+    }
     emit_leaf(Lnast_node::create_const(folded->to_pyrope()));
   } else {
     emit_leaf(lm->current_node());
   }
+}
+
+std::string uPass_runner::pkg_origin_of(std::string_view name) const {
+  const auto it = symbol_table_.tget_origin.find(std::string(name));
+  if (it == symbol_table_.tget_origin.end()) {
+    return {};
+  }
+  const std::string& key = it->second;  // "<base>.<field>[.<field>…]"
+  const auto         dot = key.find('.');
+  if (dot == std::string::npos) {
+    return {};
+  }
+  const std::string base = key.substr(0, dot);
+  // Only an IMPORT NAMESPACE qualifies — call_resolver stamps `pub_unit` on the
+  // bundle it builds for `const pkg = import("pkg")`. An ordinary struct read
+  // (`sigs.ldst`) has no such marker and keeps folding to its value.
+  const auto bun = symbol_table_.get_bundle(base);
+  if (!bun || !bun->has_attr(battr::pub_unit)) {
+    return {};
+  }
+  if (lm && lm->get_lnast()) {
+    lm->get_lnast()->add_imported_package(base);  // the pyrope emit needs the file-scope import
+  }
+  return key;
 }
 
 bool uPass_runner::imported_alias_range(std::string_view type_name, Dlop& max_out, Dlop& min_out) const {
@@ -1101,9 +1134,14 @@ void uPass_runner::emit_io_with_type_slots() {
         }
         emit_push(lm->current_type());
         lm->move_to_child();
-        int cidx = 0;
+        int         cidx = 0;
+        std::string port_name;
         do {
-          if (cidx >= 2 && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref && emit_scalar_named_type_slot(lm->current_text())) {
+          if (cidx == 0 && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+            port_name = lm->current_text();
+          }
+          if (cidx >= 2 && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref
+              && emit_scalar_named_type_slot(lm->current_text(), port_name)) {
             // concretized imported alias — nothing else to emit for this child
           } else {
             emit_subtree_verbatim();
@@ -1121,9 +1159,21 @@ void uPass_runner::emit_io_with_type_slots() {
   emit_pop();
 }
 
-bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name) {
+bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::string_view port_name) {
   if (!materialize_ || type_name.empty()) {
     return false;
+  }
+  // Record the alias the source spelled (`rm_in:vpu_defs_pkg.TXFMA_RM_SZ_T`)
+  // before it concretizes to `u3`, so the pyrope re-emission can print the name
+  // back. The LNAST slot still becomes prim_type_int, so every other consumer
+  // (tolg port widths, bitwidth) is unchanged — this is a pure side-channel.
+  if (preserve_param_provenance_ && !port_name.empty() && type_name.find('.') != std::string_view::npos && lm
+      && lm->get_lnast()) {
+    const auto base = type_name.substr(0, type_name.find('.'));
+    if (const auto bun = symbol_table_.get_bundle(base); bun && bun->has_attr(battr::pub_unit)) {
+      lm->get_lnast()->add_io_type_name(port_name, type_name);
+      lm->get_lnast()->add_imported_package(base);
+    }
   }
   auto tb = symbol_table_.get_bundle(type_name);
   if (!tb) {

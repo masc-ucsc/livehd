@@ -3627,6 +3627,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
       Io_name_map<Val>  init;
+      // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
+      // cannot tell "this key exists on both sides" from "only one side has it".
+      Io_name_map<int>  fw_side[2];
+      int               side_ix = 0;
       auto              collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
         // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
@@ -3668,6 +3672,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           // — see tests/equiv/flop_init_headroom). Widths written by the
           // transition still use each side's full local width, so a REAL
           // wide-vs-narrow divergence is still caught from the first write on.
+          if (auto sit = fw_side[side_ix].find(key); sit == fw_side[side_ix].end() || w < sit->second) {
+            fw_side[side_ix][key] = w;  // min-wins, exactly like `fw` below
+          }
           if (auto it = fw.find(key); it == fw.end() || w < it->second) {
             fw[key]   = w;
             fsgn[key] = !graph_util::is_unsign(q);
@@ -3679,8 +3686,51 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
       };
+      side_ix = 0;
       collect_flops(ref);
+      side_ix = 1;
       collect_flops(impl);
+
+      // ── bit-blasted state correspondence ──────────────────────────────────
+      // Synthesis can implement ONE N-bit register as N one-bit library DFF
+      // cells; pass/abc names each mapped instance after its source register bit,
+      // so the impl ends up with cuts `<reg>_0 .. <reg>_{N-1}` of width 1 where
+      // the ref has a single `<reg>` of width N. The two key sets are then
+      // DISJOINT: nothing corresponds, every cone reading the register compares
+      // unrelated free symbols, and the def can only come back inconclusive.
+      // Pair them here — impl bit i shares bit i of the ref's one symbol — so the
+      // rest of the machinery (seeding, threading, the next-state compare below)
+      // sees an ordinary correspondence. Deliberately conservative: the ref key
+      // must be absent from the impl side, EVERY bit must be present at width 1,
+      // and no bit key may also exist on the ref (which would make the pairing
+      // ambiguous).
+      absl::flat_hash_map<std::string, std::vector<std::string>> bitblast;  // ref key -> impl bit keys, LSB first
+      absl::flat_hash_set<std::string>                           bitblast_bits;
+      for (const auto& [key, w] : fw_side[0]) {
+        if (w < 1 || fw_side[1].count(key) != 0) {
+          continue;
+        }
+        // Longest contiguous run; the impl may hold MORE bits than the ref
+        // declares (cgen's spare sign bit), which are the ref value's extension.
+        std::vector<std::string> bits;
+        for (int i = 0;; ++i) {
+          const std::string bk = key + "_" + std::to_string(i);
+          auto              it = fw_side[1].find(bk);
+          if (it == fw_side[1].end() || it->second != 1 || fw_side[0].count(bk) != 0) {
+            break;
+          }
+          bits.push_back(bk);
+        }
+        // Same bound as the inductive twin: N or N+1 cells is this register,
+        // longer is a different one sharing a prefix (see there).
+        if (const int m = static_cast<int>(bits.size()); m != w && m != w + 1) {
+          continue;
+        }
+        for (const auto& b : bits) {
+          bitblast_bits.insert(b);
+        }
+        bitblast.emplace(key, std::move(bits));
+      }
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
@@ -3704,6 +3754,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         dump_keys(impl, "IMPL");
       }
       for (const auto& [key, w] : fw) {
+        if (bitblast_bits.count(key) != 0) {
+          continue;  // seeded below as a bit-slice of its N-bit ref counterpart
+        }
         Val v;
         if (init_no_reset && opts.gold_x == "zero") {
           v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
@@ -3721,6 +3774,42 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ref_state[key].x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(w), 0)});
         }
         impl_state[key] = v;
+      }
+      // Bit slices of a bit-blasted register (see the pairing above): the impl's
+      // one-bit cut for bit i IS bit i of the ref's N-bit symbol, so the two
+      // designs start the register in one shared power-on state and every read
+      // of it lines up. Done after the main loop because the parent key must
+      // already be seeded (`fw` iteration order is unspecified).
+      for (const auto& [pkey, bits] : bitblast) {
+        auto pit = ref_state.find(pkey);
+        if (pit == ref_state.end()) {
+          continue;
+        }
+        // COPY: the loop below inserts into ref_state, which may rehash and
+        // invalidate `pit` — every later bit would then read a dangling Val.
+        const Val parent = pit->second;
+        const int  pw      = parent.width;
+        const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+                                     {static_cast<uint32_t>(pw - 1), static_cast<uint32_t>(pw - 1)});
+        for (size_t i = 0; i < bits.size(); ++i) {
+          Val bv{cvc5::Term{}, 1, false};
+          if (static_cast<int>(i) < pw) {
+            const auto b  = static_cast<uint32_t>(i);
+            auto       op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b});
+            bv.term       = tm.mkTerm(op, {parent.term});
+            if (!parent.x_mask.isNull()) {
+              bv.x_mask = tm.mkTerm(op, {parent.x_mask});
+            }
+          } else {
+            // headroom bit: the ref value's sign/zero extension
+            bv.term = parent.is_signed ? tm.mkTerm(sign_op, {parent.term}) : tm.mkBitVector(1, 0);
+            if (!parent.x_mask.isNull()) {
+              bv.x_mask = parent.is_signed ? tm.mkTerm(sign_op, {parent.x_mask}) : tm.mkBitVector(1, 0);
+            }
+          }
+          ref_state[bits[i]]  = bv;
+          impl_state[bits[i]] = bv;
+        }
       }
       // Matched-reset shared init for each STATEFUL collapsed leaf: both designs
       // start the box's state cut at the SAME symbol (so the box doesn't lose the
@@ -3777,7 +3866,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               }
             }
           }
-          if (n > 1) {
+          // A bit-blasted register's cuts look exactly like a bank (`<reg>_0..`,
+          // no constant init once abc folds the reset into D) but they are NOT
+          // one: the pairing above has bound them to slices of the ref's ONE
+          // parent cut, and that parent is not a bank key. Holding only the impl
+          // side through the reset prologue would make two states that are now
+          // the SAME diverge on the first cycle — a spurious REFUTED.
+          if (n > 1 && bitblast_bits.count(key) == 0) {
             bank_hold_keys.insert(key);
           }
         }
@@ -4808,6 +4903,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // would constrain it (false PROVE), truncating it in the encoder drops it
   // (false REFUTE, e.g. an input 0x80 -> 0).
   Io_name_map<Val> shared;
+  // Per-side key/width sets, for the bit-blast pairing after add_flops runs:
+  // `shared` alone cannot tell "both sides have this key" from "only one does".
+  Io_name_map<int> ind_side[2];
+  int              ind_side_ix = 0;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
@@ -4893,6 +4992,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // tests/equiv/flop_init_headroom). The step's next-state comparison
       // fits both sides to the max width, so the proven invariant is exactly
       // wide' == extend(narrow') — a REAL width divergence still refutes.
+      if (auto sit = ind_side[ind_side_ix].find(key); sit == ind_side[ind_side_ix].end() || w < sit->second) {
+        ind_side[ind_side_ix][key] = w;  // min-wins, exactly like `shared` below
+      }
       if (auto it = shared.find(key); it != shared.end() && it->second.width <= w) {
         continue;
       }
@@ -4901,8 +5003,79 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared[key]    = Val{t, w, sgn};
     }
   };
+  ind_side_ix = 0;
   add_flops(ref);
+  ind_side_ix = 1;
   add_flops(impl);
+
+  // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
+  // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
+  // pass/abc names each mapped instance after its source register bit, so the
+  // impl carries cuts `<reg>_0 .. <reg>_{N-1}` of width 1 where the ref has a
+  // single `<reg>` of width N. Disjoint key sets mean NOTHING corresponds: each
+  // side mints its own free symbols and every cone reading the register diverges,
+  // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
+  // the impl's bit i to bit i of the ref's one symbol.
+  absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
+  for (const auto& [key, w] : ind_side[0]) {
+    if (w < 1 || ind_side[1].count(key) != 0) {
+      continue;
+    }
+    // Longest contiguous run `<key>_0, _1, ...`. The impl may hold MORE bits than
+    // the ref declares: cgen gives a register a spare sign bit, and abc crosses
+    // the flop at that full width. Those headroom bits are the ref value's
+    // sign/zero extension — the same rule seed_state applies when one side's decl
+    // is wider (see the min-width comment above).
+    std::vector<std::string> bits;
+    for (int i = 0;; ++i) {
+      const std::string bk = key + "_" + std::to_string(i);
+      auto              it = ind_side[1].find(bk);
+      if (it == ind_side[1].end() || it->second != 1 || ind_side[0].count(bk) != 0) {
+        break;
+      }
+      bits.push_back(bk);
+    }
+    auto pit = shared.find(key);
+    if (pit == shared.end()) {
+      continue;
+    }
+    // A WIDTH DIFFERENCE IS NOT A MISMATCH. Two states of different declared
+    // width are equivalent when the wider one is the narrower one's extension —
+    // s3 against s8 under sign extension, u30 against u50 under zero extension —
+    // and only an extension that does NOT hold is a difference. So accept any run
+    // that covers the ref's width and pin bit i >= N to the ref value's own
+    // sign/zero extension below; if the impl ever puts something else there, the
+    // next-state obligation refutes. (LiveHD also stores an unsigned value in
+    // magnitude+1 bits and the LEC cut drops that spare slot — encode.cpp
+    // real_width — so `reg p:u4` cuts at N=4 and lands as FIVE cells p_0..p_4;
+    // that is just the commonest instance of the same rule.)
+    // BOUND the run at N+1. A width difference is not a mismatch — the wider
+    // side is the narrower one's extension — but that rule governs how two
+    // CORRESPONDING states compare, not which states correspond. abc emits one
+    // cell per PHYSICAL bit (`bits_of` = magnitude+1 for unsigned), so N or N+1
+    // cells is this register and anything longer is a DIFFERENT register that
+    // merely shares a prefix. Without the bound, a ref `flag` (w=1) beside
+    // unrelated impl flops `flag_0`/`flag_1` pairs, and `flag_1` gets PINNED to a
+    // constant in the induction hypothesis — narrowing it over states the design
+    // really reaches, i.e. a false PROVEN.
+    const int m = static_cast<int>(bits.size());
+    if (m != w && m != w + 1) {
+      continue;
+    }
+    const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+                                 {static_cast<uint32_t>(w - 1), static_cast<uint32_t>(w - 1)});
+    for (size_t i = 0; i < bits.size(); ++i) {
+      cvc5::Term t;
+      if (static_cast<int>(i) < w) {
+        const auto b = static_cast<uint32_t>(i);
+        t            = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
+      } else {
+        t = pit->second.is_signed ? tm.mkTerm(sign_op, {pit->second.term}) : tm.mkBitVector(1, 0);
+      }
+      shared[bits[i]] = Val{t, 1, false};
+    }
+    ind_bitblast.emplace(key, std::move(bits));
+  }
   // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
   // cut), corresponding on both designs: the inductive miter assumes it equal and
   // proves the box's next-state (UF) equal alongside the parent's.
@@ -5493,6 +5666,39 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
   }
+  // Bit-blasted register: the ref emits ONE `nxt:<reg>` of width N, the impl one
+  // `nxt:<reg>_i` per bit. Fold the impl's bits back into a single N-bit output
+  // under the ref's name so the ordinary by-name compare pairs them — otherwise
+  // both land in unmatched_* and gate the verdict, which is the same disjoint-key
+  // failure the shared-symbol pairing above fixes for the CURRENT state.
+  for (const auto& [pkey, bits] : ind_bitblast) {
+    const std::string rkey = std::string("\x01nxt:") + pkey;
+    if (re.outputs.find(rkey) == re.outputs.end() || ie.outputs.find(rkey) != ie.outputs.end()) {
+      continue;
+    }
+    std::vector<cvc5::Term> bt;  // MSB first, as cvc5 CONCAT expects
+    bool                    all = true;
+    for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
+      auto bit = ie.outputs.find(std::string("\x01nxt:") + *it);
+      if (bit == ie.outputs.end() || bit->second.width != 1) {
+        all = false;
+        break;
+      }
+      bt.push_back(bit->second.term);
+    }
+    if (!all || bt.empty()) {
+      continue;
+    }
+    cvc5::Term cat = bt.front();
+    for (size_t i = 1; i < bt.size(); ++i) {
+      cat = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {cat, bt[i]});
+    }
+    for (const auto& b : bits) {
+      ie.outputs.erase(std::string("\x01nxt:") + b);
+    }
+    ie.outputs[rkey] = Val{cat, static_cast<int>(bits.size()), false};
+  }
+
   for (const auto& [name, rv] : re.outputs) {
     if (!name.empty() && (name[0] == '\x03' || name[0] == '\x04')) {
       continue;  // env-gated debug tap / property, never a compare point

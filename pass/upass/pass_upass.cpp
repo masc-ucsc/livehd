@@ -122,6 +122,12 @@ void Pass_upass::setup() {
                         "the dead statements on the Lnast for lnast.tolg to skip — no rebuild copy. The kernel sets "
                         "mark for lg-only flows (nothing downstream keeps the LNAST).",
                         "rebuild");
+  m1.add_label_optional("preserve_param_provenance",
+                        "keep a folded `pkg.PARAM` read SYMBOLIC in the materialized LNAST so `--emit-dir pyrope:` "
+                        "re-emits the named constant instead of its value. lnast.tolg cannot wire a symbolic ref, so "
+                        "the kernel only enables it for a pyrope-emitting, no-graphs compile (the pyrope counterpart "
+                        "of the inou.slang flag of the same name). Default off.",
+                        "false");
   m1.add_label_optional("reset_style",
                         "elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
                         "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
@@ -245,6 +251,19 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // tree, so tolg:1 forces the swap regardless. Default on.
   auto toln_txt = get_label("toln");
   run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
+
+  // Named-constant provenance: a folded `pkg.PARAM` materializes as the
+  // symbolic ref, for `--emit-dir pyrope:`. tolg cannot wire one, so refuse the
+  // combination loudly instead of silently nil-wiring the design.
+  auto prov_txt          = get_label("preserve_param_provenance");
+  preserve_param_provenance = prov_txt == "true" || prov_txt == "1";
+  if (preserve_param_provenance && run_tolg) {
+    livehd::diag::err("pass.upass", "provenance-needs-lnast", "config")
+        .msg("upass.preserve_param_provenance=true cannot be combined with tolg:1")
+        .hint("symbolic pkg.PARAM refs do not lower to hardware; emit pyrope in a separate invocation")
+        .emit();
+    preserve_param_provenance = false;
+  }
 
   // sync|async reset wiring for implicit-reset flops (tolg-only).
   reset_style = std::string(get_label("reset_style", "sync"));
@@ -551,6 +570,7 @@ void Pass_upass::work(Eprp_var& var) {
     // (io_meta/bw_meta) are unchanged. The func_extract pre-loop above keeps
     // materializing (the main walk consumes its rewrite).
     runner.set_materialize(up.run_toln && !is_template);  // never rewrite a template body
+    runner.set_preserve_param_provenance(up.preserve_param_provenance);
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
     if (runner.has_configuration_error()) {

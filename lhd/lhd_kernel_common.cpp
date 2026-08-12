@@ -1815,12 +1815,20 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
     run_step("pass.prp_writer", var, labels, opts, res);
 
+    // pass.prp_writer emits one .prp per SOURCE FILE (a file-level unit plus
+    // every `<file>.<entity>` lambda lifted out of it share `<file>.prp`), so
+    // the manifest is keyed on the file, not on each unit.
     std::vector<std::string> names;
     names.reserve(var.lnasts.size());
     for (const auto& ln : var.lnasts) {
-      names.emplace_back(ln->get_top_module_name());
+      if (ln->is_template()) {
+        continue;  // never emitted (see pass.prp_writer)
+      }
+      std::string full(ln->get_top_module_name());
+      names.emplace_back(full.substr(0, full.find('.')));
     }
     std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
       auto          f = std::format("{}/{}.prp", e.path, n);
@@ -1851,10 +1859,13 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
                     "no LNAST units to emit as pyrope",
                     "pyrope output needs source/ln: inputs (there is no LGraph -> LNAST decompiler)"};
   }
+  // One .prp per source FILE (see emit_pyrope_outputs): a one-file design is
+  // the single-file case even when the file holds several lambdas.
   std::vector<std::string> names;
   names.reserve(var.lnasts.size());
   for (const auto& ln : var.lnasts) {
-    names.emplace_back(ln->get_top_module_name());
+    std::string full(ln->get_top_module_name());
+    names.emplace_back(full.substr(0, full.find('.')));
   }
   std::sort(names.begin(), names.end());
   names.erase(std::unique(names.begin(), names.end()), names.end());

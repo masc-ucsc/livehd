@@ -40,11 +40,16 @@ def main():
         sys.stdout.buffer.write(emit.stdout)
         return emit.returncode
 
-    top = out / "sibling_recompile.top.prp"
+    # One .prp per SOURCE FILE: both lambdas of sibling_recompile.prp land in
+    # the one emitted sibling_recompile.prp, so the sibling call needs NO
+    # import — it resolves lexically, spelled with the bare lambda name.
+    top = out / "sibling_recompile.prp"
     text = top.read_text()
-    expected = 'const inc = import("sibling_recompile.inc.inc")'
-    if expected not in text or "inc(" not in text:
-        print("emitted top lacks sibling import or bare callee:\n" + text)
+    if "mod inc(" not in text or "mod top(" not in text:
+        print("emitted file lost one of the sibling lambdas:\n" + text)
+        return 1
+    if "inc(" not in text or "import(" in text:
+        print("emitted top lacks the bare sibling callee, or imported a same-file one:\n" + text)
         return 1
 
     recomp = subprocess.run(

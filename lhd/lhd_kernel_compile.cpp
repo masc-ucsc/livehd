@@ -1148,6 +1148,14 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (need_graphs && !emits_need_lnast(opts)) {
     up["dce"] = "mark";
   }
+  // Named-constant provenance, the Pyrope counterpart of the inou.slang flag of
+  // the same name (see run_slang): a pyrope-emitting, no-graphs compile keeps a
+  // folded `pkg.PARAM` symbolic so the re-emitted source reads
+  // `cmd == vpu_defs_pkg.VPU_TRANS_SIN_P2`, not `cmd == 0x78`. tolg cannot wire
+  // a symbolic ref, so any graphs flow keeps folding.
+  if (!need_graphs && find_slot(opts.emit_dirs, "pyrope") != nullptr) {
+    up["preserve_param_provenance"] = "true";
+  }
   merge_sets(opts, "compile.upass", up);
 
   // A user `--set upass.toln=0` keeps each tree's original (post-lnastfmt,

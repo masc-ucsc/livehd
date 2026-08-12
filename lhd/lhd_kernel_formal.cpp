@@ -1785,14 +1785,28 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const bool      cheap_unknown          = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
     const bool      unknown_under_collapse
         = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused && (!force_flat[def_ix].empty() || cheap_unknown);
-    if (refuted_under_collapse || unknown_under_collapse) {
+    //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
+    //        place a wrong PROVEN silently converts a DEFINITE counterexample into
+    //        a run-level pass, so it gets the same flat confirmation (a) already
+    //        gives the refute. Case (a) above says dino's PipelinedDualIssueCPU
+    //        "stays UNKNOWN collapsed and REFUTES flat" — but the abc cone
+    //        pre-pass can discharge every cut of that same collapsed miter and
+    //        report PROVEN (it does, on the bug1 variant: 186/186 cones in 33 ms
+    //        while the flat run refutes with a concrete CEX). Accepting it skips
+    //        the very retry (a) exists for. A collapsed PROVEN with nothing
+    //        refuted anywhere is untouched — the common case pays nothing.
+    const bool      proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat[def_ix].empty();
+    bool            absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
+    if (refuted_under_collapse || unknown_under_collapse || proven_absorbing) {
       {
         std::lock_guard report_lock(report_mutex);
         std::print("lec[hier]: '{}' {} under collapse ({} box def(s)) -> flat {}\n",
                    name,
-                   refuted_under_collapse ? "REFUTED" : "UNKNOWN",
+                   refuted_under_collapse ? "REFUTED" : (proven_absorbing ? "PROVEN while absorbing a refutation" : "UNKNOWN"),
                    coll.size(),
-                   refuted_under_collapse ? "confirmation" : "retry (UF boxes disable the eager bit-blaster)");
+                   refuted_under_collapse    ? "confirmation"
+                   : proven_absorbing ? "confirmation (a collapsed proof may not overrule a child's counterexample)"
+                                      : "retry (UF boxes disable the eager bit-blaster)");
       }
       livehd::lec::Lec_options oflat = o;
       // Drop the SPECULATIVE proven-child boxes being confirmed, but KEEP the
@@ -1811,6 +1825,25 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         rf.elapsed_ms  = -1;  // the progress record carries the combined wall-clock below
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
+      } else if (proven_absorbing) {
+        // The flat run is the authority here. If it settles, adopt it either way;
+        // if it cannot, the collapsed PROVEN must NOT stand — a child's
+        // counterexample is on the table and nothing discharged it, which is the
+        // definition of inconclusive.
+        if (rf.verdict != Verdict::Unknown) {
+          rf.detail      = "flat-confirm after collapsed-box PROVEN absorbing a refutation"
+                           + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                           + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+          rf.elapsed_ms  = -1;
+          rf.cvc5       += r.cvc5;
+          r              = std::move(rf);
+        } else {
+          r.verdict  = Verdict::Unknown;
+          r.detail   = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
+                     + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+          r.cvc5    += rf.cvc5;
+          absorb_demoted = true;  // see the int_blast_retry guard below
+        }
       } else if (rf.verdict != Verdict::Unknown) {
         rf.detail      = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                          + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
@@ -1826,7 +1859,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // earns ONE int-blasted re-solve at the min_timeout floor. Before the
     // trusted-box demotion: a retry REFUTE must pass through the same discipline
     // below as any other refute.
-    r = livehd::lec::int_blast_retry(ref_by_name[name], impl_by_name[name], o, std::move(r), sub_lib, order.size() != 1);
+    //
+    // NOT after an absorb demotion. `o` still carries o.collapse, so this would
+    // re-solve the very COLLAPSED miter whose PROVEN was just rejected for being
+    // unconfirmable — and hand back that same Proven, absorbing the child's
+    // counterexample and exiting 0 on a design with a concrete disproof. The
+    // demotion is the verdict; nothing may quietly undo it.
+    if (!absorb_demoted) {
+      r = livehd::lec::int_blast_retry(ref_by_name[name], impl_by_name[name], o, std::move(r), sub_lib, order.size() != 1);
+    }
     // A refute that turns on a TRUSTED box input is not a sound disproof (the
     // trusted leaf may ignore that input): degrade it to Unknown, keeping the
     // witness for diagnosis. Under strict (and any witness-carrying Unknown) this
@@ -2490,7 +2531,12 @@ bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
   return true;
 }
 
-// Read every *.prp in `dir` (one module per file) and parse its header.
+// Read every *.prp in `dir` and parse each lambda header. pass.prp_writer emits
+// one file per SOURCE FILE, so a file can hold SEVERAL lambdas (`<file>.prp`
+// carries the file scope plus every `pub mod` lifted out of it) — parse them
+// all, or a top that is not the file's first lambda goes missing and the
+// simfail testbench is silently skipped. Each module's `text` is its own slice
+// plus the file prologue (the imports it may need).
 std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
   std::vector<Lecfail_mod> mods;
   std::error_code          ec;
@@ -2501,24 +2547,58 @@ std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
     std::ifstream     ifs(de.path());
     std::stringstream ss;
     ss << ifs.rdbuf();
-    Lecfail_mod m;
-    if (!lecfail_parse_header(ss.str(), m)) {
-      continue;  // empty file-level unit: no `mod`
+    const std::string text = ss.str();
+
+    // Start of every lambda header LINE, in order.
+    std::vector<size_t> starts;
+    for (size_t at = 0; at < text.size();) {
+      const size_t np = lecfail_header_name_pos(std::string_view(text).substr(at));
+      if (np == std::string_view::npos) {
+        break;
+      }
+      const size_t abs = at + np;
+      const size_t bol = text.rfind('\n', abs);
+      starts.push_back(bol == std::string::npos ? 0 : bol + 1);
+      // Continue past this header's line.
+      const size_t nl = text.find('\n', abs);
+      if (nl == std::string::npos) {
+        break;
+      }
+      at = nl + 1;
     }
-    m.text = ss.str();
-    mods.push_back(std::move(m));
+    if (starts.empty()) {
+      continue;  // a file-level unit with no lambda (e.g. a package)
+    }
+    // The file prologue (its `const X = import(…)` header) belongs to the FILE,
+    // not to each lambda: attaching it to every slice duplicates those bindings
+    // once per lambda in the concatenated testbench, which then fails to compile
+    // on the redeclaration. Give it to the FIRST slice only — the fallback
+    // concatenates whole modules of one file in order, so one copy still leads.
+    const std::string prologue = text.substr(0, starts.front());
+    bool              first    = true;
+    for (size_t i = 0; i < starts.size(); ++i) {
+      const size_t      end  = (i + 1 < starts.size()) ? starts[i + 1] : text.size();
+      const std::string body = text.substr(starts[i], end - starts[i]);
+      Lecfail_mod       m;
+      if (!lecfail_parse_header(body, m)) {
+        continue;
+      }
+      m.text = first ? prologue + body : body;
+      first  = false;
+      mods.push_back(std::move(m));
+    }
   }
   std::sort(mods.begin(), mods.end(), [](const Lecfail_mod& a, const Lecfail_mod& b) { return a.name < b.name; });
   return mods;
 }
 
-// pass.prp_writer emits each module into its own file, so an emitted sibling
-// dependency is imported as `<unit>.<entity>.<entity>`. The simfail fallback
-// below concatenates both re-emitted hierarchies into one self-contained file;
-// those per-file imports must therefore be removed, or they both duplicate the
+// pass.prp_writer emits one file per SOURCE FILE, so an emitted sibling
+// dependency is imported as `<file>.<entity>`. The simfail fallback below
+// concatenates both re-emitted hierarchies into one self-contained file; those
+// per-file imports must therefore be removed, or they both duplicate the
 // now-local definitions and point at side scratch directories that are not
-// inputs to the replay. Package/external imports have no duplicated final path
-// component and remain untouched.
+// inputs to the replay. A PACKAGE import is the whole-namespace form
+// (`import("pkg")`, no dot) and remains untouched.
 std::string lecfail_strip_sibling_imports(std::string_view text) {
   std::string out;
   for (size_t pos = 0; pos < text.size();) {
@@ -2530,11 +2610,8 @@ std::string lecfail_strip_sibling_imports(std::string_view text) {
       const size_t imp = line.find(" = import(\"");
       const size_t q2  = imp == std::string_view::npos ? std::string_view::npos : line.find("\")", imp + 11);
       if (q2 != std::string_view::npos) {
-        const auto   path = line.substr(imp + 11, q2 - (imp + 11));
-        const size_t last = path.rfind('.');
-        const size_t prev = last == std::string_view::npos || last == 0 ? std::string_view::npos : path.rfind('.', last - 1);
-        drop              = last != std::string_view::npos && prev != std::string_view::npos
-                            && path.substr(prev + 1, last - prev - 1) == path.substr(last + 1);
+        const auto path = line.substr(imp + 11, q2 - (imp + 11));
+        drop            = path.find('.') != std::string_view::npos;  // `file.entity` — a sibling lambda
       }
     }
     if (!drop) {
@@ -3196,6 +3273,160 @@ static int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds:
   return n;
 }
 
+// See the call site: warn when the impl instantiates a `--lib` cell whose model
+// holds STATE. encode.cpp only inlines a COMBINATIONAL cell model, so such an
+// instance is blackboxed and contributes no state — every cut that reads it then
+// sees two unrelated symbols and both engines answer unknown in milliseconds.
+// Emitted once per run, naming the cells, with the concrete way out.
+static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* impl_g) {
+  if (sub_lib.empty() || impl_g == nullptr) {
+    return;
+  }
+  absl::flat_hash_set<hhds::Gid> stateful;
+  for (const auto& [gid, gp] : sub_lib) {
+    if (gp == nullptr) {
+      continue;
+    }
+    for (auto dn : gp->body().nodes(hhds::Node_order::forward)) {
+      const auto op = livehd::graph_util::type_op_of(dn);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+        stateful.insert(gid);
+        break;
+      }
+    }
+  }
+  if (stateful.empty()) {
+    return;
+  }
+  std::set<std::string>         hit;  // sorted: the message must be deterministic
+  std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
+  for (auto sn : impl_g->body().nodes()) {
+    if (livehd::graph_util::type_op_of(sn) != Ntype_op::Sub || stateful.count(sn.get_subnode_gid()) == 0) {
+      continue;
+    }
+    insts.push_back(sn);
+    if (auto sio = sn.get_subnode_io(); sio != nullptr) {
+      hit.insert(std::string(sio->get_name()));
+    }
+  }
+  const size_t n = insts.size();
+  if (n == 0) {
+    return;
+  }
+  std::string names;
+  for (const auto& s : hit) {
+    names += names.empty() ? "" : ", ";
+    names += s;
+  }
+  // INLINE them instead of blackboxing. encode.cpp's `--lib` inline path is
+  // combinational-only (a stateful model falls through to the blackbox path,
+  // where it contributes NO state and nothing can correspond to the ref's native
+  // flop — both engines then answer unknown in milliseconds). Splicing the cell
+  // body into the impl turns its internal Flop into an ordinary body flop, which
+  // the existing flop-cut machinery cuts and names after the instance — and
+  // pass/abc/abc_map.cpp already names each mapped DFF instance after its source
+  // register bit. Same move `inline_clock_gate_cells` makes for an ICG cell; the
+  // only reason it could not reach these is that a `--lib` model is not in the
+  // impl's own graph library, hence the explicit-def overload.
+  size_t done = 0;
+  for (const auto& inst : insts) {
+    auto git = sub_lib.find(inst.get_subnode_gid());
+    if (git == sub_lib.end() || git->second == nullptr) {
+      continue;
+    }
+    // The cell's own instance name is the ONLY meaningful name the spliced state
+    // can carry: a gensim cell model's internal flop has no `name` attr, so
+    // Sub_inliner::carry_node_attrs leaves it unnamed and the flop cut ends up
+    // keyed on a synthesized net name (`n1831`) that corresponds to nothing on
+    // the ref side. Snapshot the existing flops, inline, then name whatever flop
+    // appeared after the instance (`id_q_0`) — abc already named the instance
+    // after the source register bit.
+    // Only a SINGLE-flop model may take the instance name: stamping it on two
+    // flops would fuse two distinct state cuts onto one key and silently drop a
+    // compare point. A multi-flop cell keeps whatever the inliner produced.
+    // Counted on the MODEL (a handful of nodes), and the naming itself happens
+    // inside the inliner — re-walking the whole parent body once per instance
+    // would be quadratic on a design with thousands of mapped cells.
+    int model_flops = 0;
+    for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
+      model_flops += livehd::graph_util::is_type_flop(dn) ? 1 : 0;
+    }
+    done += livehd::graph_util::inline_sub_instance(impl_g, inst, "pass.lec", git->second, model_flops == 1) ? 1 : 0;
+  }
+  if (done == n) {
+    return;  // fully inlined: the cells are ordinary logic + flops now
+  }
+  livehd::diag::warn("pass.lec", "stateful-lib-cell", "unsupported")
+      .msg("the impl instantiates {} STATEFUL library cell(s) ({}) — lec could inline only {} of them", n, names, done)
+      .hint("a cell model that stays a blackbox contributes no state, so nothing corresponds to the ref's native flop "
+            "and the run is INCONCLUSIVE no matter the budget; re-synthesize with `--set pass.abc.register=false` to "
+            "keep registers native")
+      .emit();
+}
+
+// The IMPL is one FLAT def but the REF still instantiates its hierarchy: inline
+// the ref's Sub instances so both sides own the same state.
+//
+// `pass color flat` fuses the whole hierarchy into ONE abc region, so its netlist
+// is a SINGLE graph while the ref keeps its children. The ref top then owns only
+// its own flops (dino: pc, cycleCount) and EVERY child register is impl-only
+// unpaired state — no flop bijection, so the flop-cut inductive miter is never
+// built and the run degrades to a whole-design BMC that times out. Inlining is
+// semantics-preserving and gives each spliced flop its hierarchical name
+// (`pipeA_if_id.reg_0`), which is exactly what the netlist calls it, so tier-1
+// name pairing resolves them. Returns how many instances were spliced.
+//
+// Deliberately narrow: ONLY when the impl top holds no Sub at all. A netlist that
+// kept its hierarchy (`pass color synth`) already pairs def by def, and flattening
+// there would throw away the decomposition that makes it tractable.
+static size_t flatten_ref_to_match_flat_impl(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* ref_g,
+                                             hhds::Graph* impl_g) {
+  if (ref_g == nullptr || impl_g == nullptr || sub_lib.empty()) {
+    return 0;  // no `--lib`: this is not a mapped-netlist comparison
+  }
+  // A mapped netlist is ALL Subs — every Liberty cell is one. Only a DESIGN
+  // instance (not a `--lib` cell model) says the impl kept its hierarchy, and at
+  // least one cell must actually be there: an impl with NEITHER is an ordinary
+  // design whose children upass inlined, and flattening the ref would throw away
+  // a per-def decomposition that already works.
+  bool has_cell = false;
+  for (auto n : impl_g->body().nodes()) {
+    if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    if (sub_lib.find(n.get_subnode_gid()) == sub_lib.end()) {
+      return 0;  // hierarchical impl: leave the ref alone
+    }
+    has_cell = true;
+  }
+  if (!has_cell) {
+    return 0;
+  }
+  size_t done = 0;
+  // Splicing a child can expose the grandchildren it instantiated, so sweep until
+  // the ref is flat. Bounded: each round must make progress or it stops.
+  for (int round = 0; round < 64; ++round) {
+    std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
+    for (auto n : ref_g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
+        insts.push_back(n);
+      }
+    }
+    if (insts.empty()) {
+      break;
+    }
+    size_t spliced = 0;
+    for (const auto& inst : insts) {
+      spliced += livehd::graph_util::inline_sub_instance(ref_g, inst, "pass.lec") ? 1 : 0;
+    }
+    if (spliced == 0) {
+      break;  // nothing inlinable left (a real blackbox): stop rather than spin
+    }
+    done += spliced;
+  }
+  return done;
+}
+
 static std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vector<hhds::Graph*>& defs,
                                                        absl::flat_hash_set<hhds::Graph*>*             unfolded,
                                                        const std::function<bool(const hhds::Graph*)>& is_boxed = {}) {
@@ -3620,6 +3851,35 @@ void lec_command(Options& opts, Result& res) {
       if (gp != nullptr && gp != ref_g.get() && gp != impl_g.get()) {
         ref_defs.push_back(gp);
         impl_defs.push_back(gp);
+      }
+    }
+    // A STATEFUL `--lib` cell (a mapped DFF) is a modelling gap, not a hard
+    // problem: pass/lec/encode.cpp inlines a cell model only when it is
+    // COMBINATIONAL, so a register mapped to a library DFF becomes a stateless
+    // blackbox with no state to correspond against the ref's native flop. The
+    // run then reports "INCONCLUSIVE ... the solver ran out of budget", which
+    // sends the reader after solver time when no budget would ever help (both
+    // engines give up in MILLISECONDS). Say what is actually wrong, once.
+    // The per-def half is load-bearing exactly as it is for the clock gates
+    // above: the hierarchical driver encodes each def on its own, so a cell
+    // instance inside a CHILD (cva6's `tag_cmp` under `tag_cmp_wrap`) is
+    // untouched by inlining the top alone and that def stays inconclusive.
+    // A `--lib` model itself never instantiates one, so skip those (they are
+    // shared with ref_defs — mutating one would be a cross-side edit).
+    if (auto nflat = flatten_ref_to_match_flat_impl(sub_lib, ref_g.get(), impl_g.get()); nflat > 0) {
+      std::print("lec: flattened {} ref instance(s) to match a flat impl netlist\n", nflat);
+      ref_defs.clear();  // the children are inline now; only the top is comparable
+      ref_defs.push_back(ref_g.get());
+      for (const auto& [gid, gp] : sub_lib) {
+        if (gp != nullptr && gp != ref_g.get() && gp != impl_g.get()) {
+          ref_defs.push_back(gp);
+        }
+      }
+    }
+    inline_stateful_lib_cells(sub_lib, impl_g.get());
+    for (auto* d : impl_defs) {
+      if (d != nullptr && d != impl_g.get() && sub_lib.find(d->get_gid()) == sub_lib.end()) {
+        inline_stateful_lib_cells(sub_lib, d);
       }
     }
     // CLOCK-GATE CELLS first. A real design instantiates its ICG

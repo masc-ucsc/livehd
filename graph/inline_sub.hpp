@@ -29,6 +29,15 @@ namespace livehd::graph_util {
 // it cannot resolve (today: a combinational feed-through cycle through the
 // boundary). On false the parent may hold a partially inlined body -- callers
 // treat it as fatal, exactly like flatten.
-[[nodiscard]] bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass);
+// `def` overrides the body lookup for an instance whose def is not in the
+// parent's own graph library — a `lec --lib` cell model lives in a SIDE library,
+// so `Node_class::get_subnode_graph()` is null for it even though the instance's
+// subnode gid resolves in that side map. nullptr = resolve the ordinary way.
+// `name_state` names an UNNAMED spliced state node (a cell model's internal
+// flop) after the INSTANCE, so a flop-cut correspondence key survives the
+// inline. Without it the cut is keyed on a synthesized net name that has no
+// counterpart on the other design.
+[[nodiscard]] bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass,
+                                       hhds::Graph* def = nullptr, bool name_state = false);
 
 }  // namespace livehd::graph_util

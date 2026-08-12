@@ -2163,13 +2163,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         int v = Abc_LatchInit(lat[k]);
         return (v == 1 || v == 2) && !owner_has_reset(k);
       };
-      auto map_dff_cell = [&](int k) {
+      // `owner` names the SOURCE register bit this latch came from (empty when
+      // the latch count was reshaped and no correspondence survives). A mapped
+      // DFF cell otherwise lands as `g<abcId>_<cell>`, which drops the register
+      // name that the post-synthesis LEC's tier-1 state correspondence pairs on
+      // — `id_q` then has no counterpart in the netlist and the def can only come
+      // back inconclusive (every //bench:*_synth_lec_* target).
+      auto map_dff_cell = [&](int k, const std::string& owner = {}) {
         auto* L    = lat[k];
         auto* qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
         auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
         auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
         sub.set_subnode(io);
-        sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(L), dff_->name));
+        sub.attr(hhds::attrs::name)
+            .set(owner.empty() ? std::format("g{}_{}", Abc_ObjId(L), dff_->name) : unique_flop_name(owner));
         auto q = sub.create_driver_pin(dff_->q_pin);
         gu::set_bits(q, 1);
         gu::set_unsign(q);
@@ -2203,7 +2210,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             // per-bit handling, never to a dropped init
             for (int b = 0; b < sp.f->bits; ++b) {
               int k = sp.start + b;
-              needs_native(k) ? native_single(k) : map_dff_cell(k);
+              // Per-bit name under the source register: a 1-bit register keeps
+              // its plain name, a wider one indexes (`id_q[0]`) — the spelling a
+              // hand-flattened design uses, which canon_flop_name already folds.
+              if (needs_native(k)) {
+                native_single(k);
+              } else {
+                map_dff_cell(k, sp.f->bits == 1 ? sp.f->root : std::format("{}_{}", sp.f->root, b));
+              }
             }
           }
         }

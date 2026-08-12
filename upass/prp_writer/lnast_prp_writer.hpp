@@ -34,6 +34,17 @@ public:
   explicit Lnast_prp_writer(std::ostream& os, std::shared_ptr<Lnast> lnast);
   void write_all();
 
+  // ── group emit (N units of ONE source file into one .prp) ─────────────────
+  // pass.prp_writer writes every unit that came from the same source file into
+  // that file's `<file>.prp` (a file-level unit plus its `pub mod` lambdas), so
+  // the emitted tree mirrors the input tree instead of exploding into
+  // `<file>.prp` + `<file>.<entity>.prp`. The file-scope `const X = import(…)`
+  // header must then be hoisted above ALL of them and deduped: point every
+  // writer of the group at one sink, call collect_header() on each, print the
+  // sink, then write_all() the bodies (which now skip their own header).
+  void set_header_sink(std::vector<std::string>* sink) { header_sink_ = sink; }
+  void collect_header();
+
   // Debug mode (pass option `prp_writer.debug=true`): when false (default) an
   // unimplemented construct is recorded so the pass turns it into a fatal
   // diagnostic (the compile must NOT silently succeed on a TODO-laden output);
@@ -67,9 +78,64 @@ private:
   // Human-readable descriptions of every unimplemented construct hit (one per
   // emitted /* TODO */); pass.prp_writer reads this to fail the compile.
   std::vector<std::string> unimplemented_;
+  // Group emit (see set_header_sink): where the file-scope import lines go, and
+  // whether they have been produced already (write_module_imports is
+  // idempotent so collect_header + write_all cannot emit them twice).
+  std::vector<std::string>* header_sink_{nullptr};
+  bool                      header_done_{false};
+  bool                      prepared_{false};
 
   std::stack<Lnast_nid> nid_stack;
   Lnast_nid             cur;
+
+  // One-time pre-walk (fold analysis + timecheck index + file-import scan)
+  // shared by collect_header() and write_all().
+  void prepare();
+
+  // ── file-scope import residue (Pyrope-origin file-level units) ────────────
+  // See scan_file_imports: the elaborated tree keeps a folded skeleton of each
+  // `const X = import("path")`; these sets let write_stmts drop it and the
+  // header re-emit the binding.
+  void                                             scan_file_imports();
+  // Dead initial stores (`X = <const>` immediately superseded, no read between):
+  // dropped from the emission AND excluded from the fold analysis, so the
+  // surviving def counts as single-use and can inline at its reader.
+  void                                             scan_dead_init_stores();
+  Lnast_nid                                        body_stmts_nid() const;
+  absl::flat_hash_set<int64_t>                     dead_init_stmts_;
+  // Names a NESTED store writes to. Their top-level declaration/seed is what
+  // that store binds against, so neither statement drop may remove it.
+  void                                             scan_nested_defs();
+  absl::flat_hash_set<std::string>                 nested_def_names_;
+  bool                                             drops_as_import_residue(Lnast_nid nid) const;
+  bool                                             is_pub_export(std::string_view name) const;
+  bool                                             is_declare_with_value(Lnast_nid nid) const;
+  // Re-nest a struct local the front end flattened into escaped per-field leaves
+  // (`` `sig.cmd` ``, `` `sig.txfma` ``, …) back into one `mut sig = (mut cmd =
+  // 0, …)`. Fills body_bundle_text_/skip_ (keyed by the leaf declare's class
+  // index) plus bundle_fields_/declared_, exactly like collect_port_groups.
+  void                                             collect_body_bundles(Lnast_nid body_nid);
+  // The rebuilt literal already zeroes each field, so the front end's flat
+  // `base.field = 0` seed writes 0 over 0 — drop it while the field is still
+  // known zero.
+  void drop_redundant_bundle_zeros(Lnast_nid body_nid, const std::vector<std::string>& zero_fields);
+  std::unordered_map<int64_t, std::string>         body_bundle_text_;
+  std::unordered_set<int64_t>                      body_bundle_skip_;
+  bool                                             file_level_{false};
+  std::unordered_set<std::string>                  import_tmps_;   // %tmp an import() fcall wrote
+  std::unordered_set<std::string>                  import_bound_;  // file-scope name bound to one
+  std::unordered_set<std::string>                  file_stored_;   // file-scope names with a real store
+  // Compiler temps written MORE THAN ONCE (a lane write counts): they must be
+  // declared `mut`, not `const`, and — when the writes straddle sibling scopes
+  // — seeded at the function top. Filled by the body hoist scan.
+  std::unordered_set<std::string>                  multi_def_tmp_;
+  // Non-declare definition count per body name, from the same scan.
+  std::unordered_map<std::string, int>             def_count_;
+  // FIRST top-level def / read index per body name, from the same scan. A
+  // declaration whose def precedes every read is redundant — the def declares it.
+  std::unordered_map<std::string, size_t>          def_idx_;
+  std::unordered_map<std::string, size_t>          read_idx_;
+  std::vector<std::pair<std::string, std::string>> file_imports_;  // (alias, import path), source order
 
   // ── Cursor helpers ───────────────────────────────────────────────────────
   bool                         move_to_child();
@@ -194,6 +260,12 @@ private:
   // the tree directly rather than through the shared cursor). Also handles
   // comp_type_array -> "[N]T".
   std::string render_type_at(Lnast_nid type_nid);
+  // Scalar port widths (`a_i:u52` -> 52), recorded as the signature prints, so a
+  // body mask that selects every bit of a port can be dropped as a no-op.
+  std::unordered_map<std::string, int> port_bits_;
+  void                                 note_port_width(std::string_view name, std::string_view type_txt);
+  bool                                 is_whole_width_mask(Lnast_nid src, int lo, int hi) const;
+  static std::string                   fmt_bit_range(std::string_view s, int lo, int hi);
   // A declare initializer built only from compile-time constants (`5`, `(1, 2)`)
   // — the only kind the nested-mut hoist may RELOCATE to the function top.
   bool        is_comptime_init(Lnast_nid n) const;
@@ -296,6 +368,9 @@ private:
   // `SubModule`.  Maps module name -> emitted alias (== module name when no
   // collision).  Cleared per module.
   std::unordered_map<std::string, std::string> import_alias_;
+  // Callees emitted into the SAME .prp as this unit (call name -> full unit
+  // name). They take no import; the call site spells the bare lambda name.
+  std::unordered_map<std::string, std::string> same_file_callee_;
 
   // Storage-class prefix to print before an assignment LHS: a pending
   // attr_set-type keyword if one is queued, else "mut " on the first write to
@@ -362,6 +437,8 @@ private:
     Lnast_nid                    def_node;
     Lnast_ntype::Lnast_ntype_int def_type      = Lnast_ntype::Lnast_ntype_invalid;
     int                          def_count     = 0;        // assignments to this name
+    int                          decl_defs     = 0;        // of those, bare `declare`s (not value defs)
+    bool                         decl_typed    = false;    // a declare carrying a `:T` — inlining would drop it
     int                          use_count     = 0;        // reads of this name
     int                          def_index     = -1;       // pre-order index of the (single) def
     int                          use_index     = -1;       // pre-order index of the (single) use
@@ -495,6 +572,7 @@ private:
   // during the migration), OR a name this writer already mapped to an emittable
   // `t…` form (so post-strip_prefix call sites still recognise it as a temp).
   bool                    is_tmp(std::string_view name) const;
+  static bool             is_writer_temp_name(std::string_view name);
   // The infix symbol for a binary/n-ary op ntype ("+", "==", "and", …) or "" if
   // the type is not an infix op.
   static std::string_view infix_symbol(Lnast_ntype::Lnast_ntype_int t);

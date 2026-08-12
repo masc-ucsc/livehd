@@ -2525,6 +2525,22 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               }
               out_val.x_mask = u;
             }
+          } else if (op == Ntype_op::Set_mask && !pid(Ntype::get_sink_pid(op, "mask")).empty()
+                     && pid(Ntype::get_sink_pid(op, "mask"))[0].x_mask.isNull()
+                     && !pid(Ntype::get_sink_pid(op, "value")).empty()
+                     && pid(Ntype::get_sink_pid(op, "value"))[0].x_mask.isNull() && !pid(0).empty()) {
+            // A bit-insert is EXACT on the X plane: every lane the (constant)
+            // mask selects is OVERWRITTEN by `value`, so it stops being unknown;
+            // the rest keep `a`'s plane. The conservative smear below would mark
+            // the WHOLE result unknown — and since the readers emit a multi-bit
+            // output as `out = 0ub????????` followed by one Set_mask per bit,
+            // that smear leaves EVERY bit X and the output compares NOTHING. A
+            // real difference on such an output then comes back PROVEN (cva6's
+            // bug1 `tag_cmp.hit_way_o`, which yosys refutes). Only the exact,
+            // no-X-in-`value` case is claimed here; anything else still smears.
+            Term ax   = fit_x_mask_to(tm_, pid(0)[0], W);
+            Term keep = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
+            out_val.x_mask = ax.isNull() ? zero_w : tm_.mkTerm(Kind::BITVECTOR_AND, {ax, keep});
           } else {
             // any operand dynamically unknown anywhere -> whole result unknown
             Term any;

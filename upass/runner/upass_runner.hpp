@@ -94,6 +94,15 @@ public:
   // for the func_extract pre-loop and whenever take_staging() is consumed.
   void set_materialize(bool m) { materialize_ = m; }
 
+  // Named-constant provenance (the Pyrope counterpart of inou.slang's
+  // `preserve_param_provenance`): materialize a folded `pkg.PARAM` read as the
+  // SYMBOLIC ref `pkg.PARAM` instead of its value, so `--emit-dir pyrope:`
+  // re-emits `cmd == vpu_defs_pkg.VPU_TRANS_SIN_P2` rather than `cmd == 0x78`.
+  // Comptime evaluation is unaffected (it reads the symbol table, never the
+  // materialized tree), but lnast.tolg cannot wire a symbolic ref — so the
+  // kernel only turns this on for a pyrope-emitting, no-graphs compile.
+  void set_preserve_param_provenance(bool v) { preserve_param_provenance_ = v; }
+
 protected:
   struct Pass_entry {
     std::string                   name;
@@ -172,7 +181,13 @@ protected:
   std::stack<Lnast_nid>               staging_parent_stack;
   Lnast_nid                           staging_parent;
   std::vector<std::shared_ptr<Lnast>> new_lnasts;
-  bool                                materialize_{true};  // see set_materialize()
+  bool                                materialize_{true};                 // see set_materialize()
+  bool                                preserve_param_provenance_{false};  // see set_preserve_param_provenance()
+
+  // The `pkg.PARAM` a folded ref came from, or "" when the value has no
+  // imported-package origin. Reads uPass_constprop's tget_origin plus the
+  // `pub_unit` marker call_resolver stamps on an import namespace bundle.
+  std::string pkg_origin_of(std::string_view name) const;
 
   // The input Lnast being rebuilt (the lm tree at frame depth 0). The staging
   // body becomes ITS body via replace_body, so SourceIds carried into staging
@@ -327,7 +342,9 @@ protected:
   // decl_max only drives overflow checks). The `typename` provenance rides a
   // separate attr_set, so the prp_writer can still re-emit `:PType`. Returns
   // false for a TUPLE/struct or unresolved named type (emit it verbatim).
-  bool emit_scalar_named_type_slot(std::string_view type_name);
+  // `port_name` is the io port this type slot belongs to (empty for a declare's
+  // slot); with provenance on it records the alias into Lnast::io_type_names.
+  bool emit_scalar_named_type_slot(std::string_view type_name, std::string_view port_name = {});
   // Resolve an IMPORTED scalar alias `pkg.PType` off the exporting unit's pub
   // list ("type" kind) + its "MAX|MIN" pub_values face. True when the range
   // was recovered — used by the declare borrow AND the type-slot concretizer

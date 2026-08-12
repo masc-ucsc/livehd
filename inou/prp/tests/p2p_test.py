@@ -74,7 +74,10 @@ def main():
         print(comp.stdout.decode("utf-8", "ignore"))
         return 1
 
-    emitted = os.path.join(out_dir, top + ".prp")
+    # pass.prp_writer emits one .prp per SOURCE FILE — `<file>.prp` holds the
+    # file scope plus every `pub mod` lifted out of it — so a top named
+    # `<file>.<entity>` lives in `<file>.prp`, not in a per-lambda file.
+    emitted = os.path.join(out_dir, top.split(".", 1)[0] + ".prp")
     if not os.path.exists(emitted):
         cands = glob.glob(os.path.join(out_dir, "*.prp"))
         print("{} - p2p - FAILED: no emitted unit for top '{}' (have: {})".format(name, top, cands))

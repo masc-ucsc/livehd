@@ -17,6 +17,9 @@ protected:
   bool                     run_tolg{false};
   bool                     run_toln{true};
   std::string              reset_style{"sync"};  // sync|async implicit-reset wiring (tolg)
+  // Keep a folded `pkg.PARAM` symbolic in the materialized LNAST (pyrope emit
+  // only — see uPass_runner::set_preserve_param_provenance).
+  bool                     preserve_param_provenance{false};
   upass::Options_map       pass_options;
 
 public:
