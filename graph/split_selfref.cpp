@@ -38,6 +38,7 @@ const char* op_name(Ntype_op op) {
     case Ntype_op::Get_mask: return "Get_mask";
     case Ntype_op::Set_mask: return "Set_mask";
     case Ntype_op::Sext    : return "Sext";
+    case Ntype_op::Concat  : return "Concat";
     case Ntype_op::Nconst  : return "Nconst";
     default                : return "op?";
   }
@@ -47,7 +48,10 @@ const char* op_name(Ntype_op op) {
 // Break a FALSE word-level combinational loop through a PACKED wire. A single net
 // `W` driven by an `Or` (a bit-field pack) whose operands occupy DISJOINT constant
 // bit ranges is really a concat: a constant Get_mask slice of `W` reads only ONE
-// operand. inou.cgen.sim schedules `W` as one atomic object, so a slice-read of
+// operand. A `Concat` cell is that same pack spelled EXPLICITLY -- its lanes are
+// disjoint by construction, so the footprint/disjointness proof the Or spelling
+// needs is replaced by a direct lane lookup (see the Concat arms below).
+// inou.cgen.sim schedules `W` as one atomic object, so a slice-read of
 // `W` that (through parent logic) drives a DIFFERENT slice of that same `W` looks
 // like a cycle even though the bit-level DAG is acyclic -- e.g.
 //   hi = io#[2..=3];  low = hi & 3;  io = low | (a << 2);  z = io#[0..=1]
@@ -214,6 +218,16 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       return {fx.first + k, fx.second + k};
     }
+    if (op == Ntype_op::Concat) {
+      // A Concat is always NON-NEGATIVE and strictly below 2^sum(lane widths),
+      // so the lane table alone gives the bound -- no recursion into the lanes
+      // (each is masked into its own window, so a wide or negative lane cannot
+      // spill above the total). Asking the generic arm below instead would tie
+      // this to the driver's stamped bits/sign and bail on an O0 graph that has
+      // not run bitwidth yet.
+      const int total = static_cast<int>(gu::concat_total_width(m));
+      return total > 0 ? std::pair<int, int>{0, total} : kBail;
+    }
     if (op == Ntype_op::And) {
       // And with a NON-NEGATIVE constant bounds the result to the constant's
       // set-bit range regardless of the other operands' signs (bitwise and
@@ -323,6 +337,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   //  * Sum with no subtrahend and pairwise-DISJOINT operand footprints == Or
   //  * Or operands with footprints outside the requested slice -> exact zero
   //  * EQ control bit -> rebuild only from complete bounded operands
+  //  * Concat -> re-based descent into the lane(s) the slice lands in (the
+  //    disjointness the Or spelling must PROVE is a cell invariant here)
   auto mask_const
       = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo)); };
   // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
@@ -750,6 +766,64 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             // sources; leave it unresolved rather than grow the graph here.
           }
         }
+      }
+    } else if (op == Ntype_op::Concat) {
+      // The cheapest pack to dissolve, because the cell CARRIES its lane table:
+      // bits [lo,hi) come only from the lanes whose windows they land in, at a
+      // known re-based position. None of the footprint/disjointness proof the
+      // Or-of-SHL spelling needs applies -- lane i owning exactly
+      // [offset_i, offset_i + width_i) is a cell invariant.
+      //
+      // Unlike the Set_mask arm above there is NO "value must be non-negative"
+      // guard: a lane holds `value mod 2^w`, i.e. value's low w bits as spelled
+      // in two's complement, and Get_mask reads those same conceptual
+      // two's-complement bits, so the two forms already agree for a negative or
+      // over-wide lane. A straddling read is handled (not refused) so that a
+      // frontend emitting Concat is never WEAKER than the hand-spelled Or/SHL
+      // pack, whose straddles the SHL arm already splits.
+      auto                         lanes = gu::concat_lanes(m);
+      std::vector<hhds::Pin_class> parts;  // resolved pieces, each already shifted into [lo,hi)
+      bool                         ok = !lanes.empty();  // empty == malformed cell: fail closed
+      for (const auto& l : lanes) {
+        const int l_lo = static_cast<int>(l.offset);
+        const int l_hi = l_lo + static_cast<int>(l.width);
+        if (hi <= l_lo || lo >= l_hi) {
+          continue;  // this lane's window does not intersect the slice
+        }
+        const int a = std::max(lo, l_lo);
+        const int b = std::min(hi, l_hi);
+        auto      r = self(self, l.value, a - l_lo, b - l_lo, depth + 1);
+        if (r.is_invalid()) {
+          ok = false;
+          break;
+        }
+        if (a > lo) {
+          auto n = gu::create_typed_node(*g, Ntype_op::SHL);
+          ++created;
+          r.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          livehd::graph_util::create_const(*g, *Dlop::create_integer(a - lo))
+              .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
+          auto dp = n.create_driver_pin(0);
+          gu::set_bits(dp, w + 1);
+          r = dp;
+        }
+        parts.push_back(r);
+      }
+      if (ok && parts.empty()) {
+        // entirely above the top lane: the result is non-negative and bounded
+        // by the lane sum, so those bits read as exact zeros
+        res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+      } else if (ok && parts.size() == 1) {
+        res = parts.front();  // one lane covers the read: the descent IS the answer
+      } else if (ok) {
+        auto n = gu::create_typed_node(*g, Ntype_op::Or);
+        ++created;
+        for (auto& pp : parts) {
+          pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+        }
+        auto dp = n.create_driver_pin(0);
+        gu::set_bits(dp, w + 1);
+        res = dp;
       }
     }
     if (split_dbg && res.is_invalid()) {

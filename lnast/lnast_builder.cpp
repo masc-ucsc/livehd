@@ -185,6 +185,28 @@ std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& v
   return acc;
 }
 
+std::string Lnast_builder::create_concat_stmts(const std::vector<Concat_lane>& lanes) {
+  // Unlike create_bit_or_stmts this must NOT chain into binary nodes: a concat
+  // is n-ary by nature, and `concat(concat(a,b),c)` -- while legal and equal in
+  // value -- would hide the flat lane table every consumer wants (and would
+  // re-derive each intermediate's width). One node, all lanes, MSB-first.
+  I(!lanes.empty());
+
+  auto res_var = create_lnast_tmp();
+  auto op_idx  = lnast->add_child(idx_stmts, Lnast_ntype::create_concat());
+  add_ref_child(op_idx, res_var);
+  for (const auto& l : lanes) {
+    I(!l.value.empty());
+    add_value_child(op_idx, l.value);
+    // `nil`, not 0: a zero-width window is a different (illegal) thing from an
+    // unbound one, and upass has to be able to tell them apart to know whether
+    // it still owes this lane a width.
+    add_value_child(op_idx, l.bits > 0 ? std::to_string(l.bits) : std::string{"nil"});
+  }
+
+  return res_var;
+}
+
 std::string Lnast_builder::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty()) {
     return std::string(b_var);

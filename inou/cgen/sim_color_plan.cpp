@@ -1306,22 +1306,85 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           crossing = value;
         }
       }
-      if (hi > lo && position_in_whole && !crossing.is_invalid()) {
-        // A caller often builds one child input word with a Set_mask chain.
-        // Follow the exact requested field: an in-range read selects the
+      if (hi > lo && !crossing.is_invalid()) {
+        // Walk the PACKED-WORD spellings down to the single field the consumer
+        // actually reads.
+        //
+        // Ntype_op::Concat is the canonical one: the cell carries the lane
+        // table, so a read landing inside ONE lane binds that lane's value and
+        // nothing else -- exact where the Or/SHL/Get_mask pattern match this
+        // replaces had to guess a lane's extent from the NEXT lane's offset.
+        // A read that STRADDLES lanes deliberately gets nothing: a Value_use
+        // binds exactly one producer, so "depends on lanes 2 and 3" has nowhere
+        // to land, and keeping the assembled word is the coarser-but-correct
+        // answer (the same fail-closed rule as the straddling Set_mask write
+        // below).
+        //
+        // Set_mask chains are the hand-spelled twin cprop leaves behind when a
+        // window is non-constant or overlapping. An in-range read selects the
         // LSB-aligned value arm, an out-of-range read keeps walking the base.
-        // surface_shift records where that arm lived in the original word so
-        // the unchanged callee Get_mask still sees the same bit positions.
+        // surface_shift records where the selected field lived in the original
+        // word so the unchanged callee Get_mask still sees the same bit
+        // positions.
         bool rebased = false;
         for (int depth = 0; depth < 16 && !crossing.is_invalid() && !gu::is_const_pin(crossing); ++depth) {
-          const auto set_node = crossing.get_master_node();
-          if (gu::type_op_of(set_node) != Ntype_op::Set_mask) {
+          const auto packed    = crossing.get_master_node();
+          const auto packed_op = gu::type_op_of(packed);
+          if (packed_op == Ntype_op::Concat) {
+            const auto lanes = gu::concat_lanes(packed.base_node());
+            if (lanes.empty()) {
+              break;  // undecodable cell: stay on the assembled word
+            }
+            size_t hit = lanes.size();
+            for (size_t lane = 0; lane < lanes.size(); ++lane) {
+              // int64: a lane table is only bounded by the cell's own width
+              // constants, so offset + width is not an int32 the range compare
+              // may assume.
+              const int64_t window_hi = static_cast<int64_t>(lanes[lane].offset) + lanes[lane].width;
+              if (lanes[lane].offset <= lo && hi <= window_hi) {
+                hit = lane;
+                break;
+              }
+            }
+            if (hit == lanes.size()) {
+              break;
+            }
+            // Lane i's value rides sink pid 2i (cell contract). Read the
+            // OCCURRENCE edge rather than lanes[hit].value: the occurrence
+            // driver has already crossed whatever GraphIO boundary sits between
+            // the two bodies, which is what makes a lane fed from the caller
+            // resolvable at all. One value may drive several lanes, so the pid
+            // -- never pin identity -- is the sound key.
+            hhds::Occurrence_pin value;
+            for (const auto& input : packed.inp_edges()) {
+              if (input.sink.get_port_id() == static_cast<hhds::Port_id>(2 * hit)) {
+                value = input.driver;
+                break;
+              }
+            }
+            if (value.is_invalid()) {
+              break;
+            }
+            // A lane's declared width TRUNCATES its value, but only at and
+            // above that width -- and `hi <= offset + width` already excluded
+            // those bits, so the rebased range reads the raw value unchanged.
+            crossing       = value;
+            lo            -= lanes[hit].offset;
+            hi            -= lanes[hit].offset;
+            surface_shift += static_cast<uint32_t>(lanes[hit].offset);
+            rebased        = true;
+            continue;
+          }
+          // A Set_mask arm is only repositionable while the consumer still
+          // holds the absolute bit position; with the SRA already absorbed
+          // there is nowhere to put surface_shift back.
+          if (packed_op != Ntype_op::Set_mask || !position_in_whole) {
             break;
           }
           hhds::Occurrence_pin base;
           hhds::Occurrence_pin mask;
           hhds::Occurrence_pin value;
-          for (const auto& input : set_node.inp_edges()) {
+          for (const auto& input : packed.inp_edges()) {
             switch (input.sink.get_port_id()) {
               case 0 : base = input.driver; break;
               case 2 : mask = input.driver; break;
@@ -1361,22 +1424,35 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           }
           break;  // a straddling read is not one disjoint packed field
         }
-        if (rebased && !crossing.is_invalid() && !gu::is_const_pin(crossing)) {
+        // position_in_whole == false means the consumer's SRA was absorbed and
+        // its operand must arrive LSB-aligned, so the walk is only bindable
+        // when it landed exactly on the requested field's low bit -- the same
+        // `slice.lo == lo` rule the child-output arm below applies, restated in
+        // the coordinates this walk left behind. surface_shift then belongs to
+        // the absorbed SRA, not to the operand.
+        if (rebased && (position_in_whole || lo == 0) && !crossing.is_invalid() && !gu::is_const_pin(crossing)) {
           const auto terminal = index.find(crossing.get_master_node().get_occurrence_index());
+          const auto bind     = [&] {
+            producer_port  = crossing.get_port_id();
+            producer_shift = position_in_whole ? surface_shift : 0;
+            if (!position_in_whole) {
+              // The narrowed field IS the whole operand now: its own stamp is
+              // the storage width, not the assembled word's.
+              producer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(crossing)));
+            }
+          };
           if (terminal != index.end() && plan.sites_[terminal->second].live) {
-            top_input      = false;
-            producer_base  = terminal->second;
-            producer_port  = crossing.get_port_id();
-            producer_shift = surface_shift;
+            top_input     = false;
+            producer_base = terminal->second;
+            bind();
           } else if (gu::is_graph_input_pin(crossing)) {
-            top_input      = true;
-            producer_base  = Color_plan::invalid_index;
-            producer_port  = crossing.get_port_id();
-            producer_shift = surface_shift;
+            top_input     = true;
+            producer_base = Color_plan::invalid_index;
+            bind();
           }
           if (slice_debug) {
             std::fprintf(stderr,
-                         "[color-slice] traced Set_mask field to depth=%zu pin=%u shift=%u top=%s\n",
+                         "[color-slice] traced packed field to depth=%zu pin=%u shift=%u top=%s\n",
                          crossing.get_master_node().path().steps().size(),
                          static_cast<unsigned>(producer_port),
                          producer_shift,

@@ -207,7 +207,7 @@ public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, int _workers = 0,
-           bool _observation_on = false)
+           bool _observation_on = false, bool _slop_u = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -216,10 +216,30 @@ public:
       , flatten_budget(_flatten)
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
-      , workers_(_workers) {}
+      , workers_(_workers)
+      , slop_u_(_slop_u) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
   bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
   int                            workers_        = 0;
+  // sim.slop_u — store unsigned values in the CANONICAL-unsigned Slop_u<n>
+  // instead of the lazily-masked Slop<n+1>. Off by default: a Slop_u ctor MASKS
+  // its source to n bits, so it turns an `unsign` stamp that lies from a
+  // redundant mask (today's cost) into a wrong value (tomorrow's bug). Flip it
+  // on once sign stamping is affirmative and checked at the producer.
+  bool                           slop_u_         = false;
+
+public:
+  // The C++ TYPE a stored unsigned value of `bits` LiveHD bits is declared as.
+  // `bits` is magnitude+1, so the canonical form drops the always-zero sign slot
+  // and names the magnitude directly. Signed storage is never Slop_u -- it has a
+  // real sign bit and the lazy contract is correct for it.
+  [[nodiscard]] std::string stored_type(int bits, bool unsign) const {
+    if (slop_u_ && unsign && bits > 1) {
+      return absl::StrCat("Slop_u<", bits - 1, ">");
+    }
+    return absl::StrCat("Slop<", bits, ">");
+  }
+  [[nodiscard]] bool slop_u_enabled() const { return slop_u_; }
 };

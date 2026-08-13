@@ -214,6 +214,19 @@ public:
     handle_op();
     return consume_park_vote();
   }
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)`. handle_op reads the node off
+  // the cursor, so the INTERLEAVED (value, width) operand pairs need no
+  // decoding here — but the hook itself is not optional: without it a lane's
+  // read is invisible to the coalescer, and a parked producer would drain
+  // AFTER the concat that consumes it (the forward reference tolg cannot
+  // resolve).
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
   upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
     (void)dst_name;
     (void)dst;

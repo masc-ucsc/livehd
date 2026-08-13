@@ -6,11 +6,15 @@
 */
 
 // The fix side of the read-before-write bug: once the accumulator output is
-// explicitly initialized (`res = 0`), the vararg concat works. `x.[bits]` (the
+// explicitly initialized (`res = 0`), the vararg pack works. `x.[bits]` (the
 // ATTRIBUTE form, with brackets) yields each argument's declared width, so the
 // shift-and-or lands the two fields at 0x3AA. Contrast errors/dot_attr_as_field
 // (`x.bits` without brackets) and errors/comb_out_uninit_arith (no `res = 0`).
-comb concat(...a)->(res:unsigned) {
+//
+// The helper is named `pack`, not `concat`: `concat` is now a reserved builtin
+// (the bit-concatenation op), so a user lambda may not take that name. What
+// this test is about is unchanged -- the initialized accumulator read.
+comb pack(...a)->(res:unsigned) {
   res = 0
   for x in a {
      cputs("bits:{x.[bits]}")
@@ -22,7 +26,7 @@ comb concat(...a)->(res:unsigned) {
 const b:u4 = 3
 const c:u8 = 0xAA
 
-const x = concat(b,c)
+const x = pack(b,c)
 
 cputs("x:{x:x}")
 

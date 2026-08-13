@@ -945,6 +945,62 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
              + driver_expr(ctx, drivers[2]) + ")";
     }
 
+    case Ntype_op::Concat: {
+      // out = SUM_i (value_i mod 2^w_i) <<< offset_i, lanes MSB-first.
+      //
+      // The lane table comes from the SHARED decoder. A lane's window width is
+      // an explicit operand precisely because it is NOT recoverable from the
+      // driver: bits_of is an upper bound that bitwidth/cprop narrow freely and
+      // the value's significant bits are narrower still, so re-deriving it here
+      // would shift every lane above the one that got it wrong. An empty table
+      // means the cell is malformed -- fail closed rather than emit a shorter
+      // bus that reads downstream as an honest proof failure.
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      if (lanes.empty()) {
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node))
+                  + " is malformed (missing lane value or non-constant lane width operand).");
+      }
+      int64_t total = 0;  // 64-bit: each lane width alone may be up to INT32_MAX
+      for (const auto& lane : lanes) {
+        total += lane.width;
+      }
+      // The driver pin carries sum(w_i)+1 bits (the magnitude plus the
+      // always-zero sign slot of an unsigned LiveHD value), so w is normally one
+      // bit wider than the assembly.  A NARROWER stamp is not a truncating
+      // assignment to model around: the let-binding is typed at w, every lane
+      // above it would vanish, and the emitted theory would then prove the wrong
+      // bus.
+      if (total > static_cast<int64_t>(w)) {
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node)) + " assembles " + std::to_string(total)
+                  + " lane bits but its driver pin is stamped " + std::to_string(w)
+                  + " bits; the most significant lanes would be dropped.");
+      }
+      if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
+        fatal(ctx, lane_bad);
+      }
+      // Each lane occupies its OWN window before it is widened, so a negative
+      // lane lands as its two's-complement pattern (-1 at w=3 is 0b111) -- per
+      // lane and positional rather than smeared over the whole plane. A driver
+      // WIDER than its window was rejected just above, so the bv_zext below only
+      // ever extends.
+      //
+      // BitVec.append states the same value more directly, but its width lives in
+      // the TYPE (BitVec (n+m)); every other arm here normalizes operands with
+      // bv_zext at an explicit width, and the shift/or form keeps the result at
+      // the node width w that the let-chain and its consumers already expect.
+      std::vector<std::string> terms;
+      terms.reserve(lanes.size());
+      for (const auto& lane : lanes) {
+        const auto masked = ucast_expr(ucast_pin_at(ctx, lane.value, static_cast<uint32_t>(lane.width)), w);
+        // `: Nat` is not decoration: BitVec has both a Nat and a BitVec shift
+        // instance, and a bare numeral leaves the amount's type ambiguous.
+        terms.push_back(lane.offset == 0 ? masked : "(" + masked + " <<< (" + std::to_string(lane.offset) + " : Nat))");
+      }
+      return nary_op_inline("|||", terms);
+    }
+
     case Ntype_op::Memory:
       // A Memory node's read outputs are multi-valued (one per read port) and are
       // emitted as per-port lets by emit_node_lets; it is never a scalar expr.
@@ -1273,6 +1329,20 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
         deps.push_back(cert_dep_id(ctx, build, e.driver, pin_width(ctx, e.driver, node)));
       }
       break;
+    case Ntype_op::Concat:
+      // Deliberate refusal, not an oversight.  The certificate op set is fixed
+      // DATA in LGraphModel.lean (`inductive LGraphOp`), a file this pass does
+      // not own, and it has no constructor carrying the per-lane width list that
+      // a Concat needs.  No present op can stand in either: a dep reaches the
+      // evaluator as a BV at its OWN width and unshifted, so an Op_Sum/Op_Or
+      // over the lane deps loses both the per-lane window mask and the per-lane
+      // offset and would certify a different bus.  The fast model above does
+      // handle Concat, so emit_cert:false exports the design today.
+      fatal(ctx,
+            "Concat node n_" + std::to_string(node_id(node))
+                + " has no certificate encoding: LGraphOp (LGraphModel.lean) has no Op_Concat carrying the lane widths. "
+                  "Re-run with emit_cert:false, or first add Op_Concat to the Lean model (LGraphOp, denote_op, eval_op, "
+                  "simpleOpCertWfBool) and the matching bridge closer.");
     default:
       fatal(
           ctx,

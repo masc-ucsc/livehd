@@ -1,0 +1,32 @@
+/*
+:name: concat_const_lane
+:type: simulation
+*/
+
+// REGRESSION: a concat lane wider than one bit whose value is a CONSTANT.
+//
+// `Slop<M>::zext_to<W>()` keeps min(M, W) bits -- it clamps to the SOURCE
+// carrier, not just to W. cgen_sim used to size a lane operand from the
+// driver's `bits` attribute, and a const pin carries none, so a 4-bit constant
+// lane came out as `Slop_u<4>{Slop<1>::create_integer(4)}` and kept ONE bit:
+// every constant lane collapsed to its LSB. It was invisible in the small sim
+// fixtures (no wide constant lanes) and showed up as dino retiring a single
+// instruction and hanging.
+//
+// The lanes below are chosen so an LSB-only collapse cannot accidentally pass:
+// 0ub0100 (LSB 0, value 4) and 0ub110 (LSB 0, value 6) both have a clear low
+// bit, so a broken build reads them as 0.
+comb pack(a:u3) -> (z:u13) {
+  const c4:u4 = 4
+  const c6:u3 = 6
+  const c1:u3 = 1
+  z = concat(a, c4, c6, c1)
+}
+
+test pack.const_lanes {
+  mut acc = pack
+  acc.a = 5                 // 0ub101
+  step
+  // 101 _ 0100 _ 110 _ 001
+  assert(acc.z == 0ub101_0100_110_001, "constant lanes keep every bit, not just the LSB")
+}

@@ -333,6 +333,22 @@ protected:
   // Dlop) or the original ref node otherwise. Used by both emit_op_with_fold
   // and the statement-scope ref leaf case.
   void emit_ref_or_folded(std::string_view name);
+  // ── concat width binding ────────────────────────────────────────────────
+  // A `concat`'s width operands arrive as the `nil` sentinel from a frontend
+  // with no types. They are bound HERE, at emission, because the same emission
+  // loop folds a comptime lane ref to a literal -- and a literal's magnitude is
+  // not its window, so a width derived after that fold would be wrong.
+  [[nodiscard]] static std::string_view   concat_logical_name(std::string_view name);
+  void                                   check_concat_lanes();
+  void                                   check_concat_dest(std::string_view dest_name, std::string_view value_name);
+  [[nodiscard]] uint32_t                 concat_lane_declared_bits(std::string_view lane_name) const;
+  [[nodiscard]] std::vector<std::string> resolve_concat_widths(std::string& dst_name);
+  // Result temp -> its lane sum, for the lanes of a NESTING concat: an inner
+  // concat's temp is never declared by the user, but its width is the sum by
+  // construction, which is what makes `concat(concat(a,b), c)` legal.
+  absl::flat_hash_map<std::string, uint32_t> concat_result_bits_;
+  absl::flat_hash_set<Lnast_nid>             concat_checked_;       // report each concat once, not per runner iteration
+  absl::flat_hash_set<Lnast_nid>             concat_dest_checked_;
 
   // A declare/type_spec type slot that is a `ref` to a SCALAR named-type alias
   // (`x:PType` where `type PType = u10`; local OR imported `pkg.PType`) is

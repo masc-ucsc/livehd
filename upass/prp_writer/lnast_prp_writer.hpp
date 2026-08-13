@@ -209,8 +209,9 @@ private:
   // Statement form of a value-producing op (`lhs = <rhs>`).  The RHS itself is
   // rendered by render_def_rhs(), which also inlines single-use temps.  Used for
   // every infix/unary/postfix value op (plus, bit_and, sext, get_mask,
-  // tuple_get, attr_get, …) — they differ only in how render_def_rhs spells the
-  // RHS, so the statement wrapper is shared.
+  // tuple_get, attr_get, …) and for the call-shaped `concat(a, b, c)` — they
+  // differ only in how render_def_rhs spells the RHS, so the statement wrapper
+  // is shared.
   void write_value_stmt();
   // range( dst, lo, hi ) fallback — a range temp not folded into a get_mask
   // (the usual consumer) emits `dst = lo..=hi`.

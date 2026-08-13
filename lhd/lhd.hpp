@@ -322,6 +322,14 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "Color-scheduler workers used by one generated simulator instance. 0 or 1 selects the generated serial "
      "topological backend; N>1 pins the reusable Taskflow root schedule to N workers. This controls simulation "
      "execution, not sim.jobs host compilation"                                                                      },
+    {                 "slop_u",
+     "false",      Sim_set_option::Kind::boolean,
+     "materialize stored unsigned values as the CANONICAL-unsigned Slop_u<n> instead of a lazily-masked Slop<n+1>. "
+     "Slop makes no promise about storage above bit n-1, so every READ of a stored value re-masks; Slop_u pays ONE "
+     "mask at the write and none at the reads, which is the right trade for slots, state members and named temps "
+     "(written once, read many). Default off because it depends on the driver-pin sign stamp being TRUTHFUL: with "
+     "lazy masking an `unsign` stamp that lies costs a redundant mask, but with Slop_u it masks the value WRONG at "
+     "the write. Turn it on for measured experiments until sign stamping is explicit and checked"                    },
     {              "init_zero",
      "false",      Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "

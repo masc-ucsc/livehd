@@ -66,6 +66,10 @@ public:
   upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` — INTERLEAVED (value, width)
+  // operand pairs, so the lanes are src[0], src[2], … and their window widths
+  // src[1], src[3], …. Never walk the span as a flat lane list.
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
   void        process_stmts_post() override;
   // At file-scope completion, fold every `pub` value export into

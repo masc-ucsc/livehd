@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -571,6 +572,28 @@ constexpr int                 kPackedSliceFanInLimit = 64;
   return me;
 }
 
+// "Is `op` a COMPUTED combinational cell (as opposed to an IO/state/Sub/const/
+// attr boundary)?"
+//
+// TRAP: cprop spells this question six times as the ORDERED test
+// `op <= Ntype_op::Hotmux` (38), because 39..56 used to be exactly the
+// boundary band. That reading is no longer true of the enum: Concat (58) is a
+// plain combinational op that sits ABOVE the band only because 58 was the last
+// free EVEN slot when it was added (cell.hpp -- even is forced, bit 0 is
+// is_loop_last, and 40..48 are reserved as the opposite-polarity twins of
+// Memory/Flop/Latch/Fflop/Sub). Left as a bare comparison, every one of those
+// six sites SILENTLY classified a concat as state: it was excluded from CSE, from
+// the copy-prop/fold sweep, and it was handed the declared-width door that only
+// boundary pins may use.
+//
+// Ordinal-identical to the old test for every other op, so no other cell's
+// classification moves. Rem (54) is combinational too but stays outside on
+// purpose: each of these sites has its own measured reason to exclude it (see
+// is_bool01 below and canonicalize_and_masks).
+[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) {
+  return op <= Ntype_op::Hotmux || op == Ntype_op::Concat;
+}
+
 // TRUE only when the pin's VALUE is provably in {0,1}. Deliberately proven
 // from OP SEMANTICS plus the flow-independent bits==1 bound -- NEVER from the
 // bits==2 magnitude+1 reading. That convention only holds for upass-tolg
@@ -611,7 +634,7 @@ constexpr int                 kPackedSliceFanInLimit = 64;
     return false;
   }
   const auto op = type_op_of(m);
-  if (op > Ntype_op::Hotmux) {
+  if (!is_computed_comb_op(op)) {
     // State/boundary pins (Flop/Latch/Memory/Sub) carry DECLARED literal
     // widths: an unsigned 1-bit pin is an honest u1. Computed pins do NOT get
     // this door: lgyosys_tolg leaves some signed pins unstamped (an unstamped
@@ -625,6 +648,14 @@ constexpr int                 kPackedSliceFanInLimit = 64;
       return false;
     }
     return livehd::graph_util::is_unsign(p) && b == 1;
+  }
+  if (op == Ntype_op::Concat) {
+    // A Concat is non-negative with EXACTLY sum(w_i) magnitude bits, so it is
+    // in {0,1} iff its lanes add up to a single bit. Proven from the LANE TABLE
+    // (the cell's own contract) like every other computed arm here, never from
+    // the width stamp -- and concat_total_width is 0 for a malformed cell, which
+    // refuses.
+    return livehd::graph_util::concat_total_width(m) == 1;
   }
   if (op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Ror) {
     return true;
@@ -679,6 +710,389 @@ constexpr int                 kPackedSliceFanInLimit = 64;
     return {};
   }
   return value;
+}
+
+// ---- hand-spelled concat -> one Ntype_op::Concat ---------------------------
+//
+// Two idioms SPELL a bit concatenation out of general-purpose cells, and both
+// are the dominant shape in real designs: a Set_mask chain that writes one
+// field at a time over a zero base, and an Or of constant-shifted disjoint
+// fields. Measured on minion (prop_slow.md 3.1): 1,943 Set_mask chain heads
+// (405 of them pure ascending 1-bit lanes over a zero base, ~30 nodes each --
+// a Verilog concat built one node per BIT) and 1,052 Or-of-disjoint-SHL pack
+// trees. Both arms are ON -- see kOrPackEnabled at the bottom of this block for
+// what the Or arm's flip depended on.
+//
+// Both rewrites are node-NON-INCREASING: the pack HEAD is retyped in place and
+// the interior cells are swept, so nothing new is created except the per-lane
+// width constants, which are leaves on the shared const node.
+//
+// Why here and not in each backend: cprop's own scalar_get_mask_packed,
+// graph/split_selfref, sim_color_plan's slice matcher and the lec/semdiff
+// encoders each re-derive lane structure FROM THE SPELLING, with three
+// different sets of bailouts (this file's is the "straddles the lane boundary"
+// break below). A Concat hands every one of them the lane table instead.
+//
+// The value-preservation argument, and the guard that carries each half:
+//   * every window is a CONSTANT CONTIGUOUS bit range (const_mask_range /
+//     const_shl_amount refuse otherwise);
+//   * the windows are pairwise DISJOINT, so overwrite order (Set_mask) and
+//     bitwise-or order are both irrelevant and the assembly is a plain sum;
+//   * every bit OUTSIDE the windows is provably zero (a known-zero Set_mask
+//     base, or a bounded operand width), so the gaps are spelled as
+//     constant-zero lanes and the result is exactly sum(w_i) bits wide;
+//   * the head driver is UNSIGNED. A Concat is non-negative by cell contract;
+//     had the head been stamped signed, its consumers were reading the top
+//     window bit as a SIGN, and handing them an unsigned value instead changes
+//     it (u4 0b1010 reads 10, not -6).
+// A lane whose value pin is signed or wider than its window is fine and needs
+// no guard: Set_mask, Or-of-SHL and Concat all keep exactly `value mod 2^w`.
+
+struct Pack_lane {
+  hhds::Pin_class value;
+  int             lo{0};
+  int             hi{0};  // half-open
+};
+
+// The measured worst case is a full-word pack of 47-64 single-bit writes;
+// these are headroom, not tuning knobs.
+constexpr int kPackChainLimit = 256;
+constexpr int kPackMaxLanes   = 1024;
+constexpr int kPackMaxWidth   = 1 << 20;
+
+// Delete `n` and, transitively, every input whose last consumer it was. Same
+// job as Cprop::bwd_del_node, re-spelled here because the canonicalizations
+// below are free functions and the class members are not reachable from this
+// namespace.
+void sweep_dead_node(const hhds::Node_class& n) {
+  std::deque<hhds::Node_class> work;
+  // ENQUEUED-ONCE, like Cprop::bwd_del_node's `potential_set`. Without it a node
+  // that drives the swept one through TWO edges (`x*x`, a value written into two
+  // lanes) is queued twice: the first pop deletes it and the second pops a stale
+  // handle straight into has_out_edges()/del_node().
+  absl::flat_hash_set<hhds::Class_index> queued;
+  work.push_back(n);
+  queued.insert(n.get_class_index());
+  for (int budget = 4 * kPackMaxLanes; !work.empty() && budget > 0; --budget) {
+    auto cur = work.front();
+    work.pop_front();
+    if (cur.is_invalid() || Ntype::is_loop_last(type_op_of(cur)) || livehd::graph_util::is_builtin_node(cur)
+        || cur.has_out_edges()) {
+      continue;
+    }
+    for (const auto& e : cur.inp_edges()) {
+      if (is_graph_input_pin(e.driver) || is_graph_output_pin(e.driver)) {
+        continue;
+      }
+      auto m = e.driver.get_master_node();
+      if (!livehd::graph_util::is_builtin_node(m) && queued.insert(m.get_class_index()).second) {
+        work.push_back(m);
+      }
+    }
+    cur.del_node();
+  }
+}
+
+// Sort the collected windows by position, PROVE they are pairwise disjoint, and
+// fill every hole (including the one below the lowest window) with a
+// constant-zero lane, so the list tiles [0,W) exactly -- which is the only
+// layout a Concat can encode. `lanes` is left LSB-first.
+//
+// Refuses on overlap rather than picking a winner: for a Set_mask chain the
+// head-most write would win and for an Or the bits would merge, so the two
+// spellings do not even agree on what an overlap MEANS.
+[[nodiscard]] bool tile_pack_lanes(hhds::Graph& g, std::vector<Pack_lane>& lanes) {
+  if (lanes.empty() || lanes.size() > kPackMaxLanes) {
+    return false;
+  }
+  std::sort(lanes.begin(), lanes.end(), [](const Pack_lane& a, const Pack_lane& b) { return a.lo < b.lo; });
+
+  std::vector<Pack_lane> tiled;
+  tiled.reserve(2 * lanes.size() + 1);
+  int pos = 0;
+  for (const auto& l : lanes) {
+    if (l.hi <= l.lo || l.lo < pos) {
+      return false;  // empty or overlapping window
+    }
+    if (l.lo > pos) {
+      tiled.push_back(Pack_lane{create_const(g, *Dlop::create_integer(0)), pos, l.lo});
+    }
+    tiled.push_back(l);
+    pos = l.hi;
+  }
+  if (pos <= 0 || pos > kPackMaxWidth || tiled.size() > kPackMaxLanes) {
+    return false;
+  }
+  lanes = std::move(tiled);
+  return true;
+}
+
+// Retype the pack head into the Concat its lane table spells. `tiled` arrives
+// LSB-first (as tile_pack_lanes leaves it) and the cell is MSB-first, hence the
+// reverse indexing.
+void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_lane>& tiled) {
+  auto edges = node.inp_edges();  // snapshot: del_edge invalidates the lazy view
+  for (auto e : edges) {
+    e.del_edge();
+  }
+  livehd::graph_util::set_type_op(node, Ntype_op::Concat);
+
+  int32_t total = 0;
+  for (size_t i = 0; i < tiled.size(); ++i) {
+    const auto&   l = tiled[tiled.size() - 1 - i];
+    const int32_t w = l.hi - l.lo;
+    node.create_sink_pin(static_cast<hhds::Port_id>(2 * i)).connect_driver(l.value);
+    node.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(create_const(g, *Dlop::create_integer(w)));
+    total += w;
+  }
+
+  // The cell's stamp contract: sum(w_i) magnitude bits plus the always-zero
+  // sign slot of a LiveHD unsigned value. Written here rather than left to
+  // pass/bitwidth because the DEFAULT recipe (O1) is cprop with no bitwidth
+  // after it, so this stamp is the one that ships. Narrowing a head that was
+  // stamped wider is sound in the same breath: the tiling proves the value is
+  // below 2^total.
+  auto out = node.create_driver_pin(0);
+  livehd::graph_util::set_bits(out, total + 1);
+  livehd::graph_util::set_unsign(out);
+}
+
+// A Set_mask chain over a KNOWN-ZERO base: `set_mask(set_mask(0,m0,v0),m1,v1)…`
+bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
+  auto head_out = node.get_driver_pin(0);
+  if (head_out.is_invalid() || !livehd::graph_util::is_unsign(head_out)) {
+    return false;
+  }
+
+  std::vector<Pack_lane>                 lanes;
+  std::vector<hhds::Node_class>          chain;  // head first
+  absl::flat_hash_set<hhds::Class_index> in_chain;
+  auto                                   cur = node;
+  bool                                   zero_based = false;
+  while (true) {
+    if (chain.size() >= kPackChainLimit) {
+      return false;
+    }
+    if (!in_chain.insert(cur.get_class_index()).second) {
+      return false;  // cycle through the `a` pins (structurally representable)
+    }
+    auto a_pin = drv_at(cur, 0);
+    auto v_pin = drv_at(cur, 4);
+    auto r     = const_mask_range(cur);  // rejects non-const, -1 and noncontiguous
+    if (a_pin.is_invalid() || v_pin.is_invalid() || r.first < 0) {
+      return false;
+    }
+    lanes.push_back(Pack_lane{v_pin, r.first, r.second});
+    chain.push_back(cur);
+
+    if (is_const_pin(a_pin)) {
+      // Only a KNOWN-ZERO base makes the bits outside the lanes provably zero.
+      // A nonzero constant base would need residual lanes carved out of it, and
+      // a NEGATIVE one has infinitely many set bits above the top lane, which
+      // no finite concat can spell.
+      zero_based = hydrate_const(a_pin).is_known_zero();
+      break;
+    }
+    auto am = a_pin.get_master_node();
+    if (am.is_invalid() || type_op_of(am) != Ntype_op::Set_mask) {
+      return false;
+    }
+    // Interior links must be PRIVATE to this chain: the rewrite drops every
+    // intermediate word, so another reader of a partial version would lose its
+    // value (and the rewrite would stop being node-non-increasing).
+    if (!has_single_consumer(a_pin)) {
+      return false;
+    }
+    cur = am;
+  }
+  if (!zero_based) {
+    return false;
+  }
+  // A lane fed from inside the chain is a self-reference; rewiring it onto the
+  // retyped head would close the loop onto the node being rewritten.
+  for (const auto& l : lanes) {
+    if (in_chain.contains(l.value.get_master_node().get_class_index())) {
+      return false;
+    }
+  }
+  if (!tile_pack_lanes(g, lanes)) {
+    return false;
+  }
+
+  emit_concat(g, node, lanes);
+  for (size_t i = 1; i < chain.size(); ++i) {  // 0 is the head, now the Concat
+    sweep_dead_node(chain[i]);
+  }
+  return true;
+}
+
+// An Or whose operands occupy DISJOINT constant bit windows: the classic
+// `(a<<8) | (b<<4) | c` pack tree. An operand whose bit span cannot be pinned
+// down refuses the whole rewrite.
+//
+// An UPPER bound on the low bits an operand can occupy, or -1 when there is
+// none. Deliberately NOT footprint(): footprint exists to prove DISJOINTNESS,
+// where an over-approximation merely refuses, and it reads every non-IO pin
+// under the magnitude+1 convention (`bits - 1`). That convention holds for a
+// COMPUTED cell output, but a BOUNDARY pin -- graph IO, and equally a Sub /
+// Memory / Flop / Latch output -- carries the LITERAL declared width, so
+// `bits - 1` understates it by exactly one. Here the bound IS the lane width,
+// so an understatement is a readable miscompile: a u5 instance output packed as
+// a 4-bit lane emitted `{fp, 1'b0, addr[3:0], tid}` and silently dropped addr's
+// top bit (caught by prp-v2prp2v-struct_top_port).
+//
+// Over-stating is safe in both roles -- the lane just covers provably-zero high
+// bits and the mask stays an identity -- so every uncertain case rounds UP.
+[[nodiscard]] int pack_lane_width(const hhds::Pin_class& p) {
+  if (p.is_invalid()) {
+    return -1;
+  }
+  if (is_const_pin(p)) {
+    auto c = hydrate_const(p);
+    if (c.is_negative()) {
+      return -1;
+    }
+    if (c.has_unknowns()) {
+      return c.get_bits();  // a '?'-const still occupies its declared width
+    }
+    const int lb = c.get_last_bit_set();
+    return lb < 0 ? 0 : lb + 1;  // 0 == known zero: contributes nothing
+  }
+  // A Concat answers EXACTLY from its lane table, so it must be asked before
+  // either stamp gate below. Both of those read the pin's `bits`/`sign`, and an
+  // unstamped Concat -- precisely what pass.bitfuzz produces, since collect()
+  // strips the attrs off every non-const, non-state driver pin -- would take the
+  // `bits <= 0` refusal even though the cell contract answers with no stamp at
+  // all. (A stamped Concat is always `unsign`, so the sign gate never bit here.)
+  if (!is_graph_input_pin(p) && !is_graph_output_pin(p)) {
+    if (auto cm = p.get_master_node(); !cm.is_invalid() && type_op_of(cm) == Ntype_op::Concat) {
+      const int total = livehd::graph_util::concat_total_width(cm);
+      if (total > 0) {
+        return total;  // exact, by cell contract
+      }
+      return -1;  // malformed lane table: refuse, never guess from the stamp
+    }
+  }
+  if (!livehd::graph_util::is_unsign(p)) {
+    return -1;  // a signed value's sign extension has no finite top bit
+  }
+  const int bits = bits_of(p);
+  if (bits <= 0) {
+    return -1;  // unsized: [0,0) would read as EMPTY and delete a live value
+  }
+  if (is_graph_input_pin(p) || is_graph_output_pin(p)) {
+    return bits;  // literal bus width
+  }
+  auto m = p.get_master_node();
+  if (m.is_invalid()) {
+    return -1;
+  }
+  const auto op = type_op_of(m);
+  // Only a computed combinational output carries tolg's magnitude+1 stamp; Rem
+  // and Clock_cell are combinational too but sit outside the predicate, and
+  // rounding them UP to the literal width is the safe side of that gap.
+  return is_computed_comb_op(op) ? std::max(1, bits - 1) : bits;
+}
+
+bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
+  auto out = node.get_driver_pin(0);
+  if (out.is_invalid() || !livehd::graph_util::is_unsign(out)) {
+    return false;
+  }
+
+  std::vector<Pack_lane>        lanes;
+  std::vector<hhds::Node_class> shifts;
+  int                           fan_in = 0;
+  for (const auto& e : node.inp_edges()) {
+    if (++fan_in > kPackedSliceFanInLimit) {
+      return false;
+    }
+    if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+      return false;  // Or is n-ary on ONE sink; anything else is not this shape
+    }
+    auto value = e.driver;
+    int  shift = 0;
+    auto m     = value.get_master_node();
+    if (!m.is_invalid() && type_op_of(m) == Ntype_op::SHL) {
+      const int k = const_shl_amount(m);
+      auto      x = drv_at(m, 0);
+      if (k < 0 || x.is_invalid()) {
+        return false;  // runtime shift amount: no constant window
+      }
+      value = x;
+      shift = k;
+      shifts.push_back(m);
+    }
+    // The window is [shift, shift + w): its LOW end starts at `shift` even when
+    // the operand has no low bits of its own, because that is where the concat
+    // lane has to start.
+    const int w = pack_lane_width(value);
+    if (w < 0) {
+      return false;  // unbounded / signed operand: no provable window
+    }
+    if (w == 0) {
+      continue;  // provably zero: contributes nothing to an Or
+    }
+    lanes.push_back(Pack_lane{value, shift, shift + w});
+  }
+  if (lanes.size() < 2) {
+    return false;  // a 1-operand Or is a forward, handled by the scalar sweep
+  }
+  if (!tile_pack_lanes(g, lanes)) {
+    return false;
+  }
+
+  emit_concat(g, node, lanes);
+  for (auto& s : shifts) {
+    sweep_dead_node(s);
+  }
+  return true;
+}
+
+// Walk CONSUMER-side first (reverse of the forward topological order): the
+// outermost Set_mask of a write chain is the one that must become the Concat.
+// Converting an inner link first would leave the outer walk staring at a Concat
+// where it needs a constant-zero base, and the chain would only fragment.
+//
+// The Or arm is ON. It was never a correctness doubt -- `(a<<8)|(b<<4)|c ->
+// Concat` was LEC-proven on the fixtures (including the u5-instance-output lane
+// bug pack_lane_width now exists for) -- it was a CONSUMER gap, and one test
+// named it exactly: //inou/prp:prp-sim-packed_bus_bit_ring, whose two modules
+// exchange a packed bus each way and are only schedulable because
+// inou/cgen/sim_color_plan.cpp proves that the bits of one bus depend on
+// disjoint bits of the other and splits the def into slices. That matcher (and
+// graph/split_selfref's false-loop breaker) read the Or/SHL/Get_mask SPELLING
+// and had no Concat arm, so turning this on used to make `lhd sim` refuse the
+// module outright ("fine-color dependency cycle remains after state and
+// compact-loop carry cuts"). Both now decode concat_lanes() directly, which is
+// what unblocked the flip; if either arm is ever removed, this goes back to
+// false rather than growing a cprop-local guard -- inside `deva` the pack is
+// plainly acyclic, and the ring exists only in the PARENT, at Sub port level.
+//
+// The Set_mask arm below never had that consumer and is on by measurement; it
+// is also the larger population (1,943 chain heads vs 1,052 Or trees).
+constexpr bool kOrPackEnabled = true;
+
+void canonicalize_concat_packs(hhds::Graph* g) {
+  std::vector<hhds::Node_class> snapshot;
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    const auto op = type_op_of(node);
+    if (op == Ntype_op::Set_mask || (kOrPackEnabled && op == Ntype_op::Or)) {
+      snapshot.push_back(node);
+    }
+  }
+  for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
+    auto& node = *it;
+    if (node.is_invalid() || !node.has_out_edges()) {
+      continue;
+    }
+    const auto op = type_op_of(node);
+    if (op == Ntype_op::Set_mask) {
+      canonicalize_set_mask_pack(*g, node);
+    } else if (op == Ntype_op::Or && kOrPackEnabled) {
+      canonicalize_or_pack(*g, node);
+    }
+  }
 }
 
 }  // namespace
@@ -1486,6 +1900,54 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       v = Dlop::create_integer(1);
     }
     replace_node(node, *v);
+  } else if (op == Ntype_op::Concat) {
+    // Every lane VALUE is constant, so the whole assembly is one non-negative
+    // sum(w_i)-bit constant.
+    //
+    // The lane table MUST come from graph_util::concat_lanes, never from a hand
+    // walk of inp_edges: the width lives on the ODD sink pids and a lane's
+    // window is not recoverable from its driver, so a decoder that re-derived
+    // widths would shift every lane above the one it got wrong. An empty table
+    // means the cell is malformed and must fail CLOSED -- folding it as "zero
+    // lanes" would put a constant 0 where a real value was due.
+    const auto lanes = livehd::graph_util::concat_lanes(node);
+    if (lanes.empty()) {
+      return;
+    }
+    // Fixed-size (no push_back): the Dlop::Concat_lane span below holds RAW
+    // pointers into this storage, so it must not reallocate.
+    std::vector<Dlop> values(lanes.size());
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      if (!is_const_pin(lanes[i].value)) {
+        return;  // a width operand is always const, so "all inputs constant"
+                 // does NOT imply every lane VALUE is one
+      }
+      values[i]   = hydrate_const(lanes[i].value);
+      const int w = lanes[i].width;
+      // Dlop::concat_op DEBUG-asserts that a lane fits its window (a negative
+      // value spends its top bit on the sign, a non-negative one is
+      // magnitude+1) -- an over-wide lane is a caller bug there, even though
+      // the CELL truncates it. get_bits() over-approximates once the sign bit
+      // itself is unknown, so this refuses slightly more than the assert would:
+      // the safe direction, since an unfolded Concat still computes.
+      if (values[i].get_bits() > (values[i].is_negative() ? w : w + 1)) {
+        return;
+      }
+    }
+    std::vector<Dlop::Concat_lane> hl;
+    hl.reserve(lanes.size());
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      // The n-ary form is the ONLY correct one here. The binary member
+      // concat_op(other) sizes the low operand by its SIGNIFICANT bits, which
+      // is precisely the width a concat may not be sized by (and it cannot
+      // express `{a, b}` at all).
+      hl.push_back(Dlop::Concat_lane{&values[i], lanes[i].width});
+    }
+    auto result = Dlop::concat_op(std::span<const Dlop::Concat_lane>(hl.data(), hl.size()));
+    if (!result->is_integer()) {
+      return;  // nil: a non-numeric lane has no bit window -- do not fold
+    }
+    replace_node(node, *result);
   } else {
 #ifndef NDEBUG
     Pass::info("FIXME: cprop still does not copy prop node:{}\n", debug_name(node));
@@ -2212,6 +2674,45 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
       break;  // straddles the lane boundary: would need a concat
     }
 
+    if (op == Ntype_op::Concat) {
+      // The cheapest pack to resolve, because the cell CARRIES its lane table:
+      // none of the footprint/disjointness proof the Or/SHL/Set_mask arms above
+      // need applies -- lane i owning exactly [offset_i, offset_i + width_i) is
+      // a cell invariant. This is the arm that keeps a canonicalized graph at
+      // least as resolvable as the hand-spelled one it replaced.
+      //
+      // NO "value must be non-negative" guard, unlike the Set_mask arm: a lane
+      // holds `value mod 2^w`, i.e. value's low w bits as spelled in two's
+      // complement, and a Get_mask below the window reads those same
+      // conceptual bits, so the forms already agree for a negative or over-wide
+      // lane (same ruling as graph/split_selfref.cpp's Concat arm).
+      const auto lanes = livehd::graph_util::concat_lanes(m);
+      if (lanes.empty()) {
+        break;  // malformed cell: fail closed, never as "zero lanes"
+      }
+      const int32_t total = livehd::graph_util::concat_total_width(lanes);  // already decoded above
+      if (lo >= total) {
+        // Entirely above the top lane. A Concat is non-negative and strictly
+        // below 2^total, so those positions read as exact zeros.
+        replace_node(node, *Dlop::create_integer(0));
+        return true;
+      }
+      const livehd::graph_util::Concat_lane* hit = nullptr;
+      for (const auto& l : lanes) {
+        if (lo >= l.offset && hi <= l.offset + l.width) {
+          hit = &l;
+          break;
+        }
+      }
+      if (hit == nullptr) {
+        break;  // straddles two lanes: splitting would create nodes
+      }
+      cur  = hit->value;
+      lo  -= hit->offset;  // the lane value is LSB-aligned to its window
+      hi  -= hit->offset;
+      continue;
+    }
+
     break;
   }
 
@@ -2321,7 +2822,11 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     if (me > 0) {
       auto       am       = a_pin.get_master_node();
       const auto amo      = type_op_of(am);
-      const bool computed = !am.is_invalid() && amo != Ntype_op::Invalid && amo <= Ntype_op::Hotmux && !is_const_pin(a_pin)
+      // Concat qualifies through is_computed_comb_op: its driver is stamped
+      // sum(w_i)+1 and `unsign` BY CONSTRUCTION, which is exactly the
+      // magnitude+1 convention this rule reads (and the tightest such stamp in
+      // the IR -- the lane widths are declared, never inferred).
+      const bool computed = !am.is_invalid() && amo != Ntype_op::Invalid && is_computed_comb_op(amo) && !is_const_pin(a_pin)
                             && !is_graph_input_pin(a_pin);
       // NO flop/Memory/Sub-source arm, by MEASUREMENT (2026-08-06): a
       // "physical width" variant (unsigned such pin holds < 2^bits, so
@@ -2437,7 +2942,7 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
   // are deliberately excluded, as in scalar_get_mask's width-no-op rule.
   auto       vm       = value_pin.get_master_node();
   const auto vmo      = type_op_of(vm);
-  const bool computed = !vm.is_invalid() && vmo != Ntype_op::Invalid && vmo <= Ntype_op::Hotmux;
+  const bool computed = !vm.is_invalid() && vmo != Ntype_op::Invalid && is_computed_comb_op(vmo);
   const int  vbits    = bits_of(value_pin);
   if (!computed || vbits <= 0 || (vbits - 1) > me) {
     return false;
@@ -2621,15 +3126,19 @@ void Cprop::canonicalize_and_masks(hhds::Graph* g) {
         continue;
       }
       const auto xop      = type_op_of(xm);
-      const bool computed = xop != Ntype_op::Invalid && xop <= Ntype_op::Hotmux;
+      const bool computed = xop != Ntype_op::Invalid && is_computed_comb_op(xop);
       // Not is deliberately absent: GM(Not(port),mask) encodes exactly right,
       // which UNMASKS the ref side's understated And stamp in a yosys-vs-yosys
       // miter (lec_cross's De Morgan pair used to agree only because both
       // sides carried the same truncating And spelling). Until lgyosys_tolg
       // stamps magnitude+1 (or lec encodes literal stamps), keep Not cones in
       // their And spelling.
+      // Concat is safe for the same reason Get_mask is: its stamp is not an
+      // inference at all but the DECLARED lane sum + 1, so the magnitude+1
+      // reading Rule 5 and footprint() perform is exact rather than one bit
+      // short (the lgyosys_tolg OpW::maxw hazard this list exists to dodge).
       const bool safe_op  = xop == Ntype_op::SRA || xop == Ntype_op::Get_mask || xop == Ntype_op::EQ || xop == Ntype_op::LT
-                            || xop == Ntype_op::GT || xop == Ntype_op::Ror;
+                            || xop == Ntype_op::GT || xop == Ntype_op::Ror || xop == Ntype_op::Concat;
       if (computed && !safe_op) {
         continue;
       }
@@ -2668,7 +3177,7 @@ void Cprop::canonicalize_and_masks(hhds::Graph* g) {
 // for positional single-driver ports, where the pid half disambiguates.
 //
 // Guards, each load-bearing:
-//  * pure combinational ops only (op <= Hotmux), minus LUT: its function
+//  * pure combinational ops only (is_computed_comb_op), minus LUT: its function
 //    table lives in a node attribute the key does not cover;
 //  * identical bits/sign stamps on the output -- a twin re-stamped differently
 //    by an earlier fold may be read at another width by its consumers;
@@ -2708,7 +3217,7 @@ void Cprop::cse_pass(hhds::Graph* g) {
         continue;
       }
       const auto op = type_op_of(node);
-      if (op == Ntype_op::Invalid || op > Ntype_op::Hotmux || op == Ntype_op::LUT) {
+      if (op == Ntype_op::Invalid || !is_computed_comb_op(op) || op == Ntype_op::LUT) {
         continue;
       }
       if (!node.has_out_edges()) {
@@ -2761,8 +3270,13 @@ void Cprop::cse_pass(hhds::Graph* g) {
       // merging twins raises fanout and MATERIALIZES the pin at its lying
       // unsigned width (slang's `s0 >>> s1` SRA landed as reg[4:0] and read
       // -1 as 31). Ops that are non-negative by cell CONTRACT are exempt.
+      // Concat joins the exempt list: it is non-negative by CELL CONTRACT (each
+      // lane is masked into its own window, so a signed lane's sign never
+      // escapes), and a signed lane is the norm rather than a stamping lie.
+      // Without the exemption every real pack would read "suspicious" and no
+      // Concat would ever CSE.
       if (livehd::graph_util::is_unsign(nd) && op != Ntype_op::EQ && op != Ntype_op::LT && op != Ntype_op::GT && op != Ntype_op::Ror
-          && op != Ntype_op::Get_mask) {
+          && op != Ntype_op::Get_mask && op != Ntype_op::Concat) {
         bool suspicious = false;
         for (const auto& e : node.inp_edges()) {
           if (is_const_pin(e.driver) ? hydrate_const(e.driver).is_negative() : !livehd::graph_util::is_unsign(e.driver)) {
@@ -2840,10 +3354,12 @@ void Cprop::scalar_pass(hhds::Graph* g) {
       continue;
     }
     auto op = type_op_of(node);
-    // Everything above Hotmux (38) is IO/state/Sub/const/attr — not
-    // copy-propagatable. Hotmux sits between Mux (36) and IO (39) and IS
-    // handled (const one-hot selector fold, same-arm collapse).
-    if (op > Ntype_op::Hotmux) {
+    // IO/state/Sub/const/attr cells are not copy-propagatable. Hotmux sits
+    // between Mux (36) and IO (39) and IS handled (const one-hot selector fold,
+    // same-arm collapse); Concat sits ABOVE the boundary band by encoding
+    // accident and is handled too (all-const lane fold) -- see
+    // is_computed_comb_op.
+    if (!is_computed_comb_op(op)) {
       continue;
     }
 
@@ -3034,6 +3550,13 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // Canonicalize Get_mask AFTER the packed-slice folds have consumed the
   // original shapes (see normalize_get_mask_slices).
   normalize_get_mask_slices(current_graph);
+  // Fold the hand-spelled concat idioms into the cell that says it. AFTER the
+  // scalar sweep on purpose: scalar_get_mask_packed resolves reads by matching
+  // the Or/SHL/Set_mask spelling, and that fold is cycle-breaking, so it must
+  // see the original shapes first (same ordering reason as
+  // normalize_get_mask_slices). Its Concat arm keeps a re-run of cprop over an
+  // already-canonicalized graph just as resolvable.
+  canonicalize_concat_packs(current_graph);
   // Merge duplicate nodes AFTER normalization: the slice normalizer mints one
   // SRA per Get_mask, so equal slices of one word converge here into a single
   // shift feeding N masks (and duplicated inlined cones merge wholesale).

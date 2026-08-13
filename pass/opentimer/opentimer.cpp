@@ -821,6 +821,48 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         }
         auto b_const = hydrate_const(b_dpin);
         pin_tracker.add_shl(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
+      } else if (op == Ntype_op::Concat) {
+        // Wiring/packing, NOT logic: every result bit keeps the identity of the
+        // lane bit it came from, so the tracker threads timing straight through
+        // and the cell contributes zero delay. Before this arm existed, Concat
+        // was not pin-trackable at all and fell into the "needs a tmap netlist"
+        // refusal below.
+        //
+        // Widths come from the BASE lane table (the interleaved const sinks);
+        // lane VALUES must come from the occurrence edges, since the base table
+        // drops the hier chain that trk_id/net_of need. Same split lec/encode
+        // uses: decode from base, resolve the value by sink pid.
+        const auto lanes = livehd::graph_util::concat_lanes(node.base_node());
+        if (lanes.empty()) {
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("malformed concat (missing lane operand, or a non-constant lane width) on node {}", debug_name(node))
+              .fatal();
+          return;
+        }
+        if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal").msg("{}", lane_bad).fatal();
+          return;
+        }
+        absl::flat_hash_map<hhds::Port_id, hhds::Occurrence_pin> lane_by_pid;
+        for (auto& e : node.inp_edges()) {
+          lane_by_pid.insert_or_assign(e.sink.get_port_id(), e.driver);
+        }
+        std::vector<Pin_tracker<std::string>::Concat_src> srcs;
+        srcs.reserve(lanes.size());
+        for (size_t i = 0; i < lanes.size(); ++i) {
+          auto it = lane_by_pid.find(static_cast<hhds::Port_id>(2 * i));  // lane i value = sink pid 2i
+          if (it == lane_by_pid.end()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("concat lane {} has no value driver on node {}", i, debug_name(node))
+                .fatal();
+            return;
+          }
+          srcs.push_back({trk_id(it->second), io_bits_of(it->second), lanes[i].width, lanes[i].offset});
+        }
+        // sum(w)+1 -- the magnitude plus the always-zero sign slot of a result
+        // that is never negative. The driver pin's stamp is deliberately not
+        // consulted: a narrowed stamp must not move a lane.
+        pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes) + 1);
       } else if (op == Ntype_op::Or) {
         for (auto e : node.inp_edges()) {
           pin_tracker.add_or(wname, trk_id(e.driver));

@@ -1,0 +1,89 @@
+/*
+:name: concat_bundle_lanes
+:type: equiv
+:verilog_top: concat_bundle_lanes.top
+:pyrope_top: top
+*/
+
+// RTL coverage for the `concat(a, b, c)` builtin (docs/pyrope/10-internals.md,
+// "Bit selection and concatenation"). The comptime tier is covered by
+// ../pyrope/concat_two_lanes.prp and the rejection rules by ../errors/concat_*;
+// this pair is the one that proves the LOWERED datapath against an independent
+// Verilog statement of the same layout, over scalar lanes AND over the fields
+// of a BUNDLE input port. concat_tuple_lanes is its fixme sibling: the two
+// documented lane spellings that do not compile yet.
+//
+// Each output pins one claim:
+//
+//   zu   MSB-FIRST, per-lane DECLARED windows. `concat(h,l,c)` is
+//        `{p.hi, p.lo, c}` — 4+3+2 = 9 bits, argument 0 in the high bits, from
+//        a bundle port's two fields plus a scalar port.
+//
+//   zs   the SAME concat into a SIGNED destination of the same width. `s9` and
+//        `u9` are both legal (only the 9-bit field width is checked, never the
+//        signedness) and carry the same bits, so `zs` must equal `zu` and the
+//        two ports differ only in how a reader reads them.
+//
+//   wu   widening the unsigned destination: zero-extend, 9 -> 12.
+//   ws   widening the SIGNED destination — also a ZERO-extend, and that is the
+//        point of having both. A concat result is non-negative BY CONSTRUCTION
+//        (every lane masks into its own window, so no lane's sign can escape),
+//        so `s9` is a container, not a reinterpretation: `ws` is `wu`, not the
+//        sign-extension of bit 8. Pyrope is value-based here — `const s:s9 = a`
+//        for an `a:u9` keeps `a`'s value, it does not re-read its top bit as a
+//        sign — and a design that read `zs` back as negative would refute.
+//
+//   nest `concat(concat(h,l), c)` == `concat(h,l,c)`. Nesting is legal because
+//        the inner result's width is its lane sum by construction (7 bits), so
+//        the inner temp needs no user-written declaration to be a lane.
+//
+//   kz   the width is the lane's DECLARED type, never its VALUE: `k:u4` holds
+//        1, and the lane is still FOUR bits (`4'b0001`), not the one bit the
+//        value needs. Sized by value it would be `{1'b1, c}` — a 3-bit answer
+//        in a 6-bit port, i.e. every bit above `c` shifted.
+//
+//   sx   the signedness CONTRAST, and the reason the bundle carries a signed
+//        field. `l:s3` used as a VALUE sign-extends (sx is `l` in 9 bits); the
+//        same `l` used as a concat LANE contributes exactly its own 3-bit
+//        two's-complement window and never reaches past it (bits [4:2] of zu).
+//        An emitter that sign-extended a signed lane would keep sx right and
+//        silently corrupt zu.
+//
+// `zu`/`zs`/`wu`/`ws` share one concat and `nest` feeds a concat into another
+// concat's lane, so BOTH cgen paths are exercised: the inlined `{...}` (kz, sx)
+// and the materialized net `Cgen_verilog::create_locals` mints when a Concat has
+// several readers or feeds a lane (`reg [9:0] concat_16;`). This pair is LEC'd
+// by re-reading that emitted file, so it also gates the round trip through it.
+//
+// The bundle fields are rebound to declared locals (`h`, `l`) rather than
+// written as `concat(p.hi, p.lo, c)`: a dotted read lowers through a compiler
+// temp, and a temp has no declared type, which is exactly the case
+// `concat-untyped-lane` rejects — see concat_tuple_lanes. `h:u4`/`l:s3` restate
+// the field types the port signature already declares, and `p.hi`/`p.lo` reach
+// the netlist as the flattened leaf ports the golden names.
+//
+// `prp-v2prp2v-concat_bundle_lanes` FAILS today and is deliberately UNTAGGED
+// (no `fixme`, so it stays visible): the prp_writer emits `concat` lanes as raw
+// EXPRESSIONS and literals —
+//   const t4 = concat(0, packed_bits__w1)
+// — which is exactly what the lane rule rejects, so the Verilog -> Pyrope ->
+// Verilog round trip dies on the re-read, untyped destination and all. The fix
+// is in upass/prp_writer: bind each lane to a typed name and type the
+// destination. The two forward directions (`prp-equiv-`, `prp-statematch-`) are
+// green.
+pub comb top(p:(hi:u4, lo:s3), c:u2) -> (zu:u9, zs:s9, wu:u12, ws:s12, nest:u9, kz:u6, sx:s9) {
+  const h:u4 = p.hi
+  const l:s3 = p.lo
+  const k:u4 = 1     // value needs 1 bit; the LANE is the declared 4
+
+  const packed_u:u9 = concat(h, l, c)   // 4+3+2 = 9
+  const packed_s:s9 = concat(h, l, c)   // same lanes, signed destination
+
+  zu   = packed_u
+  zs   = packed_s
+  wu   = packed_u                 // 9 -> 12: zero-extend
+  ws   = packed_s                 // 9 -> 12: ALSO zero-extend
+  nest = concat(concat(h, l), c)  // (4+3) + 2 = 9, same layout as zu
+  kz   = concat(k, c)             // 4+2 = 6
+  sx   = l                        // the same signed field as a VALUE: sign-extended
+}

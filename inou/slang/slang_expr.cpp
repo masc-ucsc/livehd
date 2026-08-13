@@ -1020,26 +1020,40 @@ std::string Slang_context::lower_streaming(const slang::ast::StreamingConcatenat
   return builder_.create_bit_or_stmts(parts);
 }
 
+// `{a, b, c}` — the FIRST operand is the MSB lane, which is exactly the LNAST
+// `concat` node's own order, so the operands pass straight through in source
+// order and the node carries the whole bus as ONE n-ary statement.
+//
+// This used to be a shift+or tower whose per-lane offset was accumulated here.
+// One habit of that spelling does NOT survive the move: a zero lane may not be
+// DROPPED. The tower computed every offset independently, so skipping
+// `{2'b0, x}`'s zero cost nothing; the concat node derives each lane's offset
+// from the widths of the lanes BELOW it, so a dropped lane slides every lane
+// above it down two bits.
+//
+// The widths themselves are the easy half here — `tinfo(*e.type).bits` is the
+// operand's self-determined width, which IS the window — so slang binds every
+// lane width at creation and nothing downstream has to infer one. That is also
+// why a constant lane needs no special handling: the width rides in its own
+// operand, so `2'b0` may stay the plain value `0` without the literal's
+// spelling having to encode a width.
 std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {
-  // {a, b, c}: the FIRST operand is the MSB block.
-  auto                     ops = expr.operands();
-  std::vector<std::string> parts;
-  int64_t                  offset = 0;
-  for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
-    const auto& e  = **it;
+  auto                                       ops = expr.operands();
+  std::vector<Lnast_builder::Concat_lane>    lanes;
+  lanes.reserve(ops.size());
+
+  for (const auto* op : ops) {
+    const auto& e  = *op;
     auto        oi = tinfo(*e.type);
-    auto        v  = to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed);
-    // A zero part contributes nothing to the OR — dropping it kills the
-    // `x | (0 << k)` noise every zero-extension concat ({2'b0, x}) produced.
-    if (v != "0") {
-      parts.emplace_back(offset == 0 ? v : builder_.create_shl_stmts(v, std::to_string(offset)));
-    }
-    offset += oi.bits;
+    // to_pattern gives the two's-complement bit pattern of a signed operand,
+    // which is what a window takes; the window then masks to oi.bits anyway.
+    lanes.push_back({to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
   }
-  if (parts.empty()) {
-    return "0";
+
+  if (lanes.empty()) {
+    return "0";  // `{}` is not legal SV; keep the old empty-concat guard
   }
-  return builder_.create_bit_or_stmts(parts);
+  return builder_.create_concat_stmts(lanes);
 }
 
 // Shared base+offset math for packed element/range selects and member access.

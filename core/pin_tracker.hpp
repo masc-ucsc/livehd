@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "absl/container/node_hash_map.h"
 #include "hlop/dlop.hpp"
@@ -178,6 +179,56 @@ public:
         pv[i].pos = it->second[i].pos;
       }
     }
+  }
+
+  // One lane of an add_concat: `pin` drives the window [offset, offset+width)
+  // of the result. `sbits` is the driver's own stamped width, used only to
+  // synthesize a fresh pin vector when the lane has not been tracked yet.
+  struct Concat_src {
+    Pin     pin;
+    int32_t sbits  = 0;
+    int32_t width  = 0;  // DECLARED window width
+    int32_t offset = 0;  // LSB position of the window in the result
+  };
+
+  // Concat is pure WIRING: result bit (offset_i + k) IS lane i's bit k. Every
+  // bit keeps its (pin, pos) identity, so the cell contributes NO delay -- it
+  // mints no gate, it renames bit positions (the same reasoning that makes
+  // graph_util::ge_weight charge a Concat zero gates).
+  //
+  // `out_bits` is the CELL CONTRACT width, sum(lane widths) + 1: bits at and
+  // above sum(w) are the always-zero sign slot of a never-negative result, and
+  // are left as known zero. It is never the driver pin's stamp -- the const
+  // sinks carry the intended bit spacing, and a narrowed stamp must not move a
+  // lane.
+  void add_concat(Pin dst_pin, const std::vector<Concat_src>& lanes, int32_t out_bits) {
+    I(out_bits >= 0);
+
+    // Build into a LOCAL vector: a lane may read dst_pin's own previous entry,
+    // and full_map[dst_pin] would rehash the map out from under get_or_create_pv.
+    Pin_vector pv;
+    pv.resize(static_cast<size_t>(out_bits), {Zero_pin, 0});
+
+    for (const auto& l : lanes) {
+      const Pin_vector src = get_or_create_pv(l.pin, l.sbits);
+      if (src.empty()) {
+        continue;  // untracked and unsized: leave the window known-zero
+      }
+      for (int32_t k = 0; k < l.width; ++k) {
+        const auto dst = static_cast<size_t>(l.offset) + static_cast<size_t>(k);
+        if (dst >= pv.size()) {
+          break;  // window above the contract width; cannot happen for a well-formed cell
+        }
+        // A lane driver NARROWER than its window SIGN-EXTENDS into it: the top
+        // source bit replicates, exactly as add_shl/add_sra/add_sext do. A
+        // driver WIDER than its window cannot reach here (the caller rejects it
+        // via graph_util::concat_lane_violation).
+        const auto si = static_cast<size_t>(k) < src.size() ? static_cast<size_t>(k) : src.size() - 1;
+        pv[dst]       = src[si];
+      }
+    }
+
+    full_map.insert_or_assign(dst_pin, pv);
   }
 
   void add_or(Pin dst_pin, Pin a_pin) {

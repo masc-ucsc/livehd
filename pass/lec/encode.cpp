@@ -1953,6 +1953,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return it == by_pid.end() ? empty : it->second;
       };
 
+      // Filled by the Concat arm and re-read by the X-plane block after the
+      // switch. The lane table is the ONLY source of a lane's window width (see
+      // the Concat arm), and decoding it a second time down there would pay the
+      // whole inp_edges walk again on every packed bus.
+      std::vector<gu::Concat_lane> concat_tbl;
+
       Term result;
 
       switch (op) {
@@ -2418,6 +2424,55 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           result = fit(Val{r, Wm, false}, W);  // result pin's declared width
           break;
         }
+        case Ntype_op::Concat: {
+          // SMT-LIB has a native concat, and that is the whole point of the cell:
+          // the Set_mask chain it replaces encodes as one nested insert per lane
+          // (a 62-deep tower for a wide bus), all of which the bit-blaster then
+          // has to see through to prove the assembly is a permutation of its
+          // inputs. Here it is one term.
+          //
+          // The lane table comes from the SHARED decoder: a lane's window width is
+          // an explicit operand precisely because it is NOT recoverable from the
+          // driver (bits_of is an upper bound that bitwidth/cprop narrow freely,
+          // and the value's significant bits are narrower still). Re-deriving a
+          // width here would shift every lane above the one it got wrong -- a
+          // silent miscompile that reads as a legitimate refutation. Empty means
+          // malformed: fail closed rather than encode a shorter bus.
+          concat_tbl = gu::concat_lanes(node.base_node());
+          if (concat_tbl.empty()) {
+            return fail_unsupported("malformed Concat (missing or non-constant lane width operand) (M1)");
+          }
+          if (const auto lane_bad = gu::concat_lane_violation(concat_tbl); !lane_bad.empty()) {
+            return fail(lane_bad);
+          }
+          Term acc;
+          int  total = 0;
+          for (size_t i = 0; i < concat_tbl.size(); ++i) {
+            auto& lv = pid(static_cast<hhds::Port_id>(2 * i));  // lane i value = sink pid 2i
+            if (lv.empty()) {
+              return fail("Concat lane " + std::to_string(i) + " has no value driver");
+            }
+            // out = SUM_i (value_i mod 2^w_i) << offset_i -- each lane occupies
+            // its OWN window, so a negative lane lands as its two's-complement
+            // pattern (-1 at w=3 is 0b111). fit() extends per the lane's own
+            // sign, which IS `mod 2^w`; a driver WIDER than its window was
+            // rejected above, so this fit only ever extends.
+            Term lt  = fit(lv[0], concat_tbl[i].width);
+            acc      = acc.isNull() ? lt : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {acc, lt});
+            total   += concat_tbl[i].width;
+          }
+          // The result is ALWAYS non-negative: the pin carries sum(w)+1 bits (the
+          // magnitude plus the always-zero sign slot of an unsigned LiveHD value),
+          // so real_width() already handed back sum(w) for the stamped-unsign pin
+          // and this fit is a no-op there; a wider or signed stamp gets its sign
+          // slot from the zero-extension. Widen-only, never narrow: an
+          // under-stamped pin (or an unstamped one, defaulted to W=1 above) would
+          // otherwise silently drop the most significant lanes.
+          W          = std::max(W, total);
+          out_signed = false;
+          result     = fit(Val{acc, total, false}, W);
+          break;
+        }
         case Ntype_op::AttrSet: {
           // pass-through of the parent driver (pid0).
           if (pid(0).empty()) {
@@ -2541,6 +2596,35 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             Term ax   = fit_x_mask_to(tm_, pid(0)[0], W);
             Term keep = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
             out_val.x_mask = ax.isNull() ? zero_w : tm_.mkTerm(Kind::BITVECTOR_AND, {ax, keep});
+          } else if (op == Ntype_op::Concat && !concat_tbl.empty()) {
+            // A Concat is EXACT on the X plane, and it has to be: unknowns here are
+            // POSITIONAL, so a lane's unknown bits belong in that lane's window and
+            // nowhere else. The conservative smear below would mark the whole
+            // assembled bus unknown -- the same false-PROVEN mechanism the Set_mask
+            // arm above documents (an output whose every bit reads X compares
+            // NOTHING), and a Concat IS the output-assembly cell, so smearing it
+            // would relight that bug on every packed bus rather than on the readers'
+            // per-bit Set_mask idiom alone.
+            Term xacc;
+            int  xw = 0;
+            for (size_t i = 0; i < concat_tbl.size(); ++i) {
+              const int lw = concat_tbl[i].width;
+              auto&     lv = pid(static_cast<hhds::Port_id>(2 * i));
+              Term      lx;
+              if (!lv.empty()) {
+                // The plane must extend the way the VALUE did (fit() in the arm
+                // above): a sign-extended lane replicates an unknown msb, a
+                // zero-extended one appends known-0 bits.
+                lx = fit_x_mask_to(tm_, lv[0], lw);
+              }
+              if (lx.isNull()) {
+                lx = tm_.mkBitVector(static_cast<uint32_t>(lw), 0);  // fully known lane
+              }
+              xacc  = xacc.isNull() ? lx : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {xacc, lx});
+              xw   += lw;
+            }
+            // The sign slot (and any over-wide pin stamp) is a known zero.
+            out_val.x_mask = xacc.isNull() ? zero_w : fit(Val{xacc, xw, false}, W);
           } else {
             // any operand dynamically unknown anywhere -> whole result unknown
             Term any;

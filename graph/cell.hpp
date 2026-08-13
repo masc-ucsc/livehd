@@ -56,7 +56,8 @@ inline constexpr hhds::Port_id Port_invalid = (hhds::Port_id{1} << hhds::Port_bi
 //  50  Nconst             -- non-loop-last; sits next to Sub on purpose so
 //                            is_loop_first(Nconst||IO) is the obvious pair.
 //   ...
-//  56  AttrSet           57 reserved for Last_invalid sentinel
+//  56  AttrSet
+//  58  Concat            59 reserved for Last_invalid sentinel
 enum class Ntype_op : uint8_t {
   Invalid = 0,  // Detect bugs/unset (not used anywhere). Bit 0 == 0.
   Sum     = 2,
@@ -111,10 +112,17 @@ enum class Ntype_op : uint8_t {
   // is signed, and unsigned is just the non-negative subset, so there is no
   // second unsigned flavour and nothing downstream switches on a sign flag.
   //
-  // Slot 54 is the last free EVEN slot, and even is required: bit 0 is
-  // is_loop_last, and a remainder is combinational. Picking anything else would
-  // move Last_invalid, which resizes the four `Last_invalid`-sized tables below
-  // AND invalidates every serialized lgdb (the raw value is stored in the node).
+  // Slot 54 was the last free EVEN slot below AttrSet, and even is required:
+  // bit 0 is is_loop_last, and a remainder is combinational. Growing past
+  // AttrSet moves Last_invalid, which resizes the three `Last_invalid`-sized
+  // tables below.
+  //
+  // It does NOT invalidate serialized lgdbs (an earlier version of this comment
+  // claimed it did): `Last_invalid` is a compile-time sentinel that is never
+  // stored in a node and never serialized, and appending a slot leaves every
+  // existing op's raw value unchanged. Only the reverse direction breaks -- an
+  // lgdb written WITH the new op and read by an OLDER binary indexes past the
+  // end of that build's `cell_name_sv`.
   Rem = 54,
 
   // High-level construct kept for bitwidth's leftover-AttrSet cleanup pass.
@@ -122,7 +130,37 @@ enum class Ntype_op : uint8_t {
   // cprop's tuple_pass; CompileErr was dropped (no producer post-migration).
   AttrSet = 56,
 
-  Last_invalid = 57
+  // n-ary bit CONCATENATION, MSB-first (Verilog `{a, b, c}`), combinational.
+  //
+  // Sinks are INTERLEAVED (value, declared-width) pairs on the unlimited-sink
+  // `p0, p1, ...` names: p0 = the most significant lane's value, p1 = a
+  // comptime const holding that lane's DECLARED width in bits, p2/p3 = the next
+  // lane down, and so on. Lane i therefore lives at pids 2i / 2i+1.
+  //
+  // The width has to be an explicit operand because it is NOT recoverable from
+  // the lane driver: `bits` on that pin is an upper bound that bitwidth/cprop
+  // are free to narrow, and the value's significant bits are narrower still --
+  // and dropping a lane's leading zeros shifts every lane ABOVE it. The width
+  // is frozen from the LNAST DECLARED type at lowering time (upass.tolg) and is
+  // never re-derived. A lane's `w` is the field width: `bits - 1` for an
+  // unsigned driver (whose top stored bit is the always-zero sign slot), `bits`
+  // for a signed one, matching `Dlop::Concat_lane`.
+  //
+  // Semantics (unlimited precision): out = sum_i (v_i mod 2^w_i) << offset_i,
+  // offset_i = sum of the widths of every lane BELOW i. Each lane is masked
+  // into its own window, so a negative lane lands as its two's-complement
+  // pattern and an over-wide lane truncates -- exactly the Set_mask lane-write
+  // rule. Unknowns are per-lane and positional (no whole-plane smearing). The
+  // result is ALWAYS non-negative, so the driver pin stamps
+  // bits = sum(w_i) + 1 and is `unsign`.
+  //
+  // 58 keeps the even/odd invariant (combinational => even). 40..48 are also
+  // free evens but are reserved by construction as the opposite-polarity twins
+  // of Memory/Flop/Latch/Fflop/Sub -- and cprop's several `op > Ntype_op::Hotmux`
+  // ordered tests read that band as state/boundary.
+  Concat = 58,
+
+  Last_invalid = 59
 };
 
 // Encoding invariant: bit 0 == is_loop_last.
@@ -134,6 +172,7 @@ static_assert((static_cast<uint8_t>(Ntype_op::Fflop) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Sub) & 1) == 1);
 static_assert((static_cast<uint8_t>(Ntype_op::Clock_cell) & 1) == 0);  // combinational
 static_assert((static_cast<uint8_t>(Ntype_op::Rem) & 1) == 0);         // combinational
+static_assert((static_cast<uint8_t>(Ntype_op::Concat) & 1) == 0);      // combinational
 static_assert((static_cast<uint8_t>(Ntype_op::Sum) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Nconst) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
@@ -207,6 +246,7 @@ protected:
     a[static_cast<size_t>(Ntype_op::Nconst)]   = "const";
     a[static_cast<size_t>(Ntype_op::Clock_cell)] = "clock_cell";
     a[static_cast<size_t>(Ntype_op::Rem)]      = "rem";
+    a[static_cast<size_t>(Ntype_op::Concat)]   = "concat";
     a[static_cast<size_t>(Ntype_op::AttrSet)]  = "attr_set";
     return a;
   }();
@@ -234,14 +274,19 @@ public:
   // is_loop_last flag, so a LiveHD-stored type round-trips both meanings.
   static inline constexpr bool is_loop_last(Ntype_op op) { return (static_cast<uint8_t>(op) & 1) != 0; }
 
+  // Ops that only MOVE bits: a pin-tracker maps each result bit back to the
+  // (source pin, source bit) it came from, so these mint no gate and add no
+  // delay. Concat belongs here for the same reason -- it is wiring/packing that
+  // renames bit positions (see Pin_tracker::add_concat and graph_util::ge_weight,
+  // which charges a Concat zero gates).
   static inline constexpr bool is_pin_trackable(Ntype_op op) {
     return op == Ntype_op::Set_mask || op == Ntype_op::Get_mask || op == Ntype_op::SHL || op == Ntype_op::SRA || op == Ntype_op::And
-           || op == Ntype_op::Or || op == Ntype_op::Sext;
+           || op == Ntype_op::Or || op == Ntype_op::Sext || op == Ntype_op::Concat;
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
     return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux
-           || op == Ntype_op::Hotmux;
+           || op == Ntype_op::Hotmux || op == Ntype_op::Concat;
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;

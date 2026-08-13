@@ -688,6 +688,42 @@ upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& 
   return stamp(dst_name, dst, Lnast_range::make_unbounded());
 }
 
+upass::Vote uPass_bitwidth::process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // concat(dst, v_msb, w_msb, …, v_lsb, w_lsb) drops each lane into its OWN
+  // window, so the assembled value is always NON-NEGATIVE and exactly sum(w_i)
+  // bits wide: the range is [0, 2^sum − 1], whatever the lanes' own signs and
+  // values are (a negative lane lands as its two's-complement pattern inside
+  // its window).
+  //
+  // The widths are OPERANDS, not something this pass derives: a width that had
+  // to be inferred from a lane's range would shrink whenever the range did, and
+  // shrinking one lane shifts every lane ABOVE it -- a silent miscompile rather
+  // than a lost bound. An unbound (`nil`) width therefore does not get a guess
+  // here; the result is simply left unbounded, and upass.tolg owns the
+  // `concat-untyped-lane` diagnostic, which can point at the offending lane.
+  int64_t total = 0;
+  if ((src.size() % 2) != 0 || src.empty()) {
+    return stamp(dst_name, dst, Lnast_range::make_unbounded());  // malformed shape: fail closed
+  }
+  for (std::size_t i = 1; i < src.size(); i += 2) {  // the ODD operands are the widths
+    const auto r = range_of_operand(src[i]);
+    if (r.unbounded || r.min != r.max || r.min <= 0) {
+      return stamp(dst_name, dst, Lnast_range::make_unbounded());  // still `nil`, or not a positive comptime width
+    }
+    total += r.min;
+  }
+  // Lnast_range's bounds are int64, so a 63-bit-or-wider bus cannot be
+  // expressed (the same cutoff get_mask uses).
+  if (total <= 0 || total >= 63) {
+    return stamp(dst_name, dst, Lnast_range::make_unbounded());
+  }
+  Lnast_range r;
+  r.min       = 0;
+  r.max       = (int64_t{1} << total) - 1;
+  r.unbounded = false;
+  return stamp(dst_name, dst, r);
+}
+
 // ── Nullary hooks ────────────────────────────────────────────────────────────
 
 void uPass_bitwidth::process_func_call() {

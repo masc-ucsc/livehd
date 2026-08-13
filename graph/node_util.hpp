@@ -1034,6 +1034,145 @@ namespace ge_detail {
 
 }  // namespace ge_detail
 
+// ── Ntype_op::Concat decoding ────────────────────────────────────────────────
+//
+// A Concat's sinks are INTERLEAVED (value, declared-width) pairs, MSB-FIRST:
+// lane i occupies sink pids 2i (the value driver) and 2i+1 (an Nconst holding
+// that lane's width in bits). Every consumer must read the lane table through
+// this ONE decoder rather than walking inp_edges itself -- the whole reason the
+// cell exists is that lane widths are NOT recoverable from the drivers, and a
+// consumer that re-derives them from `bits_of` or from the value's significant
+// bits silently shifts every lane above the one it got wrong.
+struct Concat_lane {
+  hhds::Pin_class value;
+  int32_t         width{0};   // DECLARED window width, always > 0
+  int32_t         offset{0};  // LSB position of this lane in the result
+};
+
+// Lanes MSB-first (index 0 is the most significant, matching Verilog `{a,b,c}`
+// and hlop's `concat_op`), each with its resolved LSB offset. Returns an empty
+// vector for a malformed cell (missing/odd pin, non-const or non-positive
+// width) -- callers must treat empty as "cannot lower" and fail closed, never
+// as "zero lanes".
+[[nodiscard]] inline std::vector<Concat_lane> concat_lanes(const hhds::Node_class& node) {
+  std::vector<Concat_lane> lanes;
+  if (node.is_invalid() || type_op_of(node) != Ntype_op::Concat) {
+    return lanes;
+  }
+  // Gather by pid first: inp_edges order is unspecified, and here the pid IS
+  // the lane index.
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> by_pid;
+  hhds::Port_id                                       max_pid = 0;
+  for (const auto& ie : node.inp_edges()) {
+    const auto pid = ie.sink.get_port_id();
+    by_pid.emplace(pid, ie.driver);
+    max_pid = std::max(max_pid, pid);
+  }
+  if (by_pid.empty() || (max_pid % 2) == 0) {
+    return {};  // a trailing value with no width operand
+  }
+  const size_t n_lanes = static_cast<size_t>(max_pid + 1) / 2;
+  lanes.reserve(n_lanes);
+  for (size_t i = 0; i < n_lanes; ++i) {
+    auto vit = by_pid.find(static_cast<hhds::Port_id>(2 * i));
+    auto wit = by_pid.find(static_cast<hhds::Port_id>(2 * i + 1));
+    if (vit == by_pid.end() || wit == by_pid.end() || !is_const_pin(wit->second)) {
+      return {};
+    }
+    const auto wv = hydrate_const(wit->second);
+    if (!wv.is_just_i64()) {
+      return {};
+    }
+    const auto w = wv.to_just_i64();
+    if (w <= 0 || w > std::numeric_limits<int32_t>::max()) {
+      return {};
+    }
+    lanes.push_back(Concat_lane{vit->second, static_cast<int32_t>(w), 0});
+  }
+  // MSB-first: lane 0 sits above every lane after it, so offsets accumulate
+  // from the tail.
+  int32_t off = 0;
+  for (auto it = lanes.rbegin(); it != lanes.rend(); ++it) {
+    it->offset = off;
+    off       += it->width;
+  }
+  return lanes;
+}
+
+// Sum of the lane widths, i.e. the MAGNITUDE width of the result. The driver
+// pin stamps this + 1 (the always-zero sign slot of a non-negative value).
+// 0 when the cell is malformed (an EMPTY table, never "zero lanes").
+//
+// concat_lanes() already resolved every offset MSB-first, so the top lane's
+// window ends exactly at the total -- no second walk. Callers that already hold
+// the decoded table MUST use this overload: the node overload pays another full
+// inp_edges walk plus a hash map and a vector allocation.
+[[nodiscard]] inline int32_t concat_total_width(const std::vector<Concat_lane>& lanes) {
+  return lanes.empty() ? int32_t{0} : lanes.front().offset + lanes.front().width;
+}
+
+// ── The Concat lane contract ────────────────────────────────────────────────
+//
+// A Concat's output width is ALWAYS sum(declared lane widths). The interleaved
+// const sinks carry the INTENDED bit spacing, and no consumer may re-derive the
+// width from the driver pin's stamped `bits` -- `concat(a,8,b,4)` is 12 bits
+// even after the optimizer proves `a` fits in 3.
+//
+// That is the whole point of the const sinks: LGraph passes are free to narrow
+// the REAL width of a variable, while the concat keeps the spacing the source
+// asked for. So a lane driver may occupy FEWER bits than its window, and is
+// SIGN-EXTENDED up to it (LiveHD values are signed-canonical, so extension is
+// always a sign-extend: a 1-bit signed -1 widens to 0b111 in a 3-bit window,
+// while an unsigned driver's leading sign slot is zero and it widens with 0s).
+// A driver occupying MORE bits than its window is an INTERNAL COMPILE ERROR --
+// nothing may produce it, and truncating it silently shifts every lane above.
+//
+// UNITS TRAP, the reason this is one shared helper and not five open-coded
+// comparisons: `bits_of` returns the SIGNED bit count (bitwidth stamps
+// `bw.get_sbits()`), so an unsigned value carries a leading always-zero sign
+// slot -- a u3 driver stamps bits=4, an s3 driver stamps bits=3. A lane's
+// `width` is the declared FIELD width with no such slot. Comparing the two raw
+// fires on every unsigned lane in the design.
+
+// Logical field width a driver occupies: magnitude bits, sign slot removed.
+// Returns 0 for an UNSTAMPED pin -- "unknown", which is never a violation.
+[[nodiscard]] inline int32_t lane_value_bits(const hhds::Pin_class& pin) {
+  const auto b = bits_of(pin);
+  if (b <= 0) {
+    return 0;  // unstamped: unknown, not a violation
+  }
+  return is_unsign(pin) ? b - 1 : b;
+}
+
+// True iff this lane's driver fits its declared window (the contract above).
+[[nodiscard]] inline bool concat_lane_fits(const Concat_lane& l) { return lane_value_bits(l.value) <= l.width; }
+
+// Empty when every lane fits. Otherwise a diagnostic naming the first offending
+// lane, for the caller's own fatal path (`I(msg.empty(), msg.c_str())`, a pass
+// `error_at`, …). Over-wide is a compiler bug, so the message names the pin.
+[[nodiscard]] inline std::string concat_lane_violation(const std::vector<Concat_lane>& lanes) {
+  for (size_t i = 0; i < lanes.size(); ++i) {
+    const auto& l = lanes[i];
+    if (concat_lane_fits(l)) {
+      continue;
+    }
+    return std::format(
+        "internal: Concat lane {} (of {}, MSB-first) driver '{}' occupies {} bits but its declared window is {} -- a lane "
+        "driver may only be NARROWER than its window (LGraph may narrow, never widen); truncating it would shift every "
+        "lane above it",
+        i,
+        lanes.size(),
+        wire_name(l.value),
+        lane_value_bits(l.value),
+        l.width);
+  }
+  return {};
+}
+
+[[nodiscard]] inline int32_t concat_total_width(const hhds::Node_class& node) {
+  return concat_total_width(concat_lanes(node));
+}
+
 // Gate-equivalent weight of one node. See the model above. Never returns 0 for a
 // node that maps to logic -- an unknown width floors at 1, so a region's GE is
 // always at least its partitionable node count.
@@ -1046,6 +1185,11 @@ namespace ge_detail {
   switch (type_op_of(node)) {
     case Ntype_op::Invalid:
     case Ntype_op::IO:
+    // A Concat is pure wiring: it renames bit positions and mints no gate. Its
+    // out_width is the SUM of its lanes, so the default arm would charge the
+    // whole assembled bus as logic and make any packing-heavy region look
+    // enormous to the size windows.
+    case Ntype_op::Concat:
     case Ntype_op::Nconst : return 0;
 
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));

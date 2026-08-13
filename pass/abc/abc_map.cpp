@@ -1336,6 +1336,62 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           slots[b] = abc_bit(a_drv, std::min(b, from_bit));
         }
       }
+    } else if (op == Ntype_op::Concat) {
+      // out[offset_i + k] = lane_i[k] for k < w_i. Pure wiring: the output
+      // literals ALIAS the lane input literals, so a concat costs no AIG node
+      // at all (the cheapest arm here) — nothing to optimize or map.
+      //
+      // The lane widths MUST come from the shared decoder. A lane's window
+      // width is an explicit const operand precisely because it is NOT
+      // recoverable from its driver (bits_of is an upper bound that
+      // bitwidth/cprop are free to narrow, and the value's significant bits are
+      // narrower still); re-deriving it here would shift every lane ABOVE the
+      // one guessed wrong — a silent miscompile, not a build error.
+      const auto lanes = gu::concat_lanes(n);
+      if (lanes.empty()) {
+        // Empty means MALFORMED (odd/missing pin, non-const or non-positive
+        // width), never "zero lanes" — fail closed like the non-constant
+        // mask/position arms rather than emitting a const0 bus.
+        livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
+            .msg("pass.abc: malformed concat (missing lane operand, or a non-constant lane width) in region '{}'", rb.module_name)
+            .emit();
+        unsupported = true;
+      } else {
+        const int  total    = gu::concat_total_width(lanes);  // already decoded above
+        const auto lane_bad = gu::concat_lane_violation(lanes);
+        I(lane_bad.empty(), lane_bad.c_str());
+        // abc_eff_bit, not abc_bit: a lane window wider than its driver's
+        // MAGNITUDE must be filled the way the LEC reads that operand — an
+        // internal unsigned net's top slot is the always-0 sign bit, and an
+        // upstream wrapped Sum/Mux may have driven a stray 1 into it. abc_bit
+        // would wire that stray bit into the middle of the result at a fixed
+        // position (concat never re-normalizes above a lane). Below the
+        // effective width the two are identical, and a signed lane still
+        // sign-replicates, so a negative value lands as its two's-complement
+        // pattern (-1 at w=3 -> 0b111) exactly as the cell contract requires.
+        // Every lane, at its full declared window. The blast width is the CELL
+        // CONTRACT (sum(w), plus the sign slot below), never `out_bits`: the
+        // const sinks carry the intended bit spacing, and a stamp is not
+        // allowed to move a lane. This used to `break` on `pos >= out_bits`,
+        // which dropped the top lanes whenever anything narrowed the pin — and
+        // pass.bitfuzz deliberately STRIPS the stamp, leaving out_bits at the
+        // `== 0 -> 1` fallback and blasting a one-bit concat. `slots` is a map
+        // keyed by bit index, so there is no bound to stay inside.
+        for (const auto& l : lanes) {
+          for (int k = 0; k < l.width; ++k) {
+            slots[l.offset + k] = abc_eff_bit(l.value, k);
+          }
+        }
+        // Bit sum(w) is the always-zero sign slot of the (never negative)
+        // result; an over-stamped pin is zero above it too. One shared const0
+        // net: abc_const_bit builds an inverter per call, so a per-bit call
+        // would litter the AIG with dead gates.
+        const int fill_to = std::max(out_bits, total + 1);
+        auto*     zero    = abc_const_bit(false);
+        for (int b = total; b < fill_to; ++b) {
+          slots[b] = zero;
+        }
+      }
     } else if (op == Ntype_op::Sum) {
       // result = sum(A terms, pid 0) - sum(B terms, pid 1), at width out_bits
       // (the bitwidth-resolved result width, wide enough for carry growth).
@@ -1611,7 +1667,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
           .msg(
               "pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; "
+              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/concat/shl/sra/const; "
               "div/mod are blackboxed)",
               Ntype::get_name(op),
               rb.module_name)

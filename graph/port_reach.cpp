@@ -20,7 +20,8 @@ namespace {
 // unrecognized shape yields empty (the caller stays at port grain).
 // A concat leaf: bit range [lo, lo+len) of the output, driven by `pin`. A len
 // of 0 means "runs to the next leaf's lo" (the Or/SHL idiom carries no widths;
-// the Set_mask idiom carries exact ones from its masks).
+// the Set_mask idiom and the Concat cell carry exact ones -- from the masks and
+// from the explicit width operands respectively).
 struct Leaf {
   uint32_t        lo  = 0;
   uint32_t        len = 0;
@@ -69,6 +70,25 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
         return {};
       }
       work.emplace_back(off + static_cast<uint32_t>(av.to_just_i64()), val);
+      continue;
+    }
+    if (op == Ntype_op::Concat) {
+      // The EXPLICIT spelling of everything the Or/SHL arm above reverse
+      // engineers: the cell already carries the lane table, so the ranges are
+      // EXACT (no "runs to the next leaf" guessing) and the disjointness the
+      // caller checks below holds by construction.
+      auto lanes = gu::concat_lanes(n);
+      if (lanes.empty()) {
+        return {};  // malformed cell: fail closed, the caller stays at port grain
+      }
+      // A lane is TERMINAL even when its own driver is another Concat. A lane's
+      // declared width may TRUNCATE its value, so descending would let the
+      // inner lanes claim bit positions this window never exposes -- the leaf's
+      // support is computed over the whole inner cone instead, which only ever
+      // over-reports.
+      for (const auto& l : lanes) {
+        leaves.push_back({off + static_cast<uint32_t>(l.offset), static_cast<uint32_t>(l.width), l.value});
+      }
       continue;
     }
     if (op == Ntype_op::Set_mask && off == 0) {

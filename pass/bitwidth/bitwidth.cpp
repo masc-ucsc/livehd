@@ -83,6 +83,7 @@ constexpr bool infer_internal_range(Ntype_op op) {
     case Ntype_op::Not:
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask:
+    case Ntype_op::Concat:
     case Ntype_op::Sext:
     case Ntype_op::LT:
     case Ntype_op::GT:
@@ -1048,6 +1049,57 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(res_min, res_max));
 }
 
+// Concat's range is a pure function of the DECLARED lane widths, and of
+// nothing else -- not of the lane values' own ranges.
+//
+// Every lane occupies its own window, so a lane's sign never escapes: a driver
+// NARROWER than its window sign-extends into it (-1 at 3 bits is 0b111), and a
+// driver WIDER than its window is an internal compile error, not a truncation
+// (graph_util::concat_lane_violation -- truncating would shift every lane above
+// it). The result therefore saturates the full magnitude (any lane can be
+// all-ones) and is never negative: exactly [0, 2^sum(w_i)-1].
+// set_ubits_range spells that, and set_bits_sign then stamps
+// bits = sum(w_i)+1 -- the magnitude plus the always-zero sign slot of an
+// unsigned LiveHD value -- and `unsign`.
+//
+// Two traps live here, which is why the lane table only ever comes from
+// graph_util::concat_lanes:
+//   - The odd sink pids hold the WIDTH constants, not data. The generic
+//     operand seeding above puts them in bwmap like any other const, so a
+//     process_* that folded all its operands' ranges together would widen the
+//     result by the width NUMBER (an 8-lane concat carries an operand holding
+//     8). Nothing but the lane table is read below.
+//   - A lane's declared window is NOT recoverable from its driver. bits_of on
+//     the value is an upper bound that this very pass is free to narrow, and
+//     the significant bits are narrower still; re-deriving a width from it
+//     shifts every lane ABOVE the one that got it wrong.
+void Bitwidth::process_concat(hhds::Node_class& node) {
+  const auto lanes = livehd::graph_util::concat_lanes(node);
+  const auto total = livehd::graph_util::concat_total_width(lanes);
+  if (total <= 0) {
+    // Malformed cell (a missing lane, or a width operand that is not yet a
+    // positive constant). Fail closed: do NOT fall back to the pre-stamped
+    // bits, since a total that disagrees with the lane table misplaces every
+    // lane. Retrying is worth it -- adjust_bw can still const-fold the width
+    // operand's driver in a later iteration -- and if it never resolves,
+    // report_unbounded names the pin.
+    not_finished = true;
+    return;
+  }
+
+  // The lane contract. Run AFTER the total<=0 bail so a malformed cell keeps
+  // retrying (its widths may still const-fold) instead of aborting, and only on
+  // a fully decoded table. A lane driver may be narrower than its window (this
+  // very pass narrows drivers); wider means some producer sized a lane from
+  // something other than its declared type.
+  const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
+  I(lane_bad.empty(), lane_bad.c_str());
+
+  Bitwidth_range bw;
+  bw.set_ubits_range(total);
+  adjust_bw(node.create_driver_pin(0), bw);
+}
+
 void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   // inp_edges may not be in pid order — sort by sink port_id so [0]==a, [1]==b.
   sort_inp(inp_edges);
@@ -1758,6 +1810,8 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         process_get_mask(node);
       } else if (op == Ntype_op::Set_mask) {
         process_set_mask(node);
+      } else if (op == Ntype_op::Concat) {
+        process_concat(node);
       } else if (op == Ntype_op::Sext) {
         process_sext(node, inp_edges);
       } else if (op == Ntype_op::Sub) {

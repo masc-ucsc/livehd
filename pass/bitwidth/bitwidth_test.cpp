@@ -546,4 +546,34 @@ TEST(BitwidthInfer, MuxUnionsDataArms) {
   EXPECT_GE(run_and_read_driver(g, mux), 8) << "process_mux must union the data-arm widths";
 }
 
+// Concat: sinks are interleaved (value, declared-width) pairs, MSB-first. The
+// output range is a function of the DECLARED widths alone -- here 3+5 -- and
+// not of the lane values, which are two SIGNED ports spanning [-4..3] and
+// [-16..15]. Each lane occupies its own window, so the result is [0..255]:
+// 9 signed bits stamped unsign.
+//
+// The lane drivers are sized to FIT their windows (3 and 5) because a driver
+// wider than its window is now an internal compile error, not a truncation --
+// see graph_util::concat_lane_violation and process_concat. A driver may still
+// be NARROWER than its window; it sign-extends into it.
+//
+// The two ways to get the width wrong both look plausible and both miscompile:
+// folding the width CONSTANTS in as data operands (they are 3 and 5, so the
+// result would look 4 bits wide), or re-deriving a lane's width from its
+// driver's bits_of -- which is why the drivers here are deliberately NOT the
+// same width as each other.
+TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
+  auto g  = bounded_inputs("bw_concat", 3, 5);
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);  // no bits
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));              // lane 0 value (MSB lane)
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(3)).connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("b").connect_sink(op.create_sink_pin(2));  // lane 1 value (LSB lane)
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(5)).connect_sink(op.create_sink_pin(3));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  EXPECT_EQ(run_and_read_driver(g, op), 9) << "3+5 declared lane bits plus the always-zero sign slot";
+  EXPECT_TRUE(livehd::graph_util::is_unsign(op.create_driver_pin(0)))
+      << "every lane is masked into its own window, so a concat result is never negative";
+}
+
 }  // namespace

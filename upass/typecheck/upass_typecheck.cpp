@@ -208,6 +208,42 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
   set_dst_kind(dst, Kind::integer);
 }
 
+void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
+  // `concat(msb, …, lsb)`: each lane is an integer bit window, so the rule is
+  // require_all(integer) — EXCEPT that a TUPLE lane is also legal: `concat(t)`
+  // splices t's fields (field 0 most significant). constprop owns that
+  // expansion, so all this pass does is not reject the tuple on its way there.
+  // Booleans stay errors (no bool↔int interop, same as everywhere else).
+  //
+  // Nothing here looks at a lane's WIDTH: the declared-width rule that sizes
+  // each window belongs to upass.bitwidth + upass.tolg, not to a kind check.
+  // Operands are INTERLEAVED (value, width) pairs. Only the EVEN ones are
+  // lanes; the odd ones are the window widths, which are `nil` until an upass
+  // pass binds them -- so walking every operand would report that pending
+  // `nil` as a nil-in-concat type error.
+  bool bad     = false;
+  bool has_nil = false;
+  for (std::size_t i = 0; i < src.size(); i += 2) {
+    const Kind k = kind_of_operand(src[i]);
+    if (k == Kind::nil) {
+      has_nil = true;
+    } else if (k == Kind::unknown || k == Kind::integer || k == Kind::tuple) {
+      // wildcard, a scalar lane, or a spliced tuple lane — ok
+    } else {
+      bad = true;
+    }
+  }
+  if (has_nil) {
+    emit_type_error("nil-operand", "`nil` is invalid in `concat` (only copy, `==nil`/`!=nil`, and `.[valid]` are allowed)");
+  } else if (bad) {
+    emit_type_error("type-mismatch-concat",
+                    std::format("`concat` requires integer lanes ({})", name_operands(src)),
+                    "a lane is an integer bit window (a tuple lane splices its fields) — no implicit conversion, "
+                    "cast explicitly (e.g. `unsigned(b)`)");
+  }
+  set_dst_kind(dst, Kind::integer);
+}
+
 void uPass_typecheck::require_same(Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src) {
   bool any_nil = false;
   for (const auto& o : src) {
@@ -492,6 +528,7 @@ upass::Vote uPass_typecheck::process_ge(std::string_view, Bundle& dst, upass::Sr
 // ── bit manipulation / type-id: result kind only (operands not kind-checked) ─
 upass::Vote uPass_typecheck::process_set_mask(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
 upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
+upass::Vote uPass_typecheck::process_concat(std::string_view, Bundle& dst, upass::Src_span src) { require_concat(dst, src); return Vote::keep; }
 // clang-format on
 
 // ── aggregates: passthrough kinds, no homogeneity check ─────────────────────

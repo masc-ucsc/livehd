@@ -644,8 +644,12 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
         case Ntype_op::And:
         case Ntype_op::Or:
         case Ntype_op::Xor:
-        case Ntype_op::EQ  : return absl::StrCat("(", build_simple_expr(nullptr, node), ")");
-        default            : break;
+        // A concatenation is SELF-DELIMITING (`{a,b,c}` carries its own braces
+        // and its own width), so it inlines as safely as the operators above --
+        // and its lanes are already width-adjusted by build_simple_expr.
+        case Ntype_op::Concat:
+        case Ntype_op::EQ     : return absl::StrCat("(", build_simple_expr(nullptr, node), ")");
+        default               : break;
       }
     }
   }
@@ -2088,6 +2092,124 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // and the enclosing unsigned context cannot demote it to a logical shift.
       final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
     }
+  } else if (op == Ntype_op::Concat) {
+    // MSB-first `{lane0, lane1, ...}`. The lane table comes from concat_lanes(),
+    // NEVER from inp_edges: a lane's window width rides an explicit const
+    // operand (the odd sink pids) precisely because it is not recoverable from
+    // the driver -- bits_of is an upper bound bitwidth/cprop are free to narrow,
+    // and the value's significant bits are narrower still. Re-deriving a width
+    // here would shift every lane ABOVE the one guessed wrong: a silent
+    // miscompile, not a build error.
+    const auto lanes = livehd::graph_util::concat_lanes(node);
+    if (lanes.empty()) {
+      // FAIL CLOSED, same argument as the terminal `else` below. Empty means
+      // MALFORMED (missing/odd pin, a non-const or non-positive width), never
+      // "zero lanes" -- and the empty-final_expr fallbacks at the end of this
+      // function would quietly turn it into `'hx`.
+      livehd::diag::err("inou.cgen", "concat-malformed", "internal")
+          .msg("cell `{}` is a Concat whose lane table could not be decoded", debug_name(node))
+          .hint(
+              "a Concat's sinks are interleaved (value, width) pairs on p0,p1,p2,...; every odd pid must carry a "
+              "positive integer constant")
+          .fatal();
+      return {};
+    }
+
+    // Every lane must land at EXACTLY its window width. Verilog SELF-determines
+    // each concatenation operand -- it contributes its OWN width, not the
+    // context's -- so a lane one bit too wide or too narrow silently shifts
+    // every lane above it. That is why each one is width-adjusted here instead
+    // of being pasted in raw.
+    auto lane_at_width = [&](const hhds::Pin_class& v, int32_t w) -> std::string {
+      if (is_const_pin(v)) {
+        // Fold to a literal at the window width: a sized literal cannot take a
+        // part-select and an unsized one self-determines at its own width, so
+        // neither of the adjust forms below is available for a constant.
+        // to_binary() is MSB-first over get_bits() and spells an unknown bit
+        // '?' (the same spelling const_to_verilog already emits), so the low w
+        // characters ARE the window, and a shorter value replicates its msb --
+        // which is exactly `value mod 2^w` for a negative lane (-1 at w=3 is
+        // 0b111).
+        auto bin = hydrate_const(v).to_binary();
+        if (bin.empty()) {
+          bin = "0";
+        }
+        if (static_cast<int32_t>(bin.size()) >= w) {
+          bin.erase(0, bin.size() - static_cast<size_t>(w));
+        } else {
+          const char msb = bin.front();  // copy: the insert below reallocates
+          bin.insert(bin.begin(), static_cast<size_t>(w) - bin.size(), msb);
+        }
+        return absl::StrCat(w, "'b", bin);
+      }
+
+      auto expr = get_expression(v);
+      // The width the lane's net was actually DECLARED with. decl_bits_of()
+      // answers that for every net EXCEPT a Get_mask whose PIN IS SIGNED: it
+      // drops the always-zero sign slot only when is_unsign says so, while
+      // create_locals FORCES out_unsigned for every Get_mask node -- so
+      // add_to_pin2var narrowed the declaration and decl_bits_of did not
+      // follow. MEASURED on `wire t8:s8 = c` (c:s3): the net is declared
+      // `reg [6:0] get_mask_32_u` while decl_bits_of reports 8, the lane
+      // contributed 7 bits, and the `lhd lec --set formal.solver=lgyosys`
+      // against a hand-written golden REFUTED -- a one-bit lane error shifts
+      // every lane above it, so it is never contained. Read the flag
+      // add_to_pin2var recorded rather than re-deriving the policy.
+      const auto pidx = v.get_class_index();
+      int32_t    dw   = decl_bits_of(v);
+      if (pin2var.contains(pidx) && pin2var_unsigned_.contains(pidx)
+          && type_op_of(v.get_master_node()) == Ntype_op::Get_mask) {
+        dw = bits_of(v) - 1;
+      }
+      if (dw <= 0) {
+        dw = 1;  // no width stamp: add_to_pin2var declares a SCALAR reg
+      }
+      if (dw == w) {
+        return expr;
+      }
+      if (dw > w) {
+        // Truncate. This is NOT a sign question: the window is defined as the
+        // LOW w bits, so a negative lane keeps its two's-complement pattern and
+        // must not be sign-extended back. dw > w >= 1 implies dw >= 2, so the
+        // net is a vector and the part-select is legal (a 1-bit net is declared
+        // as a scalar, which cannot be indexed).
+        return absl::StrCat(expr, "[", w - 1, ":0]");
+      }
+      // Widen to w. `value mod 2^w` of a NEGATIVE value IS its two's-complement
+      // window, i.e. a sign extension. The pad is chosen by the VALUE's sign
+      // (is_unsign), not by how the net was declared: the one net whose
+      // declaration disagrees is that same signed-pin Get_mask `_u` net, and
+      // there the assignment `get_mask_32_u = c` already sign-extended `c` into
+      // the narrow unsigned reg -- so its top bit IS the value's sign and
+      // replicating it recovers the window, while a zero pad would turn a
+      // negative lane positive.
+      const int32_t pad = w - dw;
+      if (is_unsign(v)) {
+        return absl::StrCat("{", pad, "'b0,", expr, "}");
+      }
+      const auto sign_bit = (dw == 1) ? expr : absl::StrCat(expr, "[", dw - 1, "]");
+      return absl::StrCat("{{", pad, "{", sign_bit, "}},", expr, "}");
+    };
+
+    // The emitted `{...}` is ALWAYS sum(w) bits wide. The driver pin's stamped
+    // bits is not consulted: the interleaved const sinks carry the INTENDED bit
+    // spacing, and LGraph passes are free to narrow a lane driver's real width
+    // without that changing where any lane sits. This used to clip to
+    // `min(bits_of(dpin), total)` and DROP whole MSB lanes, which silently
+    // changed the value of every design where anything narrowed the pin.
+    const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
+    I(lane_bad.empty(), lane_bad.c_str());
+
+    std::string body;
+    for (const auto& l : lanes) {
+      if (!body.empty()) {
+        absl::StrAppend(&body, ",");
+      }
+      // Exactly its declared window: a narrower driver sign-extends up to it
+      // (lane_at_width), a wider one cannot reach here.
+      absl::StrAppend(&body, lane_at_width(l.value, l.width));
+    }
+    final_expr = absl::StrCat("{", body, "}");
   } else if (op == Ntype_op::Nconst) {
     return {};  // emitted as expr at create_locals time
   } else if (op == Ntype_op::AttrSet) {
@@ -3315,6 +3437,17 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     auto        dpin         = node.get_driver_pin(0);
     std::string name         = get_scaped_name(pin_wire_name(dpin));
     bool        out_unsigned = is_unsign(dpin);
+    if (op == Ntype_op::Concat) {
+      // A Concat is the one cell whose result is non-negative BY CONSTRUCTION:
+      // every lane masks into its own window, so no lane's sign can escape, and
+      // the value is the sum-of-windows in [0, 2^sum(w)). The pin is stamped
+      // bits = sum(w)+1 and `unsign` at creation -- but force it here rather
+      // than trusting is_unsign, because a `reg signed` destination re-reads a
+      // top-lane all-ones as a NEGATIVE number the moment the pin arrives one
+      // bit short of the sign slot (a graph that reached cgen without
+      // pass.bitwidth, or a driver bitwidth narrowed to exactly sum(w)).
+      out_unsigned = true;
+    }
 
     if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       // (large-mux vector path disabled in the original; preserve.)
@@ -3490,6 +3623,44 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         continue;
       }
       add_to_pin2var(fout, clk_dpin, get_scaped_name(pin_wire_name(clk_dpin)), is_unsign(clk_dpin));
+    }
+  }
+
+  // Fourth pass — a Concat LANE VALUE must never be an inlined expression.
+  //
+  // Verilog SELF-DETERMINES every concatenation operand, so build_simple_expr
+  // has to place each lane at EXACTLY its declared window width `w` (a
+  // part-select when the operand is wider, a sized pad when it is narrower) or
+  // every lane above it shifts. That adjustment needs the operand's width to be
+  // KNOWN, and only two spellings carry one: a constant literal (folded in
+  // place) and a DECLARED net (declared at bits_of -- see add_to_pin2var, which
+  // decl_bits_of tracks). An expression folded inline instead self-determines at
+  // its own natural Verilog width -- max over its operands -- which is neither
+  // bits_of nor `w`, and nothing in the emitted text would reveal the mismatch.
+  //
+  // Runs as its own pass, and by construction BEFORE process_simple_node fills
+  // pin2expr: that is what makes a Concat feeding another Concat's lane land in
+  // a net of its own rather than as an inlined `{...}` of unknown width.
+  for (auto node : graph->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Concat) {
+      continue;
+    }
+    if (!node.has_out_edges()) {
+      continue;  // dead concat: no statement is emitted for it
+    }
+    for (const auto& lane : livehd::graph_util::concat_lanes(node)) {
+      const auto& v = lane.value;
+      if (v.is_invalid() || is_const_pin(v) || pin2var.contains(v.get_class_index())) {
+        continue;  // folded to a literal, or already a declared net / module input
+      }
+      // Same hazard the second and third passes argue above: a pin parked in
+      // pin2expr has NO assignment emitter, so declaring it would mint a net
+      // nothing drives -- and get_expression prefers pin2var over pin2expr, so
+      // the lane would read that dangling net instead of the alias text.
+      if (pin2expr.contains(v.get_class_index())) {
+        continue;
+      }
+      add_to_pin2var(fout, v, get_scaped_name(pin_wire_name(v)), is_unsign(v));
     }
   }
 }

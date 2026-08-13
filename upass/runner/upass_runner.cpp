@@ -1208,6 +1208,243 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
   return false;  // a tuple/struct named type (or a scalar with no baked range) — verbatim
 }
 
+// Report every `concat` lane that declares no width.
+//
+// Deliberately NOT folded into resolve_concat_widths, which runs on the EMIT
+// path: emission is materialize-only, and the comptime / expected-error tiers
+// (`toln:0`) never materialize -- so a diagnostic raised there would simply not
+// exist for anyone compiling for comptime. This runs from the dispatch path,
+// which every tier takes. upass.tolg keeps its own copy of the check as the
+// fail-closed backstop for whatever reaches lowering.
+void uPass_runner::check_concat_lanes() {
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto nid = lm->get_current_nid();
+  if (!concat_checked_.insert(nid).second) {
+    return;  // the runner may revisit a node across iterations; report once
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();  // child 0 = dst ref
+  const std::string dst(lm->current_text());
+  uint64_t          total = 0;
+  bool              bad   = false;
+  while (lm->move_to_sibling()) {
+    const std::string lane_name(lm->current_text());
+    const bool        lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
+    livehd::diag::Span span       = lm->current_span();
+    if (!lm->move_to_sibling()) {
+      break;  // trailing lane with no width operand: malformed shape, tolg reports it
+    }
+    const auto bound_txt = std::string(lm->current_text());
+    if (!bound_txt.empty() && bound_txt != "nil") {
+      auto bv = Dlop::from_pyrope(bound_txt);  // a frontend already bound this window
+      if (bv && bv->is_integer() && bv->is_just_i64() && bv->to_just_i64() > 0) {
+        total += static_cast<uint64_t>(bv->to_just_i64());
+      } else {
+        bad = true;
+      }
+      continue;
+    }
+    if (const auto db = lane_is_ref ? concat_lane_declared_bits(lane_name) : 0; db != 0) {
+      total += db;
+      continue;
+    }
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "concat-untyped-lane",
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = lane_is_ref ? std::format("concat lane `{}` has no declared bit width", lane_name)
+                                : std::format("concat lane `{}` is a literal, which has no declared bit width", lane_name),
+        .span     = std::move(span),
+        .hint     = "a concat window is sized by the lane's DECLARED type -- never by its value, an inferred range, "
+                    "or a literal's spelling -- because narrowing one lane would shift every lane above it; bind it to "
+                    "a typed name first (`const w:u4 = <expr>` then `concat(..., w, ...)`)",
+    });
+    bad = true;
+  }
+  lm->restore_cursor(saved);
+  // Record the result temp's own width even in a non-materializing tier: the
+  // destination check below reads it, and so does a NESTING concat's lane
+  // lookup (an inner concat's temp is never user-declared, but its width is
+  // the lane sum by construction).
+  if (!bad && total > 0 && !dst.empty()) {
+    concat_result_bits_[dst] = static_cast<uint32_t>(total);
+  }
+}
+
+// `c:u12 = concat(a:u4, b:u8)` -- the destination's declared width must equal
+// the lane sum EXACTLY. Not `>=`: a concat states a bit LAYOUT, and a
+// destination that quietly zero-extends it is a layout the source never wrote.
+// Signedness is free (`u12` and `s12` are both 12-bit fields), so only the
+// width is compared.
+//
+// Runs where a concat's TEMP is bound to a named destination, because the
+// concat node's own dst is always a compiler temp.
+void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_view value_name) {
+  const auto cit = concat_result_bits_.find(std::string(value_name));
+  if (cit == concat_result_bits_.end()) {
+    return;
+  }
+  // PYROPE ONLY. "the destination must declare the lane sum" is a rule about
+  // Pyrope SOURCE: it exists so a concat's bit layout is written down at both
+  // ends. Verilog states its widths its own way -- `logic [14:0] x; assign x =
+  // {a,b,c};` is a complete declaration, and Verilog's assignment rules make a
+  // wider or narrower target legal (pad / truncate) rather than an error. slang
+  // has already resolved all of that and binds every lane width itself, so
+  // applying the Pyrope rule to an imported design rejects ordinary RTL --
+  // minion's vpu_top.sv alone produced 269 of these. Same split tolg draws for
+  // an undriven read (hard error for Pyrope, warn for Verilog).
+  if (lm && lm->get_lnast() && lm->get_lnast()->is_verilog_origin()) {
+    return;
+  }
+  // Only a SOURCE-level destination is checked. A store into a compiler temp
+  // (an SSA staging name a frontend minted, a `___N`) is an internal move, not
+  // a declaration the user wrote, and demanding a type of it would reject a
+  // frontend's own staging name.
+  dest_name = concat_logical_name(dest_name);
+  if (dest_name.empty()) {
+    return;
+  }
+  const auto nid = lm->get_current_nid();
+  if (!concat_dest_checked_.insert(nid).second) {
+    return;
+  }
+  const uint32_t declared = concat_lane_declared_bits(dest_name);
+  livehd::diag::Span span = lm->current_span();
+  if (declared == 0) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "concat-untyped-dest",
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = std::format("`{}` is assigned a concat but has no declared type", dest_name),
+        .span     = std::move(span),
+        .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
+                                "(e.g. `{}:u{}` or `{}:s{}`)",
+                                cit->second, dest_name, cit->second, dest_name, cit->second),
+    });
+    return;
+  }
+  if (declared != cit->second) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "concat-width-mismatch",
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = std::format("`{}` is declared {} bits but the concat assigned to it is {} bits", dest_name, declared,
+                                cit->second),
+        .span     = std::move(span),
+        .hint     = "a concat's destination must match the lane sum EXACTLY, so the bit layout the source states is "
+                    "the layout the destination has -- widen or narrow the lanes, not the destination",
+    });
+  }
+}
+
+// The DECLARED bit width of one `concat` lane, or 0 when the lane declares
+// none. This is the only width a concat window may be sized by.
+//
+// Three sources, in order:
+//   * a previous concat's result -- its width is the lane sum, by construction,
+//     which is what makes `concat(concat(a,b), c)` legal without the inner temp
+//     ever being declared by the user;
+//   * decl_facts, the single source of truth for "what was `name` declared as".
+//     Its `bits` is already the FIELD width (the sign slot is dropped for an
+//     unsigned declaration), so `a:u4` and `a:s4` both answer 4 -- which is
+//     right: a window is a bit count, and signedness only decides how the bits
+//     are read back;
+//   * nothing. A literal operand lands here (a literal has no declared type,
+//     however it is spelled) and so does an unannotated expression. Both keep
+//     the `nil` and are reported by upass.tolg, which has the span.
+uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) const {
+  if (lane_name.empty()) {
+    return 0;
+  }
+  if (const auto it = concat_result_bits_.find(std::string(lane_name)); it != concat_result_bits_.end()) {
+    return it->second;
+  }
+  // A read is an SSA VERSION (`a___ssa_2`); the type was declared once on the
+  // base name. Without this strip every lane in an SSA'd body -- which is every
+  // lane a frontend produces -- looks undeclared.
+  const auto base = concat_logical_name(lane_name);
+  if (const auto it = concat_result_bits_.find(std::string(base)); it != concat_result_bits_.end()) {
+    return it->second;
+  }
+  const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, base);
+  if (!f || !f->has_type_spec || f->bits == 0) {
+    return 0;
+  }
+  return f->bits;
+}
+
+// The user-visible variable behind an LNAST name: SSA suffix stripped. Returns
+// empty for a pure COMPILER TEMP (`___3`, `%4`), which has no user identity at
+// all -- the "a concat's destination must be declared" rule is a statement
+// about SOURCE, so it cannot be asked of a temp the compiler minted itself.
+std::string_view uPass_runner::concat_logical_name(std::string_view name) {
+  if (const auto p = name.find("___ssa_"); p != std::string_view::npos) {
+    name = name.substr(0, p);
+  }
+  if (name.empty() || name.starts_with("___") || name.front() == '%') {
+    return {};
+  }
+  return name;
+}
+
+// Walk the concat node under the cursor and return the width text to emit for
+// each lane ("" = leave the `nil` in place). Also records the result temp's own
+// width when EVERY lane resolved, so a nesting concat can size this one.
+std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_name) {
+  std::vector<std::string> widths;
+  if (!lm->has_child()) {
+    return widths;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  dst_name = std::string(lm->current_text());  // child 0 is the dst ref
+
+  uint64_t total     = 0;
+  bool     all_bound = true;
+  while (lm->move_to_sibling()) {
+    const std::string lane_name(lm->current_text());
+    const bool        lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
+    if (!lm->move_to_sibling()) {
+      all_bound = false;  // trailing lane with no width operand: malformed, tolg reports it
+      break;
+    }
+    // An ALREADY-BOUND width wins: a frontend that knew the window (slang reads
+    // it off the operand type) has better information than anything derivable
+    // from a name, and re-deriving it could disagree.
+    const auto        bound_txt = std::string(lm->current_text());
+    const bool        is_nil    = bound_txt.empty() || bound_txt == "nil";
+    if (!is_nil) {
+      widths.emplace_back();  // keep whatever is there
+      auto v = Dlop::from_pyrope(bound_txt);
+      if (v && v->is_integer() && v->is_just_i64() && v->to_just_i64() > 0) {
+        total += static_cast<uint64_t>(v->to_just_i64());
+      } else {
+        all_bound = false;
+      }
+      continue;
+    }
+    const uint32_t bits = lane_is_ref ? concat_lane_declared_bits(lane_name) : 0;
+    if (bits == 0) {
+      widths.emplace_back();  // unresolved: leave the nil; check_concat_lanes reported it
+      all_bound = false;
+      continue;
+    }
+    widths.emplace_back(std::to_string(bits));
+    total += bits;
+  }
+  lm->restore_cursor(saved);
+
+  if (all_bound && total > 0 && total <= std::numeric_limits<uint32_t>::max() && !dst_name.empty()) {
+    concat_result_bits_[dst_name] = static_cast<uint32_t>(total);
+  }
+  return widths;
+}
+
 void uPass_runner::emit_op_with_fold(bool fold_all) {
   if (!materialize_) {
     return;  // pure emission (dispatch happened in the caller); cursor untouched
@@ -1218,6 +1455,27 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   }
   const auto op_ntype = lm->current_type();
   const bool is_call  = Lnast_ntype::is_func_call(op_ntype);
+
+  // ── concat: bind the `nil` width operands, HERE ──────────────────────────
+  //
+  // `concat(dst, v0, w0, v1, w1, …)` reaches the runner with every `w` still
+  // the `nil` sentinel when the frontend had no types (prp2lnast). Each one has
+  // to become the lane's DECLARED width, and it has to happen at THIS moment:
+  // the loop below folds a comptime lane ref to a literal, and a literal's
+  // magnitude is not its window (`0ub0010` and `0ub10` are the same value at
+  // different widths). Resolve first, fold second, and the width survives as a
+  // sibling operand.
+  //
+  // Deliberately NOT sized from the lane's value or its inferred range: a
+  // window that shrank because a value happened to be small would shift every
+  // lane ABOVE it -- a silent miscompile, not a lost bound. An unresolvable
+  // lane keeps its `nil` and upass.tolg reports it with a span.
+  std::vector<std::string> concat_widths;  // one per lane, "" = leave the nil
+  std::string              concat_dst;
+  if (Lnast_ntype::is_concat(op_ntype)) {
+    concat_widths = resolve_concat_widths(concat_dst);
+  }
+
   emit_push(op_ntype);      // carries the SourceId (general carry)
   std::string call_callee;  // child 1 of a func_call — read while walking it below
 
@@ -1258,6 +1516,10 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
           lm->move_to_parent();
         }
         emit_pop();
+      } else if (!concat_widths.empty() && idx >= 2 && (idx % 2) == 0 && !concat_widths[idx / 2 - 1].empty()) {
+        // A concat WIDTH operand (children 2, 4, 6, … pair with lanes 1, 3, 5, …)
+        // that we just resolved: emit the bound width in place of the `nil`.
+        emit_leaf(Lnast_node::create_const(concat_widths[idx / 2 - 1]));
       } else {
         // Either the LHS (don't fold — it's a dst) or a non-ref child (const,
         // or a nested subtree).
@@ -1666,6 +1928,9 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
     // No leading dst ref: still push-dispatch with a throwaway dst (hooks
     // that need the payload walk the cursor themselves).
     rn.dst = std::make_shared<Bundle>("");
+  }
+  if (Lnast_ntype::is_concat(lm->get_raw_ntype())) {
+    check_concat_lanes();  // dispatch path: runs in EVERY tier, unlike emission
   }
   const bool vote_drop = dispatch_push(fn, rn);
   // task 2n Phase B: record the just-defined variable into the LSP semantic
@@ -8382,6 +8647,7 @@ bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_sext:
     case N::Lnast_ntype_set_mask:
     case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_concat:
     case N::Lnast_ntype_bit_and:
     case N::Lnast_ntype_bit_or:
     case N::Lnast_ntype_bit_xor:
@@ -8827,6 +9093,21 @@ void uPass_runner::process_lnast() {
     // (the bundle mutation is the point — never dropped, classify not
     // consulted, matching the old process_verbatim path).
     case Ntype::Lnast_ntype_store:
+      // `c = concat(...)`: the destination's declared width must equal the lane
+      // sum exactly. Checked at the bind, not at the concat, because the concat
+      // node's own dst is always a compiler temp.
+      if (lm->current_num_children() == 2 && lm->has_child()) {
+        const auto sv = lm->save_cursor();
+        lm->move_to_child();
+        const std::string dname(lm->current_text());
+        if (lm->move_to_sibling()) {
+          const std::string vname(lm->current_text());
+          lm->restore_cursor(sv);
+          check_concat_dest(dname, vname);
+        } else {
+          lm->restore_cursor(sv);
+        }
+      }
       if (lm->current_num_children() <= 2) {
         // Direct self-store `store(c, c)` (`c = c`) is a user-facing
         // diagnostic: deliberately the EXACT lowered form only (no
@@ -9037,6 +9318,7 @@ void uPass_runner::process_lnast() {
     A_OP(sext)
     A_OP(set_mask)
     A_OP(get_mask)
+    A_OP(concat)
 
     // Comparison
     A_OP(ne)

@@ -391,8 +391,19 @@ ${LHD} compile "$W/sub_output_boundary.sv" --reader slang --top sub_output_bound
 ${LHD} sim lg:"$W/sub_output_boundary_lg/" "$W/sub_output_boundary_tb.prp" \
   --set sim.vcd=false --workdir "$W/sub_output_boundary_sim" -q \
   || fail "fused sub-output boundary generated simulation failed"
-grep -Eq 'zext_to<3>\(\)' "$W"/sub_output_boundary_sim/sim/*.cpp \
-  || fail "fused sub-output boundary did not canonicalize its child carrier"
+# The child's packed value must reach the parent through an EXPLICIT boundary
+# conversion at the child's DECLARED output width (2), not as whatever carrier
+# the pack happened to compute in.
+#
+# This used to grep for `zext_to<3>()`, because the child's `out_o[0]=`/`[1]=`
+# writes lowered to a Set_mask chain whose carrier was one bit wider than the
+# port. They now lower to a single Concat, whose width is the sum of its lane
+# windows BY CELL CONTRACT -- exactly 2 -- so there is no longer a wider
+# internal carrier to narrow, and the conversion lands at 2. The invariant being
+# guarded is unchanged (the parent observes the declared boundary before using
+# the value); only the width the boundary sits at moved, and it moved tighter.
+grep -Eq 'zext_to<2>\(\)' "$W"/sub_output_boundary_sim/sim/*.cpp \
+  || fail "fused sub-output boundary did not observe the child's declared output width"
 echo "PASS: fused hierarchy preserves the child output boundary"
 
 # ── (5) struct first written inside a unique-case arm ─────────────────────────

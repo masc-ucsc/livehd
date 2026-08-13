@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+#include <limits>
 #include <map>
 #include <optional>
 #include <print>
@@ -3237,6 +3238,20 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
   return true;
 }
 
+// A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
+// ("concat_op lane does not fit its declared width"), so an over-wide lane
+// would ABORT a -c dbg build instead of leaving the node unfolded. The kernel
+// measures the BASE plane's signed width; Dlop::get_bits() is that same count,
+// only ever rounded UP for unknowns (it returns max(base_bits, …)), so this
+// test is always at least as strict as the assert — it may decline a fold the
+// kernel would have accepted, never the reverse. A negative lane spends its top
+// bit on the sign (that is how -1 lands as 0b111 in a 3-bit window); a
+// non-negative one is magnitude plus the zero sign slot.
+static bool concat_lane_fits(const Dlop& v, int bits) {
+  const int gb = v.get_bits();
+  return v.is_negative() ? gb <= bits : gb <= bits + 1;
+}
+
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
   // against the Ntype_op kernel set. Operands are positional and follow the
@@ -3436,6 +3451,40 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     if (need_n(2)) {
       result  = *args[0].sra_op(args[1]);
       matched = true;
+    }
+  } else if (op == "concat") {
+    // The Concat cell's sinks are INTERLEAVED (value, width) pairs at pids
+    // 2i / 2i+1, and `args` is already packed in pid order — so args[2i] is a
+    // lane and args[2i+1] its DECLARED window width. A left-fold like `and`/
+    // `or` above would assemble every width as if it were a lane, and the
+    // binary Dlop::concat_op sizes by SIGNIFICANT bits, which is exactly what a
+    // concat window may not be sized by. Hence the n-ary kernel.
+    //
+    // A width that is not a positive comptime integer leaves the call
+    // unfolded rather than guessing: narrowing one window shifts every lane
+    // above it.
+    if (need_min(2) && (args.size() % 2) == 0) {
+      std::vector<Dlop::Concat_lane> lanes;
+      lanes.reserve(args.size() / 2);
+      for (std::size_t i = 0; i + 1 < args.size(); i += 2) {
+        const Dlop& w = args[i + 1];
+        if (!w.is_integer() || !w.is_just_i64()) {
+          lanes.clear();
+          break;
+        }
+        const auto n = w.to_just_i64();
+        if (n <= 0 || n > std::numeric_limits<int>::max() || !concat_lane_fits(args[i], static_cast<int>(n))) {
+          lanes.clear();
+          break;
+        }
+        lanes.push_back(Dlop::Concat_lane{&args[i], static_cast<int>(n)});
+      }
+      if (!lanes.empty()) {
+        if (auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(lanes.data(), lanes.size())); r && !r->is_invalid()) {
+          result  = *r;
+          matched = true;
+        }
+      }
     }
   } else {
     // mux / hotmux / lut handled earlier in try_eval_mux_cell_call.
@@ -5006,5 +5055,142 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   }
 
   store_trivial(var, *input_val.set_mask_op(final_mask, new_val));
+  return classify_vote();
+}
+
+// ── concat ───────────────────────────────────────────────────────────────────
+//
+// Layout: ref(dst), then INTERLEAVED (value, width) pairs, MSB-first — so the
+// LANES are src[0], src[2], … and their window WIDTHS src[1], src[3], ….
+// Reading the span as a flat lane list is the trap: every width would be
+// assembled as if it were a lane.
+//
+// The width rides as a sibling operand instead of being read off the value
+// because it is not recoverable from one: `0ub0010` and `0ub10` are the same
+// Dlop at two declared widths, and narrowing one lane shifts every lane ABOVE
+// it. So this fold never sizes a window — it folds only once every width is
+// already BOUND to a positive comptime integer, and otherwise leaves the node
+// alone (the runner binds the `nil`s at emit time from the lane's declared
+// type; upass.tolg owns the `concat-untyped-lane` error when nothing could).
+//
+// A TUPLE lane splices its fields into the layout (field 0 most significant),
+// each field carrying its own window — that is what makes `concat(my_tuple)`
+// legal. Here the splice is a FOLD-TIME expansion only: it feeds Dlop's n-ary
+// concat_op, it does not re-shape the LNAST node. Re-shaping would need to
+// insert operands in the MIDDLE of the node's child list, and the pinned HHDS
+// has no such primitive — `Tree::insert_next_sibling` appends at the end
+// regardless of the anchor (measured on this tree: inserting after child 2 of
+// 5 lands the new node last). A RUNTIME tuple lane therefore still reaches
+// upass.tolg un-expanded and is reported there; widening the operand list
+// belongs at the runner's emit-time concat seam, which already rewrites the
+// width operands in place.
+upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  (void)dst;
+  if (dst_name.empty() || src.empty() || (src.size() % 2) != 0) {
+    return classify_vote();  // no dst, or a lane with no width operand: fail closed
+  }
+  // Deliberately NOT report_nil_operand: an unbound width IS the `nil`
+  // sentinel, so the generic check would report every not-yet-typed lane as an
+  // illegal nil. A nil LANE is upass.typecheck's require_concat, which walks
+  // only the even operands and so can tell the two apart.
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // a lane is a runtime comb result → stay structural
+  }
+
+  struct Fold_lane {
+    Dlop value;
+    int  bits{0};
+  };
+  std::vector<Fold_lane> lanes;
+  lanes.reserve(src.size() / 2);
+
+  // A BOUND width: a positive comptime integer. The `nil` sentinel, a
+  // non-positive width, and an X-carrying width all read as "not bound yet" —
+  // never as a guess, because a wrong window silently relocates every lane
+  // above it.
+  auto bound_width = [&](const upass::Operand& o) -> std::optional<int> {
+    const Dlop w = operand_value(o);
+    if (!foldable(w) || !w.is_integer() || !w.is_just_i64()) {
+      return std::nullopt;
+    }
+    const auto n = w.to_just_i64();
+    if (n <= 0 || n > std::numeric_limits<int>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<int>(n);
+  };
+
+  for (std::size_t i = 0; i < src.size(); i += 2) {
+    const auto& vo = src[i];      // lane value
+    const auto& wo = src[i + 1];  // that lane's window width
+
+    std::shared_ptr<const Bundle> b        = vo.name.empty() ? vo.bundle : st().get_bundle(vo.name);
+    const bool                    is_tuple = b && (b->has_named_top() || b->unnamed_top_count() > 1);
+    if (is_tuple) {
+      // A tuple occupies no single window, so its own width operand must still
+      // be the unbound `nil`; a bound one would state a layout the fields do
+      // not have.
+      if (bound_width(wo) || vo.name.empty()) {
+        return classify_vote();
+      }
+      // Bundle iteration is CANONICAL (named alphabetically, then unnamed by
+      // position) — only the positional order coincides with the order the
+      // fields were declared. Splicing a NAMED-field tuple would lay it out
+      // alphabetically, i.e. the right bits in the wrong windows, with no
+      // diagnostic. Refuse instead; upass.tolg then reports the un-expanded
+      // lane. (Declaration order for named fields is not reachable from a
+      // Bundle today.)
+      if (b->has_named_top()) {
+        return classify_vote();
+      }
+      for (const auto& tl : b->top_levels()) {
+        if (tl.pos < 0 || tl.has_leafs || tl.leaf_count != 1) {
+          return classify_vote();  // named or nested field: no single window
+        }
+        // Same rule as a scalar lane: the window is the field's DECLARED
+        // width, never its value's magnitude.
+        const auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), absl::StrCat(vo.name, ".", tl.pos));
+        if (!f || f->bits == 0 || f->bits > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+          return classify_vote();  // undeclared field: nothing here may guess a width
+        }
+        if (!is_numeric(tl.scalar) || !concat_lane_fits(tl.scalar, static_cast<int>(f->bits))) {
+          return classify_vote();  // over-wide field: decline rather than trip concat_op's fit assert
+        }
+        lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(f->bits)});
+      }
+      continue;
+    }
+
+    const auto w = bound_width(wo);
+    if (!w) {
+      return classify_vote();  // width still `nil` — leave the node for tolg
+    }
+    // is_numeric, not foldable: unknowns are per-lane and POSITIONAL in
+    // concat_op (a lane's x-bits land in that lane's window and nowhere else),
+    // so an X-carrying lane still folds precisely.
+    const Dlop v = operand_value(vo);
+    if (!is_numeric(v) || !concat_lane_fits(v, *w)) {
+      return classify_vote();  // over-wide lane: decline rather than trip concat_op's fit assert
+    }
+    lanes.push_back(Fold_lane{v, *w});
+  }
+
+  if (lanes.empty()) {
+    return classify_vote();
+  }
+  // The N-ARY form, never the binary `a.concat_op(b)` member: that one sizes
+  // each operand by its SIGNIFICANT bits, so it cannot express `{a:u4, b:u2}`
+  // when `a` happens to hold 1. `lanes` is complete and never touched again,
+  // so the borrowed value pointers stay valid for the call.
+  std::vector<Dlop::Concat_lane> dl;
+  dl.reserve(lanes.size());
+  for (const auto& l : lanes) {
+    dl.push_back(Dlop::Concat_lane{&l.value, l.bits});
+  }
+  auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(dl.data(), dl.size()));
+  if (!r || r->is_invalid()) {
+    return classify_vote();
+  }
+  store_trivial(dst_name, *r);
   return classify_vote();
 }

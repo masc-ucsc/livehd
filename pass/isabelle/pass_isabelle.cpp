@@ -1329,6 +1329,21 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         break;
       }
 
+      case Ntype_op::Concat:
+        // Deliberate refusal, not an oversight.  The certificate op set is fixed
+        // DATA in Translation_LGraph_Model.thy (`datatype lgraph_op`), a file
+        // this pass does not own, and it has no constructor carrying the
+        // per-lane width list that a Concat needs.  No present op can stand in
+        // either: a dep reaches the evaluator as a bv at its OWN width and
+        // unshifted, so an Op_Sum/Op_Or over the lane deps loses both the
+        // per-lane window mask and the per-lane offset and would certify a
+        // different bus.  The fast model does handle Concat, so a design with
+        // one still exports its executable theory.
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node))
+                  + " has no certificate encoding: lgraph_op (Translation_LGraph_Model.thy) has no Op_Concat carrying the lane "
+                    "widths. Add it there first (lgraph_op, denote_op, eval_op, simple_op_cert_wf_bool).");
+
       default: fatal(ctx, "Unsupported op in certificate for node n_" + std::to_string(node_id(node)));
     }
   }
@@ -2328,6 +2343,64 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       auto value_w = pin_width(ctx, value, node);
       return "(sem_set_mask " + ucast_pin_at(ctx, a, w) + " " + driver_expr_at(ctx, mask, mask_w) + " "
              + driver_expr_at(ctx, value, value_w) + ")";
+    }
+
+    case Ntype_op::Concat: {
+      // out = SUM_i (value_i mod 2^w_i) << offset_i, lanes MSB-first.
+      //
+      // The lane table comes from the SHARED decoder. A lane's window width is
+      // an explicit operand precisely because it is NOT recoverable from the
+      // driver: bits_of is an upper bound that bitwidth/cprop narrow freely and
+      // the value's significant bits are narrower still, so re-deriving it here
+      // would shift every lane above the one that got it wrong. An empty table
+      // means the cell is malformed.
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      if (lanes.empty()) {
+        const auto reason
+            = "Concat node n_" + std::to_string(node_id(node)) + " is malformed (missing lane value or non-constant lane width)";
+        if (ctx.strict) {
+          fatal(ctx, reason + ".");
+        }
+        return undefined_at(w, reason);
+      }
+      int64_t total = 0;  // 64-bit: each lane width alone may be up to INT32_MAX
+      for (const auto& lane : lanes) {
+        total += lane.width;
+      }
+      // The driver pin carries sum(w_i)+1 bits (the magnitude plus the
+      // always-zero sign slot of an unsigned LiveHD value), so w is normally one
+      // bit wider than the assembly.  A NARROWER stamp is a graph inconsistency,
+      // not a truncating assignment to model around: the let-binding is typed at
+      // `w word`, every lane above it would vanish, and the emitted theory would
+      // then prove the wrong bus.  Hard-fail like the Memory width mismatch
+      // below, in strict mode or not.
+      if (total > static_cast<int64_t>(w)) {
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node)) + " assembles " + std::to_string(total)
+                  + " lane bits but its driver pin is stamped " + std::to_string(w)
+                  + " bits; the most significant lanes would be dropped.");
+      }
+      if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
+        fatal(ctx, lane_bad);
+      }
+      // Each lane occupies its OWN window before it is widened, so a negative
+      // lane lands as its two's-complement pattern (-1 at w=3 is 0b111) -- per
+      // lane and positional rather than smeared over the whole plane. A driver
+      // WIDER than its window was rejected just above, so the ucast below only
+      // ever extends.
+      //
+      // word_cat states the same value more directly, but it reads the lane width
+      // off the operand's TYPE and returns a fresh type variable per step; every
+      // other arm here normalizes operands with `ucast ... :: n word` at an
+      // explicit width, and the push_bit/or form (the SHL arm's spelling) keeps
+      // the result at the node width w that the let-chain already expects.
+      std::vector<std::string> terms;
+      terms.reserve(lanes.size());
+      for (const auto& lane : lanes) {
+        const auto masked = ucast_at(ucast_pin_at(ctx, lane.value, static_cast<uint32_t>(lane.width)), w);
+        terms.push_back(lane.offset == 0 ? masked : "(push_bit " + std::to_string(lane.offset) + " " + masked + ")");
+      }
+      return nary_op_func("Bit_Operations.or", terms);
     }
 
     case Ntype_op::Memory: {

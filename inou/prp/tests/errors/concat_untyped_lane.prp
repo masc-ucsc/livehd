@@ -1,0 +1,17 @@
+/*
+:name: concat_untyped_lane
+:type: error
+:error: no declared bit width
+:help: DECLARED type
+*/
+
+// A concat lane's window is its DECLARED type width. `u` looks sized -- its
+// initializer is a 3-digit binary literal -- but the VARIABLE has no type, and
+// a literal's spelling is not a declaration: `0ub101` and `0ub00101` are the
+// same value at different widths. Sizing the window from the value would let a
+// later change to `u` silently shift every lane above it, so this is refused
+// rather than guessed.
+comb concat_untyped_lane(b:u8) -> (z:u11) {
+  const u = 0ub101
+  z = concat(u, b)
+}

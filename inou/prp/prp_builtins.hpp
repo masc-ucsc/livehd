@@ -41,6 +41,11 @@ inline bool is_builtin_function(std::string_view name) {
       "import", "optimize",
       // overflow policies (also usable as `wrap x = …` statements)
       "wrap", "sat", "saturate",
+      // bit concatenation — `concat(a, b, c)`, argument 0 the MOST significant
+      // lane. Call-shaped but never a real call: prp2lnast rewrites it into the
+      // n-ary LNAST `concat` node (a func_call would lose the lane order, and
+      // each lane is sized by its DECLARED type at upass.tolg).
+      "concat",
       // concurrency / timing
       "spawn", "defer",
       // testbench storage references (sim-only; handled by prp_sim, not tolg).
@@ -105,6 +110,42 @@ inline uint64_t past_builtin_delay(std::string_view name) {
 // `past[N]` temporal builtin).
 inline bool is_builtin_callee(std::string_view name) {
   return is_builtin_function(name) || is_type_cast_callee(name) || past_builtin_delay(name) != 0;
+}
+
+// True iff a user `comb`/`mod`/`pipe` may NOT take this name.
+//
+// These are the built-ins prp2lnast intercepts UNCONDITIONALLY at the call site
+// (no receiver, callee spelled exactly so) BEFORE any lambda lookup happens:
+// the assert family, `import`, and `concat`. Defining `comb concat(...)` used
+// to parse fine and then be silently dead — every `concat(a, b)` was rewritten
+// into the n-ary LNAST concat node and the user's body was never reached, so
+// the failure surfaced much later as an unrelated `concat-untyped-lane`. It is
+// a definition-site error instead.
+//
+// Deliberately NOT reserved:
+//   * `wrap`/`sat`/`saturate` — statement-form overflow policies (`wrap x = …`),
+//     not call-site interceptions; `mod wrap(...)` is a legal module name.
+//   * `__`-prefixed cell intrinsics — emitted by the cellmap/lowering libraries,
+//     which legitimately define them.
+//   * type casts (`u8`, `signed`, …) — rejected earlier, as parse-level types.
+//   * methods: `t.concat = comb(...)` is fine, because a call WITH a receiver
+//     (`x.concat(a)`) is never intercepted.
+inline bool is_reserved_lambda_name(std::string_view name) {
+  static constexpr std::string_view reserved[] = {
+      "assert",
+      "cassert",
+      "assume",
+      "assume_nocheck",
+      "assert_always",
+      "import",
+      "concat",
+  };
+  for (const auto n : reserved) {
+    if (n == name) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace prp_builtins

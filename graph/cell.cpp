@@ -192,9 +192,17 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       [[fallthrough]];
     case Ntype_op::IO:
-    case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
-    case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::LUT:     // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Sub:     // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs; lane i at 2i/2i+1
       assert(is_unlimited_sink(op));
+      // p0..p15 -- the whole 0..Memory_port_stride-1 range that `sink_pid2name`
+      // can hold. It used to stop at p10, leaving 11..15 as "invalid": pid >= 16
+      // works (get_sink_name wraps it to "16p0" and get_sink_pid parses the
+      // leading digits back), but 11..15 fell into the default and made
+      // get_sink_name's `name != "invalid"` assert fire. Reachable today by an
+      // 11-arm Mux, and immediately by Concat, whose interleaved (value, width)
+      // encoding spends two pids per lane -- so a 6-lane concat lands on 11.
       switch (pid) {
         case 0 : return "p0";
         case 1 : return "p1";
@@ -206,7 +214,12 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 7 : return "p7";
         case 8 : return "p8";
         case 9 : return "p9";
-        case 10: return "p10";  // >10 handled with loop at get_sink_pid
+        case 10: return "p10";
+        case 11: return "p11";
+        case 12: return "p12";
+        case 13: return "p13";
+        case 14: return "p14";
+        case 15: return "p15";  // >15 handled by the Memory_port_stride wrap in get_sink_name
         default: return "invalid";
       }
       return "invalid";

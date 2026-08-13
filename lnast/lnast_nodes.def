@@ -129,6 +129,20 @@ LNAST_NODE( sra, sra )
 LNAST_NODE( sext, sext )
 LNAST_NODE( set_mask, set_mask )
 LNAST_NODE( get_mask, get_mask )
+// `c = concat(a, b, ...)` -- n-ary bit concatenation, MSB-FIRST (Verilog
+// `{a, b}`): concat( dst, lane_msb, ..., lane_lsb ).
+//
+// Every lane's window width comes from its DECLARED type, never from its value
+// or from an inferred range: dropping a lane's leading zeros would shift every
+// lane above it. So `concat(a, b+1)` and `concat(a, 5)` are compile errors
+// (upass.typecheck `concat-untyped-lane`) while `a:u4`, a sized literal
+// `0ub1010`, a typed field, and a nested `concat` (whose width is the sum, by
+// construction) are all fine. The result is the non-negative sum-of-widths
+// value, so it is always unsigned and needs no declared type of its own.
+//
+// A tuple lane expands to its fields in declaration order (field 0 = most
+// significant), and only when every field has a declared type.
+LNAST_NODE( concat, concat )
 // - Comparison
 LNAST_NODE( ne, ne )
 LNAST_NODE( eq, eq )

@@ -47,6 +47,7 @@ protected:
   void process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_get_mask(hhds::Node_class& node);
   void process_set_mask(hhds::Node_class& node);
+  void process_concat(hhds::Node_class& node);
   void process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_comparator(hhds::Node_class& node);
   void process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);

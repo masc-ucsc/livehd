@@ -315,6 +315,11 @@ public:
         raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
       }
       int32_t mw = io_mw(e);
+      // A port's declared width is a real declared type (io_meta carries it
+      // straight from the signature), so it can size a Concat lane. An
+      // UNBOUNDED `int`/`unsigned` port has io_mw 0 and records nothing, which
+      // is what makes `concat(unbounded_port, b)` the intended hard error.
+      record_decl_type(e.name, e.kind == Io_kind::boolean ? int32_t{1} : mw, e.is_signed);
       if (e.kind == Io_kind::boolean) {
         set_bits(raw, 1);
         set_unsign(raw);
@@ -341,6 +346,11 @@ public:
       }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
+      // An OUTPUT port's declared width is a declared type just like an
+      // input's, and it is the common destination of a concat (`z:u6 = ...`).
+      // Recording it here rather than only at a `declare` is what lets
+      // check_concat_dest_width see a signature-declared port at all.
+      record_decl_type(e.name, e.kind == Io_kind::boolean ? int32_t{1} : io_mw(e), e.is_signed);
       if (cur_srcid_ != hhds::SourceId_invalid) {
         if (auto sink = g_->get_output_pin(canon_io_name(e.name)); !sink.is_invalid()) {
           sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
@@ -529,6 +539,40 @@ private:
   [[nodiscard]] int32_t mw_lookup(std::string_view name) {
     auto it = mw_map_.find(std::string{canon_io_name(name)});
     return it != mw_map_.end() ? it->second : int32_t{1};
+  }
+
+  // The LOGICAL variable behind a (possibly SSA-versioned, possibly
+  // backtick-marked) LNAST name -- the key decl_type_ uses, because a type is
+  // declared once on the base name while every read is a fresh SSA version.
+  [[nodiscard]] static std::string logical_key(std::string_view name) {
+    std::string k{canon_io_name(name)};
+    if (auto p = k.find("___ssa_"); p != std::string::npos) {
+      k.resize(p);
+    }
+    return k;
+  }
+
+  // Declared width + signedness of one name (see decl_type_ below). Defined
+  // here, not with the member, because a nested type must be declared before
+  // the member functions whose SIGNATURE names it.
+  struct Decl_type {
+    int32_t mw{0};
+    bool    is_signed{false};
+  };
+
+  void record_decl_type(std::string_view name, int32_t mw, bool is_signed) {
+    if (mw <= 0) {
+      return;  // untyped / unbounded: nothing declared to remember
+    }
+    decl_type_[logical_key(name)] = Decl_type{mw, is_signed};
+  }
+
+  [[nodiscard]] std::optional<Decl_type> decl_type_lookup(std::string_view name) const {
+    auto it = decl_type_.find(logical_key(name));
+    if (it == decl_type_.end()) {
+      return std::nullopt;
+    }
+    return it->second;
   }
 
   [[nodiscard]] Pin resolve(std::string_view name_in) {
@@ -733,6 +777,8 @@ private:
       lower_op(nid, Ntype_op::SHL, false, OpW::shlw);
     } else if (N::is_sra(t)) {
       lower_op(nid, Ntype_op::SRA, false, OpW::firstw);
+    } else if (N::is_concat(t)) {
+      lower_concat(nid);
     } else if (N::is_sext(t)) {
       lower_sext(nid);
     } else if (N::is_red_or(t)) {
@@ -1563,6 +1609,11 @@ private:
                lnast_->get_name(lhs));
     }
     auto lhs_name = lnast_->get_name(lhs);
+    // `c = concat(...)` — the destination's declared width must equal the lane
+    // sum exactly. Checked at the STORE (and at the declare below) because the
+    // concat node's own dst is always a compiler temp, so this is the first
+    // point where a user-declared name and a concat result meet.
+    check_concat_dest_width(nid, lhs_name, rhs);
     // Deferred stage-reg creation: the din store knows the
     // effective depth (deficit narrowing against a Sub callee; 0 = wire).
     if (auto pit = pending_stage_.find(lhs_name); pit != pending_stage_.end()) {
@@ -1731,6 +1782,23 @@ private:
     auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
                         ? std::string_view{}
                         : std::string_view(lnast_->get_name(mode_nid));
+    // Remember the DECLARED width for every flavour of declare (mut/const/wire/
+    // reg/latch alike) before the per-mode branches return. Concat lanes read
+    // this; nothing else does, so an unrecognised/absent type simply records
+    // nothing and a lane on that name errors instead of silently mis-sizing.
+    if (!type_nid.is_invalid()) {
+      const auto [dmw, dsigned] = declared_width(type_nid);
+      record_decl_type(lnast_->get_name(name_nid), dmw, dsigned);
+    }
+    // A declare's optional trailing [value] child carries the initializer, so
+    // `const c:u12 = concat(a,b)` is checked here rather than at a store.
+    for (auto c = mode_nid.is_invalid() ? mode_nid : lnast_->get_sibling_next(mode_nid); !c.is_invalid();
+         c      = lnast_->get_sibling_next(c)) {
+      if (Lnast_ntype::is_ref(lnast_->get_type(c))) {
+        check_concat_dest_width(nid, lnast_->get_name(name_nid), c);
+        break;
+      }
+    }
     // 2c-wire — a single-driver combinational net: declare its passthrough
     // buffer now so position-independent reads (a read before the driver) bind
     // to it; finalize_wires() wires the buffer input to the single driver.
@@ -5397,6 +5465,161 @@ private:
     record(dst_name, drv, res_mw);
   }
 
+  // ── concat ───────────────────────────────────────────────────────────────
+  //
+  // `concat( dst, v_msb, w_msb, …, v_lsb, w_lsb )` lowers 1:1 to one
+  // Ntype_op::Concat: the LNAST node ALREADY carries the interleaved
+  // (value, width) shape, and the cell's sinks are the same pairs at pids
+  // 2i / 2i+1, MSB-first.
+  //
+  // A width operand may still be the `nil` sentinel here, meaning no upass pass
+  // could bind it from the lane's declared type. That is a HARD ERROR, never a
+  // guess: mw_lookup() would happily hand back the live value's width (or its
+  // default of 1), and the value's width is precisely what a concat may not be
+  // sized by -- narrowing one lane shifts every lane above it.
+  //
+  // This is also the LAST place the destination's declared width is checked.
+  // The concat's own dst is a compiler temp, so the user-facing `c:u12 = …`
+  // check rides where that temp is BOUND to a declared name; see
+  // check_concat_dest_width, called from the declare/store paths.
+
+  // The bound width of one lane's width operand, or nullopt when it is `nil`
+  // (or otherwise not a positive comptime integer).
+  [[nodiscard]] std::optional<int32_t> concat_bound_width(const Lnast_nid& nid) const {
+    if (nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(nid))) {
+      return std::nullopt;
+    }
+    const auto txt = lnast_->get_name(nid);
+    if (txt.empty() || txt == "nil") {
+      return std::nullopt;
+    }
+    auto v = Dlop::from_pyrope(txt);
+    if (!v || !v->is_integer() || !v->is_just_i64()) {
+      return std::nullopt;
+    }
+    const auto w = v->to_just_i64();
+    if (w <= 0 || w > std::numeric_limits<int32_t>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<int32_t>(w);
+  }
+
+  void lower_concat(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+
+    // Resolve every lane FIRST: a bad lane must abort before any cell is
+    // minted, so a rejected concat leaves no half-wired node behind.
+    struct Lane {
+      Lnast_nid nid;
+      int32_t   width;
+    };
+    std::vector<Lane> lanes;
+    for (auto v = lnast_->get_sibling_next(dst); !v.is_invalid();) {
+      auto w = lnast_->get_sibling_next(v);
+      if (w.is_invalid()) {
+        error_at(nid,
+                 {"concat-malformed", "internal"},
+                 "upass.tolg: concat lane '{}' has no width operand — every lane is a (value, width) PAIR",
+                 lnast_->get_name(v));
+      }
+      const auto bound = concat_bound_width(w);
+      if (!bound) {
+        error_at(nid,
+                 {"concat-untyped-lane", "type"},
+                 "upass.tolg: concat lane '{}' has no declared bit width — a concat window is sized by the lane's "
+                 "DECLARED type, never by its value or an inferred range, because narrowing one lane would shift "
+                 "every lane above it (bind it to a typed name first: `const w:u4 = <expr>`)",
+                 lnast_->get_name(v));
+      }
+      lanes.push_back(Lane{v, *bound});
+      v = lnast_->get_sibling_next(w);
+    }
+    if (lanes.empty()) {
+      error_at(nid, {"concat-empty", "type"}, "upass.tolg: concat needs at least one lane");
+    }
+
+    auto    node   = make_node(Ntype_op::Concat);
+    int32_t sum_mw = 0;
+    for (size_t i = 0; i < lanes.size(); ++i) {
+      auto v = leaf(lanes[i].nid);
+      node.create_sink_pin(static_cast<hhds::Port_id>(2 * i)).connect_driver(v.pin);
+      node.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1))
+          .connect_driver(create_const(*g_, *Dlop::create_integer(lanes[i].width)));
+      sum_mw += lanes[i].width;
+    }
+
+    auto out = node.create_driver_pin(0);
+    // The assembled value is always NON-NEGATIVE, so bind_result's unsigned
+    // `mw + 1` stamp is exactly right: sum(w_i) magnitude bits + the zero sign
+    // slot.
+    bind_result(lnast_->get_name(dst), out, sum_mw);
+    // The result has a declared width BY CONSTRUCTION, which is what makes
+    // `concat(concat(a,b), c)` legal and what the destination check compares
+    // a declared `c:u12` against.
+    record_decl_type(lnast_->get_name(dst), sum_mw, /*is_signed=*/false);
+    concat_result_mw_[logical_key(lnast_->get_name(dst))] = sum_mw;
+  }
+
+  // `const c:u12 = concat(a:u4, b:u8)` — the destination's declared width must
+  // equal the lane sum EXACTLY. Not `>=`: a concat states a bit layout, and a
+  // destination that quietly zero-extends it is a layout the source does not
+  // say. Signedness is free (`u12` and `s12` are both 12-bit fields), so only
+  // the width is compared.
+  //
+  // Checked where the concat's TEMP is bound to a declared name, because the
+  // concat node's own dst is always a compiler temp.
+  void check_concat_dest_width(const Lnast_nid& anchor, std::string_view dest_name, const Lnast_nid& value_nid) {
+    // Pyrope only -- see the twin guard in upass.runner. Verilog declares its
+    // widths its own way and its assignment rules pad/truncate rather than
+    // reject, so the Pyrope "destination states the layout" rule would refuse
+    // ordinary imported RTL.
+    if (lnast_->is_verilog_origin()) {
+      return;
+    }
+    if (value_nid.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(value_nid))) {
+      return;
+    }
+    auto cit = concat_result_mw_.find(logical_key(lnast_->get_name(value_nid)));
+    if (cit == concat_result_mw_.end()) {
+      return;  // not a concat result
+    }
+    // Only a SOURCE-level destination is checked -- the same exemption
+    // upass.runner's twin (check_concat_dest) documents. A store into a
+    // COMPILER TEMP (`___N`, an SSA staging name a frontend minted) is an
+    // internal move, not a declaration the user wrote: demanding a declared
+    // type of it would turn a frontend's own staging store into a hard
+    // `concat-untyped-dest` error on legal source.
+    if (const auto dkey = logical_key(dest_name); dkey.empty() || dkey.starts_with("___")) {
+      return;
+    }
+    auto dt = decl_type_lookup(dest_name);
+    if (!dt) {
+      error_at(anchor,
+               {"concat-untyped-dest", "type"},
+               "upass.tolg: '{}' is assigned a concat but has no declared type — a concat's destination must declare "
+               "the {}-bit width the lanes add up to (e.g. `{}:u{}` or `{}:s{}`)",
+               dest_name,
+               cit->second,
+               dest_name,
+               cit->second,
+               dest_name,
+               cit->second);
+    }
+    if (dt->mw != cit->second) {
+      error_at(anchor,
+               {"concat-width-mismatch", "type"},
+               "upass.tolg: '{}' is declared {} bits but the concat assigned to it is {} bits — a concat's "
+               "destination must match the lane sum EXACTLY, so that the bit layout the source states is the layout "
+               "the destination has",
+               dest_name,
+               dt->mw,
+               cit->second);
+    }
+  }
+
   enum class OpW { add, mul, maxw, andw, firstw, boolw, shlw };
 
   // n-ary op: child0 = dst, children 1..N = operands. Commutative ops feed all
@@ -6559,6 +6782,22 @@ private:
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
   absl::flat_hash_set<std::string>                   scalar_decl_;
+  // Declared TYPE width per LOGICAL name (canonical, SSA suffix stripped), for
+  // the one op whose semantics depend on the DECLARED width rather than on
+  // whatever value currently drives the name: Concat.
+  //
+  // Deliberately NOT mw_map_. That map tracks the live value's magnitude width,
+  // so `var a:u4 = 3` leaves 2 there — and a `concat(a, b)` lane must still be
+  // 4 bits wide, because narrowing it would shift every lane above it. Filled
+  // from io_meta and from every `declare` that carries a type child; a nested
+  // `concat`'s own result registers here too (its width is the lane sum, by
+  // construction).
+  absl::flat_hash_map<std::string, Decl_type>        decl_type_;
+  // Names whose value is a `concat` result, with the lane sum. Read only by
+  // check_concat_dest_width: the concat node's own dst is a compiler temp, so
+  // the user-facing `c:u12 = concat(...)` width check has to happen where that
+  // temp is bound to a declared name.
+  absl::flat_hash_map<std::string, int32_t>          concat_result_mw_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the

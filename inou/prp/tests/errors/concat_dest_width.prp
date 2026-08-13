@@ -1,0 +1,14 @@
+/*
+:name: concat_dest_width
+:type: error
+:error: declared 16 bits but the concat assigned to it is 12 bits
+:help: match the lane sum EXACTLY
+*/
+
+// A concat states a bit LAYOUT, so the destination must be exactly as wide as
+// the lanes add up to. A wider `z` is refused rather than zero-extended: the
+// padding would be a layout the source never wrote. (Signedness is free --
+// `z:s12` would be accepted -- because only the 12-bit field width is checked.)
+comb concat_dest_width(a:u4, b:u8) -> (z:u16) {
+  z = concat(a, b)
+}

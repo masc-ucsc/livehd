@@ -1295,6 +1295,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["flatten"] = v;
     } else if (k == "sim.workers") {
       labels["workers"] = v;
+    } else if (k == "sim.slop_u") {
+      labels["slop_u"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path

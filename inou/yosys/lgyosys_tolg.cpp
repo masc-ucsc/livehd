@@ -536,45 +536,51 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
 
   hhds::Pin_class dpin;
   if (inp_pins.size() > 1) {
-    // Build a concatenation as a non-negative packed value first. Every
-    // shifted chunk may need the zero sign slot at bit ss.size(), so an
-    // ordinary Or cannot legally land directly in a signed ss.size()-bit
-    // carrier. For a signed use, reinterpret the finished finite vector with
-    // one explicit Sext boundary below.
-    const int packed_bits = ss.size() + (is_signed ? 1 : 0);
-    auto      or_node     = create_typed_node(*g, Ntype_op::Or, packed_bits);
-    if (is_signed) {
-      set_unsign(or_node.create_driver_pin(0));
-    }
+    // ONE Concat cell. The old shape was an Or of shifted chunks where every
+    // chunk first had to be wrapped in a Get_mask(-1) "to-positive" node --
+    // without it a negative chunk smears its sign over the whole plane, not
+    // just its own window. The cell masks each lane into its OWN declared
+    // window by construction, so that per-chunk dance is gone; what is left is
+    // the packing itself, which is pure wiring.
+    auto concat_node = create_typed_node(*g, Ntype_op::Concat);
 
-    int offset = 0;
-    for (auto i = 0u; i < chunk_list.size(); ++i) {
-      if (!inp_pins[i].is_invalid()) {
-        hhds::Pin_class inp_pin;
-
-        if ((i + 1) == chunk_list.size() || is_signed) {
-          inp_pin = inp_pins[i];
-        } else if (type_op_of(master_node(inp_pins[i])) == Ntype_op::Get_mask) {
-          inp_pin = inp_pins[i];
-        } else if (is_const_pin(inp_pins[i]) && !hydrate_const_pin(inp_pins[i]).is_negative()) {
-          inp_pin = inp_pins[i];  // already non-negative; to-positive wrap is a no-op
-        } else {
-          if (chunk_list[i].wire) {
-            set_loc(or_node, chunk_list[i].wire->get_src_attribute());
-          }
-          auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, dpin_width(inp_pins[i]) + 1);
-          setup_sink_by_name(tposs_node, "a").connect_driver(inp_pins[i]);
-          setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
-
-          inp_pin = tposs_node.create_driver_pin(0);
-        }
-
-        append_to_or_node(g, or_node, inp_pin, offset);
+    // Provenance: the Or shape stamped itself from whichever chunk happened to
+    // need a to-positive wrap. There is a single node now, so take the first
+    // chunk that actually carries a src attribute (RTLIL order, LSB-first).
+    for (const auto& chunk : chunk_list) {
+      if (chunk.wire && !chunk.wire->get_src_attribute().empty()) {
+        set_loc(concat_node, chunk.wire->get_src_attribute());
+        break;
       }
-
-      offset += chunk_list[i].width;
     }
-    dpin = or_node.create_driver_pin(0);
+
+    // Yosys SigSpec chunks are LSB-first; the cell is MSB-first, hence the
+    // reverse walk. Lane i occupies sink pids 2i (value) and 2i+1 (an Nconst
+    // holding that lane's DECLARED width) -- chunk.width IS that declared
+    // width, which is exactly why it can never be re-derived from the driver.
+    hhds::Port_id pid   = 0;
+    int           total = 0;
+    for (auto i = chunk_list.size(); i > 0; --i) {
+      const auto& chunk = chunk_list[i - 1];
+      auto        value = inp_pins[i - 1];
+      if (value.is_invalid()) {
+        // A lane is POSITIONAL: dropping one would shift every lane below it.
+        // The Or shape simply left that window at zero by never or-ing
+        // anything in; keep that reading explicit.
+        value = create_const(*g, *Dlop::create_integer(0));
+      }
+      concat_node.create_sink_pin(pid++).connect_driver(value);
+      concat_node.create_sink_pin(pid++).connect_driver(create_const(*g, *Dlop::create_integer(chunk.width)));
+      total += chunk.width;
+    }
+    I(total == ss.size());
+
+    dpin = concat_node.create_driver_pin(0);
+    // Always non-negative: sum(w_i) magnitude bits plus the always-zero sign
+    // slot of an unsigned LiveHD value.
+    set_bits(dpin, total + 1);
+    set_unsign(dpin);
+
     if (is_signed) {
       auto sext_node = create_typed_node(*g, Ntype_op::Sext, ss.size());
       setup_sink_by_name(sext_node, "a").connect_driver(dpin);

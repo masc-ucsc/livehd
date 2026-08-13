@@ -86,6 +86,7 @@ const char* op_name(Ntype_op op) {
     case Ntype_op::Get_mask: return "Get_mask";
     case Ntype_op::Set_mask: return "Set_mask";
     case Ntype_op::Sext    : return "Sext";
+    case Ntype_op::Concat  : return "Concat";
     case Ntype_op::Nconst  : return "Nconst";
     default                : return "op?";
   }
@@ -597,6 +598,73 @@ std::string cpp_string_literal(std::string_view text) {
 }
 }  // namespace
 
+// Append a `.zext_to<target>()` to an already-built expression, FUSING it with a
+// zext the expression already ends in.
+//
+// `x.zext_to<a>().zext_to<b>()` is never two operations. Keeping the low `a`
+// bits and then the low `b` bits keeps the low `min(a,b)` bits, at carrier `b`:
+//
+//   a >= b :  x.zext_to<b>()        (the inner mask is entirely subsumed)
+//   a <  b :  x.zext_to<a, b>()     (the fused Keep/Carrier form hlop already has)
+//
+// Both collapse to ONE call, so this is a rewrite, not a heuristic. It matters
+// because the two halves of this emitter do not trust each other: the color
+// boundary glue converts a slot read at the consumer width, and operand() then
+// appends its own conversion because a narrowing unsigned slot read is
+// deliberately outside `canonical_`. On minion's shards that duplicated pair was
+// ~105k of the ~335k emitted zext_to calls, and ~90% of all chains have a == b.
+//
+// Deliberately a STRING fuse rather than a canonical_ policy change: it is valid
+// for every producer of the inner zext without having to prove, per call site,
+// that the glue's width and the driver pin's declared width agree.
+static std::string append_zext(std::string expr, int target_bits) {
+  const std::string_view tail = expr;
+  if (tail.ends_with(">()")) {
+    const auto open = expr.rfind(".zext_to<");
+    if (open != std::string::npos) {
+      // Everything between the angle brackets must be 1-2 plain integers, else
+      // this is some other templated call and the suffix match was a
+      // coincidence.
+      const auto  args_begin = open + std::string_view(".zext_to<").size();
+      const auto  args       = std::string_view(expr).substr(args_begin, expr.size() - args_begin - 3);
+      int         keep       = 0;
+      int         carrier    = 0;
+      int         parsed     = 0;
+      bool        ok         = !args.empty();
+      int         cur        = 0;
+      bool        any_digit  = false;
+      for (size_t i = 0; ok && i <= args.size(); ++i) {
+        const char c = i < args.size() ? args[i] : ',';
+        if (c >= '0' && c <= '9') {
+          cur       = cur * 10 + (c - '0');
+          any_digit = true;
+        } else if (c == ',' ) {
+          if (!any_digit || parsed >= 2) {
+            ok = false;
+            break;
+          }
+          (parsed == 0 ? keep : carrier) = cur;
+          ++parsed;
+          cur       = 0;
+          any_digit = false;
+        } else if (c != ' ') {
+          ok = false;
+        }
+      }
+      if (ok && parsed >= 1) {
+        // The inner call's KEEP width is what survives; its carrier is
+        // irrelevant here because this outer zext restates it.
+        expr.resize(open);
+        if (keep >= target_bits) {
+          return absl::StrCat(expr, ".zext_to<", target_bits, ">()");
+        }
+        return absl::StrCat(expr, ".zext_to<", keep, ", ", target_bits, ">()");
+      }
+    }
+  }
+  return absl::StrCat(expr, ".zext_to<", target_bits, ">()");
+}
+
 std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int sign_mode) {
   const std::string tw = std::to_string(target_bits);
   if (dpin.is_invalid()) {
@@ -654,7 +722,7 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
       }
       return absl::StrCat("Slop<", tw, ">{", base, "}");
     }
-    return absl::StrCat(base, ".zext_to<", tw, ">()");  // zero-extend / mask
+    return append_zext(base, target_bits);  // zero-extend / mask (fused with any zext `base` ends in)
   }
   return absl::StrCat("Slop<", tw, ">{", base, "}");  // signed sext via the hlop cross-width ctor
 }
@@ -1006,7 +1074,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
               if (me - mb < static_cast<int64_t>(wbits)) {
                 return absl::StrCat("Slop<", tw, ">{", expr, "}");
               }
-              return absl::StrCat(expr, ".zext_to<", tw, ">()");
+              return append_zext(expr, wbits);
             }
           }
         }
@@ -1046,7 +1114,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       if (single_bit) {
         gm = absl::StrCat(gm, ".zext_to<1>()");
       }
-      return absl::StrCat(gm, ".zext_to<", tw, ">()");
+      // Fused: a single-bit Get_mask already appended `.zext_to<1>()`, and
+      // the landing restates it -- one call, not two.
+      return append_zext(gm, wbits);
     }
     case Ntype_op::Set_mask: {
       // value.set_mask_op(mask, newbits) — best effort at the node width. The
@@ -1084,6 +1154,78 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                           ", ",
                           operand(e[2].driver, wbits),
                           ")");
+    }
+    case Ntype_op::Concat: {
+      // MSB-first lane assembly. The lane table comes from concat_lanes(), never
+      // from `e`: a lane's window width is an explicit const OPERAND (odd sink
+      // pids) precisely because it is not recoverable from the driver, and
+      // reading it back off `wbits_of` would shift every lane above the one that
+      // got narrowed.
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      if (lanes.empty()) {
+        // FAIL CLOSED. The generic pass-through below would emit lane 0 alone --
+        // i.e. silently drop every other lane AND leave it unshifted, which no
+        // differential test can distinguish from a plain assignment.
+        livehd::diag::err("inou.cgen.sim", "concat-malformed", "internal")
+            .msg("cell `{}` is a Concat whose lane table could not be decoded", debug_name(node))
+            .hint(
+                "a Concat's sinks are interleaved (value, width) pairs on p0,p1,p2,...; every odd pid must carry a "
+                "positive integer constant")
+            .fatal();
+        return absl::StrCat("Slop<", tw, ">::create_integer(0)");
+      }
+      const int  total    = livehd::graph_util::concat_total_width(lanes);  // already decoded above
+      const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes);
+      I(lane_bad.empty(), lane_bad.c_str());
+      // Each lane is materialized as a canonical unsigned Slop_u<w>: the ctor's
+      // one zext_to<w> is what turns an over-wide or NEGATIVE lane into its
+      // two's-complement window (-1 at w=3 becomes 0b111), and it is exactly the
+      // mask hlop's concat_op then elides for that lane. Naming Slop_u also
+      // carries the width in the TYPE, which is how concat_op learns the lane
+      // table without a second operand list.
+      std::string args;
+      for (size_t i = 0; i < lanes.size(); ++i) {
+        if (i) {
+          absl::StrAppend(&args, ", ");
+        }
+        const auto& l = lanes[i];
+        // Read the lane at w+1 bits, NOT at its own declared width.
+        // `Slop<M>::zext_to<W>()` keeps min(M, W) bits -- it clamps to the
+        // SOURCE carrier -- so a lane handed over in a carrier narrower than
+        // its window silently loses the bits above that carrier. A CONSTANT
+        // driver is the trap: const pins carry no `bits` attr, so sizing from
+        // wbits_of() gave `Slop<1>::create_integer(4)`, and `Slop_u<4>{}` of
+        // that kept ONE bit -- every constant lane collapsed to its LSB. (dino
+        // is full of `{..., 4'd4, ...}`; it retired one instruction and hung.)
+        //
+        // operand() also gets the SIGN right at that width: a signed lane
+        // sign-extends into the carrier first, so the Slop_u mask below takes
+        // its true two's-complement window rather than a zero-padded one.
+        absl::StrAppend(&args, "Slop_u<", l.width, ">{", operand(l.value, l.width + 1), "}");
+      }
+      // Assemble UNSIGNED and land signed. Slop<N>::concat_op would sign-extend
+      // from the top lane's MSB, but a Concat cell's value is defined to be the
+      // non-negative sum-of-windows, so the unsigned flavour is the correct one;
+      // the outer Slop<tw>{} is then the free (already-canonical) widening.
+      //
+      // That last step is only free while tw > total. hlop's Slop<N>{Slop_u<M>}
+      // ctor SIGN-EXTENDS FROM BIT N-1 when N <= M (hlop/slop.hpp:206-212, whose
+      // own comment reads "Slop<8>{Slop_u<8>{255}} is -1 while
+      // Slop<9>{Slop_u<8>{255}} is 255"), so landing a 7-bit concat of all ones
+      // in a Slop<7> yields -1 instead of 127 -- a silent miscompile, not a
+      // truncation anyone would notice. The cell contract stamps
+      // bits = sum(w)+1 precisely so this conversion stays value-preserving, so
+      // a narrower carrier means some pass narrowed a Concat pin below the
+      // contract.
+      I(wbits > total,
+        std::format("internal: Concat carrier Slop<{}> is not wider than its {}-bit assembly -- hlop would sign-extend "
+                    "from bit {}, turning the all-ones value into -1; the cell contract stamps sum(w)+1 = {}",
+                    wbits,
+                    total,
+                    wbits - 1,
+                    total + 1)
+            .c_str());
+      return absl::StrCat("Slop<", tw, ">{Slop_u<", total, ">::concat_op(", args, ")}");
     }
     case Ntype_op::Sext: {
       // value sign-extended from a bit position (2nd input, normally constant).
@@ -4160,8 +4302,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   std::vector<std::vector<size_t>>                                    direct_state_current_slots;
   std::vector<std::vector<const livehd::sim::Color_plan::Value_use*>> direct_value_uses_by_consumer;
   std::vector<std::string>                                            direct_slot_storage;
+  // The READ spelling of each slot. Identical to direct_slot_storage except for
+  // a Slop_u-typed slot, where reading is `slot.raw()`: the stored object is the
+  // canonical-unsigned carrier and `.raw()` is the mask-free view of it, so
+  // every consumer keeps working on a plain Slop. Writes still name the storage
+  // itself (slop_update's Slop_u overload pays the one materialization mask).
+  std::vector<std::string>                                            direct_slot_read;
+  // Per slot: is its STORAGE the canonical-unsigned Slop_u? The kernel ABI
+  // type-puns a slot address through `void**`, so the binding site and the
+  // kernel body must name the SAME type -- this is what keeps them in step.
+  std::vector<bool>                                                   direct_slot_is_u;
   std::vector<std::string>                                            direct_input_prev_storage;
-  std::map<uint32_t, size_t>                                          direct_slot_width_counts;
+  // Slots are pooled into one array per storage TYPE, so the key carries the
+  // canonical-unsigned bit as well as the width: `Slop_u<7>` and `Slop<8>` have
+  // the same carrier layout but are different C++ types and cannot share an
+  // array. With sim.slop_u off the bool is always false and the pooling is
+  // exactly what it was.
+  std::map<std::pair<uint32_t, bool>, size_t>                         direct_slot_width_counts;
+  // The previous-input shadow is only ever compared against __in (a plain
+  // Slop), never read as a value, so it stays lazy regardless of the knob --
+  // hence a plain width key here, not the (width, canonical) pair above.
   std::map<uint32_t, size_t>                                          direct_input_width_counts;
   size_t                                                              direct_seen_count         = 0;
   size_t                                                              direct_state_commit_count = 0;
@@ -4173,12 +4333,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     direct_state_current_slots.resize(color_plan_->sites().size());
     direct_value_uses_by_consumer.resize(color_plan_->version_sites().size());
     direct_slot_storage.resize(color_plan_->boundary_slots().size());
+    direct_slot_read.resize(color_plan_->boundary_slots().size());
+    direct_slot_is_u.assign(color_plan_->boundary_slots().size(), false);
     direct_input_prev_storage.resize(color_plan_->boundary_slots().size());
+    // A slot is written ONCE per settle and read by every consumer of the
+    // boundary, which is precisely the shape lazy Slop masking loses on: the
+    // write pays nothing and each read re-masks. Under sim.slop_u an UNSIGNED
+    // slot is stored canonical instead, so the mask moves to the single write.
+    // (Signed slots keep the lazy Slop: they have a real sign bit, and the lazy
+    // contract is the right one for them.)
+    const auto slot_is_canonical = [&](const livehd::sim::Color_plan::Boundary_slot& s) {
+      return slop_u_ && s.unsign && s.width > 1;
+    };
     for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
       const auto& slot = color_plan_->boundary_slots()[slot_index];
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
-        const size_t position           = direct_slot_width_counts[slot.width]++;
-        direct_slot_storage[slot_index] = absl::StrCat("__rt.__color_slot_", slot.width, "[", position, "]");
+        const bool   canonical          = slot_is_canonical(slot);
+        const size_t position           = direct_slot_width_counts[{slot.width, canonical}]++;
+        direct_slot_storage[slot_index] = canonical
+                                              ? absl::StrCat("__rt.__color_slot_u", slot.width - 1, "[", position, "]")
+                                              : absl::StrCat("__rt.__color_slot_", slot.width, "[", position, "]");
+        direct_slot_read[slot_index]
+            = canonical ? absl::StrCat(direct_slot_storage[slot_index], ".raw()") : direct_slot_storage[slot_index];
+        direct_slot_is_u[slot_index] = canonical;
       }
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_input) {
         const size_t position                 = direct_input_width_counts[slot.width]++;
@@ -4732,8 +4909,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (workers_ > 1) {
       runtime_header->append("  std::mutex __memory_eval_mutex;\n");
     }
-    for (const auto& [width, count] : direct_slot_width_counts) {
-      runtime_header->append(absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_slot_", width, "{};\n"));
+    for (const auto& [key, count] : direct_slot_width_counts) {
+      const auto& [width, canonical] = key;
+      runtime_header->append(canonical ? absl::StrCat("  std::array<Slop_u<", width - 1, ">, ", count, "> __color_slot_u",
+                                                      width - 1, "{};\n")
+                                       : absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_slot_", width,
+                                                      "{};\n"));
     }
     for (const auto& [width, count] : direct_input_width_counts) {
       runtime_header->append(absl::StrCat("  std::array<Slop<", width, ">, ", count, "> __color_input_prev_", width, "{};\n"));
@@ -8035,7 +8216,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     };
     const auto direct_read_expr = [&](const livehd::sim::Color_plan::Boundary_slot& slot, size_t slot_index) {
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
-        return direct_slot_storage[slot_index];
+        return direct_slot_read[slot_index];
       }
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::state_current) {
         const auto& state = color_plan_->sites()[slot.owner_site];
@@ -8046,7 +8227,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           return absl::StrCat("Slop<", slot.width, ">::shl_op(", value, ", ", slot.producer_shift, ")");
         }
         if (static_cast<uint32_t>(width) != slot.width) {
-          return slot.unsign ? absl::StrCat(value, ".zext_to<", slot.width, ">()")
+          return slot.unsign ? append_zext(value, static_cast<int>(slot.width))
                              : absl::StrCat("Slop<", slot.width, ">{", value, "}");
         }
         return value;
@@ -8107,7 +8288,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           break;
         }
       }
-      return slot.unsign ? absl::StrCat(value, ".zext_to<", consumer.width, ">()")
+      return slot.unsign ? append_zext(value, static_cast<int>(consumer.width))
                          : absl::StrCat("Slop<", consumer.width, ">{", value, "}");
     };
     const auto emit_serial_dirty_consumers = [&](size_t slot_index, std::string_view indent) {
@@ -8316,22 +8497,31 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           "#include <cassert>\n#include <cstddef>\n#include <cstdint>\n");
       kernel_out->append("#include \"slop.hpp\"\n\n");
       kernel_out->append("std::uint64_t ", kernel_name(kernel->signature), "(void** __bind) {\n");
+      // The pointed-to TYPE has to match what the binding site took the address
+      // of, byte for byte -- this ABI is a void* type-pun, so a mismatch is
+      // undefined behaviour rather than a compile error.
+      const auto slot_is_u = [&](size_t slot_index) {
+        return slot_index < direct_slot_is_u.size() && direct_slot_is_u[slot_index];
+      };
+      const auto slot_type = [&](size_t slot_index, uint32_t width) {
+        return slot_is_u(slot_index) ? absl::StrCat("Slop_u<", width - 1, ">") : absl::StrCat("Slop<", width, ">");
+      };
       for (size_t i = 0; i < abi.reads.size(); ++i) {
-        const auto& slot = color_plan_->boundary_slots()[abi.reads[i].slot_index];
-        if (abi.reads[i].consumer.width == slot.width) {
-          kernel_out->append(absl::StrCat("  [[maybe_unused]] const auto& __k_in_",
-                                          i,
-                                          " = *static_cast<const Slop<",
-                                          slot.width,
-                                          ">*>(__bind[",
-                                          i,
-                                          "]);\n"));
+        const auto& slot  = color_plan_->boundary_slots()[abi.reads[i].slot_index];
+        const auto  stype = slot_type(abi.reads[i].slot_index, slot.width);
+        if (abi.reads[i].consumer.width == slot.width && !slot_is_u(abi.reads[i].slot_index)) {
+          kernel_out->append(
+              absl::StrCat("  [[maybe_unused]] const auto& __k_in_", i, " = *static_cast<const ", stype, "*>(__bind[", i, "]);\n"));
         } else {
+          // zext_to on a Slop_u is MASK-FREE when the target covers its width
+          // (the invariant already guarantees it), so the same-width case goes
+          // through here too rather than binding a Slop_u reference that the
+          // arithmetic below could not consume.
           kernel_out->append(absl::StrCat("  [[maybe_unused]] const auto __k_in_",
                                           i,
-                                          " = static_cast<const Slop<",
-                                          slot.width,
-                                          ">*>(__bind[",
+                                          " = static_cast<const ",
+                                          stype,
+                                          "*>(__bind[",
                                           i,
                                           "])->zext_to<",
                                           abi.reads[i].consumer.width,
@@ -8342,9 +8532,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto& slot = color_plan_->boundary_slots()[abi.writes[i].slot_index];
         kernel_out->append(absl::StrCat("  [[maybe_unused]] auto& __k_out_",
                                         i,
-                                        " = *static_cast<Slop<",
-                                        slot.width,
-                                        ">*>(__bind[",
+                                        " = *static_cast<",
+                                        slot_type(abi.writes[i].slot_index, slot.width),
+                                        "*>(__bind[",
                                         abi.reads.size() + i,
                                         "]);\n"));
       }
@@ -8772,7 +8962,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             materialized_width = static_cast<uint32_t>(std::max(1, wbits_of(producer_output)));
           }
           if (materialized_width != use->consumer_width) {
-            value = use->unsign ? absl::StrCat(value, ".zext_to<", use->consumer_width, ">()")
+            value = use->unsign ? append_zext(value, static_cast<int>(use->consumer_width))
                                 : absl::StrCat("Slop<", use->consumer_width, ">{", value, "}");
           }
           if (use->producer_shift != 0) {
@@ -9433,7 +9623,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (source_width == static_cast<int>(slot.width)) {
               source_expr = member_value;
             } else if (is_unsign(source)) {
-              source_expr = absl::StrCat(member_value, ".zext_to<", slot.width, ">()");
+              source_expr = append_zext(member_value, static_cast<int>(slot.width));
             } else {
               source_expr = absl::StrCat("Slop<", slot.width, ">{", member_value, "}");
             }
@@ -9646,7 +9836,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       bool first_binding = true;
       for (const auto& read : abi.reads) {
         const auto& slot = color_plan_->boundary_slots()[read.slot_index];
-        const auto  expr = direct_read_expr(slot, read.slot_index);
+        // The BINDING passes the storage OBJECT's address, not the read
+        // spelling: a Slop_u's `.raw()` hands back a const reference, so `&`
+        // of it is a `const Carrier*` and the void* cast is ill-formed. The
+        // kernel below casts back to the matching type.
+        const auto expr = (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value)
+                              ? direct_slot_storage[read.slot_index]
+                              : direct_read_expr(slot, read.slot_index);
         I(!expr.empty());
         fout->append(first_binding ? "" : ",", "static_cast<void*>(&", expr, ")");
         first_binding = false;

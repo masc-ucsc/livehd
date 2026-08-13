@@ -49,6 +49,12 @@ void Inou_cgen::setup() {
                         "0");
   m2.add_label_optional("workers", "color scheduler workers (0/1 = generated serial, N>1 = Taskflow)", "0");
   m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
+  m2.add_label_optional("slop_u",
+                        "materialize stored unsigned values as canonical-unsigned Slop_u<n> (one mask at the write) "
+                        "instead of a lazily-masked Slop<n+1> (one mask at every read). Off by default: it trusts "
+                        "the driver-pin sign stamp, and a stamp that lies masks the value WRONG rather than merely "
+                        "masking it twice",
+                        "false");
   register_inou("cgen", m2);
 }
 
@@ -123,22 +129,22 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      top       = var.get("top");
   auto      fakedelay = var.get("vcd_fake_delay");
   auto      observe_s = var.get("observe");
-  if (!observe_s.empty() && observe_s != "true" && observe_s != "1" && observe_s != "on" && observe_s != "false"
-      && observe_s != "0" && observe_s != "off") {
-    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-        .msg("observe expects true|false, got '{}'", observe_s)
-        .emit();
-    return;
-  }
-  const bool observe_on = observe_s == "true" || observe_s == "1" || observe_s == "on";
+  auto      slop_u_s  = var.get("slop_u");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
-  // but the sim.vcd_fake_delay knob reaches this label directly).
-  if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false" && fakedelay != "0"
-      && fakedelay != "off") {
-    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-        .msg("sim.vcd_fake_delay expects true|false, got '{}'", fakedelay)
-        .emit();
+  // but these labels are also reachable directly).
+  bool       bad_flag = false;
+  const auto flag_on  = [&bad_flag](std::string_view label, std::string_view v) {
+    if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
+      bad_flag = true;
+    }
+    return v == "true" || v == "1" || v == "on";
+  };
+  const bool observe_on = flag_on("observe", observe_s);
+  const bool slop_u_on  = flag_on("sim.slop_u", slop_u_s);
+  flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
+  if (bad_flag) {
     return;
   }
   // sim.flatten=N — inline any callee of <= N nodes. Validated here as well as
@@ -337,7 +343,16 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
     const auto  plan_it = root_color_plans.find(g.get());
     const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
-    Cgen_sim    p(dir, vcd_out, top, fakedelay, flatten_budget, plan, compact_kernel_defs.contains(g.get()), workers, observe_on);
+    Cgen_sim    p(dir,
+                  vcd_out,
+                  top,
+                  fakedelay,
+                  flatten_budget,
+                  plan,
+                  compact_kernel_defs.contains(g.get()),
+                  workers,
+                  observe_on,
+                  slop_u_on);
     p.do_from_graph(g);
   }
 }

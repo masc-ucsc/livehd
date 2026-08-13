@@ -1,0 +1,16 @@
+/*
+:name: concat_untyped_dest
+:type: error
+:error: has no declared type
+:help: must declare the 12-bit width
+*/
+
+// The lanes fully determine the result's width, but the DESTINATION must still
+// say it: a concat is a statement about bit layout, and a destination that
+// leaves the width implicit gives a later reader nothing to check the layout
+// against. `w` here is an untyped local, so there is no declared width to
+// compare the 12-bit result to.
+comb concat_untyped_dest(a:u4, b:u8) -> (z:u12) {
+  const w = concat(a, b)
+  z = w
+}

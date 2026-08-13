@@ -1,0 +1,21 @@
+/*
+:name: concat_two_lanes
+:type: compile
+*/
+
+// `concat(a, b)` — the call-shaped bit-concatenation builtin. No grammar was
+// added for it: prp2lnast recognizes the callee and emits the n-ary LNAST
+// `concat` node (argument 0 = the MOST significant lane, Verilog `{a,b}`
+// order), and upass.tolg turns that into one Ntype_op::Concat whose per-lane
+// window comes from each lane's DECLARED type — never from the live value.
+//
+// `:type: compile` runs the whole flow: upass.tolg builds the cell (so the
+// windows really come from `a:u4` / `b:u2` -- a `:type: upass` run would stop
+// before the only pass that reads the declared widths) and inou.cgen.verilog
+// then emits it as `{a, b}`.
+//
+// z is u6 = 4 + 2 (the lane sum), with `a` occupying bits [5..2]; the result of
+// a concat is always non-negative, hence unsigned.
+comb concat_two_lanes(a:u4, b:u2) -> (z:u6) {
+  z = concat(a, b)
+}

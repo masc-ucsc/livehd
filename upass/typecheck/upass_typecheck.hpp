@@ -101,6 +101,9 @@ public:
   // single-bit→bool vs range→int is ambiguous; tuple_get likewise.)
   Vote process_set_mask(std::string_view, Bundle&, upass::Src_span) override;
   Vote process_sext(std::string_view, Bundle&, upass::Src_span) override;
+  // `concat(msb, …, lsb)` — lanes are kind-checked (integer, or a tuple to
+  // splice); result integer. Widths are NOT this pass's business.
+  Vote process_concat(std::string_view, Bundle&, upass::Src_span) override;
 
   // Aggregates — passthrough kinds, no homogeneity check.
   Vote process_tuple_add(std::string_view, Bundle&, upass::Src_span) override;
@@ -162,6 +165,10 @@ private:
   // `a << b`: `a` integer; `b` integer OR a tuple of bit positions (the
   // documented one-hot form `1 << (1,4,3)`). Result integer.
   void require_shift(std::string_view sym, Bundle& dst, upass::Src_span src);
+  // `concat(msb, …, lsb)`: every lane integer, OR a tuple (the field-splice
+  // form). Result integer. Like require_shift, the rule is not uniform over the
+  // operands, so it cannot reuse require_all.
+  void require_concat(Bundle& dst, upass::Src_span src);
   // Format "name:kind, …" for an op's operands (spanless ops localize by name).
   std::string name_operands(upass::Src_span src) const;
 

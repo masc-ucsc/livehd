@@ -533,6 +533,48 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       result = lec::fit_to(tm_, Val{r, Wm, false}, W);
       break;
     }
+    case Ntype_op::Concat: {
+      // Native SMT-LIB concat, the reason the cell exists: the Set_mask chain it
+      // replaces encodes as one nested bit-insert per lane, and the bit-blaster
+      // pays for every one of them (matches pass/lec/encode.cpp).
+      //
+      // The lane table comes from the SHARED decoder. A lane's window width is an
+      // explicit operand exactly because it is NOT recoverable from its driver
+      // (bits_of is an upper bound bitwidth/cprop narrow freely), and a re-derived
+      // width shifts every lane above the one it got wrong. Empty = malformed
+      // cell: fail closed onto the unsupported path.
+      auto lanes = gu::concat_lanes(node);
+      if (lanes.empty()) {
+        enc_unsupported_ = true;
+        return std::nullopt;
+      }
+      Term acc;
+      int  total = 0;
+      for (size_t i = 0; i < lanes.size(); ++i) {
+        auto& lv = pid(static_cast<hhds::Port_id>(2 * i));  // lane i value = sink pid 2i
+        if (lv.empty()) {
+          enc_unsupported_ = true;
+          return std::nullopt;
+        }
+        // out = SUM_i (value_i mod 2^w_i) << offset_i: every lane is masked into
+        // its OWN window, so a negative lane lands as its two's-complement pattern
+        // and an over-wide one truncates. fit_to extends per the lane's own sign,
+        // which IS `mod 2^w`.
+        Term lt  = lec::fit_to(tm_, lv[0], lanes[i].width);
+        acc      = acc.isNull() ? lt : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {acc, lt});
+        total   += lanes[i].width;
+      }
+      // The result is ALWAYS non-negative: the pin carries sum(w)+1 bits (magnitude
+      // plus the always-zero sign slot), so real_width() already returned sum(w)
+      // for the stamped-unsign pin and this fit is a no-op there; a wider or signed
+      // stamp gets its sign slot from the zero-extension. Widen-only: an
+      // under-stamped pin (or an unstamped one, defaulted to W=1 above) would
+      // otherwise silently drop the most significant lanes.
+      W          = std::max(W, total);
+      out_signed = false;
+      result     = lec::fit_to(tm_, Val{acc, total, false}, W);
+      break;
+    }
     case Ntype_op::AttrSet: {
       if (pid(0).empty()) {
         enc_unsupported_ = true;

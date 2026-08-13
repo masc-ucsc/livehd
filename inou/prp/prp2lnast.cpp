@@ -4516,6 +4516,27 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
   }
 
+  // A lambda may not take a name the call site intercepts before it ever looks
+  // for a lambda (`concat`, `import`, the assert family — see
+  // prp_builtins::is_reserved_lambda_name). Without this the definition parses,
+  // every call is rewritten into the built-in, and the body is silently dead.
+  // Only the SOURCE-named top-level shape is rejected: a hoisted in-tuple method
+  // (`t.concat = comb(…)`) is reached through a receiver, which is never
+  // intercepted.
+  if (hoist_name.empty() && !ts_node_is_null(name_node)) {
+    const auto src_name = trim(get_text(name_node));
+    if (prp_builtins::is_reserved_lambda_name(src_name)) {
+      report_error(name_node,
+                   "lambda-reserved-name",
+                   "name",
+                   std::format("`{}` is a built-in — a {} may not take that name", src_name, kind),
+                   std::format("rename the {} (`{}_impl`), or make it a method (`x.{}(…)` is not a built-in call)",
+                               kind,
+                               src_name,
+                               src_name));
+    }
+  }
+
   // canonical_escaped_ident like every other ident route: a module whose name
   // collides with a Pyrope keyword is WRITTEN back escaped (`` `pipe` ``, see
   // prp_writer's quote_module_path), and the backticks are lexical armor, not
@@ -9058,6 +9079,60 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
       attach_loc(store_idx, n);
       return past_ref;
     }
+  }
+
+  // Bit concatenation `concat(a, b, c)` — call-shaped in the grammar (no syntax
+  // was added for it) but NEVER a real call: emit the n-ary LNAST `concat` node
+  // directly. Going through func_call would lose what makes the op work — the
+  // lane ORDER, which is the only thing that says which operand is significant,
+  // and the one-node-per-concat shape upass.tolg needs to size every lane from
+  // its DECLARED type in a single pass. Argument 0 is the MOST significant lane
+  // (Verilog `{a,b,c}` order), so LNAST children 1..N are the args in source
+  // order. `concat(concat(a,b), c)` needs no special care: the inner call
+  // already lowered to a tmp whose declared width is the inner lane sum.
+  if (!has_receiver && func_ref.is_ref() && func_ref.get_name() == "concat") {
+    auto concat_args = collect_call_args(arg);
+    if (concat_args.empty()) {
+      report_error(n,
+                   "concat-empty",
+                   "type",
+                   "`concat()` needs at least one lane",
+                   "write `concat(a, b)` — argument 0 is the most significant lane");
+    }
+    for (const auto& ca : concat_args) {
+      if (ca.is_assign) {
+        // A lane's position IS its significance, so a named binding has no
+        // meaning here; accepting it would silently drop the key and pretend
+        // the source said something it did not.
+        report_error(n,
+                     "concat-named-lane",
+                     "name",
+                     "`concat` lanes are positional — a named argument has no meaning",
+                     "pass the lanes positionally: `concat(a, b)`, most significant first");
+      }
+    }
+    auto idx = builder.add_child(Lnast_ntype::create_concat());
+    auto ref = builder.mint_tmp_ref();
+    lnast->add_child(idx, ref);
+    // Children are INTERLEAVED (value, width) pairs, and every width goes out
+    // as the `nil` sentinel: prp2lnast has NO type information, so it cannot
+    // size a single window. The slot still has to exist from the start -- a
+    // later pass binds each `nil` from the lane's DECLARED type, and having the
+    // operand already in place means nothing has to re-shape the node (and,
+    // more importantly, that constant-folding a lane cannot erase its width,
+    // since the width is a sibling rather than a property of the value).
+    //
+    // A TUPLE lane (`concat(my_tuple)`) expands to the tuple's fields, field 0
+    // most significant — also not here: prp2lnast cannot tell a tuple ref from
+    // a scalar one, so the argument rides through as one lane and the later
+    // passes do the expansion. Same reason the "lane has no declared type"
+    // check lives in upass.tolg (concat-untyped-lane).
+    for (const auto& ca : concat_args) {
+      lnast->add_child(idx, ca.value);
+      lnast->add_child(idx, Lnast_node::create_const("nil"));
+    }
+    attach_loc(idx, n);
+    return ref;
   }
 
   auto call_args    = collect_call_args(arg);

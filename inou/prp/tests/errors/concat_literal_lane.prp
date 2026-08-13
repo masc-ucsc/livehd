@@ -1,0 +1,13 @@
+/*
+:name: concat_literal_lane
+:type: error
+:error: no declared bit width
+:help: bind it to a typed name first
+*/
+
+// Same rule, reached the other way: a literal written DIRECTLY as a lane has no
+// declared type either, however it is spelled. The fix is to bind it to a typed
+// name first (`const one:u8 = 1`), which states the window explicitly.
+comb concat_literal_lane(a:u4) -> (z:u12) {
+  z = concat(a, 0ub01)
+}

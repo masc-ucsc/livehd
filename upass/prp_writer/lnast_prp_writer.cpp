@@ -764,6 +764,14 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_bit_xor      :
     case N::Lnast_ntype_bit_not      :
     case N::Lnast_ntype_tuple_get    :
+    // concat has no infix/postfix spelling, but it is still a plain value def
+    // (`dst = concat(a, b, c)`), so it rides the same wrapper — only its RHS
+    // rendering (a call shape) differs. Keeping it here, rather than in a
+    // private write_concat(), is what makes it work in the OTHER render_def_rhs
+    // consumers too: a mux arm (arm_value_def) accepts any defines_child0 type,
+    // and would render a concat arm as bare child0 — a silent lane drop — if
+    // render_def_rhs did not spell it.
+    case N::Lnast_ntype_concat       :
     case N::Lnast_ntype_attr_get     : write_value_stmt(); break;
     default                          : {
       // Unknown node — record it (the pass fails the compile unless debug) and
@@ -4423,6 +4431,11 @@ bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_tuple_get:
     case N::Lnast_ntype_attr_set:
     case N::Lnast_ntype_attr_get:
+    // concat( dst, lane_msb, …, lane_lsb ): child0 IS the def. Leaving it out
+    // would count the destination as a READ, so every temp feeding a concat
+    // looks multiply-used and stops folding (and the concat's own statement
+    // would never be recognised as the def of its temp).
+    case N::Lnast_ntype_concat:
     case N::Lnast_ntype_func_call   : return true;
     // if/unique_if/cassert/for/while and the pseudo-func_* nodes read child0 (a
     // condition / value), so leave it classified as a USE — the safe default
@@ -5593,6 +5606,77 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       }
       std::string mv = mask.is_invalid() ? std::string("0") : render_value(mask, /*operand_ctx=*/true);
       return wrap(std::format("{} & {}", s, mv), /*loose=*/true);
+    }
+    case N::Lnast_ntype_concat: {
+      // `concat( dst, v_msb, w_msb, …, v_lsb, w_lsb )` is emitted as the
+      // MASKED SHIFT-OR it is equivalent to, NOT as a `concat(...)` call.
+      //
+      // Pyrope has no syntax for a per-lane window width, and a lane's width is
+      // its DECLARED type -- so `concat(a, b)` only re-parses to the same node
+      // when every lane already names something declared that wide. The values
+      // the writer has here are generated temps and literals, which declare
+      // nothing, and the re-parse then fails with `concat-untyped-lane`. (That
+      // is exactly what broke every prp-v2prp2v round trip.)
+      //
+      // Spelling the windows explicitly needs no declarations at all: the mask
+      // states the width and the shift states the offset, so the re-parse
+      // reconstructs the identical layout. cprop's Or-of-disjoint-SHL
+      // canonicalization then folds it straight back into one Concat cell, so
+      // the graph this round-trips to is the graph it came from.
+      //
+      // Why not the nicer `const t0:u4 = …` + `concat(t0, …)` form: that needs
+      // a STATEMENT per lane, and render_def_rhs is also called in operand
+      // context (a mux arm), where there is nowhere to hoist one to.
+      struct W_lane {
+        std::string expr;
+        int64_t     width  = 0;
+        int64_t     offset = 0;
+      };
+      std::vector<W_lane> wl;
+      int64_t             total = 0;
+      for (auto v = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0); !v.is_invalid();) {
+        auto w = lnast->get_sibling_next(v);
+        if (w.is_invalid()) {
+          break;
+        }
+        int64_t    bits = 0;
+        const auto wtxt = std::string(lnast->get_name(w));
+        if (!wtxt.empty() && wtxt != "nil") {
+          if (auto d = Dlop::from_pyrope(wtxt); d && d->is_integer() && d->is_just_i64()) {
+            bits = d->to_just_i64();
+          }
+        }
+        wl.push_back(W_lane{render_value(v, /*operand_ctx=*/true), bits, 0});
+        v = lnast->get_sibling_next(w);
+      }
+      // MSB-first: a lane sits above every lane after it.
+      for (auto it = wl.rbegin(); it != wl.rend(); ++it) {
+        it->offset  = total;
+        total      += it->width;
+      }
+      std::string s;
+      for (const auto& l : wl) {
+        if (l.width <= 0 || l.width > (1 << 20)) {
+          continue;  // unbound (or absurd) width: cannot be spelled; upass reports it
+        }
+        // The mask is what states the WINDOW: it is what keeps a lane from
+        // bleeding into the lane above when its value is wider (or negative).
+        //
+        // `1 << w` is only defined for w < 64, and a 64-bit lane is ordinary in
+        // imported RTL (`{64'h.., x}`), so anything at or above the shift limit
+        // spells the mask through Dlop instead of overflowing a uint64_t.
+        const std::string mask_txt = l.width < 64 ? std::to_string((uint64_t{1} << l.width) - 1)
+                                                 : Dlop::get_mask_value(static_cast<int>(l.width))->to_pyrope();
+        std::string       term     = std::format("({} & {})", l.expr, mask_txt);
+        if (l.offset != 0) {
+          term = std::format("({} << {})", term, l.offset);
+        }
+        s = s.empty() ? term : std::format("{} | {}", s, term);
+      }
+      if (s.empty()) {
+        return "0";
+      }
+      return wrap(s, /*loose=*/true);
     }
     case N::Lnast_ntype_tuple_get: {
       auto base = lnast->get_sibling_next(c0);

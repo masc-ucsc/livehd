@@ -13,7 +13,9 @@
 #include "upass_func_extract.hpp"
 
 #include <functional>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,6 +58,19 @@ std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, b
     }
   }
   return std::nullopt;
+}
+
+// A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
+// ("concat_op lane does not fit its declared width"), so an over-wide lane
+// would ABORT a -c dbg build instead of leaving the temp unfolded. The kernel
+// measures the BASE plane's signed width; Dlop::get_bits() is that same count,
+// only ever rounded UP for unknowns, so this test is always at least as strict
+// as the assert. A negative lane spends its top bit on the sign (that is how -1
+// lands as 0b111 in a 3-bit window); a non-negative one is magnitude plus the
+// zero sign slot.
+bool concat_lane_fits(const Dlop& v, int bits) {
+  const int gb = v.get_bits();
+  return v.is_negative() ? gb <= bits : gb <= bits + 1;
 }
 
 // The split is a stateful single DFS over the module tree (mirroring the old
@@ -231,6 +246,76 @@ struct Lambda_extractor {
       }
     }
     temp_scalar_value[lhs_name] = *acc;
+    lm->restore_cursor(saved);
+  }
+
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` — deliberately NOT routed
+  // through fold_temp_nary: the operands are INTERLEAVED (value, width) pairs,
+  // so a left-fold over every child would assemble each window width as if it
+  // were a lane. Each lane instead drops into its OWN window and the result is
+  // the non-negative sum-of-widths value — Dlop's n-ary concat_op (the binary
+  // member form sizes by SIGNIFICANT bits, which is exactly what a concat
+  // window may not be sized by).
+  //
+  // A width that is still the `nil` sentinel means no pass has bound that
+  // lane's declared type yet. Leave the temp unfolded rather than guess:
+  // narrowing one window shifts every lane above it.
+  void fold_temp_concat() {
+    if (!lm->has_child()) {
+      return;
+    }
+    const auto saved = lm->save_cursor();
+    lm->move_to_child();
+    if (!Lnast_ntype::is_ref(lm->current_type())) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    std::string lhs_name(lm->current_text());
+
+    // `values` must outlive the Concat_lane span (it borrows each value), so
+    // collect both halves first and only then build the lane view.
+    std::vector<Dlop> values;
+    std::vector<int>  widths;
+    while (lm->move_to_sibling()) {
+      auto v = resolve_child_scalar(std::string(lm->current_text()),
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value,
+                                    temp_scalar_value);
+      if (!v.has_value() || v->is_invalid() || !lm->move_to_sibling()) {
+        lm->restore_cursor(saved);  // unresolvable lane, or a lane with no width operand
+        return;
+      }
+      auto w = resolve_child_scalar(std::string(lm->current_text()),
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value,
+                                    temp_scalar_value);
+      if (!w.has_value() || w->is_invalid() || !w->is_integer() || !w->is_just_i64()) {
+        lm->restore_cursor(saved);  // still `nil`, or not a comptime width
+        return;
+      }
+      const auto bits = w->to_just_i64();
+      if (bits <= 0 || bits > std::numeric_limits<int>::max() || !concat_lane_fits(*v, static_cast<int>(bits))) {
+        lm->restore_cursor(saved);
+        return;
+      }
+      values.push_back(*v);
+      widths.push_back(static_cast<int>(bits));
+    }
+    if (values.empty()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    std::vector<Dlop::Concat_lane> lanes;
+    lanes.reserve(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+      lanes.push_back(Dlop::Concat_lane{&values[i], widths[i]});
+    }
+    auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(lanes.data(), lanes.size()));
+    if (r && !r->is_invalid()) {
+      temp_scalar_value[lhs_name] = *r;
+    }
     lm->restore_cursor(saved);
   }
 
@@ -615,6 +700,8 @@ struct Lambda_extractor {
         fold_temp_nary([](const Dlop& a, const Dlop& b) { return *a.or_op(b); });
       } else if (Lnast_ntype::is_bit_xor(t)) {
         fold_temp_nary([](const Dlop& a, const Dlop& b) { return *a.xor_op(b); });
+      } else if (Lnast_ntype::is_concat(t)) {
+        fold_temp_concat();  // interleaved (value, width) pairs — see the helper
       } else if (Lnast_ntype::is_tuple_add(t)) {
         process_tuple_add();
       } else if (Lnast_ntype::is_func_call(t)) {

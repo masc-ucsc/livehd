@@ -78,6 +78,19 @@ public:
   upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` is assignment-shaped like
+  // every op above, so sticky taint has to observe it. on_assign_like walks the
+  // node under the cursor, which is why the INTERLEAVED (value, width) operand
+  // pairs need no decoding here — the width consts read as ordinary rhs
+  // constants. Written out instead of joining the .cpp's EXPR_PROCESS list
+  // purely to keep this landing inside the one file this change owns.
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    on_assign_like(/*is_assign_node=*/false);
+    return upass::Vote::keep;
+  }
 
   // Attribute set/get nodes are dispatched to per-attribute handlers.
   void process_attr_set() override;

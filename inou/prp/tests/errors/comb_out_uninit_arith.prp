@@ -7,10 +7,13 @@
 // BUG (read-before-write): the `res` output is never initialized, yet the loop
 // body reads it (`res <<= …`) before the first write. The result of an
 // arithmetic/shift operation with a nil (uninitialized) operand is a compile
-// error. Initialize `res = 0` first (see comptime/comb_out_accumulate). The
+// error. Initialize `res = 0` first. The
 // vararg `comb` is a template, but the error must still fire when it is inlined
 // at the concrete `concat(b, c)` call site.
-comb concat(...a)->(res:unsigned) {
+// The helper is named `pack`, not `concat`: `concat` is now a reserved
+// builtin (the bit-concatenation op), so a user lambda may not take that name.
+// What this test is about is unchanged -- the uninitialized accumulator read.
+comb pack(...a)->(res:unsigned) {
   for x in a {
      res <<= x.[bits]   // locate_error_here  (reads uninitialized res)
      res  |= x
@@ -20,4 +23,4 @@ comb concat(...a)->(res:unsigned) {
 const b:u4 = 3
 const c:u8 = 0xAA
 
-const x = concat(b,c)
+const x = pack(b,c)
