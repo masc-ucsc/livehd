@@ -37,6 +37,14 @@ protected:
 
   bool            scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
   void            scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
+  // EQ(EQ(x,0),0) -> x / EQ(b,1) -> b boolean-chain folds. true = node deleted.
+  bool            scalar_eq(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
+  // Constant shift-of-shift composition (SRA/SHL chains). true = node rewired
+  // in place (caller must re-read input edges).
+  bool            scalar_shift(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
+  // Or of constant-shifted copies of ONE 0/1 source ({N{bit}} replication) ->
+  // Mux(bit, 0, mask). true = node deleted.
+  bool            try_broadcast_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered);
   hhds::Pin_class try_find_single_driver_pin(hhds::Node_class& node, int64_t pos);
   bool            scalar_get_mask(hhds::Node_class& node);
   bool            scalar_set_mask(hhds::Node_class& node);
@@ -55,6 +63,11 @@ protected:
   // Canonicalize Get_mask(x, ones[lo,hi)) with lo>0 into
   // Get_mask(SRA(x,lo), 2^(hi-lo)-1). Must run AFTER scalar_pass.
   void normalize_get_mask_slices(hhds::Graph* g);
+  // Retype And(x, 2^n-1) [binary, one const] into the value-identical
+  // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.
+  void canonicalize_and_masks(hhds::Graph* g);
+  // Hash-cons identical pure combinational nodes (same op, same input pins).
+  void cse_pass(hhds::Graph* g);
   void scalar_pass(hhds::Graph* g);
 
 public:

@@ -2035,6 +2035,15 @@ private:
         return any;
       }
     }
+    if (gu::is_const_pin(pin)) {
+      const auto c = gu::hydrate_const(pin);
+      if (!c.has_unknowns() && c.is_known_zero()) {
+        // +0 is the additive identity of the modulus being compared: cprop
+        // drops a Sum's lone zero addend, so the unrolled side may lack the
+        // seed constant the compact virtual expansion still carries.
+        return true;
+      }
+    }
     auto term = at_width(pin, width);
     if (!term) {
       return false;

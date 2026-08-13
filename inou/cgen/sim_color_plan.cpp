@@ -1176,6 +1176,44 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         if (!mask.is_invalid() && gu::is_const_pin(mask)) {
           std::tie(lo, hi) = gu::hydrate_const(mask).get_mask_range();
         }
+        // cprop canonicalizes the And(SRA(word,k), low-mask) bit read into
+        // Get_mask(SRA(word,k), low-mask): hop the same consumer-side SRA the
+        // And spelling below hops, so both spellings bind the exact
+        // [k, k+width) slice instead of pinning the whole shifted word.
+        //
+        // Only a LOW-ANCHORED mask may hop. Dropping position_in_whole makes
+        // the producer bind LSB-aligned (producer_shift = 0), and the consumer
+        // Get_mask still applies its ORIGINAL mask to that value: for a mask
+        // starting at bit m>0 the cell would then read bits [m, m+w) of the
+        // LSB-aligned leaf, i.e. [k+2m, k+2m+w) of the word instead of
+        // [k+m, k+m+w). The And spelling below guards the same way
+        // (mask_lo == 0).
+        if (lo == 0 && hi > lo && !gu::is_const_pin(crossing)) {
+          const auto shift_node = crossing.get_master_node();
+          if (shift_node.path() == consumer_base.node.path() && gu::type_op_of(shift_node) == Ntype_op::SRA) {
+            hhds::Occurrence_pin value;
+            hhds::Occurrence_pin amount;
+            for (const auto& input : shift_node.inp_edges()) {
+              if (input.sink.get_port_id() == 0) {
+                value = input.driver;
+              } else {
+                amount = input.driver;
+              }
+            }
+            if (!value.is_invalid() && !amount.is_invalid() && gu::is_const_pin(amount)) {
+              const auto shift = gu::hydrate_const(amount);
+              // Bound the amount before narrowing to int: a to-positive mask
+              // (-1) reports hi == INT_MAX/2, so an unbounded `hi += shift`
+              // is signed overflow.
+              if (shift.is_just_i64() && shift.to_just_i64() >= 0 && shift.to_just_i64() <= (1 << 28)) {
+                lo                += static_cast<int>(shift.to_just_i64());
+                hi                += static_cast<int>(shift.to_just_i64());
+                crossing           = value;
+                position_in_whole  = false;  // the SRA already defined the consumer's LSB-aligned surface
+              }
+            }
+          }
+        }
       } else if (consumer_op == Ntype_op::And && !gu::is_const_pin(edge.driver)) {
         int mask_width = -1;
         for (const auto& input : consumer_base.node.inp_edges()) {
