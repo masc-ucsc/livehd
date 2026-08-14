@@ -1403,7 +1403,11 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   }
 
   // value written into the slice comes from the LOW bits of the RHS
-  auto val       = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
+  // A SystemVerilog assignment to a packed field/slice first fits the RHS to
+  // the selected width. Make that precision boundary explicit here: LNAST
+  // integers are otherwise unbounded, so an arithmetic RHS can reach the
+  // bitwidth verifier one carry bit wider than the destination slice.
+  auto val       = fit_wrap(rhs, static_cast<int>(lv.width), lv.is_signed);
   auto base_name = lname_of(*lv.base);
 
   if (lv.dyn_off.empty()) {

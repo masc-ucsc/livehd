@@ -68,6 +68,11 @@ struct Phase_endpoint {
   // into the enable. AND-ing it evaluates the clock as a free data input once
   // per microstep, which is the measured `always @(posedge 'hx)` failure M8 hit.
   bool        clock_role_latch = false;
+  // A clock-role latch can also have an ordinary DATA enable in its window
+  // (`if !clk && held_en`). Unlike an ICG guard, that value is consumed LIVE at
+  // the same close microstep; sampling it into another state cut would insert
+  // a full-period delay because sample and consume happen together.
+  bool        live_guard       = false;
   // An ALWAYS-TRANSPARENT latch: no enable pin at all (tolg wires none when the
   // reg is written on every path) or a constant-true one. Its window never
   // closes, so it stores nothing -- it is a COMBINATIONAL BUFFER, and cgen
@@ -79,11 +84,9 @@ struct Phase_endpoint {
   // of the consumer): an ordinary gate samples before the root rise, an inverted
   // one before the root fall. One sample serves every consumer in the period.
   Phase       guard_sample     = Phase::Close_low;
-  // Key of the sampled-guard state cut, shared by every consumer of the same
-  // cell. Empty when the endpoint's clock is ungated. The cut is always WRITTEN
-  // (at `guard_sample`) before it is READ (at the consumer's microstep) inside
-  // one period, so its power-on value is dead -- which is why a key that fails
-  // to match across the miter costs precision, never soundness.
+  // Key of the guard cone, shared by every consumer of the same cell. Empty
+  // when the endpoint's clock is ungated. Ordinary clock-gate consumers read a
+  // sampled state cut; `live_guard` latch endpoints read the cone directly.
   std::string guard_key;
 };
 

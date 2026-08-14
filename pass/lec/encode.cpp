@@ -2442,9 +2442,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (concat_tbl.empty()) {
             return fail_unsupported("malformed Concat (missing or non-constant lane width operand) (M1)");
           }
-          if (const auto lane_bad = gu::concat_lane_violation(concat_tbl); !lane_bad.empty()) {
-            return fail(lane_bad);
-          }
           Term acc;
           int  total = 0;
           for (size_t i = 0; i < concat_tbl.size(); ++i) {
@@ -2455,8 +2452,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             // out = SUM_i (value_i mod 2^w_i) << offset_i -- each lane occupies
             // its OWN window, so a negative lane lands as its two's-complement
             // pattern (-1 at w=3 is 0b111). fit() extends per the lane's own
-            // sign, which IS `mod 2^w`; a driver WIDER than its window was
-            // rejected above, so this fit only ever extends.
+            // sign, which IS `mod 2^w`. An over-wide driver truncates here, per
+            // the Concat cell contract; the explicit window still fixes every
+            // neighboring lane's offset, so no lane can shift.
             Term lt  = fit(lv[0], concat_tbl[i].width);
             acc      = acc.isNull() ? lt : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {acc, lt});
             total   += concat_tbl[i].width;
@@ -3078,13 +3076,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (gu::type_op_of(mux) != Ntype_op::Mux) {
         return {};  // raw yosys D/EN shape: `din` IS already the transparent value
       }
+      bool                 has_q_arm = false;
+      hhds::Occurrence_pin other;
       for (const auto& e : mux.inp_edges()) {
         if (e.sink.get_port_id() == 0) {
           continue;  // the selector is the gate, not an arm
         }
-        if (!e.driver.is_invalid() && e.driver.get_class_index() != q.get_class_index()) {
-          return e.driver;
+        if (!e.driver.is_invalid() && e.driver.get_class_index() == q.get_class_index()) {
+          has_q_arm = true;
+        } else if (other.is_invalid()) {
+          other = e.driver;
         }
+      }
+      if (has_q_arm) {
+        return other;
       }
       return {};
     };
@@ -3210,7 +3215,23 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!commit_now) {
         commits = tm_.mkBoolean(false);
       } else if (pe != nullptr && !pe->guard_key.empty()) {
-        if (single_step()) {
+        if (pe->live_guard) {
+          auto git = phase_plan_->guard_cones.find(pe->guard_key);
+          if (git == phase_plan_->guard_cones.end()) {
+            return fail_unsupported("latch '" + gu::debug_name(node) + "' has no encodable live enable cone");
+          }
+          Term acc;
+          for (const auto& cone : git->second) {
+            bool ok2 = true;
+            Val  gv  = driver_val(cone, ok2);
+            if (!ok2 || gv.term.isNull()) {
+              return fail_unsupported("latch '" + gu::debug_name(node) + "' has no encodable live enable cone");
+            }
+            Term hot = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)});
+            acc      = acc.isNull() ? hot : tm_.mkTerm(Kind::AND, {acc, hot});
+          }
+          commits = acc;
+        } else if (single_step()) {
           // P == 1: one encoder step IS the reference edge, so the guard is the
           // enable held at that edge -- exactly M9's fold, but built from the
           // schedule's CANONICALIZED chain, so a gate of a gate contributes
@@ -3528,6 +3549,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // unobservable and the two sides need not agree on it.
   if (phased && !single_step()) {
     for (const auto& [gkey, cones] : phase_plan_->guard_cones) {
+      bool sampled = false;
+      for (const auto& [nk, pep] : phase_plan_->ep) {
+        if (pep.guard_key == gkey && !pep.live_guard) {
+          sampled = true;
+          break;
+        }
+      }
+      if (!sampled) {
+        continue;
+      }
       const Val cur       = seed_state(gkey, 1, false);
       // Every consumer of one cell shares the sample microstep, so read it off
       // the first endpoint that names this key.

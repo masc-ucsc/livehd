@@ -58,6 +58,10 @@ struct Clock_chain {
   bool                              refused           = false;  // a div != 1 (or a cycle) was hit
   std::string                       why;                        // refusal text
   std::vector<hhds::Occurrence_pin> guards;                     // enables to AND into the commit condition
+  // Original inline-gate enables before ICG-specific transparent-arm peeling.
+  // A latch whose own window is `clk & held_en` consumes held_en LIVE; replacing
+  // it with the ICG latch's transparent input samples the wrong half-period.
+  std::vector<hhds::Occurrence_pin> live_guards;
 };
 
 // Structural digest of a cone, used to give the SAMPLED GUARD a name. Two
@@ -198,6 +202,7 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
         }
       }
       if (n_clock == 1 && !ens.empty()) {
+        ch.live_guards.insert(ch.live_guards.end(), ens.begin(), ens.end());
         for (auto& en : ens) {
           // THE L1 ERROR. A real ICG latches its enable on the opposite phase
           // purely to suppress glitches: the latch closes exactly when the
@@ -437,18 +442,17 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     // UNKNOWN (`phase_clock_gate_invert` is exactly that fixture).
     if (ch.gated && !ch.guards.empty()) {
       e.guard_sample     = ch.guard_before_fall ? Phase::Close_high : Phase::Close_low;
+      e.live_guard       = is_latch && clock_role && !ch.live_guards.empty();
+      const auto& guards = e.live_guard ? ch.live_guards : ch.guards;
       std::string digest = root_key(ch.root, &node, clock_forest) + (ch.guard_before_fall ? "-" : "+");
-      for (const auto& gp : ch.guards) {
+      for (const auto& gp : guards) {
         digest += "&" + cone_digest(gp);
       }
-      e.guard_key
-          = "\x01"
-            "ckguard:"
-            + digest;
-      if (guard_keys.insert(e.guard_key).second) {
+      e.guard_key = "\x01" + std::string(e.live_guard ? "latchguard:" : "ckguard:") + digest;
+      if (!e.live_guard && guard_keys.insert(e.guard_key).second) {
         (ch.guard_before_fall ? plan.n_guard_high : plan.n_guard_low) += 1;
       }
-      plan.guard_cones[e.guard_key] = ch.guards;
+      plan.guard_cones[e.guard_key] = guards;
     }
 
     // Only a CLOCK-role endpoint contributes a clock root. A DATA-gated latch

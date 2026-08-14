@@ -119,6 +119,15 @@ void Lnast_prp_writer::scan_dead_init_stores() {
     if (v.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(v)) || !defines_child0(t) || Lnast_ntype::is_declare(t)) {
       continue;
     }
+    // attr_set defines metadata attached to child0, not the variable's value.
+    // In particular, slang may place `attr_set rst_q clock_pin clk_i` after
+    // the flop's constant din store. Treating that attribute as a later value
+    // definition drops `rst_q = 1` and turns a reset synchronizer into a flop
+    // that holds its reset value forever. Keep the pending value candidate;
+    // a later real value definition can still supersede it.
+    if (t == Lnast_ntype::Lnast_ntype_attr_set) {
+      continue;
+    }
     const std::string nm(strip_prefix(lnast->get_name(v)));
     // This def supersedes a pending one: that earlier store is dead.
     if (auto it = pending.find(nm); it != pending.end()) {
@@ -5609,7 +5618,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
     }
     case N::Lnast_ntype_concat: {
       // `concat( dst, v_msb, w_msb, …, v_lsb, w_lsb )` is emitted as the
-      // MASKED SHIFT-OR it is equivalent to, NOT as a `concat(...)` call.
+      // SLICED SHIFT-OR it is equivalent to, NOT as a `concat(...)` call.
       //
       // Pyrope has no syntax for a per-lane window width, and a lane's width is
       // its DECLARED type -- so `concat(a, b)` only re-parses to the same node
@@ -5618,7 +5627,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       // nothing, and the re-parse then fails with `concat-untyped-lane`. (That
       // is exactly what broke every prp-v2prp2v round trip.)
       //
-      // Spelling the windows explicitly needs no declarations at all: the mask
+      // Spelling the windows explicitly needs no declarations at all: the slice
       // states the width and the shift states the offset, so the re-parse
       // reconstructs the identical layout. cprop's Or-of-disjoint-SHL
       // canonicalization then folds it straight back into one Concat cell, so
@@ -5654,20 +5663,29 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
         it->offset  = total;
         total      += it->width;
       }
+      // SystemVerilog replication (`{N{bit}}`) reaches LNAST as N adjacent
+      // one-bit lanes that all name the same value. Expanding that shape into
+      // N shifts and ORs is exact, but needlessly destroys the compact mux form
+      // that cprop and formal engines handle well (Minion has many 66-bit
+      // enable masks in its multiply/divide datapath). Preserve the replication
+      // as one constant select. This is also safe for an ordinary concat that
+      // happens to repeat the same one-bit lane: it denotes the same bitvector.
+      if (wl.size() > 1 && total > 0 && total <= (1 << 20)
+          && std::all_of(wl.begin(), wl.end(), [&](const W_lane& l) { return l.width == 1 && l.expr == wl.front().expr; })) {
+        const std::string mask = Dlop::get_mask_value(static_cast<int>(total))->to_pyrope();
+        return wrap(std::format("if ({}) != 0 {{ {} }} else {{ 0 }}", wl.front().expr, mask), /*loose=*/true);
+      }
       std::string s;
       for (const auto& l : wl) {
         if (l.width <= 0 || l.width > (1 << 20)) {
           continue;  // unbound (or absurd) width: cannot be spelled; upass reports it
         }
-        // The mask is what states the WINDOW: it is what keeps a lane from
-        // bleeding into the lane above when its value is wider (or negative).
-        //
-        // `1 << w` is only defined for w < 64, and a 64-bit lane is ordinary in
-        // imported RTL (`{64'h.., x}`), so anything at or above the shift limit
-        // spells the mask through Dlop instead of overflowing a uint64_t.
-        const std::string mask_txt = l.width < 64 ? std::to_string((uint64_t{1} << l.width) - 1)
-                                                 : Dlop::get_mask_value(static_cast<int>(l.width))->to_pyrope();
-        std::string       term     = std::format("({} & {})", l.expr, mask_txt);
+        // The slice is what states the WINDOW: it keeps a wider or negative
+        // lane from bleeding into the lane above. Reinterpret that fully-sized
+        // slice as unsigned before it enters the OR tree. Without this, a low
+        // lane whose top bit is one sign-extends through the whole pack (for
+        // example `{33{1'b0}, 32'hffff_fffe}` became 65'h1ffff_ffff_ffff_fffe).
+        std::string term = std::format("unsigned(({})#[0..={}])", l.expr, l.width - 1);
         if (l.offset != 0) {
           term = std::format("({} << {})", term, l.offset);
         }

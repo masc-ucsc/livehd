@@ -5320,6 +5320,157 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         break;
       }
     }
+
+    // Strong, compositional accelerator: prove that EACH scheduled microstep
+    // preserves equal state from an arbitrary equal phase-boundary state. This
+    // implies the composed-period theorem below by induction, while keeping a
+    // wide datapath out of a four-deep transition expression. It is deliberately
+    // best-effort: any SAT/UNKNOWN step falls back to the ordinary composed
+    // proof, because a per-phase invariant can be stronger than necessary.
+    if (!opts.design_assumes && shared_mems.empty()) {
+      bool step_proven = true;
+      int  step_checks = 0;
+      for (size_t si = 0; si < psteps.size() && step_proven; ++si) {
+        solver.push();
+        const int ms = psteps[si];
+
+        penc.set_x_dontcare(opts.gold_x != "zero");
+        penc.set_box_keys(&ref_box_keys);
+        penc.set_phase_plan(&ind_ref_plan, ms);
+        Encoded sre = penc.encode(ref, &shared, "psr" + std::to_string(si) + "_", &shared_mems);
+        penc.set_x_dontcare(false);
+        penc.set_box_keys(&impl_box_keys);
+        penc.set_phase_plan(&ind_impl_plan, ms);
+        Encoded sie = penc.encode(impl, &shared, "psi" + std::to_string(si) + "_", &shared_mems);
+        if (!sre.ok || !sie.ok) {
+          solver.pop();
+          step_proven = false;
+          break;
+        }
+        for (const auto& [l, r] : sre.equalities) {
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+        for (const auto& [l, r] : sie.equalities) {
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+
+        Io_name_map<Val> rnxt, inxt, robs, iobs;
+        auto             split_outputs = [&](const Encoded& e, Io_name_map<Val>& nxt, Io_name_map<Val>& obs) {
+          for (const auto& [nm, v] : e.outputs) {
+            if (nm.rfind("\x01nxt:", 0) == 0) {
+              nxt[nm.substr(5)] = v;
+            } else if ((si == 0 || si == pobs_b) && (nm.empty() || (nm[0] != '\x03' && nm[0] != '\x04'))) {
+              obs[nm] = v;
+            }
+          }
+        };
+        split_outputs(sre, rnxt, robs);
+        split_outputs(sie, inxt, iobs);
+
+        struct Step_diff {
+          std::string label;
+          cvc5::Term  term;
+        };
+        std::vector<Step_diff> step_diffs;
+        bool                   complete = rnxt.size() == inxt.size() && robs.size() == iobs.size();
+        auto add_step_map = [&](std::string_view kind, const Io_name_map<Val>& a, const Io_name_map<Val>& b, bool skip_bbox) {
+          for (const auto& [nm, av] : a) {
+            auto bi = b.find(nm);
+            if (bi == b.end()) {
+              complete = false;
+              continue;
+            }
+            if (skip_bbox
+                && nm.find("\x02"
+                           "bbox:")
+                       != std::string::npos) {
+              continue;
+            }
+            const int  w  = std::max(av.width, bi->second.width);
+            cvc5::Term at = fit_to(tm, av, w);
+            cvc5::Term bt = fit_to(tm, bi->second, w);
+            if (cvc5::Term u = fit_x_mask_to(tm, av, w); !u.isNull()) {
+              const auto keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+              at              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {at, keep});
+              bt              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {bt, keep});
+            }
+            // Holds and already-paired box wiring commonly share the exact
+            // term. Do not spend one solver call per bit proving a syntactic
+            // identity; wide idle state dominated the Minion divider budget.
+            if (at == bt) {
+              continue;
+            }
+            for (int bit = 0; bit < w; ++bit) {
+              const std::string label = std::string(kind) + ":" + nm + (w == 1 ? "" : ("[" + std::to_string(bit) + "]"));
+              if (w == 1) {
+                step_diffs.push_back({label, tm.mkTerm(cvc5::Kind::DISTINCT, {at, bt})});
+              } else {
+                const auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)});
+                step_diffs.push_back({label, tm.mkTerm(cvc5::Kind::DISTINCT, {tm.mkTerm(op, {at}), tm.mkTerm(op, {bt})})});
+              }
+            }
+          }
+        };
+        add_step_map("state", rnxt, inxt, false);
+        add_step_map("output", robs, iobs, true);
+        if (!complete || step_diffs.empty()) {
+          solver.pop();
+          step_proven = false;
+          break;
+        }
+        // Most phase-local obligations are pure bit-vector cones. Let ABC
+        // discharge those in one batch before asking cvc5 one bit at a time;
+        // a SAT/unsupported ABC result is only a failure to subtract and is
+        // still checked with all encoder equalities active in cvc5 below.
+        std::vector<cvc5::Term> step_terms;
+        step_terms.reserve(step_diffs.size());
+        for (const auto& d : step_diffs) {
+          step_terms.push_back(d.term);
+        }
+        std::vector<Cone_stats>   step_stats;
+        std::vector<Cone_verdict> step_verdicts(step_diffs.size(), Cone_verdict::Unknown);
+        if (lec_cones_try(opts.cones)) {
+          const int64_t abc_ms = budget_on ? std::max<int64_t>(1, budget_left_ms() / 4) : 15000;
+          step_verdicts        = abc_prove_unsat_batch(step_terms, opts.conelimit, abc_ms, &step_stats);
+        }
+        for (size_t di = 0; di < step_diffs.size(); ++di) {
+          const auto& d = step_diffs[di];
+          if (step_verdicts[di] == Cone_verdict::Proven) {
+            ++step_checks;
+            continue;
+          }
+          solver.push();
+          solver.assertFormula(d.term);
+          arm_solve_budget();
+          const auto sr = solver.checkSat();
+          solver.pop();
+          if (!sr.isUnsat() && std::getenv("LEC_PHASE_STEP_LOG") != nullptr) {
+            std::fprintf(stderr,
+                         "[LEC_PHASE_STEP] ms=%d cut=%d/%zu %s %s\n",
+                         ms,
+                         step_checks + 1,
+                         step_diffs.size(),
+                         d.label.c_str(),
+                         sr.isUnsat() ? "equal" : (sr.isSat() ? "DIFF" : "unknown"));
+          }
+          if (!sr.isUnsat()) {
+            step_proven = false;
+            break;
+          }
+          ++step_checks;
+        }
+        solver.pop();
+      }
+      if (step_proven && step_checks > 0) {
+        res.verdict = Verdict::Proven;
+        res.engine  = "ind";
+        res.detail  = "solver=cvc5 (phase-step induction: " + std::to_string(psteps.size()) + " microsteps, "
+                      + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
+                      + ind_ref_plan.describe() + "]";
+        return res;
+      }
+    }
+
     std::array<Io_name_map<Val>, 2> half_ins;
     half_ins[0] = shared;  // inputs + the assumed-equal current state
     half_ins[1] = shared;

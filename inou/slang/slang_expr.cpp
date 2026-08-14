@@ -368,6 +368,25 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       if (*count == 0) {
         return "0";
       }
+      // `{N{bit}}` is a ubiquitous mask idiom. Keep it as one constant-select
+      // mux instead of N shifted copies joined by an OR tower. Besides being a
+      // much smaller LNAST, this preserves the simple control/data split that
+      // cprop and formal cone solvers exploit (Minion's divider uses several
+      // 65/66-bit masks in one accumulator transition).
+      if (oi.bits == 1 && *count > 1) {
+        const int  bits = static_cast<int>(*count);
+        const auto out  = fresh_local("rep");
+        const auto cond = booleanize(v);  // materialize before the if node so it is in scope in the condition
+        builder_.create_declare_stmts(out, "mut", int_max_str(bits, false), int_min_str(bits, false));
+        builder_.create_assign_stmts(out, "0");
+        auto if_nid = builder_.create_if_stmt(false);
+        builder_.add_if_cond(if_nid, cond);
+        auto then_stmts = builder_.add_if_stmts(if_nid);
+        builder_.push_stmts(then_stmts);
+        builder_.create_assign_stmts(out, Dlop::get_mask_value(bits)->to_pyrope());
+        builder_.pop_stmts();
+        return out;
+      }
       std::vector<std::string> parts;
       for (int64_t i = 0; i < *count; ++i) {
         auto off = static_cast<int64_t>(oi.bits) * i;
@@ -791,9 +810,14 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       // negative_array_index). Lnast_range::mod() gives the exact range
       // directly. No fit_wrap: |a%b| < |b|, so the result always fits.
       return builder_.create_mod_stmts(lhs, rhs);
-    case BinaryOperator::BinaryAnd : return builder_.create_bit_and_stmts(lhs, rhs);
-    case BinaryOperator::BinaryOr  : return builder_.create_bit_or_stmts({lhs, rhs});
-    case BinaryOperator::BinaryXor : return builder_.create_bit_xor_stmts(lhs, rhs);
+    // Bitwise results have slang's exact self-determined width. LNAST integers
+    // are otherwise unbounded, so a mask such as `{66{en}} & x` can retain the
+    // unsigned sign slot as a 67th value bit and later violate a Concat lane's
+    // declared 66-bit window. Materialize the language precision boundary here,
+    // just as arithmetic overflow paths do above.
+    case BinaryOperator::BinaryAnd : return fit_wrap(builder_.create_bit_and_stmts(lhs, rhs), ti.bits, ti.is_signed);
+    case BinaryOperator::BinaryOr  : return fit_wrap(builder_.create_bit_or_stmts({lhs, rhs}), ti.bits, ti.is_signed);
+    case BinaryOperator::BinaryXor : return fit_wrap(builder_.create_bit_xor_stmts(lhs, rhs), ti.bits, ti.is_signed);
     case BinaryOperator::BinaryXnor: {
       auto x = builder_.create_bit_not_stmts(builder_.create_bit_xor_stmts(lhs, rhs));
       return ti.is_signed ? x : trunc_to(x, ti.bits);
@@ -1038,16 +1062,18 @@ std::string Slang_context::lower_streaming(const slang::ast::StreamingConcatenat
 // operand, so `2'b0` may stay the plain value `0` without the literal's
 // spelling having to encode a width.
 std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {
-  auto                                       ops = expr.operands();
-  std::vector<Lnast_builder::Concat_lane>    lanes;
+  auto                                    ops = expr.operands();
+  std::vector<Lnast_builder::Concat_lane> lanes;
   lanes.reserve(ops.size());
 
   for (const auto* op : ops) {
     const auto& e  = *op;
     auto        oi = tinfo(*e.type);
-    // to_pattern gives the two's-complement bit pattern of a signed operand,
-    // which is what a window takes; the window then masks to oi.bits anyway.
-    lanes.push_back({to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
+    // A Concat lane is an IR precision boundary: its driver must already fit
+    // the source operand's self-determined window. `fit_wrap` both truncates an
+    // unsigned/unbounded expression and restores a signed operand's top-bit
+    // interpretation, yielding exactly the two's-complement window SV packs.
+    lanes.push_back({fit_wrap(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
   }
 
   if (lanes.empty()) {

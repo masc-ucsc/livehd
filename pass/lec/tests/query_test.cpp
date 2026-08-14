@@ -86,6 +86,38 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   return g;
 }
 
+// Build a 4-bit Concat lane from an 8-bit input. The Concat cell contract is
+// `value mod 2^window`; `pretruncate` spells that mask explicitly on one side.
+std::shared_ptr<hhds::Graph> build_overwide_concat(hhds::GraphLibrary& lib, const std::string& mod, bool pretruncate) {
+  auto gio = lib.create_io(mod);
+  gio->add_input("a", 0);
+  gio->set_bits("a", 9);  // unsigned u8: magnitude plus the zero sign slot
+  gio->set_unsign("a", true);
+  gio->add_output("out", 1);
+  gio->set_bits("out", 5);  // unsigned u4
+  gio->set_unsign("out", true);
+
+  auto g    = gio->create_graph();
+  auto lane = g->get_input_pin("a");
+  if (pretruncate) {
+    auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 5);
+    lane.connect_sink(mask.create_sink_pin(0));
+    graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(mask.create_sink_pin(2));
+    lane = mask.create_driver_pin(0);
+    graph_util::set_bits(lane, 5);
+    graph_util::set_unsign(lane);
+  }
+
+  auto concat = graph_util::create_typed_node(*g, Ntype_op::Concat, 5);
+  lane.connect_sink(concat.create_sink_pin(0));
+  graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(concat.create_sink_pin(1));
+  auto out = concat.create_driver_pin(0);
+  graph_util::set_bits(out, 5);
+  graph_util::set_unsign(out);
+  out.connect_sink(g->get_output_pin("out"));
+  return g;
+}
+
 std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t count = 3) {
   auto body_io = lib.create_io("active_body");
   body_io->add_input("carry", 0);
@@ -254,6 +286,15 @@ TEST(CombEquiv, AddConstOffByOneRefuted) {
 
   auto r = lec::prove_equal(ref.get(), impl.get());
   EXPECT_EQ(r.verdict, Verdict::Refuted) << r.detail;
+}
+
+TEST(CombEquiv, ConcatTruncatesOverwideLaneToDeclaredWindow) {
+  hhds::GraphLibrary lib;
+  auto               ref  = build_overwide_concat(lib, "ref", false);
+  auto               impl = build_overwide_concat(lib, "impl", true);
+
+  auto r = lec::prove_equal(ref.get(), impl.get());
+  EXPECT_EQ(r.verdict, Verdict::Proven) << r.detail;
 }
 
 TEST(CombEquiv, EngineBmcRefutes) {

@@ -81,6 +81,50 @@ expect "A full"      "$(verdict a2_lg a1_lg cnt full)" "REFUTED (not equivalent)
 expect "B full"      "$(verdict b2_lg b1_lg dut full)" "REFUTED (not equivalent)"
 expect "self full"   "$(verdict a1_lg a1_lg cnt full)" "PROVEN equivalent"
 
+# ---- pair C: slang -> Pyrope latch round trip ------------------------------
+# The high-phase latch captures an enable used LIVE by the low-phase latch.
+# The data arm is a genuine mux/concat value, not Q feedback. The phase encoder
+# used to peel that mux as though it were an ICG hold arm and then sample the
+# live enable one half-period late, refuting the writer's equivalent Pyrope.
+cat > "$WORK/c.v" <<'EOF'
+module latch_child(input logic clock, input logic d, output logic q);
+  always_latch if (!clock) q = d;
+endmodule
+
+module latch_pair(
+  input logic clock,
+  input logic en,
+  input logic [31:0] d,
+  output logic [64:0] q,
+  output logic child_q
+);
+  logic en_l;
+  logic [64:0] q_l;
+  latch_child u_child(.clock(clock), .d(d[0]), .q(child_q));
+  always_latch if (clock) en_l = en;
+  always_latch if (!clock && en_l) q_l = {{33{d[31]}}, d};
+  assign q = q_l;
+endmodule
+EOF
+
+if ! $LHD compile "$WORK/c.v" --reader slang --top latch_pair \
+       --emit-dir "lg:$WORK/c_ref_lg" --emit-dir "pyrope:$WORK/c_prp" --workdir "$WORK/w_c_emit" >/dev/null 2>&1; then
+  echo "FAIL: compile/emit latch_pair"; fail=1
+elif ! $LHD compile "$WORK/c_prp/latch_pair.prp" --top latch_pair \
+       --emit-dir "lg:$WORK/c_impl_lg" --workdir "$WORK/w_c_impl" >/dev/null 2>&1; then
+  echo "FAIL: recompile emitted latch_pair Pyrope"; fail=1
+else
+  c_out=$($LHD lec --impl "lg:$WORK/c_impl_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
+          --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_c" 2>&1)
+  if ! grep -qa "PROVEN equivalent" <<<"$c_out"; then
+    echo "FAIL: latch round trip was not PROVEN"; fail=1
+  elif ! grep -qa "phase-step induction" <<<"$c_out"; then
+    echo "FAIL: latch round trip did not exercise phase-step induction"; fail=1
+  else
+    echo "ok: latch round trip -> PROVEN equivalent"
+  fi
+fi
+
 if [ $fail -ne 0 ]; then echo "lec_phase_test: FAILED"; exit 1; fi
 echo "lec_phase_test: PASSED"
 exit 0
