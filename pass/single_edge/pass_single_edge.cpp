@@ -209,7 +209,21 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           if (gu::type_op_of(dn) != Ntype_op::Latch) {
             continue;
           }
-          if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
+          // `latch_transparent_arm` only recognizes tolg's HOLD-MUX shape
+          // (`gate ? d : q` -> `d`). A latch whose `din` is the raw D — the
+          // yosys D/EN shape, and also what Pyrope emits for a plain
+          // `if !clk { enl = en }` where `en` is a module input — has no mux,
+          // so the arm comes back invalid and the bypass silently did not fire,
+          // leaving the enable a full cycle late (the exact L1 error the block
+          // above warns about; measured as `if (enl)` in the emitted netlist,
+          // 19/29 cycles mismatching the source under iverilog).
+          // latch_contract.cpp's own ICG-def matcher already falls back this
+          // way; do the same here.
+          auto arm = lc::latch_transparent_arm(dn);
+          if (arm.is_invalid()) {
+            arm = gu::get_driver_of_sink_name(dn, "din");  // raw D/EN shape
+          }
+          if (!arm.is_invalid()) {
             en = arm;
           }
         }

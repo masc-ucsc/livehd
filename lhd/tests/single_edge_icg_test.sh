@@ -100,9 +100,25 @@ cat "$W"/v_src/*.v > "$W/src.v"
 sed 's/^module icgf(/module icgf_n(/' "$W"/v_norm/*.v > "$W/norm.v"
 
 grep -q "always_latch"      "$W/src.v"  || fail "the SOURCE emission lost its enable latch"
-grep -qE "posedge \(clk"    "$W/src.v"  || fail "the SOURCE emission lost its gated clock"
 grep -q "always_latch"      "$W/norm.v" && fail "the NORMALIZED emission still holds the enable latch"
-grep -qE "posedge \(clk &"  "$W/norm.v" && fail "the NORMALIZED emission still holds a gated clock"
+
+# The gated clock survives as a DECLARED NET, not an inline expression. cgen
+# deliberately stopped emitting `always @(posedge (clk & enl))`: it is legal
+# Verilog that LiveHD's OWN reader rejects ("the clock must be a plain signal"),
+# so cgen output could not be read back -- see the comment on the clock_pin
+# lookup in inou/cgen/cgen_verilog.cpp and tests/equiv/mclk_derived. Match the
+# net form, and check what the greps actually meant: the SOURCE flop is clocked
+# by a gate of clk, the NORMALIZED one directly by clk.
+flop_clk_of() { sed -n 's/^[[:space:]]*always @(posedge \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$1" | head -1; }
+
+src_clk="$(flop_clk_of "$W/src.v")"
+[ -n "$src_clk" ] || fail "the SOURCE emission has no posedge flop at all"
+[ "$src_clk" != clk ] || fail "the SOURCE emission lost its gated clock (the flop is clocked by clk directly)"
+grep -qE "^[[:space:]]*$src_clk[[:space:]]*=[[:space:]]*clk[[:space:]]*&" "$W/src.v" \
+  || { grep -nE "$src_clk" "$W/src.v" | head -3; fail "the SOURCE flop's clock net '$src_clk' is not driven by clk & <enable>"; }
+
+norm_clk="$(flop_clk_of "$W/norm.v")"
+[ "$norm_clk" = clk ] || fail "the NORMALIZED emission still holds a gated clock (flop clocked by '$norm_clk')"
 echo "ok: the normalized netlist has a plain posedge flop with an enable"
 
 # ---- lhd lec: real verdicts, both directions --------------------------------

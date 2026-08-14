@@ -2826,8 +2826,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::string core = etest.empty() ? value_in : absl::StrCat("(", etest, " ? ", value_in, " : ", hold, ")");
       return rtest.empty() ? core : absl::StrCat("(", rtest, " ? ", rstval, " : ", core, ")");
     };
-    auto              next_name = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_next"); };
-    auto              hold_name = [&](const std::string& base) { return latch_high ? absl::StrCat(base, "_low") : base; };
+    auto              next_name = [&](const std::string& bnm) { return absl::StrCat(bnm, latch_low ? "_low" : "_next"); };
+    auto              hold_name = [&](const std::string& bnm) { return latch_high ? absl::StrCat(bnm, "_low") : bnm; };
     const std::string din_expr  = din.is_invalid() ? f.member : operand(din, f.bits);
     if (f.depth <= 1) {
       fout->append("    auto ", next_name(f.member), " = ", next_of(din_expr, hold_name(f.member)), ";\n");

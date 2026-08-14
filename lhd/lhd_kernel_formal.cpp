@@ -524,7 +524,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                           const std::function<std::string(std::string_view)>&   canon,
                           hhds::Graph*                                          top_g) {
     livehd::lec::Clock_forest forest;
-    const std::string         top_name = canon(top_g->get_name());
+    const std::string         forest_top = canon(top_g->get_name());
 
     // Resolve one driver INSIDE parent `pname` to a root name, following the
     // derivations. Returns "" when it does not reach a known root.
@@ -542,7 +542,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (auto* r = forest.find(canon(cr.net.get_graph()->get_name()), port)) {
           return *r;
         }
-        return pname == top_name ? port : std::string{};  // a top port IS a root
+        return pname == forest_top ? port : std::string{};  // a top port IS a root
       }
       if (gu::is_const_pin(cr.net)) {
         return "";
@@ -596,7 +596,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             continue;
           }
           auto sio = node.get_subnode_io();
-          if (sio == nullptr || canon(sio->get_name()) != top_name) {
+          if (sio == nullptr || canon(sio->get_name()) != forest_top) {
             continue;
           }
           absl::flat_hash_map<std::string, std::vector<std::string>> by_net;
@@ -682,7 +682,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       return x;
     };
     {
-      auto& row = forest.port_root[top_name];
+      auto& row = forest.port_root[forest_top];
       hhds::Hier_opaque_scope sc(nullptr);
       for (auto node : top_g->fast_hier()) {
         const auto op = gu::type_op_of(node);
@@ -843,7 +843,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     {
       std::string only_root;
       bool        one = true;
-      if (auto tit = forest.port_root.find(top_name); tit != forest.port_root.end()) {
+      if (auto tit = forest.port_root.find(forest_top); tit != forest.port_root.end()) {
         for (const auto& [pn, r] : tit->second) {
           if (pn.empty()) {
             continue;
