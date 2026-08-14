@@ -10,8 +10,8 @@
 // ../pyrope/concat_two_lanes.prp and the rejection rules by ../errors/concat_*;
 // this pair is the one that proves the LOWERED datapath against an independent
 // Verilog statement of the same layout, over scalar lanes AND over the fields
-// of a BUNDLE input port. concat_tuple_lanes is its fixme sibling: the two
-// documented lane spellings that do not compile yet.
+// of a BUNDLE input port. concat_tuple_lanes independently covers direct dotted
+// lanes and proves that their explicit order controls the packed layout.
 //
 // Each output pins one claim:
 //
@@ -55,12 +55,10 @@
 // several readers or feeds a lane (`reg [9:0] concat_16;`). This pair is LEC'd
 // by re-reading that emitted file, so it also gates the round trip through it.
 //
-// The bundle fields are rebound to declared locals (`h`, `l`) rather than
-// written as `concat(p.hi, p.lo, c)`: a dotted read lowers through a compiler
-// temp, and a temp has no declared type, which is exactly the case
-// `concat-untyped-lane` rejects — see concat_tuple_lanes. `h:u4`/`l:s3` restate
-// the field types the port signature already declares, and `p.hi`/`p.lo` reach
-// the netlist as the flattened leaf ports the golden names.
+// The bundle fields are rebound to declared locals (`h`, `l`) so this fixture
+// also covers ordinary typed local lanes. Direct `concat(p.hi, p.lo, c)` is
+// legal and covered by concat_tuple_lanes; the field-read temps recover their
+// declared widths through tuple-get provenance.
 //
 // `prp-v2prp2v-concat_bundle_lanes` FAILS today and is deliberately UNTAGGED
 // (no `fixme`, so it stays visible): the prp_writer emits `concat` lanes as raw

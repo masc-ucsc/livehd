@@ -1,0 +1,16 @@
+/*
+:name: concat_ordered_array_lane
+:type: compile
+*/
+
+// Positional tuples/arrays have an order, so packing one whole is
+// unambiguous. Element 0 is the most-significant concat lane; each element
+// keeps the u4 width declared by the array type rather than shrinking to its
+// current value. A one-field named bundle is also unambiguous; only named
+// bundles with multiple fields are rejected.
+comb concat_ordered_array_lane() -> (z:u8, one_z:u4) {
+  const x:[2]u4 = (3, 2)
+  const one = (const only:u4=3)
+  z = concat(x)
+  one_z = concat(one)
+}

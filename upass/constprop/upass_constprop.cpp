@@ -5073,9 +5073,11 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
 // alone (the runner binds the `nil`s at emit time from the lane's declared
 // type; upass.tolg owns the `concat-untyped-lane` error when nothing could).
 //
-// A TUPLE lane splices its fields into the layout (field 0 most significant),
-// each field carrying its own window — that is what makes `concat(my_tuple)`
-// legal. Here the splice is a FOLD-TIME expansion only: it feeds Dlop's n-ary
+// An ORDERED POSITIONAL tuple/array lane splices its fields into the layout
+// (field 0 most significant), each field carrying its own window — that is what
+// makes `concat(my_array)` legal. A multi-field named bundle has no bit order
+// and is rejected by the runner; callers spell its fields as separate lanes.
+// Here the positional splice is a FOLD-TIME expansion only: it feeds Dlop's n-ary
 // concat_op, it does not re-shape the LNAST node. Re-shaping would need to
 // insert operands in the MIDDLE of the node's child list, and the pinned HHDS
 // has no such primitive — `Tree::insert_next_sibling` appends at the end
@@ -5134,29 +5136,37 @@ upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& d
         return classify_vote();
       }
       // Bundle iteration is CANONICAL (named alphabetically, then unnamed by
-      // position) — only the positional order coincides with the order the
-      // fields were declared. Splicing a NAMED-field tuple would lay it out
-      // alphabetically, i.e. the right bits in the wrong windows, with no
-      // diagnostic. Refuse instead; upass.tolg then reports the un-expanded
-      // lane. (Declaration order for named fields is not reachable from a
-      // Bundle today.)
-      if (b->has_named_top()) {
+      // position) — only the positional order coincides with the source's
+      // explicit order. Splicing a MULTI-FIELD named tuple would turn its
+      // alphabetical key order into layout, so the runner rejects it. A
+      // one-field named tuple is unambiguous and may fold here.
+      if (b->has_named_top() && b->named_top_count() + b->unnamed_top_count() > 1) {
         return classify_vote();
       }
+      uint32_t    array_elem_bits = 0;
+      const auto& elem_max        = b->get_attr("__elem_max");
+      const auto& elem_min        = b->get_attr("__elem_min");
+      if (elem_max.is_integer() && elem_min.is_integer()) {
+        array_elem_bits = elem_min.is_negative()
+                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()))
+                              : (elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1));
+      }
       for (const auto& tl : b->top_levels()) {
-        if (tl.pos < 0 || tl.has_leafs || tl.leaf_count != 1) {
-          return classify_vote();  // named or nested field: no single window
+        if (tl.has_leafs || tl.leaf_count != 1 || (tl.pos < 0 && tl.name.empty())) {
+          return classify_vote();  // nested or malformed field: no single window
         }
         // Same rule as a scalar lane: the window is the field's DECLARED
         // width, never its value's magnitude.
-        const auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), absl::StrCat(vo.name, ".", tl.pos));
-        if (!f || f->bits == 0 || f->bits > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        const std::string key        = tl.pos >= 0 ? std::to_string(tl.pos) : std::string(tl.name);
+        const auto        f          = upass::decl_facts::lookup(st(), lm->get_lnast().get(), absl::StrCat(vo.name, ".", key));
+        const uint32_t    field_bits = f ? f->bits : array_elem_bits;
+        if (field_bits == 0 || field_bits > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
           return classify_vote();  // undeclared field: nothing here may guess a width
         }
-        if (!is_numeric(tl.scalar) || !concat_lane_fits(tl.scalar, static_cast<int>(f->bits))) {
+        if (!is_numeric(tl.scalar) || !concat_lane_fits(tl.scalar, static_cast<int>(field_bits))) {
           return classify_vote();  // over-wide field: decline rather than trip concat_op's fit assert
         }
-        lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(f->bits)});
+        lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(field_bits)});
       }
       continue;
     }

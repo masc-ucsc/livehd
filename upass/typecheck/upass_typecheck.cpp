@@ -210,10 +210,12 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
 
 void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
   // `concat(msb, …, lsb)`: each lane is an integer bit window, so the rule is
-  // require_all(integer) — EXCEPT that a TUPLE lane is also legal: `concat(t)`
-  // splices t's fields (field 0 most significant). constprop owns that
-  // expansion, so all this pass does is not reject the tuple on its way there.
-  // Booleans stay errors (no bool↔int interop, same as everywhere else).
+  // require_all(integer) — EXCEPT that an ORDERED positional tuple/array lane
+  // is also legal: `concat(t)` splices its fields (field 0 most significant).
+  // A multi-field NAMED bundle is rejected by the runner's concat shape check:
+  // names have identity but no order, so the caller must select its fields as
+  // separate lanes. All this kind pass does is let tuple-shaped operands reach
+  // that structural check. Booleans stay errors (no bool<->int interop).
   //
   // Nothing here looks at a lane's WIDTH: the declared-width rule that sizes
   // each window belongs to upass.bitwidth + upass.tolg, not to a kind check.
@@ -228,7 +230,7 @@ void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
     if (k == Kind::nil) {
       has_nil = true;
     } else if (k == Kind::unknown || k == Kind::integer || k == Kind::tuple) {
-      // wildcard, a scalar lane, or a spliced tuple lane — ok
+      // wildcard, a scalar lane, or a tuple lane awaiting the shape check — ok
     } else {
       bad = true;
     }
@@ -238,7 +240,8 @@ void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
   } else if (bad) {
     emit_type_error("type-mismatch-concat",
                     std::format("`concat` requires integer lanes ({})", name_operands(src)),
-                    "a lane is an integer bit window (a tuple lane splices its fields) — no implicit conversion, "
+                    "a lane is an integer bit window (an ordered positional tuple/array lane splices its fields) — "
+                    "no implicit conversion, "
                     "cast explicitly (e.g. `unsigned(b)`)");
   }
   set_dst_kind(dst, Kind::integer);

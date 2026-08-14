@@ -3204,13 +3204,59 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     Lnast_node cur_val  = expr_to_node(arg_n);
     Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
 
-    // set_mask new_word cur_val mask_ref rvalue
+    // A wrap/sat policy applies to the SELECTED lane, not to the whole base.
+    // Give the policy call a synthetic unsigned type whose width is the number
+    // of selected bits, then feed its narrowed result to set_mask.  A bare
+    // write keeps the original rvalue so upass.bitwidth can reject a source
+    // wider than the selected lane.  Dynamic/open masks have no compile-time
+    // lane width and therefore cannot define wrap/sat semantics here.
+    Lnast_node store_value = rvalue;
+    if (!overflow_kind.empty()) {
+      if (!mask_ref.is_const()) {
+        report_error(lvalue,
+                     "dynamic-bit-range-overflow-policy",
+                     "type",
+                     std::format("cannot apply `{}` to a bit-range whose width is not known at compile time", overflow_kind),
+                     "use a constant-width destination range, or explicitly select the desired bits on the right-hand side");
+      }
+      const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
+      if (mv.is_invalid() || !mv.is_integer() || mv.is_negative() || mv.popcount() < 1) {
+        report_error(lvalue,
+                     "invalid-bit-range-overflow-policy",
+                     "type",
+                     std::format("cannot derive the destination width for `{}` on `{}`", overflow_kind, get_text(lvalue)),
+                     "use a non-empty constant bit range, or explicitly select the desired bits on the right-hand side");
+      }
+
+      const int  width    = mv.popcount();
+      Lnast_node type_ref = builder.mint_tmp_ref();
+      auto       ts_idx   = builder.add_child(Lnast_ntype::create_type_spec());
+      lnast->add_child(ts_idx, type_ref);
+      auto pt = lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_int());
+      lnast->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(width)->to_pyrope())));
+      lnast->add_child(pt, Lnast_node::create_const("0"));
+
+      Lnast_node narrowed = builder.mint_tmp_ref();
+      auto       fc       = builder.add_child(Lnast_ntype::create_func_call());
+      lnast->add_child(fc, narrowed);
+      lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));
+      auto va = lnast->add_child(fc, Lnast_ntype::create_store());
+      lnast->add_child(va, Lnast_node::create_ref("v"));
+      lnast->add_child(va, rvalue);
+      auto ta = lnast->add_child(fc, Lnast_ntype::create_store());
+      lnast->add_child(ta, Lnast_node::create_ref("type"));
+      lnast->add_child(ta, type_ref);
+      store_value = narrowed;
+    }
+
+    // set_mask new_word cur_val mask_ref store_value
     auto       sm_idx   = builder.add_child(Lnast_ntype::create_set_mask());
     Lnast_node new_word = builder.mint_tmp_ref();
     lnast->add_child(sm_idx, new_word);
     lnast->add_child(sm_idx, cur_val);
     lnast->add_child(sm_idx, mask_ref);
-    lnast->add_child(sm_idx, rvalue);
+    lnast->add_child(sm_idx, store_value);
+    attach_loc(sm_idx, lvalue);
 
     // Write the updated word back to the argument lvalue. Recursing keeps the
     // member_selection / dot_expression handling in one place; passing null
@@ -9122,11 +9168,12 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     // more importantly, that constant-folding a lane cannot erase its width,
     // since the width is a sibling rather than a property of the value).
     //
-    // A TUPLE lane (`concat(my_tuple)`) expands to the tuple's fields, field 0
-    // most significant — also not here: prp2lnast cannot tell a tuple ref from
-    // a scalar one, so the argument rides through as one lane and the later
-    // passes do the expansion. Same reason the "lane has no declared type"
-    // check lives in upass.tolg (concat-untyped-lane).
+    // An ORDERED positional tuple/array lane (`concat(my_array)`) expands by
+    // position, field 0 most significant — also not here: prp2lnast cannot
+    // tell an aggregate ref from a scalar one, so the argument rides through
+    // as one lane and the later passes either expand it or reject a multi-field
+    // named bundle. Same reason the "lane has no declared type" check lives in
+    // upass.tolg (concat-untyped-lane).
     for (const auto& ca : concat_args) {
       lnast->add_child(idx, ca.value);
       lnast->add_child(idx, Lnast_node::create_const("nil"));

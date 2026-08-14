@@ -140,8 +140,10 @@ LNAST_NODE( get_mask, get_mask )
 // construction) are all fine. The result is the non-negative sum-of-widths
 // value, so it is always unsigned and needs no declared type of its own.
 //
-// A tuple lane expands to its fields in declaration order (field 0 = most
-// significant), and only when every field has a declared type.
+// An ordered positional tuple/array lane expands by position (field 0 = most
+// significant), and only when every field has a declared type. A multi-field
+// named bundle has field identity but no bit order, so source must select its
+// fields as separate lanes in the desired order.
 LNAST_NODE( concat, concat )
 // - Comparison
 LNAST_NODE( ne, ne )

@@ -1,0 +1,15 @@
+/*
+:name: bitrange_write_overflow
+:type: error
+:error: does not fit the 4-bit destination slice
+:help: select 4 bits
+*/
+
+// A bit-range write has the same no-implicit-truncation rule as a normal
+// typed assignment.  The source is u8 while the selected destination lane is
+// four bits; spell the conversion explicitly with `wrap` or `b#[0..=3]`.
+pub comb bitrange_write_overflow(b:u8) -> (z:u12) {
+  mut r:u12 = 0
+  r#[8..=11] = b  // locate_error_here
+  z = r
+}

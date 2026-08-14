@@ -1246,6 +1246,77 @@ void uPass_runner::check_concat_lanes() {
       }
       continue;
     }
+    // A named bundle has field IDENTITY but deliberately has no field ORDER:
+    // Bundle's canonical traversal sorts its keys so `(hi=3, lo=2)` and
+    // `(lo=2, hi=3)` are the same value. Packing such a value as one concat
+    // lane would silently turn that implementation order into a bit-layout
+    // contract. A one-field named bundle is unambiguous; positional tuples and
+    // arrays retain their explicit order and remain legal.
+    //
+    // Try both the exact ref and its source-level SSA base. Compiler temps are
+    // useful here too: `concat((hi=3, lo=2))` names the literal through one.
+    std::shared_ptr<Bundle> lane_bundle = lane_is_ref ? symbol_table_.get_bundle(lane_name) : nullptr;
+    if (!lane_bundle && lane_is_ref) {
+      const auto logical = concat_logical_name(lane_name);
+      if (!logical.empty()) {
+        lane_bundle = symbol_table_.get_bundle(logical);
+      }
+    }
+    const size_t lane_field_count
+        = lane_bundle ? lane_bundle->named_top_count() + lane_bundle->unnamed_top_count() : static_cast<size_t>(0);
+    if (lane_bundle && lane_bundle->has_named_top() && lane_field_count > 1) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "concat-named-bundle-lane",
+          .category = "type",
+          .pass     = "upass.runner",
+          .message  = std::format("concat lane `{}` is a named bundle with multiple fields, which has no bit order", lane_name),
+          .span     = std::move(span),
+          .hint     = "select the fields explicitly in the desired order (for example, `concat(x.hi, x.lo)`, most "
+                      "significant first); positional tuples and arrays already have an order",
+      });
+      bad = true;
+      continue;
+    }
+    // An ordered positional tuple/array (or the unambiguous one-field named
+    // case) is a sequence of windows, not one scalar window. Account for its
+    // field declarations here so the dispatch path does not reject it before
+    // constprop can splice and fold the fields. Runtime tuple packing still
+    // stays structural unless a later pass can materialize it; no width is
+    // guessed from field values.
+    if (lane_bundle && (lane_field_count > 1 || lane_bundle->has_named_top())) {
+      const auto  logical         = concat_logical_name(lane_name);
+      const auto  root            = logical.empty() ? std::string_view(lane_name) : logical;
+      uint32_t    array_elem_bits = 0;
+      const auto& elem_max        = lane_bundle->get_attr("__elem_max");
+      const auto& elem_min        = lane_bundle->get_attr("__elem_min");
+      if (elem_max.is_integer() && elem_min.is_integer()) {
+        array_elem_bits = elem_min.is_negative()
+                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits()))
+                              : (elem_max.is_known_zero() ? 0 : static_cast<uint32_t>(elem_max.get_bits() - 1));
+      }
+      uint64_t tuple_total = 0;
+      bool     complete    = true;
+      for (const auto& field : lane_bundle->top_levels()) {
+        if (field.has_leafs || (field.pos < 0 && field.name.empty())) {
+          complete = false;
+          break;
+        }
+        const std::string key = field.pos >= 0 ? std::to_string(field.pos) : std::string(field.name);
+        const auto        facts
+            = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, absl::StrCat(root, ".", key));
+        const uint32_t field_bits = (facts && facts->has_type_spec) ? facts->bits : array_elem_bits;
+        if (field_bits == 0) {
+          complete = false;
+          break;
+        }
+        tuple_total += field_bits;
+      }
+      if (complete && tuple_total > 0) {
+        total += tuple_total;
+        continue;
+      }
+    }
     if (const auto db = lane_is_ref ? concat_lane_declared_bits(lane_name) : 0; db != 0) {
       total += db;
       continue;
@@ -1345,10 +1416,12 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
 // The DECLARED bit width of one `concat` lane, or 0 when the lane declares
 // none. This is the only width a concat window may be sized by.
 //
-// Three sources, in order:
+// Four sources, in order:
 //   * a previous concat's result -- its width is the lane sum, by construction,
 //     which is what makes `concat(concat(a,b), c)` legal without the inner temp
 //     ever being declared by the user;
+//   * a declared tuple field reached through its tuple_get/compiler-copy
+//     provenance -- this is what makes explicit `concat(p.hi, p.lo)` legal;
 //   * decl_facts, the single source of truth for "what was `name` declared as".
 //     Its `bits` is already the FIELD width (the sign slot is dropped for an
 //     unsigned declaration), so `a:u4` and `a:s4` both answer 4 -- which is
@@ -1364,12 +1437,88 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
   if (const auto it = concat_result_bits_.find(std::string(lane_name)); it != concat_result_bits_.end()) {
     return it->second;
   }
+  // A dotted source read lowers through a compiler temp (`%t = tuple_get(p,
+  // hi)`). The temp itself is intentionally untyped, but tuple_get records its
+  // declared source field in tget_origin. Follow that provenance so spelling
+  // the desired named-bundle order explicitly as `concat(p.hi, p.lo)` works.
+  // Ordinary untyped expression temps still have no origin and remain errors.
+  auto origin = symbol_table_.tget_origin.find(std::string(lane_name));
+  if (origin != symbol_table_.tget_origin.end()) {
+    const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, origin->second);
+    if (f && f->has_type_spec && f->bits != 0) {
+      return f->bits;
+    }
+  }
+  // A function body may be checked directly from its stored fdef before the
+  // tuple_get statements have gone through the normal dispatch path, so the
+  // transient origin map above is not necessarily populated yet. Recover the
+  // same provenance structurally from a preceding sibling
+  // `tuple_get(lane_name, base, field...)`. prp2lnast emits dotted argument
+  // reads immediately before their consuming concat; limiting the search to
+  // the enclosing statement list also avoids cross-function temp collisions.
+  const bool compiler_temp = lane_name.front() == '%' || lane_name.starts_with("___");
+  if (compiler_temp && lm && lm->get_lnast()) {
+    const auto& ln         = *lm->get_lnast();
+    auto        concat_nid = lm->get_current_nid();
+    while (!concat_nid.is_invalid() && !Lnast_ntype::is_concat(ln.get_type(concat_nid))) {
+      concat_nid = ln.get_parent(concat_nid);
+    }
+    const auto parent = concat_nid.is_invalid() ? concat_nid : ln.get_parent(concat_nid);
+    if (!parent.is_invalid()) {
+      for (auto stmt = ln.get_first_child(parent); !stmt.is_invalid() && stmt != concat_nid; stmt = ln.get_sibling_next(stmt)) {
+        // The runner may already have resolved tuple_get to a direct copy in
+        // staging. Follow that compiler-temp copy when its RHS is itself a
+        // declared ref (normally the flattened `p.hi` input leaf).
+        if (Lnast_ntype::is_store(ln.get_type(stmt))) {
+          const auto dst = ln.get_first_child(stmt);
+          const auto rhs = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
+          if (!dst.is_invalid() && !rhs.is_invalid() && ln.get_name(dst) == lane_name && Lnast_ntype::is_ref(ln.get_type(rhs))) {
+            const auto f = upass::decl_facts::lookup(symbol_table_, &ln, ln.get_name(rhs));
+            if (f && f->has_type_spec && f->bits != 0) {
+              return f->bits;
+            }
+          }
+        }
+        if (!Lnast_ntype::is_tuple_get(ln.get_type(stmt))) {
+          continue;
+        }
+        const auto dst = ln.get_first_child(stmt);
+        const auto src = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
+        if (dst.is_invalid() || src.is_invalid() || ln.get_name(dst) != lane_name || !Lnast_ntype::is_ref(ln.get_type(src))) {
+          continue;
+        }
+        std::string source_field(ln.get_name(src));
+        for (auto field = ln.get_sibling_next(src); !field.is_invalid(); field = ln.get_sibling_next(field)) {
+          if (!Lnast_ntype::is_const(ln.get_type(field))) {
+            source_field.clear();
+            break;
+          }
+          absl::StrAppend(&source_field, ".", ln.get_name(field));
+        }
+        if (!source_field.empty()) {
+          const auto f = upass::decl_facts::lookup(symbol_table_, &ln, source_field);
+          if (f && f->has_type_spec && f->bits != 0) {
+            return f->bits;
+          }
+        }
+      }
+    }
+  }
   // A read is an SSA VERSION (`a___ssa_2`); the type was declared once on the
   // base name. Without this strip every lane in an SSA'd body -- which is every
   // lane a frontend produces -- looks undeclared.
   const auto base = concat_logical_name(lane_name);
   if (const auto it = concat_result_bits_.find(std::string(base)); it != concat_result_bits_.end()) {
     return it->second;
+  }
+  if (!base.empty() && base != lane_name) {
+    origin = symbol_table_.tget_origin.find(std::string(base));
+    if (origin != symbol_table_.tget_origin.end()) {
+      const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, origin->second);
+      if (f && f->has_type_spec && f->bits != 0) {
+        return f->bits;
+      }
+    }
   }
   const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, base);
   if (!f || !f->has_type_spec || f->bits == 0) {

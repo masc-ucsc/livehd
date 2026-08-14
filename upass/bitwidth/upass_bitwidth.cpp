@@ -672,8 +672,15 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
 }
 
 upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // set_mask(base, mask, value) — writing bits outside the base's declared
-  // storage is an overflow at this node.
+  // set_mask(base, mask, value) has TWO independent fit requirements:
+  //   1. the selected destination bits must lie inside the base storage;
+  //   2. the inserted value must fit the selected lane width.
+  //
+  // The second check is the partial-write counterpart of an ordinary typed
+  // assignment.  LGraph cannot own it: by then set_mask has already made the
+  // hardware truncation explicit and the source-level omission of wrap/sat is
+  // no longer distinguishable.  An explicit RHS bit-select and the frontend's
+  // wrap/sat lowering both carry a selected-width type envelope, so they pass.
   if (src.size() >= 2 && !src[0].name.empty()) {
     const auto mask = range_of_operand(src[1]);
     if (mask.is_constant() && mask.min >= 0) {
@@ -681,6 +688,47 @@ upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& 
       if (auto env = decl_envelope_of(base)) {
         if (mask_touches_outside_bits(mask.min, storage_bits_for_env(*env))) {
           record_overflow(base, mask, *env);
+        }
+      }
+    }
+  }
+
+  if (src.size() >= 3) {
+    std::optional<int64_t> lane_bits;
+    if (src[1].name.empty() && src[1].bundle) {
+      const auto mask = src[1].bundle->scalar();
+      if (mask && mask->is_integer() && !mask->has_unknowns() && !mask->is_negative()) {
+        lane_bits = mask->popcount();
+      }
+    }
+    if (!lane_bits) {
+      const auto mask = range_of_operand(src[1]);
+      if (mask.is_constant() && mask.min >= 0) {
+        lane_bits = std::popcount(static_cast<uint64_t>(mask.min));
+      }
+    }
+
+    if (lane_bits && *lane_bits > 0) {
+      // Prefer the declared envelope: `b:u8` remains an eight-bit source even
+      // if an earlier optimization happened to learn a narrower current value.
+      // Compiler temporaries (arithmetic, literals) fall back to their derived
+      // range when they have no declaration.
+      auto value_env = envelope_of_operand(src[2]);
+      if (value_env.is_unbounded()) {
+        value_env = range_of_operand(src[2]);
+      }
+      if (!value_env.is_unbounded()) {
+        const int64_t value_bits = storage_bits_for_env(value_env);
+        if (value_bits > *lane_bits) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "bit-range-overflow",
+              .category = "bitwidth",
+              .pass     = "upass.bitwidth",
+              .message  = std::format("{}-bit value does not fit the {}-bit destination slice", value_bits, *lane_bits),
+              .span     = lm->current_span(),
+              .hint = std::format("select {} bits on the right-hand side, or apply an explicit wrap/saturate policy", *lane_bits),
+          });
         }
       }
     }

@@ -5,39 +5,13 @@
 :pyrope_top: top
 */
 
-// FAILS TODAY, DELIBERATELY UNTAGGED. `prp-equiv-concat_tuple_lanes`,
-// `prp-statematch-concat_tuple_lanes` and `prp-v2prp2v-concat_tuple_lanes` are
-// ordinary targets and they are RED — no `fixme` tag hides them, because the
-// point of this pair is to be the thing that is fixed. Do not tag it; fix it.
-//
-// The two DOCUMENTED concat lane spellings that reach a bundle's fields. Both
-// hard-error today, so this pair does not even get as far as an equivalence
-// check — it is the minimal repro for that, and the sibling
-// concat_bundle_lanes pair is the green one that covers everything around it.
-//
-//   zt   `concat(p, c)` — a TUPLE lane. docs/pyrope/10-internals.md: "A tuple
-//        lane expands to its fields in declaration order (field 0 most
-//        significant), provided every field has a declared type." Reports
-//        `concat-untyped-lane: concat lane `p` has no declared bit width`.
-//
-//   zd   `concat(p.hi, p.lo, c)` — DOTTED field lanes. Each field IS declared
-//        (`hi:u4`, `lo:s3`), but a dotted read lowers through a compiler temp
-//        (`store %z_0 = p.hi`), and the temp carries no declared type, so the
-//        lane check sees `concat lane `%z_0` has no declared bit width`.
-//
-// Where it breaks: `uPass_runner::check_concat_lanes` /
-// `concat_lane_declared_bits` (upass/runner/upass_runner.cpp) resolve a lane
-// only through `concat_result_bits_` and `decl_facts::lookup` on the lane's own
-// name — neither a tuple's fields nor a copy of a declared name. The check runs
-// on the DISPATCH path, so it fires before anything downstream can help:
-// `uPass_constprop::process_concat` already carries a tuple-splice arm (the
-// `is_tuple` branch, positional fields only) and it is UNREACHABLE today, and
-// `upass.tolg::lower_concat` never sees the node either.
-//
-// Both outputs are the same nine bits, so the golden states one layout twice —
-// which is also the claim that a tuple lane and its hand-spliced fields must
-// agree.
+// A named bundle has no implicit bit order: its keys are canonicalized by
+// name, so `concat(p)` is deliberately rejected (covered by
+// tests/errors/concat_named_bundle_lane.prp). The programmer controls the
+// layout by selecting fields as separate lanes. These two outputs prove that
+// dotted field lanes retain their DECLARED widths and that changing their
+// explicit order changes the packed layout.
 pub comb top(p:(hi:u4, lo:s3), c:u2) -> (zt:u9, zd:u9) {
-  zt = concat(p, c)            // tuple lane: hi (field 0) in the high bits
-  zd = concat(p.hi, p.lo, c)   // the same layout, spliced by hand
+  zt = concat(p.lo, p.hi, c)   // lo in [8:6], hi in [5:2]
+  zd = concat(p.hi, p.lo, c)   // hi in [8:5], lo in [4:2]
 }
