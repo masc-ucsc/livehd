@@ -383,6 +383,97 @@ are fixed.
 **Keep a per-module record** (module, node count, wall, peak RSS, new op bridges
 added, blockers hit) so the cost model stays calibrated as designs grow.
 
+### CVA6 per-module record (measured)
+
+| module | nodes | flops | max width | GetMask (all-ones) | wall | peak RSS | result |
+|---|---|---|---|---|---|---|---|
+| `cva6_alu_export` | 6,305 | 0 (comb) | 576 | 2,681 (100 %) | **4 h 15.8 min** † | **25.3 GB** | `exit 0`, 0 errors, 0 sorries — `_comb` proven |
+| `cva6_tlb_gate` | 2,061 | 137 | 513 | 901 (100 %) | **5 h 12.5 min** † | **12.2 GB** | `exit 0`, 0 errors, 0 sorries — `_comb`/`_next`/`_step` all proven |
+
+† **Dominated by ONE serial declaration, not by per-node cost.**  (An earlier note
+here blamed contention — load average ~45 from concurrent work.  That was wrong, and
+the thread accounting refutes it.)  Measured on the `cva6_tlb_gate` run at 72 min in,
+with `LEAN_NUM_THREADS=8` and `CPUQuota=800%`:
+
+| | |
+|---|---|
+| busiest thread | **4301 s CPU, state R (running)** |
+| second busiest | 60 s |
+| idle threads | **61 of 69** |
+| CPU / wall ratio | ~1.0 |
+
+CPU ≈ wall rules starvation out: a starved job accumulates *less* CPU than wall.  This
+is one declaration grinding serially while every other thread has finished — the
+signature SKILL §3 describes.  The ALU showed the same ~1.1 ratio at its 67-minute
+check, so both runs share this cause.
+
+Consequence: **node count does not predict the wall here.**  DINO's
+`PipelinedDualIssueCPU` (10,740 nodes) finished in 57.4 min, while `cva6_alu_export`
+(6,305) took 4.3 h and `cva6_tlb_gate` (2,061 — a third the ALU) took 5.2 h.  The CVA6
+modules are *smaller* than DualIssue and 4–5× slower, so the serial declaration scales
+with something other than node count.
+
+**The combiner is NOT the culprit — measured, not guessed.**  Running the identical
+`cva6_tlb_gate` file with only the combiner's body replaced by `sorry`:
+
+| variant | wall |
+|---|---|
+| full file | 18,750 s |
+| combiner stubbed to `sorry` | **18,666 s** |
+
+The combiner therefore costs **~65 s, 0.3 % of the run** — even at 2,061 nodes with a
+term-fold body.  (An earlier revision of this note named it a suspect; the probe
+refutes that.)  This also retires it as a scaling risk for CVA6-sized designs, and
+means the **chunked combiner** lever listed above would buy nothing here.
+
+Remaining suspect, and the reason Phase 1b exists: `_phiTree_keys_sub`, proven
+`by native_decide`, which compiles the **whole `phiTree` including every value
+closure** — at CVA6 widths (513/576 bits) that is a long serial native-compilation
+step, exactly the risk flagged in SKILL §5.  Confirm the same way (stub only that
+declaration and re-time) **before** optimizing: the culprit was guessed wrong three
+times during the DINO work, and once more here.
+
+Method note worth reusing: stubbing **one declaration** and re-timing is far cheaper
+than bisecting the file into cumulative slices, and it answers the same question.  It
+does not prove the file (the stubbed obligation is assumed), so it is a *localizer*,
+never a result.
+
+**Reproduce:**
+```bash
+# ALU (combinational, explicit file list, derives alu_concrete.sv from upstream)
+LEAN_EMIT_CERT=true LEAN_EMIT_FAST_BRIDGE=true RUN_LEAN=true \
+  scripts/run_cva6_alu_lean.sh
+
+# TLB gate (sequential; slang + gate wrapper, NOT sv2v -- see
+# scripts/CVA6_SV2V_FILELIST_REFERENCE.md for why)
+CVA6_TOP=cva6_tlb_gate \
+CVA6_WRAPPER_FILE=$PWD/scripts/cva6_module_wrappers/cva6_tlb_gate.sv \
+CVA6_FILELIST=$PWD/generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f \
+YOSYS_MEMORY_MODE=collect \
+LEAN_EMIT_CERT=true LEAN_EMIT_FAST_BRIDGE=true RUN_LEAN=true \
+  scripts/run_cva6_module_lean_stress.sh
+```
+
+**Node counts move with cprop — do not trust old artifacts.** Estimates taken from
+the June `pass.isabelle` outputs were both wrong after the upstream "cleaner cprop
+with less mask ops" change, in *opposite* directions: the ALU grew 5,638 → 6,305 and
+the TLB shrank 4,126 → 2,061. Run `op_census.py` on a fresh emission for the real
+number.
+
+**Trust footprint of the ALU proof** (audited): 0 `sorry`, 0 `admit`, 0 `axiom`;
+6,305 per-node `_rec` theorems (one per node, all kernel-checked); 6,548 kernel
+`decide`s; and exactly **4** `native_decide` uses — `topo.Nodup`,
+`∀ n ∈ topo, (nodes n).isSome`, `DepOrderedB`, and `BT.keys phiTree ⊆ topo`.  All
+four are *structural* well-formedness facts about a concrete finite graph, not
+semantic claims, so the Lean compiler enters the trusted base only for those; every
+semantic step (per-node recurrences, combiner, closers) is kernel-checked.
+
+**What the first two modules needed** (all three fixes are in the emitter, so later
+modules inherit them): `and3_bridge` for arity-3 `And` (5 nodes in the ALU, 10 in the
+TLB), the `Op_SHL` const port-0 width fix, and `sra_bridge_sext` for a **widening
+SRA** — the last being a real fast-model mistranslation, not a proof gap (Bug 10 in
+`STEP5_BRIDGE_BUGS.md`).
+
 ### Next benchmark after CVA6: CORE-ET / ETASP
 
 Once CVA6 modules are generating and proving certificate equivalence the way DINO

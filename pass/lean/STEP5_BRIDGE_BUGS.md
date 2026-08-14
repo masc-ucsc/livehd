@@ -7,14 +7,15 @@ combiner) and every run was killed unfinished (worst: **2 d 8 h / 94 GB**).  Eac
 time the check got fast enough to reach further into the file, it exposed more
 real proof bugs.  **"0 sorries" ≠ "typechecks".**
 
-This document records **10 bugs** found this way, the fix for each, and the
+This document records **11 bugs** found this way, the fix for each, and the
 measured cost model.  Bugs 1–3 and 5 are constant-spelling / side-condition
 issues in the op bridges; 6–8 are structural (combiner shape, source-driven
 outputs, an asymmetric closer); 9 is an arity-dispatch gap that only bites at
 scale.  All fixes are in the emitter (`pass_lean.cpp`) plus `OpBridge.lean` /
 `GraphRefine.lean`.
 
-**Bug 10 is different in kind** and came from **CVA6, not DINO**: bugs 1–9 are all
+**Bugs 10 and 11 came from CVA6, not DINO.**  Bug 11 is another proof-side gap
+(the flop enable/reset were never rewritten).  **Bug 10 is different in kind**: bugs 1–9 are all
 defects in the *proof*, while 10 is a defect in the *model* — the fast view
 zero-extended a widening arithmetic shift, so it computed a different value from
 the design.  It was caught only because the certificate disagreed, which is the
@@ -436,3 +437,67 @@ only because the certificate disagreed.  When fast and cert disagree, first deci
 which one matches LiveHD's own simulator (`cgen_sim.cpp`) before reaching for a new
 lemma — the temptation here was to add a companion lemma for `192 ≤ 65` and move on,
 which would have *proven the wrong model correct*.
+
+---
+
+## Bug 11 — `_next_refines_fast` never rewrote the flop ENABLE / RESET
+
+- **Symptom:** `cva6_tlb_gate` fails after **5 h 12 min** with a single
+  `unsolved goals` in `cva6_tlb_gate_next_refines_fast`.  In the residual goal the
+  flop *dins* are correctly rewritten (`fv10392` on both sides) but the *enable* is
+  not:
+
+  | side | enable term |
+  |---|---|
+  | fast | `bitvec_nonzero (cva6_tlb_gate_fv996 i s)` |
+  | cert | `bv_nonzero (evalGraph … 996)` |
+
+- **Root cause:** `nextStateFromCert` reads **three** cert ids per flop —
+  ```
+  din_e   = (bv_to_bitvec w (rho <din_id>))
+  reset_e = (bv_nonzero (rho <reset_id>))
+  en_e    = (bv_nonzero (rho <enable_id>))
+  ```
+  but the `_next_refines_fast` proof loop consulted only `flop_din_cert_ids`.
+  `flop_reset_cert_ids` / `flop_enable_cert_ids` were populated and used on the
+  **cert** side, then ignored by the **proof** side, so those `evalGraph` terms had
+  nothing to rewrite them to the fast `fv` form.
+
+- **Fix:** iterate all three maps per flop, **deduplicating** ids, and add
+  `bv_nonzero_bvenc` to the closer.
+  - Dedup is not a nicety: `rw` rewrites *every* occurrence of a pattern at once, so
+    a second `rw` for an already-rewritten id fails with "did not find instance of
+    pattern".  With one enable shared across 137 flops that is the normal case.
+  - `bv_nonzero_bvenc` (`bv_nonzero (bvenc x) = bitvec_nonzero x`) already existed in
+    `OpBridge.lean`.  This was **plumbing, not a missing proof** — unlike Bug 10,
+    where the model itself was wrong.
+  - Result: 138 rewrites emitted for the TLB (137 dins + the shared enable 996).
+
+- **Why DINO could not catch it:** DINO's flops have **no reset or enable pin**, so
+  the emitter writes the literals `false` / `true` on both sides — there is nothing
+  to rewrite and the omission is unobservable.  `cva6_tlb_gate` has 137 flops all
+  sharing one *computed* enable (node 996), so it fails on the first attempt.  Same
+  shape as Bug 10: a gap only a design carrying the relevant feature can expose.
+
+- **Verified:** `cva6_tlb_gate` now typechecks end-to-end — `exit 0`, 0 errors,
+  0 sorries, `_comb`/`_next`/`_step` all proven, 18,750 s / 12.2 GB.
+
+### Cheap localization: stub ONE declaration, re-time
+
+Finding this cost a full 5-hour run because the bug sits in the last ~1 % of the file,
+behind the expensive 99 %.  The cheap confirmation was to re-run the *identical* file
+with only the combiner's body replaced by `sorry`, which skips the combiner and still
+elaborates all five tail theorems:
+
+| variant | wall | verdict |
+|---|---|---|
+| full file (pre-fix) | 18,731 s | `unsolved goals` in `_next_refines_fast` |
+| combiner stubbed (post-fix) | 18,666 s | **exit 0** — fix confirmed |
+| full file (post-fix) | 18,750 s | **exit 0**, 0 sorries — proven |
+
+Two lessons.  (1) A stubbed declaration makes the file a **localizer, not a result** —
+the stubbed obligation is *assumed*, so a green probe never means "proven".  State
+what a probe assumes, every time.  (2) The same three numbers incidentally measured
+the combiner at **~65 s (0.3 %)**, refuting the standing assumption that it is the
+scaling risk at CVA6 sizes.  Stub-one-declaration is cheaper than cumulative-slice
+bisection and answers the same question.

@@ -2379,24 +2379,45 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           << "_bridge_some (" << base_name << "_bridge_rec " << A << ") (" << base_name << "_bridge_src " << A << ")\n";
       ofs << "  unfold " << base_name << "_next " << base_name << "_next_cert " << base_name << "_nextStateFromCert\n";
       int seq_gaps = 0;
+      // `nextStateFromCert` reads THREE cert ids per flop -- din, reset and enable
+      // (see the flop loop above: reset/enable become `bv_nonzero (rho <id>)`).  All
+      // three must be rewritten from `evalGraph` to the fast `fv` form or the goal
+      // keeps a mixed `bv_nonzero (evalGraph ..)` vs `bitvec_nonzero (fv..)` pair and
+      // `_next_refines_fast` fails with unsolved goals.  Rewriting only the din was
+      // invisible on DINO, whose flops have no reset/enable pin at all (they emit the
+      // literals `false`/`true`), and it surfaced on cva6_tlb_gate where 137 flops
+      // share one computed enable.
+      //
+      // DEDUPLICATE: `rw` rewrites every occurrence of the pattern at once, so a
+      // second `rw` for an id already rewritten fails ("did not find instance of
+      // pattern").  One shared enable across 137 flops makes that the normal case,
+      // not a corner case.
+      std::vector<uint32_t> next_ids;
+      std::set<uint32_t>    next_seen;
       for (const auto& fn : flop_nodes) {
         const auto fid = node_id(fn);
-        const auto dit = flop_din_cert_ids.find(fid);
-        if (dit == flop_din_cert_ids.end()) {
-          continue;  // no din driver -> both sides use the zero literal, already equal
+        for (const auto* m : {&flop_din_cert_ids, &flop_reset_cert_ids, &flop_enable_cert_ids}) {
+          if (auto it = m->find(fid); it != m->end()) {
+            if (next_seen.insert(it->second).second) {
+              next_ids.push_back(it->second);
+            }
+          }
         }
-        const uint32_t d = dit->second;
+      }
+      for (const auto d : next_ids) {
         if (topo_set.count(d)) {
           ofs << "  rw [hb " << d << " (by decide), show " << base_name << "_phi " << A << " " << d
               << " = bvenc (" << base_name << "_fv" << d << " " << A << ") from by rfl]\n";
         } else {
-          // din driven directly by a source (constant / input / flop): off-topo, so
+          // driven directly by a source (constant / input / flop): off-topo, so
           // evalGraph reads through to the source env (same as the output case).
           ofs << "  rw [GraphRefine.evalGraph_not_mem " << G << " (" << base_name << "_sourceEnv " << A << ") "
               << G << ".topo " << d << " (by decide), " << base_name << "_src" << d << " " << A << "]\n";
         }
       }
-      ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n";
+      // `bv_nonzero_bvenc` closes the reset/enable predicates
+      // (`bv_nonzero (bvenc x) = bitvec_nonzero x`).
+      ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id, bv_nonzero_bvenc]\n";
       if (seq_gaps != 0) {
         ofs << "  sorry -- " << seq_gaps << " source flop din(s) unhandled\n";
       }
