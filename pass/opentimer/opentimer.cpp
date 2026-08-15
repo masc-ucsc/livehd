@@ -859,10 +859,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           srcs.push_back({trk_id(it->second), io_bits_of(it->second), lanes[i].width, lanes[i].offset});
         }
-        // sum(w)+1 -- the magnitude plus the always-zero sign slot of a result
-        // that is never negative. The driver pin's stamp is deliberately not
+        // Literal sum(w) width of a result that is never negative. The driver
+        // pin's stamp is deliberately not
         // consulted: a narrowed stamp must not move a lane.
-        pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes) + 1);
+        pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes));
       } else if (op == Ntype_op::Or) {
         for (auto e : node.inp_edges()) {
           pin_tracker.add_or(wname, trk_id(e.driver));

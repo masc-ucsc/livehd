@@ -67,7 +67,7 @@ void restamp_finite_get_mask(hhds::Node_class& node, const Dlop& mask) {
   const auto magnitude_bits = mask.popcount();
   I(magnitude_bits < static_cast<size_t>(std::numeric_limits<int32_t>::max()));
   auto       out      = node.create_driver_pin(0);
-  const auto capacity = static_cast<int32_t>(magnitude_bits + 1);
+  const auto capacity = std::max<int32_t>(1, static_cast<int32_t>(magnitude_bits));
   const auto current  = bits_of(out);
   // A preceding range pass may prove that fewer carrier bits suffice. Keep
   // that stronger fact; this repair is only for a stale enclosing/source width
@@ -106,15 +106,38 @@ void enforce_lossless_carriers(hhds::Graph* g) {
       if (out.is_invalid()) {
         continue;
       }
-      int required = std::max(bits_of(out), 1);
+      const bool signed_output = !livehd::graph_util::is_unsign(out);
+      int        required      = std::max(bits_of(out), 1);
       for (const auto& e : node.inp_edges()) {
         const auto pid = e.sink.get_port_id();
         if ((op == Ntype_op::SHL && pid != 0) || ((op == Ntype_op::Mux || op == Ntype_op::Hotmux) && pid == 0)) {
           continue;  // shift count / selector widths are independent
         }
-        int input_bits = bits_of(e.driver);
+        int  input_bits   = bits_of(e.driver);
+        bool non_negative = livehd::graph_util::is_unsign(e.driver);
         if (is_const_pin(e.driver)) {
-          input_bits = std::max(input_bits, static_cast<int>(hydrate_const(e.driver).get_bits()));
+          // ONE hydrate per edge: hydrating twice (once for the width, once for
+          // the sign below) doubled the deserialization cost of the hottest
+          // loop in this pass.
+          const auto value = hydrate_const(e.driver);
+          non_negative     = !value.is_negative();
+          int literal_bits;
+          if (value.is_numeric() && !value.has_unknowns() && !value.is_negative()) {
+            // Dlop::get_bits() reports a signed carrier width for a positive
+            // constant. The graph hint is literal unsigned width, so the
+            // carrier's leading zero is not part of this requirement.
+            literal_bits = value.is_known_zero() ? 1 : std::max(1, static_cast<int>(value.get_bits()) - 1);
+          } else {
+            literal_bits = std::max(1, static_cast<int>(value.get_bits()));
+          }
+          input_bits = std::max(input_bits, literal_bits);
+        }
+        // Literal uW needs W+1 bits when an unlimited-precision operation
+        // lands in a signed carrier. This matters after copy propagation
+        // bypasses a finite slice: Not(u8) needs s9, and Or(s1,u1) needs s2.
+        // Unsigned outputs keep their literal W-bit realization.
+        if (signed_output && non_negative) {
+          ++input_bits;
         }
         required = std::max(required, input_bits);
       }
@@ -492,9 +515,7 @@ constexpr int                 kPackedSliceFanInLimit = 64;
 // disjointness test below HARDER to satisfy (it refuses), so it is the safe
 // direction; UNDER-approximating would pick the wrong operand and miscompile.
 //
-// GOTCHA: LiveHD stores bits = magnitude+1, so an unsigned pin's significant
-// width is bits-1. Using bits here makes adjacent packed fields overlap by one
-// bit, disjointness always fails, and the fold silently never fires.
+// An unsigned pin's `bits` is its literal significant width.
 [[nodiscard]] std::pair<int, int> footprint(const hhds::Pin_class& p, int depth) {
   if (p.is_invalid() || depth > 16) {
     return kFpBail;
@@ -556,7 +577,7 @@ constexpr int                 kPackedSliceFanInLimit = 64;
     return kFpBail;  // unsized (Nconst/Sub/Memory/IO stay exempt) -> [k,k) would
                      // read as EMPTY and fold a live value to constant 0
   }
-  return {0, std::max(1, b - 1)};
+  return {0, b};
 }
 
 // The width n of a low-contiguous mask 2^n-1 (n>=1), or -1 for anything else
@@ -590,24 +611,11 @@ constexpr int                 kPackedSliceFanInLimit = 64;
 // classification moves. Rem (54) is combinational too but stays outside on
 // purpose: each of these sites has its own measured reason to exclude it (see
 // is_bool01 below and canonicalize_and_masks).
-[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) {
-  return op <= Ntype_op::Hotmux || op == Ntype_op::Concat;
-}
+[[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) { return op <= Ntype_op::Hotmux || op == Ntype_op::Concat; }
 
-// TRUE only when the pin's VALUE is provably in {0,1}. Deliberately proven
-// from OP SEMANTICS plus the flow-independent bits==1 bound -- NEVER from the
-// bits==2 magnitude+1 reading. That convention only holds for upass-tolg
-// stamps: lgyosys_tolg stamps LITERAL widths (bits==2 holds 0..3) and leaves
-// some signed pins unstamped (an unstamped Not reads unsigned while computing
-// -x-1), so a width-metadata acceptance forwarded `cond ? 1 : 0` as a bare
-// Not and emitted 14 where 0/1 was due (expression_00002).
-//  * a constant 0 or 1;
-//  * cell contract: EQ/LT/GT/Ror outputs are 0/1;
-//  * And with a constant-1 operand, or Get_mask with mask 1: <= 1 by the op
-//    itself, regardless of any stamp;
-//  * a 2-arm Mux whose both data arms are constant 0/1;
-//  * unsigned bits==1: value < 2 under the literal convention and < 1 under
-//    magnitude+1 -- safe under BOTH.
+// TRUE only when the realization hint proves the value is in {0,1}. With one
+// literal-width contract there is no producer-specific exception: u1 means
+// exactly [0,1]. Constants carry their proof in the value itself.
 [[nodiscard]] bool is_bool01(const hhds::Pin_class& p) {
   if (p.is_invalid()) {
     return false;
@@ -625,61 +633,7 @@ constexpr int                 kPackedSliceFanInLimit = 64;
   if (is_const_pin(p)) {
     return const01(p);
   }
-  const int b = bits_of(p);
-  if (is_graph_input_pin(p) || is_graph_output_pin(p)) {
-    return livehd::graph_util::is_unsign(p) && b == 1;
-  }
-  auto m = p.get_master_node();
-  if (m.is_invalid()) {
-    return false;
-  }
-  const auto op = type_op_of(m);
-  if (!is_computed_comb_op(op)) {
-    // State/boundary pins (Flop/Latch/Memory/Sub) carry DECLARED literal
-    // widths: an unsigned 1-bit pin is an honest u1. Computed pins do NOT get
-    // this door: lgyosys_tolg leaves some signed pins unstamped (an unstamped
-    // 1-bit Not reads unsigned while holding -2), so a computed pin must
-    // prove {0,1} from its op shape below, never from width metadata.
-    //
-    // Rem only sits above Hotmux because the encoding ran out of even slots
-    // below it (cell.hpp); it is a COMPUTED op whose result takes the
-    // DIVIDEND's sign, so it must not use the declared-width door.
-    if (op == Ntype_op::Rem) {
-      return false;
-    }
-    return livehd::graph_util::is_unsign(p) && b == 1;
-  }
-  if (op == Ntype_op::Concat) {
-    // A Concat is non-negative with EXACTLY sum(w_i) magnitude bits, so it is
-    // in {0,1} iff its lanes add up to a single bit. Proven from the LANE TABLE
-    // (the cell's own contract) like every other computed arm here, never from
-    // the width stamp -- and concat_total_width is 0 for a malformed cell, which
-    // refuses.
-    return livehd::graph_util::concat_total_width(m) == 1;
-  }
-  if (op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Ror) {
-    return true;
-  }
-  if (op == Ntype_op::And || op == Ntype_op::Get_mask) {
-    // And(x, 1) / Get_mask(x, 1): the constant bounds the result by op
-    // semantics alone. For And the mask may sit on either edge of port 0;
-    // for Get_mask it is the dedicated mask sink (pid 2).
-    for (const auto& e : m.inp_edges()) {
-      const auto pid = static_cast<uint32_t>(e.sink.get_port_id());
-      if ((op == Ntype_op::And && pid == 0 && is_const_pin(e.driver))
-          || (op == Ntype_op::Get_mask && pid == 2 && is_const_pin(e.driver))) {
-        auto c = hydrate_const(e.driver);
-        if (!c.has_unknowns() && c.is_just_i64() && c.to_just_i64() == 1) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  if (op == Ntype_op::Mux) {
-    return const01(drv_at(m, 1)) && const01(drv_at(m, 2));
-  }
-  return false;
+  return livehd::graph_util::is_unsign(p) && bits_of(p) == 1;
 }
 
 // Decode a 2-input EQ against a specific constant: returns the non-const
@@ -765,7 +719,7 @@ constexpr int kPackMaxWidth   = 1 << 20;
 // below are free functions and the class members are not reachable from this
 // namespace.
 void sweep_dead_node(const hhds::Node_class& n) {
-  std::deque<hhds::Node_class> work;
+  std::deque<hhds::Node_class>           work;
   // ENQUEUED-ONCE, like Cprop::bwd_del_node's `potential_set`. Without it a node
   // that drives the swept one through TWO edges (`x*x`, a value written into two
   // lanes) is queued twice: the first pop deletes it and the second pops a stale
@@ -846,15 +800,14 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
     total += w;
   }
 
-  // The cell's stamp contract: sum(w_i) magnitude bits plus the always-zero
-  // sign slot of a LiveHD unsigned value. Written here rather than left to
+  // The cell's stamp contract is the literal unsigned sum(w_i). Written here
+  // rather than left to
   // pass/bitwidth because the DEFAULT recipe (O1) is cprop with no bitwidth
   // after it, so this stamp is the one that ships. Narrowing a head that was
   // stamped wider is sound in the same breath: the tiling proves the value is
   // below 2^total.
   auto out = node.create_driver_pin(0);
-  livehd::graph_util::set_bits(out, total + 1);
-  livehd::graph_util::set_unsign(out);
+  livehd::graph_util::set_ubits(out, total);
 }
 
 // A Set_mask chain over a KNOWN-ZERO base: `set_mask(set_mask(0,m0,v0),m1,v1)…`
@@ -867,7 +820,7 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   std::vector<Pack_lane>                 lanes;
   std::vector<hhds::Node_class>          chain;  // head first
   absl::flat_hash_set<hhds::Class_index> in_chain;
-  auto                                   cur = node;
+  auto                                   cur        = node;
   bool                                   zero_based = false;
   while (true) {
     if (chain.size() >= kPackChainLimit) {
@@ -932,14 +885,8 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
 //
 // An UPPER bound on the low bits an operand can occupy, or -1 when there is
 // none. Deliberately NOT footprint(): footprint exists to prove DISJOINTNESS,
-// where an over-approximation merely refuses, and it reads every non-IO pin
-// under the magnitude+1 convention (`bits - 1`). That convention holds for a
-// COMPUTED cell output, but a BOUNDARY pin -- graph IO, and equally a Sub /
-// Memory / Flop / Latch output -- carries the LITERAL declared width, so
-// `bits - 1` understates it by exactly one. Here the bound IS the lane width,
-// so an understatement is a readable miscompile: a u5 instance output packed as
-// a 4-bit lane emitted `{fp, 1'b0, addr[3:0], tid}` and silently dropped addr's
-// top bit (caught by prp-v2prp2v-struct_top_port).
+// where an over-approximation merely refuses. Under the unified hint contract,
+// every stamped unsigned pin carries its literal finite width.
 //
 // Over-stating is safe in both roles -- the lane just covers provably-zero high
 // bits and the mask stays an identity -- so every uncertain case rounds UP.
@@ -980,18 +927,7 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   if (bits <= 0) {
     return -1;  // unsized: [0,0) would read as EMPTY and delete a live value
   }
-  if (is_graph_input_pin(p) || is_graph_output_pin(p)) {
-    return bits;  // literal bus width
-  }
-  auto m = p.get_master_node();
-  if (m.is_invalid()) {
-    return -1;
-  }
-  const auto op = type_op_of(m);
-  // Only a computed combinational output carries tolg's magnitude+1 stamp; Rem
-  // and Clock_cell are combinational too but sit outside the predicate, and
-  // rounding them UP to the literal width is the safe side of that gap.
-  return is_computed_comb_op(op) ? std::max(1, bits - 1) : bits;
+  return bits;
 }
 
 bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
@@ -1924,9 +1860,8 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
       }
       values[i]   = hydrate_const(lanes[i].value);
       const int w = lanes[i].width;
-      // Dlop::concat_op DEBUG-asserts that a lane fits its window (a negative
-      // value spends its top bit on the sign, a non-negative one is
-      // magnitude+1) -- an over-wide lane is a caller bug there, even though
+      // Dlop::concat_op DEBUG-asserts that a lane fits its window -- an
+      // over-wide lane is a caller bug there, even though
       // the CELL truncates it. get_bits() over-approximates once the sign bit
       // itself is unknown, so this refuses slightly more than the assert would:
       // the safe direction, since an unfolded Concat still computes.
@@ -2649,11 +2584,9 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
         // two forms agree ABOVE `value`'s significant width: Get_mask reads 0
         // there, and a zero-extended `value` is what the lane holds.
         //
-        // Deliberately NOT required: that `value` fit inside the lane. A value
-        // WIDER than its lane is the common case, not the exception -- LiveHD
-        // stores bits = magnitude+1, so a w-bit field assigned a w-bit
-        // expression already presents as w+1 -- and Set_mask truncates the
-        // excess. Those truncated positions are outside [lo,hi) by construction
+        // Deliberately NOT required: that `value` fit inside the lane. Set_mask
+        // truncates any excess. Those truncated positions are outside [lo,hi)
+        // by construction
         // (the slice is contained in the lane), so the read never observes
         // them. An earlier version of this guard demanded `fv.second <= lane
         // width` and refused EVERY real field write for exactly that off-by-one
@@ -2731,7 +2664,7 @@ bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_cons
   }
 
   // Every rule preserves (hi-lo), so the mask popcount is invariant and the
-  // pin's existing bits (= magnitude+1) stays correct: do NOT re-stamp bits/sign.
+  // pin's existing literal width stays correct: do NOT re-stamp bits/sign.
   auto old_master = a_now.get_master_node();
   auto edges      = node.inp_edges();  // snapshot before mutating
   for (auto e : edges) {
@@ -2799,49 +2732,20 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // at or above n, so the mask clears nothing.
   //
   // An LGraph cell is an unbounded-precision integer op and `bits` is DERIVED
-  // metadata (pass/bitfuzz strips it and recomputes it), but tolg's bind_result
-  // stamps bits = magnitude+1 on every computed output. So an UNSIGNED computed
-  // pin of width W holds a value < 2^(W-1): if W-1 <= n the cell is pure
-  // overhead. On the dino CPU this is 344 of the 811 Get_mask cells that survive
-  // cprop today (42%) -- 256 with a narrow mask, 88 with a >64-bit one, which
-  // get_mask_range() handles uniformly.
+  // metadata (pass/bitfuzz strips it and recomputes it). An UNSIGNED pin of
+  // literal width W holds a value < 2^W: if W <= n the cell is pure overhead.
   //
   // THREE conditions, each load-bearing:
   //  * is_unsign(a) -- for a SIGNED `a` this mask is the to-positive coercion
   //    (it clears the sign extension), so dropping it would read -3 as a large
   //    positive. Rule 4 above is the signed counterpart.
-  //  * `a` is a COMBINATIONAL cell output -- only those carry bind_result's
-  //    magnitude+1 stamp. A graph-IO port's `bits` is the LITERAL bus width
-  //    (bitwidth.cpp:1588-1594), so W-1 understates it by one and an 8-bit port
-  //    with bit 7 set would be silently truncated. Memory/Sub/Flop outputs are
-  //    sized by their own declarations, not by bind_result, so they are out too.
   //  * a LOW-CONTIGUOUS mask [0,n) -- a bit-extract mask that does not start at
   //    bit 0 repositions bits and is never an identity.
   {
     const int me = low_mask_width(mask_const);  // <0 unless a low-contiguous 2^n-1
     if (me > 0) {
-      auto       am       = a_pin.get_master_node();
-      const auto amo      = type_op_of(am);
-      // Concat qualifies through is_computed_comb_op: its driver is stamped
-      // sum(w_i)+1 and `unsign` BY CONSTRUCTION, which is exactly the
-      // magnitude+1 convention this rule reads (and the tightest such stamp in
-      // the IR -- the lane widths are declared, never inferred).
-      const bool computed = !am.is_invalid() && amo != Ntype_op::Invalid && is_computed_comb_op(amo) && !is_const_pin(a_pin)
-                            && !is_graph_input_pin(a_pin);
-      // NO flop/Memory/Sub-source arm, by MEASUREMENT (2026-08-06): a
-      // "physical width" variant (unsigned such pin holds < 2^bits, so
-      // bits <= n clears nothing) was implemented, passed the whole suite,
-      // and fired ZERO times on both dino and minion — every candidate is
-      // width-refused by collapse_forward_for_pin below, because a Get_mask
-      // on a state/boundary pin exists precisely to convert the literal
-      // width to the magnitude+1 form (bits differ by construction; the
-      // width change IS the cell, same verdict as Rule 4's port note).
-      // Its C++ cost is representation-level and cgen_sim's low-mask fast
-      // path already lands it in one conversion; do not re-add the arm
-      // without first making the collapse width-shrink-tolerant AND proving
-      // that against LEC.
-      const int  abits    = bits_of(a_pin);
-      if (computed && abits > 0 && livehd::graph_util::is_unsign(a_pin) && (abits - 1) <= me) {
+      const int abits = bits_of(a_pin);
+      if (abits > 0 && livehd::graph_util::is_unsign(a_pin) && abits <= me) {
         if (collapse_forward_for_pin(node, a_pin)) {
           return true;
         }
@@ -2936,15 +2840,14 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
   }
 
   // set_mask(0, ones[0,n), value) == value when the value is already known to
-  // fit below bit n. Computed unsigned LGraph outputs use the magnitude+sign
-  // width convention: bits=W means value < 2^(W-1). The mask therefore clears
-  // nothing when W-1 <= n. Boundary/state pins use literal physical widths and
-  // are deliberately excluded, as in scalar_get_mask's width-no-op rule.
+  // fit below bit n. An unsigned bits=W hint means value < 2^W, so the mask
+  // clears nothing when W <= n. Boundary/state pins remain excluded because
+  // this rewrite is limited to computed expressions.
   auto       vm       = value_pin.get_master_node();
   const auto vmo      = type_op_of(vm);
   const bool computed = !vm.is_invalid() && vmo != Ntype_op::Invalid && is_computed_comb_op(vmo);
   const int  vbits    = bits_of(value_pin);
-  if (!computed || vbits <= 0 || (vbits - 1) > me) {
+  if (!computed || vbits <= 0 || vbits > me) {
     return false;
   }
 
@@ -3105,58 +3008,19 @@ void Cprop::canonicalize_and_masks(hhds::Graph* g) {
       continue;
     }
     auto x_pin = edges[const_idx ^ 1].driver;
-    // Convert only when the masked operand cannot mislead the Get_mask width
-    // rules. Rule 5 (and footprint) read bits as the magnitude+1 convention,
-    // but lgyosys_tolg stamps logic/select results at the LITERAL width
-    // (OpW::maxw) -- one bit short -- so a Get_mask wrapped around such a pin
-    // gets dropped as a "width no-op" while it is the load-bearing truncation
-    // (lec_cross: GM(And(a,b),0xF) collapsed onto a bits==4 And, reading
-    // 15&15 as 7). Safe operands: SRA (its literal stamp OVERSTATES the
-    // result, the conservative direction), Get_mask (restamped to capacity),
-    // Not (negative output, so the unsign-gated rules skip it), EQ/LT/GT/Ror
-    // (0/1 by cell contract), and non-computed pins (IO/state/Sub -- Rule 5
-    // excludes them explicitly). This is exactly the measured bit-extract /
-    // logical-not / bool-mask population from the sim flow.
+    // With literal width hints the And and Get_mask spellings agree for every
+    // operand producer; there is no producer-specific sign-slot exception.
     if (x_pin.is_invalid() || is_const_pin(x_pin)) {
       continue;
-    }
-    if (!is_graph_input_pin(x_pin) && !is_graph_output_pin(x_pin)) {
-      auto xm = x_pin.get_master_node();
-      if (xm.is_invalid()) {
-        continue;
-      }
-      const auto xop      = type_op_of(xm);
-      const bool computed = xop != Ntype_op::Invalid && is_computed_comb_op(xop);
-      // Not is deliberately absent: GM(Not(port),mask) encodes exactly right,
-      // which UNMASKS the ref side's understated And stamp in a yosys-vs-yosys
-      // miter (lec_cross's De Morgan pair used to agree only because both
-      // sides carried the same truncating And spelling). Until lgyosys_tolg
-      // stamps magnitude+1 (or lec encodes literal stamps), keep Not cones in
-      // their And spelling.
-      // Concat is safe for the same reason Get_mask is: its stamp is not an
-      // inference at all but the DECLARED lane sum + 1, so the magnitude+1
-      // reading Rule 5 and footprint() perform is exact rather than one bit
-      // short (the lgyosys_tolg OpW::maxw hazard this list exists to dodge).
-      const bool safe_op  = xop == Ntype_op::SRA || xop == Ntype_op::Get_mask || xop == Ntype_op::EQ || xop == Ntype_op::LT
-                            || xop == Ntype_op::GT || xop == Ntype_op::Ror || xop == Ntype_op::Concat;
-      if (computed && !safe_op) {
-        continue;
-      }
     }
     edges[0].del_edge();
     edges[1].del_edge();
     livehd::graph_util::set_type_op(node, Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(x_pin);
     setup_sink_by_name(node, "mask").connect_driver(mask_pin);
-    // Normalize the width stamp to Get_mask's magnitude+1 convention. The
-    // lgyosys_tolg And-mask carries bits == the LITERAL mask width (OpW::maxw:
-    // bits 8 for `& 0xFF`), which under Get_mask's convention claims only 7
-    // magnitude bits -- and under a signed read makes bit 7 the SIGN bit, so
-    // 0xFF re-read as -1 (caught by lgcheck BMC on simple_add). Widening to
-    // capacity is always sound: bits is a capacity bound and the selected
-    // value needs exactly popcount(mask)+1.
+    // Normalize the width stamp to the literal selection capacity.
     auto      out      = node.create_driver_pin(0);
-    const int capacity = n + 1;
+    const int capacity = n;
     if (bits_of(out) < capacity) {
       livehd::graph_util::set_bits(out, capacity);
     }

@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Simulation and source-level checking commands.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <sys/wait.h>
 
 #include <algorithm>
@@ -22,6 +20,7 @@
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "pass.hpp"
 #include "prp_sim.hpp"
 #include "rapidjson/document.h"
@@ -71,8 +70,9 @@ struct Q_fail {
 };
 
 // One sim_catalog.json record. Widths are BOTH reported on purpose: `bits` is
-// the internal Slop width (9 for a `u8` register — today's pinned probe
-// behavior) and `declared_bits` is what the source asked for.
+// the literal internal carrier width and `declared_bits` is what the source
+// asked for. They agree for ordinary typed values, but both remain useful for
+// imported or conservatively widened internal nets.
 struct Cat_sig {
   std::string name;
   std::string alias;  // the legacy spelling (`acc.__in.din`), empty when none
@@ -822,8 +822,8 @@ Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, co
 
   // A failure-anchored bound has no value until the run happens, so the batch
   // cannot bound its sampling window: it must observe the whole run.
-  bool        any_event = false;
-  const auto  tok       = [&](const Q_time& t) {
+  bool       any_event = false;
+  const auto tok       = [&](const Q_time& t) {
     if (t.is_event) {
       any_event = true;
       return std::format("F{}{}", t.offset < 0 ? "" : "+", t.offset);
@@ -921,8 +921,8 @@ Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, co
         if (!q.HasMember("at")) {
           query_usage(std::format("{}: `{}` needs an \"at\"", where, op));
         }
-        const auto t = parse_time(q["at"], std::format("{}.at", where));
-        auto hits = resolve_sel(sel, cat, where);
+        const auto t    = parse_time(q["at"], std::format("{}.at", where));
+        auto       hits = resolve_sel(sel, cat, where);
         std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });  // selectors never enumerate memory words
         if (hits.empty()) {
           throw Q_fail{"unknown_signal",
@@ -1142,9 +1142,9 @@ std::string bytes_to_dec(std::vector<uint8_t> v) {
 
 // The signed decimal rendering of a hex value. The interpretation WIDTH is the
 // source-declared one (an `s12` holding -3 is "-3", not 4093) — but only when
-// the value actually fits there: an internal width carries one more bit than
-// the declaration (9 for a `u8`), and truncating a value that uses it would
-// silently report a different number than `hex` says.
+// the value actually fits there. An imported or conservatively widened
+// internal net can exceed its declaration, and truncating a value that uses
+// those bits would silently report a different number than `hex` says.
 std::string hex_to_dec(std::string_view hx, long bits, long declared_bits, bool is_signed) {
   auto v = hex_to_bytes(hx);
   if (v.empty()) {
@@ -1217,8 +1217,7 @@ void write_value_enriched(Json_writer& w, const rj::Value& v, const Cat_sig* c) 
   w.String(c->kind == "output" ? "during_period" : "settled");
   for (auto it = v.MemberBegin(); it != v.MemberEnd(); ++it) {
     const std::string_view k = it->name.GetString();
-    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask"
-        || k == "sampled") {
+    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask" || k == "sampled") {
       continue;  // ours; a driver that starts emitting them must not double-write
     }
     w.Key(it->name.GetString());
@@ -1472,8 +1471,8 @@ void sim_command(Options& opts, Result& res) {
     // argument orders work; treating both as fatal made tb-first invocations
     // die with "no test blocks found in <dut>.prp" before the reorder scan
     // ever ran.
-    const int  rc            = prp_sim::list_tests(file, "", probe, perr);
-    const bool last_testless = rc != 0 && perr.rfind("no test blocks found", 0) == 0;
+    const int                       rc            = prp_sim::list_tests(file, "", probe, perr);
+    const bool                      last_testless = rc != 0 && perr.rfind("no test blocks found", 0) == 0;
     if (rc != 0 && !last_testless) {
       throw Lhd_error{"usage", perr.empty() ? std::format("cannot read `{}`", file) : perr, ""};
     }
@@ -1488,10 +1487,10 @@ void sim_command(Options& opts, Result& res) {
       }
     }
   }
-  const bool        setup_only = opts.sim_setup_only;
-  const bool        run_only   = opts.sim_run_only;
-  const bool        list_only  = opts.list_tests;
-  const bool        pretty     = opts.diag_fmt == Diag_fmt::pretty;
+  const bool setup_only = opts.sim_setup_only;
+  const bool run_only   = opts.sim_run_only;
+  const bool list_only  = opts.list_tests;
+  const bool pretty     = opts.diag_fmt == Diag_fmt::pretty;
   if (setup_only && run_only) {
     throw Lhd_error{"usage", "--setup-only and --run-only are mutually exclusive", ""};
   }
@@ -1589,14 +1588,14 @@ void sim_command(Options& opts, Result& res) {
   // Hierarchical combinational port mirrors are compile-time instrumentation.
   // Keep them out of the ordinary fast binary; emit them only for a run that
   // actually requests waveform or value observation.
-  opts.sim_observe = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
+  opts.sim_observe          = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
   // --set sim.checkpoint* : periodic editable checkpoints of DUT + testbench state
   // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
   // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
   // settings are forwarded to the driver, which owns the fork cadence + prune.
-  bool        ckpt_on = true;
+  bool        ckpt_on   = true;
   bool        init_zero = false;
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
@@ -1736,9 +1735,9 @@ void sim_command(Options& opts, Result& res) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
     dss << dfs.rdbuf();
-    const auto driver_source = dss.str();
-    const bool baked_vcd     = driver_source.find("vcd::global_timestamp") != std::string::npos;
-    const bool baked_observation = driver_source.find("hierarchical-observation: true") != std::string::npos;
+    const auto driver_source         = dss.str();
+    const bool baked_vcd             = driver_source.find("vcd::global_timestamp") != std::string::npos;
+    const bool baked_observation     = driver_source.find("hierarchical-observation: true") != std::string::npos;
     const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
     if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
@@ -1748,20 +1747,21 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
     if (vcd_on && !baked_vcd) {
-      res.status        = "fail";
-      res.error_class   = "usage";
+      res.status      = "fail";
+      res.error_class = "usage";
       res.error_message
           = "this --run-only sim was generated without VCD; re-run without --run-only (or "
-                          "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
-      res.exit_code     = exit_code_for(res.error_class);
+            "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
     if (observation_requested && !baked_observation) {
-      res.status        = "fail";
-      res.error_class   = "usage";
-      res.error_message = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
-                          "--probe/--break-when/--query instrumentation is generated";
-      res.exit_code     = exit_code_for(res.error_class);
+      res.status      = "fail";
+      res.error_class = "usage";
+      res.error_message
+          = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
+            "--probe/--break-when/--query instrumentation is generated";
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
     // PERSIST the setup-time decision. sim.vcd is a DRIVER-AFFECTING setting:
@@ -1797,53 +1797,24 @@ void sim_command(Options& opts, Result& res) {
       res.error_class   = "usage";
       res.error_message = std::format(
           "this --run-only sim was generated with sim.vcd_fake_delay={}; the style is baked "
-                                      "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
-                                      baked_fakedelay ? "true" : "false");
-      res.exit_code     = exit_code_for(res.error_class);
+          "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
+          baked_fakedelay ? "true" : "false");
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
   }
-  const std::string hlop_inc     = sim_hlop_include_dir(opts);
-  const std::string iassert_inc  = sim_iassert_include_dir(opts);
-  // ABSOLUTE, for the same reason as the -I block below: `--workdir` is routinely
-  // relative and the compile runs with its cwd set to the sim dir, so a relative
-  // `-I<simdir>/runtime/taskflow` resolves against the WRONG directory and the
-  // staged copy is invisible ("'taskflow/taskflow.hpp' file not found" on the
-  // first color-runtime TU, with the payload sitting right there).
-  std::string taskflow_inc = fs::absolute(simdir).string() + "/runtime/taskflow";
-  if (::access((taskflow_inc + "/taskflow/taskflow.hpp").c_str(), R_OK) != 0) {
-    taskflow_inc = sim_taskflow_include_dir(opts);  // older --run-only tree
-  }
-  // `<name>.color-runtime.hpp` is the only emitted header that pulls in
-  // <taskflow/taskflow.hpp>, so its presence is exactly "this tree needs
-  // taskflow" — the same signal the emit-dir stager uses.
-  bool needs_taskflow = false;
-  {
-    std::error_code ec;
-    for (const auto& de : fs::directory_iterator(simdir, ec)) {
-      if (de.path().filename().string().ends_with(".color-runtime.hpp")) {
-        needs_taskflow = true;
-        break;
-      }
-    }
-  }
-  // Taskflow is checked with the same fail-fast as slop.hpp/iassert.hpp: every
-  // generated simulator `#include <taskflow/taskflow.hpp>` unconditionally (the
-  // serial sim.workers=0 backend included), so a missing include dir is a
-  // DEPENDENCY failure, not an -I to quietly skip. Without this the host
-  // compile dies with a raw "'taskflow/taskflow.hpp' file not found" buried in
-  // build.log instead of the actionable diagnostic below.
-  if (hlop_inc.empty() || iassert_inc.empty() || (needs_taskflow && taskflow_inc.empty())) {
+  const std::string hlop_inc    = sim_hlop_include_dir(opts);
+  const std::string iassert_inc = sim_iassert_include_dir(opts);
+  if (hlop_inc.empty() || iassert_inc.empty()) {
     res.status        = "fail";
     res.error_class   = "dependency";
-    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {}, taskflow.hpp: {})",
+    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
                                     hlop_inc.empty() ? "<not found>" : hlop_inc,
-                                    iassert_inc.empty() ? "<not found>" : iassert_inc,
-                                    taskflow_inc.empty() ? "<not found>" : taskflow_inc);
+                                    iassert_inc.empty() ? "<not found>" : iassert_inc);
     res.exit_code     = exit_code_for(res.error_class);
     if (pretty) {
       std::print(
-          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp/taskflow), or export "
+          "  hint: run `lhd` from bazel (its runfiles carry slop.hpp/iassert.hpp), or export "
           "RUNFILES_DIR=<...>/lhd.runfiles to run it by hand; a source checkout resolves them from the sibling "
           "../hlop and ../iassert, and --set sim.hlop_dir=DIR / "
           "--set sim.iassert_dir=DIR point at an explicit checkout\n");
@@ -1907,14 +1878,10 @@ void sim_command(Options& opts, Result& res) {
                                              shell_quote(simdir_abs),
                                              shell_quote(hlop_inc),
                                              shell_quote(iassert_inc));
-  if (!taskflow_inc.empty()) {
-    cflags += " -I" + shell_quote(taskflow_inc);
-  }
-
   // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
-  int jobs = 0;
+  int               jobs       = 0;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.jobs") {
       jobs = std::atoi(v.c_str());
@@ -2125,8 +2092,8 @@ void sim_command(Options& opts, Result& res) {
     // ninja owns compile AND link, and skips whatever is already up to date.
     // Its own output is already per-edge buffered and ordered, so it is both
     // the log body and what gets shown.
-    const std::string nc = std::format("{} -C {} -j {} 2>&1", shell_quote(ninja_bin), shell_quote(simdir), jobs);
-    int               nrc = 0;
+    const std::string nc   = std::format("{} -C {} -j {} 2>&1", shell_quote(ninja_bin), shell_quote(simdir), jobs);
+    int               nrc  = 0;
     auto              nout = capture(nc, nrc);
     if (nrc != 0) {
       fail_build(nc + "\n\n" + nout, nout);
@@ -2143,11 +2110,7 @@ void sim_command(Options& opts, Result& res) {
       std::atomic<size_t> cursor{0};
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          cmds[i] = std::format("{} {} -c {} -o {} 2>&1",
-                                shell_quote(cxx),
-                                cflags,
-                                shell_quote(tus[i]),
-                                shell_quote(objs[i]));
+          cmds[i] = std::format("{} {} -c {} -o {} 2>&1", shell_quote(cxx), cflags, shell_quote(tus[i]), shell_quote(objs[i]));
           outs[i] = capture(cmds[i], rcs[i]);
         }
       };
@@ -2186,8 +2149,8 @@ void sim_command(Options& opts, Result& res) {
       link += " " + shell_quote(o);
     }
     link          += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
-    int  link_rc  = 0;
-    auto link_out = capture(link, link_rc);
+    int  link_rc   = 0;
+    auto link_out  = capture(link, link_rc);
     if (link_rc != 0) {
       fail_build(link + "\n\n" + link_out, link_out);
       return;

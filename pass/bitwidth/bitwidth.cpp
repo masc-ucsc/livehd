@@ -39,9 +39,11 @@ using livehd::graph_util::is_sink_connected;
 using livehd::graph_util::is_type_const;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::set_bits;
+using livehd::graph_util::set_sbits;
 using livehd::graph_util::set_sign;
 using livehd::graph_util::set_type_const_serialized;
 using livehd::graph_util::set_type_op;
+using livehd::graph_util::set_ubits;
 using livehd::graph_util::set_unsign;
 using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::type_op_of;
@@ -97,8 +99,8 @@ constexpr bool infer_internal_range(Ntype_op op) {
     case Ntype_op::Latch:
     case Ntype_op::Fflop:
     case Ntype_op::Sub:
-    case Ntype_op::AttrSet: return true;
-    default: return false;
+    case Ntype_op::AttrSet : return true;
+    default                : return false;
   }
 }
 
@@ -137,14 +139,11 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   });
 
 #ifndef NDEBUG
-  // Debug self-check (-c dbg). Tier 1: validate every constant against the
-  // bits/sign declared on its pin before we recompute. Tier 2: snapshot the
-  // front-end-declared sign of each explicitly-sized driver pin so that, after
-  // range inference, we can flag any pin declared UNSIGNED whose independently
-  // inferred range can go negative -- the sext/zext/get_mask that the
-  // translation should have inserted is missing, so the unsigned attribute lies
-  // about the sign/upper bits.
-  absl::flat_hash_map<hhds::Class_index, bool> declared_unsigned;
+  // Validate structural and constant hints before range inference rewrites
+  // them. Do not compare a boundary cell's inferred input range against its
+  // output sign afterward: Flop/Mux/output connections are legal finite-width
+  // truncation boundaries, so a signed producer may intentionally feed an
+  // unsigned realization.
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
       continue;
@@ -154,41 +153,10 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
     livehd::graph_util::debug_check_const_pin(dpin);
-    if (bits_of(dpin) != 0) {
-      declared_unsigned.insert_or_assign(dpin.get_class_index(), livehd::graph_util::is_unsign(dpin));
-    }
   }
 #endif
 
   bw_pass(g.get());
-
-#ifndef NDEBUG
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
-      continue;
-    }
-    auto dpin = node.create_driver_pin(0);
-    if (dpin.is_invalid()) {
-      continue;
-    }
-    auto dit = declared_unsigned.find(dpin.get_class_index());
-    if (dit == declared_unsigned.end() || !dit->second) {
-      continue;  // not explicitly sized at entry, or declared signed
-    }
-    auto rit = bwmap.find(dpin.get_class_index());
-    if (rit == bwmap.end() || rit->second.is_overflow()) {
-      continue;
-    }
-    const int64_t rmin = rit->second.min;  // hoist out of the (packed) map slot before std::format binds by ref
-    const int64_t rmax = rit->second.max;
-    I(rmin >= 0,
-      std::format("bitwidth: pin '{}' declared unsigned but inferred range [{}..{}] is negative -- missing sext/zext/get_mask?",
-                  livehd::graph_util::wire_name(dpin),
-                  rmin,
-                  rmax)
-          .c_str());
-  }
-#endif
 }
 
 // The range of a boolean-producing cell (a comparator, a reduce-OR).
@@ -241,12 +209,12 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
     // No declared width (the front end left the port unsized): inference is
     // allowed to size it, and the stamped value is all any reader has.
   }
-  const auto b = bw.get_sbits();
-  set_bits(dpin, b);
-  if (bw.is_always_positive() && b > 0) {
-    set_unsign(dpin);
+  if (bw.is_always_positive()) {
+    const auto b = bw.get_ubits();
+    set_ubits(dpin, b);
   } else {
-    set_sign(dpin);
+    const auto b = bw.get_sbits();
+    set_sbits(dpin, b);
   }
 }
 
@@ -311,7 +279,7 @@ void Bitwidth::process_flop(hhds::Node_class& node) {
       auto bits = bits_of(cpin);
       if (bits) {
         if (livehd::graph_util::is_unsign(cpin)) {
-          bw.set_ubits_range(bits - 1);
+          bw.set_ubits_range(bits);
         } else {
           bw.set_sbits_range(bits);
         }
@@ -364,8 +332,8 @@ void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   // non-negative operand (~x always negative) max_val never came down off 0:
   // the range came out as [~pmax, 0] instead of [~pmax, ~pmin], which
   // is_always_positive()/set_bits_sign() then read as UNSIGNED. That single
-  // wrong attribute made three consumers disagree about the spare sign bit --
-  // the LEC took one bit less than the pin declares, cgen emitted a correct
+  // wrong attribute made three consumers disagree about sign extension --
+  // the LEC treated the result as non-negative, cgen emitted a correct
   // signed net, and abc zero-filled the widening where it had to sign-extend
   // (`(~ec)#[0..=9]` mapped to 511 instead of 1023).
   Dlop max_val;
@@ -796,8 +764,42 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     return;
   }
 
+  // The element's SIGN follows what the front end stamped on the memory's value
+  // pins, rather than being forced signed. tolg stamps each dout with the
+  // declared element sign (set_ubits for a `[N]uW` array); blanket-signing them
+  // here made is_unsign(dout) false for EVERY memory in the design, which is
+  // exactly what cgen_sim's infer_memory_unsign reads -- so the unsigned-carrier
+  // arm of sim.slop_u could never engage under any recipe that runs
+  // pass.bitwidth, no matter what the source declared.
+  //
+  // Only an EXPLICITLY SIZED pin gets a vote: is_unsign() is attribute-ABSENCE,
+  // so an unstamped pin reads "unsigned" and would flip a whole memory on no
+  // evidence at all. With no sized value pin anywhere, keep the signed default.
+  // One signed value pin is enough to keep the memory signed (same conservative
+  // AND that infer_memory_unsign applies downstream).
+  bool       saw_sized_value = false;
+  bool       all_unsigned    = true;
+  const auto vote_sign       = [&](const hhds::Pin_class& p) {
+    if (p.is_invalid() || bits_of(p) <= 0) {
+      return;
+    }
+    saw_sized_value = true;
+    all_unsigned    = all_unsigned && livehd::graph_util::is_unsign(p);
+  };
+  for (const auto& dpin : din_drivers) {
+    vote_sign(dpin);
+  }
+  for (const auto& e : node.out_edges()) {  // read-only vote; adjust_bw runs below
+    vote_sign(e.driver);
+  }
+  const bool elem_unsigned = saw_sized_value && all_unsigned;
+
   Bitwidth_range data_bw;
-  data_bw.set_sbits_range(mem_bits);
+  if (elem_unsigned) {
+    data_bw.set_ubits_range(mem_bits);
+  } else {
+    data_bw.set_sbits_range(mem_bits);
+  }
   for (auto& dpin : din_drivers) {
     auto it = bwmap.find(dpin.get_class_index());
     if (it == bwmap.end()) {
@@ -805,8 +807,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     }
   }
 
-  Bitwidth_range bw_din;
-  bw_din.set_sbits_range(mem_bits);
+  Bitwidth_range bw_din = data_bw;
 
   // Out-connected pins: walk out_edges, collect unique driver pins.
   absl::flat_hash_set<hhds::Class_index> seen;
@@ -1058,9 +1059,8 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 // (graph_util::concat_lane_violation -- truncating would shift every lane above
 // it). The result therefore saturates the full magnitude (any lane can be
 // all-ones) and is never negative: exactly [0, 2^sum(w_i)-1].
-// set_ubits_range spells that, and set_bits_sign then stamps
-// bits = sum(w_i)+1 -- the magnitude plus the always-zero sign slot of an
-// unsigned LiveHD value -- and `unsign`.
+// set_ubits_range spells that, and set_bits_sign then stamps the exact literal
+// bits = sum(w_i) width and `unsign`.
 //
 // Two traps live here, which is why the lane table only ever comes from
 // graph_util::concat_lanes:
@@ -1220,7 +1220,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
       return;
     }
     any_negative = any_negative || !it->second.is_always_positive();
-    auto bits    = it->second.get_sbits();
+    auto bits    = it->second.is_always_positive() ? it->second.get_ubits() : it->second.get_sbits();
     if (bits > max_bits) {
       max_bits = bits;
     }
@@ -1253,7 +1253,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
     // Bitwidth_range::set_range's max >= min assertion.
     bw.set_sbits_range(max_bits);
   } else {
-    bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits - 1));
+    bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits));
   }
 
   adjust_bw(node.create_driver_pin(0), bw);
@@ -1261,7 +1261,14 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
 
 void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() > 1);
-  int32_t max_bits = 0;
+  // TWO maxima, because the unsigned and signed answers are not the same
+  // number: a literal uW operand needs W+1 bits once the RESULT has to be
+  // signed. Taking the unsigned width into a signed range makes `s4(-8) ^
+  // u8(255)` (= -249) stamp s8, and every literal-width consumer truncates it
+  // to +7.
+  int32_t max_ubits    = 0;
+  int32_t max_sbits    = 0;
+  bool    any_negative = false;
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -1270,21 +1277,23 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_
       not_finished = true;
       return;
     }
-    int32_t bits;
     if (it->second.is_always_positive()) {
-      bits = it->second.get_sbits() - 1;
+      const int32_t ubits = it->second.get_ubits();
+      max_ubits           = std::max(max_ubits, ubits);
+      max_sbits           = std::max(max_sbits, ubits + 1);
     } else {
-      bits = it->second.get_sbits();
-    }
-    if (bits > max_bits) {
-      max_bits = bits;
+      max_sbits    = std::max(max_sbits, it->second.get_sbits());
+      any_negative = true;
     }
   }
 
-  auto max_val = Dlop::get_mask_value(max_bits - 1);
-  auto min_val = Dlop::create_integer(-1)->sub_op(max_val);
-
-  adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
+  Bitwidth_range bw;
+  if (any_negative) {
+    bw.set_sbits_range(max_sbits);
+  } else {
+    bw.set_ubits_range(max_ubits);
+  }
+  adjust_bw(node.create_driver_pin(0), bw);
 }
 
 void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
@@ -1303,7 +1312,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
       unk_max_sbits = Bits_unknown;
       continue;
     }
-    int32_t bw_sbits = it->second.get_sbits();
+    int32_t bw_sbits = it->second.is_always_positive() ? it->second.get_ubits() : it->second.get_sbits();
     if (bw_sbits == 0) {
       auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
       // live-reconnect each consumer to const-0; del_node bulk-drops node's
@@ -1368,7 +1377,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
   Dlop min_val;
 
   if (pos_min_sbits != Bits_unknown) {
-    max_val = Dlop::get_mask_value(pos_min_sbits - 1);
+    max_val = Dlop::get_mask_value(pos_min_sbits);
     min_val = Dlop::create_integer(0);
   } else {
     max_val = Dlop::get_mask_value(unk_max_sbits - 1);
@@ -1760,7 +1769,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         if (bits) {
           Bitwidth_range bw;
           if (livehd::graph_util::is_unsign(dpin)) {
-            bw.set_ubits_range(bits - 1);
+            bw.set_ubits_range(bits);
           } else {
             bw.set_sbits_range(bits);
           }
@@ -1961,7 +1970,7 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
     auto bw_rhs = it2->second;
 
     if (bw_rhs.get_sbits() > bw_lhs.get_sbits()) {
-      auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
+      auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_ubits() : bw_lhs.get_sbits();
 
       auto mask_node = create_typed_node(*current_graph, Ntype_op::And);
       auto mask_dpin = mask_node.create_driver_pin(0);

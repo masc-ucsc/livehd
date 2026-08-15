@@ -156,6 +156,22 @@ int32_t Bitwidth_range::get_sbits() const {
   return bits;
 }
 
+int32_t Bitwidth_range::get_ubits() const {
+  I(is_always_positive());
+  if (overflow) {
+    // set_ubits_range(N) stores N+1 in max in overflow mode so the signed
+    // reader retains its historical extra sign capacity.
+    if (min == 0 && max > 0) {
+      return static_cast<int32_t>(max - 1);
+    }
+    return get_sbits();
+  }
+  if (max == 0) {
+    return 1;
+  }
+  return static_cast<int32_t>(Dlop::create_integer(max)->get_last_bit_set() + 1);
+}
+
 void Bitwidth_range::dump() const {
   //(max, min, sbis, overflow)
   std::print("({}, {}, {}b) {}\n", max, min, get_sbits(), overflow ? "overflow" : "");

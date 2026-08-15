@@ -325,26 +325,27 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
   for (const auto& [mk, mv] : o.uncertain_match) {
     um_pairs.push_back(mk + "=" + mv);
   }
-  return std::format("{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
-                     dref.h0,
-                     dref.h1,
-                     dimpl.h0,
-                     dimpl.h1,
-                     o.engine,
-                     o.gold_x,
-                     o.bound,
-                     o.decompose,
-                     o.strict ? 1 : 0,
-                     o.phase,
-                     o.reset_cycles,
-                     o.reset,
-                     sorted_join(match_pairs),
-                     sorted_join(um_pairs),
-                     sorted_join(o.collapse),
-                     o.assume_check ? 1 : 0,
-                     o.design_assumes ? 1 : 0,
-                     o.assumption_key,
-                     o.solver);
+  return std::format(
+      "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
+      dref.h0,
+      dref.h1,
+      dimpl.h0,
+      dimpl.h1,
+      o.engine,
+      o.gold_x,
+      o.bound,
+      o.decompose,
+      o.strict ? 1 : 0,
+      o.phase,
+      o.reset_cycles,
+      o.reset,
+      sorted_join(match_pairs),
+      sorted_join(um_pairs),
+      sorted_join(o.collapse),
+      o.assume_check ? 1 : 0,
+      o.design_assumes ? 1 : 0,
+      o.assumption_key,
+      o.solver);
 }
 
 // Entity tail of a full graph name ("file.entity" -> "entity"): the pair-hint
@@ -1566,10 +1567,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if ((o.semdiff != "none" && kids_proven) || want_pairing) {
       auto                             t0 = std::chrono::steady_clock::now();
       livehd::semdiff::Semdiff_options so;
-      so.alg            = o.semdiff == "none" ? "structural" : o.semdiff;
-      so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
-      so.state_pairing  = want_pairing;
-      so.seed_pairs     = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
+      so.alg                        = o.semdiff == "none" ? "structural" : o.semdiff;
+      so.matching_names             = true;  // anchor flops/mems by hier name (lec's correspondence basis)
+      so.state_pairing              = want_pairing;
+      so.seed_pairs                 = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
       // `kids_proven` is as load-bearing here as it is for the plain structural
       // skip below: the normalization inlines ONLY the lifted loop bodies, so
       // every other child Sub stays an opaque node matched by name/def identity
@@ -1795,8 +1796,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     //        while the flat run refutes with a concrete CEX). Accepting it skips
     //        the very retry (a) exists for. A collapsed PROVEN with nothing
     //        refuted anywhere is untouched — the common case pays nothing.
-    const bool      proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat[def_ix].empty();
-    bool            absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
+    const bool proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat[def_ix].empty();
+    bool       absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
     if (refuted_under_collapse || unknown_under_collapse || proven_absorbing) {
       {
         std::lock_guard report_lock(report_mutex);
@@ -1804,9 +1805,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                    name,
                    refuted_under_collapse ? "REFUTED" : (proven_absorbing ? "PROVEN while absorbing a refutation" : "UNKNOWN"),
                    coll.size(),
-                   refuted_under_collapse    ? "confirmation"
-                   : proven_absorbing ? "confirmation (a collapsed proof may not overrule a child's counterexample)"
-                                      : "retry (UF boxes disable the eager bit-blaster)");
+                   refuted_under_collapse ? "confirmation"
+                   : proven_absorbing     ? "confirmation (a collapsed proof may not overrule a child's counterexample)"
+                                          : "retry (UF boxes disable the eager bit-blaster)");
       }
       livehd::lec::Lec_options oflat = o;
       // Drop the SPECULATIVE proven-child boxes being confirmed, but KEEP the
@@ -1831,18 +1832,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // counterexample is on the table and nothing discharged it, which is the
         // definition of inconclusive.
         if (rf.verdict != Verdict::Unknown) {
-          rf.detail      = "flat-confirm after collapsed-box PROVEN absorbing a refutation"
-                           + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                           + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+          rf.detail = "flat-confirm after collapsed-box PROVEN absorbing a refutation" + std::string(rf.detail.empty() ? "" : "; ")
+                      + rf.detail + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
           rf.elapsed_ms  = -1;
           rf.cvc5       += r.cvc5;
           r              = std::move(rf);
         } else {
-          r.verdict  = Verdict::Unknown;
-          r.detail   = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                     + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
-          r.cvc5    += rf.cvc5;
-          absorb_demoted = true;  // see the int_blast_retry guard below
+          r.verdict       = Verdict::Unknown;
+          r.detail        = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
+                            + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+          r.cvc5         += rf.cvc5;
+          absorb_demoted  = true;  // see the int_blast_retry guard below
         }
       } else if (rf.verdict != Verdict::Unknown) {
         rf.detail      = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
@@ -3208,9 +3208,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // them) — and the VCD style knob, so `lhd lec --set sim.vcd_fake_delay=false`
   // shapes the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.taskflow_dir" || k == "sim.vcd_fake_delay"
-         || k == "sim.workers")
-        && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -3298,7 +3296,7 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
   if (stateful.empty()) {
     return;
   }
-  std::set<std::string>         hit;  // sorted: the message must be deterministic
+  std::set<std::string>         hit;    // sorted: the message must be deterministic
   std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
   for (auto sn : impl_g->body().nodes()) {
     if (livehd::graph_util::type_op_of(sn) != Ntype_op::Sub || stateful.count(sn.get_subnode_gid()) == 0) {
@@ -3358,9 +3356,10 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
   }
   livehd::diag::warn("pass.lec", "stateful-lib-cell", "unsupported")
       .msg("the impl instantiates {} STATEFUL library cell(s) ({}) — lec could inline only {} of them", n, names, done)
-      .hint("a cell model that stays a blackbox contributes no state, so nothing corresponds to the ref's native flop "
-            "and the run is INCONCLUSIVE no matter the budget; re-synthesize with `--set pass.abc.register=false` to "
-            "keep registers native")
+      .hint(
+          "a cell model that stays a blackbox contributes no state, so nothing corresponds to the ref's native flop "
+          "and the run is INCONCLUSIVE no matter the budget; re-synthesize with `--set pass.abc.register=false` to "
+          "keep registers native")
       .emit();
 }
 
@@ -3576,9 +3575,9 @@ void lec_command(Options& opts, Result& res) {
                     "use `lhd formal verify <design> <sidecar> --formal <glob>`"};
   }
 
-  const bool assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
-  Eprp_var   ref_var;
-  Eprp_var   impl_var;
+  const bool   assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
+  Eprp_var     ref_var;
+  Eprp_var     impl_var;
   // pass.formal is still a compile pipeline stage with compile.formal.* labels.
   // Bridge the ONE canonical public option into that load gate; no second user
   // option is registered or documented.
@@ -3602,7 +3601,7 @@ void lec_command(Options& opts, Result& res) {
   // non-cross path; in cross mode we additionally run lgcheck and assert
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
-  o.assume_check      = assume_check;
+  o.assume_check          = assume_check;
   // pass.formal has already proved and removed every checked child/local
   // obligation.  What remains is active by contract (explicit nocheck,
   // selected-top IO, or all assumptions when checking is disabled), and must
@@ -4807,9 +4806,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   cmd += shell_quote(simfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.taskflow_dir" || k == "sim.vcd_fake_delay"
-         || k == "sim.workers")
-        && !v.empty()) {
+    if ((k == "sim.hlop_dir" || k == "sim.iassert_dir" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -5363,8 +5360,8 @@ void formal_verify_command(Options& opts, Result& res) {
   // strategies (bmc-first at the full bound | ind-first at a shallow base case
   // whose induction rung promotes deep-state invariants to unbounded) and merges
   // per-obligation firsts. bmc / ind still select a single strategy directly.
-  o.engine = label("engine", "auto");
-  o.solver = label("solver", "cvc5");
+  o.engine       = label("engine", "auto");
+  o.solver       = label("solver", "cvc5");
   o.assume_check = label("assume_check", "true") != "false" && label("assume_check", "true") != "0";
   // Same escape hatch as lec: both drivers instantiate the same Encoder, so a
   // memory it refuses to model (per-port clock edges) has to be excludable here
@@ -5528,18 +5525,16 @@ void formal_verify_command(Options& opts, Result& res) {
       auto gio = g->get_io();
       for (const auto& d : gio->get_input_pin_decls()) {
         auto pin       = g->get_input_pin(d.name);
-        int  w         = livehd::lec::real_width_io(pin, *gio, d.name);
-        // Sign from the IO DECLARATION, never the pin: LiveHD represents uN as a
-        // signed N+1 internally, so the pin reads "signed" for an unsigned port —
-        // typing the monitor input sN would flip ordered compares in user
-        // properties (assume(x <= 15) held vacuously for large x). The decl is
-        // what the user wrote; the engine truncates/extends the bound value to
-        // the monitor's declared type.
+        int  w         = livehd::graph_util::real_width(pin, *gio, d.name);
+        // Sign comes from the IO declaration because it is authoritative at the
+        // module boundary. Typing an unsigned monitor input as signed would flip
+        // ordered comparisons in user properties (assume(x <= 15) could hold
+        // vacuously for large x).
         in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
       }
       for (const auto& d : gio->get_output_pin_decls()) {
         auto pin        = g->get_output_pin(d.name);
-        int  w          = livehd::lec::real_width_io(pin, *gio, d.name);
+        int  w          = livehd::graph_util::real_width(pin, *gio, d.name);
         out_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
       }
       for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
@@ -5550,7 +5545,7 @@ void formal_verify_command(Options& opts, Result& res) {
         if (q.is_invalid()) {
           continue;
         }
-        int w                                                        = livehd::lec::real_width(q);
+        int w                                                        = livehd::graph_util::real_width(q);
         flop_tbl[livehd::lec::canon_flop_name(node.get_hier_name())] = Sig{w == 0 ? 1 : w, !livehd::graph_util::is_unsign(q)};
       }
     }
@@ -6091,7 +6086,7 @@ void formal_verify_command(Options& opts, Result& res) {
       }
     };
     if (p.kind == "assume" && livehd::lec::is_unchecked_assume_class(p.aclass)) {
-      const char* why = p.aclass == "top_input"      ? "top-level IO assume cannot be checked; treated as assume_nocheck"
+      const char* why = p.aclass == "top_input"        ? "top-level IO assume cannot be checked; treated as assume_nocheck"
                         : p.aclass == "check_disabled" ? "formal.assume_check=false; treated as assume_nocheck"
                                                        : "assume_nocheck";
       std::print("  assume{}{}: in force (UNCHECKED {}; verdicts are conditional and unchecked)\n", where, msg, why);

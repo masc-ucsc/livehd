@@ -12,7 +12,7 @@ mod pair(x:u8) -> (lo:u8@[0], hi:u8@[0]) {
   hi = lo + 8
 }
 
-pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1], b_hi:u8@[1]) {
+pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1], b_hi:u8@[1], a_zero:u1@[1]) {
   const a = pair(d)
   const b = pair(e)
   reg ar0:u8 = 0
@@ -27,6 +27,7 @@ pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1],
   a_hi = ar1
   b_lo = br0
   b_hi = br1
+  a_zero = ar0 == 0
 }
 
 test kernel_multiwrite.changed_mask_order {
@@ -40,5 +41,6 @@ test kernel_multiwrite.changed_mask_order {
     assert(dut.a_hi == ((dv * 3) + 9) & 0xFF)
     assert(dut.b_lo == (((dv + 5) * 3) + 1) & 0xFF)
     assert(dut.b_hi == (((dv + 5) * 3) + 9) & 0xFF)
+    assert(dut.a_zero == (dut.a_lo == 0))
   }
 }

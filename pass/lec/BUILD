@@ -187,6 +187,14 @@ sh_test(
 )
 
 sh_test(
+    name = "lec_sign_slot_test",
+    srcs = ["tests/lec_sign_slot_test.sh"],
+    size = "small",
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # in-process cvc5 on both the inductive and BMC input-seeding paths
+)
+
+sh_test(
     name = "cex_debug_test",
     srcs = ["tests/cex_debug_test.sh"],
     data = ["//lhd"],

@@ -338,6 +338,9 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
 [[nodiscard]] inline std::string wire_name(const hhds::Occurrence_pin& pin) { return wire_name(pin.base_pin()); }
 
+[[nodiscard]] inline hhds::Pin_class get_driver_of_sink_name(const hhds::Node_class& node, std::string_view name);
+[[nodiscard]] inline int32_t         concat_total_width(const hhds::Node_class& node);
+
 // ---------------------------------------------------------------------------
 // Debug-only attribute self-checks (-c dbg). Tier 1: a constant driver pin must
 // be consistent with the bits/sign attributes stamped on it.
@@ -355,47 +358,78 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // bits attr default to "unsigned" only by attribute absence, so an ungated sign
 // check would false-fire on every legitimately-signed negative literal. A pin
 // the front-end deliberately sized carries a real contract worth checking.
-inline void debug_check_const_pin([[maybe_unused]] const hhds::Pin_class& dpin) {
+inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
 #ifndef NDEBUG
-  if (dpin.is_invalid() || !is_const_pin(dpin)) {
+  if (dpin.is_invalid()) {
     return;
   }
   const int32_t nbits = bits_of(dpin);
   if (nbits <= 0) {
     return;  // no explicit declared width -> nothing to violate
   }
-  const auto c = hydrate_const(dpin);
-  if (c.has_unknowns() || c.is_nil()) {
-    return;  // x/z/nil bits: no concrete value to range-check
-  }
   const bool is_uns = is_unsign(dpin);
+  if (is_const_pin(dpin)) {
+    const auto c = hydrate_const(dpin);
+    if (c.has_unknowns() || c.is_nil()) {
+      return;  // x/z/nil bits: no concrete value to range-check
+    }
 
-  // (1) An unsigned pin must never carry a negative value (its sign bit / upper
-  // bits were not cleared -- a missing get_mask / zero-extend in translation).
-  // The message is only formatted when the assertion fails (it sits inside the
-  // iassert `if (!cond)` branch) and is dropped entirely under NDEBUG.
-  I(!is_uns || !c.is_negative(),
-    std::format("unsigned const pin '{}' (declared {} bits) holds a negative value -- missing get_mask/zext?",
-                wire_name(dpin),
-                nbits)
-        .c_str());
-
-  // (2) The value must fit the declared width. For a non-negative value the
-  // highest set bit must lie below the declared unsigned width; a signed pin
-  // reserves one extra bit for the sign. get_last_bit_set() sidesteps the
-  // sign-magnitude get_bits()+1 wart.
-  if (!c.is_negative()) {
-    const int need = c.get_last_bit_set() + 1;  // unsigned magnitude bits
-    I(need <= (is_uns ? nbits : nbits - 1),
-      std::format("const pin '{}' needs {} magnitude bits but is declared {} {}signed bits",
+    // (1) An unsigned pin must never carry a negative value (its upper bits
+    // were not cleared -- a missing get_mask / zero-extend in translation).
+    I(!is_uns || !c.is_negative(),
+      std::format("unsigned const pin '{}' (declared {} bits) holds a negative value -- missing get_mask/zext?",
                   wire_name(dpin),
-                  need,
+                  nbits)
+          .c_str());
+
+    // (2) The value must fit the declared literal container. An unsigned b-bit
+    // hint represents [0,2^b-1]; a signed one represents
+    // [-2^(b-1),2^(b-1)-1].
+    const int need = is_uns ? c.get_last_bit_set() + 1 : static_cast<int>(c.get_bits());
+    I(need <= nbits,
+      std::format("const pin '{}' needs {} bits but is declared {} {}signed bits", wire_name(dpin), need, nbits, is_uns ? "un" : "")
+          .c_str());
+    return;
+  }
+
+  const auto op = type_op_of(dpin.get_master_node());
+  if (op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::EQ || op == Ntype_op::Ror || op == Ntype_op::Clock_cell) {
+    I(is_uns && nbits == 1,
+      std::format("pin '{}' from {} must carry the structural u1 hint, got {} {}signed bits",
+                  wire_name(dpin),
+                  Ntype::get_name(op),
                   nbits,
                   is_uns ? "un" : "")
           .c_str());
+  } else if (op == Ntype_op::Concat) {
+    // >= , not ==: an OVER-stamped concat pin is legal and every consumer
+    // already models it (encode.cpp widens W to sum(w) and treats the bits
+    // above as known zero; abc_map fills `max(out_bits,total)`). Only an
+    // UNDER-stamped pin is the miscompile -- it drops the top lanes.
+    const int total = concat_total_width(dpin.get_master_node());
+    I(total <= 0 || (is_uns && nbits >= total),
+      std::format("concat pin '{}' must be an unsigned hint of at least {} bits, got {} {}signed bits",
+                  wire_name(dpin),
+                  total,
+                  nbits,
+                  is_uns ? "un" : "")
+          .c_str());
+  } else if (op == Ntype_op::Get_mask) {
+    auto mask = get_driver_of_sink_name(dpin.get_master_node(), "mask");
+    if (!mask.is_invalid() && is_const_pin(mask)) {
+      const auto mv = hydrate_const(mask);
+      if (!mv.is_negative() && !mv.has_unknowns()) {
+        const auto capacity = static_cast<int32_t>(mv.popcount());
+        I(capacity == 0 || nbits <= capacity,
+          std::format("Get_mask pin '{}' selects {} bits but is hinted at {}", wire_name(dpin), capacity, nbits).c_str());
+      }
+    }
   }
 #endif
 }
+
+// Compatibility spelling while callers migrate to the general hint checker.
+inline void debug_check_const_pin(const hhds::Pin_class& dpin) { debug_check_pin_hint(dpin); }
 
 // Debug-only (-c dbg) invariant: tolg / upass generation must leave every
 // value-producing cell with a resolved width. A driver pin still at bits==0 is
@@ -412,16 +446,38 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
       continue;
     }
     auto dpin = node.create_driver_pin(0);
-    if (dpin.is_invalid() || is_const_pin(dpin)) {
+    if (dpin.is_invalid()) {
       continue;
     }
-    I(bits_of(dpin) != 0,
-      std::format("{} left cell '{}' ({}) in def '{}' at bits==0 -- unbounded width (front-end did not size it)",
-                  where,
-                  debug_name(node),
-                  Ntype::get_name(op),
-                  std::string_view{g.get_name()})
-          .c_str());
+    debug_check_pin_hint(dpin);
+    if (is_const_pin(dpin)) {
+      continue;
+    }
+    if (bits_of(dpin) == 0) {
+      std::string inputs;
+      for (const auto& edge : node.inp_edges()) {
+        if (!inputs.empty()) {
+          inputs += ", ";
+        }
+        inputs += std::format("p{}:{}b", edge.sink.get_port_id(), bits_of(edge.driver));
+        if (is_const_pin(edge.driver)) {
+          const auto value = hydrate_const(edge.driver);
+          inputs += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
+        } else if (is_graph_input_pin(edge.driver)) {
+          inputs += ":$" + std::string(edge.driver.get_pin_name());
+        } else {
+          inputs += ":" + std::string(Ntype::get_name(type_op_of(edge.driver.get_master_node())));
+        }
+      }
+      I(false,
+        std::format("{} left cell '{}' ({}) in def '{}' at bits==0 -- unbounded width (front-end did not size it); inputs [{}]",
+                    where,
+                    debug_name(node),
+                    Ntype::get_name(op),
+                    std::string_view{g.get_name()},
+                    inputs)
+            .c_str());
+    }
   }
 #endif
 }
@@ -486,6 +542,29 @@ inline void set_sign(const hhds::Pin_class& pin) {
   }
   assert_pin_attr_role<livehd::attrs::pin_signed_t>(pin);
   pin.attr(livehd::attrs::pin_signed).set(livehd::attrs::pin_signed_t::value_type{});
+}
+
+// Set one complete realization hint. `bits` is always the literal physical
+// container width: unsigned b bits represent [0,2^b-1], signed b bits represent
+// [-2^(b-1),2^(b-1)-1]. Prefer these over separate set_bits/set_* calls when a
+// producer knows both facts.
+inline void set_ubits(const hhds::Pin_class& pin, int32_t bits) {
+  set_bits(pin, bits);
+  set_unsign(pin);
+}
+
+inline void set_sbits(const hhds::Pin_class& pin, int32_t bits) {
+  set_bits(pin, bits);
+  set_sign(pin);
+}
+
+[[nodiscard]] inline int32_t real_width(const hhds::Pin_class& pin) { return bits_of(pin); }
+[[nodiscard]] inline int32_t real_width(const hhds::Occurrence_pin& pin) { return bits_of(pin); }
+[[nodiscard]] inline int32_t real_width(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view io_name) {
+  return bits_of(pin, gio, io_name);
+}
+[[nodiscard]] inline int32_t real_width(const hhds::Occurrence_pin& pin, const hhds::GraphIO& gio, std::string_view io_name) {
+  return bits_of(pin, gio, io_name);
 }
 
 // Per-node color taint.
@@ -1093,14 +1172,13 @@ struct Concat_lane {
   // from the tail.
   int32_t off = 0;
   for (auto it = lanes.rbegin(); it != lanes.rend(); ++it) {
-    it->offset = off;
-    off       += it->width;
+    it->offset  = off;
+    off        += it->width;
   }
   return lanes;
 }
 
-// Sum of the lane widths, i.e. the MAGNITUDE width of the result. The driver
-// pin stamps this + 1 (the always-zero sign slot of a non-negative value).
+// Sum of the lane widths, i.e. the literal unsigned width of the result.
 // 0 when the cell is malformed (an EMPTY table, never "zero lanes").
 //
 // concat_lanes() already resolved every offset MSB-first, so the top lane's
@@ -1122,26 +1200,20 @@ struct Concat_lane {
 // the REAL width of a variable, while the concat keeps the spacing the source
 // asked for. So a lane driver may occupy FEWER bits than its window, and is
 // SIGN-EXTENDED up to it (LiveHD values are signed-canonical, so extension is
-// always a sign-extend: a 1-bit signed -1 widens to 0b111 in a 3-bit window,
-// while an unsigned driver's leading sign slot is zero and it widens with 0s).
+// always sign-aware: a 1-bit signed -1 widens to 0b111 in a 3-bit window,
+// while an unsigned driver widens with 0s).
 // A driver occupying MORE bits than its window is an INTERNAL COMPILE ERROR --
 // nothing may produce it, and truncating it silently shifts every lane above.
 //
-// UNITS TRAP, the reason this is one shared helper and not five open-coded
-// comparisons: `bits_of` returns the SIGNED bit count (bitwidth stamps
-// `bw.get_sbits()`), so an unsigned value carries a leading always-zero sign
-// slot -- a u3 driver stamps bits=4, an s3 driver stamps bits=3. A lane's
-// `width` is the declared FIELD width with no such slot. Comparing the two raw
-// fires on every unsigned lane in the design.
-
-// Logical field width a driver occupies: magnitude bits, sign slot removed.
+// Logical field width a driver occupies. The realization-hint contract uses
+// literal widths for both signed and unsigned pins, exactly like a lane window.
 // Returns 0 for an UNSTAMPED pin -- "unknown", which is never a violation.
 [[nodiscard]] inline int32_t lane_value_bits(const hhds::Pin_class& pin) {
   const auto b = bits_of(pin);
   if (b <= 0) {
     return 0;  // unstamped: unknown, not a violation
   }
-  return is_unsign(pin) ? b - 1 : b;
+  return b;
 }
 
 // True iff this lane's driver fits its declared window (the contract above).
@@ -1169,9 +1241,7 @@ struct Concat_lane {
   return {};
 }
 
-[[nodiscard]] inline int32_t concat_total_width(const hhds::Node_class& node) {
-  return concat_total_width(concat_lanes(node));
-}
+[[nodiscard]] inline int32_t concat_total_width(const hhds::Node_class& node) { return concat_total_width(concat_lanes(node)); }
 
 // Gate-equivalent weight of one node. See the model above. Never returns 0 for a
 // node that maps to logic -- an unknown width floors at 1, so a region's GE is

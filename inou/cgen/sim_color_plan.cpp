@@ -224,6 +224,38 @@ private:
   uint64_t hi_ = 7809847782465536322ULL;
 };
 
+// Structural refinement feeds only fixed-width integers into the digest, and
+// does so tens of millions of times for a large flattened hierarchy. Keep its
+// mixer word-oriented instead of paying Shape_hash_builder's byte-at-a-time
+// text-compatible cost. The final avalanche keeps the two lanes independent;
+// as with the other structural hashes, equality is the only semantic use.
+class Refinement_hash_builder {
+public:
+  void append_u64(uint64_t value) {
+    lo_ ^= value + 0x9e3779b97f4a7c15ULL + rotate_left(hi_, 17);
+    lo_  = rotate_left(lo_, 27) * 0x3c79ac492ba7b653ULL;
+    hi_ ^= value + 0x1c69b3f74ac4ae35ULL + rotate_left(lo_, 31);
+    hi_  = rotate_left(hi_, 33) * 0x1c69b3f74ac4ae35ULL;
+  }
+
+  [[nodiscard]] std::array<uint64_t, 2> finish() const { return {avalanche(lo_), avalanche(hi_ ^ lo_)}; }
+
+private:
+  static uint64_t rotate_left(uint64_t value, unsigned shift) { return (value << shift) | (value >> (64 - shift)); }
+
+  static uint64_t avalanche(uint64_t value) {
+    value ^= value >> 27;
+    value *= 0x3c79ac492ba7b653ULL;
+    value ^= value >> 33;
+    value *= 0x1c69b3f74ac4ae35ULL;
+    value ^= value >> 27;
+    return value;
+  }
+
+  uint64_t lo_ = 1469598103934665603ULL;
+  uint64_t hi_ = 7809847782465536322ULL;
+};
+
 std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2>& hash) {
   char      text[40];
   const int size = std::snprintf(text,
@@ -483,8 +515,29 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
 
   const auto classes_of = [](const std::vector<std::array<uint64_t, 2>>& descriptions) {
     std::vector<size_t> order(descriptions.size());
+    std::vector<size_t> scratch(descriptions.size());
     std::iota(order.begin(), order.end(), 0);
-    std::ranges::sort(order, [&](size_t a, size_t b) { return std::tie(descriptions[a], a) < std::tie(descriptions[b], b); });
+    // descriptions are fixed-width hashes. An LSD radix sort retains the
+    // exact unsigned lexicographic ordering used by std::array::operator<,
+    // while avoiding an N log N comparison sort on every refinement round.
+    for (int word = 1; word >= 0; --word) {
+      for (unsigned shift = 0; shift != 64; shift += 8) {
+        std::array<size_t, 256> counts{};
+        for (const size_t index : order) {
+          ++counts[(descriptions[index][word] >> shift) & 0xffU];
+        }
+        size_t position = 0;
+        for (auto& count : counts) {
+          const size_t bucket_size  = count;
+          count                     = position;
+          position                 += bucket_size;
+        }
+        for (const size_t index : order) {
+          scratch[counts[(descriptions[index][word] >> shift) & 0xffU]++] = index;
+        }
+        order.swap(scratch);
+      }
+    }
     std::vector<uint32_t> classes(descriptions.size());
     uint32_t              next_class = 0;
     for (size_t position = 0; position < order.size(); ++position) {
@@ -573,7 +626,7 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
         }
       }
       std::ranges::sort(neighbors, [](const Neighbor& a, const Neighbor& b) { return a.fields < b.fields; });
-      Shape_hash_builder hash;
+      Refinement_hash_builder hash;
       hash.append_u64(seeds[i][0]);
       hash.append_u64(seeds[i][1]);
       hash.append_u64(neighbors.size());
@@ -843,7 +896,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   // data/state site.  A compact-loop-only root is represented by its opaque
   // loop-control site, and a completely folded root may have only a literal
   // output.  Seeding the root body keeps both shapes in the output-version
-  // discovery below instead of admitting an empty Taskflow graph that can
+  // discovery below instead of admitting an empty color schedule that can
   // never publish the root outputs.
   {
     hhds::Occurrence_path root_path;
@@ -993,11 +1046,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
     for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
-      if (gu::is_const_pin(edge.driver)) {
-        if (gu::hydrate_const(edge.driver).has_unknowns()) {
-          plan.summary_.runtime_random = true;
-        }
-      }
+      // Unknown literal bits are not runtime randomness in simulation:
+      // cgen_sim's sim_const_text() deterministically concretizes them to zero.
+      // Only operations that actually draw from hlop's seeded PRNG (currently
+      // ordering="none" memory collisions above) require random scheduling.
       const auto producer_it = index.find(edge.driver.get_master_node().get_occurrence_index());
       if (producer_it == index.end() || !plan.sites_[producer_it->second].live) {
         continue;
@@ -1147,7 +1199,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                        && output_edge.driver.get_port_id() == edge.driver.get_port_id();
           }
           if (matches) {
-            output_boundary_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output, *driver_io, decl.name)));
+            output_boundary_width  = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output, *driver_io, decl.name)));
             // The GraphIO DECLARATION carries the port's sign; the output pin
             // itself never does (upass.tolg stamps sign on driver pins only,
             // and an output pin is a sink), so gu::is_unsign(output) is
@@ -2224,7 +2276,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
 
   // Validate and order the fine-color DAG. Slot order is a hard legality
   // constraint even when two colors have no explicit value edge; the later
-  // Taskflow construction will use one barrier/control task between slots
+  // Schedule construction uses one barrier/control boundary between slots
   // instead of materializing a quadratic all-to-all precedence relation.
   std::vector<uint32_t>            indegree(plan.version_sites_.size(), 0);
   std::vector<std::vector<size_t>> successors(plan.version_sites_.size());

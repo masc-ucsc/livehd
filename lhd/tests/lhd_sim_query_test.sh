@@ -86,13 +86,14 @@ grep -q '"kind":"memory"'      "$CAT" || fail "catalog has no memories (B did no
 grep -q '"kind":"flop"'        "$CAT" || fail "catalog lost flops"
 grep -q '"alias":"acc.__in.'   "$CAT" || fail "inputs lost their legacy __in. alias"
 grep -q '"declared_bits"'      "$CAT" || fail "catalog lacks declared_bits"
-# A u8 register is a Slop<9> declared 8 — both widths must be published, because
-# --list-signals is pinned to the internal one and an agent reads the declared one.
-python3 - "$CAT" <<'PY' || fail "u8 flop widths wrong (expected bits 9 / declared_bits 8)"
+# Literal-width hints make an unsigned u8 register an 8-bit Slop_u. Keep both
+# fields in the schema because imported/internal nets may still differ from a
+# source declaration, but this ordinary state must agree.
+python3 - "$CAT" <<'PY' || fail "u8 flop widths wrong (expected bits 8 / declared_bits 8)"
 import json,sys
 c=json.load(open(sys.argv[1]))["tests"]["top.run"]["signals"]
 f=[s for s in c if s["name"]=="acc.acc"]
-sys.exit(0 if f and f[0]["bits"]==9 and f[0]["declared_bits"]==8 else 1)
+sys.exit(0 if f and f[0]["bits"]==8 and f[0]["declared_bits"]==8 else 1)
 PY
 # Hierarchy survives into the catalog.
 grep -q 'acc\..*\.c"' "$CAT" || fail "catalog lost the sub-instance state"

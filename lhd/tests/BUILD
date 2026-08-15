@@ -913,6 +913,7 @@ sh_test(
     srcs = ["sim_color_random_test.sh"],
     data = [
         "//inou/prp:tests/sim/mem_none_color_random.prp",
+        "//inou/prp:tests/sim/packed_update_chain.prp",
         "//lhd",
     ],
 )

@@ -31,6 +31,8 @@
 
 namespace livehd::lec {
 
+namespace gu = livehd::graph_util;
+
 namespace {
 // Design-size gate (memory admission). The encoder materializes the whole
 // flattened design (minus opaque/collapsed subs) into one forward_hier vector, so
@@ -847,8 +849,7 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   for (uint32_t i = 0; i < np; ++i) {
     Prop_result p;
     if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.instance)
-        || !get_str(b, p.aclass)
-        || !get_str(b, p.scope)) {
+        || !get_str(b, p.aclass) || !get_str(b, p.scope)) {
       return false;
     }
     if (b.empty()) {
@@ -1391,7 +1392,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   auto                                  gio = g->get_io();
   absl::flat_hash_map<std::string, int> in_w;  // enumerable primary inputs -> width
   for (const auto& d : gio->get_input_pin_decls()) {
-    int w = real_width_io(g->get_input_pin(d.name), *gio, d.name);
+    int w = gu::real_width(g->get_input_pin(d.name), *gio, d.name);
     if (w >= 1 && w <= enum_cap_bits) {
       in_w[std::string(d.name)] = w;
     }
@@ -1473,10 +1474,10 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
     auto op                                           = graph_util::type_op_of(node);
     if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
       (op == Ntype_op::SRA) ? ++dbg_sra : ++dbg_shl;
-      score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, real_width(node.get_driver_pin(0))));
+      score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, gu::real_width(node.get_driver_pin(0))));
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       ++dbg_mux;
-      score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, real_width(node.get_driver_pin(0))) / 2 + 1);
+      score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
     }
   }
   if (dbg) {
@@ -2076,7 +2077,7 @@ struct Port_bundle {
 
 struct Io_decl_view {
   std::string name;
-  int         width = 0;  // real declared width (real_width_io); 0 = unknown
+  int         width = 0;  // literal declared width; 0 = unknown
   bool        sgn   = false;
 };
 
@@ -2087,7 +2088,7 @@ std::vector<Io_decl_view> io_decl_views(hhds::Graph* g, bool inputs) {
   v.reserve(decls.size());
   for (const auto& d : decls) {
     auto pin = inputs ? g->get_input_pin(d.name) : g->get_output_pin(d.name);
-    v.push_back({d.name, real_width_io(pin, *gio, d.name), !gio->is_unsign(d.name)});
+    v.push_back({d.name, gu::real_width(pin, *gio, d.name), !gio->is_unsign(d.name)});
   }
   return v;
 }
@@ -2258,6 +2259,119 @@ int pipeline_flush_latency(hhds::Graph* g) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Top-level primary-input carrier, shared by both designs and by BOTH engines
+// (BMC's collect_ins and the inductive scan_inputs).
+//
+// OWNER RULING (2026-08-14): a width/sign disagreement between the two sides'
+// declaration of the same port is reconciled by ENLARGING the smaller view to
+// match the larger, never by refusing and never by truncating.
+//
+//   u8 vs u4  -> the u4 is ZERO-padded to u8
+//   u3 vs s5  -> the u3 is ZERO-padded to s5
+//   s4 vs s8  -> the s4 is SIGN-extended to s8
+//   s3 vs u8  -> BOTH go to s9: the s3 sign-extends, the u8 zero-pads
+//
+// Two facts fall out of that, and they are different widths:
+//
+//   `w`      -- the CARRIER. The common type both sides enlarge into, so no
+//               side is ever truncated. Both unsigned -> unsigned max(wa,wb);
+//               both signed -> signed max(wa,wb); MIXED -> signed
+//               max(w_signed, w_unsigned + 1), because representing a uN as
+//               signed needs the extra slot (that is the s9 in the last row).
+//   `core_w` -- the FREE SYMBOL. One symbol drives the port on BOTH sides, so
+//               it may only range over values BOTH declarations can hold: the
+//               INTERSECTION of the two domains, not the union. u8 n u4 =
+//               [0,15]; s3 n u8 = [0,3]; u3 n s5 = [0,7]. The symbol is minted
+//               at core_w and extended up to w by `core_unsign`.
+//
+// Without the intersection the solver picks a value the narrower port cannot
+// hold and the two designs read the same bit pattern differently -- a FALSE
+// REFUTED with an unreachable witness (`input signed [1:0] a` vs `input a`
+// refuted at a=2, which a 1-bit port cannot produce).
+//
+// Reconciliation is an ASSUMPTION where the domains genuinely differ: a port
+// the impl narrowed by mistake is spelled exactly like one the two front ends
+// merely declare differently, so a real dropped-bit bug reports PROVEN. The
+// verdict DISCLOSES every port it fired on.
+//
+// The constraint lives in the TERM, never in an assertFormula: cone_digest()
+// hashes only the term, so a solver-level assumption would be invisible to the
+// abc cone cache and a cached PROVEN could later be replayed without it.
+struct Top_in {
+  int  w           = 0;      // carrier: the common type both sides enlarge into
+  int  core_w      = 0;      // free symbol: the INTERSECTION of the two domains
+  bool core_unsign = true;   // how the core extends up to the carrier
+  bool sgn         = false;  // carrier read as signed (either side signed)
+  bool seen        = false;  // at least one decl merged in
+
+  // True once the two decls actually disagreed, i.e. the shared symbol is
+  // narrower than the carrier and the reconciliation is load-bearing.
+  [[nodiscard]] bool reconciled() const { return core_w > 0 && core_w < w; }
+};
+
+// Fold one design's declaration into the shared view. Written as a running
+// INTERSECTION so it stays correct for a third decl (a name can legitimately be
+// visited more than twice); each of the three cases below is the exact domain
+// intersection, not an approximation:
+//   u_a n u_b = u_min(a,b)          s_a n s_b = s_min(a,b)
+//   u_a n s_b = u_min(a, b-1)       (the signed side's magnitude bits)
+inline void merge_top_in(Top_in& slot, int w, bool sgn) {
+  if (!slot.seen) {
+    slot = Top_in{w, w, !sgn, sgn, true};
+    return;
+  }
+  const int  cw = slot.core_w;
+  const bool cu = slot.core_unsign;
+  slot.w        = std::max(slot.w, w);
+  slot.sgn      = slot.sgn || sgn;
+  if (cu && !sgn) {
+    slot.core_w = std::min(cw, w);
+  } else if (!cu && sgn) {
+    slot.core_w = std::min(cw, w);
+  } else if (cu) {  // held core unsigned, incoming signed
+    slot.core_w = std::min(cw, w - 1);
+  } else {  // held core signed, incoming unsigned
+    slot.core_w      = std::min(cw - 1, w);
+    slot.core_unsign = true;
+  }
+  if (slot.core_w < 1) {
+    // The intersection collapsed to {0} (or is empty) -- an s1 port facing a
+    // wide unsigned one, say. Do not pretend: fall back to the historical
+    // free-symbol-at-the-carrier behavior rather than pinning the port to a
+    // constant, which would be a far stronger and wholly unjustified
+    // restriction of the compared input space.
+    slot.core_w      = slot.w;
+    slot.core_unsign = !slot.sgn;
+  }
+}
+
+// The shared symbol: a free core at the intersection width, enlarged to the
+// carrier. Equal declarations give core_w == w and this is an ordinary symbol.
+[[nodiscard]] inline cvc5::Term mint_top_in(cvc5::TermManager& tm, const Top_in& in, const std::string& name) {
+  const int  core = std::max(1, in.core_w);
+  cvc5::Term t    = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(core)), name);
+  if (core >= in.w) {
+    return t;
+  }
+  const auto kind = in.core_unsign ? cvc5::Kind::BITVECTOR_ZERO_EXTEND : cvc5::Kind::BITVECTOR_SIGN_EXTEND;
+  return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {t});
+}
+
+// The all-ones level of a port, at its REAL width. For a reconciled port that
+// is all-ones of the CORE, enlarged -- NOT all-ones of the carrier, which the
+// enlarged symbol can never equal (an unsatisfiable assumption makes the whole
+// solve vacuously unsat, i.e. a silent PROVEN).
+[[nodiscard]] inline cvc5::Term top_in_ones(cvc5::TermManager& tm, const Top_in& in) {
+  const int  core = std::max(1, in.core_w);
+  cvc5::Term ones = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(core), 0)});
+  if (core >= in.w) {
+    return ones;
+  }
+  const auto kind = in.core_unsign ? cvc5::Kind::BITVECTOR_ZERO_EXTEND : cvc5::Kind::BITVECTOR_SIGN_EXTEND;
+  return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {ones});
+}
+
 }  // namespace
 
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
@@ -2274,6 +2388,30 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
   res.engine = opts.engine;  // the auto portfolio overrides this with the winning engine
+
+  // Top-level ports where the two sides differ by exactly a sign slot, so the
+  // shared symbol's spare bit was forced to 0 (see Top_in). The verdict has to
+  // say so: a PROVEN that rests on this holds only where that bit really is 0.
+  // Disclosure is UNCONDITIONAL -- not gated on formal.strict, which defaults
+  // true and would turn the ruling's intended PROVEN into Unknown by default.
+  absl::flat_hash_set<std::string> reconciled_ports;
+  // Idempotent by INSPECTING res.detail rather than by a latch: several engines
+  // ASSIGN res.detail rather than appending to it (the bmc and phase-inductive
+  // arms both do), which would silently drop a latched disclosure. Re-calling
+  // this after any such assignment restores it.
+  auto disclose_reconciled = [&]() {
+    if (reconciled_ports.empty() || res.detail.find("width/sign reconciled") != std::string::npos) {
+      return;
+    }
+    std::vector<std::string> names(reconciled_ports.begin(), reconciled_ports.end());
+    std::sort(names.begin(), names.end());
+    res.detail += "; width/sign reconciled on top port(s) ";
+    for (size_t i = 0; i < names.size(); ++i) {
+      res.detail += (i != 0 ? "," : "") + names[i];
+    }
+    res.detail += " (the two sides declare them differently; the shared input ranges over the domain BOTH "
+                  "declarations can hold), so a verdict here does not cover values only the wider side admits";
+  };
 
   if (opts.solver != "cvc5") {
     res.verdict  = Verdict::Unknown;
@@ -2767,7 +2905,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           auto        pid  = e.sink.get_port_id();
           auto        nit  = in_name.find(pid);
           std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
-          int         w    = real_width(e.driver);
+          int         w    = gu::real_width(e.driver);
           if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
             in_pw[port] = w;
           }
@@ -2809,7 +2947,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           for (const auto& e : bi.node.out_edges()) {
             auto        dp   = e.driver;
             std::string port = out_port_name(sio, dp);
-            int         w    = real_width(dp);
+            int         w    = gu::real_width(dp);
             if (w == 0) {
               w = 1;
             }
@@ -2875,7 +3013,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           for (const auto& e : bi.node.out_edges()) {
             auto        dp   = e.driver;
             std::string port = out_port_name(sio, dp);
-            int         w    = std::max(1, real_width(dp));
+            int         w    = std::max(1, gu::real_width(dp));
             if (auto it = out_pw.find(port); it == out_pw.end() || w > it->second) {
               out_pw[port] = w;
             }
@@ -2916,7 +3054,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           auto        dp   = e.driver;
           std::string port = out_port_name(sio, dp);
           std::string key  = bk + ":" + port;
-          int         w    = real_width(dp);
+          int         w    = gu::real_width(dp);
           if (w == 0) {
             w = 1;
           }
@@ -3456,28 +3594,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           += "; phase schedule P=" + std::to_string(P) + " ref[" + ref_plan.describe() + "] impl[" + impl_plan.describe() + "]";
     }
 
-    struct In {
-      int  w;
-      bool sgn;
-    };
+    // Both sides' decls are MERGED (see Top_in): the old "keep the wider, skip
+    // the rest" rule discarded the narrower side's sign, which is exactly the
+    // fact the sign-slot reconciliation needs.
+    using In = Top_in;
     Io_name_map<In> ins;
     auto            collect_ins = [&](hhds::Graph* g) {
       auto gio = g->get_io();
       for (const auto& d : gio->get_input_pin_decls()) {
         auto pin = g->get_input_pin(d.name);
-        int  w   = real_width_io(pin, *gio, d.name);
+        int  w   = gu::real_width(pin, *gio, d.name);
         if (w == 0) {
           w = 1;
         }
-        if (auto it = ins.find(d.name); it != ins.end() && it->second.w >= w) {
-          continue;  // keep the max-width view across both designs (bit-width trap)
-        }
-        bool sgn    = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
-        ins[d.name] = In{w, sgn};
+        const bool sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+        merge_top_in(ins[d.name], w, sgn);
       }
     };
     collect_ins(ref);
     collect_ins(impl);
+    for (const auto& [name, info] : ins) {
+      if (info.reconciled()) {
+        reconciled_ports.insert(std::string(name));
+      }
+    }
+    disclose_reconciled();
 
     // Reset-phase setup. A PRIMARY reset input is a TOP-level input name that
     // drives some flop's reset_pin directly; its asserted level is 0 when that
@@ -3630,7 +3771,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
       Io_name_map<int>  fw_side[2];
-      int               side_ix = 0;
+      int               side_ix       = 0;
       auto              collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
         // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
@@ -3644,8 +3785,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // Opaque at the collapse set: a collapsed leaf's state is the box's ONE
         // cut, not a set of internal flop cuts (the encoder agrees -- encode.cpp
         // passes the same opaque set explicitly).
-        for (auto node :
-             g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {  // descend: cut flops at every level
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {  // descend: cut flops at every level
           const auto nop = graph_util::type_op_of(node);
           // A LATCH is a state cut exactly like a flop under a phase schedule
           // (the encoder seeds and threads it the same way), so its power-on
@@ -3659,7 +3799,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             continue;
           }
           auto key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
-          int  w   = real_width(q);
+          int  w   = gu::real_width(q);
           if (w == 0) {
             w = 1;
           }
@@ -3710,8 +3850,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (w < 1 || fw_side[1].count(key) != 0) {
           continue;
         }
-        // Longest contiguous run; the impl may hold MORE bits than the ref
-        // declares (cgen's spare sign bit), which are the ref value's extension.
+        // Longest contiguous run; the implementation has one cell per literal
+        // state bit.
         std::vector<std::string> bits;
         for (int i = 0;; ++i) {
           const std::string bk = key + "_" + std::to_string(i);
@@ -3721,9 +3861,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           bits.push_back(bk);
         }
-        // Same bound as the inductive twin: N or N+1 cells is this register,
-        // longer is a different one sharing a prefix (see there).
-        if (const int m = static_cast<int>(bits.size()); m != w && m != w + 1) {
+        // Same exact-width bound as the inductive twin.
+        if (const int m = static_cast<int>(bits.size()); m != w) {
           continue;
         }
         for (const auto& b : bits) {
@@ -3742,7 +3881,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             if (q.is_invalid()) {
               continue;
             }
-            int  w   = real_width(q);
+            int  w   = gu::real_width(q);
             bool rst = flop_initial(tm, node, w > 0 ? w : 1).has_value();
             keys.insert(std::string(rst ? "[reset] " : "[UNRST] ") + eff(node.get_hier_name()) + "  <=  " + node.get_hier_name());
           }
@@ -3787,10 +3926,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         // COPY: the loop below inserts into ref_state, which may rehash and
         // invalidate `pit` — every later bit would then read a dangling Val.
-        const Val parent = pit->second;
+        const Val  parent  = pit->second;
         const int  pw      = parent.width;
-        const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
-                                     {static_cast<uint32_t>(pw - 1), static_cast<uint32_t>(pw - 1)});
+        const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(pw - 1), static_cast<uint32_t>(pw - 1)});
         for (size_t i = 0; i < bits.size(); ++i) {
           Val bv{cvc5::Term{}, 1, false};
           if (static_cast<int>(i) < pw) {
@@ -3945,7 +4083,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (q.is_invalid()) {
             continue;
           }
-          int w = real_width(q);
+          int w = gu::real_width(q);
           if (w == 0) {
             w = 1;
           }
@@ -4274,7 +4412,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (bundle_in_leaves.count(name) > 0) {
             continue;  // bound to extracts of its flat base's symbol below, never an independent free
           }
-          cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), in_tag + name);
+          cvc5::Term t = mint_top_in(tm, info, in_tag + std::string(name));
           // Phase control: pin a primary reset input to its asserted level during
           // the reset phase / run-prologue, and to its deasserted level in the
           // run-checked window. (active-low reset -> asserted=0, deasserted=all-1.)
@@ -4283,8 +4421,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             const bool negreset     = rit->second;
             // asserted level: 0 if active-low else all-ones; deasserted is the dual.
             const bool drive_zero   = assert_reset ? negreset : !negreset;
-            cvc5::Term lvl = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
-                                        : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+            // all-ones at the port's REAL width, not at the carrier's. When the
+            // two sides differ by a sign slot the carrier is a zero-extended
+            // narrow core, so all-ones-of-the-carrier is a value the symbol can
+            // never take -- and pinning a reset to an impossible level makes the
+            // whole solve vacuously unsat, which reads out as a silent PROVEN.
+            // (It was already wrong without the sign slot: a 1-bit reset facing a
+            // 2-bit declaration got pinned to 2'b11 rather than 1.)
+            cvc5::Term lvl = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
           }
           snap_ins[name] = Val{t, info.w, info.sgn};
@@ -4584,6 +4728,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                                   : "")
                  + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
                  + bundle_note;
+    disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
     // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
@@ -4911,7 +5056,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
   // equal-or-wider width, so these entries survive the union build (detection
-  // and add_inputs read widths through the same real_width_io).
+  // and add_inputs read widths through the same graph utility).
   for (const auto* b : in_bundles) {
     cvc5::Term flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), b->base);
     shared[b->base] = Val{flat, b->width, b->flat_signed};
@@ -4919,24 +5064,36 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared[ln] = lv;
     }
   }
-  auto add_inputs = [&](hhds::Graph* g) {
+  // SCAN both designs before minting anything. The old shape minted inside the
+  // per-design loop and `continue`d on the wider entry, which threw away the
+  // narrower side's declared SIGN -- the one fact the sign-slot reconciliation
+  // needs (see Top_in). Bundle bases pre-seeded above still win via the
+  // equal-or-wider guard at mint time.
+  Io_name_map<Top_in> top_ins;
+  auto                scan_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
       auto pin = g->get_input_pin(d.name);
-      int  w   = real_width_io(pin, *gio, d.name);
+      int  w   = gu::real_width(pin, *gio, d.name);
       if (w == 0) {
         w = 1;
       }
-      if (auto it = shared.find(d.name); it != shared.end() && it->second.width >= w) {
-        continue;  // already have an equal-or-wider shared symbol
-      }
-      bool       sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
-      cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), d.name);
-      shared[d.name] = Val{t, w, sgn};
+      const bool sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+      merge_top_in(top_ins[d.name], w, sgn);
     }
   };
-  add_inputs(ref);
-  add_inputs(impl);
+  scan_inputs(ref);
+  scan_inputs(impl);
+  for (const auto& [name, info] : top_ins) {
+    if (auto it = shared.find(name); it != shared.end() && it->second.width >= info.w) {
+      continue;  // already have an equal-or-wider shared symbol (bundle base)
+    }
+    if (info.reconciled()) {
+      reconciled_ports.insert(std::string(name));
+    }
+    shared[name] = Val{mint_top_in(tm, info, std::string(name)), info.w, info.sgn};
+  }
+  disclose_reconciled();
 
   Phase_plan ind_ref_plan, ind_impl_plan;
   bool       ind_use_plan = false;
@@ -4978,7 +5135,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         continue;
       }
       std::string key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
-      int         w   = real_width(q);
+      int         w   = gu::real_width(q);
       if (w == 0) {
         w = 1;
       }
@@ -5021,11 +5178,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (w < 1 || ind_side[1].count(key) != 0) {
       continue;
     }
-    // Longest contiguous run `<key>_0, _1, ...`. The impl may hold MORE bits than
-    // the ref declares: cgen gives a register a spare sign bit, and abc crosses
-    // the flop at that full width. Those headroom bits are the ref value's
-    // sign/zero extension — the same rule seed_state applies when one side's decl
-    // is wider (see the min-width comment above).
+    // Longest contiguous run `<key>_0, _1, ...`.
     std::vector<std::string> bits;
     for (int i = 0;; ++i) {
       const std::string bk = key + "_" + std::to_string(i);
@@ -5039,31 +5192,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (pit == shared.end()) {
       continue;
     }
-    // A WIDTH DIFFERENCE IS NOT A MISMATCH. Two states of different declared
-    // width are equivalent when the wider one is the narrower one's extension —
-    // s3 against s8 under sign extension, u30 against u50 under zero extension —
-    // and only an extension that does NOT hold is a difference. So accept any run
-    // that covers the ref's width and pin bit i >= N to the ref value's own
-    // sign/zero extension below; if the impl ever puts something else there, the
-    // next-state obligation refutes. (LiveHD also stores an unsigned value in
-    // magnitude+1 bits and the LEC cut drops that spare slot — encode.cpp
-    // real_width — so `reg p:u4` cuts at N=4 and lands as FIVE cells p_0..p_4;
-    // that is just the commonest instance of the same rule.)
-    // BOUND the run at N+1. A width difference is not a mismatch — the wider
-    // side is the narrower one's extension — but that rule governs how two
-    // CORRESPONDING states compare, not which states correspond. abc emits one
-    // cell per PHYSICAL bit (`bits_of` = magnitude+1 for unsigned), so N or N+1
-    // cells is this register and anything longer is a DIFFERENT register that
-    // merely shares a prefix. Without the bound, a ref `flag` (w=1) beside
+    // The bit-blasted implementation has one cell per literal state bit. A
+    // longer run is a different register that merely shares a prefix. Without
+    // the exact bound, a ref `flag` (w=1) beside
     // unrelated impl flops `flag_0`/`flag_1` pairs, and `flag_1` gets PINNED to a
     // constant in the induction hypothesis — narrowing it over states the design
     // really reaches, i.e. a false PROVEN.
     const int m = static_cast<int>(bits.size());
-    if (m != w && m != w + 1) {
+    if (m != w) {
       continue;
     }
-    const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
-                                 {static_cast<uint32_t>(w - 1), static_cast<uint32_t>(w - 1)});
+    const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(w - 1), static_cast<uint32_t>(w - 1)});
     for (size_t i = 0; i < bits.size(); ++i) {
       cvc5::Term t;
       if (static_cast<int>(i) < w) {
@@ -5124,7 +5263,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (q.is_invalid()) {
           continue;
         }
-        int w = real_width(q);
+        int w = gu::real_width(q);
         if (w == 0) {
           w = 1;
         }
@@ -5498,6 +5637,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (state_keys.count(nm) > 0 || (!nm.empty() && nm[0] == '\x01')) {
           continue;
         }
+        // Re-mint through the SAME carrier shape the port was seeded with. A
+        // flat mkConst here would hand half 1 a free symbol whose spare sign
+        // bit is unconstrained, reinstating the false REFUTED for exactly the
+        // ports Top_in reconciled -- in the half a reader is least likely to
+        // look at.
+        if (auto it = top_ins.find(nm); it != top_ins.end() && it->second.w == v.width) {
+          v = Val{mint_top_in(tm, it->second, "h1_" + nm), v.width, v.is_signed};
+          continue;
+        }
         v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "h1_" + nm), v.width, v.is_signed};
       }
     }
@@ -5663,6 +5811,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.engine = "ind";
     res.detail = "solver=cvc5 (phase-inductive: one composed source period, " + std::to_string(psteps.size()) + " microsteps; "
                  + std::to_string(pchecks) + " compare points); ref[" + ind_ref_plan.describe() + "]";
+    disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
     // `checked_steps` / `output_checks` stay 0 exactly as the ordinary inductive
     // engine leaves them: they are the BOUNDED-BMC accounting, and a nonzero
     // `output_checks` on a Proven verdict is what the tier-2 discipline reads as
@@ -8110,7 +8259,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     auto gio = design->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
       auto pin = design->get_input_pin(d.name);
-      int  w   = real_width_io(pin, *gio, d.name);
+      int  w   = gu::real_width(pin, *gio, d.name);
       if (w == 0) {
         w = 1;
       }
@@ -8255,7 +8404,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         continue;
       }
       auto key = canon_flop_name(node.get_hier_name());
-      int  w   = real_width(q);
+      int  w   = gu::real_width(q);
       if (w == 0) {
         w = 1;
       }

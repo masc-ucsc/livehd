@@ -1423,8 +1423,7 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
 //   * a declared tuple field reached through its tuple_get/compiler-copy
 //     provenance -- this is what makes explicit `concat(p.hi, p.lo)` legal;
 //   * decl_facts, the single source of truth for "what was `name` declared as".
-//     Its `bits` is already the FIELD width (the sign slot is dropped for an
-//     unsigned declaration), so `a:u4` and `a:s4` both answer 4 -- which is
+//     Its `bits` is already the literal FIELD width, so `a:u4` and `a:s4` both answer 4 -- which is
 //     right: a window is a bit count, and signedness only decides how the bits
 //     are read back;
 //   * nothing. A literal operand lands here (a literal has no declared type,

@@ -6,7 +6,7 @@
 //
 // The obligation is taken as a cvc5 TERM, not re-derived from the LGraph. That
 // is the whole point: the term already carries encode.cpp's exact semantics
-// (flop reset/enable folding, the magnitude+1 width rules, Sub inlining, X
+// (flop reset/enable folding, literal width/sign rules, Sub inlining, X
 // masking), so a proven cone discharges LITERALLY the same formula the cvc5
 // obligation would, and no width/semantics drift can make ABC "prove" a cut
 // cvc5 would refute. The term's free-variable support IS the cone boundary:

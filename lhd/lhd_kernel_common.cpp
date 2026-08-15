@@ -1293,10 +1293,10 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["vcd_fake_delay"] = v;
     } else if (k == "sim.flatten") {
       labels["flatten"] = v;
-    } else if (k == "sim.workers") {
-      labels["workers"] = v;
     } else if (k == "sim.slop_u") {
       labels["slop_u"] = v;
+    } else if (k == "sim.debug") {
+      labels["debug"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path
@@ -1411,13 +1411,11 @@ std::string find_header_in_runfiles(std::string_view header) {
   // repository. What it does have is the sibling `<exe>.runfiles` directory bazel
   // writes next to every binary; get_exe_path() is symlink-resolved, so this lands
   // in bazel-out where that sibling also exists. Without it the sim runtime probes
-  // silently miss (slop.hpp/iassert.hpp still resolve from the ../hlop dev layout,
-  // but taskflow has no such fallback and the generated tree loses its staged copy).
+  // silently miss (slop.hpp/iassert.hpp still resolve from the ../hlop dev layout).
   {
-    std::error_code    rec;
-    const std::string  exe_dir = file_utils::get_exe_path();  // the DIRECTORY holding the binary
-    for (fs::directory_iterator it(exe_dir, fs::directory_options::skip_permission_denied, rec), end;
-         !exe_dir.empty() && it != end;
+    std::error_code   rec;
+    const std::string exe_dir = file_utils::get_exe_path();  // the DIRECTORY holding the binary
+    for (fs::directory_iterator it(exe_dir, fs::directory_options::skip_permission_denied, rec), end; !exe_dir.empty() && it != end;
          it.increment(rec)) {
       if (rec) {
         rec.clear();
@@ -1519,69 +1517,6 @@ std::string sim_iassert_include_dir(const Options& opts) {
   return find_header_in_runfiles("iassert.hpp");  // bazel runfiles fallback
 }
 
-// The include root for OpenTimer's bundled Taskflow copy. The explicit knob
-// accepts either the OpenTimer checkout root (`ot/taskflow/...`), its `ot/`
-// directory, or the include root itself (`taskflow/...`). Runfiles discovery
-// returns the leaf taskflow directory, so step up once to the include root.
-std::string sim_taskflow_include_dir(const Options& opts) {
-  std::vector<std::string> cands;
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.taskflow_dir" && !v.empty()) {
-      cands.push_back(v);
-      cands.push_back(v + "/ot");
-    }
-  }
-  for (const auto& cand : cands) {
-    if (::access((cand + "/taskflow/taskflow.hpp").c_str(), R_OK) == 0) {
-      return cand;
-    }
-  }
-  const auto leaf = find_header_in_runfiles("taskflow/taskflow.hpp");
-  if (leaf.empty()) {
-    return {};
-  }
-  return std::filesystem::path(leaf).parent_path().string();
-}
-
-// Vendor the exact runfiles-resolved OpenTimer Taskflow headers into the
-// generated sim tree. This keeps build.ninja relocatable/replayable after a
-// Bazel sandbox disappears and gives the standalone generated Bazel module the
-// same fork without asking bzlmod to resolve another Taskflow release.
-std::string stage_sim_taskflow(const Options& opts, const std::string& simdir) {
-  const auto source_root = sim_taskflow_include_dir(opts);
-  if (source_root.empty()) {
-    return {};
-  }
-  const fs::path  source = fs::path(source_root) / "taskflow";
-  const fs::path  target = fs::path(simdir) / "runtime" / "taskflow";
-  std::error_code ec;
-  for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; it != end;
-       it.increment(ec)) {
-    if (ec) {
-      ec.clear();
-      continue;
-    }
-    if (!it->is_regular_file(ec)) {
-      continue;
-    }
-    const auto rel = it->path().lexically_relative(source);
-    if (rel.empty()) {
-      return {};
-    }
-    const auto destination = target / "taskflow" / rel;
-    fs::create_directories(destination.parent_path(), ec);
-    if (ec) {
-      return {};
-    }
-    std::ifstream      input(it->path(), std::ios::binary);
-    std::ostringstream bytes;
-    bytes << input.rdbuf();
-    File_output output(destination.string());
-    output.append(bytes.str());
-  }
-  return target.string();
-}
-
 // Host C++ compiler for the fast (header-only + optional VCD) sim build. The Slop
 // runtime needs C++23; the repo already requires a C++23 toolchain to build lhd,
 // so the host compiler has it. $CXX wins (CI override), then the usual names.
@@ -1626,12 +1561,10 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
                     "no synthesizable modules to emit as sim:",
                     "the design produced no LGraphs (a pure-comptime program has no module IO)"};
   }
-  const auto&              dir      = sim_out->path;
-  auto                     names    = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
-  const auto               hlop     = sim_hlop_path(opts);
-  const auto               taskflow = stage_sim_taskflow(opts, dir);
+  const auto&              dir   = sim_out->path;
+  auto                     names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
+  const auto               hlop  = sim_hlop_path(opts);
   std::vector<std::string> color_aux_sources;
-  bool                     needs_taskflow = false;
   {
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
@@ -1643,23 +1576,8 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
           && filename.ends_with(".cpp")) {
         color_aux_sources.push_back(filename);
       }
-      // `<name>.color-runtime.hpp` is the ONLY emitted header that pulls in
-      // <taskflow/taskflow.hpp> (cgen_sim writes it iff a module got a parallel
-      // color schedule), so its presence is exactly "this tree needs taskflow".
-      needs_taskflow = needs_taskflow || filename.ends_with(".color-runtime.hpp");
     }
     std::ranges::sort(color_aux_sources);
-  }
-  // Fail HERE rather than emitting a tree that cannot build: without the staged
-  // copy the generated sources have no way to resolve <taskflow/taskflow.hpp>,
-  // and the BUILD's `runtime/taskflow/**` glob would fail to even LOAD (bazel
-  // globs are allow_empty=False), which reads as a broken scaffold instead of a
-  // missing dependency.
-  if (needs_taskflow && taskflow.empty()) {
-    throw Lhd_error{"dependency",
-                    "could not stage taskflow/taskflow.hpp for the generated parallel sim runtime",
-                    "run lhd from bazel (its runfiles carry the OpenTimer taskflow fork), or export "
-                    "RUNFILES_DIR=<...>/lhd.runfiles, or pass --set sim.taskflow_dir=DIR"};
   }
 
   // MODULE.bazel — standalone root. bzlmod honors only ROOT overrides, so we
@@ -1700,17 +1618,9 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
       ofs << std::format("        \"{}\",\n", source);
     }
     ofs << "    ],\n";
-    // The staged-taskflow glob is emitted only when the copy is actually there:
-    // a bazel glob defaults to allow_empty=False, so naming an absent directory
-    // makes the package fail to LOAD (`bazel build //...` dies in analysis, with
-    // no compile ever attempted).
-    ofs << (taskflow.empty() ? "    hdrs = glob([\"*.hpp\"]),\n"
-                             : "    hdrs = glob([\"*.hpp\", \"runtime/taskflow/taskflow/**/*.hpp\"]),\n");
+    ofs << "    hdrs = glob([\"*.hpp\"]),\n";
     ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
            "    linkopts = [\"-pthread\"],\n";
-    if (!taskflow.empty()) {
-      ofs << "    includes = [\"runtime/taskflow\"],\n";
-    }
     ofs << "    features = select({\n"
            "        \":opt\": [\"thin_lto\"],\n"
            "        \"//conditions:default\": [],\n"

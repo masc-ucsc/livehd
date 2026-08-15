@@ -289,7 +289,7 @@ TEST(Bitfuzz, SeededSelectionIsReproducible) {
     auto g = gio->create_graph();
     for (int i = 0; i < 8; ++i) {
       auto ff = gu::create_typed_node(*g, Ntype_op::Flop);
-      gu::set_bits(ff.create_driver_pin(0), 8);
+      gu::set_sbits(ff.create_driver_pin(0), 8);
       g->get_input_pin("d").connect_sink(gu::setup_sink_by_name(ff, "din"));
       g->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(ff, "clock_pin"));
       if (i == 0) {

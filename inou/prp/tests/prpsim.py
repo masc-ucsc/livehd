@@ -34,7 +34,7 @@ def _sim_compiler():
 
 
 def _sim_include_dirs(tmp_dir):
-    # Locate the hlop + iassert + exact OpenTimer Taskflow header dirs. Under `bazel test` the
+    # Locate the hlop + iassert header dirs. Under `bazel test` the
     # `cc_direct_headers` data dep stages slop.hpp/blop.hpp (hlop) and
     # iassert.hpp (iassert) into the test runfiles; find them by name and
     # return their directories. Returns [] when not found (manual run with no
@@ -47,17 +47,14 @@ def _sim_include_dirs(tmp_dir):
     roots.append(tmp_dir)
     wanted = ('slop.hpp', 'iassert.hpp')
     found = {}
-    taskflow_root = None
     for root in roots:
         for dirpath, _dirs, files in os.walk(root):
             for w in wanted:
                 if w not in found and w in files:
                     found[w] = dirpath
-            if taskflow_root is None and os.path.basename(dirpath) == 'taskflow' and 'taskflow.hpp' in files:
-                taskflow_root = os.path.dirname(dirpath)
-        if len(found) == len(wanted) and taskflow_root is not None:
+        if len(found) == len(wanted):
             break
-    if len(found) != len(wanted) or taskflow_root is None:
+    if len(found) != len(wanted):
         return []
     # dedup while preserving order
     dirs, seen = [], set()
@@ -66,8 +63,6 @@ def _sim_include_dirs(tmp_dir):
         if d not in seen:
             seen.add(d)
             dirs.append(d)
-    if taskflow_root not in seen:
-        dirs.append(taskflow_root)
     return dirs
 
 

@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: phase_clock_gate_invert
 :pyrope_top: phase_clock_gate_invert
+:equiv_engine: cvc5
 */
 
 // Twin of the inverted-gate golden, written as an ENABLE rather than a gated

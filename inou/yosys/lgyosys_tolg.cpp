@@ -52,6 +52,7 @@ using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
 using livehd::graph_util::set_sign;
 using livehd::graph_util::set_type_op;
+using livehd::graph_util::set_ubits;
 using livehd::graph_util::set_unsign;
 using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::type_op_of;
@@ -142,7 +143,7 @@ namespace {
   auto pin = g->get_input_pin(name);
   // Stamp the width on the body pin attr too (not only the GraphIO decl):
   // downstream consumers size derived nodes from bits_of(pin) — e.g. the
-  // tposs wrappers below use bits_of(dpin)+1, which read 0 (a 1-bit reg in
+  // tposs wrappers below use bits_of(dpin), which read 0 (a 1-bit reg in
   // cgen, truncating the port) when only the GraphIO carried the width.
   set_bits(pin, static_cast<int32_t>(bits));
   return pin;
@@ -431,7 +432,7 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
       return dpin;
     }
 
-    auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(dpin) + 1);
+    auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, bits_of(dpin));
     setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
     setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
@@ -485,8 +486,15 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
 // constants to the driver-pin bits, so shl(9,4) on a 4-bit pin becomes 0.
 [[nodiscard]] static int32_t dpin_width(const hhds::Pin_class& dpin) {
   auto w = bits_of(dpin);
+  if (w == 0 && is_graph_input_pin(dpin) && dpin.get_graph() != nullptr) {
+    if (const auto gio = dpin.get_graph()->get_io(); gio) {
+      w = bits_of(dpin, *gio, dpin.get_pin_name());
+    }
+  }
   if (w == 0 && is_const_pin(dpin)) {
-    w = static_cast<int32_t>(hydrate_const_pin(dpin).get_bits());
+    // Dlop reports zero significant bits for literal zero; an RTL realization
+    // still needs the one-bit 0 container.
+    w = std::max<int32_t>(1, static_cast<int32_t>(hydrate_const_pin(dpin).get_bits()));
   }
   return w;
 }
@@ -508,10 +516,10 @@ static void append_to_or_node(hhds::Graph* g, const hhds::Node_class& or_node, c
     setup_sink_by_name(shl_node, "a").connect_driver(dpin);
     setup_sink_by_name(shl_node, "b").connect_driver(create_const(*g, *Dlop::create_integer(or_offset)));
 
-    set_bits(tposs_node.create_driver_pin(0), or_offset + dpin_width(dpin) + 1);
+    set_ubits(tposs_node.create_driver_pin(0), or_offset + dpin_width(dpin));
     setup_sink_by_name(tposs_node, "a").connect_driver(shl_node.create_driver_pin(0));
   } else {
-    set_bits(tposs_node.create_driver_pin(0), dpin_width(dpin) + 1);
+    set_ubits(tposs_node.create_driver_pin(0), dpin_width(dpin));
     setup_sink_by_name(tposs_node, "a").connect_driver(dpin);
   }
 
@@ -576,10 +584,9 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
     I(total == ss.size());
 
     dpin = concat_node.create_driver_pin(0);
-    // Always non-negative: sum(w_i) magnitude bits plus the always-zero sign
-    // slot of an unsigned LiveHD value.
-    set_bits(dpin, total + 1);
-    set_unsign(dpin);
+    // Always non-negative: the declared result width is exactly the sum of
+    // the positional lane widths.
+    set_ubits(dpin, total);
 
     if (is_signed) {
       auto sext_node = create_typed_node(*g, Ntype_op::Sext, ss.size());
@@ -655,8 +662,12 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
   }
 
   auto a_tposs = create_typed_node(*g, Ntype_op::Get_mask);
-  if (bits_of(dpin)) {
-    set_bits(a_tposs.create_driver_pin(0), bits_of(dpin) + 1);
+  // Constants do not carry a pin-width attribute, but the RTLIL cell port does.
+  // Use that declared operand width so the explicit to-positive boundary never
+  // leaves an unbounded Get_mask for cprop to guess later.
+  const int32_t operand_bits = bits_of(dpin) != 0 ? bits_of(dpin) : bits;
+  if (operand_bits > 0) {
+    set_ubits(a_tposs.create_driver_pin(0), operand_bits);
   }
   setup_sink_by_name(a_tposs, "a").connect_driver(dpin);
   setup_sink_by_name(a_tposs, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
@@ -1712,7 +1723,7 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
         and_node.create_sink_pin(0).connect_driver(pre_or_node.create_driver_pin(0));
         create_const(*g, rd_mask).connect_sink(and_node.create_sink_pin(0));
 
-        auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, wire->width + 1);
+        auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, wire->width);
         setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
         setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
@@ -1753,12 +1764,9 @@ static void connect_comparator(hhds::Node_class& exit_node, const RTLIL::Cell* c
     setup_sink_by_name(exit_node, "bs").connect_driver(b_dpin);
   }
 
+  // Comparisons are structurally boolean regardless of operand signedness.
   auto out = exit_node.create_driver_pin(0);
-  if (cell_port_is_signed(cell, ID::A) || cell_port_is_signed(cell, ID::B)) {
-    set_sign(out);
-  } else {
-    set_unsign(out);
-  }
+  set_ubits(out, 1);
   explicit_pin_signs.insert(out.get_class_index());
 }
 
@@ -1859,8 +1867,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
         auto ror_node = create_typed_node(*g, Ntype_op::Ror, 1);
 
-        auto not_ror_node = create_typed_node(*g, Ntype_op::Not, 1);
+        auto not_ror_node = create_typed_node(*g, Ntype_op::Xor, 1);
         not_ror_node.create_sink_pin(0).connect_driver(ror_node.create_driver_pin(0));
+        not_ror_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        set_ubits(not_ror_node.create_driver_pin(0), 1);
+        explicit_pin_signs.insert(not_ror_node.create_driver_pin(0).get_class_index());
 
         and_node.create_sink_pin(0).connect_driver(not_ror_node.create_driver_pin(0));
 
@@ -1870,7 +1881,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         if (a_bits > 1) {
           auto sra_node = create_typed_node(*g, Ntype_op::SRA, 1);
 
-          auto not_a_node = create_typed_node(*g, Ntype_op::Not, a_bits);
+          // `a_dpin` is the unsigned RTLIL A vector. LGraph Not is unlimited:
+          // ~uW ranges from -2^W through -1 and therefore needs W+1 signed
+          // carrier bits until the surrounding reduction consumes it.
+          auto not_a_node = create_typed_node(*g, Ntype_op::Not, a_bits + 1);
           not_a_node.create_sink_pin(0).connect_driver(a_dpin);
 
           ror_node.create_sink_pin(0).connect_driver(not_a_node.create_driver_pin(0));
@@ -1926,20 +1940,25 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
     } else if (std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       I(get_input_size(cell) == get_output_size(cell));
-      const auto y_bits  = get_output_size(cell);
-      auto       bit_not = create_typed_node(*g, Ntype_op::Not, y_bits);
+      const auto y_bits   = get_output_size(cell);
+      const bool a_signed = cell->hasParam(ID::A_SIGNED) && cell->getParam(ID::A_SIGNED).as_bool();
+      auto       bit_not  = create_typed_node(*g, Ntype_op::Not, y_bits + (a_signed ? 0 : 1));
       connect_all_inputs(bit_not.create_sink_pin(0), cell);
 
       // LGraph Not is an unlimited signed operation. RTLIL $not is a finite
       // vector operation, so make its legal precision reduction explicit.
       set_type_op(exit_node, Ntype_op::And);
-      set_bits(exit_node.create_driver_pin(0), y_bits);
+      set_ubits(exit_node.create_driver_pin(0), y_bits);
+      explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
       exit_node.create_sink_pin(0).connect_driver(bit_not.create_driver_pin(0));
       exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
     } else if (std::strncmp(cell->type.c_str(), "$logic_not", 10) == 0) {
       auto entry_node = create_typed_node(*g, Ntype_op::Ror, 1);
-      auto not_node   = create_typed_node(*g, Ntype_op::Not, 1);
+      auto not_node   = create_typed_node(*g, Ntype_op::Xor, 1);
       not_node.create_sink_pin(0).connect_driver(entry_node.create_driver_pin(0));
+      not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+      set_ubits(not_node.create_driver_pin(0), 1);
+      explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
       if (y_bits == 1) {
@@ -2064,23 +2083,27 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
 
       if (a_bits == 1 && y_bits == 1) {
-        set_type_op(exit_node, Ntype_op::Not);
-        set_bits(exit_node.create_driver_pin(0), 1);
+        set_type_op(exit_node, Ntype_op::Xor);
+        set_ubits(exit_node.create_driver_pin(0), 1);
         exit_node.create_sink_pin(0).connect_driver(a_dpin);
+        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
         hhds::Node_class not_node;
         if (y_bits == 1) {
-          set_type_op(exit_node, Ntype_op::Not);
-          set_bits(exit_node.create_driver_pin(0), 1);
+          set_type_op(exit_node, Ntype_op::Xor);
+          set_ubits(exit_node.create_driver_pin(0), 1);
           not_node = exit_node;
         } else {
-          not_node = create_typed_node(*g, Ntype_op::Not, 1);
+          not_node = create_typed_node(*g, Ntype_op::Xor, 1);
 
           set_type_op(exit_node, Ntype_op::Get_mask);
           set_bits(exit_node.create_driver_pin(0), y_bits);  // zext the 1-bit reduce to y_bits (match $reduce_and/or)
           setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }
+        not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        set_ubits(not_node.create_driver_pin(0), 1);
+        explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
         auto and_node = create_typed_node(*g, Ntype_op::And, 1);
         and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
@@ -2195,8 +2218,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->hasPort(ID::EN)) {
         auto enable_dpin = get_dpin(g, cell, ID::EN);
         if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
-          auto not_node = create_typed_node(*g, Ntype_op::Not, 1);
+          auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
           not_node.create_sink_pin(0).connect_driver(enable_dpin);
+          not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+          set_ubits(not_node.create_driver_pin(0), 1);
+          explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
           setup_sink_by_name(exit_node, "enable").connect_driver(not_node.create_driver_pin(0));
         } else {
           setup_sink_by_name(exit_node, "enable").connect_driver(enable_dpin);
@@ -2253,6 +2279,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
     } else if (std::strncmp(cell->type.c_str(), "$neg", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Sum);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
+      set_sign(exit_node.create_driver_pin(0));
+      explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
 
       setup_sink_by_name(exit_node, "as").connect_driver(create_const(*g, *Dlop::create_integer(0)));
       setup_sink_by_name(exit_node, "bs").connect_driver(get_dpin(g, cell, ID::A));
@@ -2291,12 +2319,16 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
       int y_bits = get_output_size(cell);
       if (y_bits == 1) {
-        set_type_op(exit_node, Ntype_op::Not);
-        set_bits(exit_node.create_driver_pin(0), 1);
+        set_type_op(exit_node, Ntype_op::Xor);
+        set_ubits(exit_node.create_driver_pin(0), 1);
         exit_node.create_sink_pin(0).connect_driver(cmp_node.create_driver_pin(0));
+        exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
       } else {
-        auto not_node = create_typed_node(*g, Ntype_op::Not, 1);
+        auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
         not_node.create_sink_pin(0).connect_driver(cmp_node.create_driver_pin(0));
+        not_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
+        set_ubits(not_node.create_driver_pin(0), 1);
+        explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
 
         set_type_op(exit_node, Ntype_op::Get_mask);
         setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
@@ -2346,19 +2378,26 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto b_dpin = create_pick_concat_dpin(g, cell->getPort(ID::B), false);
       auto s_dpin = create_pick_concat_dpin(g, cell->getPort(ID::S), false);
 
-      auto not_s = create_typed_node(*g, Ntype_op::Not, y_bits);
+      // S is an unsigned y_bits-wide mask. Its unlimited complement needs one
+      // signed headroom bit; A and B then mask that bit away again.
+      auto not_s = create_typed_node(*g, Ntype_op::Not, y_bits + 1);
       not_s.create_sink_pin(0).connect_driver(s_dpin);
 
       auto keep_a = create_typed_node(*g, Ntype_op::And, y_bits);
       keep_a.create_sink_pin(0).connect_driver(a_dpin);
       keep_a.create_sink_pin(0).connect_driver(not_s.create_driver_pin(0));
+      set_ubits(keep_a.create_driver_pin(0), y_bits);
+      explicit_pin_signs.insert(keep_a.create_driver_pin(0).get_class_index());
 
       auto take_b = create_typed_node(*g, Ntype_op::And, y_bits);
       take_b.create_sink_pin(0).connect_driver(b_dpin);
       take_b.create_sink_pin(0).connect_driver(s_dpin);
+      set_ubits(take_b.create_driver_pin(0), y_bits);
+      explicit_pin_signs.insert(take_b.create_driver_pin(0).get_class_index());
 
       set_type_op(exit_node, Ntype_op::Or);
-      set_bits(exit_node.create_driver_pin(0), y_bits);
+      set_ubits(exit_node.create_driver_pin(0), y_bits);
+      explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
       exit_node.create_sink_pin(0).connect_driver(keep_a.create_driver_pin(0));
       exit_node.create_sink_pin(0).connect_driver(take_b.create_driver_pin(0));
     } else if (std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
@@ -2384,7 +2423,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (y_bits <= a_bits || y_bits <= b_bits) {
         sum_node = create_typed_node(*g, Ntype_op::Sum, y_bits);
         set_type_op(exit_node, Ntype_op::And);
-        set_bits(exit_node.create_driver_pin(0), y_bits);
+        set_ubits(exit_node.create_driver_pin(0), y_bits);
+        explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
         exit_node.create_sink_pin(0).connect_driver(sum_node.create_driver_pin(0));
         exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
       } else {
@@ -2398,6 +2438,20 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
         b = "bs";
       }
+
+      // The arithmetic carrier's sign follows the operation, not the RTLIL
+      // wire receiving its (possibly masked) result. Subtraction can be
+      // negative even for two unsigned operands; addition is negative only
+      // when both operands are signed. In the truncating shape above the
+      // outer And is the unsigned y_bits result, while this internal Sum must
+      // retain its signed range until the mask.
+      auto sum_dpin = sum_node.create_driver_pin(0);
+      if (b == "bs" || (a_sign && b_sign)) {
+        set_sign(sum_dpin);
+      } else {
+        set_unsign(sum_dpin);
+      }
+      explicit_pin_signs.insert(sum_dpin.get_class_index());
 
       if (a_sign && b_sign) {
         auto a_dpin = get_dpin(g, cell, ID::A);
@@ -2475,7 +2529,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         and_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
 
         set_type_op(exit_node, Ntype_op::Get_mask);
-        set_bits(exit_node.create_driver_pin(0), y_bits + 1);
+        set_ubits(exit_node.create_driver_pin(0), y_bits);
         setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
@@ -2532,7 +2586,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           and_node.create_sink_pin(0).connect_driver(dpin_a_signed);
           and_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::get_mask_value(y_bits)));
 
-          auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, y_bits + 1);
+          auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask, y_bits);
+          set_unsign(tposs_node.create_driver_pin(0));
           setup_sink_by_name(tposs_node, "a").connect_driver(and_node.create_driver_pin(0));
           setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
 
@@ -2548,7 +2603,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         } else {
           auto tposs_node = create_typed_node(*g, Ntype_op::Get_mask);
           if (bits_of(dpin_a_signed)) {
-            set_bits(tposs_node.create_driver_pin(0), bits_of(dpin_a_signed) + 1);
+            set_ubits(tposs_node.create_driver_pin(0), bits_of(dpin_a_signed));
           }
           setup_sink_by_name(tposs_node, "a").connect_driver(dpin_a_signed);
           setup_sink_by_name(tposs_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
@@ -2762,9 +2817,12 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
       exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$_NOT_", 6) == 0) {
-      set_type_op(exit_node, Ntype_op::Not);
-      set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
+      I(get_output_size(cell) == 1);
+      set_type_op(exit_node, Ntype_op::Xor);
+      set_ubits(exit_node.create_driver_pin(0), 1);
+      explicit_pin_signs.insert(exit_node.create_driver_pin(0).get_class_index());
       exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
+      exit_node.create_sink_pin(0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
       set_type_op(exit_node, Ntype_op::Flop);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
@@ -2886,6 +2944,14 @@ static void finalize_module(hhds::Graph* g) {
       // and reset with LiveHD's internal signed-by-default convention.
       continue;
     }
+    if (op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::EQ || op == Ntype_op::Ror || op == Ntype_op::Clock_cell) {
+      set_ubits(dpin, 1);
+      continue;
+    }
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Concat) {
+      set_unsign(dpin);
+      continue;
+    }
     if (explicit_pin_signs.contains(dpin.get_class_index())) {
       // Internal RTLIL wires may be explicitly unsigned (the common case for
       // logic vectors and generated FIFO pointers). Unsigned is represented by
@@ -2894,11 +2960,7 @@ static void finalize_module(hhds::Graph* g) {
       continue;
     }
 
-    if (op == Ntype_op::Get_mask) {
-      set_unsign(dpin);
-    } else {
-      set_sign(dpin);
-    }
+    set_sign(dpin);
 
     // Every RTLIL-derived single-driver pin must carry its width here. Get_mask
     // (to_positive) and Sext widths are intentionally left for the bitwidth

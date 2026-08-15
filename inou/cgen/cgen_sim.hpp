@@ -37,16 +37,29 @@ private:
   absl::flat_hash_map<pin_key_t, std::string> pin2var;
   int                                         tmp_cnt = 0;
   // Pins whose C++ variable is CANONICAL at its declared width: the value the
-  // word holds IS the exact mathematical value, correctly sign-extended. Only
-  // the combinational temps we emit ourselves qualify -- their producing op ran
-  // under the capacity invariant (bits = magnitude+1), so the result fits.
+  // word holds IS the exact mathematical value, correctly sign-extended.
   //
-  // BOUNDARY values do NOT qualify and must keep the declared-width
-  // re-interpretation `operand()` applies: a module input is filled from a
-  // testbench string (an s8 port can arrive holding 200, not -56), and memory
-  // reads / sub outputs are materialized elsewhere. Reading those bare made
-  // signed compares wrong -- caught by prp-simeq-rt_sat_s.
+  // Two populations qualify. (1) Combinational temps we emit ourselves -- their
+  // producing op ran under the literal-width range invariant, so the result
+  // fits. (2) UNSIGNED boundary storage under sim.slop_u: a `Slop_u<W>` member
+  // is canonical by its own type invariant, which is the whole point of the
+  // carrier. mark_slop_u_binding() inserts those here, from IO inputs, flop q
+  // pins, memory douts / read_all and Sub outputs alike.
+  //
+  // SIGNED boundary values still do NOT qualify, and must keep the
+  // declared-width re-interpretation `operand()` applies: a module input is
+  // filled from a testbench string (an s8 port can arrive holding 200, not
+  // -56), and memory reads / sub outputs are materialized elsewhere. Reading
+  // those bare made signed compares wrong -- caught by prp-simeq-rt_sat_s.
+  //
+  // Do NOT "restore" a blanket boundary exclusion here: it would silently
+  // re-sign every unsigned register and port, with no compile error, because
+  // Slop_u converts implicitly in both directions.
   absl::flat_hash_set<pin_key_t>              canonical_;
+  // Canonical pins whose materialized C++ object is Slop_u<W>, rather than
+  // its Slop<W+1> carrier. Mixed HLOP operations accept these objects directly;
+  // operand() only unwraps them when a concrete Slop carrier is required.
+  absl::flat_hash_set<pin_key_t>              slop_u_values_;
 
   // Pins whose C++ name is REWRITTEN by the sequential section, mid-stream:
   // a latency-1 memory read register (`<mem>_q<n>`), which the memory block
@@ -71,6 +84,7 @@ private:
   // keep `= expr` -- i.e. the EXPLICIT cross-width ctor's build-time width
   // check -- everywhere else.
   bool sub_width_expr_ = false;
+  bool slop_u_expr_    = false;
 
   // Stage 0 combinational-loop safety net. A sim module is ONE sequential
   // `cycle()` schedule, so a combinational cycle -- a real loop, or a FALSE loop
@@ -141,6 +155,8 @@ private:
   // low-bit Get_mask), so bits outside the declared source width cannot leak.
   std::string stored_operand(const hhds::Pin_class& dpin, int fallback_bits);
   // The RHS Slop<wbits> expression for one combinational node.
+  bool        proven_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const;
+  bool        proven_canonical_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const;
   bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
   std::string node_expr(const hhds::Node_class& node, int wbits);
 
@@ -206,8 +222,8 @@ public:
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
-           const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, int _workers = 0,
-           bool _observation_on = false, bool _slop_u = false)
+           const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
+           bool _slop_u = true, bool _debug = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -216,28 +232,35 @@ public:
       , flatten_budget(_flatten)
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
-      , workers_(_workers)
-      , slop_u_(_slop_u) {}
+      , slop_u_(_slop_u)
+      , debug_(_debug) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
   bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
-  int                            workers_        = 0;
-  // sim.slop_u — store unsigned values in the CANONICAL-unsigned Slop_u<n>
-  // instead of the lazily-masked Slop<n+1>. Off by default: a Slop_u ctor MASKS
-  // its source to n bits, so it turns an `unsign` stamp that lies from a
-  // redundant mask (today's cost) into a wrong value (tomorrow's bug). Flip it
-  // on once sign stamping is affirmative and checked at the producer.
-  bool                           slop_u_         = false;
+  // sim.slop_u — materialize every value whose LGraph driver pin is proven
+  // unsigned in the CANONICAL-unsigned Slop_u<n> (one mask at the write),
+  // instead of the lazily-masked Slop<n> (one mask at every read).
+  //
+  // UNIFORM: combinational temps, IO ports, memories, registers/flops/latches
+  // and color boundary slots all follow the SAME rule -- there is no exemption
+  // for state, for reset-free state, or for module boundaries. (An earlier
+  // spelling of this comment claimed one; the carve-out was a mistake and was
+  // repealed 2026-08-14.) false = everything is Slop<n>.
+  bool                           slop_u_         = true;
+  // sim.debug keeps the materializing Slop_u landing in generated code so an
+  // unsigned-proof mistake remains visible while debugging. The normal path
+  // uses from_proven(), whose width check is compile-time and whose runtime
+  // work is only a carrier copy.
+  bool                           debug_          = false;
 
 public:
-  // The C++ TYPE a stored unsigned value of `bits` LiveHD bits is declared as.
-  // `bits` is magnitude+1, so the canonical form drops the always-zero sign slot
-  // and names the magnitude directly. Signed storage is never Slop_u -- it has a
-  // real sign bit and the lazy contract is correct for it.
+  // The C++ TYPE a stored unsigned value of `bits` literal LiveHD bits is
+  // declared as. Signed storage is never Slop_u -- it has a real sign bit and
+  // the lazy contract is correct for it.
   [[nodiscard]] std::string stored_type(int bits, bool unsign) const {
-    if (slop_u_ && unsign && bits > 1) {
-      return absl::StrCat("Slop_u<", bits - 1, ">");
+    if (slop_u_ && unsign && bits > 0) {
+      return absl::StrCat("Slop_u<", bits, ">");
     }
     return absl::StrCat("Slop<", bits, ">");
   }

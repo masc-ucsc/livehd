@@ -308,14 +308,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       // unary width-adjust (zext) OR to-unsigned: result is the non-negative low
       // sig bits of THIS node's (unsigned) output pin.
       int b = gu::bits_of(p);
-      return b > 1 ? std::pair<int, int>{0, b - 1} : (b == 1 ? std::pair<int, int>{0, 1} : kBail);
+      return b > 0 ? std::pair<int, int>{0, b} : kBail;
     }
-    // generic value: an over-approximation is sound only when UNSIGNED (its top
-    // sign bit is always 0, so the significant width is bits-1; a 1-bit
-    // unsigned pin is {0,1}).
+    // generic value: an over-approximation is sound only when UNSIGNED; its
+    // literal width bounds every possibly-set bit.
     int b = gu::bits_of(p);
     if (gu::is_unsign(p)) {
-      return b > 1 ? std::pair<int, int>{0, b - 1} : std::pair<int, int>{0, 1};
+      return b > 0 ? std::pair<int, int>{0, b} : kBail;
     }
     return kBail;
   };
@@ -388,7 +387,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       val.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
       mask_const(lo, hi).connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(2)));
       auto dp = n.create_driver_pin(0);
-      gu::set_bits(dp, w + 1);
+      gu::set_ubits(dp, w);
       return dp;
     };
     if (gu::is_const_pin(v)) {
@@ -514,7 +513,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, w + 1);
+          gu::set_ubits(dp, w);
           res = dp;
         }
       }
@@ -538,7 +537,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
               livehd::graph_util::create_const(*g, *Dlop::create_integer(k - lo))
                   .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
               auto dp = n.create_driver_pin(0);
-              gu::set_bits(dp, w + 1);
+              gu::set_ubits(dp, w);
               res = dp;
             }
           }
@@ -576,7 +575,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           rsel = sel;
         } else if (gu::is_unsign(sel)) {
           int sb = gu::bits_of(sel);
-          rsel   = self(self, sel, 0, std::max(1, sb - 1), depth + 1);
+          rsel   = self(self, sel, 0, std::max(1, sb), depth + 1);
         }
       }
       if (!rsel.is_invalid()) {
@@ -601,7 +600,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             ap.connect_sink(n.create_sink_pin(pid));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, w + 1);
+          gu::set_ubits(dp, w);
           res = dp;
         }
       }
@@ -626,7 +625,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             const int db      = gu::bits_of(d);
             int       whole_w = 0;
             if (gu::is_unsign(d) && db > 0) {
-              whole_w = std::max(1, db - 1);
+              whole_w = std::max(1, db);
             } else {
               // A signed-typed masked value is still exactly reconstructible
               // when footprint proves it nonnegative and zero above hi.
@@ -663,7 +662,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             d.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, 2);  // unsigned boolean: one magnitude bit + spare sign
+          gu::set_ubits(dp, 1);  // unsigned boolean
           res = dp;
         }
       }
@@ -675,14 +674,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
         ++created;
         r.connect_sink(n1.create_sink_pin(static_cast<hhds::Port_id>(0)));
         auto np = n1.create_driver_pin(0);
-        gu::set_bits(np, w + 1);
+        gu::set_sbits(np, w + 1);
         auto n2 = gu::create_typed_node(*g, Ntype_op::And);
         ++created;
         np.connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
         livehd::graph_util::create_const(*g, *Dlop::get_mask_value(w - 1, 0))
             .connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
         auto dp = n2.create_driver_pin(0);
-        gu::set_bits(dp, w + 1);
+        gu::set_ubits(dp, w);
         res = dp;
       }
     } else if (op == Ntype_op::Get_mask) {
@@ -694,7 +693,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       if (md.is_invalid()) {
         // unary zext: positions [0, sig) preserved; above sig -> zeros
         int b   = gu::bits_of(v);
-        int sig = b > 1 ? b - 1 : b;
+        int sig = b;
         if (sig > 0) {
           if (lo >= sig) {
             res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
@@ -708,7 +707,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           if (mc.is_just_i64() && mc.to_just_i64() == -1) {
             // to-unsigned keeps positions; above the sig width -> zeros
             int b   = gu::bits_of(v);
-            int sig = b > 1 ? b - 1 : b;
+            int sig = b;
             if (sig > 0 && lo >= sig) {
               res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
             } else if (sig > 0) {
@@ -782,7 +781,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       // frontend emitting Concat is never WEAKER than the hand-spelled Or/SHL
       // pack, whose straddles the SHL arm already splits.
       auto                         lanes = gu::concat_lanes(m);
-      std::vector<hhds::Pin_class> parts;  // resolved pieces, each already shifted into [lo,hi)
+      std::vector<hhds::Pin_class> parts;                // resolved pieces, each already shifted into [lo,hi)
       bool                         ok = !lanes.empty();  // empty == malformed cell: fail closed
       for (const auto& l : lanes) {
         const int l_lo = static_cast<int>(l.offset);
@@ -804,7 +803,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           livehd::graph_util::create_const(*g, *Dlop::create_integer(a - lo))
               .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, w + 1);
+          gu::set_ubits(dp, w);
           r = dp;
         }
         parts.push_back(r);
@@ -822,7 +821,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
         }
         auto dp = n.create_driver_pin(0);
-        gu::set_bits(dp, w + 1);
+        gu::set_ubits(dp, w);
         res = dp;
       }
     }

@@ -61,7 +61,7 @@ struct Dut {
   std::vector<std::string> arrays;     // memory members (hlop::Memory_*<...>)
   std::vector<int>         arrays_w;   // ...and their ELEMENT Slop<N> widths (parallel)
   std::vector<Sub>         subs;
-  bool                     is_child = false;  // this unit is instantiated by another unit (a sub-instance)
+  bool                     is_child   = false;  // this unit is instantiated by another unit (a sub-instance)
   // Does this class have step()/cycle()? Only a Color_plan ROOT does; an
   // ordinary hierarchy definition is a storage-only record driven by its
   // root's occurrence-wide DAG. A `test` naming one cannot be driven directly.
@@ -95,10 +95,22 @@ struct Dut {
     const size_t i = static_cast<size_t>(it - names.begin());
     return i < widths.size() ? widths[i] : 0;
   }
-  int input_width(const std::string& f) const { return width_in(inputs, inputs_w, f); }
-  int output_width(const std::string& f) const { return width_in(outputs, outputs_w, f); }
-  int reg_width(const std::string& f) const { return width_in(regs, regs_w, f); }
-  int array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
+  static bool signed_in(const std::vector<std::string>& names, const std::vector<bool>& signs, const std::string& f) {
+    auto it = std::find(names.begin(), names.end(), f);
+    if (it == names.end()) {
+      return false;
+    }
+    const size_t i = static_cast<size_t>(it - names.begin());
+    return i < signs.size() ? static_cast<bool>(signs[i]) : false;
+  }
+  int  input_width(const std::string& f) const { return width_in(inputs, inputs_w, f); }
+  int  output_width(const std::string& f) const { return width_in(outputs, outputs_w, f); }
+  int  reg_width(const std::string& f) const { return width_in(regs, regs_w, f); }
+  int  array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
+  bool input_signed(const std::string& f) const { return signed_in(inputs, inputs_s, f); }
+  bool output_signed(const std::string& f) const { return signed_in(outputs, outputs_s, f); }
+  bool reg_signed(const std::string& f) const { return signed_in(regs, regs_s, f); }
+  bool array_signed(const std::string& f) const { return signed_in(arrays, arrays_s, f); }
 };
 
 // Read one cgen_sim <stem>.iface.json manifest into a Dut (2f-sim B0).
@@ -132,7 +144,7 @@ bool parse_iface(const std::string& path, Dut& d, std::string& err) {
     err = path + ": iface manifest has no module name";
     return false;
   }
-  d.cls = doc["module"].GetString();
+  d.cls        = doc["module"].GetString();
   // Absent in a manifest written before this field existed: assume executable
   // there, so an older emit dir keeps working exactly as it did.
   d.executable = !doc.HasMember("executable") || !doc["executable"].IsBool() || doc["executable"].GetBool();
@@ -1196,8 +1208,13 @@ private:
   // storage cell: name -> (hoisted C++ ref, declared width). Such a name is not
   // a driver local (no `Slop<W> pc{}` is emitted for it) -- every read goes to
   // the design, and, for a `regref`, every write does too.
-  std::map<std::string, std::pair<std::string, int>> ref_alias_;
-  std::set<std::string>                              ref_writable_;  // bound with regref
+  struct Ref_alias {
+    std::string storage;
+    int         width     = 64;
+    bool        is_signed = false;
+  };
+  std::map<std::string, Ref_alias> ref_alias_;
+  std::set<std::string>            ref_writable_;  // bound with regref
 
   // Is this rvalue a `sigref(...)` / `regref(...)` call?
   bool is_ref_call(TSNode n) const {
@@ -1221,7 +1238,7 @@ private:
   // (The spec's multi-match string `regref` that resolves to zero-or-many cells
   // is the SYNTHESIZABLE construct and is still TBD; a testbench ref is one
   // cell, because a C++ reference is one cell.)
-  std::string ref_call_target(TSNode call, int* w_out = nullptr) {
+  std::string ref_call_target(TSNode call, int* w_out = nullptr, bool* signed_out = nullptr) {
     TSNode     fn       = field(call, "function");
     const bool writable = !ts_node_is_null(fn) && text_of(src_, fn) == "regref";
     TSNode     args     = field(call, "argument");
@@ -1231,27 +1248,35 @@ private:
     TSNode      a0 = ts_node_named_child(args, 0);
     std::string base, fld;
     if (inst_dot(a0, base, fld)) {
-      return field_access(base, fld, writable, w_out);
+      return field_access(base, fld, writable, w_out, signed_out);
     }
-    return path_target(call, writable, w_out);
+    return path_target(call, writable, w_out, signed_out);
   }
 
   // C++ accessor for `acc.fld`, as a HOISTED reference to the storage cell.
   // See field_storage for the storage paths themselves.
-  std::string field_access(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr) {
-    return hoist_ref(field_storage(var, fld, write, w_out));
+  std::string field_access(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr,
+                           bool* signed_out = nullptr) {
+    return hoist_ref(field_storage(var, fld, write, w_out, signed_out));
   }
 
   // C++ storage path for `acc.fld`: __in.fld (input), __out.fld (output), or fld
   // (struct-scope reg). `write` rejects read-only targets. `w_out` (when given)
   // receives the member's DECLARED Slop width, so a read can be re-expressed at
   // the port's own width instead of through a scalar.
-  std::string field_storage(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr) {
+  std::string field_storage(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr,
+                            bool* signed_out = nullptr) {
     auto width = [&](int w) {
       if (w_out != nullptr) {
         *w_out = w;
       }
     };
+    auto sign = [&](bool s) {
+      if (signed_out != nullptr) {
+        *signed_out = s;
+      }
+    };
+    sign(false);
     // A tuple/struct-packed port is a nested struct in the generated header, so
     // its leaf path IS the C++ path (`acc.io_in.pc` -> `__in.io_in.pc`). Check
     // the port lists before the hierarchical-state walk below, which would
@@ -1260,6 +1285,7 @@ private:
       const Dut& td = duts_.at(inst_of_var.at(var));
       if (td.has_input(fld)) {
         width(td.input_width(fld));
+        sign(td.input_signed(fld));
         return var + ".__in." + fld;
       }
       if (td.has_output(fld)) {
@@ -1267,6 +1293,7 @@ private:
           fail("cannot drive output '" + var + "." + fld + "' (an output is read-only; use `sigref`)");
         }
         width(td.output_width(fld));
+        sign(td.output_signed(fld));
         return var + ".__out." + fld;
       }
     }
@@ -1296,14 +1323,17 @@ private:
           }
           if (idx.empty() && hd->has_reg(name)) {
             width(hd->reg_width(name));
+            sign(hd->reg_signed(name));
             return cxx + "." + name;
           }
           if (std::find(hd->arrays.begin(), hd->arrays.end(), name) != hd->arrays.end()) {
             width(hd->array_width(name));
+            sign(hd->array_signed(name));
             return cxx + "." + name + "[" + idx + "]";
           }
           if (!idx.empty() && hd->arrays.size() == 1) {
             width(hd->array_width(hd->arrays.front()));
+            sign(hd->array_signed(hd->arrays.front()));
             return cxx + "." + hd->arrays.front() + "[" + idx + "]";  // RTL-name alias
           }
           fail("unknown state '" + name + "' in hierarchical path '" + var + "." + fld + "'");
@@ -1371,6 +1401,7 @@ private:
     const Dut& d = duts_.at(inst_of_var.at(var));
     if (d.has_input(fld)) {
       width(d.input_width(fld));
+      sign(d.input_signed(fld));
       return var + ".__in." + fld;
     }
     if (d.has_output(fld)) {
@@ -1383,10 +1414,12 @@ private:
       // it is a plain member, so the read is free where the old peek(__in) cost
       // a whole cycle() plus a snapshot/restore of the entire design state.
       width(d.output_width(fld));
+      sign(d.output_signed(fld));
       return var + ".__out." + fld;
     }
     if (d.has_reg(fld)) {
       width(d.reg_width(fld));
+      sign(d.reg_signed(fld));
       return var + "." + fld;
     }
     // NOTE (2f-sim B0): a memory WORD is NOT readable here. `d.arrays` is now
@@ -1407,7 +1440,7 @@ private:
   // field_access on the matching DUT instance (09-verification.md). `<unit>`
   // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
   // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
-  std::string path_target(TSNode call, bool write, int* w_out = nullptr) {
+  std::string path_target(TSNode call, bool write, int* w_out = nullptr, bool* signed_out = nullptr) {
     TSNode args = field(call, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
       fail("a string-path ref needs a \"unit/field\" path");
@@ -1436,7 +1469,7 @@ private:
     if (var.empty()) {
       fail("no DUT instance for ref path '" + path + "'");
     }
-    return field_access(var, fld, write, w_out);
+    return field_access(var, fld, write, w_out, signed_out);
   }
 
   // Value for a `{name}` puts/print interpolation. A dotted `acc.field` (or a
@@ -1454,8 +1487,7 @@ private:
       }
     }
     if (auto it = ref_alias_.find(name); it != ref_alias_.end()) {
-      const int w = it->second.second;
-      return slop_val(it->second.first + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+      return member_read(it->second.storage, it->second.width, it->second.is_signed);
     }
     if (auto it = local_w_.find(name); it != local_w_.end()) {
       return slop_val(name, it->second);
@@ -1571,8 +1603,9 @@ private:
           // Deliberately NOT a driver local: it holds no value of its own, so
           // there is nothing to zero-init and nothing to width-infer.
           int  w         = 0;
-          auto r         = ref_call_target(rv, &w);
-          ref_alias_[ln] = {r, w > 0 ? w : 64};
+          bool is_signed = false;
+          auto r         = ref_call_target(rv, &w, &is_signed);
+          ref_alias_[ln] = {r, w > 0 ? w : 64, is_signed};
           if (text_of(src_, field(rv, "function")) == "regref") {
             ref_writable_.insert(ln);
           }
@@ -1675,18 +1708,27 @@ private:
     return "(" + to_slop(v).cpp + ").to_decimal()";
   }
 
-  // Read a DUT port / reg / memory element as a testbench value. An RTL member
-  // is a bit vector, so it is read UNSIGNED (zero-extended into one spare sign
-  // bit): the value stays non-negative in the signed plane and every later
-  // widening preserves it. This is also what the old `to_just_i64()` read did
-  // for anything under 64 bits — now it holds at every width.
+  // Read a DUT port / reg / memory element into the testbench's signed Slop
+  // plane. The interface manifest is authoritative: unsigned values get one
+  // zero sign slot, while signed values are sign-extended into that slot. The
+  // distinction became observable once LGraph signed widths became literal:
+  // an s8 output no longer carries a hidden ninth sign bit for the testbench.
+  static Val member_read(const std::string& storage, int width, bool is_signed) {
+    const int tw = width + 1;
+    if (is_signed) {
+      return slop_val("Slop<" + std::to_string(tw) + ">{" + storage + "}", tw);
+    }
+    return slop_val(storage + ".zext_to<" + std::to_string(tw) + ">()", tw);
+  }
+
   Val port_read(const std::string& base, const std::string& fld) {
-    int         w = 0;
-    std::string a = field_access(base, fld, /*write=*/false, &w);
+    int         w         = 0;
+    bool        is_signed = false;
+    std::string a         = field_access(base, fld, /*write=*/false, &w, &is_signed);
     if (w <= 0) {
       w = 64;  // a member the header parse could not size: keep the old plane
     }
-    return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+    return member_read(a, w, is_signed);
   }
 
   static bool is_unary_op(std::string_view t) { return t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus"; }
@@ -1745,8 +1787,7 @@ private:
       // the design's storage at this instant, so it re-reads on every use rather
       // than holding whatever the cell contained when it was bound.
       if (auto it = ref_alias_.find(nm); it != ref_alias_.end()) {
-        const int w = it->second.second;
-        return slop_val(it->second.first + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+        return member_read(it->second.storage, it->second.width, it->second.is_signed);
       }
       if (auto it = local_w_.find(nm); it != local_w_.end()) {
         return slop_val(nm, it->second);
@@ -1795,12 +1836,13 @@ private:
       // A bare `sigref(x)` / `regref(x)` used as a value (rather than bound to a
       // name) still reads the cell -- it is just an unnamed binding.
       if (is_ref_call(n)) {
-        int         w = 0;
-        std::string a = ref_call_target(n, &w);
+        int         w         = 0;
+        bool        is_signed = false;
+        std::string a         = ref_call_target(n, &w, &is_signed);
         if (w <= 0) {
           w = 64;
         }
-        return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+        return member_read(a, w, is_signed);
       }
       // A WIDTH CAST used as a value: `u1(clock >= 4)`, `u8(x + 1)`. Without
       // this arm the call fell through to the flat operand/operator walker,
@@ -2455,7 +2497,7 @@ private:
       if (!ref_writable_.count(lname)) {
         fail("cannot write through the read-only reference '" + lname + "' (bind it with `regref`, not `sigref`)");
       }
-      o << ind << "__prp_poke(" << it->second.first << ", " << to_slop(eval(rv)).cpp << ");\n";
+      o << ind << "__prp_poke(" << it->second.storage << ", " << to_slop(eval(rv)).cpp << ");\n";
       return;
     }
     if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
@@ -2592,9 +2634,6 @@ private:
       << " % _ckpt.every == 0) : _cad.due())) {\n";
     o << ind << "  std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, " << clk << ");\n";
     o << ind << "  auto _t0 = std::chrono::steady_clock::now();\n";
-    for (const auto& [var, m] : inst_of_var) {
-      o << ind << "  " << var << ".__color_quiesce();  // destroy/join Taskflow workers before fork\n";
-    }
     o << ind << "  hlop::ckpt::fork_checkpoint([&]() {\n";
     o << ind << "    hlop::ckpt::make_dirs(_cdir);\n";
     o << ind << "    std::map<std::string, std::string> _regs;\n";
@@ -3206,15 +3245,24 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
   // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
   // driving it into a Slop<N> port is a width change with Verilog `port = val`
-  // semantics — the RAW low bits, ZERO-filled above. Staging through
+  // semantics — retain the RAW low bits, then restore Slop<N>'s signed-carrier
+  // invariant above bit N-1. Staging through
   // max(M,64) is what keeps both readings right: a NEGATIVE value fills the
   // port (`poke(p, -1)` drives all ones, not the 0b11 of a 2-bit -1), while a
   // value whose top bit is DATA rather than sign (a 64-bit LCG word into an
   // 80-bit port) still zero-fills. Past 64 bits the value's own width governs,
   // so a constant of ANY width drives exactly — the 64-bit staging that used to
   // clip a wide poke is gone.
+  // zext_to<N,N+1>() performs the truncation without making bit N-1 a sign;
+  // the cross-width Slop<N> constructor then sign-extends that exact N-bit
+  // pattern. A same-width zext_to<N>() assignment left signed inputs such as
+  // s8 0xff stored as +255, so every signed operation consumed a noncanonical
+  // carrier after the literal-width migration.
   o << "template<int N, int M> static inline void __prp_poke(Slop<N>& d, const Slop<M>& v){ "
-       "constexpr int S = (M > 64 ? M : 64); d = Slop<S>(v).template zext_to<N>(); }\n";
+       "constexpr int S = (M > 64 ? M : 64); d = Slop<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+  o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop<M>& v){ "
+       "constexpr int S = (M > 64 ? M : 64); d = Slop_u<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+  o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop_u<M>& v){ d = Slop_u<N>{v}; }\n";
   // `{val:spec}` puts interpolation for PLAIN locals: grammar
   // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated
   // every 4 (mirrors the comptime __fmt fold in upass/constprop).

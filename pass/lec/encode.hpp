@@ -25,9 +25,9 @@ using Io_name_map = absl::flat_hash_map<std::string, V>;
 // bit-vector terms, mirroring inou/cgen's process_simple_node semantics. It is
 // deterministic and side-effect free on the graph.
 //
-// A signal value is a bit-vector `term` of `width` bits (the real bus width,
-// `is_unsign(pin) ? bits_of(pin)-1 : bits_of(pin)`), plus the `is_signed`
-// flag that drives width-extension and signed/unsigned comparison & shift.
+// A signal value is a bit-vector `term` of literal `width` bits, plus the
+// `is_signed` flag that drives width-extension and signed/unsigned comparison
+// and shift.
 struct Val {
   cvc5::Term term;
   int        width     = 0;
@@ -276,12 +276,6 @@ Mem_sig        read_mem_sig(const hhds::Node_class& node);
 inline Mem_sig read_mem_sig(const hhds::Occurrence_node& node) { return read_mem_sig(node.base_node()); }
 std::string    mem_state_key(const Mem_sig& sig, int occ);
 
-// Real bus width of a pin (signed magnitude+1 count; unsigned drops the spare
-// sign bit). 0 means "unknown / no bits attribute". See lec.md "Bit-width trap".
-int real_width(const hhds::Pin_class& pin);
-int real_width(const hhds::Occurrence_pin& pin);
-int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view name);
-
 // Stable cross-design / cross-front-end correspondence key for a Flop state
 // cell (source span preferred, then pin name). Used by both the encoder (to
 // emit current/next state under one key) and prove_equal (to share the
@@ -317,9 +311,7 @@ public:
   // (the def is encoded with its inputs bound to the instance's input Vals and
   // its outputs wired to the instance's output pins). Unset, or a def that is
   // missing / contains state / nests too deep, keeps the sound `Sub -> fail`.
-  // Typically the gensim cell-model library behind an ABC standard-cell netlist;
-  // it also flips Get_mask/Set_mask to raw bit-vector widths (a mapped netlist's
-  // unsigned nets carry no spare sign bit, unlike front-end RTL).
+  // Typically the gensim cell-model library behind an ABC standard-cell netlist.
   void set_sub_lib(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* lib) { sub_lib_ = lib; }
 
   // Shared output symbols for BLACKBOX Sub instances (missing/unresolved defs —

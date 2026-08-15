@@ -30,13 +30,15 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
                                          bool swap = false) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);  // unsigned: bits attr = magnitude+1
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_input("b", 1);
-  gio->set_bits("b", bits + 1);
+  gio->set_bits("b", bits);
   gio->set_unsign("b", true);
   gio->add_output("out", 2);
-  gio->set_bits("out", bits + 1);
+  const int out_bits
+      = op == Ntype_op::Sum ? bits + 1 : ((op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT) ? 1 : bits);
+  gio->set_bits("out", out_bits);
   gio->set_unsign("out", true);
 
   auto g    = gio->create_graph();
@@ -54,8 +56,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
   }
 
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, bits + 1);
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, out_bits);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }
@@ -64,7 +65,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std::string& mod, int64_t k, int bits) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_output("out", 1);
   gio->set_bits("out", bits + 1);
@@ -80,8 +81,7 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   cpin.connect_sink(sink_a);
 
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, bits + 1);
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, bits + 1);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }
@@ -91,29 +91,27 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
 std::shared_ptr<hhds::Graph> build_overwide_concat(hhds::GraphLibrary& lib, const std::string& mod, bool pretruncate) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", 9);  // unsigned u8: magnitude plus the zero sign slot
+  gio->set_bits("a", 8);
   gio->set_unsign("a", true);
   gio->add_output("out", 1);
-  gio->set_bits("out", 5);  // unsigned u4
+  gio->set_bits("out", 4);  // unsigned u4
   gio->set_unsign("out", true);
 
   auto g    = gio->create_graph();
   auto lane = g->get_input_pin("a");
   if (pretruncate) {
-    auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 5);
+    auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 4);
     lane.connect_sink(mask.create_sink_pin(0));
     graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(mask.create_sink_pin(2));
     lane = mask.create_driver_pin(0);
-    graph_util::set_bits(lane, 5);
-    graph_util::set_unsign(lane);
+    graph_util::set_ubits(lane, 4);
   }
 
-  auto concat = graph_util::create_typed_node(*g, Ntype_op::Concat, 5);
+  auto concat = graph_util::create_typed_node(*g, Ntype_op::Concat, 4);
   lane.connect_sink(concat.create_sink_pin(0));
   graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(concat.create_sink_pin(1));
   auto out = concat.create_driver_pin(0);
-  graph_util::set_bits(out, 5);
-  graph_util::set_unsign(out);
+  graph_util::set_ubits(out, 4);
   out.connect_sink(g->get_output_pin("out"));
   return g;
 }

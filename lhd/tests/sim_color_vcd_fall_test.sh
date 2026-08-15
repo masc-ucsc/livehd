@@ -19,8 +19,8 @@ body="$(ls "$work"/setup/sim/*negsole.cpp | head -1)"
 
 grep -q 'color-direct eligible=true' "$header" || fail "mixed-edge VCD fell back to the retired scheduler"
 grep -q 'void __vcd_snapshot(bool __pos)' "$header" || fail "VCD snapshot ABI is not edge-selective"
-grep -q 'vcd-pre-rise-barrier' "$body" || fail "missing pre-rise observation barrier"
-grep -q 'vcd-pre-fall-barrier' "$body" || fail "missing pre-fall observation barrier"
+grep -q '__vcd_snapshot(true)' "$body" || fail "missing pre-rise observation barrier"
+grep -q '__vcd_snapshot(false)' "$body" || fail "missing pre-fall observation barrier"
 grep -q 'if (__pos == false).* = ma;' "$body" || fail "negedge state is not sampled immediately before fall commit"
 
 "$LHD" sim "$PRP" --set sim.vcd=true --workdir "$work/run" -q >/dev/null

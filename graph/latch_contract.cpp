@@ -34,6 +34,8 @@ namespace {
 //   Mux(s, 0, 1)   the `cond ? 1 : 0` enable shape  -> follow the SELECTOR
 //   EQ(x, 0)       boolean negation                 -> follow x, flip parity
 //   EQ(x, 1)       boolean identity                 -> follow x
+//   Xor(x, 1)      canonical u1 boolean negation    -> follow x, flip parity
+//   Xor(x, 0)      boolean identity                 -> follow x
 //   Not(x)                                          -> follow x, flip parity
 //   Get_mask/Sext  width/sign adjust (identity)     -> follow the value
 // Anything else is treated as the root. A cone we cannot decode simply resolves
@@ -132,6 +134,49 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
         continue;
       }
       if (const_is(cst, 1)) {
+        ph.net = val;
+        continue;
+      }
+      break;
+    }
+
+    if (op == Ntype_op::Xor) {
+      // lesssign's canonical logical negation is `u1 ^ 1`. Treat only the
+      // exact two-input boolean form as phase shaping; an n-ary/data XOR is a
+      // genuine computed control root and must remain opaque.
+      Pin val;
+      Pin cst;
+      int cnt = 0;
+      for (const auto& e : n.inp_edges()) {
+        ++cnt;
+        if (gu::is_const_pin(e.driver)) {
+          if (!cst.is_invalid()) {
+            break;
+          }
+          cst = e.driver;
+        } else {
+          if (!val.is_invalid()) {
+            break;
+          }
+          val = e.driver;
+        }
+      }
+      if (cnt != 2 || val.is_invalid() || cst.is_invalid()) {
+        break;
+      }
+      // `x ^ 1` is a logical negation ONLY for a u1 `x`; on anything wider it
+      // flips bit 0 alone and the result is not the inverted phase of `x`.
+      // Refusing here just leaves the XOR as the (opaque) control root, which
+      // is the conservative direction.
+      if (gu::bits_of(val) != 1 || !gu::is_unsign(val)) {
+        break;
+      }
+      if (const_is(cst, 1)) {
+        ph.inverted = !ph.inverted;
+        ph.net      = val;
+        continue;
+      }
+      if (const_is(cst, 0)) {
         ph.net = val;
         continue;
       }

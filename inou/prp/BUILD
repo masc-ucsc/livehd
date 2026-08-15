@@ -13,6 +13,7 @@ exports_files([
     "tests/sim/flop_sim_negedge_sole_clock.prp",
     "tests/sim/mem_color_direct.prp",
     "tests/sim/mem_none_color_random.prp",
+    "tests/sim/packed_update_chain.prp",
     "tests/sim/cond_call_always_consumer.prp",
     "tests/sim/color_kernel_multiwrite.prp",
     "tests/sim/loop_roll_conditional_state_call.prp",
@@ -366,7 +367,6 @@ cc_direct_headers(
     deps = [
         "@hlop//hlop",
         "@iassert",
-        "@opentimer//:taskflow",
     ],
     visibility = ["//visibility:private"],
 )
@@ -613,9 +613,6 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             # lowers to a negative shift -- so there is no forward direction to
             # run until inou/slang resolves the select to X.
             "tests/equiv/partsel_oob_ascending.prp",
-            # signed_bitwise_mux_arm (2026-08-02): a bitwise op's result loses
-            # its operands' sign, so the forward direction refutes too.
-            "tests/equiv/signed_bitwise_mux_arm.prp",
             # latch_rule_a / latch_rule_b / reg_clock_from_logic MOVED to
             # tests/errors/ (2026-08-08): all three are COMPILE REFUSALS (latch
             # contract rules A and B; the tolg clock whitelist), so there is no
@@ -823,7 +820,6 @@ _STATEMATCH_FIXME = [
         "selfref_concat_assign",    # self-referential whole-vector assign never driven
         # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
         "partsel_oob_ascending",    # out-of-range select on a `[0:N]` vector: negative shift, not X
-        "signed_bitwise_mux_arm",   # `sa | 2'sb11` behind a mux zero-extends (bitwise drops sign)
         # The three formal phase-scheduler trackers (phase_latch_flop_edges,
         # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
         # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
@@ -921,7 +917,6 @@ _V2PRP2V_NATIVE_FIXME = [
     # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
     # an ascending vector lowers to a negative shift), so neither leg can run.
     "partsel_oob_ascending",
-    "signed_bitwise_mux_arm",
 ]
 
 # Two goldens cannot be checked against their original Verilog: both available
@@ -1024,7 +1019,6 @@ _V2PRP2V_VERILOG_FIXME = [
     "selfref_concat_assign",
     # 2026-08-02 chimera sweep (see _V2PRP2V_NATIVE_FIXME for the root cause).
     "partsel_oob_ascending",
-    "signed_bitwise_mux_arm",
 ]
 
 [

@@ -5670,10 +5670,15 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       // enable masks in its multiply/divide datapath). Preserve the replication
       // as one constant select. This is also safe for an ordinary concat that
       // happens to repeat the same one-bit lane: it denotes the same bitvector.
+      //
+      // The selector is the lane's BIT 0, not a nonzero test of the whole
+      // expression: `l.width == 1` states the WINDOW, and nothing here bounds
+      // the lane VALUE to one bit. A repeated 2-bit `2` would pack as all zeros
+      // through the slice spelling below and as all ones through a `!= 0` test.
       if (wl.size() > 1 && total > 0 && total <= (1 << 20)
           && std::all_of(wl.begin(), wl.end(), [&](const W_lane& l) { return l.width == 1 && l.expr == wl.front().expr; })) {
         const std::string mask = Dlop::get_mask_value(static_cast<int>(total))->to_pyrope();
-        return wrap(std::format("if ({}) != 0 {{ {} }} else {{ 0 }}", wl.front().expr, mask), /*loose=*/true);
+        return wrap(std::format("if unsigned(({})#[0..=0]) != 0 {{ {} }} else {{ 0 }}", wl.front().expr, mask), /*loose=*/true);
       }
       std::string s;
       for (const auto& l : wl) {

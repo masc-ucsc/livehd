@@ -1,0 +1,21 @@
+/*
+:name: lesssign_u1_mux
+:type: equiv
+:verilog_top: lesssign_u1_mux
+:pyrope_top: lesssign_u1_mux
+:equiv_engine: cvc5
+*/
+
+// Width-contract fixture: clock/reset/comparison are u1, a four-arm selector
+// is u2, and the selected data remains exactly u3.
+pub mod lesssign_u1_mux::[timecheck=false](clk:u1, reset:u1, sel:u2, d0:u3, d1:u3, d2:u3, d3:u3) -> (q:u3@[], zero:u1@[]) {
+  reg state:u3:[init=0, reset_pin=ref reset, clock_pin=ref clk]
+  state = match sel {
+    == 0 { d0 }
+    == 1 { d1 }
+    == 2 { d2 }
+    else { d3 }
+  }
+  q = state
+  zero = state == 0
+}

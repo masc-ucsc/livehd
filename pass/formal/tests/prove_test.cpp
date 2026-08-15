@@ -3,6 +3,8 @@
 // pass.formal Prover acceptance: single-design property verdicts on tiny
 // hand-built graphs (no reader). Mirrors pass/lec query_test's builders.
 
+#include "prove.hpp"
+
 #include <memory>
 #include <string>
 
@@ -11,25 +13,25 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
-#include "prove.hpp"
 
 using namespace livehd;
 using livehd::formal::Verdict;
 
 namespace {
 
-// out = a <op> b, both operands on sink "a" (And/EQ/...). `bits` is the magnitude
-// width; the bits attr is magnitude+1 (unsigned drops the spare sign bit).
+// out = a <op> b, both operands on sink "a" (And/EQ/...). `bits` is the
+// literal unsigned width.
 std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::string& mod, Ntype_op op, int bits) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_input("b", 1);
-  gio->set_bits("b", bits + 1);
+  gio->set_bits("b", bits);
   gio->set_unsign("b", true);
   gio->add_output("out", 2);
-  gio->set_bits("out", bits + 1);
+  const int out_bits = op == Ntype_op::EQ ? 1 : bits;
+  gio->set_bits("out", out_bits);
   gio->set_unsign("out", true);
 
   auto g      = gio->create_graph();
@@ -38,8 +40,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
   g->get_input_pin("a").connect_sink(sink_a);
   g->get_input_pin("b").connect_sink(sink_a);
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, bits + 1);
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, out_bits);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }
@@ -48,10 +49,10 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::string& mod, int bits) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_output("out", 1);
-  gio->set_bits("out", 2);
+  gio->set_bits("out", 1);
   gio->set_unsign("out", true);
 
   auto g      = gio->create_graph();
@@ -60,8 +61,7 @@ std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::s
   g->get_input_pin("a").connect_sink(sink_a);
   g->get_input_pin("a").connect_sink(sink_a);  // a == a
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, 2);  // 1-bit result (magnitude+1)
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, 1);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }

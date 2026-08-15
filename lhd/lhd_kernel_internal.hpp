@@ -92,28 +92,28 @@ inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] =
 };
 
 inline constexpr Set_pass kSetPasses[] = {
-    {     "compile.upass",        "pass.upass",     Set_pass::List::all},
-    {     "compile.cprop",        "pass.cprop",     Set_pass::List::all},
-    {  "compile.bitwidth",     "pass.bitwidth",     Set_pass::List::all},
-    {   "compile.bitfuzz",      "pass.bitfuzz",     Set_pass::List::all},
+    {     "compile.upass",        "pass.upass",      Set_pass::List::all},
+    {     "compile.cprop",        "pass.cprop",      Set_pass::List::all},
+    {  "compile.bitwidth",     "pass.bitwidth",      Set_pass::List::all},
+    {   "compile.bitfuzz",      "pass.bitfuzz",      Set_pass::List::all},
     {    "compile.formal",       "pass.formal", Set_pass::List::specific},
-    {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
-    {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},
-    {     "compile.yosys",   "inou.yosys.tolg",     Set_pass::List::all},
-    {     "compile.slang",        "inou.slang",     Set_pass::List::all},
-    {   "formal.isabelle",     "pass.isabelle",     Set_pass::List::all},
-    {       "formal.lean",         "pass.lean",     Set_pass::List::all},
-    {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},
-    {        "pass.color",        "pass.color",     Set_pass::List::all},
-    {    "pass.partition",    "pass.partition",     Set_pass::List::all},
-    {  "pass.single_edge",  "pass.single_edge",     Set_pass::List::all},
-    {          "pass.abc",          "pass.abc",     Set_pass::List::all},
-    {      "pass.liberty",      "pass.liberty",     Set_pass::List::all},
-    {    "pass.opentimer",    "pass.opentimer",     Set_pass::List::all},
-    {            "formal",          "pass.lec",     Set_pass::List::common},
-    {        "formal.lec",          "pass.lec",     Set_pass::List::specific},
-    {      "pass.semdiff",      "pass.semdiff",     Set_pass::List::all},
-    {      "pass.analyze",      "pass.analyze",     Set_pass::List::all},
+    {       "pass.formal",       "pass.formal",     Set_pass::List::none}, // alias of compile.formal
+    {      "compile.cgen", "inou.cgen.verilog",      Set_pass::List::all},
+    {     "compile.yosys",   "inou.yosys.tolg",      Set_pass::List::all},
+    {     "compile.slang",        "inou.slang",      Set_pass::List::all},
+    {   "formal.isabelle",     "pass.isabelle",      Set_pass::List::all},
+    {       "formal.lean",         "pass.lean",      Set_pass::List::all},
+    {"compile.prp_writer",   "pass.prp_writer",      Set_pass::List::all},
+    {        "pass.color",        "pass.color",      Set_pass::List::all},
+    {    "pass.partition",    "pass.partition",      Set_pass::List::all},
+    {  "pass.single_edge",  "pass.single_edge",      Set_pass::List::all},
+    {          "pass.abc",          "pass.abc",      Set_pass::List::all},
+    {      "pass.liberty",      "pass.liberty",      Set_pass::List::all},
+    {    "pass.opentimer",    "pass.opentimer",      Set_pass::List::all},
+    {            "formal",          "pass.lec",   Set_pass::List::common},
+    {        "formal.lec",          "pass.lec", Set_pass::List::specific},
+    {      "pass.semdiff",      "pass.semdiff",      Set_pass::List::all},
+    {      "pass.analyze",      "pass.analyze",      Set_pass::List::all},
 };
 
 struct Ir_inputs {
@@ -172,7 +172,6 @@ void                     emit_verilog_outputs(Options& opts, Result& res, Eprp_v
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& output_dir);
 std::string              sim_hlop_include_dir(const Options& opts);
 std::string              sim_iassert_include_dir(const Options& opts);
-std::string                         sim_taskflow_include_dir(const Options& opts);
 std::string              sim_host_cxx();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);
 void                     emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var);
@@ -207,8 +206,8 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
 // resolve_top_name), else the sole module. `side` is "ref"/"impl", or "" for
 // a single-sided command (changes the error phrasing); `cmd` prefixes the
 // error messages ("lec", "formal verify", "pass semdiff").
-std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
-                                            std::string_view side, std::string_view cmd, std::string_view diag_pass);
+std::shared_ptr<hhds::Graph>        pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
+                                                   std::string_view side, std::string_view cmd, std::string_view diag_pass);
 Ir_inputs                           gather_ir_inputs(const Options& opts, std::string_view command);
 std::string                         json_escape_min(std::string_view value);
 Ln_inputs                           classify_ln_inputs(const std::vector<std::string>& tokens, std::string_view command);

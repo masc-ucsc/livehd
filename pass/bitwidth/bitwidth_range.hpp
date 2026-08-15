@@ -94,11 +94,12 @@ public:
   void set_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_range(*min_val, *max_val); }
   void set_range(int64_t min_val, int64_t max_val) { set_range(*Dlop::create_integer(min_val), *Dlop::create_integer(max_val)); }
 
-  bool   is_overflow() const { return overflow; };
-  void   set_sbits_range(int32_t size);
-  void   set_ubits_range(int32_t size);
+  bool    is_overflow() const { return overflow; };
+  void    set_sbits_range(int32_t size);
+  void    set_ubits_range(int32_t size);
   int32_t get_sbits() const;
-  Dlop  get_range() const {
+  int32_t get_ubits() const;
+  Dlop    get_range() const {
     if (overflow) {
       return *Dlop::create_integer(1)->shl_op(*Dlop::create_integer(get_sbits()));
     }

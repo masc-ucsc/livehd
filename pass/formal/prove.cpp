@@ -29,12 +29,12 @@ Prover::Prover(hhds::Graph* g, const Prove_options& opts) : g_(g), opts_(opts) {
     if (dpin.is_invalid()) {
       continue;
     }
-    int w = lec::real_width_io(dpin, *gio, d.name);
+    int w = gu::real_width(dpin, *gio, d.name);
     if (w == 0) {
       w = 1;
     }
-    bool sgn = !gio->is_unsign(d.name);
-    Term t   = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
+    bool sgn                      = !gio->is_unsign(d.name);
+    Term t                        = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
     memo_[dpin.get_class_index()] = Val{t, w, sgn};
     inputs_.emplace_back(std::string(d.name), t);
   }
@@ -138,7 +138,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
     // Fallback: a primary input the ctor did not pre-seed (e.g. unnamed). Use the
     // pin's own bits (real_width, not the by-name IO lookup, to avoid asserting on
     // a non-declared name).
-    int w = lec::real_width(dpin);
+    int w = gu::real_width(dpin);
     if (w == 0) {
       w = 1;
     }
@@ -155,14 +155,14 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
   auto op   = gu::type_op_of(node);
 
   if (op == Ntype_op::Flop) {
-    int w = lec::real_width(dpin);
+    int w = gu::real_width(dpin);
     if (w == 0) {
       w = 1;
     }
-    bool        sgn = !gu::is_unsign(dpin);
-    enc_stateful_   = true;
-    std::string nm  = lec::flop_state_key(*g_, node);
-    Term        t   = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), nm);
+    bool sgn       = !gu::is_unsign(dpin);
+    enc_stateful_  = true;
+    std::string nm = lec::flop_state_key(*g_, node);
+    Term        t  = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), nm);
     Val         v{t, w, sgn};
     memo_[ci] = v;
     return v;
@@ -192,7 +192,7 @@ std::optional<Val> Prover::val_of(const hhds::Pin_class& dpin) {
 
 std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds::Pin_class& dpin) {
   auto op = gu::type_op_of(node);
-  int  W  = lec::real_width(dpin);
+  int  W  = gu::real_width(dpin);
   if (W == 0) {
     W = 1;  // comparisons / reductions are 1-bit
   }
@@ -292,8 +292,8 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       Term concat;
       int  cw = 0;
       for (const auto& v : all) {
-        concat = concat.isNull() ? v.term : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {concat, v.term});
-        cw += v.width;
+        concat  = concat.isNull() ? v.term : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {concat, v.term});
+        cw     += v.width;
       }
       if (concat.isNull()) {
         enc_unsupported_ = true;
@@ -348,8 +348,8 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
           Term lb  = lec::fit_to(tm_, Val{b.term, b.width, b.is_signed}, cw);
           Kind cmp = (op == Ntype_op::LT) ? (use_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
                                           : (use_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
-          Term one         = tm_.mkTerm(cmp, {la, lb});
-          acc              = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
+          Term one = tm_.mkTerm(cmp, {la, lb});
+          acc      = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
         }
       }
       result = pred_to_bv(acc);
@@ -425,7 +425,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      const Val&      a = pid(0)[0];
+      const Val&      a        = pid(0)[0];
       // mask is a single const driver; read it directly (no inp_edges scan).
       hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
       if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
@@ -501,7 +501,7 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
           for (size_t k = 1; k < parts.size(); ++k) {
             r = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {r, parts[k]});
           }
-          aw = r;
+          aw  = r;
           vi += w;
         }
         result = lec::fit_to(tm_, Val{aw, Wm, false}, W);
@@ -564,10 +564,9 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         acc      = acc.isNull() ? lt : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {acc, lt});
         total   += lanes[i].width;
       }
-      // The result is ALWAYS non-negative: the pin carries sum(w)+1 bits (magnitude
-      // plus the always-zero sign slot), so real_width() already returned sum(w)
-      // for the stamped-unsign pin and this fit is a no-op there; a wider or signed
-      // stamp gets its sign slot from the zero-extension. Widen-only: an
+      // The result is ALWAYS non-negative: the pin carries the literal sum(w)
+      // width, so the graph width already equals sum(w) for the unsigned pin
+      // and this fit is a no-op there. Widen-only: an
       // under-stamped pin (or an unstamped one, defaulted to W=1 above) would
       // otherwise silently drop the most significant lanes.
       W          = std::max(W, total);
@@ -724,7 +723,7 @@ Query_out Prover::is_false(const hhds::Pin_class& cond) {
 
 Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   absl::flat_hash_set<hhds::Class_index> seen;
-  int                                    n = 0;
+  int                                    n  = 0;
   bool                                   st = false, unsup = false;
   cone_walk(a, seen, n, st, unsup);
   cone_walk(b, seen, n, st, unsup);
@@ -738,11 +737,11 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   if (!va || !vb || enc_unsupported_) {
     return {Verdict::Unknown, st || enc_stateful_, ""};
   }
-  int  wa = static_cast<int>(va->term.getSort().getBitVectorSize());
-  int  wb = static_cast<int>(vb->term.getSort().getBitVectorSize());
-  int  w  = std::max(wa, wb);
-  Term ta = lec::fit_to(tm_, lec::Val{va->term, wa, va->is_signed}, w);
-  Term tb = lec::fit_to(tm_, lec::Val{vb->term, wb, vb->is_signed}, w);
+  int  wa     = static_cast<int>(va->term.getSort().getBitVectorSize());
+  int  wb     = static_cast<int>(vb->term.getSort().getBitVectorSize());
+  int  w      = std::max(wa, wb);
+  Term ta     = lec::fit_to(tm_, lec::Val{va->term, wa, va->is_signed}, w);
+  Term tb     = lec::fit_to(tm_, lec::Val{vb->term, wb, vb->is_signed}, w);
   Term refute = tm_.mkTerm(Kind::DISTINCT, {ta, tb});  // a != b falsifies "always equal"
   return solve(refute, n, st || enc_stateful_);
 }
@@ -759,10 +758,10 @@ Query_out Prover::is_onehot0(const hhds::Pin_class& sel) {
   if (!v || enc_unsupported_) {
     return {Verdict::Unknown, st || enc_stateful_, ""};
   }
-  Term s    = v->term;
-  int  w    = static_cast<int>(s.getSort().getBitVectorSize());
-  Term sm1  = tm_.mkTerm(Kind::BITVECTOR_SUB, {s, bv_const(w, 1)});
-  Term andv = tm_.mkTerm(Kind::BITVECTOR_AND, {s, sm1});
+  Term s      = v->term;
+  int  w      = static_cast<int>(s.getSort().getBitVectorSize());
+  Term sm1    = tm_.mkTerm(Kind::BITVECTOR_SUB, {s, bv_const(w, 1)});
+  Term andv   = tm_.mkTerm(Kind::BITVECTOR_AND, {s, sm1});
   Term refute = tm_.mkTerm(Kind::DISTINCT, {andv, bv_const(w, 0)});  // (sel & (sel-1)) != 0 -> >=2 bits set
   return solve(refute, n, st || enc_stateful_);
 }

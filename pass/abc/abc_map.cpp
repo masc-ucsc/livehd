@@ -738,43 +738,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return net;
   };
 
-  // LiveHD's magnitude+1 width convention (mirrors pass.lec's real_width): an
-  // unsigned net reserves its top bit as an always-0 sign slot, so its true
-  // operating width is bits-1; a signed net uses all its bits. Arithmetic that
-  // truncates/sign-fills (mult, shift-right) must be sized at THIS width, not the
-  // raw bits_of, or it diverges from the LEC on the spare bit when a region input
-  // is wider than its value range (e.g. the to-positive-signed Get_mask that
-  // feeds a shift/multiply makes a u8 a 9-bit signed port; the LEC drops the spare
-  // bit, so the bit-blast must produce a 0 there too). Add/and/or/xor/compare are
-  // bit-position-wise and already agree with the LEC's spare bit, so they keep
-  // bits_of. Always >= 1.
-  auto real_width = [&](const hhds::Pin_class& p) -> int {
-    int b = gu::bits_of(p);
-    if (b <= 0) {
-      return 1;
-    }
-    return gu::is_unsign(p) ? std::max(1, b - 1) : b;
-  };
+  auto real_width = [&](const hhds::Pin_class& p) -> int { return std::max(1, gu::real_width(p)); };
 
-  // The "effective" width at which the LEC reads an OPERAND driver: a region
-  // INPUT port carries its full literal bus width (real_width_io == bits_of,
-  // every bit meaningful — e.g. the 9-bit-unsigned to-positive Get_mask port that
-  // feeds a shift), but an INTERNAL net is read at its magnitude width
-  // (real_width = bits_of-1 for unsigned, dropping the always-0 spare top slot).
-  // Reading an internal unsigned operand at raw bits_of would expose a spare slot
-  // an upstream op may have driven to 1 (a wrapped Sum, a Mux, ...), which the LEC
-  // drops — so shift/multiply operands must be read at this effective width.
-  absl::flat_hash_set<hhds::Pin_class> region_input_drivers;
-  for (const auto& p : rb.inputs) {
-    region_input_drivers.insert(p.src_driver);
-  }
+  // Width hints are literal at region boundaries and on internal nets alike.
   auto eff_width = [&](const hhds::Pin_class& d) -> int {
-    if (region_input_drivers.contains(d)) {
-      return std::max(1, gu::bits_of(d));
-    }
     if (gu::is_const_pin(d)) {
       // A constant driver usually carries NO bits attribute (bits_of == 0), so
-      // real_width would clamp it to 1 bit and a width-sensitive consumer
+      // An unstamped constant would clamp to 1 bit and a width-sensitive consumer
       // (mult/sra) would read e.g. 342 as its bit 0 only — collapsing the whole
       // cone to a constant (the const-mult miscompile). Size a constant from
       // its VALUE: get_bits() is the minimal two's-complement width, which is
@@ -784,7 +754,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return real_width(d);
   };
   // Bit i of an operand as the LEC sees it: the real bit below its effective
-  // width, then sign/zero extension above it (NOT the raw stored spare slot).
+  // width, then sign/zero extension above it.
   auto abc_eff_bit = [&](const hhds::Pin_class& d, int i) -> Abc_Obj_t* {
     if (gu::is_const_pin(d)) {
       // Constants are exact in abc_bit: with no bits attr (w == 0) it reads the
@@ -873,24 +843,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
-      // tolg wraps a call-site clock in 1-bit Get_mask coercions (`x:u1` casts
-      // survive cprop when the source is signed, and their output carries the
-      // usual unsigned +1 headroom bit). On a 1-bit OPERAND they are wire
+      // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
+      // casts survive cprop when the source is signed). On a 1-bit operand they are wire
       // identities regardless of the declared output width — trace to the root
       // so the register's clock is recognized as region-input-driven and the
       // DFF clock pin connects DIRECTLY to it (never through mapped logic).
       //
-      // Whole-design flatten stacks ONE such coercion per hierarchy level (each
-      // call site re-coerces `clock = clock`), so the chain is as deep as the
-      // instance tree. The operand test must therefore use the MAGNITUDE width
-      // (real_width), not the raw bits_of: the root graph-input pin of a `u1`
-      // clock carries bits==1, but every intermediate Get_mask output in the
-      // chain carries the unsigned +1 headroom bit (bits==2). Testing bits_of==1
-      // matched only the root and stopped the walk after the FIRST hop — the
-      // exact case this loop exists for — so every register more than one level
-      // deep looked internally clocked and was falsely demoted to a boundary box
-      // (38940 of XiangShan XSCore's 39062 registers: precisely those at
-      // instance depth >= 2). real_width is 1 for both shapes.
+      // Whole-design flatten can stack one such coercion per hierarchy level,
+      // so trace the identity chain to the structural clock source.
       for (int guard = 0; guard < 64 && !f.clk_drv.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
         auto m = f.clk_drv.get_master_node();
         if (gu::type_op_of(m) != Ntype_op::Get_mask) {
@@ -1361,16 +1321,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         const auto lane_bad = gu::concat_lane_violation(lanes);
         I(lane_bad.empty(), lane_bad.c_str());
         // abc_eff_bit, not abc_bit: a lane window wider than its driver's
-        // MAGNITUDE must be filled the way the LEC reads that operand — an
-        // internal unsigned net's top slot is the always-0 sign bit, and an
-        // upstream wrapped Sum/Mux may have driven a stray 1 into it. abc_bit
-        // would wire that stray bit into the middle of the result at a fixed
-        // position (concat never re-normalizes above a lane). Below the
-        // effective width the two are identical, and a signed lane still
+        // literal width must be filled the way the LEC reads that operand.
+        // A signed lane still
         // sign-replicates, so a negative value lands as its two's-complement
         // pattern (-1 at w=3 -> 0b111) exactly as the cell contract requires.
         // Every lane, at its full declared window. The blast width is the CELL
-        // CONTRACT (sum(w), plus the sign slot below), never `out_bits`: the
+        // CONTRACT sum(w), never `out_bits`: the
         // const sinks carry the intended bit spacing, and a stamp is not
         // allowed to move a lane. This used to `break` on `pos >= out_bits`,
         // which dropped the top lanes whenever anything narrowed the pin — and
@@ -1382,11 +1338,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             slots[l.offset + k] = abc_eff_bit(l.value, k);
           }
         }
-        // Bit sum(w) is the always-zero sign slot of the (never negative)
-        // result; an over-stamped pin is zero above it too. One shared const0
+        // Any over-stamped bits above sum(w) are known zero. One shared const0
         // net: abc_const_bit builds an inverter per call, so a per-bit call
         // would litter the AIG with dead gates.
-        const int fill_to = std::max(out_bits, total + 1);
+        const int fill_to = std::max(out_bits, total);
         auto*     zero    = abc_const_bit(false);
         for (int b = total; b < fill_to; ++b) {
           slots[b] = zero;
@@ -2231,8 +2186,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
         auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
         sub.set_subnode(io);
-        sub.attr(hhds::attrs::name)
-            .set(owner.empty() ? std::format("g{}_{}", Abc_ObjId(L), dff_->name) : unique_flop_name(owner));
+        sub.attr(hhds::attrs::name).set(owner.empty() ? std::format("g{}_{}", Abc_ObjId(L), dff_->name) : unique_flop_name(owner));
         auto q = sub.create_driver_pin(dff_->q_pin);
         gu::set_bits(q, 1);
         gu::set_unsign(q);

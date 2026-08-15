@@ -47,13 +47,15 @@ void Inou_cgen::setup() {
                         "sim.flatten=N: structurally inline a sub-instance whose callee body has <= N nodes into "
                         "its parent before occurrence-wide color planning, bottom-up. 0 = never",
                         "0");
-  m2.add_label_optional("workers", "color scheduler workers (0/1 = generated serial, N>1 = Taskflow)", "0");
   m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
   m2.add_label_optional("slop_u",
-                        "materialize stored unsigned values as canonical-unsigned Slop_u<n> (one mask at the write) "
-                        "instead of a lazily-masked Slop<n+1> (one mask at every read). Off by default: it trusts "
-                        "the driver-pin sign stamp, and a stamp that lies masks the value WRONG rather than merely "
-                        "masking it twice",
+                        "materialize every LGraph-proven unsigned value as canonical-unsigned Slop_u<n> "
+                        "(one mask at the write) instead of a lazily-masked Slop<n> (one mask at every read). "
+                        "Uniform across combinational temps, IO ports, memories, registers and color boundary "
+                        "slots -- no exemption for state or module boundaries",
+                        "true");
+  m2.add_label_optional("debug",
+                        "retain runtime Slop_u landing masks for checking bitwidth-proven unsigned values (true/false)",
                         "false");
   register_inou("cgen", m2);
 }
@@ -72,8 +74,7 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
   // automatically feed this path. One .v per module, generated inline.
   // (Per-module Verilog cgen used to be dispatched onto a custom thread pool,
   // but that was an unused performance optimization; build-level parallelism
-  // comes from independent lhd invocations. If sim/cgen ever needs
-  // intra-process parallelism it will be reintroduced via taskflow.)
+  // comes from independent lhd invocations.)
   // Internal graph names are the hierarchical, always-unique `file.entity`
   // (two files may define the same simple module name). Verilog module names are
   // flat, so pre-compute one flat name per co-emitted graph, shared by every
@@ -123,18 +124,19 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
-  Inou_cgen pp(var);
-  auto      dir       = pp.get_odir(var);
-  auto      vcd_out   = var.get("vcd");
-  auto      top       = var.get("top");
-  auto      fakedelay = var.get("vcd_fake_delay");
-  auto      observe_s = var.get("observe");
-  auto      slop_u_s  = var.get("slop_u");
+  Inou_cgen  pp(var);
+  auto       dir       = pp.get_odir(var);
+  auto       vcd_out   = var.get("vcd");
+  auto       top       = var.get("top");
+  auto       fakedelay = var.get("vcd_fake_delay");
+  auto       observe_s = var.get("observe");
+  auto       slop_u_s  = var.get("slop_u");
+  auto       debug_s   = var.get("debug");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
-  bool       bad_flag = false;
-  const auto flag_on  = [&bad_flag](std::string_view label, std::string_view v) {
+  bool       bad_flag  = false;
+  const auto flag_on   = [&bad_flag](std::string_view label, std::string_view v) {
     if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
       livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
       bad_flag = true;
@@ -143,6 +145,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   };
   const bool observe_on = flag_on("observe", observe_s);
   const bool slop_u_on  = flag_on("sim.slop_u", slop_u_s);
+  const bool debug_on   = flag_on("sim.debug", debug_s);
   flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
   if (bad_flag) {
     return;
@@ -159,19 +162,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
           .msg("sim.flatten expects a non-negative node count, got '{}'", flatten_s)
           .hint("0 keeps every sub-instance as its own struct; N inlines any callee whose body has <= N nodes")
-          .emit();
-      return;
-    }
-  }
-  int  workers   = 0;
-  auto workers_s = var.get("workers");
-  if (!workers_s.empty()) {
-    const auto* b = workers_s.data();
-    const auto* e = b + workers_s.size();
-    auto [p, ec]  = std::from_chars(b, e, workers);
-    if (ec != std::errc{} || p != e || workers < 0) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-          .msg("sim.workers expects a non-negative worker count, got '{}'", workers_s)
           .emit();
       return;
     }
@@ -350,9 +340,9 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   flatten_budget,
                   plan,
                   compact_kernel_defs.contains(g.get()),
-                  workers,
                   observe_on,
-                  slop_u_on);
+                  slop_u_on,
+                  debug_on);
     p.do_from_graph(g);
   }
 }

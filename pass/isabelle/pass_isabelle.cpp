@@ -2367,9 +2367,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       for (const auto& lane : lanes) {
         total += lane.width;
       }
-      // The driver pin carries sum(w_i)+1 bits (the magnitude plus the
-      // always-zero sign slot of an unsigned LiveHD value), so w is normally one
-      // bit wider than the assembly.  A NARROWER stamp is a graph inconsistency,
+      // The driver pin carries the literal sum(w_i) bits. A NARROWER stamp is a graph inconsistency,
       // not a truncating assignment to model around: the let-binding is typed at
       // `w word`, every lane above it would vanish, and the emitted theory would
       // then prove the wrong bus.  Hard-fail like the Memory width mismatch

@@ -64,7 +64,7 @@ struct Options {
   // front-end, so verilog joins the pyrope flow (ln:/lg: emits, in-process
   // lec). `--reader yosys-slang|yosys-verilog` overrides to the yosys path
   // (SV/Verilog -> LGraphs).
-  std::string reader = "slang";
+  std::string reader        = "slang";
   std::string depfile;
   // --unused-inputs PATH (compile): write the declared source-file positionals
   // whose contents did NOT reach the compiled closure (absent from every final
@@ -90,20 +90,20 @@ struct Options {
   // cap (0 = unlimited); hier = -1 unset (flat for cat/grep/diff, full for
   // tree), INT_MAX = bare --hier (all levels), else an explicit depth; hops =
   // focus radius around filter matches (reserved).
-  std::string tool_target;
+  std::string              tool_target;
   // `tool tree --target kind:<X>` (repeatable): node kinds to list inside each
   // module of the hierarchy — registers/memories that ride the same instance
   // tree. Empty => the bare instance tree (default). `kind:register` aliases
   // flop/fflop/latch, `kind:memory` aliases memory; any Ntype name (flop, mux,
   // sub, …) also matches exactly.
   std::vector<std::string> tool_kinds;
-  std::string tool_attr;
-  int         tool_max     = 200;
-  int         tool_hier    = -1;
-  int         tool_hops    = 0;
-  int         tool_context = 2;     // `tool diff -C n` text-line context
-  bool        tool_invert  = false; // `tool grep -v`: keep records that do NOT match
-  bool        tool_match   = false; // `tool diff --match`: visualize via the semdiff `match` attribute
+  std::string              tool_attr;
+  int                      tool_max     = 200;
+  int                      tool_hier    = -1;
+  int                      tool_hops    = 0;
+  int                      tool_context = 2;      // `tool diff -C n` text-line context
+  bool                     tool_invert  = false;  // `tool grep -v`: keep records that do NOT match
+  bool                     tool_match   = false;  // `tool diff --match`: visualize via the semdiff `match` attribute
 
   // `--stats` (canonical `--set lhd.stats=true`): ask whichever pass runs for its
   // aggregate report. Meaning is per consumer: `pass semdiff` prints the
@@ -113,11 +113,11 @@ struct Options {
   // propagations, restarts, theory lemmas, resource units, timings). The formal
   // consumer also registers a cvc5 plugin that makes the solve ~8x SLOWER, so it is a
   // diagnosis tool — never leave it on, and never time a run with it.
-  bool        stats = false;
+  bool stats = false;
 
-  std::string impl_kind, impl_path, impl_top;  // lec --impl
-  std::string ref_kind, ref_path, ref_top;     // lec --ref
-  std::string formal_filter;                   // formal verify / lec: formal-block name glob
+  std::string              impl_kind, impl_path, impl_top;  // lec --impl
+  std::string              ref_kind, ref_path, ref_top;     // lec --ref
+  std::string              formal_filter;                   // formal verify / lec: formal-block name glob
   // lec --collapse <def> (repeatable): module-def names the driver has already
   // proven equivalent, forced to the sound black-box path even when --lib could
   // flatten them (proven-module collapse — the parent stops re-solving them).
@@ -133,9 +133,9 @@ struct Options {
   // pyrope command; harmless defaults elsewhere.
   bool        fmt_inplace = false;  // -i / --inplace: rewrite each input file
   std::string fmt_output;           // -o / --output FILE: write to FILE (one input)
-  int         fmt_indent  = 0;      // --indent N: spaces per level (0 => prpfmt default 4)
-  int         fmt_width   = 0;      // --width N: wrap column (0 => prpfmt default 80)
-  bool        fmt_verify  = false;  // --verify: re-parse the formatted output
+  int         fmt_indent = 0;       // --indent N: spaces per level (0 => prpfmt default 4)
+  int         fmt_width  = 0;       // --width N: wrap column (0 => prpfmt default 80)
+  bool        fmt_verify = false;   // --verify: re-parse the formatted output
 
   std::string result_json;
   std::string workdir;
@@ -160,19 +160,19 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> sim_args;
   // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
   // nearest checkpoint <= the target and resumes from there. -1 = not requested.
-  long sim_restart_at = -1;  // --restart-at/--restart-cycle N: jump to cycle N
-  long sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
-  long sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
-  bool sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
-  long sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
+  long                                             sim_restart_at = -1;  // --restart-at/--restart-cycle N: jump to cycle N
+  long                                             sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
+  long                                             sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
+  bool        sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
+  long        sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
   // `sim` observability: query signal values without re-instrumenting (the driver
   // snapshots scalar signals by hierarchical name). Results land in the result
   // envelope's "debug" member (and `--result-json`).
-  bool        sim_list_signals = false;  // --list-signals: enumerate observable signals, then exit
-  std::string sim_probe;                 // --probe SIG,...: per-cycle JSON trajectory of these signals
-  long        sim_probe_from = -1;       // --probe-from A
-  long        sim_probe_to   = -1;       // --probe-to B
-  std::string sim_break_when;            // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
+  bool        sim_list_signals    = false;  // --list-signals: enumerate observable signals, then exit
+  std::string sim_probe;                    // --probe SIG,...: per-cycle JSON trajectory of these signals
+  long        sim_probe_from = -1;          // --probe-from A
+  long        sim_probe_to   = -1;          // --probe-to B
+  std::string sim_break_when;               // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
   // `sim --query FILE|-|{inline}` (2f-sim): a BATCHED JSON request
   // ({schema_version:1, kind:"sim_query", queries:[...]}). Batching is what lets
   // the planner union every question's time range and answer them all from ONE
@@ -271,8 +271,8 @@ int  run_meta_command(const Options& opts);
 // shared definition across translation units.
 struct Sim_set_option {
   enum class Kind { boolean, non_neg_num, bool_or_file };  // value grammar enforced on --set
-  std::string_view name;                     // flag under sim.*, e.g. "checkpoint_min_secs"
-  std::string_view default_value;            // shown by `lhd list options`
+  std::string_view name;                                   // flag under sim.*, e.g. "checkpoint_min_secs"
+  std::string_view default_value;                          // shown by `lhd list options`
   Kind             kind;
   std::string_view help;  // full help (also `lhd describe sim.flag`)
 };
@@ -282,73 +282,66 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
      "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none"                                                               },
+     "FILE bakes that explicit path, false bakes none"                                                     },
     {         "vcd_fake_delay",
      "true",      Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                                     },
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"                           },
     {               "hlop_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
      "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
-     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"          },
+     "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
     {            "iassert_dir",
      "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
-     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"               },
-    {           "taskflow_dir",
-     "", Sim_set_option::Kind::bool_or_file,
-     "DIR — include root containing taskflow/taskflow.hpp from OpenTimer's bundled fork. Empty = auto from lhd's "
-     "bazel runfiles. Generated simulators use this exact copy rather than resolving an independent Taskflow release"},
+     "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"     },
     {                "flatten",
      "0",  Sim_set_option::Kind::non_neg_num,
      "N — structurally inline a sub-instance into its parent before occurrence-wide color planning when the "
      "callee body has <= N nodes. 0 keeps hierarchy intact. Inlining may reduce storage-path depth but duplicates "
-     "the body per instantiation, so use it only for measured experiments"                                           },
+     "the body per instantiation, so use it only for measured experiments"                                 },
     {                  "ninja",
      "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
      "its dependents); the built-in path always rebuilds every translation unit. A `build.ninja` reproducing the "
-     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"                                 },
+     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"                       },
     {                   "jobs",
      "0",  Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
-     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"                },
-    {                "workers",
-     "0",  Sim_set_option::Kind::non_neg_num,
-     "Color-scheduler workers used by one generated simulator instance. 0 or 1 selects the generated serial "
-     "topological backend; N>1 pins the reusable Taskflow root schedule to N workers. This controls simulation "
-     "execution, not sim.jobs host compilation"                                                                      },
+     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"      },
     {                 "slop_u",
+     "true",      Sim_set_option::Kind::boolean,
+     "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "
+     "lazily-masked Slop<n+1>. Slop makes no promise about storage above bit n-1, so every READ of a stored value "
+     "re-masks; Slop_u pays ONE mask at the write and none at the reads. Reset-free state and other unknown-capable "
+     "boundaries remain Slop. Set false only for lowering comparisons"                                     },
+    {                  "debug",
      "false",      Sim_set_option::Kind::boolean,
-     "materialize stored unsigned values as the CANONICAL-unsigned Slop_u<n> instead of a lazily-masked Slop<n+1>. "
-     "Slop makes no promise about storage above bit n-1, so every READ of a stored value re-masks; Slop_u pays ONE "
-     "mask at the write and none at the reads, which is the right trade for slots, state members and named temps "
-     "(written once, read many). Default off because it depends on the driver-pin sign stamp being TRUTHFUL: with "
-     "lazy masking an `unsign` stamp that lies costs a redundant mask, but with Slop_u it masks the value WRONG at "
-     "the write. Turn it on for measured experiments until sign stamping is explicit and checked"                    },
+     "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
+     "and emits only compile-time width checks, avoiding masks in production generated code"               },
     {              "init_zero",
      "false",      Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
-     "Explicit initial values and runtime reset values are unchanged"                                                },
+     "Explicit initial values and runtime reset values are unchanged"                                      },
     {             "checkpoint",
      "true",      Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"              },
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"    },
     {    "checkpoint_min_secs",
      "10",  Sim_set_option::Kind::non_neg_num,
-     "wall-clock floor in seconds between checkpoints (a short run writes none)"                                     },
+     "wall-clock floor in seconds between checkpoints (a short run writes none)"                           },
     {         "checkpoint_max",
      "10",  Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                          },
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)"                                },
     {"checkpoint_max_overhead",
      "0.10",  Sim_set_option::Kind::non_neg_num,
-     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                              },
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)"                    },
     {       "checkpoint_every",
      "0",  Sim_set_option::Kind::non_neg_num,
-     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                                },
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                      },
 };
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of

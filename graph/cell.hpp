@@ -142,17 +142,16 @@ enum class Ntype_op : uint8_t {
   // are free to narrow, and the value's significant bits are narrower still --
   // and dropping a lane's leading zeros shifts every lane ABOVE it. The width
   // is frozen from the LNAST DECLARED type at lowering time (upass.tolg) and is
-  // never re-derived. A lane's `w` is the field width: `bits - 1` for an
-  // unsigned driver (whose top stored bit is the always-zero sign slot), `bits`
-  // for a signed one, matching `Dlop::Concat_lane`.
+  // never re-derived. A lane's `w` is the literal field width for both signed
+  // and unsigned drivers, matching `Dlop::Concat_lane`.
   //
   // Semantics (unlimited precision): out = sum_i (v_i mod 2^w_i) << offset_i,
   // offset_i = sum of the widths of every lane BELOW i. Each lane is masked
   // into its own window, so a negative lane lands as its two's-complement
   // pattern and an over-wide lane truncates -- exactly the Set_mask lane-write
   // rule. Unknowns are per-lane and positional (no whole-plane smearing). The
-  // result is ALWAYS non-negative, so the driver pin stamps
-  // bits = sum(w_i) + 1 and is `unsign`.
+  // result is ALWAYS non-negative, so the driver pin stamps the exact literal
+  // width bits = sum(w_i) and is `unsign`.
   //
   // 58 keeps the even/odd invariant (combinational => even). 40..48 are also
   // free evens but are reserved by construction as the opposite-polarity twins

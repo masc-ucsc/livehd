@@ -118,7 +118,7 @@ everything the encoder needs.
   - **The obligation is taken as a cvc5 TERM, not re-sliced from the LGraph**
     (`cone_abc.cpp`). The per-cut diff term already *is* the cone — its
     free-variable support is exactly the cone boundary — so the blast inherits
-    encode.cpp's flop reset/enable folding, magnitude+1 widths, `--lib` Sub
+    encode.cpp's flop reset/enable folding, literal width/sign hints, `--lib` Sub
     inlining and X-masking verbatim. A second, hand-derived lowering of those
     rules is precisely how a bit-level pre-pass would "prove" a cut cvc5 refutes.
     Terms outside the pure bit-vector fragment (arrays, UF, division) are
@@ -340,16 +340,12 @@ numeric `Port_id` via `Ntype::get_sink_pid(op,name)`; use
 `node.get_sink_pin(name)` / `get_driver_pin(name)`. Single-driver output is
 `get_driver_pin(0)`.
 
-**⚠ Bit-width — the #1 trap:** the per-pin `bits` attribute
-(`graph_util::bits_of`) is the **signed** count = magnitude + 1 (one sign bit),
-*regardless* of the sign flag. The real bit-vector width is
-`w = graph_util::is_unsign(pin) ? bits_of(pin) - 1 : bits_of(pin)` — a 4-bit
-unsigned bus is stored as `bits=5` (`encode.cpp::real_width`). `is_unsign(pin)` ≡
-the `pin_signed` attr is absent. Off-by-one here silently breaks every
-comparison/arith equivalence. (cgen proves it: `reg signed [bits-1:0]` for
-signed, `bits-1` for unsigned.) Exception: under `--lib`, a mapped netlist's
-unsigned nets carry no spare sign bit, so the encoder uses the **raw**
-`bits_of` width there.
+**Bit width/sign:** the per-pin `bits` attribute (`graph_util::bits_of`) is the
+literal physical container width for both signed and unsigned values. The
+`pin_signed` attribute selects the interpretation: absent means unsigned
+`[0,2^bits-1]`; present means signed two's complement
+`[-2^(bits-1),2^(bits-1)-1]`. `bits=0` means unspecified. There is no hidden
+unsigned sign slot, so every encoder and mapped netlist uses `bits_of` directly.
 
 **Op-semantics traps** (build the table from the real `Ntype_op`s, per
 `process_simple_node`): `Sum` — a-drivers add, **b-drivers subtract**. `SRA` —
@@ -505,6 +501,6 @@ REFUTED with the residue naming the one differing register.
 - **LiveHD encoder surface** — `graph/cell.hpp` (`Ntype_op`),
   `graph/node_util.hpp` (`graph_util::*`), `inou/cgen/cgen_verilog.cpp`
   (reference walker / `process_simple_node`), `inou/yosys/lgyosys_tolg.cpp`
-  (Flop/Memory/Sub builder), `pass/bitwidth/bitwidth.cpp` (`bits` = magnitude+1)
+  (Flop/Memory/Sub builder), `pass/bitwidth/bitwidth.cpp` (range-derived literal hints)
 - **SEC methodology** — van Eijk register correspondence (TCAD'00); Cheng SEC
   (HLDVT'05); ABC `dsec`/`dprove` (FRAIG SAT-sweeping)

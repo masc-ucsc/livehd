@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "bitwidth.hpp"
+
 #include <memory>
 
-#include "bitwidth.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -19,6 +20,18 @@ namespace {
     }
   }
   return false;
+}
+
+TEST(BitwidthRange, MinimalUnsignedWidths) {
+  EXPECT_EQ(Bitwidth_range(0, 0).get_ubits(), 1);
+  EXPECT_EQ(Bitwidth_range(0, 1).get_ubits(), 1);
+  EXPECT_EQ(Bitwidth_range(0, 2).get_ubits(), 2);
+  EXPECT_EQ(Bitwidth_range(0, 7).get_ubits(), 3);
+  EXPECT_EQ(Bitwidth_range(0, 8).get_ubits(), 4);
+
+  Bitwidth_range wide;
+  wide.set_ubits_range(128);
+  EXPECT_EQ(wide.get_ubits(), 128);
 }
 
 // A Sum fed by two graph inputs that carry NO declared width: bitwidth cannot
@@ -62,6 +75,7 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   auto g = gio->create_graph();
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum, 8);
+  livehd::graph_util::set_sbits(sum.create_driver_pin(0), 8);
   g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
   g->get_input_pin("b").connect_sink(sum.create_sink_pin(1));
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
@@ -224,15 +238,12 @@ TEST(BitwidthInfer, PrestampedMuxIsReinferredFromDataArms) {
   livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(mux.create_sink_pin(2));
   mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, mux), 2) << "the mux range [0..1] needs two signed-unbounded storage bits";
+  EXPECT_EQ(run_and_read_driver(g, mux), 1) << "the mux range [0..1] is an unsigned one-bit value";
 }
 
 // Get_mask over a SIGNED input must keep every selected bit. `a` declared 3
 // signed bits spans [-4..3]; masking with 0b111 zero-extends, so the result
-// spans [0..7] and needs 4 signed bits. Deriving 3 would mean the emitted net
-// is one bit too narrow and the top bit is silently dropped -- an actual
-// miscompile, which is what `lhd lec` reported (res ref=8 impl=4 @ a=7) when
-// pass.bitfuzz first made this path run.
+// spans [0..7] and needs exactly 3 unsigned bits.
 TEST(BitwidthInfer, GetMaskKeepsEverySelectedBitOfSignedInput) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_getmask_signed");
@@ -244,40 +255,34 @@ TEST(BitwidthInfer, GetMaskKeepsEverySelectedBitOfSignedInput) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);  // no bits
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
   gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, gm), 4) << "a & 0b111 over [-4..3] spans [0..7]: 4 signed bits";
+  EXPECT_EQ(run_and_read_driver(g, gm), 3) << "a & 0b111 over [-4..3] spans [0..7]: u3";
 }
 
 // Same shape with an UNSIGNED declaration. A PORT's declared `bits` is the
 // LITERAL bus width, so `input [2:0]` spans [0..7] -- masking with 0b111 is the
-// identity and the result is still 4 signed bits. Seeding it as ubits(bits-1)
-// (the internal-net magnitude convention) gave [0..3] and truncated everything
-// downstream.
+// identity and the result is still u3.
 TEST(BitwidthInfer, GetMaskOverUnsignedInputKeepsWidth) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_getmask_unsigned");
   gio->add_input("a", 1);
   gio->set_bits("a", 3);
-  gio->set_unsign("a", true);  // unsigned: [0..3]
+  gio->set_unsign("a", true);  // unsigned: [0..7]
   gio->add_output("o", 2);
   auto g = gio->create_graph();
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
   gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, gm), 4) << "a 3-bit unsigned PORT spans [0..7]: 4 signed bits";
+  EXPECT_EQ(run_and_read_driver(g, gm), 3) << "a 3-bit unsigned port spans [0..7]: u3";
 }
 
 // The tup_in_port shape: `get_mask(a, 0b111) + 1` where `a` is 3 signed bits.
-// The mask yields [0..7], so the sum spans [1..8] and needs 5 signed bits.
-// Deriving 4 ([-8..7]) drops the 8 and cgen emits a truncating net -- the
-// `res(ref=8 impl=0) @ ar.x=7` counterexample.
+// The mask yields [0..7], so the sum spans [1..8] and needs u4.
 TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_mask_plus1");
@@ -289,8 +294,7 @@ TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   gm.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
@@ -298,13 +302,13 @@ TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
-  EXPECT_EQ(livehd::graph_util::bits_of(gm.create_driver_pin(0)), 4) << "a & 0b111 over [-4..3] spans [0..7]";
-  EXPECT_EQ(bits, 5) << "[0..7] + 1 spans [1..8], which needs 5 signed bits";
+  EXPECT_EQ(livehd::graph_util::bits_of(gm.create_driver_pin(0)), 3) << "a & 0b111 over [-4..3] spans [0..7]";
+  EXPECT_EQ(bits, 4) << "[0..7] + 1 spans [1..8], which needs u4";
 }
 
 // The full tup_in_port chain: Get_mask(a,0b111) -> Sext(.,5) -> +1. The mask
 // yields [0..7], the Sext is a no-op on a non-negative source, so the sum still
-// spans [1..8] and needs 5 signed bits. process_sext BYPASSES and deletes a
+// spans [1..8] and needs u4. process_sext BYPASSES and deletes a
 // Sext whose source already fits `sign_max`; the sum must be sized from the
 // surviving source either way.
 TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
@@ -318,13 +322,11 @@ TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
 
   auto sx = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);
   livehd::graph_util::setup_sink_by_name(sx, "a").connect_driver(gm.create_driver_pin(0));
-  livehd::graph_util::setup_sink_by_name(sx, "b")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(5)));
+  livehd::graph_util::setup_sink_by_name(sx, "b").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(5)));
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   sx.create_driver_pin(0).connect_sink(sum.create_sink_pin(0));
@@ -332,12 +334,12 @@ TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
-  EXPECT_EQ(bits, 5) << "[0..7] sign-extended then +1 spans [1..8]: 5 signed bits";
+  EXPECT_EQ(bits, 4) << "[0..7] sign-extended then +1 spans [1..8]: u4";
 }
 
 // The zero-extend every slang front end emits: a signed N-bit port masked with
 // an ALL-ONES (negative, -1) mask. `x` spans [-128..127] and `x & -1` maps
-// x=-1 to 255, so the image is [0..255] and `+1` needs 10 signed bits.
+// x=-1 to 255, so the image is [0..255] and `+1` needs u9.
 //
 // The worst-case probe used the literal -1, but a negative mask makes
 // get_mask_op copy bits [0, src_bits) of the SOURCE and -1 is one bit wide, so
@@ -365,7 +367,7 @@ TEST(BitwidthInfer, AllOnesMaskOverSignedPortKeepsFullRange) {
   sum.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   int32_t bits = run_and_read_driver(g, sum);
-  EXPECT_EQ(bits, 10) << "[0..255] + 1 spans [1..256], which needs 10 signed bits";
+  EXPECT_EQ(bits, 9) << "[0..255] + 1 spans [1..256], which needs u9";
 }
 
 // A VARIABLE arithmetic right shift. `a` is a fixed constant-like range and the
@@ -385,15 +387,14 @@ TEST(BitwidthInfer, VariableSraKeepsRangeAndSurvives) {
   // shift amount = (n & 3) + 1  -> [1..4], strictly positive
   auto nm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(nm, "a").connect_driver(g->get_input_pin("n"));
-  livehd::graph_util::setup_sink_by_name(nm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(3)));
+  livehd::graph_util::setup_sink_by_name(nm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(3)));
   auto amt = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   nm.create_driver_pin(0).connect_sink(amt.create_sink_pin(0));
   livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(amt.create_sink_pin(0));
 
   auto sra = livehd::graph_util::create_typed_node(*g, Ntype_op::SRA);
-  livehd::graph_util::setup_sink_by_name(sra, "a")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(9345)));
+  livehd::graph_util::setup_sink_by_name(sra, "a").connect_driver(
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(9345)));
   livehd::graph_util::setup_sink_by_name(sra, "b").connect_driver(amt.create_driver_pin(0));
   sra.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
@@ -485,9 +486,8 @@ TEST(BitwidthInfer, BitAndWidth) {
   EXPECT_GT(run_and_read_driver(g, op), 0) << "process_bit_and must infer a bounded width";
 }
 
-// A comparator (LT) produces the ZERO-EXTENDED boolean {0, 1} regardless of its
-// operands -- 2 signed bits marked unsigned, which is exactly what tolg/cgen
-// declare (`reg [1:0]`). It must NOT come back as the 1-bit signed {-1, 0}:
+// A comparator (LT) produces the unsigned boolean {0, 1} regardless of its
+// operands. It must NOT come back as the 1-bit signed {-1, 0}:
 // booleans get shifted into position when a `match` is lowered to a one-hot
 // selector, and a negative boolean sign-extends over the bits above it.
 TEST(BitwidthInfer, ComparatorIsUnsignedBoolean) {
@@ -497,7 +497,7 @@ TEST(BitwidthInfer, ComparatorIsUnsignedBoolean) {
   g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, op), 2) << "a boolean is [0..1]: 2 signed bits";
+  EXPECT_EQ(run_and_read_driver(g, op), 1) << "a boolean is [0..1]: u1";
   EXPECT_TRUE(livehd::graph_util::is_unsign(op.create_driver_pin(0)))
       << "a comparator result is non-negative; a signed {-1,0} boolean breaks `cmp << k`";
 }
@@ -514,13 +514,11 @@ TEST(BitwidthInfer, ShiftedComparatorStaysNonNegative) {
 
   auto shl = livehd::graph_util::create_typed_node(*g, Ntype_op::SHL);
   livehd::graph_util::setup_sink_by_name(shl, "a").connect_driver(cmp.create_driver_pin(0));
-  livehd::graph_util::setup_sink_by_name(shl, "b")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(2)));
+  livehd::graph_util::setup_sink_by_name(shl, "b").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(2)));
   shl.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   (void)run_and_read_driver(g, shl);
-  EXPECT_TRUE(livehd::graph_util::is_unsign(shl.create_driver_pin(0)))
-      << "a shifted boolean must stay non-negative";
+  EXPECT_TRUE(livehd::graph_util::is_unsign(shl.create_driver_pin(0))) << "a shifted boolean must stay non-negative";
 }
 
 // Mux: sink 0 is the selector, sinks 1..N the data arms; the output unions
@@ -549,8 +547,7 @@ TEST(BitwidthInfer, MuxUnionsDataArms) {
 // Concat: sinks are interleaved (value, declared-width) pairs, MSB-first. The
 // output range is a function of the DECLARED widths alone -- here 3+5 -- and
 // not of the lane values, which are two SIGNED ports spanning [-4..3] and
-// [-16..15]. Each lane occupies its own window, so the result is [0..255]:
-// 9 signed bits stamped unsign.
+// [-16..15]. Each lane occupies its own window, so the result is u8.
 //
 // The lane drivers are sized to FIT their windows (3 and 5) because a driver
 // wider than its window is now an internal compile error, not a truncation --
@@ -571,7 +568,7 @@ TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
   livehd::graph_util::create_const(*g, *Dlop::create_integer(5)).connect_sink(op.create_sink_pin(3));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
-  EXPECT_EQ(run_and_read_driver(g, op), 9) << "3+5 declared lane bits plus the always-zero sign slot";
+  EXPECT_EQ(run_and_read_driver(g, op), 8) << "a concat is exactly the sum of its declared lane widths";
   EXPECT_TRUE(livehd::graph_util::is_unsign(op.create_driver_pin(0)))
       << "every lane is masked into its own window, so a concat result is never negative";
 }

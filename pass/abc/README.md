@@ -46,9 +46,8 @@ Per region (`Region_body` from the partition seam):
    native as a boundary (like a `Sub`/memory) and a `div-blackbox` warning fires.
    Anything else is still an `unsupported-cell` error.
 
-   Magnitude-width note: `mult`/`sra` size their result at the LEC's `real_width`
-   (LiveHD reserves the top bit of an *unsigned* net as an always-0 sign slot), so
-   the spare bit is held at 0 rather than carrying a stray product/sign bit.
+   Width note: `mult`/`sra` size their result at the LEC's literal
+   `real_width`; unsigned widths contain no hidden sign slot.
 2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb and seq default
    `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`)
    against the `read_lib -s` Liberty (`-s` skips multi-output cells — fa/ha

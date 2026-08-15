@@ -10,7 +10,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "encode.hpp"  // livehd::lec::Val + exported helpers (fit_to/real_width/flop_state_key)
+#include "encode.hpp"  // livehd::lec::Val + exported helpers (fit_to/flop_state_key)
 #include "hhds/graph.hpp"
 #include "query.hpp"  // livehd::lec::Verdict
 

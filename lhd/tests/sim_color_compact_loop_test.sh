@@ -13,6 +13,22 @@ fail() {
   exit 1
 }
 
+# Negative assertion. A bare `grep ... && fail` cannot distinguish "no match"
+# (status 1, the assertion HOLDS) from "the search itself failed" (status >1 --
+# a missing or unreadable path), and `set -e` exempts every non-final command of
+# an AND list, so the broken case reports GREEN. Branch on the status instead.
+refute() {
+  local msg="$1"
+  shift
+  local st=0
+  grep "$@" >/dev/null 2>&1 || st=$?
+  case "$st" in
+    0) fail "$msg" ;;
+    1) : ;;
+    *) fail "negative search failed with status $st: grep $*" ;;
+  esac
+}
+
 "$LHD" sim "$PRP" --setup-only --workdir "$work/setup" -q >/dev/null
 header="$(ls "$work"/setup/sim/*rolled_cond_top.hpp | head -1)"
 body="$(ls "$work"/setup/sim/*rolled_cond_top.cpp | head -1)"
@@ -27,10 +43,11 @@ grep -q 'std::array<Callee, count> lanes' "$header" || fail "compact state was p
 grep -q 'for (std::size_t ordinal = 0; ordinal < count; ++ordinal)' "$header" \
   || fail "compact wrapper lost its native runtime ordinal loop"
 grep -q '__compact_advance();  // compact-loop control: one native ordinal walk' "$body" \
-  || fail "pre-rise loop version is not one outer Taskflow color"
+  || fail "pre-rise loop version is not one outer color"
 grep -q '__compact_publish();  // compact-loop post-edge version: one native ordinal walk' "$body" \
-  || fail "post-edge loop version is not one outer Taskflow color"
-grep -q '::__color_run_taskflow()' "$body" || fail "root did not construct the reusable Taskflow graph"
+  || fail "post-edge loop version is not one outer color"
+grep -q '::__color_run()' "$body" || fail "root did not emit the serial color schedule"
+refute "compact-loop simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|tf::Taskflow' "$header" "$body"
 # A negative assertion must distinguish "no match" (status 1) from "the search
 # itself failed" (anything else). `grep ... && fail` cannot: set -e exempts
 # every non-final command of an AND list, so an unreadable path exits non-zero,

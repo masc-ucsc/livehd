@@ -79,7 +79,7 @@ LEAF="$W/fd/sim/h.leaf.cpp"
 # explicit clock is threaded through two wrapper levels and width/identity
 # shaping, but still resolves structurally to the top clock input.
 grep -q 'color-direct eligible=true' "$WRAPH" || fail "ordinary hierarchy did not select the color-direct scheduler"
-grep -q 'vcd-pre-rise-barrier' "$WRAP" || fail "direct VCD lacks the pre-rise Taskflow barrier"
+grep -q '__vcd_snapshot(true)' "$WRAP" || fail "direct VCD lacks its pre-rise observation barrier"
 grep -q '__vcd_publish_period' "$WRAP" || fail "direct VCD lacks ordered root publication"
 
 # the flopless wrapper resolves its pass-through clock port: real label, no uniquify

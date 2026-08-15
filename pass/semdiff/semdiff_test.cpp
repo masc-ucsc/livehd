@@ -112,10 +112,8 @@ std::shared_ptr<hhds::Graph> build_memory_kind(const std::string& dir, int64_t t
   mem.set_name("m");
   livehd::graph_util::create_const(*g, *Dlop::create_integer(type))
       .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "type"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(8))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(4))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(8)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
   auto q = mem.create_driver_pin(0);
   livehd::graph_util::set_bits(q, 8);
   livehd::graph_util::set_pin_name(q, "m");
@@ -333,8 +331,8 @@ TEST(Semdiff, DigestConstructionOrderIndependent) {
   EXPECT_EQ(da, db);
 }
 
-// canonical_digest: a width or IO-name change must change the digest (the
-// unsigned bits = magnitude+1 trap; lec pairs IO by name). NOTE add_input's
+// canonical_digest: a literal width or IO-name change must change the digest
+// (LEC pairs IO by name). NOTE add_input's
 // second arg is the PORT ID, not bits — width is the pin `bits` attribute.
 TEST(Semdiff, DigestSensitiveToWidthAndIoName) {
   auto base = build_and_or("lgdb_semdiff_dw_base", "m");
@@ -675,13 +673,11 @@ TEST(Semdiff, StatePairingInitMismatchRefuses) {
   EXPECT_NE(r.a_state_unpaired[0].find("(kind/init mismatch)"), std::string::npos) << r.a_state_unpaired[0];
 }
 
-// A WIDTH difference must NOT refuse the pair. The same state element does not
-// have the same declared width on both sides of a Verilog round trip: cgen
-// needs one extra bit to carry an unsigned magnitude, so a `u8` register comes
-// back as `reg [8:0]` against a golden `reg [7:0]`. Folding that into the pair
-// precondition refused every such pair, the flops got free independent power-on
-// symbols and the miter refuted at step 1 on the initial value alone -- a FALSE
-// REFUTED on byte-equivalent designs (measured on tests/equiv/mod_delay3).
+// A WIDTH difference must NOT refuse the pair. Independently imported
+// implementations can give the same state element different valid declared
+// widths. Folding width into the pair precondition leaves the flops as free,
+// independent power-on symbols and can refute at step 1 on the initial value
+// alone -- a false REFUTED when the observable state is equivalent.
 //
 // Sound because the miter crosses widths already: query.cpp shares ONE symbol
 // per cut at the MIN width and Encoder::seed_state extends it to each side with

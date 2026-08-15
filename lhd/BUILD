@@ -99,7 +99,6 @@ filegroup(
     srcs = [
         "@hlop//hlop:sim_runtime_hdrs",
         "@iassert//:sim_runtime_hdrs",
-        "@opentimer//:sim_taskflow_hdrs",
     ],
     visibility = ["//visibility:public"],
 )

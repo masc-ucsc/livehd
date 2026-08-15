@@ -76,6 +76,11 @@ private:
   // carry self-edges throughout code generation.
   absl::flat_hash_map<Loop_occurrence_key, std::string> loop_instance_names_;
   absl::flat_hash_map<Loop_pin_key, std::string>        loop_output_vars_;
+  // Occurrence outputs whose callee decl is UNSIGNED. Kept beside the name so
+  // the class-pin binding below can seed pin2var_unsigned_ from the same
+  // authority the `wire`/`wire signed` decision used -- reading the class pin's
+  // own hint there would be a second authority that can disagree.
+  absl::flat_hash_set<Loop_pin_key>                     loop_output_unsigned_;
   absl::flat_hash_map<Loop_pin_key, std::string>        loop_input_exprs_;
   // Clock_cell output -> private enable-latch variable. The output itself is a
   // wire in pin2var; the latch implements glitch-free gating in emitted RTL.
@@ -106,6 +111,7 @@ private:
   // declared name from GraphIO.
   static std::string pin_wire_name(const hhds::Pin_class& pin);
   std::string        get_wire_or_const(const hhds::Pin_class& dpin) const;
+  std::string        get_wire_or_const(const hhds::Pin_class& dpin, int width, bool unsign) const;
   static std::string get_scaped_name(std::string_view name);
   // Flat Verilog module name for an internal `file.entity` graph name (see
   // flat_names_). Not yet scaped — the caller still runs get_scaped_name.
@@ -127,8 +133,9 @@ private:
   // Is an SRA's left operand arithmetically signed (sign-filling shift)? True if
   // the pin carries the signed hint, or it is itself a (recursively signed) SRA
   // result. SRA is the only right-shift cell, so it preserves its operand's
-  // signedness — but tolg's bind_result tags every op output unsigned, so a
-  // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
+  // signedness. Some lowering paths can insert a representation-only wrapper
+  // between chained shifts; recurse through SRA so the arithmetic intent is
+  // preserved even when the immediate pin hint is not authoritative.
   static bool    operand_reads_signed(const hhds::Pin_class& dpin);
   // Is `dpin`'s emitted net DECLARED unsigned (`wire [W-1:0]`, no `signed`)?
   // Only a declared net qualifies: the caller widens it with a concatenation,

@@ -127,7 +127,7 @@ std::string cut_point_key(hhds::Graph* g, const hhds::Node_class& node) {
 }
 
 // Width of a node's first sized driver pin (0 = unknown). Folded into the key so
-// differing widths never falsely match (unsigned bits = magnitude+1 trap).
+// differing literal widths never falsely match.
 int32_t node_out_bits(const hhds::Node_class& node) {
   for (const auto& e : node.out_edges()) {
     if (auto b = gu::bits_of(e.driver); b != 0) {
@@ -351,14 +351,11 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
       }
     }
     // WIDTH is folded in LAST, and kept in a separate twin, because it is the
-    // one part of the pair precondition that is not an identity: the SAME state
-    // element legitimately has different declared widths on the two sides. cgen
-    // needs one extra bit to carry an unsigned magnitude, so a `u8` register
-    // round-tripped through Verilog comes back as `reg [8:0]` against the
-    // golden's `reg [7:0]`, and folding that into the identity refused EVERY
-    // such pair as a "kind/init mismatch" -- the flops then got free,
-    // independent power-on symbols and the miter refuted at step 1 on the
-    // initial value. Measured on tests/equiv/mod_delay3 and its whole family.
+    // one part of the pair precondition that is not an identity: independently
+    // imported implementations can describe the SAME state element with
+    // different valid widths. Folding width into the identity refused such
+    // pairs as a "kind/init mismatch" -- the flops then got free, independent
+    // power-on symbols and the miter could refute at step 1 on the initial value.
     //
     // Relaxing it is sound because the miter already crosses widths: query.cpp
     // mints ONE shared symbol per cut at the MIN width of the two sides and
@@ -1753,9 +1750,9 @@ namespace {
 // representation: folded_loop_identical's shape/accounting gates are what make
 // the accepted mixed-loop class deliberately small and inspectable.
 struct Fold_key {
-  uint64_t h0 = 0;
-  uint64_t h1 = 0;
-  auto operator<=>(const Fold_key&) const = default;
+  uint64_t h0                                 = 0;
+  uint64_t h1                                 = 0;
+  auto     operator<=>(const Fold_key&) const = default;
 };
 
 Fold_key fold_atom(std::string_view tag, std::string_view payload = {}) {
@@ -2022,7 +2019,37 @@ private:
           return collect_sum(*input, width, terms);
         }
       }
-      if (gu::type_op_of(node) == Ntype_op::Sum && occurrence_width(pin) >= width) {
+      if (gu::type_op_of(node) == Ntype_op::Sum) {
+        // A full-precision unsigned sum can also be distributed into a wider
+        // comparison modulus. This matters when cprop drops a zero seed: the
+        // first binary lane sum may be narrower than the final n-ary sum, but
+        // neither representation has discarded a carry. Signed or unknown
+        // operands keep their native fit so extension semantics remain exact.
+        bool exact_unsigned_sum = gu::is_unsign(pin);
+        for (const auto& edge : node.inp_edges()) {
+          if (edge.sink.get_port_id() != 0) {
+            exact_unsigned_sum = false;
+            break;
+          }
+          if (gu::is_const_pin(edge.driver)) {
+            const auto value = gu::hydrate_const(edge.driver);
+            if (value.has_unknowns() || value.is_negative()) {
+              exact_unsigned_sum = false;
+              break;
+            }
+          } else if (!gu::is_unsign(edge.driver)) {
+            exact_unsigned_sum = false;
+            break;
+          }
+        }
+        if (occurrence_width(pin) < width && !exact_unsigned_sum) {
+          auto term = at_width(pin, width);
+          if (!term) {
+            return false;
+          }
+          terms.push_back(*term);
+          return true;
+        }
         bool any = false;
         for (const auto& edge : node.inp_edges()) {
           // Sum port 0 is addition. Any subtract/other operand makes this a
@@ -2609,7 +2636,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   // is part of the identity (a parent's edges carry port ids; permuting the
   // binding changes what those edges mean without touching this graph's nodes).
   // Width is read the way the lec encoder reads it (pin bits attr with decl
-  // fallback — encode.cpp real_width_io), so digest-equal implies encode-equal.
+  // fallback — graph_util::real_width), so digest-equal implies encode-equal.
   auto gio = g->get_io();
   for (const auto& dio : gio->get_input_pin_decls()) {
     uint64_t t = hcombine(hstr("\x01idecl"), hstr(dio.name));

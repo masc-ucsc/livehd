@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#
-# 3d-sim-color migration rung I: a flat ordinary-posedge definition is emitted
-# as a persistent color graph with explicit commit barriers and a post-fall-only
-# reset publication path. No module-local edge/settle scheduler may survive.
+# A flat ordinary-posedge definition uses the serial occurrence-wide color
+# schedule with explicit commit barriers and no Taskflow dependency.
 
 set -euo pipefail
 
@@ -14,6 +11,22 @@ mkdir -p "$work"
 fail() {
   echo "FAIL: $*" >&2
   exit 1
+}
+
+# Negative assertion. A bare `grep ... && fail` cannot distinguish "no match"
+# (status 1, the assertion HOLDS) from "the search itself failed" (status >1 --
+# a missing or unreadable path), and `set -e` exempts every non-final command of
+# an AND list, so the broken case reports GREEN. Branch on the status instead.
+refute() {
+  local msg="$1"
+  shift
+  local st=0
+  grep "$@" >/dev/null 2>&1 || st=$?
+  case "$st" in
+    0) fail "$msg" ;;
+    1) : ;;
+    *) fail "negative search failed with status $st: grep $*" ;;
+  esac
 }
 
 cat > "$work/staged.prp" <<'EOF'
@@ -41,80 +54,36 @@ header="$(ls "$work"/setup/sim/*accum.hpp | head -1)"
 body="$(ls "$work"/setup/sim/*accum.cpp | head -1)"
 runtime="$(ls "$work"/setup/sim/*accum.color-runtime.hpp | head -1)"
 
-grep -q 'void __color_prepare_taskflow()' "$header" || fail "missing persistent Taskflow preparation method"
-grep -q 'void __color_refresh_inputs()' "$header" || fail "missing versioned input refresh method"
-grep -q 'void __color_reset_settle()' "$header" || fail "missing post-fall-only reset publication method"
-grep -q '#include <taskflow/taskflow.hpp>' "$runtime" || fail "selected root runtime does not compile its Taskflow API"
-grep -q 'std::shared_ptr<__Color_runtime> __color_runtime' "$header" || fail "root schedule is not persistent/reusable"
-grep -q 'tf::Executor' "$runtime" \
-  && fail "the serial backend created an unused resident Taskflow worker"
-grep -q 'void __color_run_taskflow()' "$header" || fail "root does not declare its Taskflow runner"
-grep -q 'void __color_eval(std::size_t color)' "$header" || fail "root lacks the body-private indexed color dispatcher"
-grep -q 'void __color_quiesce() { __color_runtime.reset(); }' "$header" \
-  || fail "root cannot join Taskflow workers before a fork-based checkpoint"
-grep -q 'void eval_posedge()' "$header" && fail "flat staged definition retained the monolithic posedge method"
-grep -q 'void __settle' "$header" && fail "color root retained the module-local settle API"
-grep -q '::__settle()' "$body" && fail "color root retained module-local settle generation"
-grep -q '::__color_run_taskflow()' "$body" || fail "root Taskflow schedule body was not emitted"
-grep -q 'runtime->graph.emplace' "$body" || fail "root schedule does not build reusable Taskflow tasks"
-grep -q '::__color_eval(std::size_t' "$body" || fail "planned colors were not lowered to an executable dispatcher"
-grep -Fq 'slots[slot].precede(colors[color])' "$body" || fail "Taskflow lost per-color slot precedence"
-grep -Fq 'colors[color].precede(slots[slot + 1])' "$body" || fail "Taskflow lost the next-phase barrier"
-grep -q 'rise-commit-barrier' "$body" || fail "Taskflow has no staged rise commit action"
-grep -q 'struct .*::__Color_runtime' "$runtime" || fail "color runtime details are not isolated from the module header"
-grep -q '__color_slot_' "$body" || fail "cross-color values do not have producer-owned storage"
-grep -q '__color_run_serial();  // auto/one worker avoids per-period Taskflow dispatch overhead' "$header" \
-  || fail "default cycle does not use the generated serial topological backend"
+grep -q 'void __color_prepare_runtime()' "$header" || fail "missing persistent color-runtime preparation"
+grep -q 'void __color_refresh_inputs()' "$header" || fail "missing versioned input refresh"
+grep -q 'void __color_reset_settle()' "$header" || fail "missing reset publication path"
+grep -q 'void __color_run()' "$header" || fail "missing serial color runner"
+grep -q 'void __color_eval(std::size_t color)' "$header" || fail "missing indexed color dispatcher"
+grep -q 'std::shared_ptr<__Color_runtime> __color_runtime' "$header" || fail "color runtime is not persistent"
+refute "flat color root retained monolithic posedge evaluation" -q 'void eval_posedge()' "$header"
+refute "color root retained module-local settle API" -q 'void __settle' "$header"
+refute "color root retained module-local settle generation" -q '::__settle()' "$body"
+grep -q '::__color_run()' "$body" || fail "serial color schedule body was not emitted"
+grep -q '::__color_eval(std::size_t' "$body" || fail "planned colors were not lowered"
+grep -q '__color_slot_' "$body" || fail "cross-color values lack producer-owned storage"
+grep -q 'struct .*::__Color_runtime' "$runtime" || fail "runtime details are not isolated from the module header"
+refute "generated simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|tf::Taskflow' "$header" "$body" "$runtime"
 
-# The opt-in parallel backend retains generation-based dirty activation. It is
-# intentionally absent from the faster generated serial schedule.
-"$LHD" sim "$work/staged.prp" --setup-only --set sim.workers=2 \
-  --workdir "$work/setup-workers" -q >/dev/null
-parallel_body="$(ls "$work"/setup-workers/sim/*accum.cpp | head -1)"
-parallel_runtime="$(ls "$work"/setup-workers/sim/*accum.color-runtime.hpp | head -1)"
-grep -q '__Color_runtime() : executor(2)' "$parallel_runtime" || fail "sim.workers=2 did not size the Taskflow executor"
-grep -q '__color_runtime->executor.run(__color_runtime->graph).wait()' "$parallel_body" \
-  || fail "the explicit multi-worker backend cannot execute the persistent Taskflow graph"
-grep -q 'if (!__dirty && !__always_run\[__color_index\]) return;' "$parallel_body" \
-  || fail "parallel colors do not retain per-boundary dirty generations"
-grep -q '__color_seen\[' "$parallel_body" || fail "parallel color input generations are not retained across periods"
-grep -q 'slop_update(__rt.__color_slot_' "$parallel_body" \
-  || fail "parallel producer slots do not advance generations on change"
+commit_body="$(sed -n '/::__color_commit(std::size_t/,/^}/p' "$body")"
+grep -q 'slop_update(state, state_din)' <<<"$commit_body" || fail "rise commit does not consume pending state"
+grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational logic"
 
-commit_body="$(sed -n '/::__color_commit_taskflow(std::size_t/,/^}/p' "$body")"
-grep -q 'slop_update(state, state_din)' <<<"$commit_body" || fail "rise commit does not consume the parked pending slot"
-grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational or output logic"
+[ ! -e "$work/setup/sim/runtime/taskflow" ] || fail "generated tree still stages Taskflow"
+refute "standalone BUILD still references Taskflow" -q 'runtime/taskflow' "$work/setup/sim/BUILD"
 
-taskflow="$work/setup/sim/runtime/taskflow/taskflow/taskflow.hpp"
-[ -f "$taskflow" ] || fail "the exact OpenTimer Taskflow payload was not staged into the generated tree"
-grep -q 'runtime/taskflow' "$work/setup/sim/BUILD" || fail "standalone Bazel scaffold cannot include staged Taskflow"
-grep -q 'linkopts = \["-pthread"\]' "$work/setup/sim/BUILD" || fail "standalone Bazel scaffold lacks pthread linkage"
+# Host-compile and execute the exact generated source, including checkpointing.
+"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 --workdir "$work/run" -q >/dev/null
+refute "host build still references Taskflow" -q 'runtime/taskflow' "$work/run/sim/build.ninja"
+refute "checkpoint driver retained worker quiescing" -q '__color_quiesce' "$work/run/sim/drv.cpp"
 
-# Host-compile and execute the exact generated source, not only its shape.
-"$LHD" sim "$work/staged.prp" --set sim.checkpoint_every=1 \
-  --workdir "$work/run" -q >/dev/null
-grep -q -- '-pthread' "$work/run/sim/build.ninja" || fail "Ninja host build lacks pthread compile/link flags"
-grep -q 'runtime/taskflow' "$work/run/sim/build.ninja" || fail "Ninja host build does not use the staged Taskflow copy"
-grep -q '\.__color_quiesce();  // destroy/join Taskflow workers before fork' "$work/run/sim/drv.cpp" \
-  || fail "checkpoint driver can fork with resident Taskflow workers"
-grep -Eq 'runfiles.*opentimer|opentimer.*runfiles' "$work/run/sim/build.ninja" \
-  && fail "Ninja host build baked a disposable Taskflow runfiles path"
-
-# ...and that -I must be ABSOLUTE. `--workdir` is routinely RELATIVE (the runs
-# above happen to pass an absolute TEST_TMPDIR path, which hid this), while the
-# compile runs with its cwd set to the sim dir — so a relative
-# `-I<workdir>/sim/runtime/taskflow` resolves against the wrong directory and the
-# staged payload is invisible ("'taskflow/taskflow.hpp' file not found" with the
-# headers sitting right there). Drive it the way a user does: relative workdir,
-# from a cwd that is not the repo root.
+# A relative workdir must remain valid now that no staged include path is needed.
 lhd_abs="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
 (cd "$work" && "$lhd_abs" sim staged.prp --workdir relwork -q >/dev/null) \
-  || fail "a relative --workdir run failed to build/run the generated simulator"
-tf_inc="$(grep -o -- "-I'\?[^' ]*runtime/taskflow" "$work/relwork/sim/build.ninja" | head -1)"
-[ -n "$tf_inc" ] || fail "relative-workdir Ninja build does not use the staged Taskflow copy"
-case "$tf_inc" in
-  -I\'/* | -I/*) ;;
-  *) fail "staged Taskflow -I is relative ($tf_inc); the compile runs from the sim dir" ;;
-esac
+  || fail "relative --workdir simulation failed"
 
-echo "PASS: flat posedge simulation uses only the persistent state-version color graph"
+echo "PASS: flat posedge simulation uses the serial occurrence-wide color schedule"

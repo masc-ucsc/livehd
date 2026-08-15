@@ -37,15 +37,11 @@ namespace gu = livehd::graph_util;
 // Peel WIDTH-ONLY wrappers off a clock driver so the shape dispatch below sees
 // the operator that actually derives the clock.
 //
-// Widths do not line up across a Verilog round trip: cgen's value model needs
-// one extra bit for an unsigned magnitude, so `clk_b & gate` (two 1-bit nets)
-// comes back as a 2-bit `and_28`, and the reader then narrows it with a
-// Get_mask before it reaches the flop's clock_pin. The ICG fold matched on the
-// IMMEDIATE driver's op, saw `get_mask` instead of `and`, and refused the flop
-// as an unmodellable derived clock -- measured on tests/equiv/mclk_derived,
+// Explicit casts and independently inferred hierarchy boundaries can leave a
+// width-only Get_mask wrapper between a derived clock expression and its
+// consumer. The wrapper changes representation, not the clock's SHAPE, so peel
+// it before recognizing an ICG cone. Measured on tests/equiv/mclk_derived,
 // which is the identical `<clock> & <enable>` cone the fold exists to handle.
-// The extra bit carries no information (it is a zero/sign extension of the same
-// value), so a narrowing is not part of the clock's SHAPE.
 //
 // Same peel set as resolve_clk_input, and the same lowest-port-id rule for
 // picking the value operand out of Get_mask/Set_mask/Sext -- these all take the
@@ -377,32 +373,6 @@ Term mux_arm_cond(cvc5::TermManager& tm, bool hotmux, const Term& sel, int sel_w
 }
 
 }  // namespace
-
-// Real bus width of a pin: bits attribute is the signed magnitude+1 count;
-// an unsigned pin drops the spare sign bit (see lec.md "Bit-width trap").
-int real_width(const hhds::Pin_class& pin) {
-  int b = gu::bits_of(pin);
-  if (b == 0) {
-    return 0;
-  }
-  return gu::is_unsign(pin) ? b - 1 : b;
-}
-
-int real_width(const hhds::Occurrence_pin& pin) { return real_width(pin.base_pin()); }
-
-int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view name) {
-  // A module PORT's `bits` attribute is the LITERAL declared bus width
-  // (`[3:0]` -> 4), NOT the internal magnitude+1 convention that real_width()
-  // assumes for ordinary nets. A port therefore carries exactly `bits`
-  // observable bits regardless of sign; subtracting a "spare sign bit" here
-  // would drop a REAL data bit (e.g. a 4-bit `output [3:0] io_out` driven by a
-  // signed net 0b1010 got truncated to 0b010 = 2, a false PROVEN). cgen
-  // declares every port as `signed [bits-1:0]` (full `bits` width), so the
-  // encoder must use the same width or the lg: LEC and the re-emitted-Verilog
-  // LEC disagree on the same design. (Readers that disagree on a port's width
-  // by a sign-bit slot are still reconciled at the max width in query.cpp.)
-  return gu::bits_of(pin, gio, name);
-}
 
 // Extend / truncate a value to exactly `width` bits.
 Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
@@ -767,7 +737,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             auto site = parent->get_node(hhds::Class_index{steps.back().subnode.value});
             if (auto loop = site.subnode_loop(); loop && loop->index_input && dpin.get_port_id() == *loop->index_input) {
               const int64_t value = loop->index_at(*steps.back().ordinal);
-              const int     width = std::max(1, real_width(dpin));
+              const int     width = std::max(1, gu::real_width(dpin));
               return Val{bv_const(tm_, width, static_cast<uint64_t>(value)), width, value < 0};
             }
           }
@@ -795,7 +765,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // ---- Inputs: shared symbol or a fresh one, mapped onto the input driver pin.
   for (const auto& d : gio->get_input_pin_decls()) {
     auto dpin = g->get_input_pin(d.name);
-    int  w    = real_width_io(dpin, *gio, d.name);
+    int  w    = gu::real_width(dpin, *gio, d.name);
     if (w == 0) {
       // A width-less input is a scalar control signal — a clock (abstracted out
       // of the relational encoding via the flop-state cut) or a 1-bit reset /
@@ -970,7 +940,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (qpin.is_invalid()) {
       continue;
     }
-    int w = real_width(qpin);
+    int w = gu::real_width(qpin);
     if (w == 0) {
       w = 1;
     }
@@ -1455,7 +1425,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           continue;  // operand not ready yet; the fixpoint comes back to it
         }
         auto qp = node.get_driver_pin(0);
-        int  qw = real_width(qp);
+        int  qw = gu::real_width(qp);
         if (qw == 0) {
           qw = 1;
         }
@@ -1641,7 +1611,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               // extending identically and false-PROVE a real sign-vs-zero-extension
               // divergence downstream of the leaf. The UF codomain stays the union
               // width; phase 2 fits the application down to this local width.
-              int         ow   = real_width(dp);
+              int         ow   = gu::real_width(dp);
               if (ow == 0) {
                 ow = 1;
               }
@@ -1683,7 +1653,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               if (ofn == sbox->out_fn.end()) {
                 return fail("state box for '" + defname + "' has no output UF for port '" + port + "'");
               }
-              int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, real_width(dp));
+              int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, gu::real_width(dp));
               Val bov{tm_.mkTerm(Kind::APPLY_UF, {ofn->second, S.term}), ow, !gu::is_unsign(dp)};
               // Deliberately NO x_mask (see the Comb_box note above): smearing a
               // Moore output whenever the abstract state might hold an X made every
@@ -1705,7 +1675,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                 }
               }
               if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
-                int w = real_width(dp);
+                int w = gu::real_width(dp);
                 if (w == 0) {
                   w = 1;
                 }
@@ -1915,17 +1885,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
 
       auto dpin = node.get_driver_pin(0);
-      int  W    = real_width(dpin);
+      int  W    = gu::real_width(dpin);
       if (W == 0) {
         // Comparisons/reductions are 1-bit; default unknown width to that.
         W = 1;
-      }
-      // An ABC standard-cell netlist's Set_mask output concat uses RAW net widths
-      // (its unsigned nets carry no spare sign bit), so the front-end magnitude+1
-      // real_width would truncate the running concatenation a bit at a time. Use
-      // the raw bits there so the stored value keeps full width.
-      if (sub_lib_ != nullptr && op == Ntype_op::Set_mask) {
-        W = std::max(1, gu::bits_of(dpin));
       }
       bool out_signed = !gu::is_unsign(dpin);
 
@@ -2347,11 +2310,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             break;
           }
           // Full contiguous-mask bit-insert (the bit-blast's output concat): out[i]
-          // = (rb<=i<re) ? value[i-rb] : a[i].  Works for both the front-end path
-          // (W = magnitude+1 real_width) and an ABC standard-cell netlist (W = RAW
-          // net width — set above at the dpin width branch, its unsigned nets carry
-          // no spare sign bit).  `a` and `value` are already stored at their own
-          // real_widths; fit() reconciles them to the window/result widths.
+          // = (rb<=i<re) ? value[i-rb] : a[i]. `a` and `value` are already stored
+          // at their own literal widths; fit() reconciles them to the window/result widths.
           int  Wm    = std::max(1, W);
           auto range = mask.get_mask_range();
           int  rb = range.first, re = range.second;
@@ -2459,11 +2419,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             acc      = acc.isNull() ? lt : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {acc, lt});
             total   += concat_tbl[i].width;
           }
-          // The result is ALWAYS non-negative: the pin carries sum(w)+1 bits (the
-          // magnitude plus the always-zero sign slot of an unsigned LiveHD value),
-          // so real_width() already handed back sum(w) for the stamped-unsign pin
-          // and this fit is a no-op there; a wider or signed stamp gets its sign
-          // slot from the zero-extension. Widen-only, never narrow: an
+          // The result is always non-negative and carries exactly sum(w) bits.
+          // Widen-only, never narrow: an
           // under-stamped pin (or an unstamped one, defaulted to W=1 above) would
           // otherwise silently drop the most significant lanes.
           W          = std::max(W, total);
@@ -2497,24 +2454,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (arms.empty()) {
             return fail("Mux/Hotmux has no arms");
           }
-          // A multiplexer's result is exactly as wide as its (equal-width) arms — the
-          // declared output-pin width is advisory and a reader may UNDER-stamp it. The
-          // native slang reader stamps a `casez` result width from the SELECTOR (e.g. a
-          // 2-bit forwardB) rather than the 64-bit data arms, so real_width(dpin) came
-          // back 1 and the arms were truncated to bit 0 (`casez_tmp = data[0]`), a false
-          // REFUTE against a reader that keeps full width. Take the max of the declared
-          // width and the widest arm so the data is never narrowed by a bad pin stamp.
-          // A mux selects whole arms, so its result is the full declared bus width,
-          // NOT the sign-magnitude-reduced real_width(dpin) (which drops the spare
-          // sign bit for an unsigned pin). Without this, an unsigned output fed a
-          // narrower SIGNED arm — e.g. yosys-slang lowers `we ? 8'hFF : 8'h00` with a
-          // true-arm `1'sh1` (1-bit signed -1) — sign-extends into the dropped MSB and
-          // truncates (0xFF -> 0x7F), a false REFUTE. Clamp up to bits_of (widen only).
-          if (int db = gu::bits_of(dpin); db > W) {
-            W = db;
-          }
-          for (const auto& a : arms) {
-            W = std::max(W, a.width);  // never narrow the data below its arms
+          // The result pin is the Mux contract. A typed result may deliberately
+          // be narrower than an arm, in which case selecting that arm truncates
+          // it to W bits. fit() below models both that truncation and extension;
+          // do not widen W from producer metadata and defeat the sink type.
+          //
+          // UNSTAMPED is not "1 bit", though: `W` was defaulted to 1 above for a
+          // pin with no bits attribute at all (readers that size a `casez`
+          // result from the SELECTOR, pass.bitfuzz which deliberately strips the
+          // stamp). Truncating whole data arms to bit 0 there is a silent false
+          // verdict, so an unstamped pin takes its width from its arms.
+          if (gu::bits_of(dpin) == 0) {
+            for (const auto& a : arms) {
+              W = std::max(W, a.width);
+            }
           }
           // default else = last arm (covers in-range exactly + out-of-range det.)
           result = fit(arms.back(), W);
@@ -2579,8 +2532,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               out_val.x_mask = u;
             }
           } else if (op == Ntype_op::Set_mask && !pid(Ntype::get_sink_pid(op, "mask")).empty()
-                     && pid(Ntype::get_sink_pid(op, "mask"))[0].x_mask.isNull()
-                     && !pid(Ntype::get_sink_pid(op, "value")).empty()
+                     && pid(Ntype::get_sink_pid(op, "mask"))[0].x_mask.isNull() && !pid(Ntype::get_sink_pid(op, "value")).empty()
                      && pid(Ntype::get_sink_pid(op, "value"))[0].x_mask.isNull() && !pid(0).empty()) {
             // A bit-insert is EXACT on the X plane: every lane the (constant)
             // mask selects is OVERWRITTEN by `value`, so it stops being unknown;
@@ -2591,8 +2543,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             // real difference on such an output then comes back PROVEN (cva6's
             // bug1 `tag_cmp.hit_way_o`, which yosys refutes). Only the exact,
             // no-X-in-`value` case is claimed here; anything else still smears.
-            Term ax   = fit_x_mask_to(tm_, pid(0)[0], W);
-            Term keep = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
+            Term ax        = fit_x_mask_to(tm_, pid(0)[0], W);
+            Term keep      = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(pid(Ntype::get_sink_pid(op, "mask"))[0], W)});
             out_val.x_mask = ax.isNull() ? zero_w : tm_.mkTerm(Kind::BITVECTOR_AND, {ax, keep});
           } else if (op == Ntype_op::Concat && !concat_tbl.empty()) {
             // A Concat is EXACT on the X plane, and it has to be: unknowns here are
@@ -2621,7 +2573,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               xacc  = xacc.isNull() ? lx : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {xacc, lx});
               xw   += lw;
             }
-            // The sign slot (and any over-wide pin stamp) is a known zero.
+            // Any over-wide unsigned pin stamp is known zero above the concat.
             out_val.x_mask = xacc.isNull() ? zero_w : fit(Val{xacc, xw, false}, W);
           } else {
             // any operand dynamically unknown anywhere -> whole result unknown
@@ -2815,7 +2767,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // property authored in the selected root has exactly one step (the
       // fproperty site), while a property in a child has the parent call-site
       // step(s) followed by the fproperty site.
-      const auto steps                                                                = node.get_occurrence_index().path.steps();
+      const auto steps = node.get_occurrence_index().path.steps();
       if (steps.size() <= 1) {
         out.prop_top.insert(occ);
       } else {
@@ -3035,7 +2987,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     const auto& node  = flops[fi];
     const int   depth = flop_depths[fi];
     auto        qpin  = node.get_driver_pin(0);
-    int         w     = real_width(qpin);
+    int         w     = gu::real_width(qpin);
     if (w == 0) {
       w = 1;
     }
@@ -3548,28 +3500,27 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // one samples at 2 and its consumers fire at 3), so the power-on value is
   // unobservable and the two sides need not agree on it.
   if (phased && !single_step()) {
-    for (const auto& [gkey, cones] : phase_plan_->guard_cones) {
-      bool sampled = false;
-      for (const auto& [nk, pep] : phase_plan_->ep) {
-        if (pep.guard_key == gkey && !pep.live_guard) {
-          sampled = true;
-          break;
-        }
+    // ONE pass over the endpoints instead of two nested scans per guard key
+    // (the old shape was O(guard_cones * endpoints) twice over, on the design's
+    // whole endpoint map). A key is a SAMPLED cut only when some endpoint reads
+    // it that way; `live_guard` endpoints read their cone directly.
+    absl::flat_hash_map<std::string, int> sampled_key_ms;
+    for (const auto& [nk, pep] : phase_plan_->ep) {
+      if (pep.guard_key.empty() || pep.live_guard) {
+        continue;
       }
-      if (!sampled) {
+      // Every consumer of one cell shares the sample microstep, so the first
+      // endpoint that names this key decides it.
+      sampled_key_ms.try_emplace(pep.guard_key, static_cast<int>(pep.guard_sample));
+    }
+    for (const auto& [gkey, cones] : phase_plan_->guard_cones) {
+      const auto sit = sampled_key_ms.find(gkey);
+      if (sit == sampled_key_ms.end()) {
         continue;
       }
       const Val cur       = seed_state(gkey, 1, false);
-      // Every consumer of one cell shares the sample microstep, so read it off
-      // the first endpoint that names this key.
-      int       sample_ms = static_cast<int>(Phase::Close_low);
-      for (const auto& [nk, pep] : phase_plan_->ep) {
-        if (pep.guard_key == gkey) {
-          sample_ms = static_cast<int>(pep.guard_sample);
-          break;
-        }
-      }
-      Term nxt = cur.term;
+      const int sample_ms = sit->second;
+      Term      nxt       = cur.term;
       if (sample_ms == microstep_) {
         Term acc;
         bool gok = true;
@@ -4015,7 +3966,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       return fail("output '" + d.name + "' driver not encodable (missing " + missing_driver_key + ", values "
                   + std::to_string(pin2val.size()) + (pin2val.empty() ? ")" : ", first " + pin2val.begin()->first + ")"));
     }
-    int ow = real_width_io(spin, *gio, d.name);
+    int ow = gu::real_width(spin, *gio, d.name);
     if (ow == 0) {
       // A width-less output port is a 1-bit scalar (Verilog: a port with no
       // range is one bit) — NOT the width of whatever drives it. Defaulting to
