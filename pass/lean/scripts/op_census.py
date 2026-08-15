@@ -235,6 +235,17 @@ def main():
     print("state fields     : %d" % n_flops)
     print("bridge emitted   : %s%s" % (bridge_mode, (" (%d _rec theorems)" % n_rec) if bridge_mode else ""))
     if not nodes:
+        # Distinguish the two very different reasons for an empty certificate.
+        # A memory-bearing design gets a deliberate counts-only stub (the cert
+        # evaluator is bit-vector-only), which is expected today -- reporting it
+        # as "did you forget emit_cert?" sends you looking in the wrong place.
+        mem_stub = re.search(r"^def (\w+)_memory_count : Nat := (\d+)$", text, re.M)
+        if mem_stub:
+            print("\nCERTIFICATE IS THE MEMORY STUB: this design has %s LGraph Memory node(s),"
+                  % mem_stub.group(2))
+            print("so pass.lean emitted counts only (no graphCert / evalGraph / bridge).")
+            print("Expected until the memory-aware certificate lands; not an emit_cert problem.")
+            return 1
         print("\nNO certificate nodes found -- was this emitted with formal.lean.emit_cert=true?")
         return 1
 

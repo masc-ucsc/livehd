@@ -202,7 +202,14 @@ struct Memory_info {
   uint64_t                      size       = 0;
   uint32_t                      wensize    = 0;
   int64_t                       type       = 0;
+  // Read-during-write forwarding MATRIX (graph/cell.cpp pid 5), NOT a bool: bit
+  // (r * n_write_ports + w) set => read ordinal r sees write ordinal w's new data
+  // on a same-cycle same-address collision.  `fwd_known` is false when the pin is
+  // non-constant or the matrix does not fit an i64; the emitter then refuses any
+  // memory where the policy is observable (>=1 read and >=1 write port) rather
+  // than silently assuming read-first.
   int64_t                       fwd        = 0;
+  bool                          fwd_known  = true;
   int64_t                       posclk     = 1;
   // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision
   // window undefined? Kept as a bool, not the matrix — the emitter refuses the
@@ -361,7 +368,18 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     } else if (pname == "type") {
       mi.type = const_pin_int(ctx, e.driver, node, pname);
     } else if (pname == "fwd") {
-      mi.fwd = const_pin_int_or(e.driver, 0);  // unused in async emission; tolerate non-const
+      // NOT lenient: `fwd` IS load-bearing (memory_raw_read_port picks the
+      // pre- or post-write image from it).  A non-constant driver, or a matrix
+      // too wide for an i64, must be refused where it is observable -- see the
+      // post-loop check -- not defaulted to read-first.
+      if (pin_is_const(e.driver)) {
+        const auto v  = pin_const_value(e.driver);
+        mi.fwd_known  = v.is_just_i64();
+        mi.fwd        = mi.fwd_known ? v.to_just_i64() : 0;
+      } else {
+        mi.fwd_known = false;
+        mi.fwd       = 0;
+      }
     } else if (pname == "undef") {
       // ordering="none": the read-during-write window is UNDEFINED. The policy
       // tuple below only knows the two DEFINED answers (write_first from a set
@@ -388,6 +406,18 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       mi.ports[port_id].enable = e.driver;
     } else if (pname == "clock_pin") {
       mi.ports[port_id].clock = e.driver;
+    } else {
+      // No silent drop.  graph/cell.cpp gives the Memory cell pins 0..15, and the
+      // arms above cover 12 of them.  The rest -- `init` (11), and the WHOLE-ARRAY
+      // trio `update` (12) / `update_enable` (13) / `reset` (14) -- change the
+      // cell's semantics: when `update` is driven the cell carries ONE bulk
+      // next-state bus instead of N per-entry write ports, and `reset` restores
+      // `init`.  None of that is modeled, so falling through would emit a memory
+      // with no bulk update and no reset and call it a faithful model.
+      fatal(ctx,
+            memory_policy_summary(mi) + ". unsupported Memory pin `" + pname + "` (raw pid " + std::to_string(raw_pid)
+                + ") is driven. pass.lean models per-entry read/write ports only; `init`/`update`/`update_enable`/`reset` "
+                  "(whole-array contents, bulk next-state, bulk enable, reset) have no counterpart in the emitted model.");
     }
   }
 
@@ -456,6 +486,23 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
               + ". pass.lean cannot model ordering=\"none\" (the `undef` matrix): sram_1r1w_{read,write}_first only express "
                 "the two DEFINED collision answers, so the certificate would assert a value in a window the emitted RTL "
                 "leaves x. Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
+  }
+  // The read-during-write policy is only OBSERVABLE when some read can collide
+  // with some write.  Where it is observable it must be known exactly: guessing
+  // read-first would export a proof about a different design.
+  if (!mi.read_ports.empty() && !mi.write_ports.empty()) {
+    if (!mi.fwd_known) {
+      fatal(ctx,
+            memory_policy_summary(mi)
+                + ". the `fwd` read-during-write matrix is not a readable constant, and this memory has both read and write "
+                  "ports, so the policy is observable. Refusing rather than assuming read-first.");
+    }
+    const auto cells = static_cast<uint64_t>(mi.read_ports.size()) * static_cast<uint64_t>(mi.write_ports.size());
+    if (cells > 62) {
+      fatal(ctx,
+            memory_policy_summary(mi) + ". the `fwd` matrix needs " + std::to_string(cells)
+                + " bits (reads x writes), which does not fit the i64 window used to read it.");
+    }
   }
   mi.sync = (mi.type == 1);
 
@@ -551,9 +598,30 @@ std::string ucast_pin_at(const LeanCtx& ctx, const Node_pin& dpin, uint32_t w) {
 // mem_write_be.  This is the memory next-state and, for a write-first (fwd=1)
 // read, the transparent image the read observes.  For the 1-write case it is
 // behaviorally identical to sram_1r1w_{read,write}_first.
-std::string memory_write_fold(const LeanCtx& ctx, const Memory_info& mi) {
+// Does read ordinal `r` see write ordinal `w`'s new data on a same-cycle
+// same-address collision?  graph/cell.cpp pid 5: bit (r * n_write_ports + w).
+bool memory_fwd_bit(const Memory_info& mi, size_t r_ord, size_t w_ord) {
+  const auto idx = r_ord * mi.write_ports.size() + w_ord;
+  if (idx >= 63) {
+    return false;  // unreachable: parse refuses a matrix this wide
+  }
+  return ((mi.fwd >> idx) & 1) != 0;
+}
+
+// Folded write image.  `r_ord` selects WHICH writes are visible:
+//   - nullopt        -> all of them; this is the memory NEXT STATE.
+//   - a read ordinal -> only the writes that read forwards from, per the `fwd`
+//                       matrix; this is the image that read observes.
+// Writes are applied in port order either way, so a later (higher port_id) write
+// WINS a same-cycle same-address collision.  Each write is enable-gated; a
+// byte-enable memory (wensize>1) uses mem_write_be.
+std::string memory_write_fold(const LeanCtx& ctx, const Memory_info& mi, std::optional<size_t> r_ord = std::nullopt) {
   std::string acc = "s." + mi.field;
-  for (auto widx : mi.write_ports) {
+  for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
+    if (r_ord.has_value() && !memory_fwd_bit(mi, *r_ord, w_ord)) {
+      continue;  // this read does not forward from this write
+    }
+    const auto  widx     = mi.write_ports[w_ord];
     const auto& p        = mi.ports.at(widx);
     const auto  addr     = ucast_pin_at(ctx, p.addr, mi.addr_width);
     const auto  data     = ucast_pin_at(ctx, p.din, mi.bits);
@@ -577,15 +645,26 @@ std::string memory_read_enable_port(const LeanCtx& ctx, const Memory_info& mi, s
   return "(bitvec_nonzero " + ucast_pin_at(ctx, rp.enable, pin_width(ctx, rp.enable, mi.node)) + ")";
 }
 
-// Raw (ungated) read value of a specific read port.  Read-during-write policy is
-// memory-wide (mi.fwd): fwd=1 (write-first / transparent) reads the post-write
-// folded image so a same-cycle write forwards; else (read-first) reads the old
-// memory s.field.  Matches sram_1r1w_{write,read}_first for the 1R1W case and
-// extends it to multiple write ports (last writer wins via the fold).
+// Raw (ungated) read value of a specific read port.  The read-during-write policy
+// is PER (read, write) PAIR, not memory-wide: this read observes the image with
+// exactly its forwarded writes applied (see memory_write_fold).  With no forwarded
+// write that degenerates to the committed image `s.field` (read-first); with all
+// of them, to the full post-write image (write-first).
+//
+// This used to test `mi.fwd == 1` -- correct only for 1R1W, since bit (r*n_wr+w)
+// means a 1R2W all-forwarding memory encodes as 3 and silently fell into the
+// read-first branch.  The hpdcache shape (1 read / 18 writes) is exactly that case.
 std::string memory_raw_read_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
   const auto& rp    = mi.ports.at(port_idx);
   const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
-  const auto  base  = (mi.fwd == 1 && !mi.write_ports.empty()) ? memory_write_fold(ctx, mi) : ("s." + mi.field);
+  size_t      r_ord = 0;
+  for (size_t k = 0; k < mi.read_ports.size(); ++k) {
+    if (mi.read_ports[k] == port_idx) {
+      r_ord = k;
+      break;
+    }
+  }
+  const auto base = mi.write_ports.empty() ? ("s." + mi.field) : memory_write_fold(ctx, mi, r_ord);
   return "mem_read " + base + " " + raddr;
 }
 
@@ -1549,6 +1628,21 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
   }
 
+  // Fail LOUD, not quiet.  The four `emit_cert && emit_fast_bridge &&
+  // memory_nodes.empty()` conjunctions below silently degrade a memory design to
+  // "no bridge", so asking for a bridge and getting a file without one looked like
+  // the bridge had been emitted and passed.  pass.isabelle refuses outright
+  // (pass_isabelle.cpp:2645-2656); match that.  The underlying reason is the same
+  // in both passes: the certificate evaluator is bit-vector-only, so a bridge over
+  // a memory design would be unprovable rather than merely absent.
+  if (emit_fast_bridge && !memory_nodes.empty()) {
+    fatal(ctx,
+          "formal.lean.emit_fast_bridge is not supported for designs with memory nodes ("
+              + std::to_string(memory_nodes.size())
+              + " found): the graph certificate has no memory operator, so memory designs get a counts-only stub and there "
+                "is nothing to bridge to. Emit with emit_fast_bridge=false, or wait for the memory-aware certificate.");
+  }
+
   auto topo = reachable_topo_order(roots, flop_nids);
 
   std::ofstream ofs(lean_path);
@@ -2036,8 +2130,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // ---------------------------------------------------------------------------
   // Fast-view bridge (step 5): <base>_comb = <base>_comb_cert, proven the general
   // way via GraphRefine.evalGraph_of_localAgree + the OpBridge per-op lemmas.
-  // (emit_cert is true and there are no memory nodes at this point.)
+  // Reaching here implies emit_cert and no memory nodes: memory now aborts up
+  // front (see the emit_fast_bridge check before the topo sort), and a
+  // memory-bearing design returned early at the certificate stub before this.
+  // Assert it rather than rely on that reasoning holding after a future edit --
+  // this site is the one that is NOT part of the four `&&`-gates below.
   // ---------------------------------------------------------------------------
+  if (emit_fast_bridge && !memory_nodes.empty()) {
+    fatal(ctx, "internal: reached fast-bridge emission with memory nodes present");
+  }
   if (emit_fast_bridge) {
     const std::string P = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)")
                                       : ("(i : " + base_name + "_in)");
