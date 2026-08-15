@@ -60,9 +60,6 @@ protected:
   // scalar sweep, so downstream passes see the canonical `din = data` form.
   void canonicalize_latch_holds(hhds::Graph* g);
 
-  // Canonicalize Get_mask(x, ones[lo,hi)) with lo>0 into
-  // Get_mask(SRA(x,lo), 2^(hi-lo)-1). Must run AFTER scalar_pass.
-  void normalize_get_mask_slices(hhds::Graph* g);
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
   // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.
   void canonicalize_and_masks(hhds::Graph* g);

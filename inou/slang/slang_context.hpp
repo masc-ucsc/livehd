@@ -329,13 +329,10 @@ private:
   // flat bus. Deep READS of a nested-struct field route through the leaf and are
   // safe to bundle (small_todo_working.md Type B).
   absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_deep_written_;
-  // Plain packed-array LOCALS driven by a single whole per-element assignment (a
-  // `'{...}` pattern or a per-element `{...}` concat) and read by element select,
-  // with no element writes (the Type C shift-network shape — an element reading a
-  // sibling of the same array reads the stale whole-array bus / a false comb
-  // cycle). Split into per-element leaf nets (declare_array_leaves) — the array
-  // analogue of the struct bundle — so each element read routes to its own net.
-  // Reset per module.
+  // Packed scalar-element arrays eligible for storage-aware SROA. Locals become
+  // per-element wire/mut leaves and clocked packed arrays become per-element reg
+  // leaves. True memories and ports use their dedicated representations. Reset
+  // per module.
   absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_array_bundle_;
   bool                                                        is_packed_array_bundle_var(const slang::ast::ValueSymbol& sym) const;
   void                                                        declare_array_leaves(const slang::ast::ValueSymbol& sym);
@@ -407,6 +404,10 @@ private:
   // Definition names of the elaboration roots (slang's root.topInstances).
   // `flat_top_io` packs the IO of exactly these.
   absl::flat_hash_set<std::string> top_defs_;
+  // Profitable internal packed-vector ports selected by a per-module prepass.
+  // Keys are `<specialized-unit-name>\x1f<port-name>` so definition emission
+  // and every instance call make the same decision without expanding top IO.
+  absl::flat_hash_set<std::string> vector_bundle_ports_;
   const Struct_info*               bundle_port_of(const slang::ast::Symbol& sym) const;
   // COMB bundle OUTPUT ports drive a local per-field SHADOW accumulator
   // (`<port>__bpo.<field>` mut leaves, poison-initialized) and the port leaf

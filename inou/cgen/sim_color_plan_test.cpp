@@ -180,6 +180,54 @@ std::shared_ptr<hhds::Graph> make_combinational_chain(std::string_view tag, size
   return graph;
 }
 
+std::shared_ptr<hhds::Graph> make_fixed_lane_extract(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+  auto  io  = lib.create_io(std::string(tag) + "_fixed_lane");
+  io->add_input("in", 0);
+  io->add_output("out", 1);
+  io->set_bits("in", 16);
+  io->set_bits("out", 4);
+  io->set_unsign("in", true);
+  io->set_unsign("out", true);
+  auto graph = io->create_graph();
+
+  auto producer = gu::create_typed_node(*graph, Ntype_op::Not);
+  graph->get_input_pin("in").connect_sink(producer.create_sink_pin(0));
+  auto packed = producer.create_driver_pin(0);
+  gu::set_bits(packed, 16);
+  gu::set_unsign(packed);
+
+  auto get_mask = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  packed.connect_sink(gu::setup_sink_by_name(get_mask, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(0xf0)).connect_sink(gu::setup_sink_by_name(get_mask, "mask"));
+  auto lane = get_mask.create_driver_pin(0);
+  gu::set_bits(lane, 4);
+  gu::set_unsign(lane);
+  lane.connect_sink(graph->get_output_pin("out"));
+  return graph;
+}
+
+std::shared_ptr<hhds::Graph> make_fixed_top_input_lane_extract(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+  auto  io  = lib.create_io(std::string(tag) + "_fixed_top_input_lane");
+  io->add_input("in", 0);
+  io->add_output("out", 1);
+  io->set_bits("in", 16);
+  io->set_bits("out", 4);
+  io->set_unsign("in", true);
+  io->set_unsign("out", true);
+  auto graph = io->create_graph();
+
+  auto get_mask = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  graph->get_input_pin("in").connect_sink(gu::setup_sink_by_name(get_mask, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(0xf0)).connect_sink(gu::setup_sink_by_name(get_mask, "mask"));
+  auto lane = get_mask.create_driver_pin(0);
+  gu::set_bits(lane, 4);
+  gu::set_unsign(lane);
+  lane.connect_sink(graph->get_output_pin("out"));
+  return graph;
+}
+
 std::shared_ptr<hhds::Graph> make_narrow_child_boundary(std::string_view tag) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
@@ -210,7 +258,7 @@ std::shared_ptr<hhds::Graph> make_narrow_child_boundary(std::string_view tag) {
   auto parent = parent_io->create_graph();
   gu::set_bits(parent->get_input_pin("x"), 65);
   gu::set_bits(parent->get_input_pin("clk"), 1);
-  auto pnot   = gu::create_typed_node(*parent, Ntype_op::Not);
+  auto pnot = gu::create_typed_node(*parent, Ntype_op::Not);
   parent->get_input_pin("x").connect_sink(pnot.create_sink_pin(0));
   auto wide_value = pnot.create_driver_pin(0);
   gu::set_bits(wide_value, 65);
@@ -319,8 +367,8 @@ TEST(SimColorPlan, ChildPortCastKeepsProducerStorageAndConsumerWidthsSeparate) {
   auto plan  = livehd::sim::Color_plan::discover(graph.get());
 
   ASSERT_TRUE(plan.complete()) << plan.report();
-  bool found_narrowing_boundary = false;
-  size_t top_outputs            = 0;
+  bool   found_narrowing_boundary = false;
+  size_t top_outputs              = 0;
   for (const auto& slot : plan.boundary_slots()) {
     if (slot.kind == livehd::sim::Color_plan::Boundary_kind::top_output) {
       ++top_outputs;
@@ -378,19 +426,18 @@ TEST(SimColorPlan, ConditionalBoundaryExemptsForwardedDefinitionValid) {
   }
   ASSERT_NE(conditional_owner, livehd::sim::Color_plan::invalid_index);
   bool saw_conditional_body = false;
-  bool saw_unconditional     = false;
+  bool saw_unconditional    = false;
   for (const auto& version : plan.version_sites()) {
     saw_conditional_body |= version.control_owner == conditional_owner;
-    saw_unconditional |= version.control_owner == livehd::sim::Color_plan::invalid_index;
+    saw_unconditional    |= version.control_owner == livehd::sim::Color_plan::invalid_index;
   }
   EXPECT_TRUE(saw_conditional_body);
   EXPECT_TRUE(saw_unconditional) << "the forwarded __valid occurrence is part of its enclosing contract, not a new local region";
   for (const auto& color : plan.colors()) {
     const size_t owner = plan.version_sites()[color.members.front()].control_owner;
     for (const size_t member : color.members) {
-      EXPECT_EQ(plan.version_sites()[member].control_owner, owner)
-          << "coarsening must not erase a structural activation boundary\n"
-          << plan.report();
+      EXPECT_EQ(plan.version_sites()[member].control_owner, owner) << "coarsening must not erase a structural activation boundary\n"
+                                                                   << plan.report();
     }
   }
 }
@@ -495,6 +542,53 @@ TEST(SimColorPlan, CoarsensCombinationalChainsWithoutCrossingExecutionSlots) {
   }
   EXPECT_EQ(top_inputs, 1u);
   EXPECT_EQ(top_outputs, 2u);
+}
+
+TEST(SimColorPlan, ConstantGetMaskUsesAnLsbAlignedBoundaryLane) {
+  auto graph = make_fixed_lane_extract("fixed_lane");
+  auto plan  = livehd::sim::Color_plan::discover(graph.get());
+
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  size_t lane_uses = 0;
+  for (const auto& use : plan.value_uses()) {
+    const auto& consumer = plan.version_sites()[use.consumer_version];
+    if (livehd::graph_util::type_op_of(plan.sites()[consumer.base_site].node.base_node()) != Ntype_op::Get_mask
+        || use.consumer_port != Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+      continue;
+    }
+    ++lane_uses;
+    EXPECT_TRUE(use.preextracted);
+    EXPECT_EQ(use.producer_extract_lo, 4u);
+    EXPECT_EQ(use.producer_extract_hi, 8u);
+    EXPECT_EQ(use.producer_shift, 0u);
+    EXPECT_EQ(use.width, 4u);
+    EXPECT_EQ(use.consumer_width, 4u);
+    EXPECT_TRUE(use.unsign);
+  }
+  EXPECT_EQ(lane_uses, 2u) << "the pre-rise and post-fall observations use the same fixed lane contract\n" << plan.report();
+}
+
+TEST(SimColorPlan, ConstantGetMaskTopInputKeepsTheExtractedLaneWidth) {
+  auto graph = make_fixed_top_input_lane_extract("fixed_top_input_lane");
+  auto plan  = livehd::sim::Color_plan::discover(graph.get());
+
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  size_t lane_uses = 0;
+  for (const auto& use : plan.value_uses()) {
+    const auto& consumer = plan.version_sites()[use.consumer_version];
+    if (livehd::graph_util::type_op_of(plan.sites()[consumer.base_site].node.base_node()) != Ntype_op::Get_mask
+        || use.consumer_port != Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+      continue;
+    }
+    ++lane_uses;
+    EXPECT_TRUE(use.top_input);
+    EXPECT_TRUE(use.preextracted);
+    EXPECT_EQ(use.width, 4u);
+    EXPECT_EQ(use.consumer_width, 4u);
+    EXPECT_EQ(use.producer_extract_lo, 4u);
+    EXPECT_EQ(use.producer_extract_hi, 8u);
+  }
+  EXPECT_EQ(lane_uses, 2u) << plan.report();
 }
 
 TEST(SimColorPlan, StateActionsRemainSingletonColors) {

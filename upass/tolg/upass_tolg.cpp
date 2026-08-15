@@ -1079,6 +1079,23 @@ private:
       // Runner-stamped instance-path prefix for a reg inside an inlined comb
       // (`pipeB_ex_mem`); finalize_regs prepends it (dotted) to the local name.
       info.hier_prefix = std::string(val);
+    } else if (key == "sroa_origin") {
+      std::string_view origin = val;
+      if (origin.size() >= 2
+          && ((origin.front() == '\'' && origin.back() == '\'') || (origin.front() == '"' && origin.back() == '"'))) {
+        origin = origin.substr(1, origin.size() - 2);
+      }
+      info.aggregate_origin = std::string(origin);
+    } else if (key == "sroa_source_index") {
+      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_source_index);
+    } else if (key == "sroa_lane_ordinal") {
+      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_lane_ordinal);
+    } else if (key == "sroa_bit_offset") {
+      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_bit_offset);
+    } else if (key == "sroa_bit_width") {
+      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_bit_width);
+    } else if (key == "sroa_extent") {
+      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_extent);
     } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
     } else {
@@ -1272,6 +1289,17 @@ private:
           livehd::graph_util::set_pin_name(qn, final_name);
           flop.set_name(final_name);
         }
+      }
+
+      if (!info.aggregate_origin.empty()) {
+        const std::string aggregate_name
+            = info.hier_prefix.empty() ? info.aggregate_origin : (info.hier_prefix + "." + info.aggregate_origin);
+        flop.attr(livehd::attrs::aggregate_origin).set(aggregate_name);
+        flop.attr(livehd::attrs::aggregate_source_index).set(info.aggregate_source_index);
+        flop.attr(livehd::attrs::aggregate_lane_ordinal).set(info.aggregate_lane_ordinal);
+        flop.attr(livehd::attrs::aggregate_bit_offset).set(info.aggregate_bit_offset);
+        flop.attr(livehd::attrs::aggregate_bit_width).set(info.aggregate_bit_width);
+        flop.attr(livehd::attrs::aggregate_extent).set(info.aggregate_extent);
       }
 
       // Runs after the walk: anchor this reg's diagnostics at its declaration
@@ -1567,6 +1595,130 @@ private:
     if (rhs.is_invalid()) {
       return;
     }
+    const std::string lhs_text{lnast_->get_name(lhs)};
+
+    // Comptime arrays have already been evaluated and every runtime use is
+    // materialized by the runner (for example as a tuple-literal reg init).
+    // Their original initializer stores remain in the marked LNAST for source
+    // fidelity, but they must not mint hardware or enter scalar-array SROA.
+    if (comptime_array_names_.contains(lhs_text)) {
+      return;
+    }
+
+    // Combinational typed positional array. A two-child store is a whole-value
+    // initializer/replacement; additional children are indices followed by the
+    // element value. The live representation is a packed bus with element 0 in
+    // the least-significant lane.
+    if (auto ait = array_scalar_views_.find(lhs_text); ait != array_scalar_views_.end()) {
+      auto& view = ait->second;
+      auto  next = lnast_->get_sibling_next(rhs);
+      if (next.is_invalid()) {
+        Pin value_pin;
+        if (Lnast_ntype::is_const(lnast_->get_type(rhs))) {
+          auto txt = lnast_->get_name(rhs);
+          auto v   = (txt == "nil" || txt == "0sb?") ? Dlop::create_integer(0) : Dlop::from_pyrope(txt);
+          if (!v || !v->is_integer()) {
+            error_here("upass.tolg: whole-array value '{}' for '{}' is not an integer", txt, lhs_text);
+            return;
+          }
+          auto lane   = v->and_op(*Dlop::get_mask_value(view.elem_mw));
+          auto packed = Dlop::create_integer(0);
+          for (int64_t i = 0; i < view.size; ++i) {
+            packed = packed->or_op(*lane->shl_op(*Dlop::create_integer(i * view.elem_mw)));
+          }
+          value_pin = create_const(*g_, *packed);
+        } else if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
+          const std::string rhs_name{lnast_->get_name(rhs)};
+          if (auto tit = tuple_recs_.find(rhs_name); tit != tuple_recs_.end() && tit->second.named.empty()
+                                                     && static_cast<int64_t>(tit->second.elems.size()) == view.size) {
+            auto packed = Dlop::create_integer(0);
+            for (int64_t i = 0; i < view.size; ++i) {
+              const auto e = tit->second.elems[static_cast<size_t>(i)];
+              if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
+                error_here("upass.tolg: runtime tuple whole-array value for '{}' is not supported", lhs_text);
+                return;
+              }
+              auto ev = Dlop::from_pyrope(lnast_->get_name(e));
+              if (!ev || !ev->is_integer()) {
+                error_here("upass.tolg: array '{}' initializer element is not an integer", lhs_text);
+                return;
+              }
+              auto lane = ev->and_op(*Dlop::get_mask_value(view.elem_mw));
+              packed    = packed->or_op(*lane->shl_op(*Dlop::create_integer(i * view.elem_mw)));
+            }
+            value_pin = create_const(*g_, *packed);
+          } else {
+            value_pin = leaf(rhs).pin;
+          }
+        } else {
+          value_pin = leaf(rhs).pin;
+        }
+        record(lhs_text, value_pin, static_cast<int32_t>(view.size * view.elem_mw));
+        return;
+      }
+
+      // One-dimensional element store for now; nested dimensions stay on the
+      // existing memory path until their row-major flattening is generalized.
+      auto value_nid = next;
+      if (!lnast_->get_sibling_next(next).is_invalid()) {
+        error_here("upass.tolg: scalar-replaced array '{}' currently supports one element index", lhs_text);
+        return;
+      }
+      auto base_it = pin_map_.find(lhs_text);
+      if (base_it == pin_map_.end()) {
+        error_here("upass.tolg: array '{}' is written before it has an initializer", lhs_text);
+        return;
+      }
+      Val  base{base_it->second, static_cast<int32_t>(view.size * view.elem_mw)};
+      auto iv = leaf(value_nid);
+
+      if (Lnast_ntype::is_const(lnast_->get_type(rhs))) {
+        auto ci = Dlop::from_pyrope(lnast_->get_name(rhs));
+        if (!ci || !ci->is_just_i64() || ci->to_just_i64() < 0 || ci->to_just_i64() >= view.size) {
+          error_at(nid,
+                   {"array-index-out-of-range", "type"},
+                   "Pyrope array index {} is outside [0, {}) for '{}'",
+                   lnast_->get_name(rhs),
+                   view.size,
+                   lhs_text);
+          return;
+        }
+        const int64_t off  = ci->to_just_i64() * view.elem_mw;
+        auto          mask = Dlop::get_mask_value(static_cast<int>(off + view.elem_mw - 1), static_cast<int>(off));
+        auto          sm   = make_node(Ntype_op::Set_mask);
+        setup_sink_by_name(sm, "a").connect_driver(base.pin);
+        setup_sink_by_name(sm, "mask").connect_driver(create_const(*g_, *mask));
+        setup_sink_by_name(sm, "value").connect_driver(iv.pin);
+        auto out = sm.create_driver_pin(0);
+        set_ubits(out, base.mw);
+        record(lhs_text, out, base.mw);
+        return;
+      }
+
+      auto index = leaf(rhs);
+      auto mult  = make_node(Ntype_op::Mult);
+      setup_sink_by_name(mult, "as").connect_driver(index.pin);
+      setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+      auto offset = mult.create_driver_pin(0);
+      set_ubits(offset, std::max<int32_t>(index.mw + std::bit_width(static_cast<uint32_t>(view.elem_mw)), 1));
+
+      auto maskn = make_node(Ntype_op::SHL);
+      setup_sink_by_name(maskn, "a").connect_driver(create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+      setup_sink_by_name(maskn, "b").connect_driver(offset);
+      auto mask = maskn.create_driver_pin(0);
+      set_ubits(mask, base.mw);
+
+      auto shifted = make_node(Ntype_op::SHL);
+      setup_sink_by_name(shifted, "a").connect_driver(iv.pin);
+      setup_sink_by_name(shifted, "b").connect_driver(offset);
+      auto placed = shifted.create_driver_pin(0);
+      set_ubits(placed, base.mw);
+
+      auto out = lower_dynamic_mask_rmw(base, mask, placed);
+      record(lhs_text, out, base.mw);
+      lower_array_index_assert(index, view.size, nid);
+      return;
+    }
     // 1a-mem — an indexed store to a declared memory becomes a write port;
     // the 2-child whole-array form is the mut/const array initializer.
     if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs))); mit != mem_map_.end()) {
@@ -1576,6 +1728,33 @@ private:
         lower_mem_store(lhs, lnast_->get_name(lhs), mit->second);
       }
       return;
+    }
+    // A bit-view or whole-value update of a combinational typed array is
+    // SSA-versioned (`r___ssa_N = packed_bus`). Keep that version as a scalar
+    // packed alias with the original array layout. Subsequent bit reads use the
+    // bus directly and element reads extract one declared-width lane.
+    if (lnast_->get_sibling_next(rhs).is_invalid()) {
+      const std::string base = logical_key(lhs_text);
+      if (base != lhs_text) {
+        if (auto ait = array_scalar_views_.find(base); ait != array_scalar_views_.end()) {
+          auto v = leaf(rhs);
+          record(lhs_text, v.pin, v.mw);
+          auto view_copy                = ait->second;
+          array_scalar_views_[lhs_text] = std::move(view_copy);
+          return;
+        }
+        if (auto mit = mem_map_.find(base); mit != mem_map_.end() && mit->second.is_array) {
+          auto v = leaf(rhs);
+          record(lhs_text, v.pin, v.mw);
+          array_scalar_views_[lhs_text] = Array_scalar_view{
+              .size        = mit->second.size,
+              .dims        = mit->second.dims,
+              .elem_mw     = mit->second.elem_mw,
+              .elem_signed = mit->second.elem_signed,
+          };
+          return;
+        }
+      }
     }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
       error_at(lhs,
@@ -1652,6 +1831,10 @@ private:
         auto rec_copy                      = tit->second;
         tuple_recs_[std::string(lhs_name)] = std::move(rec_copy);
         return;
+      }
+      if (auto ait = array_scalar_views_.find(rhs_name); ait != array_scalar_views_.end()) {
+        auto view_copy                             = ait->second;
+        array_scalar_views_[std::string(lhs_name)] = std::move(view_copy);
       }
       if (auto mrt = mem_results_.find(rhs_name); mrt != mem_results_.end()) {
         auto rec_copy                       = mrt->second;
@@ -1781,14 +1964,33 @@ private:
       lower_wire_declare(name_nid, type_nid, nid);
       return;
     }
-    // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
-    // memory; a mut/const array that survived to tolg (runtime-indexed) → a
-    // comb type=2 array / ROM. Never a Flop, never a plain binding.
+    // Storage intent precedes representation: a `reg` array is persistent and
+    // remains a Memory cell; a mut/const array is a combinational aggregate and
+    // receives a packed scalar view that indexed operations can scalar-replace.
     const bool is_reg   = mode == "reg" || mode.starts_with("reg ");
     const bool is_latch = mode == "latch";  // level-sensitive latch (din+enable, no clock)
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
         && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
-      lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
+      if (mode.find("comptime") != std::string_view::npos) {
+        comptime_array_names_.insert(std::string(lnast_->get_name(name_nid)));
+        return;
+      }
+      if (is_reg) {
+        lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/false);
+      } else {
+        const auto elem_nid         = lnast_->get_first_child(type_nid);
+        const bool multidimensional = !elem_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid));
+        const bool has_inline_init  = !lnast_->get_sibling_next(mode_nid).is_invalid();
+        if (multidimensional || has_inline_init) {
+          // Slang ROM/array initializers are children of the declaration, and
+          // nested arrays retain row-major address semantics. Keep those as a
+          // Memory cell; the scalar view is for one-dimensional, store-driven
+          // combinational arrays only.
+          lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/true);
+        } else {
+          lower_comb_array_declare(name_nid, type_nid);
+        }
+      }
       return;
     }
 
@@ -1930,6 +2132,12 @@ private:
     std::string      name_override;  // explicit `name=` — replaces the local flop name
     std::string      hier_prefix;    // runner-stamped `__hier` instance path (e.g.
                                      // "pipeB_ex_mem")
+    std::string      aggregate_origin;
+    int32_t          aggregate_source_index = 0;
+    int32_t          aggregate_lane_ordinal = 0;
+    int32_t          aggregate_bit_offset   = 0;
+    int32_t          aggregate_bit_width    = 0;
+    int32_t          aggregate_extent       = 0;
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
@@ -2039,6 +2247,16 @@ private:
     // Verilog nonblocking semantics.
     Pin                          update_val{};  // current accumulated update bus value
     Pin                          update_en{};   // current accumulated update enable (invalid => always-on)
+  };
+
+  // Packed scalar SSA version of a combinational typed positional array.
+  // The value itself lives in pin_map_; this side record preserves the array
+  // extent and lane type so tuple_get can recover element semantics.
+  struct Array_scalar_view {
+    int64_t              size = 0;
+    std::vector<int64_t> dims;
+    int32_t              elem_mw     = 0;
+    bool                 elem_signed = false;
   };
 
   static constexpr int kMemPortStride = static_cast<int>(Ntype::Memory_port_stride);
@@ -2366,6 +2584,49 @@ private:
       return it->second;
     }
     return 0;
+  }
+
+  // A mut/const positional array is combinational aggregate storage, not a
+  // persistent Memory. Preserve its declared shape while representing the live
+  // value as one packed scalar bus; indexed reads/writes below recover lanes.
+  // This keeps the logical LNAST array intact and leaves physical leaf SROA to
+  // downstream transformations.
+  //
+  // ONE-DIMENSIONAL by construction: lower_declare sends a nested
+  // `comp_type_array` element (and any inline initializer) to lower_mem_declare
+  // instead, so the element type reaching here is always a scalar. A nested
+  // element that ever did reach here would take the "sized scalar element type"
+  // error below (declared_width of an array type is 0), never a silent
+  // mis-lowering — so there is no multi-dimension walk to maintain here.
+  void lower_comb_array_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid) {
+    auto    elem_nid = lnast_->get_first_child(type_nid);
+    auto    len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
+    int64_t size     = 0;
+    if (!elem_nid.is_invalid() && !len_nid.is_invalid()) {
+      std::string len_txt{lnast_->get_name(len_nid)};
+      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
+        len_txt = len_txt.substr(1, len_txt.size() - 2);
+      }
+      auto d = Dlop::from_pyrope(len_txt);
+      if (!d || !d->is_just_i64() || d->to_just_i64() <= 0) {
+        error_here("upass.tolg: array '{}' size '{}' is not a positive comptime constant",
+                   lnast_->get_name(name_nid),
+                   lnast_->get_name(len_nid));
+        return;
+      }
+      size = d->to_just_i64();
+    }
+    const auto [elem_mw, elem_signed] = declared_width(elem_nid);
+    if (size <= 0 || elem_mw <= 0) {
+      error_here("upass.tolg: array '{}' requires a sized scalar element type", lnast_->get_name(name_nid));
+      return;
+    }
+    array_scalar_views_[std::string(lnast_->get_name(name_nid))] = Array_scalar_view{
+        .size        = size,
+        .dims        = {size},
+        .elem_mw     = elem_mw,
+        .elem_signed = elem_signed,
+    };
   }
 
   // declare(ref name, comp_type_array(elem_type, const '[N]'), const mode
@@ -3389,7 +3650,59 @@ private:
                "be lowered to a netlist",
                src.is_invalid() ? std::string_view{"?"} : lnast_->get_name(src));
     }
-    auto it = mem_map_.find(std::string(lnast_->get_name(src)));
+    const std::string src_name{lnast_->get_name(src)};
+    if (auto ait = array_scalar_views_.find(src_name); ait != array_scalar_views_.end()) {
+      if (!lnast_->get_sibling_next(idx).is_invalid()) {
+        error_here("upass.tolg: scalar-replaced array '{}' currently supports one element index", src_name);
+        return;
+      }
+      auto packed = leaf(src);
+      auto iv     = leaf(idx);
+      Pin  offset;
+      bool dynamic_index = false;
+      if (Lnast_ntype::is_const(lnast_->get_type(idx))) {
+        auto ci = Dlop::from_pyrope(lnast_->get_name(idx));
+        if (!ci || !ci->is_just_i64() || ci->to_just_i64() < 0 || ci->to_just_i64() >= ait->second.size) {
+          error_at(nid,
+                   {"array-index-out-of-range", "type"},
+                   "Pyrope array index {} is outside [0, {}) for '{}'",
+                   lnast_->get_name(idx),
+                   ait->second.size,
+                   src_name);
+          return;
+        }
+        offset = create_const(*g_, *Dlop::create_integer(ci->to_just_i64() * ait->second.elem_mw));
+      } else {
+        dynamic_index = true;
+        auto mult     = make_node(Ntype_op::Mult);
+        setup_sink_by_name(mult, "as").connect_driver(iv.pin);
+        setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(ait->second.elem_mw)));
+        offset = mult.create_driver_pin(0);
+        set_ubits(offset, std::max<int32_t>(iv.mw + std::bit_width(static_cast<uint32_t>(ait->second.elem_mw)), 1));
+      }
+
+      auto sra = make_node(Ntype_op::SRA);
+      setup_sink_by_name(sra, "a").connect_driver(packed.pin);
+      setup_sink_by_name(sra, "b").connect_driver(offset);
+      auto shifted = sra.create_driver_pin(0);
+      set_ubits(shifted, packed.mw);
+
+      auto gm = make_node(Ntype_op::Get_mask);
+      setup_sink_by_name(gm, "a").connect_driver(shifted);
+      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(ait->second.elem_mw)));
+      auto out = gm.create_driver_pin(0);
+      if (ait->second.elem_signed) {
+        set_sbits(out, ait->second.elem_mw);
+        record(lnast_->get_name(dst), out, ait->second.elem_mw);
+      } else {
+        bind_result(lnast_->get_name(dst), out, ait->second.elem_mw);
+      }
+      if (dynamic_index) {
+        lower_array_index_assert(iv, ait->second.size, nid);
+      }
+      return;
+    }
+    auto it = mem_map_.find(src_name);
     if (it == mem_map_.end()) {
       // Multi-output Sub result: tuple_get(dst, result, 'port') binds that
       // output port's driver pin with the io-entry width/sign contract.
@@ -4997,21 +5310,13 @@ private:
       return;
     }
 
-    auto m = leaf(hi);
-
-    // width = m - n + 1   (Sum sums sink "a", subtracts sink "b").
-    auto width = make_node(Ntype_op::Sum);
-    setup_sink_by_name(width, "as").connect_driver(m.pin);
-    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    setup_sink_by_name(width, "bs").connect_driver(n.pin);
-    const int32_t w_mw = std::max(n.mw, m.mw) + 1;
-    auto          w_dp = width.create_driver_pin(0);
-    set_ubits(w_dp, w_mw);
+    auto m  = leaf(hi);
+    auto rw = lower_range_width(n, m);
 
     // pow = 1 << width. One headroom bit represents 2^a_width before -1.
     auto pow = make_node(Ntype_op::SHL);
     setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    setup_sink_by_name(pow, "b").connect_driver(w_dp);
+    setup_sink_by_name(pow, "b").connect_driver(rw.clamped);
     const int32_t pow_mw = a_val.mw + 1;
     auto          pow_dp = pow.create_driver_pin(0);
     set_ubits(pow_dp, pow_mw);
@@ -5029,7 +5334,70 @@ private:
     setup_sink_by_name(andn, "as").connect_driver(mask_dp);
     bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw);
 
-    lower_range_assert(n, m, loc_nid);
+    lower_range_assert(rw.reversed, loc_nid);
+  }
+
+  // `hi + 1 - lo`, plus the one-bit "this range is REVERSED" flag that both the
+  // data path and the runtime assert need. Shared by the range READ and the
+  // range WRITE: the two halves of one bit view have to agree on the geometry.
+  //
+  // The difference is genuinely SIGNED. Nothing orders two runtime endpoints
+  // (`lo`/`hi` are plain lowered values, and the `hi >= lo` obligation is a
+  // runtime lgassert that no width/range inference consumes), which is the same
+  // rule lower_op applies to every other subtraction -- "a subtraction can go
+  // negative regardless of operand signs". Stamping it unsigned was a lie the
+  // shifts below then read as a huge count: `1 << width` wrapped to 0, the low
+  // mask to all-ones, and a WRITE clobbered every bit of its destination --
+  // outside the requested range, and decided before the assert ever fires.
+  //
+  // The flag tests the SIGN OF THE WIDTH, not `hi < lo`. An LT node carries the
+  // structural u1 hint on its output pin and cgen.verilog derives the
+  // comparison's signedness from exactly that pin, so `hi < lo` emits a bare
+  // `hi < lo` -- and Verilog makes a relational UNSIGNED as soon as one operand
+  // is unsigned, so a negative `hi` (`a#[j..=(i-1)]`, i == 0) read as a huge
+  // value and the guard silently never fired. cgen.sim instead takes the
+  // comparison's signedness from the OPERAND pins, so the same node also
+  // disagreed between the two backends. Both operands of `width < 0` are
+  // signed, so every backend agrees, and it is the exact condition wanted:
+  // `width == 0` (the empty `hi == lo - 1`) already yields a zero mask.
+  struct Range_width {
+    Pin     clamped;   // unsigned: the width, or 0 when the range is reversed
+    Pin     reversed;  // u1: 1 when hi < lo
+    int32_t mw;
+  };
+
+  Range_width lower_range_width(const Val& lo, const Val& hi) {
+    // One bit WIDER than the endpoints' own carrier: the widest legal width,
+    // `hi_max + 1`, needs the full unsigned `w_mw`, so a SIGNED carrier of the
+    // same size would wrap it.
+    const int32_t w_mw  = std::max(lo.mw, hi.mw) + 1;
+    auto          width = make_node(Ntype_op::Sum);
+    setup_sink_by_name(width, "as").connect_driver(hi.pin);
+    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(width, "bs").connect_driver(lo.pin);
+    auto width_dp = width.create_driver_pin(0);
+    set_sbits(width_dp, w_mw + 1);
+
+    auto rev = make_node(Ntype_op::LT);  // positional: width < 0
+    setup_sink_by_name(rev, "as").connect_driver(width_dp);
+    setup_sink_by_name(rev, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto rev_dp = rev.create_driver_pin(0);
+    set_ubits(rev_dp, 1);
+
+    // A reversed range selects NO bits, so clamp its width to 0: the mask comes
+    // out 0, so a read is 0 and a write leaves its destination untouched -- the
+    // only sane data path for an empty range (the lgassert still reports it).
+    auto sel = make_node(Ntype_op::Mux);
+    sel.create_sink_pin(0).connect_driver(rev_dp);                                       // selector
+    sel.create_sink_pin(1).connect_driver(width_dp);                                     // false: hi >= lo
+    sel.create_sink_pin(2).connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // true: reversed
+    auto clamped = sel.create_driver_pin(0);
+    // Unsigned (the clamp proves it) and never NARROWER than the widest arm:
+    // cgen.sim rejects a Mux whose result carrier truncates an arm
+    // ("mux-width-loss").
+    set_ubits(clamped, w_mw + 1);
+
+    return Range_width{.clamped = clamped, .reversed = rev_dp, .mw = w_mw + 1};
   }
 
   // Emit a runtime `lgassert(hi >= lo)` guarding a dynamic range select against
@@ -5039,18 +5407,16 @@ private:
   // carries the `a#[lo..=hi]` source span for the assert message. Skipped when
   // there is no GraphLibrary to register the primitive in (the data-path
   // lowering is already complete and correct without the guard).
-  void lower_range_assert(const Val& lo, const Val& hi, const Lnast_nid& loc_nid) {
+  // `reversed` is the flag lower_range_width already built for the data path.
+  // Recomputing it here as `LT(hi, lo)` is what the guard used to do, and that
+  // spelling could not fire for a signed `hi` -- see lower_range_width.
+  void lower_range_assert(const Pin& reversed, const Lnast_nid& loc_nid) {
     if (lib_ == nullptr) {
       return;
     }
-    // cond = (hi >= lo) = LT(hi,lo) XOR 1.
-    auto lt = make_node(Ntype_op::LT);  // positional: "a" < "b"
-    setup_sink_by_name(lt, "as").connect_driver(hi.pin);
-    setup_sink_by_name(lt, "bs").connect_driver(lo.pin);
-    auto lt_dp = lt.create_driver_pin(0);
-    set_ubits(lt_dp, 1);
+    // cond = (hi >= lo) = reversed XOR 1.
     auto notn = make_node(Ntype_op::Xor);
-    setup_sink_by_name(notn, "as").connect_driver(lt_dp);
+    setup_sink_by_name(notn, "as").connect_driver(reversed);
     setup_sink_by_name(notn, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     auto cond = notn.create_driver_pin(0);
     set_ubits(cond, 1);
@@ -5078,6 +5444,56 @@ private:
     std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
+    }
+    sub.attr(hhds::attrs::name).set(loc);
+  }
+
+  // Pyrope requires a dynamic out-of-range array access to fail at runtime.
+  // Materialize `0 <= index < size` as the same lgassert primitive used for
+  // dynamic range preconditions. Verilog-origin accesses are handled by slang
+  // and retain SystemVerilog's X/ignored-write behavior instead.
+  void lower_array_index_assert(const Val& index, int64_t size, const Lnast_nid& loc_nid) {
+    if (lib_ == nullptr || lnast_->is_verilog_origin()) {
+      return;
+    }
+
+    auto lt_size = make_node(Ntype_op::LT);
+    setup_sink_by_name(lt_size, "as").connect_driver(index.pin);
+    setup_sink_by_name(lt_size, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    auto cond = lt_size.create_driver_pin(0);
+    set_ubits(cond, 1);
+
+    if (pin_can_be_negative(index.pin)) {
+      auto lt_zero = make_node(Ntype_op::LT);
+      setup_sink_by_name(lt_zero, "as").connect_driver(index.pin);
+      setup_sink_by_name(lt_zero, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+      auto neg = lt_zero.create_driver_pin(0);
+      set_ubits(neg, 1);
+      cond = and2(cond, not1(neg));
+    }
+
+    const auto guard = effect_path_cond();
+    if (!guard.is_invalid()) {
+      cond = or2(not1(nonzero1(guard)), nonzero1(cond));
+    }
+
+    auto gio = lib_->find_io(livehd::graph_util::lgassert_module_name);
+    if (!gio) {
+      gio = lib_->create_io(livehd::graph_util::lgassert_module_name);
+      gio->add_input("cond", 1);
+      gio->set_bits("cond", 1);
+      gio->set_unsign("cond", true);
+    }
+    auto sub = make_node(Ntype_op::Sub);
+    sub.set_subnode(gio);
+    sub.create_sink_pin("cond").connect_driver(cond);
+    const auto  sp  = lnast_->span_of(loc_nid);
+    std::string loc = "array index out of range";
+    if (!sp.file.empty()) {
+      loc += " at " + sp.file;
+      if (sp.start_line) {
+        loc += ":" + std::to_string(*sp.start_line);
+      }
     }
     sub.attr(hhds::attrs::name).set(loc);
   }
@@ -5308,6 +5724,114 @@ private:
     return leaf(val);
   }
 
+  void record_set_mask_result(std::string_view dst_name, const Pin& drv, int32_t mw) {
+    const bool is_reg  = reg_map_.contains(std::string(dst_name)) && reg_info_.contains(std::string(dst_name));
+    const bool is_wire = !is_reg && wire_names_.contains(std::string(dst_name));
+    if (is_reg) {
+      record(din_key(dst_name), drv, mw);
+      record(en_key(dst_name), en_const(true), 1);
+    } else if (is_wire) {
+      record(din_key(dst_name), drv, mw);
+    } else {
+      record(dst_name, drv, mw);
+    }
+  }
+
+  // Build `(base & ~mask) | (shifted_value & mask)` using an explicitly
+  // width-bounded inverse mask. This is the common full-value RMW used by
+  // runtime bit and range writes; no dynamic Set_mask cell is required.
+  [[nodiscard]] Pin lower_dynamic_mask_rmw(const Val& base, const Pin& mask, const Pin& shifted_value) {
+    const int32_t out_mw = std::max<int32_t>(base.mw, 1);
+
+    auto inv = make_node(Ntype_op::Xor);
+    setup_sink_by_name(inv, "as").connect_driver(mask);
+    setup_sink_by_name(inv, "as").connect_driver(create_const(*g_, *Dlop::get_mask_value(out_mw)));
+    auto inv_dp = inv.create_driver_pin(0);
+    set_ubits(inv_dp, out_mw);
+
+    auto kept = make_node(Ntype_op::And);
+    setup_sink_by_name(kept, "as").connect_driver(base.pin);
+    setup_sink_by_name(kept, "as").connect_driver(inv_dp);
+    auto kept_dp = kept.create_driver_pin(0);
+    set_ubits(kept_dp, out_mw);
+
+    auto inserted = make_node(Ntype_op::And);
+    setup_sink_by_name(inserted, "as").connect_driver(shifted_value);
+    setup_sink_by_name(inserted, "as").connect_driver(mask);
+    auto inserted_dp = inserted.create_driver_pin(0);
+    set_ubits(inserted_dp, out_mw);
+
+    auto merged = make_node(Ntype_op::Or);
+    setup_sink_by_name(merged, "as").connect_driver(kept_dp);
+    setup_sink_by_name(merged, "as").connect_driver(inserted_dp);
+    auto merged_dp = merged.create_driver_pin(0);
+    set_ubits(merged_dp, out_mw);
+    return merged_dp;
+  }
+
+  // `dst#[lo..=hi] = value` with runtime endpoints. The language operation
+  // stays a range write through LNAST; tolg materializes its hardware as one
+  // packed RMW. Later SROA can distribute the resulting value over leaves.
+  void lower_dynamic_range_update(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& ins, const Lnast_nid& lo,
+                                  const Lnast_nid& hi, const Lnast_nid& loc_nid) {
+    auto base = set_mask_base(val);
+    auto n    = leaf(lo);
+    auto m    = leaf(hi);
+    auto iv   = leaf(ins);
+
+    // width = hi + 1 - lo, clamped to 0 on a reversed range so the mask comes
+    // out 0 and the RMW leaves `dst` untouched. The clamped value is
+    // non-negative by construction, so the shift amounts below never see a
+    // negative-as-unsigned count.
+    auto rw = lower_range_width(n, m);
+
+    auto pow = make_node(Ntype_op::SHL);
+    setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(pow, "b").connect_driver(rw.clamped);
+    auto pow_dp = pow.create_driver_pin(0);
+    set_ubits(pow_dp, std::max<int32_t>(base.mw + 1, 2));
+
+    auto low_mask = make_node(Ntype_op::Sum);
+    setup_sink_by_name(low_mask, "as").connect_driver(pow_dp);
+    setup_sink_by_name(low_mask, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto low_mask_dp = low_mask.create_driver_pin(0);
+    set_ubits(low_mask_dp, std::max<int32_t>(base.mw + 1, 2));
+
+    auto maskn = make_node(Ntype_op::SHL);
+    setup_sink_by_name(maskn, "a").connect_driver(low_mask_dp);
+    setup_sink_by_name(maskn, "b").connect_driver(n.pin);
+    auto mask_dp = maskn.create_driver_pin(0);
+    set_ubits(mask_dp, std::max<int32_t>(base.mw, 1));
+
+    auto shifted = make_node(Ntype_op::SHL);
+    setup_sink_by_name(shifted, "a").connect_driver(iv.pin);
+    setup_sink_by_name(shifted, "b").connect_driver(n.pin);
+    auto shifted_dp = shifted.create_driver_pin(0);
+    set_ubits(shifted_dp, std::max<int32_t>(base.mw, 1));
+
+    auto merged = lower_dynamic_mask_rmw(base, mask_dp, shifted_dp);
+    record_set_mask_result(lnast_->get_name(dst), merged, std::max<int32_t>(base.mw, 1));
+    lower_range_assert(rw.reversed, loc_nid);
+  }
+
+  // `dst#[idx] = value`: prp2lnast has already built the one-hot mask `1<<idx`.
+  // Multiplying that mask by the checked one-bit value places the insertion at
+  // the selected position without recovering the original index expression.
+  void lower_dynamic_bit_update(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op, const Lnast_nid& ins) {
+    auto base = set_mask_base(val);
+    auto mask = leaf(mask_op);
+    auto iv   = leaf(ins);
+
+    auto placed = make_node(Ntype_op::Mult);
+    setup_sink_by_name(placed, "as").connect_driver(mask.pin);
+    setup_sink_by_name(placed, "as").connect_driver(iv.pin);
+    auto placed_dp = placed.create_driver_pin(0);
+    set_ubits(placed_dp, std::max<int32_t>(base.mw, 1));
+
+    auto merged = lower_dynamic_mask_rmw(base, mask.pin, placed_dp);
+    record_set_mask_result(lnast_->get_name(dst), merged, std::max<int32_t>(base.mw, 1));
+  }
+
   // set_mask(ref(dst), value, mask, ins).
   void lower_set_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
@@ -5342,6 +5866,21 @@ private:
                lnast_->get_name(it->second),
                lnast_->get_name(it->second));
     }
+    const std::string mask_name{lnast_->get_name(mask_op)};
+    if (auto it = range_dyn_map_.find(mask_name); it != range_dyn_map_.end()) {
+      if (Lnast_ntype::is_const(lnast_->get_type(it->second.second)) && lnast_->get_name(it->second.second) == "nil") {
+        error_at(nid,
+                 {"open-range-write", "unsupported"},
+                 "upass.tolg: open-ended runtime bit-range write is not supported — give the upper bound explicitly");
+      }
+      lower_dynamic_range_update(dst, val, ins, it->second.first, it->second.second, nid);
+      return;
+    }
+    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mask_name);
+    if (runtime_mask) {
+      lower_dynamic_bit_update(dst, val, mask_op, ins);
+      return;
+    }
     auto mask = mask_from_operand(mask_op);
 
     // A partial bit-range WRITE of a declared reg/wire is a next-state
@@ -5356,8 +5895,6 @@ private:
     // result, not q — so when the base operand is the destination itself, read
     // the current din accumulator (if any) instead of resolving the name to q.
     const std::string dst_name{lnast_->get_name(dst)};
-    const bool        is_reg  = reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
-    const bool        is_wire = !is_reg && wire_names_.contains(dst_name);
     // RMW base = current din accumulator if a prior partial write set it, else
     // the committed value (q / buffer output) via the name. This must key off
     // the BASE OPERAND's name, not just dst: prp2lnast lowers `r#[lo..=hi] = x`
@@ -5392,16 +5929,7 @@ private:
     auto    drv     = node.create_driver_pin(0);
     int32_t res_mw  = std::max(vv.mw, mask_mw);
     set_ubits(drv, res_mw);
-    if (is_reg) {
-      record(din_key(dst_name), drv, res_mw);
-      record(en_key(dst_name), en_const(true), 1);
-      return;
-    }
-    if (is_wire) {
-      record(din_key(dst_name), drv, res_mw);
-      return;
-    }
-    record(dst_name, drv, res_mw);
+    record_set_mask_result(dst_name, drv, res_mw);
   }
 
   // ── concat ───────────────────────────────────────────────────────────────
@@ -6689,16 +7217,16 @@ private:
   // din/enable keys). clock_*/reset_* lazily bind the clock/reset graph
   // inputs. reg_info_/reg_order_ carry the finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
-  absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
-  absl::flat_hash_map<std::string, Reg_info>         reg_info_;
-  std::vector<std::string>                           reg_order_;
+  absl::flat_hash_map<std::string, hhds::Node_class>  reg_map_;
+  absl::flat_hash_map<std::string, Reg_info>          reg_info_;
+  std::vector<std::string>                            reg_order_;
   // Scalar `mut`/`const` declares (NOT reg/latch/array). A `mut b:uN = nil`
   // emits no init store, so its name never gets a driver — but using it as a
   // `b#[lo..=hi] = …` bit-assembly base is legal (the covered bits are
   // overwritten). lower_set_mask substitutes a 0sb? base for such a name; the
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
-  absl::flat_hash_set<std::string>                   scalar_decl_;
+  absl::flat_hash_set<std::string>                    scalar_decl_;
   // Declared TYPE width per LOGICAL name (canonical, SSA suffix stripped), for
   // the one op whose semantics depend on the DECLARED width rather than on
   // whatever value currently drives the name: Concat.
@@ -6709,19 +7237,21 @@ private:
   // from io_meta and from every `declare` that carries a type child; a nested
   // `concat`'s own result registers here too (its width is the lane sum, by
   // construction).
-  absl::flat_hash_map<std::string, Decl_type>        decl_type_;
+  absl::flat_hash_map<std::string, Decl_type>         decl_type_;
   // Names whose value is a `concat` result, with the lane sum. Read only by
   // check_concat_dest_width: the concat node's own dst is a compiler temp, so
   // the user-facing `c:u12 = concat(...)` width check has to happen where that
   // temp is bound to a declared name.
-  absl::flat_hash_map<std::string, int32_t>          concat_result_mw_;
+  absl::flat_hash_map<std::string, int32_t>           concat_result_mw_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
-  absl::flat_hash_map<std::string, Mem_info>         mem_map_;
-  absl::flat_hash_map<int32_t, int>                  mem_write_site_counts_;
-  std::vector<std::string>                           mem_order_;
+  absl::flat_hash_map<std::string, Mem_info>          mem_map_;
+  absl::flat_hash_map<std::string, Array_scalar_view> array_scalar_views_;
+  absl::flat_hash_set<std::string>                    comptime_array_names_;
+  absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;
+  std::vector<std::string>                            mem_order_;
   // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED
   // (see current_path_cond). `path_folded_[i]` caches the fold of terms[0..i]
   // once some consumer asks for it; an invalid entry is "not built yet".

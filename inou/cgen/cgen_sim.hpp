@@ -60,6 +60,11 @@ private:
   // its Slop<W+1> carrier. Mixed HLOP operations accept these objects directly;
   // operand() only unwraps them when a concrete Slop carrier is required.
   absl::flat_hash_set<pin_key_t>              slop_u_values_;
+  // Get_mask nodes whose occurrence input was already narrowed to their exact
+  // constant lane by the color ABI. For that occurrence the cell is an
+  // identity; the set is rebuilt per emitted member because Class_index is
+  // definition-local and can repeat across hierarchy occurrences.
+  absl::flat_hash_set<hhds::Class_index>      preextracted_get_masks_;
 
   // Pins whose C++ name is REWRITTEN by the sequential section, mid-stream:
   // a latency-1 memory read register (`<mem>_q<n>`), which the memory block
@@ -223,7 +228,7 @@ public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
-           bool _slop_u = true, bool _debug = false)
+           bool _slop_u = true, bool _color_dirty = true, bool _debug = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -233,6 +238,7 @@ public:
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
       , slop_u_(_slop_u)
+      , color_dirty_(_color_dirty)
       , debug_(_debug) {}
 
 private:
@@ -248,6 +254,7 @@ private:
   // spelling of this comment claimed one; the carve-out was a mistake and was
   // repealed 2026-08-14.) false = everything is Slop<n>.
   bool                           slop_u_         = true;
+  bool                           color_dirty_    = true;  // cross-cycle color activation and boundary change tracking
   // sim.debug keeps the materializing Slop_u landing in generated code so an
   // unsigned-proof mistake remains visible while debugging. The normal path
   // uses from_proven(), whose width check is compile-time and whose runtime

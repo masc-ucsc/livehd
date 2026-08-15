@@ -1133,7 +1133,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
 
   std::vector<std::optional<bool>> state_rising(plan.sites_.size());
   std::vector<size_t>              state_updates(plan.sites_.size(), std::numeric_limits<size_t>::max());
-  std::set<std::tuple<size_t, size_t, hhds::Port_id, uint32_t, hhds::Port_id, uint32_t, State_version, bool>> exact_value_uses;
+  std::set<std::tuple<size_t, size_t, hhds::Port_id, uint32_t, uint32_t, uint32_t, hhds::Port_id, uint32_t, State_version, bool>>
+      exact_value_uses;
   struct Output_use {
     hhds::Port_id public_port   = 0;
     size_t        body_anchor   = Color_plan::invalid_index;
@@ -1166,26 +1167,40 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     if (!top_input && (producer_it == index.end() || !plan.sites_[producer_it->second].live)) {
       return;
     }
-    size_t        producer_base  = top_input ? Color_plan::invalid_index : producer_it->second;
-    hhds::Port_id producer_port  = edge.driver.get_port_id();
-    uint32_t      producer_shift = 0;
-    uint32_t      producer_width = 0;
+    size_t        producer_base       = top_input ? Color_plan::invalid_index : producer_it->second;
+    hhds::Port_id producer_port       = edge.driver.get_port_id();
+    uint32_t      producer_shift      = 0;
+    uint32_t      producer_width      = 0;
+    uint32_t      producer_extract_lo = 0;
+    uint32_t      producer_extract_hi = 0;
+    bool          preextracted        = false;
+    int           lo                  = -1;
+    int           hi                  = -1;
 
     // A packed child output may be a word-level cycle while the exact slice
     // demanded by its parent is acyclic. Resolve constant Get_mask and the
     // common And(SRA(word,k),low-mask) idiom through the callee's proven
     // output-slice summary and bind the exact leaf value.
     const auto& consumer_base          = plan.sites_[plan.version_sites_[consumer].base_site];
+    const auto  consumer_op            = gu::type_op_of(consumer_base.node);
     const bool  slice_debug            = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
     uint32_t    output_boundary_width  = 0;
     bool        output_boundary_unsign = gu::is_unsign(edge.driver);
+    if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
+      for (const auto& input : consumer_base.node.inp_edges()) {
+        if (input.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "mask") && gu::is_const_pin(input.driver)) {
+          std::tie(lo, hi) = gu::hydrate_const(input.driver).get_mask_range();
+          break;
+        }
+      }
+    }
     // Occurrence traversal also erases a child's GraphIO output node. Recover
     // that public carrier before fusing the child producer into its parent
     // consumer. The child expression itself can be wider (for example, a
     // packed Set_mask chain), but those internal bits are not visible across
     // the declared module boundary.
-    const auto  driver_node            = edge.driver.get_master_node();
-    const auto  driver_steps           = driver_node.path().steps();
+    const auto driver_node  = edge.driver.get_master_node();
+    const auto driver_steps = driver_node.path().steps();
     if (driver_steps.size() > consumer_base.node.path().steps().size()) {
       const auto driver_graph = driver_node.get_graph();
       const auto driver_io    = driver_graph == nullptr ? nullptr : driver_graph->get_io();
@@ -1211,23 +1226,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
     if (!top_input && library != nullptr) {
-      int                  lo                = -1;
-      int                  hi                = -1;
       bool                 position_in_whole = true;
       uint32_t             surface_shift     = 0;
       hhds::Occurrence_pin crossing          = edge.driver;
-      const auto           consumer_op       = gu::type_op_of(consumer_base.node);
       if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == 0) {
-        hhds::Occurrence_pin mask;
-        for (const auto& input : consumer_base.node.inp_edges()) {
-          if (input.sink.get_port_id() == 2) {
-            mask = input.driver;
-            break;
-          }
-        }
-        if (!mask.is_invalid() && gu::is_const_pin(mask)) {
-          std::tie(lo, hi) = gu::hydrate_const(mask).get_mask_range();
-        }
         // cprop canonicalizes the And(SRA(word,k), low-mask) bit read into
         // Get_mask(SRA(word,k), low-mask): hop the same consumer-side SRA the
         // And spelling below hops, so both spellings bind the exact
@@ -1589,9 +1591,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                 }
                 const hhds::Occurrence_index leaf_occurrence{producer_path, slice.leaf.get_master_node().get_definition_index()};
                 if (const auto leaf = index.find(leaf_occurrence); leaf != index.end() && plan.sites_[leaf->second].live) {
-                  producer_base  = leaf->second;
-                  producer_port  = slice.leaf.get_port_id();
-                  producer_shift = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
+                  producer_base   = leaf->second;
+                  producer_port   = slice.leaf.get_port_id();
+                  producer_shift  = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
+                  // The selected producer is the LSB-aligned leaf, so retain
+                  // the requested range in that leaf's coordinates. The old
+                  // ABI shifted the leaf back into the packed word and let the
+                  // consumer extract it again; the lane ABI below extracts at
+                  // the producer and transports only the useful bits.
+                  lo             -= static_cast<int>(slice.lo);
+                  hi             -= static_cast<int>(slice.lo);
                   if (!position_in_whole) {
                     producer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(slice.leaf)));
                   }
@@ -1613,11 +1622,28 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
 
+    // A positive contiguous Get_mask is an unsigned lane value. Once the
+    // source has been resolved through any packed/child spelling above,
+    // transport that lane LSB-aligned instead of rebuilding its whole packed
+    // carrier at the boundary and extracting it again in the consumer. This
+    // also applies to a top input: the public IO remains one packed object, but
+    // each fixed internal view is a narrow direct-ABI lane.
+    if (consumer_op == Ntype_op::Get_mask && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a") && lo >= 0
+        && hi > lo) {
+      producer_extract_lo = static_cast<uint32_t>(lo);
+      producer_extract_hi = static_cast<uint32_t>(hi);
+      producer_shift      = 0;
+      producer_width      = producer_extract_hi - producer_extract_lo;
+      preextracted        = true;
+    }
+
     const size_t producer = top_input ? Color_plan::invalid_index : producer_version(producer_base, version, producer_port);
     const auto   key      = std::tuple{producer,
                                        consumer,
                                        producer_port,
                                        producer_shift,
+                                       producer_extract_lo,
+                                       producer_extract_hi,
                                        edge.sink.get_port_id(),
                                        consumer_input,
                                        version,
@@ -1627,35 +1653,44 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     }
     const uint32_t width
         = producer_width != 0 ? producer_width : static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(edge.driver)));
-    uint32_t consumer_width   = output_boundary_width != 0 ? output_boundary_width : width;
+    uint32_t consumer_width = preextracted ? width : (output_boundary_width != 0 ? output_boundary_width : width);
     // Occurrence traversal resolves a definition-local GraphIO input directly
     // to its caller-side producer. Preserve the declared port width at that
     // erased boundary: a signed N-bit producer is commonly represented by an
     // N+1-bit expression, and carrying that extra sign bit into a child's
     // packed cone can overlap the adjacent field. The module-local scheduler
     // performed this truncation when assigning child.__in; the direct ABI must
-    // make the same cast explicit in its slot shape.
-    uint32_t definition_input = 0;
-    for (const auto& base_edge : consumer_base.node.base_node().inp_edges()) {
-      if (definition_input++ != consumer_input) {
-        continue;
+    // make the same cast explicit in its slot shape. A pre-extracted Get_mask
+    // is the exception: its binding intentionally replaces the packed input
+    // with the selected lane, so restoring the definition input width would
+    // widen that lane before the identity Get_mask consumes it.
+    if (!preextracted) {
+      uint32_t definition_input = 0;
+      for (const auto& base_edge : consumer_base.node.base_node().inp_edges()) {
+        if (definition_input++ != consumer_input) {
+          continue;
+        }
+        if (gu::is_graph_input_pin(base_edge.driver)) {
+          consumer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(base_edge.driver)));
+        }
+        break;
       }
-      if (gu::is_graph_input_pin(base_edge.driver)) {
-        consumer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(base_edge.driver)));
-      }
-      break;
     }
-    plan.value_uses_.push_back(Value_use{producer,
-                                         consumer,
-                                         version,
-                                         producer_port,
-                                         producer_shift,
-                                         edge.sink.get_port_id(),
-                                         consumer_input,
-                                         width,
-                                         consumer_width,
-                                         output_boundary_width != 0 ? output_boundary_unsign : gu::is_unsign(edge.driver),
-                                         top_input});
+    plan.value_uses_.push_back(
+        Value_use{producer,
+                  consumer,
+                  version,
+                  producer_port,
+                  producer_shift,
+                  producer_extract_lo,
+                  producer_extract_hi,
+                  edge.sink.get_port_id(),
+                  consumer_input,
+                  width,
+                  consumer_width,
+                  preextracted ? true : (output_boundary_width != 0 ? output_boundary_unsign : gu::is_unsign(edge.driver)),
+                  top_input,
+                  preextracted});
     if (!top_input) {
       add_version_edge(producer, consumer, consumer_width);
     }
@@ -2500,15 +2535,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   for (size_t rank = 0; rank < structural_order.size(); ++rank) {
     structural_rank[structural_order[rank]] = rank;
   }
-  absl::flat_hash_map<std::pair<size_t, size_t>, uint64_t>       queued_epoch;
-  uint64_t                                                       next_epoch               = 1;
-  constexpr uint64_t                                             kSoftColorGe             = 50'000;
-  constexpr size_t                                               kExactConvexVersionLimit = 50'000;
-  absl::flat_hash_map<const hhds::Graph*, hhds::Occurrence_path> first_body_occurrence;
-  absl::flat_hash_map<const hhds::Graph*, uint64_t>              definition_ge;
-  absl::flat_hash_set<const hhds::Graph*>                        reused_bodies;
+  absl::flat_hash_map<std::pair<size_t, size_t>, uint64_t>                            queued_epoch;
+  uint64_t                                                                            next_epoch               = 1;
+  constexpr uint64_t                                                                  kSoftColorGe             = 50'000;
+  constexpr size_t                                                                    kExactConvexVersionLimit = 50'000;
+  absl::flat_hash_map<const hhds::Graph*, hhds::Occurrence_path>                      first_body_occurrence;
+  absl::flat_hash_map<const hhds::Graph*, uint64_t>                                   definition_ge;
+  absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_set<hhds::Occurrence_path>> body_occurrences;
+  absl::flat_hash_set<const hhds::Graph*>                                             reused_bodies;
   for (const auto& site : plan.sites_) {
-    const auto* definition    = site.node.get_graph();
+    const auto* definition = site.node.get_graph();
+    body_occurrences[definition].insert(site.node.path());
     const auto [it, inserted] = first_body_occurrence.emplace(definition, site.node.path());
     if (inserted || it->second == site.node.path()) {
       definition_ge[definition] += site.gate_equivalents;
@@ -2522,11 +2559,42 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   // it keeps identical occurrences on the same ABI. Large repeated bodies are
   // allowed to fuse with their callers because their per-cycle boundary and
   // dispatch cost dominates the modest generated-code reuse.
-  constexpr uint64_t kReusableKernelMaxGe        = 1'024;
-  const auto         body_reuse_worth_preserving = [&](size_t root) {
+  constexpr uint64_t                                   kReusableKernelMaxGe          = 1'024;
+  constexpr uint64_t                                   kReusableKernelMinGe          = 128;
+  constexpr size_t                                     kReusableKernelMaxOccurrences = 256;
+  std::vector<std::pair<uint64_t, const hhds::Graph*>> reuse_candidates;
+  for (const auto* definition : reused_bodies) {
+    const auto occurrences = body_occurrences[definition].size();
+    const auto ge          = definition_ge[definition];
+    if (ge < kReusableKernelMinGe || ge > kReusableKernelMaxGe || occurrences > kReusableKernelMaxOccurrences) {
+      continue;
+    }
+    const uint64_t duplicated_ge = ge * (occurrences - 1);
+    if (duplicated_ge >= 2'048) {
+      reuse_candidates.emplace_back(duplicated_ge, definition);
+    }
+  }
+  std::ranges::sort(reuse_candidates, [](const auto& lhs, const auto& rhs) {
+    if (lhs.first != rhs.first) {
+      return lhs.first > rhs.first;
+    }
+    const auto lhs_io   = lhs.second->get_io();
+    const auto rhs_io   = rhs.second->get_io();
+    const auto lhs_name = std::string(lhs_io ? lhs_io->get_name() : "");
+    const auto rhs_name = std::string(rhs_io ? rhs_io->get_name() : "");
+    if (lhs_name != rhs_name) {
+      return lhs_name < rhs_name;
+    }
+    return lhs_io != nullptr && rhs_io != nullptr && lhs_io->get_gid() < rhs_io->get_gid();
+  });
+  absl::flat_hash_set<const hhds::Graph*> selected_reuse_bodies;
+  if (!reuse_candidates.empty()) {
+    selected_reuse_bodies.insert(reuse_candidates.front().second);
+  }
+  const auto body_reuse_worth_preserving = [&](size_t root) {
     return std::ranges::any_of(members[root], [&](size_t member) {
       const auto* definition = plan.sites_[plan.version_sites_[member].base_site].node.get_graph();
-      return reused_bodies.contains(definition) && definition_ge[definition] <= kReusableKernelMaxGe;
+      return selected_reuse_bodies.contains(definition);
     });
   };
   const auto crosses_reuse_boundary = [&](size_t lhs, size_t rhs) {
@@ -2565,10 +2633,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     // Exact repeated reachability is quadratic at whole-Minion scale. A global
     // topological interval is convex by construction: every vertex on a path
     // between two members has an execution rank inside the same interval.
-    // At this scale runtime task count wins over occurrence-local code reuse:
-    // preserving every tiny repeated definition fragments Minion into more
-    // than 100K colors while eliminating little generated source. Normal-sized
-    // plans still use the scored lost-reuse boundary above.
+    // Use a linear interval coarsener at this scale, but retain the same
+    // selected repeated-definition boundaries as the exact path. Those islands
+    // are what let cgen emit one verified canonical kernel and bind it to many
+    // occurrences; crossing them here silently disables reuse on the designs
+    // that need it most.
     std::vector<size_t> execution_order(nversions);
     std::iota(execution_order.begin(), execution_order.end(), 0);
     std::ranges::sort(execution_order, {}, [&](size_t version) { return plan.version_sites_[version].execution_order; });
@@ -2581,6 +2650,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       bool can_join = current != Color_plan::invalid_index
                       && plan.version_sites_[members[current].front()].slot == plan.version_sites_[version].slot
                       && plan.version_sites_[members[current].front()].control_owner == plan.version_sites_[version].control_owner
+                      && !crosses_reuse_boundary(current, version)
                       && color_ge[current] <= kSoftColorGe - std::min<uint64_t>(color_ge[version], kSoftColorGe);
       if (!can_join) {
         current = version;
@@ -2864,18 +2934,27 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     slot_index.emplace(std::move(signature), result);
     return result;
   };
-  const auto add_consumer
-      = [&](size_t slot_index_value, size_t version, hhds::Port_id port, uint32_t input, uint32_t consumer_width) {
-          auto&                   slot = plan.boundary_slots_[slot_index_value];
-          const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width};
-          const auto              duplicate = std::ranges::find_if(slot.consumers, [&](const Boundary_consumer& existing) {
-            return std::tie(existing.version_site, existing.color, existing.port, existing.input, existing.width)
-                   == std::tie(consumer.version_site, consumer.color, consumer.port, consumer.input, consumer.width);
-          });
-          if (duplicate == slot.consumers.end()) {
-            slot.consumers.push_back(consumer);
-          }
-        };
+  const auto add_consumer = [&](size_t        slot_index_value,
+                                size_t        version,
+                                hhds::Port_id port,
+                                uint32_t      input,
+                                uint32_t      consumer_width,
+                                bool          preextracted) {
+    auto&                   slot = plan.boundary_slots_[slot_index_value];
+    const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width, preextracted};
+    const auto              duplicate = std::ranges::find_if(slot.consumers, [&](const Boundary_consumer& existing) {
+      return std::tie(existing.version_site, existing.color, existing.port, existing.input, existing.width, existing.preextracted)
+             == std::tie(consumer.version_site,
+                         consumer.color,
+                         consumer.port,
+                         consumer.input,
+                         consumer.width,
+                         consumer.preextracted);
+    });
+    if (duplicate == slot.consumers.end()) {
+      slot.consumers.push_back(consumer);
+    }
+  };
 
   // Current state is persistent ABI storage even when its only consumer is a
   // root output or another state's pending input. Declare it from the state
@@ -2921,7 +3000,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                        version,
                        output.get_port_id(),
                        0,
-                       static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output))));
+                       static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(output))),
+                       false);
         }
       }
       if (update != Color_plan::invalid_index) {
@@ -2945,7 +3025,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     size_t       source_slot    = Color_plan::invalid_index;
     size_t       producer_color = Color_plan::invalid_index;
     if (use.top_input) {
-      const auto signature = std::format("top-input:p{}:b{}:u{}", use.producer_port, use.width, use.unsign);
+      const auto signature = std::format("top-input:p{}:b{}:u{}:x{}-{}",
+                                         use.producer_port,
+                                         use.width,
+                                         use.unsign,
+                                         use.producer_extract_lo,
+                                         use.producer_extract_hi);
       source_slot          = ensure_slot(signature,
                                          Boundary_kind::top_input,
                                          State_version::pre_rise,
@@ -2961,38 +3046,43 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       const auto& producer_base = plan.sites_[producer_site.base_site];
       producer_color            = color_of_version(use.producer_version);
       if (producer_site.role == Version_role::state_read) {
-        const auto   physical_pin    = producer_base.node.base_node().get_driver_pin(use.producer_port);
-        const auto   physical_width  = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(physical_pin)));
-        const bool   physical_unsign = gu::is_unsign(physical_pin);
-        const bool   natural_view    = use.producer_shift == 0 && use.width == physical_width && use.unsign == physical_unsign;
-        const auto   signature       = natural_view ? std::format("{}:current:p{}", producer_base.storage_id, use.producer_port)
-                                                    : std::format("{}:current-view:p{}:shift{}:b{}:u{}",
-                                                                  producer_base.storage_id,
-                                                                  use.producer_port,
-                                                                  use.producer_shift,
-                                                                  use.width,
-                                                                  use.unsign);
-        const size_t update          = state_updates[producer_site.base_site];
-        source_slot                  = ensure_slot(signature,
-                                                   Boundary_kind::state_current,
-                                                   State_version::pre_rise,
-                                                   producer_site.base_site,
-                                                   update,
-                                                   color_of_version(update),
-                                                   use.producer_port,
-                                                   use.producer_port,
-                                                   use.width,
-                                                   use.unsign);
+        const auto physical_pin    = producer_base.node.base_node().get_driver_pin(use.producer_port);
+        const auto physical_width  = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(physical_pin)));
+        const bool physical_unsign = gu::is_unsign(physical_pin);
+        const bool natural_view
+            = !use.preextracted && use.producer_shift == 0 && use.width == physical_width && use.unsign == physical_unsign;
+        const auto   signature = natural_view ? std::format("{}:current:p{}", producer_base.storage_id, use.producer_port)
+                                              : std::format("{}:current-view:p{}:shift{}:b{}:u{}:x{}-{}",
+                                                            producer_base.storage_id,
+                                                            use.producer_port,
+                                                            use.producer_shift,
+                                                            use.width,
+                                                            use.unsign,
+                                                            use.producer_extract_lo,
+                                                            use.producer_extract_hi);
+        const size_t update    = state_updates[producer_site.base_site];
+        source_slot            = ensure_slot(signature,
+                                             Boundary_kind::state_current,
+                                             State_version::pre_rise,
+                                             producer_site.base_site,
+                                             update,
+                                             color_of_version(update),
+                                             use.producer_port,
+                                             use.producer_port,
+                                             use.width,
+                                             use.unsign);
         plan.boundary_slots_[source_slot].producer_shift = use.producer_shift;
       } else if (producer_color != consumer_color) {
-        const auto signature = std::format("{}:{}:{}:value:p{}:shift{}:b{}:u{}",
+        const auto signature = std::format("{}:{}:{}:value:p{}:shift{}:b{}:u{}:x{}-{}",
                                            producer_base.storage_id,
                                            state_version_name(producer_site.version),
                                            version_role_name(producer_site.role),
                                            use.producer_port,
                                            use.producer_shift,
                                            use.width,
-                                           use.unsign);
+                                           use.unsign,
+                                           use.producer_extract_lo,
+                                           use.producer_extract_hi);
         source_slot          = ensure_slot(signature,
                                            Boundary_kind::color_value,
                                            producer_site.version,
@@ -3008,7 +3098,24 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
     if (source_slot != Color_plan::invalid_index) {
-      add_consumer(source_slot, use.consumer_version, use.consumer_port, use.consumer_input, use.consumer_width);
+      auto& slot = plan.boundary_slots_[source_slot];
+      if (use.preextracted) {
+        if ((slot.producer_extract_hi != 0 || slot.producer_extract_lo != 0)
+            && (slot.producer_extract_lo != use.producer_extract_lo || slot.producer_extract_hi != use.producer_extract_hi)) {
+          plan.summary_.boundary_one_writer = false;
+          plan.summary_.versioning_complete = false;
+          plan.errors_.push_back(std::format("direct-ABI slot {} has incompatible extraction ranges [{},{}) and [{},{})",
+                                             slot.structural_id,
+                                             slot.producer_extract_lo,
+                                             slot.producer_extract_hi,
+                                             use.producer_extract_lo,
+                                             use.producer_extract_hi));
+        }
+        slot.producer_extract_lo = use.producer_extract_lo;
+        slot.producer_extract_hi = use.producer_extract_hi;
+        slot.producer_shift      = 0;
+      }
+      add_consumer(source_slot, use.consumer_version, use.consumer_port, use.consumer_input, use.consumer_width, use.preextracted);
     }
   }
   for (const auto& output : output_uses) {
@@ -3521,7 +3628,7 @@ std::string Color_plan::report() const {
                                          : std::string_view(colors_[slot.producer_color].structural_id);
       result                      += std::format(
           "boundary-slot {} kind={} version={} owner={} writer-version={} writer-color={} "
-          "producer-port={} producer-shift={} public-port={} bits={} unsign={} consumers=",
+          "producer-port={} producer-shift={} producer-extract=[{},{}) public-port={} bits={} unsign={} consumers=",
           slot.structural_id,
           boundary_kind_name(slot.kind),
           state_version_name(slot.version),
@@ -3530,18 +3637,21 @@ std::string Color_plan::report() const {
           producer_color,
           slot.producer_port,
           slot.producer_shift,
+          slot.producer_extract_lo,
+          slot.producer_extract_hi,
           slot.public_port,
           slot.width,
           slot.unsign);
       for (size_t i = 0; i < slot.consumers.size(); ++i) {
         const auto& consumer  = slot.consumers[i];
-        result               += std::format("{}{}:{}:p{}:i{}:b{}",
+        result               += std::format("{}{}:{}:p{}:i{}:b{}:preextracted={}",
                                             i == 0 ? "" : ",",
                                             colors_[consumer.color].structural_id,
                                             version_sites_[consumer.version_site].structural_id,
                                             consumer.port,
                                             consumer.input,
-                                            consumer.width);
+                                            consumer.width,
+                                            consumer.preextracted ? "true" : "false");
       }
       result += "\n";
     }

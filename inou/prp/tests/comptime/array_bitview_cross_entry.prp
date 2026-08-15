@@ -1,0 +1,13 @@
+/*
+:name: array_bitview_cross_entry
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+mut r:[2]u8 = 0
+r[0] = 0xFF
+r[1] = 0xAA
+const x = r#[4..=12]
+cputs("x:{x:h}")
+cassert(x == 0xAF)

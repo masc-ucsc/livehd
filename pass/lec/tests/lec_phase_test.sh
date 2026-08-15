@@ -118,10 +118,61 @@ else
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_c" 2>&1)
   if ! grep -qa "PROVEN equivalent" <<<"$c_out"; then
     echo "FAIL: latch round trip was not PROVEN"; fail=1
-  elif ! grep -qa "phase-step induction" <<<"$c_out"; then
-    echo "FAIL: latch round trip did not exercise phase-step induction"; fail=1
+  # Pin the EXACT proof arm. BOTH phase arms spell the word "microstep", so
+  # matching that alone lets the proof drift between arms with no test turning
+  # red. Expected arm here: the COMPOSED-PERIOD one, query.cpp's
+  #   "phase-inductive: one composed source period, <n> microsteps"
+  # The emitted Pyrope now re-reads to terms syntactically IDENTICAL to the
+  # source graph's, so the per-step arm's `at == bt` skip leaves it with no
+  # compare point (`step_diffs.empty()` -> step_proven=false) and it hands the
+  # period to the composed arm. The per-STEP arm is pinned by pair D below.
+  # If this ever lands on a different arm, pin THAT arm's exact spelling --
+  # never relax this back to a bare "microstep" match.
+  elif ! grep -qa "phase-inductive: one composed source period" <<<"$c_out"; then
+    echo "FAIL: latch round trip was not proven on the composed-period phase arm"; fail=1
   else
-    echo "ok: latch round trip -> PROVEN equivalent"
+    echo "ok: latch round trip -> PROVEN equivalent (composed period)"
+  fi
+fi
+
+# ---- pair D: two SV spellings of the same 65-bit sign-extended latch --------
+# Same phase structure as pair C, but the two sides are built from DIFFERENT
+# source expressions ({{33{d[31]}},d} vs a signed cast), so their state terms
+# are not syntactically equal and the proof must compare each scheduled
+# transition: the phase-STEP induction arm.
+cat > "$WORK/d.v" <<'EOF'
+module latch_child(input logic clock, input logic d, output logic q);
+  always_latch if (!clock) q = d;
+endmodule
+
+module latch_pair(
+  input logic clock,
+  input logic en,
+  input logic [31:0] d,
+  output logic [64:0] q,
+  output logic child_q
+);
+  logic en_l;
+  logic [64:0] q_l;
+  latch_child u_child(.clock(clock), .d(d[0]), .q(child_q));
+  always_latch if (clock) en_l = en;
+  always_latch if (!clock && en_l) q_l = 65'(signed'(d));
+  assign q = q_l;
+endmodule
+EOF
+
+if ! $LHD compile "$WORK/d.v" --reader slang --top latch_pair \
+       --emit-dir "lg:$WORK/d_lg" --workdir "$WORK/w_d" >/dev/null 2>&1; then
+  echo "FAIL: compile latch_pair (signed-cast spelling)"; fail=1
+else
+  d_out=$($LHD lec --impl "lg:$WORK/d_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
+          --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_d" 2>&1)
+  if ! grep -qa "PROVEN equivalent" <<<"$d_out"; then
+    echo "FAIL: latch spelling pair was not PROVEN"; fail=1
+  elif ! grep -qa "phase-step induction" <<<"$d_out"; then
+    echo "FAIL: latch spelling pair did not exercise phase-step induction"; fail=1
+  else
+    echo "ok: latch spelling pair -> PROVEN equivalent (phase-step)"
   fi
 fi
 

@@ -137,6 +137,35 @@ sh_test(
     ],
 )
 
+# Pyrope rejects a statically out-of-range array index in uPass. A dynamic
+# index cannot be decided until execution, so keep the generated assertion
+# live and exercise it with an out-of-range value in a small RTL simulation.
+sh_test(
+    name = "prp-array-oob-runtime",
+    srcs = ["tests/array_oob_runtime_test.sh"],
+    args = ["$(location //inou/prp:tests/lgraph/array_oob_runtime.prp)"],
+    data = [
+        "//inou/prp:tests/lgraph/array_oob_runtime.prp",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
+# A runtime bit-range write whose endpoints arrive REVERSED (upper endpoint
+# `i-1` can even go negative). Two obligations, neither statically decidable:
+# the destination comes back untouched, and the descending-range diagnostic
+# actually fires. Both need an RTL simulation to observe.
+sh_test(
+    name = "prp-range-reversed-runtime",
+    srcs = ["tests/range_reversed_runtime_test.sh"],
+    args = ["$(location //inou/prp:tests/lgraph/range_reversed_runtime.prp)"],
+    data = [
+        "//inou/prp:tests/lgraph/range_reversed_runtime.prp",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 # Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
 # failure; this companion checks that accepting the clock tuple did not merely
 # collapse it to one shared clock in emitted Verilog.

@@ -14,9 +14,9 @@
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
-#include "range_bits.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
+#include "range_bits.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"
 
@@ -134,11 +134,22 @@ public:
   // / tuple / array; push_reduction looks the tmp up and errors. Cleared per run
   // in begin_iteration (tmp names are unique within a lambda walk).
   absl::flat_hash_set<std::string> non_int_bitsel_;
-  bool report_reduction_nonint(upass::Src_span src);
-  // True when `o` may be bit-selected/reduced: an integer/boolean scalar, a
-  // range base, or a runtime value whose kind is not yet known. A string, enum
-  // value, tuple, or array returns false.
-  bool is_bitselectable_operand(const upass::Operand& o);
+  bool                             report_reduction_nonint(upass::Src_span src);
+  // True when `o` may be reduced as an integer/boolean scalar (or is a range /
+  // unresolved runtime value). Typed arrays return false even though their
+  // ordinary get/set-mask bit view is legal: array reductions are not.
+  bool                             is_bitselectable_operand(const upass::Operand& o);
+
+  // Typed positional arrays have a language-level packed bit view. Element 0
+  // occupies the least-significant lane; each lane uses the declared element
+  // width rather than the value's significant width. Named bundles remain
+  // unordered and deliberately do not pass through this conversion.
+  std::optional<Dlop> positional_array_bitview(const upass::Operand& o);
+
+  // Write a packed scalar back into an already-shaped typed positional array,
+  // one declared-width lane at a time. Returns false when `name` is not such an
+  // array or its concrete positional shape is unavailable.
+  bool scatter_positional_array(std::string_view name, const Dlop& packed);
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
@@ -160,8 +171,8 @@ public:
   static void set_ambiguous_units(absl::flat_hash_set<std::string> s) { ambiguous_units_ = std::move(s); }
 
 protected:
-  static inline std::vector<Pending_import> pending_imports_;
-  static inline absl::flat_hash_set<std::string>                  ambiguous_units_;
+  static inline std::vector<Pending_import>      pending_imports_;
+  static inline absl::flat_hash_set<std::string> ambiguous_units_;
 
   // Resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
@@ -314,7 +325,7 @@ protected:
   // warning can look up the field path first and fall back to its enclosing var.
   absl::flat_hash_map<std::string, livehd::diag::Span> var_spans_;
   // Remember `var`'s span the first time it is seen with a resolvable location.
-  void note_var_span(std::string_view var);
+  void                                                 note_var_span(std::string_view var);
 
   // Local replacement for the deleted runner_type_query_fn seam:
   // inferred scalar KIND off the binding + declared integer ENVELOPE from

@@ -772,7 +772,9 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
     return;
   }
   const std::string dvar(lm->current_text());
-  auto              consider = [&](const std::string& slot, std::string_view txt) {
+  auto&             raw_refs = tuple_raw_slot_ref_[dvar];
+  raw_refs.clear();
+  auto consider = [&](const std::string& slot, std::string_view txt) {
     if (auto it = symbol_table_.tuple_slot_ref.find(dvar); it != symbol_table_.tuple_slot_ref.end() && it->second.count(slot)) {
       return;  // constprop already recorded this carrier
     }
@@ -794,7 +796,9 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
     if (Lnast_ntype::is_const(t)) {
       ++unnamed_pos;
     } else if (Lnast_ntype::is_ref(t)) {
-      consider(std::to_string(unnamed_pos), lm->current_text());
+      const auto slot = std::to_string(unnamed_pos);
+      raw_refs[slot]  = std::string(lm->current_text());
+      consider(slot, lm->current_text());
       ++unnamed_pos;
     } else if (Lnast_ntype::is_store(t)) {
       // Named field: store(ref(key), const/ref(val)) — named slots don't
@@ -803,6 +807,7 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
       if (lm->move_to_child()) {
         const std::string key(lm->current_text());
         if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+          raw_refs[key] = std::string(lm->current_text());
           consider(key, lm->current_text());
         }
       }
@@ -1068,7 +1073,7 @@ std::string uPass_runner::pkg_origin_of(std::string_view name) const {
   // Only an IMPORT NAMESPACE qualifies — call_resolver stamps `pub_unit` on the
   // bundle it builds for `const pkg = import("pkg")`. An ordinary struct read
   // (`sigs.ldst`) has no such marker and keeps folding to its value.
-  const auto bun = symbol_table_.get_bundle(base);
+  const auto        bun  = symbol_table_.get_bundle(base);
   if (!bun || !bun->has_attr(battr::pub_unit)) {
     return {};
   }
@@ -1167,8 +1172,7 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
   // before it concretizes to `u3`, so the pyrope re-emission can print the name
   // back. The LNAST slot still becomes prim_type_int, so every other consumer
   // (tolg port widths, bitwidth) is unchanged — this is a pure side-channel.
-  if (preserve_param_provenance_ && !port_name.empty() && type_name.find('.') != std::string_view::npos && lm
-      && lm->get_lnast()) {
+  if (preserve_param_provenance_ && !port_name.empty() && type_name.find('.') != std::string_view::npos && lm && lm->get_lnast()) {
     const auto base = type_name.substr(0, type_name.find('.'));
     if (const auto bun = symbol_table_.get_bundle(base); bun && bun->has_attr(battr::pub_unit)) {
       lm->get_lnast()->add_io_type_name(port_name, type_name);
@@ -1230,9 +1234,9 @@ void uPass_runner::check_concat_lanes() {
   uint64_t          total = 0;
   bool              bad   = false;
   while (lm->move_to_sibling()) {
-    const std::string lane_name(lm->current_text());
-    const bool        lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
-    livehd::diag::Span span       = lm->current_span();
+    const std::string  lane_name(lm->current_text());
+    const bool         lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
+    livehd::diag::Span span        = lm->current_span();
     if (!lm->move_to_sibling()) {
       break;  // trailing lane with no width operand: malformed shape, tolg reports it
     }
@@ -1382,8 +1386,8 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
   if (!concat_dest_checked_.insert(nid).second) {
     return;
   }
-  const uint32_t declared = concat_lane_declared_bits(dest_name);
-  livehd::diag::Span span = lm->current_span();
+  const uint32_t     declared = concat_lane_declared_bits(dest_name);
+  livehd::diag::Span span     = lm->current_span();
   if (declared == 0) {
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
@@ -1394,7 +1398,11 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .span     = std::move(span),
         .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
                                 "(e.g. `{}:u{}` or `{}:s{}`)",
-                                cit->second, dest_name, cit->second, dest_name, cit->second),
+                                cit->second,
+                                dest_name,
+                                cit->second,
+                                dest_name,
+                                cit->second),
     });
     return;
   }
@@ -1404,11 +1412,11 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .code     = "concat-width-mismatch",
         .category = "type",
         .pass     = "upass.runner",
-        .message  = std::format("`{}` is declared {} bits but the concat assigned to it is {} bits", dest_name, declared,
-                                cit->second),
-        .span     = std::move(span),
-        .hint     = "a concat's destination must match the lane sum EXACTLY, so the bit layout the source states is "
-                    "the layout the destination has -- widen or narrow the lanes, not the destination",
+        .message
+        = std::format("`{}` is declared {} bits but the concat assigned to it is {} bits", dest_name, declared, cit->second),
+        .span = std::move(span),
+        .hint = "a concat's destination must match the lane sum EXACTLY, so the bit layout the source states is "
+                "the layout the destination has -- widen or narrow the lanes, not the destination",
     });
   }
 }
@@ -1564,8 +1572,8 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
     // An ALREADY-BOUND width wins: a frontend that knew the window (slang reads
     // it off the operand type) has better information than anything derivable
     // from a name, and re-deriving it could disagree.
-    const auto        bound_txt = std::string(lm->current_text());
-    const bool        is_nil    = bound_txt.empty() || bound_txt == "nil";
+    const auto bound_txt = std::string(lm->current_text());
+    const bool is_nil    = bound_txt.empty() || bound_txt == "nil";
     if (!is_nil) {
       widths.emplace_back();  // keep whatever is there
       auto v = Dlop::from_pyrope(bound_txt);
@@ -1591,6 +1599,63 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
     concat_result_bits_[dst_name] = static_cast<uint32_t>(total);
   }
   return widths;
+}
+
+// `x:u48 = 0sb?` — an UNKNOWN sign extension is the WIDTH-TAKING wildcard: the
+// `?` replicates into the destination's DECLARED width and stops there, so the
+// store is exactly `x = 0ub` + 48 `?` (and `v:u8 = 0sb?1` is `0ub??????_?1`).
+// Returns that literal's text, or "" to leave the store as written.
+//
+// Resolved HERE, at emission, for the same reason the concat widths above are:
+// everything downstream (tolg, the Pyrope writer, sim, LEC) reads the LITERAL,
+// and a sign-unknown literal carries no width to read — Dlop can only bound one
+// conservatively (get_bits() -> 65 for ANY sign-unknown value). Left alone, every
+// net driven by an x-poison came out 65 bits wide, and a destination wider than
+// that read a known 0 above bit 64 instead of `?`.
+//
+// A destination with no declared width (`mut z = 0sb?`) has no envelope to fill
+// and keeps the 1-bit signed unknown it is written as. A SIGNED destination is
+// also left alone: masking would make the value non-negative, and Dlop has no
+// bounded-width signed all-unknown to narrow it to (the sign bit is the unknown).
+std::string uPass_runner::resolve_x_fill() {
+  if (!lm->has_child()) {
+    return {};
+  }
+  const auto  saved = lm->save_cursor();
+  std::string out;
+  lm->move_to_child();
+  const std::string dst(lm->current_text());  // child 0 is the dst ref
+  // Exactly two children: a plain scalar store. An indexed / multi-level write
+  // targets part of the destination, which is not the whole declared envelope.
+  if (!dst.empty() && lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
+    const auto txt      = std::string(lm->current_text());
+    const bool last_kid = !lm->move_to_sibling();  // a third child = an indexed write, not a whole store
+    // An SSA version holds a value OF the declared variable, so it answers to
+    // the base name's envelope (the poison store lands on `x___ssa_1`).
+    auto       f        = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), dst);
+    if (!f || !f->range_max) {
+      if (const auto pos = dst.find("___ssa_"); pos != std::string::npos) {
+        f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), std::string_view{dst}.substr(0, pos));
+      }
+    }
+    if (last_kid && f && f->range_max && f->range_min && f->range_max->is_integer() && !f->range_max->is_negative()
+        && !f->range_min->is_negative() && !f->range_max->has_unknowns()) {
+      const int w = f->range_max->get_bits() - 1;  // uN's max is 2^N-1; get_bits() counts the sign slot
+      if (w > 0) {
+        try {
+          const Dlop& v = Dlop::from_pyrope_cached(txt);
+          if (v.is_integer() && v.unknown_bit_test(w)) {
+            if (auto filled = v.and_op(*f->range_max); filled && !filled->is_invalid()) {
+              out = filled->to_pyrope();  // canonical + round-tripping
+            }
+          }
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — an unparseable literal is left as written
+        }
+      }
+    }
+  }
+  lm->restore_cursor(saved);
+  return out;
 }
 
 void uPass_runner::emit_op_with_fold(bool fold_all) {
@@ -1623,6 +1688,8 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   if (Lnast_ntype::is_concat(op_ntype)) {
     concat_widths = resolve_concat_widths(concat_dst);
   }
+  // ── `0sb?`: the width-taking wildcard, bound to the destination, HERE ─────
+  const std::string x_fill = Lnast_ntype::is_store(op_ntype) ? resolve_x_fill() : std::string{};
 
   emit_push(op_ntype);      // carries the SourceId (general carry)
   std::string call_callee;  // child 1 of a func_call — read while walking it below
@@ -1664,6 +1731,8 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
           lm->move_to_parent();
         }
         emit_pop();
+      } else if (!x_fill.empty() && idx == 1) {
+        emit_leaf(Lnast_node::create_const(x_fill));  // `0sb?` filled to the dst's declared width
       } else if (!concat_widths.empty() && idx >= 2 && (idx % 2) == 0 && !concat_widths[idx / 2 - 1].empty()) {
         // A concat WIDTH operand (children 2, 4, 6, … pair with lanes 1, 3, 5, …)
         // that we just resolved: emit the bound width in place of the `nil`.
@@ -5292,8 +5361,16 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
       return false;  // named or non-contiguous slot — not a plain indexable array
     }
     if (auto rname = try_tuple_slot_ref(src, slot)) {
-      elems.push_back(Lnast_node::create_ref(*rname));  // runtime wire
-      any_runtime = true;
+      // tuple_slot_ref can retain the SSA carrier of a leaf whose producer
+      // constprop folded away. Emitting that carrier here creates a dangling
+      // Hotmux arm (`%tmp` with no staged store). Materialize its folded value
+      // as a literal; only a genuinely runtime carrier keeps the ref.
+      if (auto folded = try_fold_ref(*rname)) {
+        elems.push_back(Lnast_node::create_const(folded->to_pyrope()));
+      } else {
+        elems.push_back(Lnast_node::create_ref(*rname));  // runtime wire
+        any_runtime = true;
+      }
     } else if (bundle) {
       const Dlop& t = bundle->get_trivial(bundle_path::of_string(slot));
       if (t.is_invalid()) {
@@ -5324,7 +5401,12 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
     // types); its absence is what tells a plain tuple value from a Memory/ROM.
     const bool is_array_typed = bundle && !bundle->get_attr("__elem_max").is_invalid();
     const auto facts          = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), src);
-    const bool muxable_mode   = facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind);
+    // A frontend-created `%tmp = tuple_add(...)` has no declaration facts but
+    // is itself the plain tuple value; all-constant SROA reads commonly take
+    // this shape. Named values still require an explicit non-reg mode so a
+    // registered/typed array cannot be mistaken for a constant ROM tuple.
+    const bool muxable_mode   = (!facts && std::string_view(src).starts_with("%"))
+                                || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
     if (is_array_typed || !muxable_mode) {
       return false;
     }
@@ -5363,6 +5445,139 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
   emit_pop();  // store
   emit_pop();  // stmts (else)
   emit_pop();  // unique_if
+  return true;
+}
+
+bool uPass_runner::try_lower_dynamic_tuple_store() {
+  // Slang represents a runtime write to an SROA scalar-element array as
+  // store(tuple_of_leaf_refs, runtime_index, value). Lower that language-level
+  // operation here, downstream of the frontend, into mutually exclusive leaf
+  // writes. The empty else preserves SystemVerilog out-of-range write semantics
+  // (no element is modified).
+  if (!lm->get_lnast()->is_verilog_origin() || lm->current_num_children() != 3 || !lm->has_child()) {
+    return false;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string tuple(lm->current_text());
+  // The MARKER on the carrier is the authority, not the `.eN` spelling of the
+  // leaves below: a genuine tuple whose members are named `.e0`, `.e1`, … is
+  // indistinguishable by name, and decoding one into mutually exclusive leaf
+  // writes plus an out-of-range no-op arm would silently change its meaning.
+  // Only Slang_lvalue's two SROA element-write sites mint this prefix.
+  if (!tuple.starts_with(Lnast::sroa_write_tuple_prefix)) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  if (!lm->move_to_sibling() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string index(lm->current_text());
+  if (try_fold_ref(index)) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  if (!lm->move_to_sibling() || !lm->is_last_child()) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const Lnast_node value = Lnast_ntype::is_ref(lm->get_raw_ntype()) ? Lnast_node::create_ref(lm->current_text())
+                                                                    : Lnast_node::create_const(lm->current_text());
+  lm->restore_cursor(saved);
+
+  auto shape = try_tuple_shape(tuple);
+  if (!shape || shape->empty()) {
+    return false;
+  }
+  std::vector<std::string> targets;
+  targets.reserve(shape->size());
+  auto is_sroa_leaf = [](std::string_view name) {
+    auto pos = name.find(".e");
+    while (pos != std::string_view::npos) {
+      size_t i = pos + 2;
+      if (i < name.size() && name[i] >= '0' && name[i] <= '9') {
+        while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
+          ++i;
+        }
+        if (i == name.size() || name[i] == '.' || name.substr(i).starts_with("___ssa_")) {
+          return true;
+        }
+      }
+      pos = name.find(".e", pos + 2);
+    }
+    return false;
+  };
+  const auto raw_it = tuple_raw_slot_ref_.find(tuple);
+  for (size_t lane = 0; lane < shape->size(); ++lane) {
+    const auto& [slot, positional] = (*shape)[lane];
+    if (!positional || slot != std::to_string(lane)) {
+      return false;
+    }
+    auto target = try_tuple_slot_ref(tuple, slot);
+    if (!target && raw_it != tuple_raw_slot_ref_.end()) {
+      if (auto it = raw_it->second.find(slot); it != raw_it->second.end()) {
+        target = it->second;
+      }
+    }
+    if (!target || !is_sroa_leaf(*target)) {
+      return false;
+    }
+    targets.push_back(std::move(*target));
+  }
+
+  std::vector<std::optional<Dlop>> prior_values;
+  prior_values.reserve(targets.size());
+  for (const auto& target : targets) {
+    prior_values.push_back(try_fold_ref(target));
+  }
+  flush_deferred_emits();
+  // A preceding comptime assignment may have been folded without staging a
+  // physical store. Once this runtime update appears, that folded value is the
+  // hold/default arm of the write and must be materialized before the decoded
+  // branch stores. Runtime-valued leaves already have their real producer.
+  for (size_t lane = 0; lane < targets.size(); ++lane) {
+    if (!prior_values[lane]) {
+      continue;
+    }
+    emit_push(Lnast_ntype::create_store());
+    emit_leaf(Lnast_node::create_ref(targets[lane]));
+    emit_leaf(Lnast_node::create_const(prior_values[lane]->to_pyrope()));
+    emit_pop();
+  }
+  const uint32_t           seq = ++inline_seq_;
+  std::vector<std::string> conds;
+  conds.reserve(targets.size());
+  for (size_t lane = 0; lane < targets.size(); ++lane) {
+    auto cmp = std::format("%dwrsel{}_{}", seq, lane);
+    emit_staging_op(Lnast_ntype::create_eq(), cmp, {Lnast_node::create_ref(index), Lnast_node::create_const(std::to_string(lane))});
+    conds.push_back(std::move(cmp));
+  }
+  emit_push(Lnast_ntype::create_unique_if());
+  for (size_t lane = 0; lane < targets.size(); ++lane) {
+    emit_leaf(Lnast_node::create_ref(conds[lane]));
+    emit_push(Lnast_ntype::create_stmts());
+    emit_push(Lnast_ntype::create_store());
+    emit_leaf(Lnast_node::create_ref(targets[lane]));
+    emit_leaf(value);
+    emit_pop();
+    emit_pop();
+  }
+  emit_push(Lnast_ntype::create_stmts());  // out of range: ignored write
+  emit_pop();
+  emit_pop();
+  // The synthesized branch stores were emitted directly into staging rather
+  // than recursively dispatched through constprop. Invalidate each leaf's
+  // stale comptime value explicitly so later whole-array or element reads use
+  // the runtime mux result instead of folding to the value from before this
+  // dynamic write.
+  for (const auto& target : targets) {
+    symbol_table_.set(target, Symbol_table::invalid_lconst);
+  }
   return true;
 }
 
@@ -9241,6 +9456,9 @@ void uPass_runner::process_lnast() {
     // (the bundle mutation is the point — never dropped, classify not
     // consulted, matching the old process_verbatim path).
     case Ntype::Lnast_ntype_store:
+      if (try_lower_dynamic_tuple_store()) {
+        break;
+      }
       // `c = concat(...)`: the destination's declared width must equal the lane
       // sum exactly. Checked at the bind, not at the concat, because the concat
       // node's own dst is always a compiler temp.
@@ -9691,6 +9909,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   Dlop        decl_min;
   Dlop        elem_max;  // array declares: the ELEMENT envelope ([4][8]u8 → u8)
   Dlop        elem_min;
+  Dlop        array_size;                        // outer declared extent (for static bounds checks)
   upass::Kind elem_kind = upass::Kind::unknown;  // array declares: the element KIND (integer vs boolean)
   std::string type_name;
   upass::Mode mode       = upass::Mode::unknown;
@@ -9717,6 +9936,23 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       // (decl_facts/try_decl_type consumers).
       int depth = 0;
       while (Lnast_ntype::is_comp_type_array(lm->get_raw_ntype()) && lm->has_child()) {
+        if (depth == 0) {
+          const auto arr_nid = lm->get_current_nid();
+          const auto elem_n  = lm->get_lnast()->get_first_child(arr_nid);
+          const auto dim_n   = elem_n.is_invalid() ? elem_n : lm->get_lnast()->get_sibling_next(elem_n);
+          if (!dim_n.is_invalid() && Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n))) {
+            std::string_view dim = lm->get_lnast()->get_name(dim_n);
+            if (dim.size() >= 2 && dim.front() == '[' && dim.back() == ']') {
+              dim.remove_prefix(1);
+              dim.remove_suffix(1);
+            }
+            int64_t n = 0;
+            if (auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), n);
+                ec == std::errc{} && ptr == dim.end() && n >= 0) {
+              array_size = *Dlop::create_integer(n);
+            }
+          }
+        }
         lm->move_to_child();  // child0 = element (possibly a nested array)
         ++depth;
       }
@@ -9969,6 +10205,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   }
   if (elem_kind != upass::Kind::unknown) {
     bundle->set_attr("__elem_kind", *Dlop::create_integer(static_cast<int64_t>(elem_kind)));
+  }
+  if (!array_size.is_invalid()) {
+    bundle->set_attr("__array_size", array_size);
   }
 
   // Back-flow: when this dst is a tuple_get extraction tmp (`___2 = ___1.a`

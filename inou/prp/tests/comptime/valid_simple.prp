@@ -17,10 +17,14 @@ cassert((v1 != 0) == 0sb?)
 cassert((v2 != 0) == 0sb?)
 
 const res1 = v1 + 0
-const res2 = v2 + 1
 
-cassert(res1 == v1 == 0sb?)  // 1 bit, unknown
-cassert(res2 == 0sb??)       // 2 bits, unknown both of them
+cassert((res1 != 0) == 0sb?)  // the unknown propagates through the arithmetic
+
+// `0sb?` is the WIDTH-TAKING wildcard: the `?` fills the DECLARED width of the
+// destination and stops there, so `v2:u32 = 0sb?` holds 32 unknown bits — the
+// same value as `0ub` followed by 32 `?`, not the 1 bit the literal is written
+// as. A destination with no declared width keeps the 1-bit signed unknown.
+cassert(v2 == 0ub????????????????????????????????)
 
 v2 = 100
 cassert((v2 + 1) == 101)

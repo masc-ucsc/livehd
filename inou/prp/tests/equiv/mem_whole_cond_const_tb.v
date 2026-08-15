@@ -7,11 +7,11 @@ module mem_whole_cond_const_tb;
   reg  [0:0] clr;
   reg  [0:0] fill;
   reg  [0:0] we;
-  reg  [2:0] waddr;
-  reg  [9:0] wdata;
-  reg  [2:0] idx;
+  reg  [1:0] waddr;
+  reg  [5:0] wdata;
+  reg  [1:0] idx;
   reg clock;
-  wire [9:0] r;
+  wire [5:0] r;
   \mem_whole_cond_const.condconst  dut(.clr(clr), .fill(fill), .we(we), .waddr(waddr), .wdata(wdata), .idx(idx), .clock(clock), .r(r));
   reg [63:0] s, sig; integer k;
   initial begin
@@ -20,13 +20,13 @@ module mem_whole_cond_const_tb;
       s=s*A+C; clr = s & 64'd1;
       s=s*A+C; fill = s & 64'd1;
       s=s*A+C; we = s & 64'd1;
-      s=s*A+C; waddr = s & 64'd7;
-      s=s*A+C; wdata = s & 64'd1023;
-      s=s*A+C; idx = s & 64'd7;
+      s=s*A+C; waddr = s & 64'd3;
+      s=s*A+C; wdata = s & 64'd63;
+      s=s*A+C; idx = s & 64'd3;
       #1 clock=1; #1;
       #1 clock=0; #1;
       if (k>=32) begin
-        sig = sig*P + (r & 64'd1023);
+        sig = sig*P + (r & 64'd63);
       end
     end
     $display("SIG %0d", sig & MASK);

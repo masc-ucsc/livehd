@@ -372,6 +372,7 @@ bool Lnast_prp_writer::is_foldable_optype(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_bit_not:
     case N::Lnast_ntype_sext:
     case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_concat:
     case N::Lnast_ntype_tuple_get:
     case N::Lnast_ntype_attr_get : return true;
     // store is foldable only as a plain copy (handled at the call site, which
@@ -2505,6 +2506,12 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
         print(":");
         print(ait->second);
         emitted_type = true;
+        typed_emitted_.insert(std::string(pname));  // the signature states this port's width
+        // The alias is what PRINTS, but the concretized `uN` is still what the
+        // port holds — record it so a whole-width mask on this port still folds.
+        if (!type_nid.is_invalid()) {
+          note_port_width(pname, render_type_at(type_nid));
+        }
       } else if (!type_nid.is_invalid()) {
         auto t = render_type_at(type_nid);
         if (!t.empty()) {
@@ -2512,6 +2519,7 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
           print(t);
           emitted_type = true;
           note_port_width(pname, t);
+          typed_emitted_.insert(std::string(pname));
         }
       }
       if (!emitted_type) {
@@ -3247,6 +3255,7 @@ void Lnast_prp_writer::write_declare() {
   print(" ");
   print(lhs);
   if (!type_suffix.empty()) {
+    typed_emitted_.insert(std::string(lhs));  // the source states this name's width
     print(":");
     print(type_suffix);
   }
@@ -3269,6 +3278,8 @@ void Lnast_prp_writer::write_declare() {
     print(" = ");
     if (current_ntype() == Lnast_ntype::Lnast_ntype_tuple_add) {
       write_tuple_literal();  // memory init: a bare tuple_add (no LHS child)
+    } else if (auto sh = x_poison_shorthand(cur, lhs); !sh.empty()) {
+      print(sh);  // the declared width is right here: `mut x:u48 = 0sb?`
     } else {
       print(render_value(cur, /*operand_ctx=*/false));
     }
@@ -3505,21 +3516,288 @@ std::string Lnast_prp_writer::render_comptime_init(Lnast_nid n) {
   return out;
 }
 
-// A port declared `uN` is N bits wide, so `p#[0..=N-1]` selects the whole value
-// and is a no-op the emitted source is better without. Recorded as the signature
-// prints (which precedes the body, so every body reader sees it). ONLY a plain
-// unsigned `uN`: on a signed `sN` the same mask REINTERPRETS the value as
-// unsigned, which is a real operation.
-// True when [lo..=hi] covers every bit of `src`, so the mask selects the value
-// unchanged. Only decided for a REF naming a `uN` PORT — that is where the width
-// is known for certain, and where the redundant mask actually shows up
-// (`a_i#[0..=51]` on `a_i:u52`). Anything else stays as written.
+// True when [lo..=hi] covers every bit `src` can hold, so the mask selects the
+// value unchanged and is a no-op the emitted source is better without. Decided
+// from `known_unsigned_bits`: a `uN` port or declared variable is the common
+// case (`a_i#[0..=51]` on `a_i:u52`), a temp whose definition bounds it (a
+// narrower slice, a sized concat) the rest; anything unproven stays as written.
+// Only an UNSIGNED bound counts: on a signed value the same mask REINTERPRETS
+// it as unsigned, which is a real operation.
 bool Lnast_prp_writer::is_whole_width_mask(Lnast_nid src, int lo, int hi) const {
-  if (lo != 0 || src.is_invalid() || lnast->get_type(src) != Lnast_ntype::Lnast_ntype_ref) {
+  if (lo != 0 || hi < 0) {
     return false;
   }
-  auto it = port_bits_.find(std::string(strip_prefix(lnast->get_name(src))));
-  return it != port_bits_.end() && it->second == hi + 1;
+  return fits_unsigned_bits(src, static_cast<int64_t>(hi) + 1);
+}
+
+// A numeric const leaf's CANONICAL Pyrope spelling. Dlop::to_pyrope is the
+// round-tripping printer — small values decimal, wide ones hex, unknown
+// patterns `0ub…`/`0sb…` — so the emitted source stops carrying whatever
+// spelling the pass that minted the literal happened to use. The visible win is
+// the 64-bit masks an x-pattern compare produces: `& 18446744073709551614`
+// prints as `& 0xfffffffffffffffe`. Text that does not parse (or is not a
+// number) is passed through untouched.
+std::string Lnast_prp_writer::canonical_const_text(std::string_view txt) {
+  if (txt.empty() || (std::isdigit(static_cast<unsigned char>(txt.front())) == 0 && txt.front() != '-')) {
+    return std::string(txt);
+  }
+  try {
+    const Dlop& d = Dlop::from_pyrope_cached(txt);
+    // An all-`?` pattern drops to_pyrope's leading sign digit (`0ub0???` ->
+    // `0ub???`): an unsigned literal zero-extends, so the two are the same
+    // value (checked by a cassert), and the shorter one is what the width
+    // reads as.
+    if (d.is_integer() && d.has_unknowns() && txt.size() > 4 && txt.starts_with("0ub0")
+        && txt.find_first_not_of('?', 4) == std::string_view::npos) {
+      return std::string("0ub").append(txt.substr(4));
+    }
+    // Otherwise a boolean / string / nil / x-PATTERN keeps its own spelling:
+    // for a pattern the written form already IS the canonical binary one.
+    if (d.is_integer() && !d.has_unknowns()) {
+      auto s = d.to_pyrope();
+      if (!s.empty()) {
+        // to_pyrope's multi-word hex path prints the top word with `{:x}`, so a
+        // positive value that needed a zero headroom word for its sign leads
+        // with it: `0x0ffffffff0000707f`. Leading zeros never change a hex
+        // literal's value (checked: `0x0ff == 0xff`), so drop them.
+        const size_t pfx = s.starts_with("-0x") ? 3 : (s.starts_with("0x") ? 2 : 0);
+        if (pfx != 0) {
+          size_t nz = s.find_first_not_of('0', pfx);
+          if (nz == std::string::npos) {
+            nz = s.size() - 1;  // all zeros: keep one digit
+          }
+          s.erase(pfx, nz - pfx);
+        }
+        return s;
+      }
+    }
+  } catch (...) {  // NOLINT(bugprone-empty-catch) — an unparseable literal is emitted as written
+  }
+  return std::string(txt);
+}
+
+// Parse a const leaf's text as a NON-NEGATIVE integer with no unknown bits: the
+// only literal whose unsigned window is its own magnitude. Null for anything
+// else (`nil`, a string, a negative, an x-pattern). The parse is the shared
+// memo, so re-asking about the same literal is a hash lookup.
+static const Dlop* plain_uint_literal(std::string_view txt) {
+  if (txt.empty()) {
+    return nullptr;
+  }
+  try {
+    const Dlop& d = Dlop::from_pyrope_cached(txt);
+    if (d.is_integer() && !d.has_unknowns() && !d.is_negative()) {
+      return &d;
+    }
+  } catch (...) {  // NOLINT(bugprone-empty-catch) — an unparseable literal simply has no window
+  }
+  return nullptr;
+}
+
+std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_depth) const {
+  using N = Lnast_ntype;
+  if (n.is_invalid() || walk_depth > 8) {  // a re-converging DAG is walked once per edge: bound it
+    return std::nullopt;
+  }
+  const auto t = lnast->get_type(n);
+  if (N::is_const(t)) {
+    const auto* d = plain_uint_literal(lnast->get_name(n));
+    if (d == nullptr) {
+      return std::nullopt;
+    }
+    return d->get_bits() > 0 ? d->get_bits() - 1 : 0;  // get_bits() counts the sign slot
+  }
+  if (N::is_ref(t)) {
+    const std::string nm(lnast->get_name(n));
+    if (auto pit = port_bits_.find(std::string(strip_prefix(nm))); pit != port_bits_.end()) {
+      return pit->second;
+    }
+    auto fit = fold_info_.find(nm);
+    if (fit == fold_info_.end() || fit->second.def_count - fit->second.decl_defs != 1) {
+      return std::nullopt;  // no def, or several: this read's value is not pinned to one expression
+    }
+    // A DECLARE alongside the value def can carry an initializer, and a read
+    // that lands on that initializer instead (a def inside one if-arm, read
+    // outside it) is a different, possibly wider value. Only a name whose
+    // single def is its ONLY def — or a compiler temp, which the front end
+    // mints fresh per operation — is pinned. A declared `uN` variable is
+    // covered above, by its type.
+    if (fit->second.decl_defs != 0 && !is_tmp(nm)) {
+      return std::nullopt;
+    }
+    return known_unsigned_bits(fit->second.def_node, walk_depth + 1);
+  }
+
+  auto c0 = lnast->get_child(n);
+  switch (t) {
+    case N::Lnast_ntype_get_mask: {
+      // The emitted `s#[lo..=hi]` is an unsigned select of hi-lo+1 bits. A
+      // ONE-bit select is excluded: its constant fold is the signed -1/0
+      // boolean (Dlop::get_mask_op), so it carries no unsigned window.
+      auto src  = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
+      auto mask = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
+      if (mask.is_invalid()) {
+        return std::nullopt;
+      }
+      if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
+        auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
+        if (rit == range_lohi_.end()) {
+          return std::nullopt;
+        }
+        const auto lo = parse_int_const(rit->second.first);
+        const auto hi = parse_int_const(rit->second.second);
+        if (!lo || !hi || *lo < 0 || *hi < *lo + 1) {
+          return std::nullopt;
+        }
+        return static_cast<int>(*hi - *lo + 1);
+      }
+      if (lnast->get_type(mask) != N::Lnast_ntype_const) {
+        return std::nullopt;
+      }
+      auto run = contiguous_run(lnast->get_name(mask));  // the compacting (`#[lo..=hi]`) spelling
+      if (!run || run->second - run->first < 1) {
+        return std::nullopt;
+      }
+      return run->second - run->first + 1;
+    }
+    case N::Lnast_ntype_concat: {
+      // sum(lane widths) — the concat's result is that non-negative width.
+      int64_t total = 0;
+      for (auto v = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0); !v.is_invalid();) {
+        auto w = lnast->get_sibling_next(v);
+        if (w.is_invalid()) {
+          return std::nullopt;
+        }
+        const auto* d = plain_uint_literal(lnast->get_name(w));  // `nil` (unbound) parses to nothing
+        if (d == nullptr || !d->is_just_i64() || d->to_just_i64() <= 0) {
+          return std::nullopt;
+        }
+        total += d->to_just_i64();
+        v      = lnast->get_sibling_next(w);
+      }
+      return total > 0 && total < (1 << 20) ? std::optional<int>(static_cast<int>(total)) : std::nullopt;
+    }
+    case N::Lnast_ntype_bit_and: {
+      // ONE non-negative operand bounds the AND: `a & C` is in [0, C] whatever
+      // `a` is. That is how a one-bit read (`(en & 1)`) and a masked field
+      // (`data & _rep_1` on a `u15`) state their window.
+      std::optional<int> best;
+      for (auto o = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0); !o.is_invalid();
+           o      = lnast->get_sibling_next(o)) {
+        auto w = known_unsigned_bits(o, walk_depth + 1);
+        if (w && (!best || *w < *best)) {
+          best = w;
+        }
+      }
+      return best;
+    }
+    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_xor: {
+      // OR/XOR need EVERY operand bounded (a negative one sets the high bits).
+      int widest = 0;
+      for (auto o = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0); !o.is_invalid();
+           o      = lnast->get_sibling_next(o)) {
+        auto w = known_unsigned_bits(o, walk_depth + 1);
+        if (!w) {
+          return std::nullopt;
+        }
+        widest = std::max(widest, *w);
+      }
+      return widest > 0 ? std::optional<int>(widest) : std::nullopt;
+    }
+    case N::Lnast_ntype_shl: {
+      // `a << k` (constant k) grows the window by exactly k.
+      auto src = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
+      auto amt = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
+      if (amt.is_invalid() || !lnast->get_sibling_next(amt).is_invalid()) {
+        return std::nullopt;
+      }
+      auto        w = known_unsigned_bits(src, walk_depth + 1);
+      const auto* k = plain_uint_literal(lnast->get_name(amt));
+      if (!w || k == nullptr || !k->is_just_i64()) {
+        return std::nullopt;
+      }
+      const int64_t total = *w + k->to_just_i64();
+      return total > 0 && total < (1 << 20) ? std::optional<int>(static_cast<int>(total)) : std::nullopt;
+    }
+    case N::Lnast_ntype_store: {
+      // A pure copy carries its value's window.
+      auto val = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
+      if (val.is_invalid() || !lnast->get_sibling_next(val).is_invalid()) {
+        return std::nullopt;  // an indexed store writes only part of the target
+      }
+      return known_unsigned_bits(val, walk_depth + 1);
+    }
+    default: return std::nullopt;
+  }
+}
+
+// `x = 0ub????…` (every bit unknown) where `x` is DECLARED exactly that wide is
+// the width-taking wildcard spelled the long way: emit `0sb?`. upass fills it
+// back to the identical value on re-parse (uPass_runner::resolve_x_fill), so
+// this is a pure spelling change — and one that keeps a 1027-bit poison from
+// putting 1027 `?` on a line. Only when the width is DECLARED (a port or a `uN`
+// declare, both of which the writer emits with their type): without one the
+// literal itself is the only statement of the width, and must stay.
+int Lnast_prp_writer::x_poison_width(Lnast_nid val_nid) const {
+  if (val_nid.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(val_nid))) {
+    return 0;
+  }
+  const auto txt = lnast->get_name(val_nid);
+  if (txt.size() < 4 || txt[0] != '0' || txt[1] != 'u' || txt[2] != 'b') {
+    return 0;  // `0ub…`: an UNSIGNED all-unknown pattern (a signed one does not fill)
+  }
+  int w = 0;
+  for (const char c : txt.substr(3)) {
+    if (c == '_') {
+      continue;
+    }
+    if (c == '?') {
+      ++w;
+      continue;
+    }
+    if (c == '0' && w == 0) {
+      continue;  // to_pyrope's leading sign digit
+    }
+    return 0;  // a KNOWN bit: not an all-unknown poison
+  }
+  return w > 1 ? w : 0;
+}
+
+bool Lnast_prp_writer::is_x_poison_of_width(Lnast_nid val_nid, int bits) const {
+  return bits > 1 && x_poison_width(val_nid) == bits;
+}
+
+std::string Lnast_prp_writer::x_poison_shorthand(Lnast_nid val_nid, std::string_view lhs) const {
+  const std::string nm(lhs);
+  auto              it = port_bits_.find(nm);
+  if (it == port_bits_.end() || !is_x_poison_of_width(val_nid, it->second)) {
+    return {};
+  }
+  // The wildcard fills from the DECLARED width, so it may only replace the
+  // literal when the emitted source still states that width — a port's
+  // signature, or a `:uN` on the declaration. Otherwise the literal IS the
+  // width and has to stay.
+  return typed_emitted_.count(nm) != 0 ? std::string("0sb?") : std::string{};
+}
+
+std::optional<std::string> Lnast_prp_writer::const_lane_value(Lnast_nid n, int64_t bits) const {
+  if (n.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(n))) {
+    return std::nullopt;
+  }
+  const std::string txt(lnast->get_name(n));
+  const auto*       d = plain_uint_literal(txt);
+  if (d == nullptr) {
+    return std::nullopt;  // negative / unknown-bit lane: the window mask is real
+  }
+  const int w = d->get_bits() > 0 ? d->get_bits() - 1 : 0;
+  if (w > bits) {
+    return std::nullopt;  // over-wide literal: the window mask is what truncates it
+  }
+  if (d->is_just_i64() && d->to_just_i64() == 0) {
+    return std::string("0");
+  }
+  return canonical_const_text(txt);
 }
 
 void Lnast_prp_writer::note_port_width(std::string_view name, std::string_view type_txt) {
@@ -3758,8 +4036,15 @@ void Lnast_prp_writer::write_store() {
   print(lhs);
   if (scalar && !prefix.empty()) {
     if (auto tit = type_specs_.find(lhs); tit != type_specs_.end() && !tit->second.empty()) {
+      typed_emitted_.insert(lhs);
       print(":");
       print(tit->second);
+    } else if (auto pit = port_bits_.find(lhs); pit != port_bits_.end() && is_x_poison_of_width(val_nid, pit->second)) {
+      // This declaring store's value is a full-width x poison, which is about to
+      // print as the `0sb?` wildcard — so the DECLARE has to carry the width the
+      // literal used to state, or the re-parse would fill a 1-bit unknown.
+      typed_emitted_.insert(lhs);
+      print(std::format(":u{}", pit->second));
     }
   }
   while (move_to_sibling() && !is_last_child()) {
@@ -3768,7 +4053,16 @@ void Lnast_prp_writer::write_store() {
     print("]");
   }
   print(" = ");
-  print(render_value(cur, /*operand_ctx=*/false));  // cursor sits on the value (last child)
+  // An all-`?` poison whose width IS the target's declared width re-compacts to
+  // the wildcard it came from: `x:u48 = 0sb?` says the same thing as 48 `?`, and
+  // the re-parse fills it back to the identical value (the declared width is
+  // right there in the emitted `mut x:u48`). Without a declared width the long
+  // literal IS the width, so it stays.
+  if (auto sh = x_poison_shorthand(cur, lhs); !sh.empty()) {
+    print(sh);
+  } else {
+    print(render_value(cur, /*operand_ctx=*/false));  // cursor sits on the value (last child)
+  }
   if (auto it = store_timechecks_.find(store_nid.get_class_index().value); it != store_timechecks_.end()) {
     print(render_timecheck_suffix(it->second));
   }
@@ -4360,7 +4654,10 @@ void Lnast_prp_writer::write_set_mask() {
   }
   std::string ins;
   if (move_to_sibling()) {  // insert value — may be a single-use temp to inline
-    ins = render_value(cur, /*operand_ctx=*/true);
+    // A single contiguous run consumes `ins` WHOLE (`dst#[lo..=hi] = ins`), so a
+    // loose expression needs no parens there. Several runs each append a
+    // `#[..]` slice to it, which does.
+    ins = render_value(cur, /*operand_ctx=*/mask_runs(mask_txt).size() != 1);
   }
   move_to_parent();
 
@@ -4569,7 +4866,21 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
     if (!var_nid.is_invalid()) {
       auto type_nid = lnast->get_sibling_next(var_nid);
       if (!type_nid.is_invalid()) {
-        type_specs_[std::string(strip_prefix(lnast->get_name(var_nid)))] = render_type_at(type_nid);
+        auto tt                                                         = render_type_at(type_nid);
+        type_specs_[std::string(strip_prefix(lnast->get_name(var_nid)))] = tt;
+        note_port_width(strip_prefix(lnast->get_name(var_nid)), tt);
+      }
+    }
+  }
+  // A `uN` DECLARE bounds the variable exactly like a `uN` port does, so a
+  // later `x#[0..=N-1]` on it is the same no-op mask (`_rep_1:u15` in a
+  // replication lowering is the common one).
+  if (t == Lnast_ntype::Lnast_ntype_declare) {
+    auto var_nid = lnast->get_child(nid);
+    if (!var_nid.is_invalid()) {
+      auto type_nid = lnast->get_sibling_next(var_nid);
+      if (!type_nid.is_invalid()) {
+        note_port_width(strip_prefix(lnast->get_name(var_nid)), render_type_at(type_nid));
       }
     }
   }
@@ -5469,7 +5780,7 @@ void Lnast_prp_writer::analyze_instance_inline() {
 std::string Lnast_prp_writer::const_text(Lnast_nid node) const {
   auto text = lnast->get_name(node);
   if (!text.empty() && (isdigit(static_cast<unsigned char>(text[0])) || text[0] == '-')) {
-    return std::string(text);
+    return canonical_const_text(text);
   }
   if (text == "true" || text == "false" || text == "nil") {
     return std::string(text);
@@ -5583,9 +5894,14 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       return std::format("{}#sext[0..={}]", s, p);  // postfix — binds tight, never wrapped
     }
     case N::Lnast_ntype_get_mask: {
-      auto        src  = lnast->get_sibling_next(c0);
-      auto        mask = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
-      std::string s    = src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/true);
+      auto src  = lnast->get_sibling_next(c0);
+      auto mask = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
+      // A mask that selects every bit is dropped, and the source is then NOT a
+      // sub-expression of a `#[..]` postfix — it inherits THIS node's context,
+      // so it must not be parenthesised on its own account.
+      auto srctxt = [&](bool as_operand) {
+        return src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/as_operand);
+      };
       if (!mask.is_invalid()) {
         if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
           auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
@@ -5596,25 +5912,25 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
             const auto hi = parse_int_const(rit->second.second);
             if (lo && hi && *lo >= 0 && *hi >= *lo) {
               if (is_whole_width_mask(src, static_cast<int>(*lo), static_cast<int>(*hi))) {
-                return s;  // selects every bit of a `uN` source: a no-op
+                return srctxt(operand_ctx);  // selects every bit of the source: a no-op
               }
-              return fmt_bit_range(s, static_cast<int>(*lo), static_cast<int>(*hi));  // tight
+              return fmt_bit_range(srctxt(true), static_cast<int>(*lo), static_cast<int>(*hi));  // tight
             }
-            return std::format("{}#[{}..={}]", s, rit->second.first, rit->second.second);  // tight
+            return std::format("{}#[{}..={}]", srctxt(true), rit->second.first, rit->second.second);  // tight
           }
         } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
           std::string mt(lnast->get_name(mask));
           if (auto run = contiguous_run(mt)) {
             if (is_whole_width_mask(src, run->first, run->second)) {
-              return s;  // selects every bit of a `uN` source: a no-op
+              return srctxt(operand_ctx);  // selects every bit of the source: a no-op
             }
-            return fmt_bit_range(s, run->first, run->second);  // tight
+            return fmt_bit_range(srctxt(true), run->first, run->second);  // tight
           }
-          return wrap(std::format("{} & {}", s, mt), /*loose=*/true);
+          return wrap(std::format("{} & {}", srctxt(true), canonical_const_text(mt)), /*loose=*/true);
         }
       }
       std::string mv = mask.is_invalid() ? std::string("0") : render_value(mask, /*operand_ctx=*/true);
-      return wrap(std::format("{} & {}", s, mv), /*loose=*/true);
+      return wrap(std::format("{} & {}", srctxt(true), mv), /*loose=*/true);
     }
     case N::Lnast_ntype_concat: {
       // `concat( dst, v_msb, w_msb, …, v_lsb, w_lsb )` is emitted as the
@@ -5640,6 +5956,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
         std::string expr;
         int64_t     width  = 0;
         int64_t     offset = 0;
+        Lnast_nid   nid;  // the lane's value node (for the width/sign queries below)
       };
       std::vector<W_lane> wl;
       int64_t             total = 0;
@@ -5655,7 +5972,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
             bits = d->to_just_i64();
           }
         }
-        wl.push_back(W_lane{render_value(v, /*operand_ctx=*/true), bits, 0});
+        wl.push_back(W_lane{render_value(v, /*operand_ctx=*/true), bits, 0, v});
         v = lnast->get_sibling_next(w);
       }
       // MSB-first: a lane sits above every lane after it.
@@ -5678,9 +5995,18 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       if (wl.size() > 1 && total > 0 && total <= (1 << 20)
           && std::all_of(wl.begin(), wl.end(), [&](const W_lane& l) { return l.width == 1 && l.expr == wl.front().expr; })) {
         const std::string mask = Dlop::get_mask_value(static_cast<int>(total))->to_pyrope();
-        return wrap(std::format("if unsigned(({})#[0..=0]) != 0 {{ {} }} else {{ 0 }}", wl.front().expr, mask), /*loose=*/true);
+        const auto&       sel  = wl.front();
+        // A lane already proven to be one unsigned bit IS the selector.
+        const std::string test = fits_unsigned_bits(sel.nid, 1) ? sel.expr : std::format("unsigned(({})#[0])", sel.expr);
+        return wrap(std::format("if {} != 0 {{ {} }} else {{ 0 }}", test, mask), /*loose=*/true);
       }
-      std::string s;
+      // `loose` = the text needs parens to sit next to another operator (only a
+      // shift does; every other spelling is already atomic or self-parenthesised).
+      struct Term {
+        std::string text;
+        bool        loose = false;
+      };
+      std::vector<Term> terms;
       for (const auto& l : wl) {
         if (l.width <= 0 || l.width > (1 << 20)) {
           continue;  // unbound (or absurd) width: cannot be spelled; upass reports it
@@ -5690,14 +6016,43 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
         // slice as unsigned before it enters the OR tree. Without this, a low
         // lane whose top bit is one sign-extends through the whole pack (for
         // example `{33{1'b0}, 32'hffff_fffe}` became 65'h1ffff_ffff_ffff_fffe).
-        std::string term = std::format("unsigned(({})#[0..={}])", l.expr, l.width - 1);
-        if (l.offset != 0) {
-          term = std::format("({} << {})", term, l.offset);
+        //
+        // Neither is needed for a lane whose value provably already sits in
+        // [0, 2^width-1]: nothing can bleed and there is no sign to reinterpret,
+        // so the lane enters the OR tree as itself. A ZERO lane then contributes
+        // nothing at all and drops out — its window still rides in the widths of
+        // the lanes below it, which is what fixes every lane's offset.
+        std::string term;
+        if (auto k = const_lane_value(l.nid, l.width)) {
+          if (*k == "0") {
+            continue;
+          }
+          term = *k;
+        } else if (fits_unsigned_bits(l.nid, l.width)) {
+          term = l.expr;
+        } else {
+          term = std::format("unsigned({})", fmt_bit_range("(" + l.expr + ")", 0, static_cast<int>(l.width) - 1));
         }
-        s = s.empty() ? term : std::format("{} | {}", s, term);
+        bool loose = false;
+        if (l.offset != 0) {
+          term  = std::format("{} << {}", term, l.offset);
+          loose = true;
+        }
+        terms.emplace_back(Term{std::move(term), loose});
       }
-      if (s.empty()) {
+      if (terms.empty()) {
         return "0";
+      }
+      if (terms.size() == 1) {  // a lone lane: let the CALLER decide the parens
+        return wrap(terms.front().text, terms.front().loose);
+      }
+      std::string s;
+      for (const auto& term_i : terms) {
+        if (!s.empty()) {
+          s += " | ";
+        }
+        // `<<` next to `|` is always parenthesised
+        s += term_i.loose ? "(" + term_i.text + ")" : term_i.text;
       }
       return wrap(s, /*loose=*/true);
     }

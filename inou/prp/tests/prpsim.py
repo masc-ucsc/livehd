@@ -175,34 +175,104 @@ def run_simulation(runner, tmp_dir, test):
         bodies += [os.path.join(abs_simdir, fn) for fn in sorted(os.listdir(abs_simdir))
                    if fn.endswith('.cpp') and fn.startswith(kernel_prefixes)]
     exe = os.path.join(abs_simdir, 'drv.bin')
-    cc  = [cxx] + cflags + bodies + [drv, '-o', exe]
-    cp  = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    if cp.returncode != 0:
-        print('{} - simulation - FAILED: driver did not compile'.format(name))
-        print('  cmd: {}'.format(' '.join(cc)))
-        print(cp.stdout.decode('utf-8', 'ignore'))
-        return 1
 
-    # Run the one binary over every test. The `:args:` are passed verbatim as
-    # `--<key> <value>`; the binary applies each per test (warning about a flag no
-    # test uses) and exits non-zero if any test's `assert` fired.
-    run_args = []
-    for k, v in sim_args:
-        run_args += ['--' + k, v]
-    rp  = subprocess.run([exe] + run_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out = rp.stdout.decode('utf-8', 'ignore')
-    if rp.returncode != 0:
-        print('{} - simulation - FAILED (assert):'.format(name))
-        print(out)
-        return 1
-    # rc == 0 means every test passed. Report the count from the binary's own
-    # registry (`--list-tests` JSON) rather than scanning stdout for "PASS " lines
-    # (a test's own `puts("PASS ...")` would otherwise miscount).
-    n_tests = 0
+    # UNITY BUILD: one `#include`-ing translation unit instead of one clang++ TU
+    # per generated body. These fixtures are tiny designs (a few hundred lines
+    # each) but every TU re-parses slop.hpp and re-runs the whole frontend, so
+    # the per-TU fixed cost -- not the design -- is what this build pays for.
+    # Measured 2026-08-15 across all 79 `tests/sim/*.prp` fixtures (arm64,
+    # clang -O1): 264s of compile CPU as separate TUs, 148s as unity (1.8x), and
+    # every unity binary produced byte-identical output to its multi-TU twin.
+    # That CPU is the real lever: `bazel test` runs these targets concurrently,
+    # so a `prp-sim-*` target that costs 5s of CPU solo shows up as 20-30s of
+    # wall clock in a loaded regression. Compiling the TUs in PARALLEL instead
+    # would cut the solo wall time just as well but leave the CPU total
+    # untouched (and oversubscribe, since bazel budgets one core per test), so
+    # it does nothing for the regression. Unity cuts both.
+    #
+    # -O1 stays. -O2 is slower to compile with no payoff at these sizes, and -O0
+    # does not link: the generated bodies reference `Dlop::free_storage`, which
+    # only disappears once the optimizer drops the dead dynamic-width path.
+    # Pulling hlop's dlop.cpp/dcontext.cpp in to satisfy it costs more than -O0
+    # saves (3.9s vs 2.4s on cgen_cones).
+    #
+    # A unity TU can only break where separate TUs would not: two generated
+    # files colliding at file scope. No fixture does today; if the emitter ever
+    # introduces one, fall back to separate TUs rather than turning an emitter
+    # hygiene problem into a wall of unrelated red sim failures -- the fallback
+    # says so on stdout (captured in the bazel test log) so the lost speed is
+    # not silent.
+    # NOT inside abs_simdir: `lhd sim --run-only` and the `build.ninja` it writes
+    # both take EVERY `*.cpp` in the sim dir except `drv.cpp` as a DUT body, so a
+    # unity TU parked there would be compiled as one more body and duplicate every
+    # symbol in it -- silently breaking the documented `ninja -C <simdir>` escape
+    # hatch on any workdir a `prp-sim-*` target had touched. It only needs to see
+    # the generated sources, and it includes them by absolute path.
+    # Living in the PARENT means the name is SHARED, so it must carry the identity
+    # of the writer -- not of the path, which every writer into that parent has in
+    # common. Anything derived from `abs_simdir` is a constant here (`simdir` is
+    # always `<simroot>/sim`, and `lhd_kernel_sim.cpp` hardcodes the same), so the
+    # only real collision vector -- two harness processes sharing a cwd -- is keyed
+    # off the PID. The `finally` below then deletes it, so a passing run leaves no
+    # stale TU in a user's workdir. A compile FAILURE keeps it on purpose: the
+    # `cmd:` printed below names it, and that line has to stay re-runnable.
+    uni = os.path.join(os.path.dirname(abs_simdir.rstrip(os.sep)) or os.curdir,
+                       '__prpsim_unity_{}.cpp'.format(os.getpid()))
+    keep_uni = False
     try:
-        lt = subprocess.run([exe, '--list-tests'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        n_tests = len(json.loads(lt.stdout.decode('utf-8', 'ignore')).get('tests', []))
-    except Exception:
-        n_tests = out.count('\nPASS ') + (1 if out.startswith('PASS ') else 0)
-    print('{} - simulation - success ({} test(s))'.format(name, n_tests))
-    return 0
+        # Inside the `try`: a write that dies part-way (ENOSPC) still gets cleaned.
+        with open(uni, 'w') as f:
+            f.write('// Generated by prpsim.py -- unity TU over the driver + every reachable DUT body.\n')
+            for b in bodies:
+                f.write('#include "{}"\n'.format(b))
+            f.write('#include "{}"\n'.format(drv))
+
+        cc = [cxx] + cflags + [uni, '-o', exe]
+        cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if cp.returncode != 0 and bodies:
+            print('{} - simulation - NOTE: unity build failed (generated files collide at file '
+                  'scope?); falling back to one TU per body, which is slower'.format(name))
+            print(cp.stdout.decode('utf-8', 'ignore'))
+            cc = [cxx] + cflags + bodies + [drv, '-o', exe]
+            cp = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if cp.returncode != 0:
+            print('{} - simulation - FAILED: driver did not compile'.format(name))
+            print('  cmd: {}'.format(' '.join(cc)))
+            print(cp.stdout.decode('utf-8', 'ignore'))
+            # `cc` still names `uni` when there are no bodies to fall back to.
+            keep_uni = uni in cc
+            return 1
+
+        # Run the one binary over every test. The `:args:` are passed verbatim as
+        # `--<key> <value>`; the binary applies each per test (warning about a flag no
+        # test uses) and exits non-zero if any test's `assert` fired.
+        run_args = []
+        for k, v in sim_args:
+            run_args += ['--' + k, v]
+        rp  = subprocess.run([exe] + run_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = rp.stdout.decode('utf-8', 'ignore')
+        if rp.returncode != 0:
+            print('{} - simulation - FAILED (assert):'.format(name))
+            print(out)
+            return 1
+        # rc == 0 means every test passed. Report the count from the binary's own
+        # registry (`--list-tests` JSON) rather than scanning stdout for "PASS " lines
+        # (a test's own `puts("PASS ...")` would otherwise miscount).
+        n_tests = 0
+        try:
+            lt = subprocess.run([exe, '--list-tests'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            n_tests = len(json.loads(lt.stdout.decode('utf-8', 'ignore')).get('tests', []))
+        except Exception:
+            n_tests = out.count('\nPASS ') + (1 if out.startswith('PASS ') else 0)
+        print('{} - simulation - success ({} test(s))'.format(name, n_tests))
+        return 0
+    finally:
+        # The unity compiler errors are printed inside the `try` above, so they are
+        # already out. The one diagnostic that OUTLIVES this scope is the `cmd:`
+        # line on a compile failure with no fallback -- `keep_uni` leaves the TU in
+        # place for it.
+        if not keep_uni:
+            try:
+                os.remove(uni)
+            except OSError:
+                pass

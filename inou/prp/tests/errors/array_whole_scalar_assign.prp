@@ -1,0 +1,15 @@
+/*
+:name: array_whole_scalar_assign
+:type: error
+:error: cannot assign integer value to `lanes`
+:help: use a new variable
+*/
+
+// A typed positional array has a packed BIT VIEW, so a bit-range update
+// (`lanes#[hi..=lo] = v`) legally lowers to `set_mask` + a whole store of an
+// INTEGER back into the array — see comptime/array_bitview_write.prp and
+// equiv/array_bitview_runtime.prp. A BARE scalar store is not that round trip:
+// it would silently broadcast 5 into all four lanes, so it stays a type error.
+mut lanes:[4]u8 = 0
+lanes = 5  // locate_error_here
+cputs("l0:{lanes[0]}")

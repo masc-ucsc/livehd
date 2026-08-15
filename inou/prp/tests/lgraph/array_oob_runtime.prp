@@ -1,0 +1,8 @@
+pub comb array_oob_runtime(idx:u3) -> (o:u8) {
+  mut lanes:[4]u8 = 0
+  lanes[0] = 0x11
+  lanes[1] = 0x22
+  lanes[2] = 0x33
+  lanes[3] = 0x44
+  o = lanes[idx]
+}

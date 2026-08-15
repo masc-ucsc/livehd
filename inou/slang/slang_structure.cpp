@@ -108,6 +108,24 @@ bool field_type_is_struct_free(const slang::ast::Type& type) {
   return true;
 }
 
+// A packed array element can be split recursively when every named struct
+// field eventually bottoms out in an integral non-union leaf.
+bool array_element_sroa_supported(const slang::ast::Type& type) {
+  const auto& ct = type.getCanonicalType();
+  if (ct.isPackedUnion() || !ct.isIntegral()) {
+    return false;
+  }
+  if (!ct.isStruct()) {
+    return true;
+  }
+  for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+    if (!array_element_sroa_supported(f.getType())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // True iff a field of this type CANNOT be represented as an independent bundle
 // leaf without breaking the deep-access routing. A plain (non-array) nested
 // packed struct is fine: a deep read `io.sub.x` lowers as a MemberAccess whose
@@ -533,41 +551,39 @@ struct Struct_whole_copy_collector : public slang::ast::ASTVisitor<Struct_whole_
   }
 };
 
-// Flags a plain packed-array LOCAL that is driven by a SINGLE whole PER-ELEMENT
-// assignment (a `'{...}` assignment pattern OR a `{...}` bit-concatenation whose
-// operands are exactly the array elements) AND read by element select somewhere,
-// with NO element/partial writes. This is the CIRCT/firtool shift-network shape
-// (small_todo_working.md Type C), e.g. CloseShiftLeftWithMux's
-//   assign io_result_res_vec = {{_T_6}, ..., {_T_1}, {io.src}};
-// where each `_T_k` reads `io_result_res_vec[k-1]` — a sibling element of the
-// same array (often indirectly through a named wire). Lowered to one flat bus the
-// sibling read binds to the STALE whole-array bus (poison / a false comb cycle),
-// miscompiling / failing to encode. Splitting the array into independent
-// per-element leaf nets (declare_array_leaves) routes each sibling read to its own
-// net — the array analogue of the per-field struct bundle. Requiring a single
-// whole per-element driver and no element writes keeps the split a pure
-// representation change (semantically identical) and dodges the dynamic-index-
-// write case the leaf path does not handle; ordinary packed arrays are untouched.
+// Harvest packed-array symbols and their access/driver shapes. The access
+// counters remain useful diagnostics for the original Type-C false-cycle case,
+// but SROA eligibility is now type/storage based: the consumer selects every
+// supported multi-bit-element packed array, including dynamic accesses and
+// clocked state, while the storage classifier keeps true memories separate.
 struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_collector, slang::ast::VisitFlags::AllGood> {
   struct Info {
-    int  whole_drivers   = 0;
-    bool per_elem_driver = false;
-    bool elem_written    = false;
-    bool elem_read       = false;
-    bool nonconst_access = false;  // a dynamic-index / range select — keep flat
+    int  whole_drivers        = 0;
+    bool per_elem_driver      = false;
+    bool elem_written         = false;
+    bool dynamic_elem_written = false;
+    bool elem_read            = false;
+    bool nonconst_access      = false;
   };
-  absl::flat_hash_map<const slang::ast::ValueSymbol*, Info>* info = nullptr;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Info>* info      = nullptr;
+  const absl::flat_hash_set<const slang::ast::Symbol*>*      loop_vars = nullptr;
 
-  // A select index is CONSTANT only if it folds to a literal (CIRCT emits `3'h0`
-  // etc.). A dynamic index (`arr[sig]`) touches the whole array — there is no
-  // per-element independence to exploit, and the flat-bus + dynamic-shift lowering
-  // is the correct (and only proven) path — so such an array must stay flat.
-  static bool is_dynamic_selector(const slang::ast::Expression& sel) {
+  // A selector is static when it is already a literal or references only
+  // procedural loop induction variables / params / genvars / enum values. The
+  // reader elaborates those loop lanes independently, so treating `arr[i]` as
+  // a runtime-addressed memory write would falsely memory-ize register arrays.
+  bool is_dynamic_selector(const slang::ast::Expression& sel) const {
     const slang::ast::Expression* s = &sel;
     while (s->kind == slang::ast::ExpressionKind::Conversion) {
       s = &s->as<slang::ast::ConversionExpression>().operand();
     }
-    return s->kind != slang::ast::ExpressionKind::IntegerLiteral;
+    if (s->kind == slang::ast::ExpressionKind::IntegerLiteral) {
+      return false;
+    }
+    Static_selector_scan scan;
+    scan.loop_vars = loop_vars;
+    s->visit(scan);
+    return !scan.all_static;
   }
 
   static bool is_pattern(slang::ast::ExpressionKind k) {
@@ -579,7 +595,7 @@ struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_colle
     if (!(ct.isPackedArray() && ct.isIntegral() && ct.getArrayElementType() != nullptr)) {
       return false;
     }
-    if (!field_type_is_struct_free(*ct.getArrayElementType())) {
+    if (!array_element_sroa_supported(*ct.getArrayElementType())) {
       return false;
     }
     // Require a genuine MULTI-BIT element (a real 2-D array like `[6:0][53:0]`),
@@ -641,7 +657,32 @@ struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_colle
       }
     } else if (const auto* base = lhs_base_symbol(*l)) {
       if (is_candidate(*base)) {
-        (*info)[base].elem_written = true;  // an element / partial write: keep flat
+        auto& in                           = (*info)[base];
+        in.elem_written                    = true;
+        // A clocked array with a runtime-addressed element write is an
+        // addressable memory, not merely a packed register aggregate. Keep
+        // that storage intent so the existing Memory lowering owns it. Walk
+        // through an optional field select for arrays of structs.
+        const slang::ast::Expression* part = l;
+        while (part != nullptr) {
+          if (part->kind == slang::ast::ExpressionKind::ElementSelect) {
+            const auto& es = part->as<slang::ast::ElementSelectExpression>();
+            if (lhs_base_symbol(es.value()) == base && is_dynamic_selector(es.selector())) {
+              in.dynamic_elem_written = true;
+            }
+            part = &es.value();
+            continue;
+          }
+          if (part->kind == slang::ast::ExpressionKind::MemberAccess) {
+            part = &part->as<slang::ast::MemberAccessExpression>().value();
+            continue;
+          }
+          if (part->kind == slang::ast::ExpressionKind::RangeSelect) {
+            part = &part->as<slang::ast::RangeSelectExpression>().value();
+            continue;
+          }
+          break;
+        }
       }
     }
     visitDefault(a);
@@ -669,6 +710,65 @@ struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_colle
       }
     }
     visitDefault(e);
+  }
+};
+
+// Select packed-vector ports whose body repeatedly addresses constant bits.
+// These are profitable leaf ports (the compressor-array xN_i[i] shape), unlike
+// a vector used only as a whole value. Dynamic selects stay packed: expanding
+// those would merely replace one indexed extraction with a large Hotmux.
+struct Packed_vector_port_collector : public slang::ast::ASTVisitor<Packed_vector_port_collector, slang::ast::VisitFlags::AllGood> {
+  struct Info {
+    int  static_selects = 0;
+    bool dynamic_select = false;
+  };
+  const absl::flat_hash_set<const slang::ast::ValueSymbol*>* ports     = nullptr;
+  const absl::flat_hash_set<const slang::ast::Symbol*>*      loop_vars = nullptr;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Info>  info;
+
+  bool is_static(const slang::ast::Expression& selector) const {
+    const slang::ast::Expression* s = &selector;
+    while (s->kind == slang::ast::ExpressionKind::Conversion) {
+      s = &s->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (s->kind == slang::ast::ExpressionKind::IntegerLiteral) {
+      return true;
+    }
+    Static_selector_scan scan;
+    scan.loop_vars = loop_vars;
+    s->visit(scan);
+    return scan.all_static;
+  }
+
+  static bool is_plain_vector(const slang::ast::ValueSymbol& sym) {
+    const auto& ct = sym.getType().getCanonicalType();
+    return ct.isPackedArray() && ct.isIntegral() && ct.getArrayElementType() != nullptr
+           && ct.getArrayElementType()->getBitWidth() == 1 && ct.getBitWidth() > 1 && ct.getBitWidth() <= 256;
+  }
+
+  void handle(const slang::ast::ElementSelectExpression& expr) {
+    if (expr.value().kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& sym = expr.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (ports->contains(&sym) && is_plain_vector(sym)) {
+        auto& use = info[&sym];
+        if (is_static(expr.selector())) {
+          ++use.static_selects;
+        } else {
+          use.dynamic_select = true;
+        }
+      }
+    }
+    visitDefault(expr);
+  }
+
+  void handle(const slang::ast::RangeSelectExpression& expr) {
+    if (expr.value().kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& sym = expr.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (ports->contains(&sym) && is_plain_vector(sym)) {
+        info[&sym].dynamic_select = true;
+      }
+    }
+    visitDefault(expr);
   }
 };
 
@@ -888,7 +988,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       }
       // M7: a qualifying packed-struct port becomes a TUPLE-typed io entry
       // (bundle) — per-field leaf ports after the SSA flatten, not a flat bus.
-      const bool                 is_bundle = !is_flat_array && bundle_port_qualifies(port, symbol.getDefinition().name);
+      const bool                 is_bundle = !is_flat_array && bundle_port_qualifies(port, module_name_of(symbol));
       // Provenance: a `[P-1:0]` dim naming a package param mints an imported
       // scalar alias (`pub type P_T = uN` in the package unit) the pyrope
       // re-emission prints as the port's type. A bundle port skips the alias
@@ -1424,6 +1524,42 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto out_tup       = builder_.lnast->add_child(io_nid, Lnast_ntype::create_tuple_add());
   builder_.idx_stmts = builder_.lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
+  // Port-vector SROA is body-profitable and internal-only. The port symbols
+  // belong to the canonical body, exactly like emit_module_io's registrations.
+  // Record the decision under the specialized unit name before emitting IO so
+  // the definition and all recursive instance sites agree.
+  Array_index_collector array_indices;
+  body->visit(array_indices);
+  if (!top_defs_.contains(std::string(symbol.getDefinition().name))) {
+    absl::flat_hash_set<const slang::ast::ValueSymbol*>              port_symbols;
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string> port_names;
+    for (const auto* p : body->getPortList()) {
+      if (p->kind != slang::ast::SymbolKind::Port) {
+        continue;
+      }
+      const auto& port = p->as<slang::ast::PortSymbol>();
+      if (port.internalSymbol == nullptr) {
+        continue;
+      }
+      if (const auto* value = port.internalSymbol->as_if<slang::ast::ValueSymbol>()) {
+        port_symbols.insert(value);
+        port_names.emplace(value, std::string(port.name));
+      }
+    }
+    Packed_vector_port_collector pvc;
+    pvc.ports     = &port_symbols;
+    pvc.loop_vars = &array_indices.loop_vars;
+    body->visit(pvc);
+    for (const auto& [port, use] : pvc.info) {
+      if (use.static_selects < 2 || use.dynamic_select) {
+        continue;
+      }
+      if (const auto it = port_names.find(port); it != port_names.end()) {
+        vector_bundle_ports_.insert(absl::StrCat(unit_name, "\x1f", it->second));
+      }
+    }
+  }
+
   emit_module_io(symbol, in_tup, out_tup);
   local_param_lname_.clear();
   emit_local_param_consts(*body);
@@ -1459,29 +1595,47 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   {
     absl::flat_hash_map<const slang::ast::ValueSymbol*, Array_bundle_collector::Info> info;
     Array_bundle_collector                                                            abc;
-    abc.info = &info;
+    abc.info      = &info;
+    abc.loop_vars = &array_indices.loop_vars;
     body->visit(abc);
     for (const auto& [sym, in] : info) {
-      // Exactly one whole per-element driver, read ONLY by constant single-element
-      // select, and no element/partial writes: a candidate for the per-element leaf
-      // split. A dynamic-index or range read keeps it flat (no per-element leaf to
-      // route such an access to).
-      if (!(in.whole_drivers == 1 && in.per_elem_driver && in.elem_read && !in.elem_written && !in.nonconst_access)) {
+      bool type_c_selfref = false;
+      if (in.whole_drivers == 1 && in.per_elem_driver && !in.elem_written && !in.nonconst_access) {
+        if (const auto* drv = whole_net_driver(*sym)) {
+          absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
+          type_c_selfref = driver_reads_target(*drv, *sym, visiting, 0);
+        }
+      }
+      // General SROA pays for itself when an element is selected at runtime;
+      // the original Type-C self-reference remains eligible because splitting
+      // it is a correctness fix even with constant indices. Whole-value and
+      // constant-index-only matrices stay flat: exploding those added no mux
+      // benefit and can turn legal bit-level update cones into artificial
+      // cross-leaf cycles at hierarchy scale.
+      const bool stable_leaf_storage = reg_syms_.contains(sym) || wire_syms_.contains(sym);
+      const bool runtime_element_use = stable_leaf_storage && in.elem_read && in.nonconst_access;
+      if (!runtime_element_use && !type_c_selfref) {
         continue;
       }
-      // Only SELF-REFERENCING arrays (an element driver reads a sibling element,
-      // directly or transitively) actually need the split — that is the false comb
-      // cycle. A non-self-ref per-element array (independent elements) must keep its
-      // flat bus: bundling it into a wire tuple whose reads later inline away leaves
-      // a write-only tuple the prp_writer round-trip cannot recompile.
-      const auto* drv = whole_net_driver(*sym);
-      if (drv == nullptr) {
+      // Storage-aware SROA eligibility covers stable wires and registers.
+      // Element writes, dynamic reads, range accesses, and clocked state are
+      // all legal consumers of an expanded aggregate. The storage classifier
+      // below still keeps true memories out of this set, and
+      // Array_bundle_collector::is_candidate retains the >1-bit scalar-element
+      // restriction so ordinary buses are never exploded into one-bit leaves.
+      //
+      // A clocked packed array that is only whole-written and dynamically read
+      // expresses register-file memory intent; leave it for packed_mem_regs_.
+      // A dynamically written array with no whole reset/default does likewise.
+      // Arrays whose reset/default establishes every lane remain eligible for
+      // leaf-register SROA, including their dynamic lane mux/update.
+      const bool memory_shaped_reg
+          = reg_syms_.contains(sym)
+            && ((in.nonconst_access && !in.elem_written) || (in.dynamic_elem_written && in.whole_drivers == 0));
+      if (memory_shaped_reg) {
         continue;
       }
-      absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
-      if (driver_reads_target(*drv, *sym, visiting, 0)) {
-        struct_array_bundle_.insert(sym);
-      }
+      struct_array_bundle_.insert(sym);
     }
   }
   // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
@@ -1518,8 +1672,6 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // array that is never runtime-indexed is safe to flatten; a runtime-indexed
   // one stays a memory.
   {
-    Array_index_collector aic;
-    body->visit(aic);
     auto is_runtime_sel = [&](const slang::ast::Expression* sel) {
       if (try_eval_int(*sel)) {
         return false;  // folds to a constant (genvar/param/const index)
@@ -1527,11 +1679,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // Not directly foldable: still constant after unroll if it references only
       // loop-induction vars / params / genvars. A runtime signal makes it dynamic.
       Static_selector_scan ss;
-      ss.loop_vars = &aic.loop_vars;
+      ss.loop_vars = &array_indices.loop_vars;
       sel->visit(ss);
       return !ss.all_static;
     };
-    for (const auto& [sym, sel] : aic.selects) {
+    for (const auto& [sym, sel] : array_indices.selects) {
       if (is_runtime_sel(sel)) {
         runtime_indexed_arrays_.insert(sym);
       }
@@ -1541,15 +1693,15 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     // equivalent Pyrope memory, instead of flattening to one wide N*W-bit flop.
     // A const-indexed-only packed 2-D reg keeps the flat-bus path (yosys-slang
     // compatibility); any runtime select anywhere marks the whole array.
-    for (const auto& [sym, sel] : aic.packed_selects) {
+    for (const auto& [sym, sel] : array_indices.packed_selects) {
       int64_t n = 0, lo = 0;
       int     w  = 0;
       bool    sg = false;
       // An OUTPUT reg must stay a flat flop bus — its q pin IS the port driver;
       // memory-izing it would leave the output undriven (dcache's
       // `output [Sets][Ways] hlock_state_o` read at runtime indices).
-      if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)
-          && is_runtime_sel(sel)) {
+      if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !struct_array_bundle_.contains(sym)
+          && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -1861,7 +2013,10 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
       // no driver are X, not zero. Keep it as one packed accumulator (dynamic
       // element access is the flat_port shift/mask path) and poison every bit;
       // the element stores below replace only the bits they actually drive.
-      builder_.create_declare_stmts(name, "mut", "", "", absl::StrCat("0ub", std::string(static_cast<size_t>(flat_bits), '?')));
+      // Declared width + the width-taking `0sb?` wildcard, not a flat_bits-long
+      // run of `?` (these buses reach 1024 bits). Same value either way.
+      builder_.create_declare_stmts(name, "mut", int_max_str(static_cast<int>(flat_bits), false),
+                                    int_min_str(static_cast<int>(flat_bits), false), "0sb?");
     }
     clear_pending_loc();
     return true;
@@ -2110,6 +2265,14 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
     declare_unpacked(sym, /*is_reg=*/true);
     return;
   }
+  // A packed register array is named state, not an addressable memory merely
+  // because it persists across cycles. Expand eligible arrays into element
+  // registers while preserving the complete declared extent. True memories
+  // took the unpacked-array path above (or were explicitly memory-classified).
+  if (is_packed_array_bundle_var(sym)) {
+    declare_array_leaves(sym);
+    return;
+  }
   // A runtime-indexed PACKED 2-D reg `[N-1:0][W-1:0]` (W>1) is a register file:
   // declare it as a scalar-element MEMORY `reg name:[N]uW = nil` (mirrors the
   // non-flatten scalar branch of declare_unpacked) so element reads/writes route
@@ -2263,28 +2426,44 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
 
   set_pending_loc(sym.location);
   {
-    // No declared range on locals: the importer masks every op result to its
-    // verilog width already, and a range would conflict with the x poison
-    // init (an all-? literal reads as -1 to the bitwidth range check).
-    builder_.create_declare_stmts(name, "mut", "", "");
-    // poison init: a read of never-assigned bits is x, not silent 0
+    // An UNSIGNED local's DECLARED range coexists with the x poison, which is
+    // why it states its type: `0sb?` is the WIDTH-TAKING wildcard (see
+    // uPass_runner::resolve_x_fill), so it fills exactly the declared width and
+    // lands INSIDE the envelope the range states — where the old width-matched
+    // `0ub????…` literal read as -1 to the range check.
+    //
+    // A SIGNED local declares NO range, because no initializer can match one.
+    // The fill refuses a signed destination and there is nothing to fill TO:
+    // Dlop has no bounded-width all-unknown signed value — the sign bit is
+    // itself the unknown, so an honest x sign-extends without bound and
+    // Dlop::get_bits() can only bound it (at 65). Narrowing the poison to the
+    // declared width instead would make the sign bit a KNOWN 0: the net of a
+    // signed local holds its SIGN-EXTENDED value (every store is fit_wrap'd,
+    // every read is the plain net), so a non-negative `0ub????` pattern is the
+    // silent 0 the poison exists to prevent. Declaring `s4` around the
+    // unbounded unknown would state an envelope its own initializer cannot sit
+    // in; the range comes back the day Dlop can carry a width-bounded signed
+    // unknown. Sign is not lost by omitting it — the importer sexts at every
+    // operation (fit_wrap).
     if (ti.is_signed) {
-      builder_.create_assign_stmts(name, "0sb?");
+      builder_.create_declare_stmts(name, "mut", "", "");
     } else {
-      std::string qmarks(static_cast<size_t>(ti.bits), '?');
-      builder_.create_assign_stmts(name, absl::StrCat("0ub", qmarks));
+      builder_.create_declare_stmts(name, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     }
+    builder_.create_assign_stmts(name, "0sb?");
   }
   clear_pending_loc();
 }
 
 bool Slang_context::is_packed_array_bundle_var(const slang::ast::ValueSymbol& sym) const {
-  // Only a per-element-driven packed-array LOCAL (see Array_bundle_collector). Ports,
-  // clocked regs, and memory-ized arrays keep their existing lowering.
+  // Packed scalar-element arrays selected by the module prepass are SROA
+  // candidates. Ports use the separate one-logical-IO bundle path; true
+  // memories retain their Memory lowering. Clocked packed arrays are allowed
+  // here and become one register leaf per declared element.
   if (!struct_array_bundle_.contains(&sym)) {
     return false;
   }
-  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || reg_syms_.contains(&sym) || mem_info_.contains(&sym)) {
+  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || mem_info_.contains(&sym)) {
     return false;
   }
   // The per-element leaf is `<base>.e<idx>`; a base name that needs backtick
@@ -2299,12 +2478,10 @@ bool Slang_context::is_packed_array_bundle_var(const slang::ast::ValueSymbol& sy
   return ct.isPackedArray() && ct.isIntegral();
 }
 
-// Declare the per-ELEMENT leaf nets of a self-referencing packed array. Reuses the
-// Struct_info machinery (assign_struct_whole / read_struct_whole / find_struct_field)
-// with each element modeled as a field named `e<idx>` at bit offset idx*elem_bits.
-// Fields are ordered HIGHEST-index-first so field[i] lines up with `'{...}` element
-// [i] (a SystemVerilog array assignment pattern lists the first-declared/high index
-// first, exactly like the struct field order the pattern path already assumes).
+// Declare reversible per-element leaves for an eligible packed array. Reuse the
+// Struct_info whole-value machinery, model scalar lanes as `eN`, and recursively
+// flatten struct lanes as `eN.field`. Packed bit offsets use physical lane
+// ordinals; the separately recorded source index preserves ascending ranges.
 void Slang_context::declare_array_leaves(const slang::ast::ValueSymbol& sym) {
   const auto& ct        = sym.getType().getCanonicalType();
   const auto* elem_ty   = ct.getArrayElementType();
@@ -2319,25 +2496,47 @@ void Slang_context::declare_array_leaves(const slang::ast::ValueSymbol& sym) {
   // leaf binds the read to the driver regardless of textual order. The
   // element-level dependency is acyclic (that is the whole point of splitting),
   // so no real combinational cycle results.
-  si.is_wire  = true;
-  si.is_tuple = false;  // per-element flat leaves (never a real LNAST tuple)
-  auto base   = lname_of(sym);
+  const bool  is_reg         = reg_syms_.contains(&sym);
+  // The only combinational packed-array shape admitted here without stable
+  // preclassified storage is the Type-C self-reference. Its leaves are an
+  // acyclic dependency graph even though the aggregate assignment reads a
+  // sibling lane, so they must be position-independent wires. Registers keep
+  // their persistent leaf state instead.
+  si.is_wire                 = !is_reg;
+  si.is_tuple                = false;  // per-element flat leaves (never a real LNAST tuple)
+  auto        base           = lname_of(sym);
+  const auto& pa             = ct.as<slang::ast::PackedArrayType>();
+  auto        emit_sroa_attr = [&](std::string_view leaf, std::string_view key, std::string value) {
+    auto& ln = *builder_.lnast;
+    auto  a  = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(a, Lnast_node::create_ref(leaf));
+    ln.add_child(a, Lnast_node::create_const(key));
+    ln.add_child(a, Lnast_node::create_const(value));
+  };
+  std::vector<Struct_info::Field> element_fields;
+  if (elem_ty->getCanonicalType().isStruct()) {
+    element_fields = struct_port_fields(*elem_ty);
+  } else {
+    element_fields.push_back({"", 0, elem_bits, elem_ti.is_signed});
+  }
   set_pending_loc(sym.location);
   for (int idx = count - 1; idx >= 0; --idx) {
-    si.fields.push_back({absl::StrCat("e", idx), static_cast<int64_t>(idx) * elem_bits, elem_bits, elem_ti.is_signed});
-    auto leaf = absl::StrCat(base, ".e", idx);
-    if (si.is_wire) {
-      builder_.create_declare_stmts(leaf,
-                                    "wire",
-                                    int_max_str(elem_bits, elem_ti.is_signed),
-                                    int_min_str(elem_bits, elem_ti.is_signed));
-    } else {
-      builder_.create_declare_stmts(leaf, "mut", "", "");
-      if (elem_ti.is_signed) {
-        builder_.create_assign_stmts(leaf, "0sb?");
-      } else {
-        std::string qmarks(static_cast<size_t>(elem_bits), '?');
-        builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+    for (const auto& ef : element_fields) {
+      const auto field_name = ef.name.empty() ? absl::StrCat("e", idx) : absl::StrCat("e", idx, ".", ef.name);
+      const auto field_off  = static_cast<int64_t>(idx) * elem_bits + ef.off;
+      si.fields.push_back({field_name, field_off, ef.bits, ef.is_signed});
+      auto leaf = absl::StrCat(base, ".", field_name);
+      if (is_reg) {
+        builder_.create_declare_stmts(leaf, "reg", int_max_str(ef.bits, ef.is_signed), int_min_str(ef.bits, ef.is_signed), "nil");
+        const int64_t source_index = pa.range.isDescending() ? pa.range.lower() + idx : pa.range.upper() - idx;
+        emit_sroa_attr(leaf, "sroa_origin", absl::StrCat("\"", base, "\""));
+        emit_sroa_attr(leaf, "sroa_source_index", std::to_string(source_index));
+        emit_sroa_attr(leaf, "sroa_lane_ordinal", std::to_string(idx));
+        emit_sroa_attr(leaf, "sroa_bit_offset", std::to_string(field_off));
+        emit_sroa_attr(leaf, "sroa_bit_width", std::to_string(ef.bits));
+        emit_sroa_attr(leaf, "sroa_extent", std::to_string(count));
+      } else {  // si.is_wire == !is_reg, so this is always the wire leaf
+        builder_.create_declare_stmts(leaf, "wire", int_max_str(ef.bits, ef.is_signed), int_min_str(ef.bits, ef.is_signed));
       }
     }
   }
@@ -2466,6 +2665,15 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
 
 bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
   const auto& ct = t.getCanonicalType();
+  if (ct.isPackedArray() && ct.isIntegral()) {
+    // Keep an array port as one packed logical IO at the language boundary.
+    // Local/register SROA still applies inside the module; a downstream graph
+    // transformation may expand the port once it can preserve/reaggregate the
+    // public interface provenance. Treating the array itself as a struct-style
+    // field bundle here expanded every internal call boundary and introduced
+    // cross-instance dependency cycles in full Minion.
+    return false;
+  }
   if (!ct.isStruct() || !ct.isIntegral()) {
     return false;  // packed struct only: the PORT TYPE itself (not union/enum/array-of-struct)
   }
@@ -2516,6 +2724,25 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
 // double-counts. Gated by struct_port_bundle_ok, which vets the same nesting.
 std::vector<Slang_context::Struct_info::Field> Slang_context::struct_port_fields(const slang::ast::Type& t) {
   std::vector<Struct_info::Field> out;
+  const auto&                     ct = t.getCanonicalType();
+  if (ct.isPackedArray()) {
+    const auto*                     elem  = ct.getArrayElementType();
+    auto                            ti    = tinfo(*elem);
+    const int                       count = ti.bits > 0 ? static_cast<int>(ct.getBitWidth()) / ti.bits : 0;
+    std::vector<Struct_info::Field> element_fields;
+    if (elem->getCanonicalType().isStruct()) {
+      element_fields = struct_port_fields(*elem);
+    } else {
+      element_fields.push_back({"", 0, ti.bits, ti.is_signed});
+    }
+    for (int lane = count - 1; lane >= 0; --lane) {
+      for (const auto& ef : element_fields) {
+        const auto name = ef.name.empty() ? absl::StrCat("e", lane) : absl::StrCat("e", lane, ".", ef.name);
+        out.push_back({name, static_cast<int64_t>(lane) * ti.bits + ef.off, ef.bits, ef.is_signed});
+      }
+    }
+    return out;
+  }
   auto collect = [&out](auto&& self, const slang::ast::Type& ty, std::string_view prefix, int64_t base_off) -> void {
     const auto& st = ty.getCanonicalType().as<slang::ast::PackedStructType>();
     for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
@@ -2559,7 +2786,8 @@ bool Slang_context::bundle_port_qualifies(const slang::ast::PortSymbol& port, st
       return false;
     }
   }
-  return struct_port_bundle_ok(port.getType());
+  return struct_port_bundle_ok(port.getType())
+         || vector_bundle_ports_.contains(absl::StrCat(owner_def, "\x1f", std::string(port.name)));
 }
 
 const Slang_context::Struct_info* Slang_context::bundle_port_of(const slang::ast::Symbol& sym) const {
@@ -3561,7 +3789,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       // array, a flat-port/memory net, or a non-integral type.
       const auto& ct = vs->getType().getCanonicalType();
       if (ct.isStruct() || ct.isPackedUnion() || !ct.isIntegral() || is_scalar_struct_var(*vs) || is_packed_array_bundle_var(*vs)
-          || flat_port_syms_.contains(vs) || mem_syms_.contains(vs)) {
+          || bundle_port_of(*vs) != nullptr || flat_port_syms_.contains(vs) || mem_syms_.contains(vs)) {
         continue;
       }
       // Split when the net has more than one DRIVER (co-writers across blocks,
@@ -3857,8 +4085,17 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // read back as a SECOND `mut tmp = …` (redeclaration). As a declare init it
     // is rendered once by write_declare, which marks the name declared so the
     // accumulating writes reassign without a `mut` prefix.
-    std::string poison = ti.is_signed ? std::string("0sb?") : absl::StrCat("0ub", std::string(static_cast<size_t>(ti.bits), '?'));
-    builder_.create_declare_stmts(tmp, "mut", "", "", poison);
+    // An UNSIGNED accumulator states its width in the DECLARE and poisons with
+    // the width-taking wildcard: `mut tmp:uN = 0sb?` is the same value as the
+    // width-matched `0ub????…` literal (upass fills the `?` to the declared
+    // width) and does not put N `?` on the line — some of these buses are 1024
+    // bits wide. A SIGNED one keeps the untyped form: the fill is unsigned-only
+    // (Dlop has no bounded-width all-unknown signed value to narrow to).
+    if (ti.is_signed) {
+      builder_.create_declare_stmts(tmp, "mut", "", "", "0sb?");
+    } else {
+      builder_.create_declare_stmts(tmp, "mut", int_max_str(ti.bits, false), int_min_str(ti.bits, false), "0sb?");
+    }
     builder_.create_declare_stmts(foo, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     clear_pending_loc();
     declared_.insert(wsym);  // suppress the lazy wire declare
@@ -3915,8 +4152,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
                        struct_whole_copied_.contains(&ns) ? 1 : 0,
                        struct_deep_written_.contains(&ns) ? 1 : 0);
         }
-        if (is_scalar_struct_var(ns)
-            && (std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns) || struct_field_read_.contains(&ns))) {
+        const bool sroa_array_init = is_packed_array_bundle_var(ns);
+        if ((sroa_array_init || is_scalar_struct_var(ns))
+            && (sroa_array_init || std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns)
+                || struct_field_read_.contains(&ns))) {
           current_assign_nonblocking_ = false;
           if (assign_struct_whole(ns, *ns.getInitializer())) {
             clear_pending_loc();
@@ -4579,11 +4818,33 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     }
     for (const auto& [sym, init_text] : reset_stores) {
       declare_reg(*sym);  // ensure declared (hoisting normally did)
-      auto  name      = lname_of(*sym);
+      auto name = lname_of(*sym);
+      struct Reset_target {
+        std::string name;
+        std::string initial;
+      };
+      std::vector<Reset_target> targets;
+      if (auto sit = struct_var_info_.find(sym); sit != struct_var_info_.end() && reg_syms_.contains(sym)) {
+        // The source reset value is the packed aggregate. Slice it by each
+        // leaf's recorded packed offset so every expanded flop gets exactly
+        // the reset bits belonging to its original array element.
+        auto packed = Dlop::from_pyrope(init_text);
+        if (!packed || packed->is_invalid()) {
+          emit_unsupported(sym->location, "unsupported-sroa-reset", "could not split the packed-array reset value");
+          continue;
+        }
+        for (const auto& f : sit->second.fields) {
+          auto mask = Dlop::get_mask_value(static_cast<int>(f.off) + f.bits - 1, static_cast<int>(f.off));
+          auto lane = packed->get_mask_op(*mask);
+          targets.push_back({absl::StrCat(name, ".", f.name), std::string(lane->to_pyrope())});
+        }
+      } else {
+        targets.push_back({name, init_text});
+      }
       auto& ln        = *builder_.lnast;
-      auto  emit_attr = [&](std::string_view key, const std::string& val, bool val_is_ref) {
+      auto  emit_attr = [&](std::string_view target, std::string_view key, const std::string& val, bool val_is_ref) {
         auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-        ln.add_child(idx, Lnast_node::create_ref(name));
+        ln.add_child(idx, Lnast_node::create_ref(target));
         ln.add_child(idx, Lnast_node::create_const(key));
         if (val_is_ref) {
           ln.add_child(idx, Lnast_node::create_ref(val));
@@ -4591,11 +4852,13 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           ln.add_child(idx, Lnast_node::create_const(val));
         }
       };
-      emit_attr("initial", init_text, false);
-      emit_attr("reset_pin", reset_ref_name, true);
-      emit_attr("sync", "false", false);
-      if (!edge_pos) {
-        emit_attr("negreset", "true", false);
+      for (const auto& target : targets) {
+        emit_attr(target.name, "initial", target.initial, false);
+        emit_attr(target.name, "reset_pin", reset_ref_name, true);
+        emit_attr(target.name, "sync", "false", false);
+        if (!edge_pos) {
+          emit_attr(target.name, "negreset", "true", false);
+        }
       }
     }
 
@@ -4704,6 +4967,10 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       std::vector<std::string> targets;
       if (auto mit = mem_info_.find(sym); mit != mem_info_.end() && mit->second.is_tuple) {
         for (const auto& f : mit->second.fields) {
+          targets.push_back(absl::StrCat(name, ".", f.name));
+        }
+      } else if (auto sit = struct_var_info_.find(sym); sit != struct_var_info_.end() && reg_syms_.contains(sym)) {
+        for (const auto& f : sit->second.fields) {
           targets.push_back(absl::StrCat(name, ".", f.name));
         }
       } else {
@@ -4941,7 +5208,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
     // M7: the SAME type-only rule the child def used — parents and children
     // stay consistent because neither consults body uses.
-    const bool bundle = bundle_port_qualifies(port);
+    const bool bundle = bundle_port_qualifies(port, callee);
     if (is_out) {
       ++n_outputs_total;
       any_bundle_out |= bundle;

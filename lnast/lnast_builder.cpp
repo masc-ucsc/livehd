@@ -2,6 +2,8 @@
 
 #include "lnast_builder.hpp"
 
+#include <cctype>
+
 #include "absl/strings/str_split.h"
 #include "bundle_key.hpp"
 #include "iassert.hpp"
@@ -123,6 +125,48 @@ void Lnast_builder::new_lnast(std::string_view name) {
   tmp_var_cnt = 0;
   tmp_scope_.clear();
   tmp_label_cnt_.clear();
+  tmp_ubits_.clear();
+}
+
+void Lnast_builder::note_unsigned_bits(std::string_view name, int bits) {
+  if (name.empty() || bits <= 0) {
+    return;
+  }
+  auto [it, inserted] = tmp_ubits_.emplace(name, bits);
+  if (!inserted && bits < it->second) {
+    it->second = bits;  // a tighter (still exact) claim wins
+  }
+}
+
+// A leaf text that is an integer LITERAL (not an identifier / temp ref), parsed.
+// Returns null for anything else — including a name that merely starts with a
+// digit but does not parse.
+static const Dlop* literal_value(std::string_view txt) {
+  if (txt.empty() || (std::isdigit(static_cast<unsigned char>(txt.front())) == 0 && txt.front() != '-' && txt.front() != '\'')) {
+    return nullptr;
+  }
+  try {
+    return &Dlop::from_pyrope_cached(txt);
+  } catch (...) {  // NOLINT(bugprone-empty-catch) — unparseable text is simply not a literal
+    return nullptr;
+  }
+}
+
+std::optional<int> Lnast_builder::unsigned_bits(std::string_view name) const {
+  if (name.empty()) {
+    return std::nullopt;
+  }
+  if (auto it = tmp_ubits_.find(name); it != tmp_ubits_.end()) {
+    return it->second;
+  }
+  // A literal carries its own width. Only a plain non-negative integer counts:
+  // a negative value has no unsigned window, and an unknown-bit pattern
+  // (`0ub1?`) is not narrowable by magnitude.
+  const auto* v = literal_value(name);
+  if (v != nullptr && v->is_integer() && !v->has_unknowns() && !v->is_negative()) {
+    return v->get_bits() > 0 ? v->get_bits() - 1 : 0;  // get_bits() counts the sign slot
+  }
+  return std::nullopt;
 }
 
 // std::vector<std::shared_ptr<Lnast>> Lnast_builder::pick_lnast() {
@@ -195,6 +239,7 @@ std::string Lnast_builder::create_concat_stmts(const std::vector<Concat_lane>& l
   auto res_var = create_lnast_tmp();
   auto op_idx  = lnast->add_child(idx_stmts, Lnast_ntype::create_concat());
   add_ref_child(op_idx, res_var);
+  int total_bits = 0;
   for (const auto& l : lanes) {
     I(!l.value.empty());
     add_value_child(op_idx, l.value);
@@ -202,6 +247,13 @@ std::string Lnast_builder::create_concat_stmts(const std::vector<Concat_lane>& l
     // unbound one, and upass has to be able to tell them apart to know whether
     // it still owes this lane a width.
     add_value_child(op_idx, l.bits > 0 ? std::to_string(l.bits) : std::string{"nil"});
+    total_bits = l.bits > 0 && total_bits >= 0 ? total_bits + l.bits : -1;
+  }
+  // "The result is the non-negative sum(bits)-wide integer" (Dlop::concat_op),
+  // so a fully-sized concat needs no truncation to its own width. An unbound
+  // (`nil`) lane leaves the total unknown until upass resolves it.
+  if (total_bits > 0) {
+    note_unsigned_bits(res_var, total_bits);
   }
 
   return res_var;
@@ -460,6 +512,17 @@ std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::
   add_ref_child(idx, res_var);
   add_value_child(idx, sel_var);  // a constant selectee is legal (constprop folds it)
   add_value_child(idx, bitmask);
+
+  // get_mask packs the selected bits LSB-first and zero-extends, so the result
+  // is a non-negative popcount(mask)-wide integer. NOT recorded for a one-bit
+  // mask: that fold returns the signed -1/0 boolean (see Dlop::get_mask_op),
+  // which has no unsigned window.
+  if (const auto* m = literal_value(bitmask); m != nullptr && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
+    const int w = m->popcount();
+    if (w >= 2) {
+      note_unsigned_bits(res_var, w);
+    }
+  }
 
   return res_var;
 }

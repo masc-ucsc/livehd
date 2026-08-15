@@ -148,3 +148,170 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 )
+
+# Storage-aware scalar replacement of a packed scalar-element array. Constant
+# element accesses route directly to leaves, a dynamic read preserves the
+# SystemVerilog selector semantics, and whole-value use reassembles only at the
+# output boundary.
+sh_test(
+    name = "slang_packed_array_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_vector_port_sroa",
+    size = "large",
+    srcs = ["tests/packed_vector_port_sroa_test.sh"],
+    data = [
+        "tests/sv/packed_vector_port_sroa.v",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_wire_init_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_wire_init_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_wire_init_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_reg_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_reg_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_reg_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_loop_reg_sroa",
+    size = "large",
+    srcs = ["tests/packed_array_loop_reg_sroa_test.sh"],
+    args = ["$(location tests/sv/packed_array_loop_reg_sroa.v)"],
+    data = [
+        "tests/sv/packed_array_loop_reg_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# Ascending packed indices deliberately reverse source index versus physical
+# lane ordinal. Dynamic access includes out-of-range values and whole-value
+# packing must keep the declared [0:3] ordering.
+sh_test(
+    name = "slang_packed_array_ascending_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_ascending_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_ascending_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_signed_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_signed_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_signed_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_port_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_port_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_port_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_struct_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_struct_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_struct_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
+    name = "slang_packed_array_struct_reg_sroa",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/packed_array_struct_reg_sroa.v)",
+    ],
+    data = [
+        "tests/sv/packed_array_struct_reg_sroa.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)

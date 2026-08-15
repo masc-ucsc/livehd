@@ -1435,6 +1435,15 @@ sh_test(
     ],
 )
 
+# pass.cprop must collapse a constant SRA + low mask into one nonzero contiguous
+# Get_mask range, which cgen then lowers through HLOP's direct range extraction.
+# An unrelated runtime source shift remains, proving the check is selective.
+sh_test(
+    name = "lhd_getmask_range_test",
+    srcs = ["lhd_getmask_range_test.sh"],
+    data = _FLOW_DATA + ["getmask_range.v"],
+)
+
 # `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the
 # coalescer upass per-op hooks (toln consumer present) + pass.prp_writer
 # unit emission, with the verifier discharging every cassert.

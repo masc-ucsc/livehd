@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 #include "diag.hpp"  // livehd::diag::Span — located diagnostics for builtins (cassert)
 #include "kind.hpp"
 #include "upass_core.hpp"
@@ -99,6 +100,7 @@ public:
 
   // Bit manipulation / type-id — result kinds only. (get_mask stamps nothing:
   // single-bit→bool vs range→int is ambiguous; tuple_get likewise.)
+  // set_mask also RECORDS the packed-bit-view round trip (see bitview_tmp_).
   Vote process_set_mask(std::string_view, Bundle&, upass::Src_span) override;
   Vote process_sext(std::string_view, Bundle&, upass::Src_span) override;
   // `concat(msb, …, lsb)` — lanes are kind-checked (integer, or an aggregate
@@ -118,6 +120,17 @@ public:
 
 private:
   int init_construction_depth_{0};
+  // Packed-bit-view round trip: a `arr#[hi..=lo] = v` write lowers to
+  // `set_mask(%t, arr, mask, v)` followed by `store(arr, %t)` — the ONE store
+  // that legally writes an integer into a typed positional array (it changes
+  // representation, not the source type). Maps that `%t` to the array's base
+  // (SSA-suffix-stripped) name, so process_store can admit exactly that store
+  // and still reject a genuine `arr = 5`. A chained write re-reads the prior
+  // `%t` as its base, so a recorded temp carries the array root forward.
+  absl::flat_hash_map<std::string, std::string> bitview_tmp_;
+  // The array root behind `o` when it is a typed positional array (or a
+  // bitview_tmp_ cut from one); empty otherwise.
+  std::string_view bitview_root_of(const upass::Operand& o) const;
   static const char* kind_name(Kind k);
   // Equality / assignment compatibility class: int / bool / string distinct;
   // range and tuple share a class (`range == flat tuple` is legal); -1 for

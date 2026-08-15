@@ -1295,6 +1295,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["flatten"] = v;
     } else if (k == "sim.slop_u") {
       labels["slop_u"] = v;
+    } else if (k == "sim.color_dirty") {
+      labels["color_dirty"] = v;
     } else if (k == "sim.debug") {
       labels["debug"] = v;
     }

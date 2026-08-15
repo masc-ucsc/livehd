@@ -2396,8 +2396,14 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
   }
 }
 
-// Resolve a CONSTANT slice read of a packed wire to the operand that actually
-// drives it: Get_mask(Or(.. shl(x_j,k_j) ..), mask[lo,hi)) -> Get_mask(x_j, ..).
+// Resolve a CONSTANT slice read through shifts and packed wires to the operand
+// that actually drives it. In particular, this is the canonical backend-neutral
+// collapse:
+//
+//   Get_mask(SRA(x,k), mask[lo,hi)) -> Get_mask(x, mask[lo+k,hi+k))
+//
+// It also handles packed values:
+//   Get_mask(Or(.. shl(x_j,k_j) ..), mask[lo,hi)) -> Get_mask(x_j, ..).
 // The firtool/Chisel bundle-as-UInt idiom writes a wide net as an Or of
 // constant-shifted disjoint fields and reads fields back with constant slices;
 // at word level that reads as a combinational cycle even though the bit ranges
@@ -2852,108 +2858,6 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
   }
 
   return collapse_forward_for_pin(node, value_pin);
-}
-
-// Canonicalize every constant-mask Get_mask into ONE shape:
-//     Get_mask(x, ones[lo,hi))  ->  Get_mask(SRA(x, lo), 2^(hi-lo)-1)
-//
-// get_mask packs the selected bits LSB-first, so a contiguous run starting at
-// `lo` is exactly (x >> lo) truncated to hi-lo bits. Afterwards every Get_mask
-// carries either the -1 to-positive sentinel or a LOW-contiguous mask -- ONE
-// canonical shape instead of four.
-//
-// This is a REPRESENTATION simplification, which is why it belongs here and not
-// in one backend. Six subsystems each re-derive this classification today
-// (pass/lec -> bv_extract, cgen_verilog -> Verilog slice, cgen_sim, pass/abc,
-// pass/bitwidth, pass/isabelle). pass/lean pays the most: it models the general
-// case as `sem_get_mask x mask = pack_low x (mask_indices mask).reverse` -- a
-// list-of-indices gather discharged through custom bridge lemmas -- where a low
-// mask is Lean's PRIMITIVE BitVec.extractLsb. Its emitter even mirrors
-// cgen_sim's `cw` width convention by hand (pass_lean.cpp:922), pinning a proof
-// backend to a constant in an unrelated backend.
-//
-// ORDERING: must run AFTER scalar_pass. split_packed_selfref_wires and
-// scalar_get_mask_packed derive bit-range bounds via footprint(), which reads
-// the Get_mask shape directly; rewriting first turns a resolvable slice into a
-// bail, and that fold is cycle-breaking, so a bail is a hard downstream failure
-// (struct_field_chain_disjoint / _own_lane).
-void Cprop::normalize_get_mask_slices(hhds::Graph* g) {
-  std::vector<hhds::Node_class> nodes;
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (type_op_of(node) == Ntype_op::Get_mask) {
-      nodes.push_back(node);
-    }
-  }
-
-  const auto a_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "a");
-  const auto m_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "mask");
-
-  for (auto& node : nodes) {
-    if (node.is_invalid() || !node.has_out_edges()) {
-      continue;
-    }
-    hhds::Edge_class a_edge, m_edge;
-    bool             have_a = false, have_m = false;
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.get_port_id() == a_pid) {
-        a_edge = e;
-        have_a = true;
-      } else if (e.sink.get_port_id() == m_pid) {
-        m_edge = e;
-        have_m = true;
-      }
-    }
-    if (!have_a || !have_m || !is_const_pin(m_edge.driver)) {
-      continue;
-    }
-    auto       a_pin      = a_edge.driver;
-    const auto mask_const = hydrate_const(m_edge.driver);
-    // The scalar walk can encounter this node before its mask expression has
-    // folded to a constant.  Normalize runs after that whole sweep, so enforce
-    // the finite-select capacity again here.  This is what prevents a 6-bit
-    // packed field from surviving as a Slop<65> merely because its source word
-    // was 64 bits wide.
-    restamp_finite_get_mask(node, mask_const);
-    if (mask_const.is_negative() || mask_const.has_unknowns()) {
-      continue;
-    }
-    auto [mb, me]   = mask_const.get_mask_range();  // half-open; {-1,-1} = noncontiguous
-    const int abits = bits_of(a_pin);
-    // Only when the mask stays INSIDE the value's declared width: a mask that
-    // overruns it is selecting the value's sign extension, which the general
-    // lowering handles by reading the value at the mask's full span
-    // (const_bit_select).
-    if (mb <= 0 || me <= mb || abits <= 0 || me > abits) {
-      continue;
-    }
-
-    // Drop the OLD inputs FIRST. add_edge invalidates edge handles (graph.hpp:
-    // "add_edge/del_edge/del_pin/del_node ... invalidates an in-flight
-    // iterator"), so building the SRA before deleting leaves these stale, the
-    // deletes silently no-op, and connect ADDS a second driver to the same sink
-    // pid instead of replacing (hhds returns 2 edges) -- drv_at() then keeps
-    // handing back the original and every slice reads bit 0.
-    a_edge.del_edge();
-    m_edge.del_edge();
-
-    // Keep the SOURCE width on the shift. `bits` is a capacity bound, so a wider
-    // declaration is always sound, and shrinking it to abits-lo would make the
-    // backends NARROW the source on read (Slop<13>{Slop<16> port}), re-signing a
-    // boundary value from the wrong bit.
-    auto sra = create_typed_node(*current_graph, Ntype_op::SRA, abits);
-    setup_sink_by_name(sra, "a").connect_driver(a_pin);
-    setup_sink_by_name(sra, "b").connect_driver(create_const(*current_graph, *Dlop::create_integer(mb)));
-    auto sd = sra.create_driver_pin(0);
-    livehd::graph_util::set_bits(sd, abits);
-    if (livehd::graph_util::is_unsign(a_pin)) {
-      livehd::graph_util::set_unsign(sd);
-    } else {
-      livehd::graph_util::set_sign(sd);
-    }
-
-    node.create_sink_pin(a_pid).connect_driver(sd);
-    node.create_sink_pin(m_pid).connect_driver(create_const(*current_graph, *Dlop::get_mask_value(static_cast<int>(me - mb))));
-  }
 }
 
 // And(x, 2^n-1) [binary, exactly one constant] is value-identical to
@@ -3411,19 +3315,16 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // slice resolution, complement window) see them all.
   canonicalize_and_masks(current_graph);
   scalar_pass(current_graph);
-  // Canonicalize Get_mask AFTER the packed-slice folds have consumed the
-  // original shapes (see normalize_get_mask_slices).
-  normalize_get_mask_slices(current_graph);
   // Fold the hand-spelled concat idioms into the cell that says it. AFTER the
   // scalar sweep on purpose: scalar_get_mask_packed resolves reads by matching
   // the Or/SHL/Set_mask spelling, and that fold is cycle-breaking, so it must
   // see the original shapes first (same ordering reason as
-  // normalize_get_mask_slices). Its Concat arm keeps a re-run of cprop over an
+  // original range masks. Its Concat arm keeps a re-run of cprop over an
   // already-canonicalized graph just as resolvable.
   canonicalize_concat_packs(current_graph);
-  // Merge duplicate nodes AFTER normalization: the slice normalizer mints one
-  // SRA per Get_mask, so equal slices of one word converge here into a single
-  // shift feeding N masks (and duplicated inlined cones merge wholesale).
+  // Merge duplicate nodes after the scalar/canonical folds (duplicated inlined
+  // cones merge wholesale). Contiguous Get_mask ranges stay as ranges: every
+  // backend can lower that operation directly without manufacturing an SRA.
   cse_pass(current_graph);
   enforce_lossless_carriers(current_graph);
   // The front ends sometimes spell an unconditional latch write as a

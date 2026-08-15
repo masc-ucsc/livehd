@@ -1,0 +1,13 @@
+// A dynamic bit-range WRITE whose upper endpoint can go NEGATIVE (`i - 1` with
+// i == 0). `hi + 1 - lo` is then negative, and a negative width read as an
+// unsigned shift count wrapped `1 << width` to 0, the low mask to all-ones, and
+// clobbered every bit of the destination. The guard that was supposed to catch
+// it compared the ENDPOINTS, and a comparison against a signed `hi` is unsigned
+// in Verilog, so it never fired either. Both are pinned by
+// range_reversed_runtime_test.sh: for a reversed range the destination must be
+// returned UNCHANGED and the diagnostic must fire.
+pub comb range_reversed_runtime(i:u4, j:u4, v:u32, b:u32) -> (o:u32) {
+  mut r:u32 = b
+  r#[j..=(i-1)] = v
+  o = r
+}

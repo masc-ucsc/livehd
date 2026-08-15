@@ -136,7 +136,12 @@ grep -q 'simulated modules: cnt'        <<<"$out" || fail "the error must list t
 { echo '// const cnt = import("stale.leftover")'; cat "$W/tb_lg.prp"; } > "$W/tb_cmt.prp"
 "$LHD" sim lg:"$W/L/" "$W/tb_cmt.prp" --setup-only --workdir "$W/s_cmt" -q --result-json "$W/r_cmt.json" \
   || fail "a commented-out import broke the live one: $(cat "$W/r_cmt.json" 2>/dev/null)"
-grep -q 'dut_cnt acc' "$W/s_cmt/sim/drv.cpp" || fail "driver bound the wrong DUT: $(grep -n ' acc;' "$W/s_cmt/sim/drv.cpp")"
+grep -q 'std::make_unique<dut_cnt>()' "$W/s_cmt/sim/drv.cpp" \
+  || fail "driver bound the wrong DUT: $(grep -n '_dut_storage_acc' "$W/s_cmt/sim/drv.cpp")"
+grep -q 'auto& acc = \*_dut_storage_acc' "$W/s_cmt/sim/drv.cpp" \
+  || fail "driver did not preserve the DUT reference surface: $(grep -n '_dut_storage_acc' "$W/s_cmt/sim/drv.cpp")"
+! grep -q 'dut_cnt acc;' "$W/s_cmt/sim/drv.cpp" \
+  || fail "driver put the DUT back on the thread stack"
 
 # ---- 5. slang --top publishes the whole forest, so ln: stays linkable --------
 cat > "$W/hier.sv" <<'EOF'

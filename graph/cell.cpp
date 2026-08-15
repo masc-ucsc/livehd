@@ -26,6 +26,12 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");
     hhds::register_attr_tag<livehd::attrs::proven_t>("livehd::attrs::proven");
     hhds::register_attr_tag<livehd::attrs::runtime_check_t>("livehd::attrs::runtime_check");
+    hhds::register_attr_tag<livehd::attrs::aggregate_origin_t>("livehd::attrs::aggregate_origin");
+    hhds::register_attr_tag<livehd::attrs::aggregate_source_index_t>("livehd::attrs::aggregate_source_index");
+    hhds::register_attr_tag<livehd::attrs::aggregate_lane_ordinal_t>("livehd::attrs::aggregate_lane_ordinal");
+    hhds::register_attr_tag<livehd::attrs::aggregate_bit_offset_t>("livehd::attrs::aggregate_bit_offset");
+    hhds::register_attr_tag<livehd::attrs::aggregate_bit_width_t>("livehd::attrs::aggregate_bit_width");
+    hhds::register_attr_tag<livehd::attrs::aggregate_extent_t>("livehd::attrs::aggregate_extent");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     // source provenance rides hhds::attrs::srcid (self-registering)
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");

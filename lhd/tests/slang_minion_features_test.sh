@@ -402,15 +402,11 @@ ${LHD} sim lg:"$W/sub_output_boundary_lg/" "$W/sub_output_boundary_tb.prp" \
 # internal carrier to narrow, and the conversion lands at 2. The invariant being
 # guarded is unchanged (the parent observes the declared boundary before using
 # the value); only the width the boundary sits at moved, and it moved tighter.
-# The boundary is now the SLOT, not a zext: under the uniform unsigned-carrier
-# rule (sim.slop_u, default on) the child's 2-bit unsigned output materializes as
-# a `Slop_u<2>` color slot, and the parent reads it from there --
-# `__color_slot_u2[...]` -- so the declared width is carried by the slot's TYPE
-# instead of by a widening call. The old `zext_to<2>()` spelling only ever
-# appears with `--set sim.slop_u=false`, where the 1-bit input ports widen into
-# the concat lanes instead; asserting it here made this check pass vacuously in
-# the default mode. Match the slot, which holds under both.
-grep -Eq '__color_slot_u?2\[' "$W"/sub_output_boundary_sim/sim/*.cpp \
+# The boundary may be a typed slot, or direct color fusion may inline the child
+# into the parent. In the latter case the inner `Slop_u<2>::from_proven` is the
+# child boundary and the outer one is the top output boundary. Require either
+# exact spelling; a single top-output conversion alone is not sufficient.
+grep -Eq '__color_slot_u?2\[|Slop_u<2>::from_proven.*Slop_u<2>::from_proven' "$W"/sub_output_boundary_sim/sim/*.cpp \
   || fail "fused sub-output boundary did not observe the child's declared output width"
 echo "PASS: fused hierarchy preserves the child output boundary"
 

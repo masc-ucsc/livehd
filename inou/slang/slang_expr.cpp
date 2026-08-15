@@ -706,7 +706,7 @@ std::optional<int> Slang_context::value_width(const slang::ast::Expression& e) c
     case ExpressionKind::RangeSelect:
     case ExpressionKind::MemberAccess:
     case ExpressionKind::Concatenation:
-    case ExpressionKind::Replication: break;
+    case ExpressionKind::Replication      : break;
     case ExpressionKind::Conversion:
       // slang bounds a conversion by its destination type, but the operand
       // underneath is folded in with the same heuristic — recurse so an
@@ -1234,18 +1234,89 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // reconstructs the whole value from the leaves via lower_rvalue(base) below.
   if (expr.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
     const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
-    if (is_packed_array_bundle_var(bsym) && ti.bits == stride) {
+    if ((is_packed_array_bundle_var(bsym) || bundle_port_of(bsym) != nullptr) && base_ty.isPackedArray() && ti.bits == stride) {
       const auto& es = expr.as<slang::ast::ElementSelectExpression>();
+      if (!declared_.contains(&bsym) && bundle_port_of(bsym) == nullptr) {
+        declare_value_symbol(bsym, /*force_reg=*/false);
+      }
+      const Struct_info* array_info = bundle_port_of(bsym);
+      if (array_info == nullptr) {
+        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+          array_info = &it->second;
+        }
+      }
+      const auto                            leaf_base = bundle_port_of(bsym) != nullptr ? bundle_port_body_base(bsym) : lname_of(bsym);
+      static const std::vector<Struct_info::Field> no_fields;
+      // A reference, not a copy: a dynamic select below asks for every lane, so
+      // copying the field table per access is O(lanes * fields) of churn on the
+      // arrays this path exists for.
+      const auto& fields    = array_info == nullptr ? no_fields : array_info->fields;
+      auto        read_lane = [&](int64_t idx) {
+        const auto  prefix     = absl::StrCat("e", idx);
+        const auto  dot_prefix = absl::StrCat(prefix, ".");  // hoisted: the loop below asks per field
+        std::string value;
+        for (const auto& f : fields) {
+          if (f.name != prefix && !std::string_view(f.name).starts_with(dot_prefix)) {
+            continue;
+          }
+          auto       part = to_pattern(read_leaf(absl::StrCat(leaf_base, ".", f.name)), f.bits, f.is_signed);
+          const auto rel  = f.off - idx * stride;
+          if (rel != 0) {
+            part = builder_.create_shl_stmts(part, std::to_string(rel));
+          }
+          value = value.empty() ? part : builder_.create_bit_or_stmts({value, part});
+        }
+        return value;
+      };
       if (auto ci = try_eval_int(es.selector())) {
         int64_t idx = range.isDescending() ? (*ci - range.lower()) : (range.upper() - *ci);
-        if (!declared_.contains(&bsym)) {
-          declare_value_symbol(bsym, /*force_reg=*/false);
+        if (auto value = read_lane(idx); !value.empty()) {
+          return ti.is_signed ? builder_.create_sext_stmts(value, std::to_string(stride - 1)) : value;
         }
-        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
-          if (const auto* f = find_struct_field(it->second, absl::StrCat("e", idx))) {
-            auto v = read_leaf(absl::StrCat(lname_of(bsym), ".", f->name));
-            return f->is_signed ? builder_.create_sext_stmts(v, std::to_string(f->bits - 1)) : v;
+      } else {
+        // Preserve the aggregate as positional element refs at this access
+        // boundary. uPass recognizes a runtime tuple_get over those refs and
+        // lowers it to Hotmux, avoiding a permanent concat+shift cone. Append
+        // an explicit unknown lane so the Hotmux's mandatory else arm matches
+        // SystemVerilog out-of-range selection instead of aliasing the final
+        // valid element.
+        if (array_info != nullptr) {
+          auto index = to_int_value(lower_rvalue(es.selector()));
+          if (range.isDescending()) {
+            if (range.lower() != 0) {
+              index = builder_.create_minus_stmts(index, std::to_string(range.lower()));
+            }
+          } else {
+            index = builder_.create_minus_stmts(std::to_string(range.upper()), index);
           }
+
+          // Build every lane value before the tuple node. read_lane can emit
+          // masks/shifts/ors (and constant-folded temporaries); creating the
+          // tuple first would make its children forward-reference those
+          // producers, so uPass sees unresolved slots while lowering the
+          // runtime tuple_get.
+          std::vector<std::string> lanes;
+          lanes.reserve(range.width());
+          for (int64_t lane_idx = 0; lane_idx < static_cast<int64_t>(range.width()); ++lane_idx) {
+            lanes.push_back(read_lane(lane_idx));
+          }
+
+          auto& ln       = *builder_.lnast;
+          auto  tuple    = builder_.create_lnast_tmp();
+          auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
+          ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
+          for (const auto& lane : lanes) {
+            ln.add_child(tuple_op, Lnast_node::create_ref(lane));
+          }
+          std::string xbits(static_cast<size_t>(stride), '?');
+          ln.add_child(tuple_op, Lnast_node::create_const(absl::StrCat("0ub", xbits)));
+
+          auto result = builder_.create_lnast_tmp();
+          auto get    = builder_.add_child(Lnast_ntype::create_tuple_get());
+          ln.add_child(get, Lnast_node::create_ref(result));
+          ln.add_child(get, Lnast_node::create_ref(tuple));
+          builder_.add_value_child_pub(get, index);
+          return ti.is_signed ? builder_.create_sext_stmts(result, std::to_string(stride - 1)) : result;
         }
       }
     }

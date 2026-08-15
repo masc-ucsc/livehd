@@ -901,9 +901,13 @@ public:
 
     // ---- DUT instances. One persistent instance per `mut acc = Module`
     // declaration (the seed is set once by main() before any test runs).
+    // Hierarchical designs can make the generated class tens of megabytes, so
+    // keep its storage off the thread stack. The reference preserves the plain
+    // `acc.member` surface used by the rest of the generated test function.
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
-      o << "  " << duts_.at(m).cls << " " << var << "; " << var << ".reset_cycle(_init_zero);\n";
+      o << "  auto _dut_storage_" << var << " = std::make_unique<" << duts_.at(m).cls << ">(); auto& " << var << " = *_dut_storage_"
+        << var << "; " << var << ".reset_cycle(_init_zero);\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a
@@ -3287,7 +3291,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     o << "#include \"vcd_writer.hpp\"\n";
   }
   o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <cctype>\n"
-       "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include "
+       "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <memory>\n#include "
+       "<fstream>\n#include "
        "<chrono>\n\n";
 
   // Checkpoint configuration (sim.checkpoint*): periodic fork-checkpoints of the

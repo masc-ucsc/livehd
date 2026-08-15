@@ -1,0 +1,29 @@
+/*
+:name: unknown_fill_width
+:type: parsing lnast comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// `0sb?` is the WIDTH-TAKING wildcard. An UNKNOWN sign extension replicates the
+// `?` into the DECLARED width of the destination and stops there, so a poison
+// write is spelled once and means "every bit of this variable is unknown" —
+// `x:u48 = 0sb?` is exactly `x = 0ub` + 48 `?`.
+
+mut a:u48 = 0sb?                     // the declaration's initializer
+cassert(a == 0ub????????????????????????????????????????????????)
+
+mut b:u8 = 0
+b = 0sb?                             // ... and a plain reassignment
+cassert(b == 0ub????????)
+
+mut c:u8 = 0sb?1                     // a PARTIALLY unknown pattern fills the same way
+cassert(c == 0ub??????_?1)
+
+// No declared width means no envelope to fill: the literal keeps the 1-bit
+// signed unknown it is written as.
+mut d = 0sb?
+cassert(d == 0sb?)
+
+// The fill is a bit pattern, not a magnitude: the unknown still propagates.
+cassert((a != 0) == 0sb?)

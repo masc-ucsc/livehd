@@ -261,12 +261,26 @@ private:
   // the tree directly rather than through the shared cursor). Also handles
   // comp_type_array -> "[N]T".
   std::string render_type_at(Lnast_nid type_nid);
-  // Scalar port widths (`a_i:u52` -> 52), recorded as the signature prints, so a
-  // body mask that selects every bit of a port can be dropped as a no-op.
+  // Scalar UNSIGNED widths (`a_i:u52` -> 52) of ports (recorded as the signature
+  // prints) and of `uN`-declared body variables (recorded by the pre-walk), so a
+  // mask that selects every bit of one can be dropped as a no-op. Only `uN`: on
+  // a signed `sN` the same mask REINTERPRETS the value, which is a real op.
   std::unordered_map<std::string, int> port_bits_;
   void                                 note_port_width(std::string_view name, std::string_view type_txt);
   bool                                 is_whole_width_mask(Lnast_nid src, int lo, int hi) const;
   static std::string                   fmt_bit_range(std::string_view s, int lo, int hi);
+  // The width of a value node's UNSIGNED range ([0, 2^w-1]) when the writer can
+  // prove one, else nullopt. Lets the emitter drop a mask / `unsigned()` that
+  // provably cannot change the value.
+  std::optional<int>                   known_unsigned_bits(Lnast_nid n, int walk_depth = 0) const;
+  bool                                 fits_unsigned_bits(Lnast_nid n, int64_t bits) const {
+    auto w = known_unsigned_bits(n);
+    return w && *w <= bits;
+  }
+  // A concat lane that is a non-negative integer literal fitting its window:
+  // its own spelling (the window mask cannot change it). "0" for a zero lane,
+  // which the caller drops from the OR tree entirely.
+  std::optional<std::string> const_lane_value(Lnast_nid n, int64_t bits) const;
   // A declare initializer built only from compile-time constants (`5`, `(1, 2)`)
   // — the only kind the nested-mut hoist may RELOCATE to the function top.
   bool        is_comptime_init(Lnast_nid n) const;
@@ -566,7 +580,20 @@ private:
   // "defining" node, inlining folded operands recursively.
   std::string render_def_rhs(Lnast_nid def_node, bool operand_ctx);
   // A const leaf -> its Pyrope spelling (number / true|false|nil / quoted string).
-  std::string const_text(Lnast_nid node) const;
+  std::string        const_text(Lnast_nid node) const;
+  // The canonical (Dlop::to_pyrope) spelling of a numeric literal's text; any
+  // non-numeric / unparseable text passes through unchanged.
+  static std::string canonical_const_text(std::string_view txt);
+  // `0sb?` when this store's value is an all-`?` literal exactly as wide as the
+  // target's DECLARED width, else "" (print the literal). See the definition.
+  std::string        x_poison_shorthand(Lnast_nid val_nid, std::string_view lhs) const;
+  // True when `val_nid` is an all-`?` literal exactly `bits` wide.
+  bool               is_x_poison_of_width(Lnast_nid val_nid, int bits) const;
+  // Width of an all-`?` literal (0 when it is not one, or is a single bit).
+  int                x_poison_width(Lnast_nid val_nid) const;
+  // Names whose EMITTED declaration (port signature or `:T` suffix) states the
+  // width, so a width-taking `0sb?` re-parses to the same value.
+  std::unordered_set<std::string> typed_emitted_;
 
   // ── Utilities ────────────────────────────────────────────────────────────
   // True for a compiler SSA temp: a raw `%`-prefixed name (or legacy `___`

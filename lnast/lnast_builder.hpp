@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <optional>
 #include <stack>
 
 #include "hlop/dlop.hpp"
@@ -189,6 +190,29 @@ public:
   // ref when the text reads as an identifier, const otherwise.
   void add_value_child_pub(const Lnast_nid& parent, std::string_view value);
 
+  // ── minted-temp value ranges ─────────────────────────────────────────────
+  // "This temp's value is a NON-NEGATIVE integer that fits in `bits` bits"
+  // ([0, 2^bits-1]). Recorded by the emitters that guarantee it (get_mask, a
+  // fully-sized concat) and by frontends that know the window they just built.
+  // A frontend uses it to skip re-truncating a value that provably already
+  // fits, which is the difference between `unsigned((x#[0..=31])#[0..=31])` and
+  // plain `x` in every consumer downstream (LNAST is infinite-precision integer
+  // semantics, so a mask that cannot drop a bit is a pure no-op node).
+  //
+  // Only an EXACT claim may be recorded: a wrong width here silently deletes a
+  // truncation the value actually needed. Nothing is recorded for a value that
+  // can be negative or that carries unknown bits past `bits`.
+  void               note_unsigned_bits(std::string_view name, int bits);
+  // The recorded width of a temp, or the literal's own width when `name` is a
+  // non-negative integer constant (a literal needs no truncation either). Empty
+  // when nothing is known.
+  std::optional<int> unsigned_bits(std::string_view name) const;
+  // True when `name`'s value provably fits unsigned in `bits` bits.
+  bool               fits_unsigned(std::string_view name, int bits) const {
+    auto w = unsigned_bits(name);
+    return w && *w <= bits;
+  }
+
 private:
   Lnast_nid   add_ref_child(const Lnast_nid& parent, std::string_view name);
   Lnast_nid   add_const_child(const Lnast_nid& parent, std::string_view value);
@@ -203,4 +227,6 @@ private:
   // where the counter is per-label and monotonic for the whole lnast.
   std::string                              tmp_scope_;
   absl::flat_hash_map<std::string, int>    tmp_label_cnt_;
+  // note_unsigned_bits() bookkeeping, per lnast (cleared by new_lnast).
+  absl::flat_hash_map<std::string, int>    tmp_ubits_;
 };

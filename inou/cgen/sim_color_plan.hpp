@@ -120,17 +120,20 @@ public:
   // DAG. A single version dependency may cover several of these uses, while
   // state-transition precedence has no Value_use at all.
   struct Value_use {
-    size_t        producer_version = invalid_index;
-    size_t        consumer_version = invalid_index;
-    State_version version          = State_version::pre_rise;
-    hhds::Port_id producer_port    = 0;
-    uint32_t      producer_shift   = 0;  // position an LSB-aligned slice in the consumer's whole word
-    hhds::Port_id consumer_port    = 0;
-    uint32_t      consumer_input   = 0;  // exact inp_edges() position; ports may be variadic
-    uint32_t      width            = 1;  // physical producer/storage width
-    uint32_t      consumer_width   = 1;  // width after an erased GraphIO boundary cast
-    bool          unsign           = false;
-    bool          top_input        = false;
+    size_t        producer_version    = invalid_index;
+    size_t        consumer_version    = invalid_index;
+    State_version version             = State_version::pre_rise;
+    hhds::Port_id producer_port       = 0;
+    uint32_t      producer_shift      = 0;  // position an LSB-aligned slice in the consumer's whole word
+    uint32_t      producer_extract_lo = 0;  // non-empty [lo,hi): store only this fixed source lane
+    uint32_t      producer_extract_hi = 0;
+    hhds::Port_id consumer_port       = 0;
+    uint32_t      consumer_input      = 0;  // exact inp_edges() position; ports may be variadic
+    uint32_t      width               = 1;  // physical producer/storage width
+    uint32_t      consumer_width      = 1;  // width after an erased GraphIO boundary cast
+    bool          unsign              = false;
+    bool          top_input           = false;
+    bool          preextracted        = false;  // consumer Get_mask is the identity on this lane
   };
 
   struct Boundary_consumer {
@@ -139,6 +142,7 @@ public:
     hhds::Port_id port         = 0;
     uint32_t      input        = 0;  // exact inp_edges() position within the consumer
     uint32_t      width        = 1;  // consumer-visible width after boundary casting
+    bool          preextracted = false;
   };
 
   // Direct color ABI. Each slot has exactly one writer. For color values the
@@ -148,16 +152,18 @@ public:
   // they never call another module's settle/eval routine.
   struct Boundary_slot {
     std::string                    structural_id;
-    Boundary_kind                  kind             = Boundary_kind::color_value;
-    State_version                  version          = State_version::pre_rise;
-    size_t                         owner_site       = invalid_index;
-    size_t                         producer_version = invalid_index;
-    size_t                         producer_color   = invalid_index;
-    hhds::Port_id                  producer_port    = 0;
-    uint32_t                       producer_shift   = 0;
-    hhds::Port_id                  public_port      = 0;
-    uint32_t                       width            = 1;
-    bool                           unsign           = false;
+    Boundary_kind                  kind                = Boundary_kind::color_value;
+    State_version                  version             = State_version::pre_rise;
+    size_t                         owner_site          = invalid_index;
+    size_t                         producer_version    = invalid_index;
+    size_t                         producer_color      = invalid_index;
+    hhds::Port_id                  producer_port       = 0;
+    uint32_t                       producer_shift      = 0;
+    uint32_t                       producer_extract_lo = 0;
+    uint32_t                       producer_extract_hi = 0;
+    hhds::Port_id                  public_port         = 0;
+    uint32_t                       width               = 1;
+    bool                           unsign              = false;
     std::string                    literal;  // non-empty only for an observation alias driven by a constant
     std::vector<Boundary_consumer> consumers;
   };

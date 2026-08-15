@@ -6,19 +6,27 @@
 */
 
 // CONDITIONAL whole-array CONST stores to a REGISTERED array: a clear-all arm
-// (`arr = 0`) and a fill-all arm (`arr = 0x3ff`) each bulk-write every entry,
+// (`arr = 0`) and a fill-all arm (`arr = 0x3f`) each bulk-write every entry,
 // coexisting with a per-entry write (`arr[waddr] = wdata`). The two whole-array
 // const stores accumulate into one clocked `update` bus via a priority mux (the
 // later `fill` arm wins where its path-cond holds), gated by `clr | fill`; the
 // per-entry write OVERRIDES the bulk update. This is the XiangShan
 // `validArray <= '{0,..}` (reset/flush) + per-set write idiom: a const/tuple-lit
 // whole-array store to a reg memory (lower_mem_init_store -> lower_mem_update_store).
-pub mod condconst(clr:bool, fill:bool, we:bool, waddr:u3, wdata:u10, idx:u3) -> (r:u10@[0]) {
-  reg arr:[8]u10 = nil
+//
+// SIZED 4x6, not 8x10 (2026-08-15). Every idiom above needs only that a
+// broadcast store, a decoded per-entry store and a dynamic read coexist -- the
+// entry count and data width are free parameters, and `prp-v2prp2v-*` pays for
+// them quadratically: its lgcheck oracle falls through to the bounded miter
+// (`sat -seq 1..5` over the unrolled array), where 80 flops cost 39s and 24
+// cost 7.7s. Widths stay non-power-of-2 (u6/u2, fill = all-ones 0x3f) so the
+// width-inference and sign-conversion coverage the odd u10/u3 gave is kept.
+pub mod condconst(clr:bool, fill:bool, we:bool, waddr:u2, wdata:u6, idx:u2) -> (r:u6@[0]) {
+  reg arr:[4]u6 = nil
   if clr {
     arr = 0
   } elif fill {
-    arr = 0x3ff
+    arr = 0x3f
   } elif we {
     arr[waddr] = wdata
   }

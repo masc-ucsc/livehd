@@ -67,8 +67,18 @@ void Slang_context::emit_prim_type_int(const Lnast_nid& parent, int bits, bool i
 }
 
 std::string Slang_context::trunc_to(const std::string& v, int bits) {
+  // A value already proven to sit in [0, 2^bits-1] cannot lose a bit here, and
+  // LNAST is infinite-precision integer semantics — so the mask is a pure no-op
+  // node. Dropping it at creation keeps the double `x#[0..=31]#[0..=31]` (a
+  // sized read feeding a same-width assignment/concat lane) out of every
+  // downstream pass, not just out of the emitted Pyrope.
+  if (builder_.fits_unsigned(v, bits)) {
+    return v;
+  }
   if (bits <= 1) {
-    return builder_.create_bit_and_stmts(v, "1");
+    auto r = builder_.create_bit_and_stmts(v, "1");
+    builder_.note_unsigned_bits(r, 1);
+    return r;
   }
   return builder_.create_get_mask_stmts(v, mask_text(bits));
 }
@@ -80,7 +90,9 @@ std::string Slang_context::extract_field(const std::string& v, int64_t lo, int b
   // get_mask both selects and shifts down, but its single-bit form is the
   // -1/0 boolean; shift+trunc keeps the verilog 0/1 value for any width.
   if (bits == 1) {
-    return builder_.create_bit_and_stmts(builder_.create_sra_stmts(v, std::to_string(lo)), "1");
+    auto r = builder_.create_bit_and_stmts(builder_.create_sra_stmts(v, std::to_string(lo)), "1");
+    builder_.note_unsigned_bits(r, 1);
+    return r;
   }
   return builder_.create_get_mask_stmts(v,
                                         Dlop::get_mask_value(static_cast<int>(lo) + bits - 1, static_cast<int>(lo))->to_pyrope());

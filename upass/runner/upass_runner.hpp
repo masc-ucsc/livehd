@@ -332,22 +332,25 @@ protected:
   // Emits either the folded value of `name` (when any pass returns a valid
   // Dlop) or the original ref node otherwise. Used by both emit_op_with_fold
   // and the statement-scope ref leaf case.
-  void emit_ref_or_folded(std::string_view name);
+  void                                       emit_ref_or_folded(std::string_view name);
   // ── concat width binding ────────────────────────────────────────────────
   // A `concat`'s width operands arrive as the `nil` sentinel from a frontend
   // with no types. They are bound HERE, at emission, because the same emission
   // loop folds a comptime lane ref to a literal -- and a literal's magnitude is
   // not its window, so a width derived after that fold would be wrong.
-  [[nodiscard]] static std::string_view   concat_logical_name(std::string_view name);
-  void                                   check_concat_lanes();
-  void                                   check_concat_dest(std::string_view dest_name, std::string_view value_name);
-  [[nodiscard]] uint32_t                 concat_lane_declared_bits(std::string_view lane_name) const;
-  [[nodiscard]] std::vector<std::string> resolve_concat_widths(std::string& dst_name);
+  [[nodiscard]] static std::string_view      concat_logical_name(std::string_view name);
+  void                                       check_concat_lanes();
+  void                                       check_concat_dest(std::string_view dest_name, std::string_view value_name);
+  [[nodiscard]] uint32_t                     concat_lane_declared_bits(std::string_view lane_name) const;
+  [[nodiscard]] std::vector<std::string>     resolve_concat_widths(std::string& dst_name);
+  // `x:u48 = 0sb?` -> the `0ub` + 48 `?` literal the wildcard stands for at this
+  // destination, or "" to leave the store as written. See the definition.
+  [[nodiscard]] std::string                  resolve_x_fill();
   // Result temp -> its lane sum, for the lanes of a NESTING concat: an inner
   // concat's temp is never declared by the user, but its width is the sum by
   // construction, which is what makes `concat(concat(a,b), c)` legal.
   absl::flat_hash_map<std::string, uint32_t> concat_result_bits_;
-  absl::flat_hash_set<Lnast_nid>             concat_checked_;       // report each concat once, not per runner iteration
+  absl::flat_hash_set<Lnast_nid>             concat_checked_;  // report each concat once, not per runner iteration
   absl::flat_hash_set<Lnast_nid>             concat_dest_checked_;
 
   // A declare/type_spec type slot that is a `ref` to a SCALAR named-type alias
@@ -549,6 +552,7 @@ protected:
   // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
   // (nested access, dynamic index, comptime slot, or unknown ref).
   bool                                                                              try_resolve_tuple_get();
+  bool                                                                              try_lower_dynamic_tuple_store();
   // `dst = src[idx]` with a RUNTIME index into a comptime fixed-size tuple of
   // scalar wires (`const choices=[a,b,c,d]`) lowers to a balanced Hotmux —
   // `match idx { ==0 {dst=e0} … else {dst=e_{n-1}} }` — instead of erroring in
@@ -574,6 +578,12 @@ protected:
   // (the bundle trivial stays the authority) and genuine tuples are skipped
   // (their runtime leaves were re-homed by constprop's propagate_sub_slot_refs).
   void                                                     record_runtime_tuple_slot_refs();
+  // Raw REF children of the most recently seen tuple_add. This also remembers
+  // a ref whose current VALUE is comptime-known: a dynamic SROA store still
+  // needs the ref as an LVALUE after constprop has replaced its tuple slot with
+  // that current constant. Consumed only by try_lower_dynamic_tuple_store,
+  // which additionally requires the `.eN` SROA leaf naming contract.
+  absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_raw_slot_ref_;
 
   // ── pipe/mod/fluid template specialization ────────────────────
   // Called from try_inline_func_call at the pipe/mod decline point when the

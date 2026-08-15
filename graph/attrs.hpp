@@ -155,6 +155,28 @@ struct runtime_check_t {
 };
 inline constexpr runtime_check_t runtime_check{};
 
+// Reversible scalar-replacement provenance for expanded aggregates.
+struct aggregate_origin_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr aggregate_origin_t aggregate_origin{};
+
+#define LIVEHD_AGGREGATE_INT_ATTR(tag_name) \
+  struct tag_name##_t {                     \
+    using value_type = int32_t;             \
+    using storage    = hhds::flat_storage;  \
+  };                                        \
+  inline constexpr tag_name##_t tag_name {}
+
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_source_index);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_lane_ordinal);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_bit_offset);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_bit_width);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_extent);
+
+#undef LIVEHD_AGGREGATE_INT_ATTR
+
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
@@ -253,6 +275,18 @@ template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_origin_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_source_index_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_lane_ordinal_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_bit_offset_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_bit_width_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_extent_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
 template <>

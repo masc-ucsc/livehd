@@ -543,9 +543,56 @@ TEST(LnastPrpWriter, ConcatReplicationStaysCompact) {
   }
 
   const auto output = run_and_emit(ln, {"noop"});
-  EXPECT_NE(output.find("if unsigned((enable)#[0..=0]) != 0"), std::string::npos) << output;
+  EXPECT_NE(output.find("if unsigned((enable)#[0]) != 0"), std::string::npos) << output;
   EXPECT_NE(output.find("0x00000000000000003ffffffffffffffff"), std::string::npos) << output;
   EXPECT_EQ(output.find("enable <<"), std::string::npos) << output;
+}
+
+// A lane whose value is already proven to sit in its window needs neither the
+// window mask nor the `unsigned()` reinterpret, and a lane that is a constant
+// ZERO contributes nothing to the pack at all — its window still rides in the
+// widths of the lanes below it. `{1'b0, x[31:0]}` is therefore just `x#[0..=31]`.
+TEST(LnastPrpWriter, ConcatDropsProvenLaneMaskAndZeroLane) {
+  auto ln = std::make_shared<Lnast>("concat_proven_lanes");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());  // lo = x#[0..=31]
+  ln->add_child(gm, Lnast_node::create_ref("lo"));
+  ln->add_child(gm, Lnast_node::create_ref("x"));
+  ln->add_child(gm, Lnast_node::create_const("0xffffffff"));
+
+  auto concat = ln->add_child(stmts, Lnast_ntype::create_concat());
+  ln->add_child(concat, Lnast_node::create_ref("z"));
+  ln->add_child(concat, Lnast_node::create_const("0"));  // 1-bit zero lane
+  ln->add_child(concat, Lnast_node::create_const("1"));
+  ln->add_child(concat, Lnast_node::create_ref("lo"));  // 32-bit lane, proven 32 bits
+  ln->add_child(concat, Lnast_node::create_const("32"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("z = lo"), std::string::npos) << output;  // the whole pack IS the low lane
+  EXPECT_EQ(output.find("unsigned"), std::string::npos) << output;
+  EXPECT_EQ(output.find("<<"), std::string::npos) << output;
+}
+
+// A one-bit window is spelled `x#[N]`, never `x#[N..=N]`.
+TEST(LnastPrpWriter, SingleBitRangeIsSpelledWithoutRange) {
+  auto ln = std::make_shared<Lnast>("one_bit_select");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());
+  ln->add_child(gm, Lnast_node::create_ref("b"));
+  ln->add_child(gm, Lnast_node::create_ref("x"));
+  ln->add_child(gm, Lnast_node::create_const("8"));  // bit 3 only
+
+  auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(store, Lnast_node::create_ref("out"));
+  ln->add_child(store, Lnast_node::create_ref("b"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("x#[3]"), std::string::npos) << output;
+  EXPECT_EQ(output.find("#[3..=3]"), std::string::npos) << output;
 }
 
 // ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────
