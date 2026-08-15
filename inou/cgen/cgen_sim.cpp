@@ -4599,6 +4599,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // into a lazy same-width Slop solely for dirty detection.
   std::map<std::pair<uint32_t, bool>, size_t>       direct_input_width_counts;
   size_t                                            direct_state_commit_count = 0;
+  // Version-site IDs are sparse across reads/data/updates. Give only state
+  // updates dense flag storage so the per-cycle clear touches the useful set.
+  std::vector<size_t>                               direct_state_commit_flag_of_member;
   std::vector<bool>                                 direct_random_color;
   if (color_runtime_root) {
     direct_consumed_slots.resize(color_plan_->colors().size());
@@ -4610,6 +4613,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     direct_slot_read.resize(color_plan_->boundary_slots().size());
     direct_slot_is_u.assign(color_plan_->boundary_slots().size(), false);
     direct_input_prev_storage.resize(color_plan_->boundary_slots().size());
+    direct_state_commit_flag_of_member.assign(color_plan_->version_sites().size(), livehd::sim::Color_plan::invalid_index);
     // A slot is written ONCE per settle and read by every consumer of the
     // boundary, which is precisely the shape lazy Slop masking loses on: the
     // write pays nothing and each read re-masks. Under sim.slop_u an UNSIGNED
@@ -4737,7 +4741,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
       for (const size_t member : color_plan_->colors()[color_index].members) {
         if (color_plan_->version_sites()[member].role == livehd::sim::Color_plan::Version_role::state_update) {
-          direct_state_commit_count = std::max(direct_state_commit_count, member + 1);
+          I(direct_state_commit_flag_of_member[member] == livehd::sim::Color_plan::invalid_index);
+          direct_state_commit_flag_of_member[member] = direct_state_commit_count++;
         }
         const auto& site = color_plan_->sites()[color_plan_->version_sites()[member].base_site];
         if (type_op_of(site.node.base_node()) == Ntype_op::Memory) {
@@ -4779,7 +4784,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   };
   std::vector<Direct_commit_shard> direct_commit_shards;
   if (color_runtime_root && direct_state_commit_count > 512) {
-    constexpr size_t kTargetCommitMembersPerShard = 512;
+    // Small shards let clock-gated designs skip inactive state scans while
+    // keeping generated translation units cheap to compile.
+    constexpr size_t kTargetCommitMembersPerShard = 64;
     for (const auto slot :
          {livehd::sim::Color_plan::Execution_slot::rise_commit, livehd::sim::Color_plan::Execution_slot::fall_commit}) {
       for (size_t member = 0; member < color_plan_->version_sites().size(); ++member) {
@@ -9410,14 +9417,24 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     const auto root_fout              = fout;
     size_t     color_eval_shard       = 0;
     const auto emit_state_commit_flag = [&](size_t member, std::string_view predicate) {
-      fout->append("  __rt.__state_commit[", std::to_string(member), "] = ", predicate, ";\n");
+      I(member < direct_state_commit_flag_of_member.size()
+        && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index);
+      const size_t commit_flag = direct_state_commit_flag_of_member[member];
+      const bool   conditional = predicate != "true";
+      if (conditional) {
+        fout->append("  if (", predicate, ") {\n");
+      }
+      const std::string indent = conditional ? "    " : "  ";
+      fout->append(indent, "__rt.__state_commit[", std::to_string(commit_flag), "] = true;\n");
       if (member < direct_commit_shard_of_member.size()
           && direct_commit_shard_of_member[member] != livehd::sim::Color_plan::invalid_index) {
-        fout->append("  __rt.__commit_shard_active[",
+        fout->append(indent,
+                     "__rt.__commit_shard_active[",
                      std::to_string(direct_commit_shard_of_member[member]),
-                     "] |= __rt.__state_commit[",
-                     std::to_string(member),
-                     "];\n");
+                     "] = true;\n");
+      }
+      if (conditional) {
+        fout->append("  }\n");
       }
     };
     std::vector<std::vector<size_t>> direct_incoming_versions(color_plan_->version_sites().size());
@@ -10635,7 +10652,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto  state = occurrence_member(site);
       const auto  op    = type_op_of(site.node.base_node());
       I(!state.empty());
-      fout->append("  if (__rt.__state_commit[", std::to_string(member), "]) {\n");
+      I(member < direct_state_commit_flag_of_member.size()
+        && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index);
+      fout->append("  if (__rt.__state_commit[", std::to_string(direct_state_commit_flag_of_member[member]), "]) {\n");
       if (op == Ntype_op::Memory) {
         const auto* memory = find_local_mem(version.base_site);
         I(memory != nullptr);
