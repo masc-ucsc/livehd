@@ -3792,6 +3792,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   sub_instance_names_.clear();
   loop_instance_names_.clear();
   loop_output_vars_.clear();
+  loop_output_unsigned_.clear();  // written and read as a pair with loop_output_vars_
   loop_input_exprs_.clear();
   clock_latch_vars_.clear();
   first_array_block = true;

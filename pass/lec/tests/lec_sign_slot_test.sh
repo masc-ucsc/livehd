@@ -1,21 +1,28 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Top-level SIGN SLOT (owner ruling 2026-08-14): `input signed [w:0] foo` whose
-# top bit is zero denotes the same value as `input [w-1:0] foo`, and LEC must
-# reconcile that automatically for top-level ports.
+# Top-level port WIDTH/SIGN reconciliation (owner ruling 2026-08-14): when the
+# two sides declare the same port differently, LEC ENLARGES the smaller view to
+# match the larger -- it never refuses and never truncates.
 #
-# Before the fix, `add_inputs`/`collect_ins` minted ONE free symbol at the max
-# width across the two designs, so the narrower side's port was driven by values
-# it can never hold -- `input signed [1:0] a` vs `input a` refuted at `a=2`
-# (0b10) with an unreachable witness. The carrier is now a ZERO_EXTEND of a
-# fresh w-bit core, which removes those values structurally.
+#   u8 vs u4 -> the u4 is zero-padded to u8
+#   u3 vs s5 -> the u3 is zero-padded to s5
+#   s4 vs s8 -> the s4 is sign-extended to s8
+#   s3 vs u8 -> BOTH go to s9 (the s3 sign-extends, the u8 zero-pads)
 #
-# The reconciliation is an ASSUMPTION, not a proof (at this boundary a genuine
-# port narrowing is spelled identically), so every case below also asserts that
-# the verdict DISCLOSES it. The guard case pins the scope: any width/sign
-# disagreement that is NOT the exact w / w+1 shape keeps the old free-symbol
-# behavior, because zeroing top bits there would be a false PROVEN.
+# Two widths fall out. The CARRIER is that common type, so no side is
+# truncated. The FREE SYMBOL is narrower: one symbol drives the port on both
+# sides, so it may only range over the INTERSECTION of the two domains
+# (u8 n u4 = [0,15]; s3 n u8 = [0,3]). Before the fix the symbol was free at the
+# carrier width, so the solver picked values the narrower port cannot hold and
+# the two designs read the same bits differently -- `input signed [1:0] a` vs
+# `input a` refuted at `a=2` (0b10), a value a 1-bit port cannot produce.
+#
+# Where the domains genuinely differ this is an ASSUMPTION, not a proof: a port
+# the impl narrowed by mistake is spelled exactly like one the front ends merely
+# declare differently. Every case below therefore also asserts that the verdict
+# DISCLOSES which ports it fired on, and case (5) pins that a real functional
+# difference still refutes.
 
 set -u
 
@@ -51,7 +58,7 @@ run_lec() {
 # ...` afterwards, so a bare `tail -1` of `^lec: ` picks up the artifact notice.
 verdict() { grep -E "^lec: .*(PROVEN|REFUTED|PASS\(|UNKNOWN|UNSUPPORTED)" "$OUT" | tail -1; }
 
-# ── (1) data port, combinational: the reproduction ───────────────────────────
+# ── (1) data port, combinational: the original reproduction ──────────────────
 cat >"$WORK/ref.v" <<'EOF'
 module m(input signed [1:0] a, output signed [3:0] y);
   assign y = a;
@@ -65,29 +72,41 @@ EOF
 run_lec comb --ref "$WORK/ref.v" --impl "$WORK/impl.v"
 verdict | grep -q 'PROVEN' \
   || fail "sign-slot data port did not reconcile: $(verdict)"
-verdict | grep -q 'sign-slot narrowing on top port(s) a' \
+verdict | grep -q 'width/sign reconciled on top port(s) a' \
   || fail "the sign-slot PROVEN did not disclose the assumption: $(verdict)"
 echo "PASS: combinational sign-slot data port reconciles and discloses"
 
-# ── (2) GUARD: same width, different sign is NOT a sign slot ─────────────────
-# s2 vs u2 is a real difference (ref reads 0b10 as -2, impl as 2) and must stay
-# refuted. This is what keeps the fix from becoming a blanket "narrow to min".
-cat >"$WORK/same_s2.v" <<'EOF'
-module m(input signed [1:0] a, output signed [3:0] y);
+# ── (2) the four shapes of the ruling ────────────────────────────────────────
+# Enlarge the smaller view to match the larger; the SHARED input symbol ranges
+# over the intersection so neither port is ever driven out of its own domain.
+#   u8 vs u4 -> u4 zero-padded to u8        u3 vs s5 -> u3 zero-padded to s5
+#   s4 vs s8 -> s4 sign-extended to s8      s3 vs u8 -> BOTH to s9
+decl_case() {
+  cat >"$WORK/$1.v" <<EOF
+module m(input $2 a, output signed [15:0] y);
   assign y = a;
 endmodule
 EOF
-cat >"$WORK/same_u2.v" <<'EOF'
-module m(input [1:0] a, output signed [3:0] y);
-  assign y = a;
-endmodule
-EOF
-run_lec guard --ref "$WORK/same_s2.v" --impl "$WORK/same_u2.v"
-verdict | grep -q 'REFUTED' \
-  || fail "same-width s2 vs u2 must stay REFUTED (the scope leaked): $(verdict)"
-verdict | grep -q 'sign-slot narrowing' \
-  && fail "the guard case must not report a sign-slot narrowing: $(verdict)"
-echo "PASS: same-width sign disagreement is still refuted"
+}
+decl_case u8 "[7:0]"
+decl_case u4 "[3:0]"
+decl_case u3 "[2:0]"
+decl_case s5 "signed [4:0]"
+decl_case s4 "signed [3:0]"
+decl_case s8 "signed [7:0]"
+decl_case s3 "signed [2:0]"
+# semdiff=none on purpose: its structural prefilter is IO-declaration-blind, so
+# it would short-circuit these to PROVEN without ever reaching the encoder --
+# the very code under test. (That blindness is a separate, pre-existing hole.)
+for pair in "u8 u4" "u3 s5" "s4 s8" "s3 u8"; do
+  set -- $pair
+  run_lec "shape_$1_$2" --ref "$WORK/$1.v" --impl "$WORK/$2.v" --set formal.lec.semdiff=none
+  verdict | grep -Eq 'PROVEN|PASS\(' \
+    || fail "$1 vs $2 did not reconcile by enlargement: $(verdict)"
+  verdict | grep -q 'width/sign reconciled on top port(s) a' \
+    || fail "$1 vs $2 reconciled without disclosing it: $(verdict)"
+done
+echo "PASS: u8/u4, u3/s5, s4/s8 and s3/u8 all reconcile by enlargement and disclose"
 
 # ── (3) sequential, every engine ─────────────────────────────────────────────
 cat >"$WORK/seq_ref.v" <<'EOF'
@@ -117,7 +136,7 @@ for eng in auto ind bmc; do
   run_lec "seq_$eng" --ref "$WORK/seq_ref.v" --impl "$WORK/seq_impl.v" --set formal.engine="$eng"
   verdict | grep -Eq 'PROVEN|PASS\(' \
     || fail "engine=$eng did not reconcile the sequential sign-slot port: $(verdict)"
-  verdict | grep -q 'sign-slot narrowing on top port(s) a' \
+  verdict | grep -q 'width/sign reconciled on top port(s) a' \
     || fail "engine=$eng dropped the sign-slot disclosure (an arm that ASSIGNS res.detail?): $(verdict)"
 done
 echo "PASS: sequential sign-slot reconciles and discloses on auto/ind/bmc"

@@ -1742,7 +1742,18 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   out.cvc5       = cubes;
   if (unknown == 0) {
     out.verdict = Verdict::Proven;
-    out.detail  = "auto: case-split " + tag + " PROVEN (every cube UNSAT)";
+    // PREPEND onto a worker's detail rather than replacing it. Assigning here
+    // discarded every cube's deserialized detail -- including any width/sign
+    // reconciliation disclosure the worker emitted -- on what is the DEFAULT
+    // path for a combinational miter (formal.partitions defaults to 4). The
+    // REFUTED branch above already seeds from the refuting worker.
+    for (size_t i = 0; i < got.size(); ++i) {
+      if (done[i] && got[i].verdict == Verdict::Proven && !got[i].detail.empty()) {
+        out.detail = got[i].detail;
+        break;
+      }
+    }
+    out.detail = "auto: case-split " + tag + " PROVEN (every cube UNSAT)" + (out.detail.empty() ? "" : "; " + out.detail);
   } else {
     out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
     out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
@@ -2395,10 +2406,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Disclosure is UNCONDITIONAL -- not gated on formal.strict, which defaults
   // true and would turn the ruling's intended PROVEN into Unknown by default.
   absl::flat_hash_set<std::string> reconciled_ports;
-  // Idempotent by INSPECTING res.detail rather than by a latch: several engines
-  // ASSIGN res.detail rather than appending to it (the bmc and phase-inductive
-  // arms both do), which would silently drop a latched disclosure. Re-calling
-  // this after any such assignment restores it.
+  // Idempotent by INSPECTING res.detail rather than by a latch: THREE engine
+  // arms ASSIGN res.detail rather than appending to it -- bmc, phase-step
+  // induction, and phase-inductive -- and an assignment would silently drop a
+  // latched disclosure. Re-call this after any such assignment. (Inspection
+  // also cannot rescue itself: the assignment wipes the substring it looks
+  // for, which is exactly why each arm needs its own call.)
   auto disclose_reconciled = [&]() {
     if (reconciled_ports.empty() || res.detail.find("width/sign reconciled") != std::string::npos) {
       return;
@@ -5606,6 +5619,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         res.detail  = "solver=cvc5 (phase-step induction: " + std::to_string(psteps.size()) + " microsteps, "
                       + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
                       + ind_ref_plan.describe() + "]";
+        disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
         return res;
       }
     }

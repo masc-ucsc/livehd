@@ -786,11 +786,19 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     saw_sized_value = true;
     all_unsigned    = all_unsigned && livehd::graph_util::is_unsign(p);
   };
-  for (const auto& dpin : din_drivers) {
-    vote_sign(dpin);
-  }
+  // OUTPUT pins decide, and only they. A din DRIVER is an arbitrary write-data
+  // expression whose sign this very pass infers from a range -- evidence about
+  // one written value, never about the declared element type -- so letting it
+  // vote lets a negative-capable expression re-sign a `[N]uW` array, which
+  // adjust_bw then stamps onto every dout. Consult din only when there is no
+  // sized output at all (a write-only memory with no observable read).
   for (const auto& e : node.out_edges()) {  // read-only vote; adjust_bw runs below
     vote_sign(e.driver);
+  }
+  if (!saw_sized_value) {
+    for (const auto& dpin : din_drivers) {
+      vote_sign(dpin);
+    }
   }
   const bool elem_unsigned = saw_sized_value && all_unsigned;
 

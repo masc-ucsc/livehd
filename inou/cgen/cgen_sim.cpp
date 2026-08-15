@@ -8267,6 +8267,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // INVARIANT every producer below maintains: bits <= mag + 1. `Not` relies
     // on it -- `Slop_u<mag>`'s carrier is `Slop<mag + 1>`, which must be at
     // least as wide as the operand being complemented.
+    //
+    // SECOND, SILENT REQUIREMENT: `mag` must be EXACTLY the width the value is
+    // observed at, never an upper bound. `Slop_u<mag>::not_op` masks at it, so
+    // a too-SMALL mag is a build error (the invariant above catches it) while a
+    // too-LARGE one still satisfies the invariant and silently complements
+    // phantom bits to 1. That is why the const leaf uses the literal container
+    // width rather than Dlop's signed bit count, and why a narrowing pass-
+    // through arm reports "not representable" instead of keeping its operand.
     struct Bool_expr {
       std::string text;      // empty == this cone is not representable
       int         bits = 1;  // Slop_arg<T>::bits of `text`
@@ -8291,9 +8299,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     };
     // operand() materializes a literal AT the width it is asked for, so the
     // C++ type is Slop<1>; the VALUE keeps the literal's own width.
+    //
+    // `mag` is the LITERAL container width, which is NOT Dlop::get_bits(): that
+    // is the SIGNED significant-bit count, one wider than the container for
+    // every non-negative literal (3 stamps 3 bits, container 2). A const pin
+    // carries no `bits` attr, so wbits_of() floors at 1 and contributes
+    // nothing -- get_bits() alone would decide, and the inflated width is a
+    // silent wrong value under `Slop_u<mag>::not_op`, whose extra bit always
+    // complements to 1.
     const auto bool_const_expr = [&](const hhds::Occurrence_pin& pin) {
-      const auto cpin = pin.base_pin();
-      return Bool_expr{operand(cpin, 1), 1, std::max({wbits_of(cpin), static_cast<int>(hydrate_const(cpin).get_bits()), 1})};
+      const auto cpin  = pin.base_pin();
+      const auto value = hydrate_const(cpin);
+      const int  gb    = static_cast<int>(value.get_bits());
+      const int  mag   = std::max({wbits_of(cpin), value.is_negative() ? gb : gb - 1, 1});
+      return Bool_expr{operand(cpin, 1), 1, mag};
     };
     // `~x` used as a boolean has to be complemented at the VALUE's width and
     // masked back to it: the member `Slop<W>::not_op()` exists only on Slop
@@ -8370,7 +8389,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return bool_eq_expr(inputs[0], inputs[1]);
       }
       if ((op == Ntype_op::Get_mask || op == Ntype_op::Sext) && !inputs.empty()) {
-        return inputs.front();
+      // A pass-through keeps the OPERAND's text, so it can only keep the
+      // OPERAND's C++ type -- but `mag` must be the width THIS node's value is
+      // observed at, because `Slop_u<mag>::not_op` above masks at it. A
+      // NARROWING node cannot be spelled by handing its operand through: the
+      // mask/truncation would vanish from the text while the complement masked
+      // at the narrower width. That was survivable while `Not` emitted the
+      // unmasked member form; it is an observably wrong guard now. Report such
+      // a cone as not representable and let the caller evaluate the region
+      // unconditionally, which is always safe.
+        const int node_w = std::max(wbits_of(pin.base_pin()), 1);
+        auto      value  = inputs.front();
+        if (node_w < value.mag) {
+          return {};
+        }
+        value.mag = node_w;
+        return value;
       }
       return {};
     };
@@ -8434,7 +8468,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return bool_eq_expr(inputs[0], inputs[1]);
       }
       if ((op == Ntype_op::Get_mask || op == Ntype_op::Sext || op == Ntype_op::Set_mask) && !inputs.empty()) {
-        return inputs.front();
+      // A pass-through keeps the OPERAND's text, so it can only keep the
+      // OPERAND's C++ type -- but `mag` must be the width THIS node's value is
+      // observed at, because `Slop_u<mag>::not_op` above masks at it. A
+      // NARROWING node cannot be spelled by handing its operand through: the
+      // mask/truncation would vanish from the text while the complement masked
+      // at the narrower width. That was survivable while `Not` emitted the
+      // unmasked member form; it is an observably wrong guard now. Report such
+      // a cone as not representable and let the caller evaluate the region
+      // unconditionally, which is always safe.
+        const int node_w = std::max(wbits_of(pin.base_pin()), 1);
+        auto      value  = inputs.front();
+        if (node_w < value.mag) {
+          return {};
+        }
+        value.mag = node_w;
+        return value;
       }
       return {};
     };
@@ -9099,7 +9148,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           const auto& slot   = color_plan_->boundary_slots()[write.slot_index];
           const auto  source = find_site_output(version.base_site, slot.producer_port);
           I(!source.is_invalid());
-          std::string source_expr = slot_is_u(write.slot_index) ? raw_operand(source, slot.width + 1) : operand(source, slot.width);
+          // The raw path is only value-correct for an UNSIGNED source. The
+          // destination is a `Slop_u<W>&`, whose converting ctor ZERO-extends;
+          // handing it a narrower SIGNED temp therefore drops the sign bits,
+          // while the serial emitter for the same slot spells `Slop<W>{...}`
+          // and sign-extends. A signed source must take operand().
+          // The shift also forces the concrete carrier: `Slop<W>::shl_op` runs
+          // input_width_check, and a bare `Slop_u<W>` counts as W+1 Slop-bits,
+          // so shifting one would static_assert in the generated kernel.
+          const bool raw_ok        = slot_is_u(write.slot_index) && slot.producer_shift == 0 && is_unsign(source);
+          std::string source_expr = raw_ok ? raw_operand(source, slot.width + 1) : operand(source, slot.width);
           if (slot.producer_shift != 0) {
             source_expr = absl::StrCat("Slop<", slot.width, ">::shl_op(", source_expr, ", ", slot.producer_shift, ")");
           }
