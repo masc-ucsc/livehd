@@ -2309,15 +2309,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   // each complete memory-evaluation color with one runtime critical section;
   // the serial backend needs neither an edge nor a lock.
 
+  constexpr size_t kExactConvexVersionLimit = 50'000;
+
   // Validate and order the fine-color DAG. Slot order is a hard legality
   // constraint even when two colors have no explicit value edge; the later
   // Schedule construction uses one barrier/control boundary between slots
   // instead of materializing a quadratic all-to-all precedence relation.
-  std::vector<uint32_t>            indegree(plan.version_sites_.size(), 0);
-  std::vector<std::vector<size_t>> successors(plan.version_sites_.size());
+  std::vector<uint32_t>                                 indegree(plan.version_sites_.size(), 0);
+  std::vector<std::vector<std::pair<size_t, uint64_t>>> successors(plan.version_sites_.size());
   for (const auto& edge : plan.version_dependencies_) {
     ++indegree[edge.consumer];
-    successors[edge.producer].push_back(edge.consumer);
+    successors[edge.producer].emplace_back(edge.consumer, edge.boundary_bits);
     if (static_cast<uint8_t>(plan.version_sites_[edge.producer].slot)
         > static_cast<uint8_t>(plan.version_sites_[edge.consumer].slot)) {
       plan.summary_.versioning_complete = false;
@@ -2385,13 +2387,46 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       ready.push(i);
     }
   }
-  uint64_t order = 0;
-  while (!ready.empty()) {
-    const size_t current = ready.top();
-    ready.pop();
+  // On plans too large for exact convex contraction, keep a newly-ready
+  // consumer beside its producer when both belong to the same occurrence
+  // body. Prefer the widest dependency when several become ready together.
+  // This changes only the legal topological order used by the linear
+  // coarsener; small plans retain their original deterministic order.
+  uint64_t order          = 0;
+  size_t   preferred      = Color_plan::invalid_index;
+  uint64_t preferred_bits = 0;
+  while (preferred != Color_plan::invalid_index || !ready.empty()) {
+    size_t current = preferred;
+    preferred      = Color_plan::invalid_index;
+    preferred_bits = 0;
+    if (current == Color_plan::invalid_index) {
+      current = ready.top();
+      ready.pop();
+    }
     plan.version_sites_[current].execution_order = order++;
-    for (const size_t successor : successors[current]) {
+    std::vector<std::pair<size_t, uint64_t>> newly_ready;
+    for (const auto& [successor, bits] : successors[current]) {
       if (--indegree[successor] == 0) {
+        newly_ready.emplace_back(successor, bits);
+      }
+    }
+    for (const auto& [successor, bits] : newly_ready) {
+      const auto& current_site   = plan.version_sites_[current];
+      const auto& successor_site = plan.version_sites_[successor];
+      const bool  same_surface   = plan.version_sites_.size() > kExactConvexVersionLimit && current_site.slot == successor_site.slot
+                                   && site_path_rank[current_site.base_site] == site_path_rank[successor_site.base_site];
+      if (!same_surface) {
+        ready.push(successor);
+        continue;
+      }
+      if (preferred == Color_plan::invalid_index || bits > preferred_bits
+          || (bits == preferred_bits && later(preferred, successor))) {
+        if (preferred != Color_plan::invalid_index) {
+          ready.push(preferred);
+        }
+        preferred      = successor;
+        preferred_bits = bits;
+      } else {
         ready.push(successor);
       }
     }
@@ -2536,13 +2571,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     structural_rank[structural_order[rank]] = rank;
   }
   absl::flat_hash_map<std::pair<size_t, size_t>, uint64_t>                            queued_epoch;
-  uint64_t                                                                            next_epoch               = 1;
-  constexpr uint64_t                                                                  kSoftColorGe             = 50'000;
-  constexpr size_t                                                                    kExactConvexVersionLimit = 50'000;
+  uint64_t                                                                            next_epoch   = 1;
+  constexpr uint64_t                                                                  kSoftColorGe = 50'000;
   absl::flat_hash_map<const hhds::Graph*, hhds::Occurrence_path>                      first_body_occurrence;
   absl::flat_hash_map<const hhds::Graph*, uint64_t>                                   definition_ge;
   absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_set<hhds::Occurrence_path>> body_occurrences;
   absl::flat_hash_set<const hhds::Graph*>                                             reused_bodies;
+  const bool         collect_hier_reuse       = nversions > kExactConvexVersionLimit && plan.summary_.version_dag_acyclic;
+  constexpr uint64_t kHierReuseMinGe          = 2'048;
+  constexpr uint64_t kHierReuseMaxGe          = 12'000;
+  constexpr uint64_t kHierReuseMaxCutBits     = 128;
+  constexpr size_t   kHierReuseMaxCutSlots    = 8;
+  constexpr uint64_t kHierReuseMinScore       = 200;
+  constexpr size_t   kHierReuseMinOccurrences = 4;
+  constexpr size_t   kHierReuseMaxOccurrences = 128;
+  struct Reuse_path_node {
+    std::map<Occurrence_step_key, size_t> children;
+    size_t                                parent     = Color_plan::invalid_index;
+    size_t                                depth      = 0;
+    uint64_t                              local_ge   = 0;
+    uint64_t                              subtree_ge = 0;
+  };
+  std::vector<Reuse_path_node>                       reuse_path_trie(1);
+  absl::flat_hash_map<hhds::Occurrence_path, size_t> reuse_path_node;
   for (const auto& site : plan.sites_) {
     const auto* definition = site.node.get_graph();
     body_occurrences[definition].insert(site.node.path());
@@ -2552,6 +2603,32 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     }
     if (!inserted && it->second != site.node.path()) {
       reused_bodies.insert(definition);
+    }
+    if (collect_hier_reuse) {
+      size_t trie_node = 0;
+      for (const auto& step : site.node.path().steps()) {
+        const auto key   = occurrence_step_key(step);
+        const auto found = reuse_path_trie[trie_node].children.find(key);
+        if (found == reuse_path_trie[trie_node].children.end()) {
+          const size_t child = reuse_path_trie.size();
+          reuse_path_trie[trie_node].children.emplace(key, child);
+          reuse_path_trie.push_back(Reuse_path_node{{}, trie_node, reuse_path_trie[trie_node].depth + 1, 0, 0});
+          trie_node = child;
+        } else {
+          trie_node = found->second;
+        }
+      }
+      reuse_path_trie[trie_node].local_ge += site.gate_equivalents;
+      reuse_path_node.try_emplace(site.node.path(), trie_node);
+    }
+  }
+  if (collect_hier_reuse) {
+    for (size_t node = reuse_path_trie.size(); node-- > 0;) {
+      reuse_path_trie[node].subtree_ge += reuse_path_trie[node].local_ge;
+      if (node == 0) {
+        continue;
+      }
+      reuse_path_trie[reuse_path_trie[node].parent].subtree_ge += reuse_path_trie[node].subtree_ge;
     }
   }
   // Small repeated definitions remain canonical-kernel islands: sharing their
@@ -2587,9 +2664,158 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     }
     return lhs_io != nullptr && rhs_io != nullptr && lhs_io->get_gid() < rhs_io->get_gid();
   });
+  struct Hier_reuse_candidate {
+    uint64_t           score         = 0;
+    uint64_t           subtree_ge    = 0;
+    uint64_t           max_cut_bits  = 0;
+    size_t             max_cut_slots = 0;
+    size_t             occurrences   = 0;
+    bool               uniform       = false;
+    const hhds::Graph* definition    = nullptr;
+  };
+  std::vector<Hier_reuse_candidate> hier_reuse_candidates;
+  if (collect_hier_reuse) {
+    for (const auto* definition : reused_bodies) {
+      const auto occurrence = first_body_occurrence.find(definition);
+      if (occurrence == first_body_occurrence.end()) {
+        continue;
+      }
+      const auto path_node = reuse_path_node.find(occurrence->second);
+      if (path_node == reuse_path_node.end()) {
+        continue;
+      }
+      const size_t occurrences    = body_occurrences[definition].size();
+      uint64_t     subtree_ge     = reuse_path_trie[path_node->second].subtree_ge;
+      uint64_t     max_subtree_ge = subtree_ge;
+      for (const auto& path : body_occurrences[definition]) {
+        const auto node = reuse_path_node.find(path);
+        if (node == reuse_path_node.end()) {
+          continue;
+        }
+        subtree_ge     = std::min(subtree_ge, reuse_path_trie[node->second].subtree_ge);
+        max_subtree_ge = std::max(max_subtree_ge, reuse_path_trie[node->second].subtree_ge);
+      }
+      hier_reuse_candidates.push_back(
+          Hier_reuse_candidate{0, subtree_ge, 0, 0, occurrences, subtree_ge == max_subtree_ge, definition});
+    }
+  }
+  if (collect_hier_reuse) {
+    std::vector<bool> candidate_cut_root(reuse_path_trie.size(), false);
+    for (const auto& candidate : hier_reuse_candidates) {
+      if (!candidate.uniform || candidate.subtree_ge < kHierReuseMinGe || candidate.subtree_ge > kHierReuseMaxGe
+          || candidate.occurrences < kHierReuseMinOccurrences || candidate.occurrences > kHierReuseMaxOccurrences) {
+        continue;
+      }
+      for (const auto& path : body_occurrences[candidate.definition]) {
+        const auto node = reuse_path_node.find(path);
+        if (node != reuse_path_node.end()) {
+          candidate_cut_root[node->second] = true;
+        }
+      }
+    }
+    std::vector<size_t>                            cut_slots(reuse_path_trie.size(), 0);
+    std::vector<uint64_t>                          cut_bits(reuse_path_trie.size(), 0);
+    absl::flat_hash_set<std::pair<size_t, size_t>> cut_values;
+    const auto                                     record_cut = [&](size_t path_node, size_t producer, uint64_t bits) {
+      if (candidate_cut_root[path_node] && cut_values.insert({path_node, producer}).second) {
+        ++cut_slots[path_node];
+        cut_bits[path_node] += bits;
+      }
+    };
+    for (const auto& edge : plan.version_dependencies_) {
+      size_t producer_path = reuse_path_node.at(plan.sites_[plan.version_sites_[edge.producer].base_site].node.path());
+      size_t consumer_path = reuse_path_node.at(plan.sites_[plan.version_sites_[edge.consumer].base_site].node.path());
+      while (reuse_path_trie[producer_path].depth > reuse_path_trie[consumer_path].depth) {
+        record_cut(producer_path, edge.producer, edge.boundary_bits);
+        producer_path = reuse_path_trie[producer_path].parent;
+      }
+      while (reuse_path_trie[consumer_path].depth > reuse_path_trie[producer_path].depth) {
+        record_cut(consumer_path, edge.producer, edge.boundary_bits);
+        consumer_path = reuse_path_trie[consumer_path].parent;
+      }
+      while (producer_path != consumer_path) {
+        record_cut(producer_path, edge.producer, edge.boundary_bits);
+        record_cut(consumer_path, edge.producer, edge.boundary_bits);
+        producer_path = reuse_path_trie[producer_path].parent;
+        consumer_path = reuse_path_trie[consumer_path].parent;
+      }
+    }
+    for (auto& candidate : hier_reuse_candidates) {
+      if (!candidate.uniform || candidate.subtree_ge < kHierReuseMinGe || candidate.subtree_ge > kHierReuseMaxGe
+          || candidate.occurrences < kHierReuseMinOccurrences || candidate.occurrences > kHierReuseMaxOccurrences) {
+        continue;
+      }
+      for (const auto& path : body_occurrences[candidate.definition]) {
+        const auto node = reuse_path_node.find(path);
+        if (node == reuse_path_node.end()) {
+          continue;
+        }
+        candidate.max_cut_slots = std::max(candidate.max_cut_slots, cut_slots[node->second]);
+        candidate.max_cut_bits  = std::max(candidate.max_cut_bits, cut_bits[node->second]);
+      }
+      const uint64_t duplicated_ge = candidate.subtree_ge * (candidate.occurrences - 1);
+      candidate.score              = duplicated_ge / std::max<uint64_t>(1, candidate.max_cut_bits);
+    }
+  }
+  std::ranges::sort(hier_reuse_candidates, [](const auto& lhs, const auto& rhs) {
+    if (lhs.score != rhs.score) {
+      return lhs.score > rhs.score;
+    }
+    if (lhs.subtree_ge != rhs.subtree_ge) {
+      return lhs.subtree_ge > rhs.subtree_ge;
+    }
+    const auto lhs_io   = lhs.definition->get_io();
+    const auto rhs_io   = rhs.definition->get_io();
+    const auto lhs_name = std::string(lhs_io ? lhs_io->get_name() : "");
+    const auto rhs_name = std::string(rhs_io ? rhs_io->get_name() : "");
+    if (lhs_name != rhs_name) {
+      return lhs_name < rhs_name;
+    }
+    return lhs_io != nullptr && rhs_io != nullptr && lhs_io->get_gid() < rhs_io->get_gid();
+  });
   absl::flat_hash_set<const hhds::Graph*> selected_reuse_bodies;
   if (!reuse_candidates.empty()) {
     selected_reuse_bodies.insert(reuse_candidates.front().second);
+  }
+  // A repeated human module with a compact, uniform hierarchical closure is a
+  // useful coarsening boundary: its live value cut is usually much smaller than
+  // an arbitrary graph cut, and preserving the closure gives cgen a stable unit
+  // for generated-code reuse and incremental regeneration. Keep this much
+  // stricter than local-body reuse; isolating large or lightly repeated modules
+  // prevents profitable fusion in their callers. Each closure is an induced
+  // subset of the already validated version DAG, so it is acyclic by construction.
+  const hhds::Graph* selected_hier_reuse = nullptr;
+  for (const auto& candidate : hier_reuse_candidates) {
+    if (candidate.uniform && candidate.subtree_ge >= kHierReuseMinGe && candidate.subtree_ge <= kHierReuseMaxGe
+        && candidate.max_cut_bits <= kHierReuseMaxCutBits && candidate.max_cut_slots <= kHierReuseMaxCutSlots
+        && candidate.score >= kHierReuseMinScore && candidate.occurrences >= kHierReuseMinOccurrences
+        && candidate.occurrences <= kHierReuseMaxOccurrences) {
+      selected_hier_reuse = candidate.definition;
+      break;
+    }
+  }
+  std::vector<bool> hierarchy_root(reuse_path_trie.size(), false);
+  if (selected_hier_reuse != nullptr) {
+    for (const auto& path : body_occurrences[selected_hier_reuse]) {
+      const auto node = reuse_path_node.find(path);
+      if (node != reuse_path_node.end()) {
+        hierarchy_root[node->second] = true;
+      }
+    }
+  }
+  std::vector<size_t> hierarchy_owner(reuse_path_trie.size(), Color_plan::invalid_index);
+  std::vector<size_t> version_hierarchy_owner(nversions, Color_plan::invalid_index);
+  if (selected_hier_reuse != nullptr) {
+    for (size_t node = 1; node < reuse_path_trie.size(); ++node) {
+      hierarchy_owner[node] = hierarchy_root[node] ? node : hierarchy_owner[reuse_path_trie[node].parent];
+    }
+    for (size_t version = 0; version < nversions; ++version) {
+      const auto& path = plan.sites_[plan.version_sites_[version].base_site].node.path();
+      const auto  node = reuse_path_node.find(path);
+      if (node != reuse_path_node.end()) {
+        version_hierarchy_owner[version] = hierarchy_owner[node->second];
+      }
+    }
   }
   const auto body_reuse_worth_preserving = [&](size_t root) {
     return std::ranges::any_of(members[root], [&](size_t member) {
@@ -2598,9 +2824,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     });
   };
   const auto crosses_reuse_boundary = [&](size_t lhs, size_t rhs) {
-    const auto& lhs_path = plan.sites_[plan.version_sites_[members[lhs].front()].base_site].node.path();
-    const auto& rhs_path = plan.sites_[plan.version_sites_[members[rhs].front()].base_site].node.path();
-    return lhs_path != rhs_path && (body_reuse_worth_preserving(lhs) || body_reuse_worth_preserving(rhs));
+    const auto& lhs_path  = plan.sites_[plan.version_sites_[members[lhs].front()].base_site].node.path();
+    const auto& rhs_path  = plan.sites_[plan.version_sites_[members[rhs].front()].base_site].node.path();
+    const auto  lhs_owner = version_hierarchy_owner[members[lhs].front()];
+    const auto  rhs_owner = version_hierarchy_owner[members[rhs].front()];
+    const bool  crosses_hierarchy
+        = lhs_owner != rhs_owner && (lhs_owner != Color_plan::invalid_index || rhs_owner != Color_plan::invalid_index);
+    return crosses_hierarchy || (lhs_path != rhs_path && (body_reuse_worth_preserving(lhs) || body_reuse_worth_preserving(rhs)));
   };
   const auto crosses_control_boundary = [&](size_t lhs, size_t rhs) {
     return plan.version_sites_[members[lhs].front()].control_owner != plan.version_sites_[members[rhs].front()].control_owner;

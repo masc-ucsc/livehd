@@ -137,9 +137,16 @@ fi
 
 # ---- pair D: two SV spellings of the same 65-bit sign-extended latch --------
 # Same phase structure as pair C, but the two sides are built from DIFFERENT
-# source expressions ({{33{d[31]}},d} vs a signed cast), so their state terms
-# are not syntactically equal and the proof must compare each scheduled
-# transition: the phase-STEP induction arm.
+# source expressions, so their state terms are not syntactically equal and the
+# proof must compare each scheduled transition: the phase-STEP induction arm.
+#
+# The other side used to be `65'(signed'(d))`. It no longer differs: the slang
+# reader now RECOGNIZES `{{N{v[msb]}}, v}` as a sign extension and lowers it to
+# the same `sext` the cast produces (Slang_context::lower_concat_sext), so the
+# two terms became syntactically identical and the proof drifted to the
+# composed-period arm — the same coverage loss pair C already took. Keep this
+# side on a spelling the recognizer deliberately does NOT fold: a CONDITIONAL
+# fill is a mux, not a replicated sign bit.
 cat > "$WORK/d.v" <<'EOF'
 module latch_child(input logic clock, input logic d, output logic q);
   always_latch if (!clock) q = d;
@@ -156,14 +163,14 @@ module latch_pair(
   logic [64:0] q_l;
   latch_child u_child(.clock(clock), .d(d[0]), .q(child_q));
   always_latch if (clock) en_l = en;
-  always_latch if (!clock && en_l) q_l = 65'(signed'(d));
+  always_latch if (!clock && en_l) q_l = d[31] ? {33'h1ffffffff, d} : {33'h0, d};
   assign q = q_l;
 endmodule
 EOF
 
 if ! $LHD compile "$WORK/d.v" --reader slang --top latch_pair \
        --emit-dir "lg:$WORK/d_lg" --workdir "$WORK/w_d" >/dev/null 2>&1; then
-  echo "FAIL: compile latch_pair (signed-cast spelling)"; fail=1
+  echo "FAIL: compile latch_pair (conditional-fill spelling)"; fail=1
 else
   d_out=$($LHD lec --impl "lg:$WORK/d_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_d" 2>&1)

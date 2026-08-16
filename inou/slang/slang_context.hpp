@@ -520,6 +520,23 @@ private:
   void                                                        emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);                      // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
+  // A constant bit WINDOW of a named root: `x`, `x[7:4]`, `io.f[3]`, `p[2][5:0]`
+  // normalized to (root expression, 0-based low bit from the root's LSB, width).
+  // `key` is a semantic identity for the root — two windows with the same key
+  // read the SAME storage, even though they are distinct AST nodes. Only
+  // CONSTANT selects over integral fixed-range bases resolve; anything else
+  // (dynamic index, unpacked base, arithmetic root, …) returns nullopt.
+  struct Bit_window {
+    std::string key;
+    int64_t     lo   = 0;
+    int64_t     bits = 0;
+  };
+  std::optional<Bit_window> const_bit_window(const slang::ast::Expression& e);
+  // `{{N{v[msb]}}, v…}` is how firtool (and hand-written RTL) spells a sign
+  // extension. Recognize it as one and return the `sext` lowering, so the
+  // replicated sign bit never becomes a mask/broadcast + shift + or tower.
+  // Returns "" when `expr` is not that idiom.
+  std::string lower_concat_sext(const slang::ast::ConcatenationExpression& expr);
   // Packed `'{...}` assignment pattern (simple/structured/replicated): elements
   // are already resolved positionally MSB-first, so concatenate them like a
   // concat. `type` must be integral (packed struct/array); unpacked targets are

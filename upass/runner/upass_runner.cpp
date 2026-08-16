@@ -1638,14 +1638,37 @@ std::string uPass_runner::resolve_x_fill() {
         f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), std::string_view{dst}.substr(0, pos));
       }
     }
-    if (last_kid && f && f->range_max && f->range_min && f->range_max->is_integer() && !f->range_max->is_negative()
+    // The declared envelope, as a MASK. Two sources, in precedence order:
+    //
+    //   1. the exact `int(min,max)` range — the precise bound, so `int(0,5)`
+    //      fills 3 bits and not 8;
+    //   2. `bits` alone, which is ALL AN IO PORT CARRIES once its width passes
+    //      61. upass.ssa records `has_range` only when BOTH bounds are
+    //      i64-representable (`Dlop::is_just_i64()` == `get_bits() <= 62`), and
+    //      a u62's max needs 63 — so every wider port reaches here with a
+    //      width and no range.
+    //
+    // Without source 2 a wide port's poison stayed the 1-bit `0sb?`, tolg sized
+    // it from `Dlop::get_bits()` (65 for ANY sign-unknown value), and the
+    // destination read a KNOWN 1 above bit 64 — the silent 0/1 this fill exists
+    // to prevent, just at a different width. Reproduced with a 128-bit undriven
+    // comb output round-tripped through `--emit-dir pyrope:`: `129'sb0?…?`
+    // direct, `65'sb1?…?` after the round trip. Only `has_type_spec` facts
+    // qualify (an io port or an explicit `[bits=N]`), never an inferred width.
+    std::optional<Dlop> envelope;
+    if (f && f->range_max && f->range_min && f->range_max->is_integer() && !f->range_max->is_negative()
         && !f->range_min->is_negative() && !f->range_max->has_unknowns()) {
-      const int w = f->range_max->get_bits() - 1;  // uN's max is 2^N-1; get_bits() counts the sign slot
+      envelope = *f->range_max;
+    } else if (f && f->has_type_spec && f->kind == upass::decl_facts::Num::unsigned_int && f->bits > 0) {
+      envelope = *Dlop::get_mask_value(static_cast<int>(f->bits));
+    }
+    if (last_kid && envelope && !envelope->is_invalid()) {
+      const int w = envelope->get_bits() - 1;  // uN's max is 2^N-1; get_bits() counts the sign slot
       if (w > 0) {
         try {
           const Dlop& v = Dlop::from_pyrope_cached(txt);
           if (v.is_integer() && v.unknown_bit_test(w)) {
-            if (auto filled = v.and_op(*f->range_max); filled && !filled->is_invalid()) {
+            if (auto filled = v.and_op(*envelope); filled && !filled->is_invalid()) {
               out = filled->to_pyrope();  // canonical + round-tripping
             }
           }

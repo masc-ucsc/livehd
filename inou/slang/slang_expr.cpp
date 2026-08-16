@@ -1061,8 +1061,202 @@ std::string Slang_context::lower_streaming(const slang::ast::StreamingConcatenat
 // why a constant lane needs no special handling: the width rides in its own
 // operand, so `2'b0` may stay the plain value `0` without the literal's
 // spelling having to encode a width.
+// A constant bit WINDOW of a named root, normalized to (identity key, 0-based
+// low bit from the root's LSB, width). The select math mirrors lower_select's
+// `normalize` exactly — a declared range may be ascending or descending and
+// need not start at 0, and a packed-array element carries a stride.
+//
+// The KEY is a semantic identity, not an AST identity: the `x` inside `{32{x[31]}}`
+// and the `x` in the lane below it are distinct AST nodes reading the same
+// storage, and only the resolved symbol (plus, for a packed struct, the field
+// path) can say so. A field path re-bases the window on the FIELD, which is how
+// the reader lowers it (an independent leaf net) — so `io.x[31]` and `io.x`
+// share a key while `io[63]` and `io.x` deliberately do not.
+//
+// nullopt for anything not pinned to a constant offset over integral
+// fixed-range storage: a dynamic index, an unpacked/memory-ized base, an
+// arithmetic or literal root, a select-under-field. Callers treat that as "the
+// two windows may or may not overlap", i.e. refuse.
+std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const slang::ast::Expression& e) {
+  const auto ti = tinfo(*e.type);
+  if (ti.bits <= 0) {
+    return std::nullopt;
+  }
+  Bit_window w;
+  w.bits = ti.bits;
+
+  const slang::ast::Expression* cur = &e;
+  while (cur->kind == ExpressionKind::ElementSelect || cur->kind == ExpressionKind::RangeSelect) {
+    const auto& base    = cur->kind == ExpressionKind::ElementSelect ? cur->as<slang::ast::ElementSelectExpression>().value()
+                                                                    : cur->as<slang::ast::RangeSelectExpression>().value();
+    const auto& base_ty = base.type->getCanonicalType();
+    if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
+      return std::nullopt;  // unpacked / memory-ized base: a different read path
+    }
+    const auto range   = base_ty.getFixedRange();
+    const auto stride  = base_ty.isPackedArray() ? static_cast<int64_t>(base_ty.getArrayElementType()->getBitWidth()) : 1;
+    int64_t    elem_lo = 0;  // bottom of the window, 0-based in ELEMENTS from the LSB end
+    if (stride <= 0) {
+      return std::nullopt;
+    }
+    // (width_down, width_up): elements the index is above / below, so one
+    // formula covers `[i]`, `[hi:lo]`, `[i +: W]` and `[i -: W]`.
+    int64_t width_down = 1;
+    int64_t width_up   = 1;
+    const slang::ast::Expression* idx = nullptr;
+    if (cur->kind == ExpressionKind::ElementSelect) {
+      idx = &cur->as<slang::ast::ElementSelectExpression>().selector();
+    } else {
+      const auto& rs   = cur->as<slang::ast::RangeSelectExpression>();
+      const auto  kind = rs.getSelectionKind();
+      // Element count of THIS slice — `tinfo(*cur->type)`, not the accumulated
+      // `w.bits` (the outermost expression's width, which only coincides on the
+      // first peel). SV forbids selecting after a range select, so today the
+      // two are always equal here; do not make this depend on that.
+      const auto  elems = static_cast<int64_t>(tinfo(*cur->type).bits) / stride;
+      if (kind == slang::ast::RangeSelectionKind::Simple) {
+        auto l = try_eval_int(rs.left());
+        auto r = try_eval_int(rs.right());
+        if (!l || !r) {
+          return std::nullopt;
+        }
+        elem_lo = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
+      } else if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+        idx        = &rs.left();
+        width_up   = elems;
+      } else {
+        idx        = &rs.left();
+        width_down = elems;
+      }
+    }
+    if (idx != nullptr) {
+      auto ci = try_eval_int(*idx);
+      if (!ci) {
+        return std::nullopt;  // dynamic select: no constant window
+      }
+      elem_lo = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
+    }
+    if (elem_lo < 0) {
+      return std::nullopt;
+    }
+    w.lo += elem_lo * stride;
+    cur = &base;
+  }
+
+  const auto& root = *cur;
+  const auto  ri   = tinfo(*root.type);
+  if (ri.bits <= 0 || w.lo + w.bits > ri.bits) {
+    return std::nullopt;  // an out-of-range select is diagnosed on the normal path
+  }
+
+  std::vector<std::string_view> fields;  // innermost-last; reversed into the key
+  while (cur->kind == ExpressionKind::MemberAccess) {
+    const auto& ma = cur->as<slang::ast::MemberAccessExpression>();
+    if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+      return std::nullopt;
+    }
+    fields.push_back(ma.member.name);
+    cur = &ma.value();
+  }
+  // NamedValue only. A HIERARCHICAL reference resolves to a ValueSymbol in an
+  // InstanceBodySymbol, and slang shares one body across instances with the
+  // same parameterization — so two refs down DIFFERENT instance paths could
+  // share a symbol pointer, i.e. a key that lies. The whole soundness argument
+  // is "same key ⇒ same storage"; nothing may weaken it. Measured cost of
+  // refusing: zero (dino, cva6 and minion have no hierarchical-ref sign
+  // extension), and a miss only means the generic concat path runs.
+  if (cur->kind != ExpressionKind::NamedValue) {
+    return std::nullopt;
+  }
+  const auto& sym = cur->as<slang::ast::NamedValueExpression>().symbol;
+  w.key           = absl::StrCat("#", absl::Hex(reinterpret_cast<uintptr_t>(&sym)));  // NOLINT(performance-no-int-to-ptr)
+  for (auto it = fields.rbegin(); it != fields.rend(); ++it) {
+    absl::StrAppend(&w.key, ".", *it);
+  }
+  return w;
+}
+
+// `{{N{v[msb]}}, v}` / `{{N{v[msb]}}, v[msb:lo]}` / `{{N{v[msb]}}, v[msb:lo], w}`
+// is how firtool (and hand-written RTL) spells a sign extension: replicate the
+// top bit of the lanes below, N times, above them. That is exactly LNAST's
+// `sext`, so emit one instead of lowering the replication — which would
+// otherwise cost a bit-extract plus an N-bit broadcast (a select mux, or an
+// OR tower of N shifted copies) plus a shift and an OR, all to recompute a bit
+// the value below already carries.
+//
+// Soundness: the replicated bit has to be the MSB of the lane DIRECTLY below the
+// replication, which (lanes being packed MSB-first) is the MSB of all the lanes
+// below it taken together. Both sides are resolved to constant windows over the
+// same storage, so a replicated bit of some OTHER net — `{{32{ready}}, data}`,
+// a mask idiom, not a sign extension — can never match. Returns "" (having
+// emitted nothing) for every shape it does not recognize.
+std::string Slang_context::lower_concat_sext(const slang::ast::ConcatenationExpression& expr) {
+  auto ops = expr.operands();
+  if (ops.size() < 2 || ops[0]->kind != ExpressionKind::Replication) {
+    return "";
+  }
+  const auto& rep   = ops[0]->as<slang::ast::ReplicationExpression>();
+  auto        count = try_eval_int(rep.count());
+  if (!count || *count < 1) {
+    return "";
+  }
+  // `{N{b}}` models its operand as a one-element concatenation; unwrap it so the
+  // window below sees the bit expression itself.
+  const slang::ast::Expression* bit = &rep.concat();
+  if (bit->kind == ExpressionKind::Concatenation) {
+    auto inner = bit->as<slang::ast::ConcatenationExpression>().operands();
+    if (inner.size() != 1) {
+      return "";
+    }
+    bit = inner[0];
+  }
+  if (tinfo(*bit->type).bits != 1) {
+    return "";  // a multi-bit replication is not a sign extension
+  }
+
+  auto sign_w = const_bit_window(*bit);
+  auto top_w  = const_bit_window(*ops[1]);
+  if (!sign_w || !top_w || sign_w->key != top_w->key || sign_w->lo != top_w->lo + top_w->bits - 1) {
+    return "";
+  }
+
+  int64_t low_bits = 0;
+  for (size_t i = 1; i < ops.size(); ++i) {
+    auto oi = tinfo(*ops[i]->type);
+    if (oi.bits <= 0) {
+      return "";
+    }
+    low_bits += oi.bits;
+  }
+  const auto total_bits = *count + low_bits;
+  if (total_bits != tinfo(*expr.type).bits) {
+    return "";  // the concat's own width disagrees: leave the generic path alone
+  }
+
+  // Committed: from here on nothing may fail, because lowering emits.
+  std::vector<Lnast_builder::Concat_lane> lanes;
+  lanes.reserve(ops.size() - 1);
+  for (size_t i = 1; i < ops.size(); ++i) {
+    const auto& e  = *ops[i];
+    auto        oi = tinfo(*e.type);
+    lanes.push_back({fit_wrap(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
+  }
+  // A single SIGNED lane needs no sext node: fit_wrap already restored its
+  // top-bit interpretation, which IS the sign extension.
+  std::string low = lanes.size() == 1 ? lanes[0].value : builder_.create_concat_stmts(lanes);
+  if (lanes.size() != 1 || !tinfo(*ops[1]->type).is_signed) {
+    low = builder_.create_sext_stmts(low, std::to_string(low_bits - 1));
+  }
+  return trunc_to(low, static_cast<int>(total_bits));
+}
+
 std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {
-  auto                                    ops = expr.operands();
+  auto ops = expr.operands();
+
+  if (auto sx = lower_concat_sext(expr); !sx.empty()) {
+    return sx;
+  }
+
   std::vector<Lnast_builder::Concat_lane> lanes;
   lanes.reserve(ops.size());
 

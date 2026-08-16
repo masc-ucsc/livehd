@@ -4908,10 +4908,14 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
 // fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
 
 upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
-  // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit.
-  // Delegate to Dlop: src may carry unknown bits (sext_op sign-extends the
-  // unknown sign too); skip only non-values. nbits must be concrete.
+  // Sign-extend: [sext: ref(dst), ref_or_const(src), const(sign_bit_pos)]
+  // The third operand is the sign bit's INDEX, not a width: `sext_op(from_bit)`
+  // reads bit `from_bit` of src and replaces every bit above it with that bit
+  // (Blop::sext64, `(src >> from_bit) & 1`), so the result lies in
+  // [-2^from_bit, 2^from_bit-1]. A producer sign-extending an N-bit value
+  // therefore passes N-1. Delegate to Dlop: src may carry unknown bits
+  // (sext_op sign-extends the unknown sign too); skip only non-values. The
+  // position must be concrete.
   (void)dst;
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();

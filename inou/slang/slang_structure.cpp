@@ -551,6 +551,12 @@ struct Struct_whole_copy_collector : public slang::ast::ASTVisitor<Struct_whole_
   }
 };
 
+// Above this lane count a split stops paying: it mints one leaf net per lane
+// AND a Hotmux of the same arity, where the packed bus + barrel shift stays one
+// cone. xiangshan's Rob.sv carries 512- and 4096-lane tables; dino's widest is
+// 16 and minion's are 8.
+constexpr int64_t kSroaMaxLanes = 64;
+
 // Harvest packed-array symbols and their access/driver shapes. The access
 // counters remain useful diagnostics for the original Type-C false-cycle case,
 // but SROA eligibility is now type/storage based: the consumer selects every
@@ -562,6 +568,16 @@ struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_colle
     bool per_elem_driver      = false;
     bool elem_written         = false;
     bool dynamic_elem_written = false;
+    // A write through a MULTI-ELEMENT range select of the whole array
+    // (`arr[2:1] <= v`). There is no single element leaf to route it to, and
+    // the splitter that handles the same shape for packed STRUCTS
+    // (slang_lvalue.cpp's whole-var constant-slice arm) is guarded on
+    // is_scalar_struct_var, so an array falls through to the flat set_mask path
+    // and writes the bare undeclared name — the whole assignment DISAPPEARS
+    // (`___next_arr.eN = arr.eN` for every lane, an `unresolved-ref` warning,
+    // exit 0). Refuse to split such an array until that arm learns the
+    // element stride; flat is slower, not wrong.
+    bool range_written        = false;
     bool elem_read            = false;
     bool nonconst_access      = false;
   };
@@ -678,7 +694,14 @@ struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_colle
             continue;
           }
           if (part->kind == slang::ast::ExpressionKind::RangeSelect) {
-            part = &part->as<slang::ast::RangeSelectExpression>().value();
+            const auto& rs = part->as<slang::ast::RangeSelectExpression>();
+            // A range select DIRECTLY on the array spans whole elements
+            // (`arr[2:1]`); one nested under an element select is a sub-element
+            // bit slice (`arr[i][3:0]`), which does have a leaf to route to.
+            if (rs.value().kind == slang::ast::ExpressionKind::NamedValue && lhs_base_symbol(rs.value()) == base) {
+              in.range_written = true;
+            }
+            part = &rs.value();
             continue;
           }
           break;
@@ -1592,12 +1615,41 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     body->visit(dwc);
   }
   struct_array_bundle_.clear();
+  // Packed arrays written through a whole-array RANGE select (`arr[2:1] <= v`).
+  // Only the FLAT bus representation lowers that write correctly (set_mask
+  // composes it); both split representations silently DROP it — see
+  // Array_bundle_collector::Info::range_written. Keeps them out of the memory
+  // classifier below too.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> array_range_written;
   {
     absl::flat_hash_map<const slang::ast::ValueSymbol*, Array_bundle_collector::Info> info;
     Array_bundle_collector                                                            abc;
     abc.info      = &info;
     abc.loop_vars = &array_indices.loop_vars;
     body->visit(abc);
+    // A NET INITIALIZER (`wire [N-1:0][W-1:0] x = {lane, lane, …};` — how
+    // firtool spells every combinational lane table) is bound by slang's
+    // bindRValue and is NEVER wrapped in an AssignmentExpression, so the
+    // visitor above never sees it and the array looks undriven. lower_members
+    // already models it as its own driver kind (SymbolKind::Net +
+    // getInitializer(), separate from ContinuousAssign) — seed the same
+    // bookkeeping here, or `wire x = {…}` and `assign x = {…}` classify
+    // differently for no reason. That also makes the Type-C self-reference fix
+    // below reach the `wire x = …` spelling, which it silently never did.
+    for (auto& [sym, in] : info) {
+      const slang::ast::Expression* init = sym->getInitializer();
+      if (init == nullptr) {
+        continue;
+      }
+      while (init->kind == slang::ast::ExpressionKind::Conversion) {
+        init = &init->as<slang::ast::ConversionExpression>().operand();
+      }
+      const auto& ct = sym->getType().getCanonicalType();
+      in.whole_drivers++;
+      in.per_elem_driver |= Array_bundle_collector::per_element_rhs(*init,
+                                                                    Array_bundle_collector::elem_count_of(ct),
+                                                                    Array_bundle_collector::elem_bits_of(ct));
+    }
     for (const auto& [sym, in] : info) {
       bool type_c_selfref = false;
       if (in.whole_drivers == 1 && in.per_elem_driver && !in.elem_written && !in.nonconst_access) {
@@ -1612,12 +1664,35 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // constant-index-only matrices stay flat: exploding those added no mux
       // benefit and can turn legal bit-level update cones into artificial
       // cross-leaf cycles at hierarchy scale.
-      const bool stable_leaf_storage = reg_syms_.contains(sym) || wire_syms_.contains(sym);
-      const bool runtime_element_use = stable_leaf_storage && in.elem_read && in.nonconst_access;
+      //
+      // `wire_syms_` used to be the second disjunct here. It was DEAD: the set
+      // is cleared in the module prologue and filled only inside lower_members,
+      // which runs after this — so only registers ever qualified and no
+      // combinational array could split, whatever the comment said. It also
+      // asks the wrong question: wire classification means "read before
+      // written", while what SROA needs is "each element leaf ends up with
+      // exactly one driver" — which is what keeps the `wire` leaves
+      // declare_array_leaves mints legal under tolg's single-driver rule. One
+      // whole-array per-element driver and no element writes says exactly that,
+      // and it is a property this collector already measures.
+      const bool single_whole_elem_driver = in.whole_drivers == 1 && in.per_elem_driver && !in.elem_written;
+      const bool stable_leaf_storage      = reg_syms_.contains(sym) || single_whole_elem_driver;
+      // Splitting is only worth it when an element is selected at RUNTIME (it
+      // turns a barrel shift over the packed bus into a lane mux); the original
+      // Type-C self-reference stays eligible because splitting it is a
+      // correctness fix even at constant indices. A lane cap keeps the mux
+      // sane: xiangshan has 512- and 4096-lane tables, and splitting one mints
+      // that many leaf nets plus a same-sized Hotmux.
+      const bool runtime_element_use = stable_leaf_storage && in.elem_read && in.nonconst_access
+                                       && Array_bundle_collector::elem_count_of(sym->getType().getCanonicalType())
+                                              <= kSroaMaxLanes;
+      if (in.range_written) {
+        array_range_written.insert(sym);
+        continue;
+      }
       if (!runtime_element_use && !type_c_selfref) {
         continue;
       }
-      // Storage-aware SROA eligibility covers stable wires and registers.
       // Element writes, dynamic reads, range accesses, and clocked state are
       // all legal consumers of an expanded aggregate. The storage classifier
       // below still keeps true memories out of this set, and
@@ -1699,9 +1774,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       bool    sg = false;
       // An OUTPUT reg must stay a flat flop bus — its q pin IS the port driver;
       // memory-izing it would leave the output undriven (dcache's
-      // `output [Sets][Ways] hlock_state_o` read at runtime indices).
+      // `output [Sets][Ways] hlock_state_o` read at runtime indices). So must
+      // an array written through a whole-array range select: a Memory has one
+      // write port per element store and no place to put `arr[2:1] <= v`, so
+      // the write is silently dropped (the memory instantiates with
+      // `wr_enable_0(1'b0)`).
       if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !struct_array_bundle_.contains(sym)
-          && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
+          && !array_range_written.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -3997,14 +4076,15 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     }
     std::sort(couts.begin(), couts.end(), sym_emit_less);
     for (const auto* sym : couts) {
-      const auto [bits, is_signed] = output_info_.at(sym);
       set_pending_loc(sym->location);
-      if (is_signed) {
-        builder_.create_assign_stmts(sym_lname_.at(sym), "0sb?");
-      } else {
-        std::string qmarks(static_cast<size_t>(bits > 0 ? bits : 1), '?');
-        builder_.create_assign_stmts(sym_lname_.at(sym), absl::StrCat("0ub", qmarks));
-      }
+      // `0sb?` is the WIDTH-TAKING wildcard (uPass_runner::resolve_x_fill): the
+      // `?` replicates into the destination's DECLARED width — for a port, its
+      // io_meta type — and stops there. Same value as a `bits`-long run of `?`,
+      // but minion has 512- and 1024-bit combinational outputs and one such
+      // literal is a kilobyte of LNAST text. The signed arm was already this
+      // form (a signed destination has no bounded-width all-unknown Dlop to
+      // narrow to, so the fill deliberately leaves it alone).
+      builder_.create_assign_stmts(sym_lname_.at(sym), "0sb?");
       clear_pending_loc();
     }
     // M7: every COMB bundle OUTPUT port drives a local per-field SHADOW

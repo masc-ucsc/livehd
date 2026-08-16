@@ -180,6 +180,33 @@ sh_test(
     ],
 )
 
+# `{{N{v[msb]}}, v}` is a sign extension, not a broadcast + shift + or. Pins
+# both halves: the shapes that MUST fold to `sext`, and the look-alikes that
+# must not.
+sh_test(
+    name = "slang_concat_sext",
+    size = "large",
+    srcs = ["tests/concat_sext_test.sh"],
+    data = [
+        "tests/sv/concat_sext.v",
+        "//lhd",
+    ],
+)
+
+# Packed 2-D array eligibility, both directions: a net-initialized lane table
+# read at a runtime index must SPLIT (barrel shift -> lane mux), and an array
+# written through a whole-array range select must stay FLAT (the split
+# representations drop the write).
+sh_test(
+    name = "slang_packed_array_net_init_mux",
+    size = "large",
+    srcs = ["tests/packed_array_net_init_mux_test.sh"],
+    data = [
+        "tests/sv/packed_array_net_init_mux.v",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "slang_packed_array_wire_init_sroa",
     size = "large",

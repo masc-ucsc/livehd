@@ -4805,9 +4805,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   std::vector<size_t> direct_commit_shard_of_member(color_runtime_root ? color_plan_->version_sites().size() : 0,
                                                     livehd::sim::Color_plan::invalid_index);
+  std::vector<size_t> direct_commit_shard_bit_of_member(color_runtime_root ? color_plan_->version_sites().size() : 0,
+                                                        livehd::sim::Color_plan::invalid_index);
   for (size_t shard = 0; shard < direct_commit_shards.size(); ++shard) {
-    for (const size_t member : direct_commit_shards[shard].members) {
-      direct_commit_shard_of_member[member] = shard;
+    for (size_t bit = 0; bit < direct_commit_shards[shard].members.size(); ++bit) {
+      const size_t member                           = direct_commit_shards[shard].members[bit];
+      direct_commit_shard_of_member[member]         = shard;
+      direct_commit_shard_bit_of_member[member]     = bit;
     }
   }
 
@@ -5279,9 +5283,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     runtime_header->append("  bool __color_state_changed = false;\n");
     runtime_header->append("  std::array<bool, ", std::to_string(color_plan_->colors().size()), "> __color_dirty{};\n");
-    runtime_header->append("  std::array<bool, ", std::to_string(direct_state_commit_count), "> __state_commit{};\n");
-    if (!direct_commit_shards.empty()) {
-      runtime_header->append("  std::array<bool, ", std::to_string(direct_commit_shards.size()), "> __commit_shard_active{};\n");
+    if (direct_commit_shards.empty()) {
+      runtime_header->append("  std::array<bool, ", std::to_string(direct_state_commit_count), "> __state_commit{};\n");
+    } else {
+      runtime_header->append("  std::array<uint64_t, ", std::to_string(direct_commit_shards.size()), "> __commit_shard_mask{};\n");
     }
     runtime_header->append("  std::array<uint64_t (*)(void**), ",
                            std::to_string(color_plan_->colors().size()),
@@ -9433,13 +9438,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("  if (", predicate, ") {\n");
       }
       const std::string indent = conditional ? "    " : "  ";
-      fout->append(indent, "__rt.__state_commit[", std::to_string(commit_flag), "] = true;\n");
       if (member < direct_commit_shard_of_member.size()
           && direct_commit_shard_of_member[member] != livehd::sim::Color_plan::invalid_index) {
         fout->append(indent,
-                     "__rt.__commit_shard_active[",
+                     "__rt.__commit_shard_mask[",
                      std::to_string(direct_commit_shard_of_member[member]),
-                     "] = true;\n");
+                     "] |= uint64_t{1} << ",
+                     std::to_string(direct_commit_shard_bit_of_member[member]),
+                     ";\n");
+      } else {
+        fout->append(indent, "__rt.__state_commit[", std::to_string(commit_flag), "] = true;\n");
       }
       if (conditional) {
         fout->append("  }\n");
@@ -10674,7 +10682,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       I(!state.empty());
       I(member < direct_state_commit_flag_of_member.size()
         && direct_state_commit_flag_of_member[member] != livehd::sim::Color_plan::invalid_index);
-      fout->append("  if (__rt.__state_commit[", std::to_string(direct_state_commit_flag_of_member[member]), "]) {\n");
+      if (direct_commit_shards.empty()) {
+        fout->append("  if (__rt.__state_commit[", std::to_string(direct_state_commit_flag_of_member[member]), "]) {\n");
+      } else {
+        I(member < direct_commit_shard_of_member.size()
+          && direct_commit_shard_of_member[member] != livehd::sim::Color_plan::invalid_index);
+        fout->append("  if ((__rt.__commit_shard_mask[",
+                     std::to_string(direct_commit_shard_of_member[member]),
+                     "] & (uint64_t{1} << ",
+                     std::to_string(direct_commit_shard_bit_of_member[member]),
+                     ")) != 0) {\n");
+      }
       if (op == Ntype_op::Memory) {
         const auto* memory = find_local_mem(version.base_site);
         I(memory != nullptr);
@@ -10752,9 +10770,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append("  if (__slot == ", std::to_string(static_cast<size_t>(slot)), ") {\n");
         for (size_t shard = 0; shard < direct_commit_shards.size(); ++shard) {
           if (direct_commit_shards[shard].slot == slot) {
-            fout->append("    if (__color_runtime->__commit_shard_active[", std::to_string(shard), "]) {\n");
-            fout->append("      __color_runtime->__commit_shard_active[", std::to_string(shard), "] = false;\n");
+            fout->append("    if (__color_runtime->__commit_shard_mask[", std::to_string(shard), "] != 0) {\n");
             fout->append("      __color_commit_part_", std::to_string(shard), "();\n");
+            fout->append("      __color_runtime->__commit_shard_mask[", std::to_string(shard), "] = 0;\n");
             fout->append("    }\n");
           }
         }
@@ -10911,10 +10929,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(
         "  __color_prepare_runtime();\n"
         "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
-        "  __rt.__color_state_changed = false;\n"
-        "  __rt.__state_commit.fill(false);\n");
-    if (!direct_commit_shards.empty()) {
-      fout->append("  __rt.__commit_shard_active.fill(false);\n");
+        "  __rt.__color_state_changed = false;\n");
+    if (direct_commit_shards.empty()) {
+      fout->append("  __rt.__state_commit.fill(false);\n");
+    } else {
+      fout->append("  __rt.__commit_shard_mask.fill(0);\n");
     }
     fout->append("  __color_refresh_inputs();\n");
     if (color_dirty_) {
@@ -10996,10 +11015,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(
         "  __color_prepare_runtime();\n"
         "  [[maybe_unused]] auto& __rt = *__color_runtime;\n"
-        "  __rt.__color_state_changed = false;\n"
-        "  __rt.__state_commit.fill(false);\n");
-    if (!direct_commit_shards.empty()) {
-      fout->append("  __rt.__commit_shard_active.fill(false);\n");
+        "  __rt.__color_state_changed = false;\n");
+    if (direct_commit_shards.empty()) {
+      fout->append("  __rt.__state_commit.fill(false);\n");
+    } else {
+      fout->append("  __rt.__commit_shard_mask.fill(0);\n");
     }
     if (color_dirty_) {
       fout->append(
