@@ -2292,6 +2292,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         bridge_call = "sum2_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 2) {
         bridge_call = "and_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 4) {
+        // Arity-4 And: cva6_raw_checker_gate has 13.  Fold-free, same reason as
+        // arity 3 (Bug 9) -- routing it through the n-ary fold would make the
+        // closer unfold a List.foldl.
+        bridge_call = "and4_bridge";
       } else if (info.op_expr == "LGraphOp.Op_And" && info.deps.size() == 3) {
         // Arity-3 And gets its own fold-free bridge for the same reason binary Or
         // does (Bug 9): routing it through the n-ary fold would make the closer

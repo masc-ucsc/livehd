@@ -339,6 +339,54 @@ theorem and3_bridge {wa wb wc w : Nat} (a : BitVec wa) (b : BitVec wb) (c : BitV
   rw [hin]
   simp only [bv_bit_bvenc, BitVec.getLsbD_and, getLsbD_zext_lt b hi, getLsbD_zext_lt c hi]
 
+/-- Peel one level off a left-nested `bv_bitwise` And chain.  Factored out of the
+inline `have` in `and3_bridge` so each extra arity costs one `have`, not a fresh
+copy of the whole proof.  Note `wx` is separate from the chain width `w`: the
+operands of an n-ary And keep their own widths and are `bv_zext`ed by the fast
+model, so they are not all `BitVec w`. -/
+theorem bv_bit_and_step {w wx : Nat} (A : BV) (x : BitVec wx) {i : Nat} (hi : i < w) :
+    bv_bit (bv_bitwise w (fun p q => p && q) A (bvenc x)) i
+      = (bv_bit A i && x.getLsbD i) := by
+  unfold bv_bitwise
+  rw [bv_bit_bitsToInt _ hi]
+  simp [bv_bit_bvenc]
+
+/-- Arity-4 `And`.  Same fold-free shape as `and3_bridge`: the RHS is exactly the
+left-nested `&&&` chain `nary_op_inline` emits, so the default closer suffices and
+no `List.foldl` is introduced (Bug 9).
+
+Found by the CVA6 module sweep: `cva6_raw_checker_gate` has 13 arity-4 `And` nodes.
+Observed arities across DINO + all swept CVA6 modules are 2, 3 and 4; if a wider one
+ever appears, extend by adding one `have` in the same pattern. -/
+theorem and4_bridge {wa wb wc wd w : Nat}
+    (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) (d : BitVec wd) :
+    eval_op LGraphOp.Op_And w [bvenc a, bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext a : BitVec w) &&& (bv_zext b : BitVec w))
+                 &&& (bv_zext c : BitVec w)) &&& (bv_zext d : BitVec w)) := by
+  show bv_bitwise w (fun x y => x && y)
+        (bv_bitwise w (fun x y => x && y)
+          (bv_bitwise w (fun x y => x && y) (bv_resize w (bvenc a)) (bvenc b)) (bvenc c)) (bvenc d) = _
+  rw [bv_resize_bvenc]
+  apply bv_bitwise_eq
+  intro i hi
+  have h2 := bv_bit_and_step (bvenc (bv_zext a : BitVec w)) b hi
+  have h3 := bv_bit_and_step
+      (bv_bitwise w (fun p q => p && q) (bvenc (bv_zext a : BitVec w)) (bvenc b)) c hi
+  -- `bv_bitwise_eq` has already peeled the OUTERMOST level (the `&&& d`), so the
+  -- chain left in the goal is one shorter than the term above.
+  rw [h3, h2]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_and,
+             getLsbD_zext_lt b hi, getLsbD_zext_lt c hi, getLsbD_zext_lt d hi]
+
+/-- Emitter-facing check at `cva6_raw_checker_gate` nid 312's exact shape:
+`Op_And` width 1, four 1-bit operands, the first a constant. -/
+example (b c d : BitVec 1) :
+    eval_op LGraphOp.Op_And 1
+        [bvenc (BitVec.ofInt 1 ((Int.ofNat 1))), bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext (BitVec.ofInt 1 ((Int.ofNat 1))) : BitVec 1) &&& (bv_zext b : BitVec 1))
+                 &&& (bv_zext c : BitVec 1)) &&& (bv_zext d : BitVec 1)) :=
+  and4_bridge _ b c d
+
 theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_Or w [bvenc a, bvenc b]
       = bvenc ((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) := by

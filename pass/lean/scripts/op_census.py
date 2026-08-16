@@ -58,6 +58,8 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "and_bridge")
     if op == "Op_And" and arity == 3:
         return ("ok", "and3_bridge (fold-free)")
+    if op == "Op_And" and arity == 4:
+        return ("ok", "and4_bridge (fold-free)")
     if op == "Op_Or" and arity == 2:
         # Binary Or does NOT take the n-ary bridge: orn_bv_bridge is correct at
         # arity 2 but its closer unfolds a List.foldl, which sent the kernel into
