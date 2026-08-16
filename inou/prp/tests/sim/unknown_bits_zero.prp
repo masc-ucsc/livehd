@@ -1,0 +1,29 @@
+/*
+:name: unknown_bits_zero
+:type: simulation
+:set: sim.unknown_zero=true
+*/
+
+// sim.unknown_zero=true: every `?` literal bit is the deterministic 0 the
+// simulator used before the knob existed (which also lets the literal fold at
+// C++ compile time instead of taking a runtime parse). Twin of
+// unknown_bits_random, which pins the default random-draw policy.
+//
+// Both a DUT constant and a testbench literal are covered — one knob, whole
+// simulation.
+
+pub mod unknown_bits_zero(a:u64) -> (r:u64@[0]) {
+  mut c:u64 = 0sb?
+  r = a ^ c
+}
+
+test unknown_bits_zero.forced_zero {
+  mut dut     = unknown_bits_zero
+  mut got:u64 = 0
+  tick 4 {
+    dut.a = 0ub????????  // a TESTBENCH literal: zeroed by the same knob
+    step
+    got = got | dut.r
+  }
+  assert(got == 0, "sim.unknown_zero must make every `?` bit a 0")
+}

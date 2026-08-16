@@ -1,0 +1,21 @@
+/*
+:name: const_nil_cond_bind
+:type: equiv
+:verilog_top: const_nil_cond_bind.cnb
+:pyrope_top: cnb
+*/
+
+// `const x = nil` is a FORWARD DECLARATION: the net has no value yet and its one
+// later assignment binds it. Being single-assignment, that bind defines the net
+// on EVERY path — the same rule a `wire` follows — so the conditional write
+// below means `o == a + 1` regardless of `c`. There is no mux against the `nil`.
+// (Unlike `wire`, a `const` is NOT position-independent: a read before the bind
+// is an error, which is why the emitter prefers this form when the write comes
+// first.)
+pub comb cnb(a:u8, c:bool) -> (o:u8) {
+  const w:u8 = nil
+  if c {
+    w = a + 1
+  }
+  o = w
+}

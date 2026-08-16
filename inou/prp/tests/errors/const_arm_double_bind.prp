@@ -1,0 +1,18 @@
+/*
+:name: const_arm_double_bind
+:type: error
+:error: rebind
+:help: single assignment
+*/
+
+// Two binds of the same `const` in ONE arm both run, so this is a rebind — the
+// driver count is the MAX over an if/match's arms, not "does any arm write it".
+// (Writing it once in each of two exclusive arms is the legal shape.)
+comb t(a:u8, b:u8, c:bool) -> (o:u8) {
+  const w:u8 = nil   // locate_error_here
+  if c {
+    w = a
+    w = b
+  }
+  o = w
+}

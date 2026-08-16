@@ -1,0 +1,20 @@
+/*
+:name: const_cond_rebind
+:type: error
+:error: rebind
+:help: single assignment
+*/
+
+// A CONDITIONAL bind of a `const` forward declaration is legal (see
+// equiv/const_nil_cond_bind), but it is still the one assignment: pairing it
+// with a second one is a rebind. The whole `if`/`match` counts as ONE, so this
+// shape has two. Caught here because the comptime `vbound` tally in
+// upass.attributes only sees comptime-decided writes.
+comb t(a:u8, b:u8, c:bool) -> (o:u8) {
+  const w:u8 = nil   // locate_error_here
+  if c {
+    w = a
+  }
+  w = b
+  o = w
+}

@@ -1,0 +1,40 @@
+/*
+:name: unknown_bits_random
+:type: simulation
+*/
+
+// sim.unknown_zero DEFAULT (false): Slop carries no runtime X, so every `?` bit
+// of a literal must become a concrete 0 or 1 — and the concrete bit is DRAWN
+// from the run's seeded PRNG rather than silently forced to 0, so an
+// unspecified bit cannot be relied on by accident. `unknown_bits_zero` is the
+// opposite-policy twin.
+//
+// The draw is once per literal per run, NOT per cycle: a constant must stay
+// constant, or every color feeding it would become per-period random work and
+// Color_plan::runtime_random (which gates quiescence detection) would be a lie.
+// The stability assert below is the deterministic half of the contract.
+
+pub mod unknown_bits_random(a:u64) -> (r:u64@[0]) {
+  mut c:u64 = 0sb?
+  r = a ^ c
+}
+
+test unknown_bits_random.drawn_once {
+  mut dut       = unknown_bits_random
+  mut first:u64 = 0
+  mut stable    = true
+  tick 8 {
+    dut.a = 0
+    step
+    if clock == 0 {
+      first = dut.r
+    } elif dut.r != first {
+      stable = false
+    }
+  }
+  assert(stable, "the x-fill changed between cycles — it must be drawn once, not per cycle")
+  // Not an assertion about a PARTICULAR random value (see mem_none_color_random
+  // for the same discipline): 64 independently drawn bits are all-zero with
+  // probability 2^-64, so this only fails if the `?` bits were never drawn.
+  assert(first != 0, "the x-fill was all zero — with sim.unknown_zero off the `?` bits must be random")
+}
