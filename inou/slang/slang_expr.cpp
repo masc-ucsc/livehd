@@ -1281,42 +1281,48 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         // SystemVerilog out-of-range selection instead of aliasing the final
         // valid element.
         if (array_info != nullptr) {
-          auto index = to_int_value(lower_rvalue(es.selector()));
-          if (range.isDescending()) {
-            if (range.lower() != 0) {
-              index = builder_.create_minus_stmts(index, std::to_string(range.lower()));
-            }
-          } else {
-            index = builder_.create_minus_stmts(std::to_string(range.upper()), index);
-          }
-
           // Build every lane value before the tuple node. read_lane can emit
           // masks/shifts/ors (and constant-folded temporaries); creating the
           // tuple first would make its children forward-reference those
           // producers, so uPass sees unresolved slots while lowering the
           // runtime tuple_get.
+          // A lane with no matching leaf yields "" — an empty ref child would
+          // be a malformed tuple, so fall through to the generic flat-value
+          // path instead (same guard the constant-index branch above has).
           std::vector<std::string> lanes;
           lanes.reserve(range.width());
+          bool every_lane_read = true;
           for (int64_t lane_idx = 0; lane_idx < static_cast<int64_t>(range.width()); ++lane_idx) {
             lanes.push_back(read_lane(lane_idx));
+            every_lane_read = every_lane_read && !lanes.back().empty();
           }
+          if (every_lane_read && !lanes.empty()) {
+            auto index = to_int_value(lower_rvalue(es.selector()));
+            if (range.isDescending()) {
+              if (range.lower() != 0) {
+                index = builder_.create_minus_stmts(index, std::to_string(range.lower()));
+              }
+            } else {
+              index = builder_.create_minus_stmts(std::to_string(range.upper()), index);
+            }
 
-          auto& ln       = *builder_.lnast;
-          auto  tuple    = builder_.create_lnast_tmp();
-          auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
-          ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
-          for (const auto& lane : lanes) {
-            ln.add_child(tuple_op, Lnast_node::create_ref(lane));
+            auto& ln       = *builder_.lnast;
+            auto  tuple    = builder_.create_lnast_tmp();
+            auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
+            ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
+            for (const auto& lane : lanes) {
+              ln.add_child(tuple_op, Lnast_node::create_ref(lane));
+            }
+            std::string xbits(static_cast<size_t>(stride), '?');
+            ln.add_child(tuple_op, Lnast_node::create_const(absl::StrCat("0ub", xbits)));
+
+            auto result = builder_.create_lnast_tmp();
+            auto get    = builder_.add_child(Lnast_ntype::create_tuple_get());
+            ln.add_child(get, Lnast_node::create_ref(result));
+            ln.add_child(get, Lnast_node::create_ref(tuple));
+            builder_.add_value_child_pub(get, index);
+            return ti.is_signed ? builder_.create_sext_stmts(result, std::to_string(stride - 1)) : result;
           }
-          std::string xbits(static_cast<size_t>(stride), '?');
-          ln.add_child(tuple_op, Lnast_node::create_const(absl::StrCat("0ub", xbits)));
-
-          auto result = builder_.create_lnast_tmp();
-          auto get    = builder_.add_child(Lnast_ntype::create_tuple_get());
-          ln.add_child(get, Lnast_node::create_ref(result));
-          ln.add_child(get, Lnast_node::create_ref(tuple));
-          builder_.add_value_child_pub(get, index);
-          return ti.is_signed ? builder_.create_sext_stmts(result, std::to_string(stride - 1)) : result;
         }
       }
     }

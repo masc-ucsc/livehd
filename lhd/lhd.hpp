@@ -179,7 +179,8 @@ struct Options {
   // replay; the legacy flags above stay the low-ceremony spelling of the same
   // engine. Answers land in the envelope's "query" member.
   std::string sim_query;
-  bool        sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
+  bool        sim_observe         = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
+  bool        sim_runtime_support = true;   // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };

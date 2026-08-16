@@ -1588,6 +1588,9 @@ void sim_command(Options& opts, Result& res) {
   // Hierarchical combinational port mirrors are compile-time instrumentation.
   // Keep them out of the ordinary fast binary; emit them only for a run that
   // actually requests waveform or value observation.
+  // --list-signals is deliberately NOT here: describe_signals() walks the
+  // declared state/IO members, so it needs the runtime-support state walk
+  // below, never the hierarchical mirrors.
   opts.sim_observe          = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
@@ -1614,6 +1617,10 @@ void sim_command(Options& opts, Result& res) {
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
+  // The default checkpoint-capable build retains the editable state-walk
+  // surface. An explicit checkpoint-off performance build may omit it, unless
+  // VCD/probe/query/--list-signals needs the same generated control plane.
+  opts.sim_runtime_support   = ckpt_on || opts.sim_observe || opts.sim_list_signals;
 
   // Debug-flag sanity (sim_checkpoint_debug_plan): catch contradictory combinations
   // up front instead of silently producing a degenerate run.
@@ -1666,7 +1673,7 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
     std::string err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, opts.sim_observe, tests, err) != 0) {
+    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, opts.sim_observe, opts.sim_runtime_support, tests, err) != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
@@ -1738,6 +1745,8 @@ void sim_command(Options& opts, Result& res) {
     const auto driver_source         = dss.str();
     const bool baked_vcd             = driver_source.find("vcd::global_timestamp") != std::string::npos;
     const bool baked_observation     = driver_source.find("hierarchical-observation: true") != std::string::npos;
+    const bool baked_runtime_support = driver_source.find("runtime-control-support: true") != std::string::npos
+                                       || driver_source.find(".dump_state(") != std::string::npos;
     const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
     if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
@@ -1761,6 +1770,16 @@ void sim_command(Options& opts, Result& res) {
       res.error_message
           = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
             "--probe/--break-when/--query instrumentation is generated";
+      res.exit_code = exit_code_for(res.error_class);
+      return;
+    }
+    if (opts.sim_runtime_support && !baked_runtime_support) {
+      res.status      = "fail";
+      res.error_class = "usage";
+      res.error_message
+          = "this --run-only sim was generated without checkpoint/observation support (no checkpointing, "
+            "--list-signals, --probe, --break-when or --query); repeat --set sim.checkpoint=false or re-run "
+            "--setup-only with runtime support enabled";
       res.exit_code = exit_code_for(res.error_class);
       return;
     }

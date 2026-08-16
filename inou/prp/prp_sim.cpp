@@ -30,7 +30,6 @@
 namespace prp_sim {
 
 namespace {
-
 std::string slurp(const std::string& path) {
   std::ifstream      ifs(path, std::ios::binary);
   std::ostringstream ss;
@@ -727,8 +726,9 @@ public:
   // key), read after emit_run_fn to expand the per-test query catalog.
   const std::map<std::string, std::string>& instances() const { return inst_of_var; }
 
-  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir, const std::string& file)
-      : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file) {
+  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir, const std::string& file,
+             bool runtime_support_on)
+      : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file), runtime_support_on_(runtime_support_on) {
     auto slash  = file_.find_last_of("/\\");
     file_short_ = (slash == std::string::npos) ? file_ : file_.substr(slash + 1);
     // Pre-scan file-scope import bindings (`const my_top = import("unit.lam")`):
@@ -950,12 +950,22 @@ public:
     // body run) — the agent learns the --probe/--break-when vocabulary. Hoisted out
     // of the instance guard so a test with no DUT instance also short-circuits
     // (describing nothing) instead of running the whole testbench.
-    o << "  if (_dbg.list_signals) {\n";
-    for (const auto& [var, m] : inst_of_var) {
-      o << "    " << var << ".describe_signals(\"" << var << ".\", _dbg.sigs);\n";
+    if (runtime_support_on_) {
+      o << "  if (_dbg.list_signals) {\n";
+      for (const auto& [var, m] : inst_of_var) {
+        o << "    " << var << ".describe_signals(\"" << var << ".\", _dbg.sigs);\n";
+      }
+      o << "    return _fails;\n  }\n";
+    } else {
+      // The state-walk methods were not generated, so there is nothing to
+      // enumerate. Say so loudly: silently running the testbench and reporting
+      // an EMPTY signal list (exit 0) would read as "this design has no state".
+      o << "  if (_dbg.list_signals) {\n";
+      o << "    std::fprintf(stderr, \"lhd sim: this simulator was built without the signal state walk "
+           "(--set sim.checkpoint=false); re-run --setup-only with checkpointing or an observation flag\\n\");\n";
+      o << "    std::exit(2);\n  }\n";
     }
-    o << "    return _fails;\n  }\n";
-    if (!inst_of_var.empty()) {
+    if (runtime_support_on_ && !inst_of_var.empty()) {
       o << "  hlop::ckpt::Cadence _cad; _cad.init(_ckpt.enabled, _ckpt.min_secs, _ckpt.max_overhead);\n";
       o << "  std::string _ckpt_base = _ckpt.dir.empty() ? std::string() : (_ckpt.dir + \"/" << sanitize(name) << "\");\n";
       // No upfront mkdir: the first due checkpoint's make_dirs(_cdir) creates the
@@ -1037,6 +1047,7 @@ private:
   std::string                                 vcd_dir_;                        // empty = no VCD; else <vcd_dir>/<test>.vcd per test
   std::string                                 file_;                           // source .prp path (for failing_assert file:line)
   std::string                                 file_short_;                     // basename of file_ (the inline located message)
+  bool                                        runtime_support_on_    = true;   // checkpoint/probe/query generated control plane
   bool                                        in_tick_               = false;  // inside a tick body (reject nested ticks)
   bool                                        restart_block_emitted_ = false;  // --restart-at handled by the first tick
   std::set<std::string>                       locals_;                         // scalar driver vars
@@ -2631,11 +2642,11 @@ private:
   // writes ckp<cycle>/{regs.json, <mem>.hex, tb.json, meta.json}; the parent
   // creates the dir first (so prune sees this cycle) and prunes to max after.
   void emit_checkpoint_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty()) {
+    if (!runtime_support_on_ || inst_of_var.empty()) {
       return;
     }
     o << ind << "if (_ckpt.enabled && !_ckpt_base.empty() && " << clk << " > 0 && (_ckpt.every > 0 ? (" << clk
-      << " % _ckpt.every == 0) : _cad.due())) {\n";
+      << " % _ckpt.every == 0) : _cad.due())) [[unlikely]] {\n";
     o << ind << "  std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, " << clk << ");\n";
     o << ind << "  auto _t0 = std::chrono::steady_clock::now();\n";
     o << ind << "  hlop::ckpt::fork_checkpoint([&]() {\n";
@@ -2676,7 +2687,7 @@ private:
   // instead of 0. Only the first tick restarts (the single-clock model has one
   // primary loop); later ticks run normally. No-op when no checkpoint is <= X.
   void emit_restart_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty() || restart_block_emitted_) {
+    if (!runtime_support_on_ || inst_of_var.empty() || restart_block_emitted_) {
       return;
     }
     restart_block_emitted_ = true;
@@ -2750,7 +2761,7 @@ private:
   // every scalar signal once, then record a --probe trajectory row (within the
   // window) and/or test the --break-when condition (first hit only).
   void emit_debug_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty()) {
+    if (!runtime_support_on_ || inst_of_var.empty()) {
       return;
     }
     // `window_only` marks the verdict-discarded --vcd-on-fail re-run — skip probing
@@ -3104,7 +3115,7 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
 }  // namespace
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             bool observation_on, std::vector<Test_info>& tests, std::string& err) {
+             bool observation_on, bool runtime_support_on, std::vector<Test_info>& tests, std::string& err) {
   // 1. read DUT interfaces from the cgen_sim manifests in simdir (2f-sim B0).
   // One <stem>.iface.json per emitted module; the matching <stem>.hpp is still
   // the header the driver #includes, so the two names are kept side by side.
@@ -3189,7 +3200,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
     used_ids.insert(fn_id);
 
-    Driver_gen              gen(src, duts, vcd_dir, file);  // fresh per-test state
+    Driver_gen              gen(src, duts, vcd_dir, file, runtime_support_on);  // fresh per-test state
     std::vector<Param_info> pinfo;
     try {
       fns << gen.emit_run_fn(test, name, fn_id, pinfo, includes) << "\n";
@@ -3234,6 +3245,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   std::ostringstream o;
   o << "// Generated by lhd sim (prp_sim). Do not edit.\n";
   o << "// hierarchical-observation: " << (observation_on ? "true" : "false") << "\n";
+  o << "// runtime-control-support: " << (runtime_support_on ? "true" : "false") << "\n";
   o << "// One driver for every `test` block of " << file << ":\n";
   o << "//   --list-tests          print the tests + parameters as JSON, then exit\n";
   o << "//   --test NAME           run only test NAME (repeatable; default = all)\n";

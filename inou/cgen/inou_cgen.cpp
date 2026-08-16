@@ -48,6 +48,7 @@ void Inou_cgen::setup() {
                         "its parent before occurrence-wide color planning, bottom-up. 0 = never",
                         "0");
   m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
+  m2.add_label_optional("runtime_support", "emit checkpoint/probe/query state-walk methods", "true");
   m2.add_label_optional("slop_u",
                         "materialize every LGraph-proven unsigned value as canonical-unsigned Slop_u<n> "
                         "(one mask at the write) instead of a lazily-masked Slop<n> (one mask at every read). "
@@ -128,30 +129,32 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
-  Inou_cgen pp(var);
-  auto      dir           = pp.get_odir(var);
-  auto      vcd_out       = var.get("vcd");
-  auto      top           = var.get("top");
-  auto      fakedelay     = var.get("vcd_fake_delay");
-  auto      observe_s     = var.get("observe");
-  auto      slop_u_s      = var.get("slop_u");
-  auto      color_dirty_s = var.get("color_dirty");
-  auto      debug_s       = var.get("debug");
+  Inou_cgen  pp(var);
+  auto       dir               = pp.get_odir(var);
+  auto       vcd_out           = var.get("vcd");
+  auto       top               = var.get("top");
+  auto       fakedelay         = var.get("vcd_fake_delay");
+  auto       observe_s         = var.get("observe");
+  auto       runtime_support_s = var.get("runtime_support");
+  auto       slop_u_s          = var.get("slop_u");
+  auto       color_dirty_s     = var.get("color_dirty");
+  auto       debug_s           = var.get("debug");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
-  bool       bad_flag  = false;
-  const auto flag_on   = [&bad_flag](std::string_view label, std::string_view v) {
+  bool       bad_flag          = false;
+  const auto flag_on           = [&bad_flag](std::string_view label, std::string_view v) {
     if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
       livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
       bad_flag = true;
     }
     return v == "true" || v == "1" || v == "on";
   };
-  const bool observe_on     = flag_on("observe", observe_s);
-  const bool slop_u_on      = flag_on("sim.slop_u", slop_u_s);
-  const bool color_dirty_on = flag_on("sim.color_dirty", color_dirty_s);
-  const bool debug_on       = flag_on("sim.debug", debug_s);
+  const bool observe_on         = flag_on("observe", observe_s);
+  const bool runtime_support_on = flag_on("runtime_support", runtime_support_s);
+  const bool slop_u_on          = flag_on("sim.slop_u", slop_u_s);
+  const bool color_dirty_on     = flag_on("sim.color_dirty", color_dirty_s);
+  const bool debug_on           = flag_on("sim.debug", debug_s);
   flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
   if (bad_flag) {
     return;
@@ -347,6 +350,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   plan,
                   compact_kernel_defs.contains(g.get()),
                   observe_on,
+                  runtime_support_on,
                   slop_u_on,
                   color_dirty_on,
                   debug_on);

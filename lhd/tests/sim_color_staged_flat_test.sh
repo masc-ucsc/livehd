@@ -70,7 +70,12 @@ grep -q 'struct .*::__Color_runtime' "$runtime" || fail "runtime details are not
 refute "generated simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|tf::Taskflow' "$header" "$body" "$runtime"
 
 commit_body="$(sed -n '/::__color_commit(std::size_t/,/^}/p' "$body")"
-grep -q 'slop_update(state, state_din)' <<<"$commit_body" || fail "rise commit does not consume pending state"
+# A scalar (non-pipelined) commit lands the pending value with a plain
+# assignment: the dynamic `__state_commit` flag is only raised after proving
+# D != Q, so slop_update's compare-on-write would repeat that test. A pipe
+# stage still needs slop_update (it carries its own per-stage change bit).
+grep -Eq 'slop_update\(state, state_din\)|state = state_din;' <<<"$commit_body" \
+  || fail "rise commit does not consume pending state"
 grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational logic"
 
 [ ! -e "$work/setup/sim/runtime/taskflow" ] || fail "generated tree still stages Taskflow"

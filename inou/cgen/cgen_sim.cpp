@@ -2606,6 +2606,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     gd          = fnv1a_str(gd, top);
     gd          = fnv1a(gd, (is_top ? 2u : 0u) | (vcd_fakedelay ? 1u : 0u));
     gd          = fnv1a(gd, compact_kernel_ ? 1u : 0u);
+    gd          = fnv1a(gd, runtime_support_on ? 1u : 0u);
     gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
     gd          = fnv1a(gd, color_dirty_ ? 1u : 0u);
     gd          = fnv1a(gd, debug_ ? 1u : 0u);
@@ -7863,352 +7864,355 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("}\n");
   }
 
-  // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
-  // literal); memories -> one editable `<_dir>/<_p><member>.hex` each; recurse
-  // into sub-instances. Mirrors the reset_cycle/peek member walk. ----
-  fout->append("void ",
-               mod,
-               "::dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const {\n");
-  for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  _r[_p + \"", s, "\"] = ", s, ".to_pyrope();\n"));
-    }
-    fout->append(absl::StrCat("  _r[_p + \"", f.member, "\"] = ", f.member, ".to_pyrope();\n"));
-  }
-  {
-    absl::flat_hash_set<std::string> emitted;
+  if (runtime_support_on) {
+    // ---- dump_state: flops/regs -> the `_r` map (by hierarchical name, pyrope
+    // literal); memories -> one editable `<_dir>/<_p><member>.hex` each; recurse
+    // into sub-instances. Mirrors the reset_cycle/peek member walk. ----
+    fout->append("void ",
+                 mod,
+                 "::dump_state(const std::string& _p, std::map<std::string, std::string>& _r, const std::string& _dir) const {\n");
     for (const auto& f : flops) {
-      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-        fout->append(absl::StrCat("  _r[_p + \"", f.prev_member, "\"] = ", f.prev_member, " ? \"true\" : \"false\";\n"));
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  _r[_p + \"", s, "\"] = ", s, ".to_pyrope();\n"));
+      }
+      fout->append(absl::StrCat("  _r[_p + \"", f.member, "\"] = ", f.member, ".to_pyrope();\n"));
+    }
+    {
+      absl::flat_hash_set<std::string> emitted;
+      for (const auto& f : flops) {
+        if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+          fout->append(absl::StrCat("  _r[_p + \"", f.prev_member, "\"] = ", f.prev_member, " ? \"true\" : \"false\";\n"));
+        }
       }
     }
-  }
-  for (const auto& m : mems) {
-    fout->append(absl::StrCat("  hlop::ckpt::write_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _r[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_pyrope();\n"));
+    for (const auto& m : mems) {
+      fout->append(absl::StrCat("  hlop::ckpt::write_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(absl::StrCat("  _r[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_pyrope();\n"));
+        }
       }
     }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  ", s.inst, ".dump_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
-  }
-  // The persistent input latch __in is state too: a poke-once-and-hold input must
-  // survive a restart (the testbench may not re-poke it after the checkpoint cycle).
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      fout->append(absl::StrCat("  _r[_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_pyrope();\n"));
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".dump_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
     }
-  }
-  fout->append("}\n");
+    // The persistent input latch __in is state too: a poke-once-and-hold input must
+    // survive a restart (the testbench may not re-poke it after the checkpoint cycle).
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        fout->append(absl::StrCat("  _r[_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_pyrope();\n"));
+      }
+    }
+    fout->append("}\n");
 
-  // ---- load_state: set each flop/reg from the map IF PRESENT (a missing key
-  // keeps the reset value -> cross-version reload tolerance); memories from the
-  // hex file if present; recurse into sub-instances. ----
-  fout->append("void ",
-               mod,
-               "::load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir) {\n");
-  for (const auto& f : flops) {
-    const auto type = value_type(f.bits, f.unsign);
-    for (const auto& s : f.stages) {
+    // ---- load_state: set each flop/reg from the map IF PRESENT (a missing key
+    // keeps the reset value -> cross-version reload tolerance); memories from the
+    // hex file if present; recurse into sub-instances. ----
+    fout->append("void ",
+                 mod,
+                 "::load_state(const std::string& _p, const std::map<std::string, std::string>& _r, const std::string& _dir) {\n");
+    for (const auto& f : flops) {
+      const auto type = value_type(f.bits, f.unsign);
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                  s,
+                                  "\"); _it != _r.end()) ",
+                                  s,
+                                  " = ",
+                                  type,
+                                  "::from_pyrope(_it->second);\n"));
+      }
       fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
-                                s,
+                                f.member,
                                 "\"); _it != _r.end()) ",
-                                s,
+                                f.member,
                                 " = ",
                                 type,
                                 "::from_pyrope(_it->second);\n"));
     }
-    fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
-                              f.member,
-                              "\"); _it != _r.end()) ",
-                              f.member,
-                              " = ",
-                              type,
-                              "::from_pyrope(_it->second);\n"));
-  }
-  {
-    absl::flat_hash_set<std::string> emitted;
-    for (const auto& f : flops) {
-      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
-                                  f.prev_member,
-                                  "\"); _it != _r.end()) ",
-                                  f.prev_member,
-                                  " = Slop<1>::from_pyrope(_it->second).is_known_true();\n"));
+    {
+      absl::flat_hash_set<std::string> emitted;
+      for (const auto& f : flops) {
+        if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+          fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                    f.prev_member,
+                                    "\"); _it != _r.end()) ",
+                                    f.prev_member,
+                                    " = Slop<1>::from_pyrope(_it->second).is_known_true();\n"));
+        }
       }
     }
-  }
-  for (const auto& m : mems) {
-    const auto type = value_type(m.bits, m.unsign);
-    fout->append(absl::StrCat("  hlop::ckpt::read_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
-                                  m.member,
-                                  "_q",
-                                  p.rdidx,
-                                  "\"); _it != _r.end()) ",
-                                  m.member,
-                                  "_q",
-                                  p.rdidx,
+    for (const auto& m : mems) {
+      const auto type = value_type(m.bits, m.unsign);
+      fout->append(absl::StrCat("  hlop::ckpt::read_mem_hex(_dir + \"/\" + _p + \"", m.member, ".hex\", ", m.member, ");\n"));
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"",
+                                    m.member,
+                                    "_q",
+                                    p.rdidx,
+                                    "\"); _it != _r.end()) ",
+                                    m.member,
+                                    "_q",
+                                    p.rdidx,
+                                    " = ",
+                                    type,
+                                    "::from_pyrope(_it->second);\n"));
+        }
+      }
+    }
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".load_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
+    }
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        const auto type = value_type(io.bits, io.unsign);
+        fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.",
+                                  io.field,
+                                  "\"); _it != _r.end()) __in.",
+                                  io.field,
                                   " = ",
                                   type,
                                   "::from_pyrope(_it->second);\n"));
       }
     }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  ", s.inst, ".load_state(_p + \"", s.inst, ".\", _r, _dir);\n"));
-  }
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      const auto type = value_type(io.bits, io.unsign);
-      fout->append(absl::StrCat("  if (auto _it = _r.find(_p + \"__in.",
-                                io.field,
-                                "\"); _it != _r.end()) __in.",
-                                io.field,
-                                " = ",
-                                type,
-                                "::from_pyrope(_it->second);\n"));
+    fout->append("  ++__gen;  // loaded state: every gated evaluation must recompute\n");
+    if (color_runtime_root) {
+      fout->append("  __color_runtime.reset();  // discard serial dirty/input caches after checkpoint restore\n");
     }
-  }
-  fout->append("  ++__gen;  // loaded state: every gated evaluation must recompute\n");
-  if (color_runtime_root) {
-    fout->append("  __color_runtime.reset();  // discard serial dirty/input caches after checkpoint restore\n");
-  }
-  fout->append("}\n");
+    fout->append("}\n");
 
-  // ---- design_hash: FNV-fold of every member name+width (+ mem size + sub
-  // callee + recursion). Stamped into meta.json; a mismatch on load is a WARNING
-  // (editable checkpoints are cross-version on purpose), never a hard reject. ----
-  fout->append("std::uint64_t ", mod, "::design_hash() const {\n");
-  fout->append("  std::uint64_t _h = hlop::ckpt::kFnvOffset;\n");
-  if (color_root) {
-    // Keep checkpoint compatibility diagnostic-only, but make the diagnostic
-    // exact enough to explain a stale execution contract. The schedule digest
-    // deliberately excludes the observation-name suffix; the full binding
-    // digest retains it so renamed/direct observation slots still warn.
-    const std::string report      = color_plan_->report();
-    const size_t      observation = report.find("observation-map begin");
-    const auto        schedule
-        = observation == std::string::npos ? std::string_view{report} : std::string_view{report}.substr(0, observation);
-    const uint64_t schedule_digest = fnv1a_str(0xcbf29ce484222325ULL, schedule);
-    const uint64_t binding_digest  = fnv1a_str(0xcbf29ce484222325ULL, report);
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, ",
-                              cpp_string_literal("sim-color-boundary-abi-v2"),
-                              ");\n",
-                              "  _h = hlop::ckpt::fnv1a(_h, ",
-                              cpp_string_literal(kSimGenVersion),
-                              ");\n",
-                              "  _h = hlop::ckpt::fnv1a_u64(_h, ",
-                              schedule_digest,
-                              "ULL);\n",
-                              "  _h = hlop::ckpt::fnv1a_u64(_h, ",
-                              binding_digest,
-                              "ULL);\n"));
-  }
-  for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", s, "\"), ", f.bits, ");\n"));
+    // ---- design_hash: FNV-fold of every member name+width (+ mem size + sub
+    // callee + recursion). Stamped into meta.json; a mismatch on load is a WARNING
+    // (editable checkpoints are cross-version on purpose), never a hard reject. ----
+    fout->append("std::uint64_t ", mod, "::design_hash() const {\n");
+    fout->append("  std::uint64_t _h = hlop::ckpt::kFnvOffset;\n");
+    if (color_root) {
+      // Keep checkpoint compatibility diagnostic-only, but make the diagnostic
+      // exact enough to explain a stale execution contract. The schedule digest
+      // deliberately excludes the observation-name suffix; the full binding
+      // digest retains it so renamed/direct observation slots still warn.
+      const std::string report      = color_plan_->report();
+      const size_t      observation = report.find("observation-map begin");
+      const auto        schedule
+          = observation == std::string::npos ? std::string_view{report} : std::string_view{report}.substr(0, observation);
+      const uint64_t schedule_digest = fnv1a_str(0xcbf29ce484222325ULL, schedule);
+      const uint64_t binding_digest  = fnv1a_str(0xcbf29ce484222325ULL, report);
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, ",
+                                cpp_string_literal("sim-color-boundary-abi-v2"),
+                                ");\n",
+                                "  _h = hlop::ckpt::fnv1a(_h, ",
+                                cpp_string_literal(kSimGenVersion),
+                                ");\n",
+                                "  _h = hlop::ckpt::fnv1a_u64(_h, ",
+                                schedule_digest,
+                                "ULL);\n",
+                                "  _h = hlop::ckpt::fnv1a_u64(_h, ",
+                                binding_digest,
+                                "ULL);\n"));
     }
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.member, "\"), ", f.bits, ");\n"));
-  }
-  {
-    absl::flat_hash_set<std::string> emitted;
     for (const auto& f : flops) {
-      if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
-        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.prev_member, "\"), 1);\n"));
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", s, "\"), ", f.bits, ");\n"));
+      }
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.member, "\"), ", f.bits, ");\n"));
+    }
+    {
+      absl::flat_hash_set<std::string> emitted;
+      for (const auto& f : flops) {
+        if (!f.prev_member.empty() && emitted.insert(f.prev_member).second) {
+          fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"", f.prev_member, "\"), 1);\n"));
+        }
       }
     }
-  }
-  for (const auto& m : mems) {
-    // Ordering + wensize are part of the memory's identity: a checkpoint taken
-    // under one same-cycle mode restores into a different machine under another,
-    // and without this the hash would not budge.
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
-                              m.member,
-                              "\"), ",
-                              m.bits,
-                              "), ",
-                              m.size,
-                              ");\n"));
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(_h, ",
-                              static_cast<int>(m.order),
-                              "), ",
-                              m.wensize,
-                              ");\n"));
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
-                                  m.member,
-                                  "_q",
-                                  p.rdidx,
-                                  "\"), ",
-                                  m.bits,
-                                  ");\n"));
+    for (const auto& m : mems) {
+      // Ordering + wensize are part of the memory's identity: a checkpoint taken
+      // under one same-cycle mode restores into a different machine under another,
+      // and without this the hash would not budge.
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                                m.member,
+                                "\"), ",
+                                m.bits,
+                                "), ",
+                                m.size,
+                                ");\n"));
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(_h, ",
+                                static_cast<int>(m.order),
+                                "), ",
+                                m.wensize,
+                                ");\n"));
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                                    m.member,
+                                    "_q",
+                                    p.rdidx,
+                                    "\"), ",
+                                    m.bits,
+                                    ");\n"));
+        }
       }
     }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, \"",
-                              s.inst,
-                              "\"); _h = hlop::ckpt::fnv1a_u64(_h, ",
-                              s.inst,
-                              ".design_hash());\n"));
-  }
-  // Interface (every I/O port name+width+direction) so a port change warns.
-  for (const auto& io : ios) {
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
-                              io.field,
-                              "\"), ",
-                              io.bits,
-                              "), ",
-                              io.is_input ? 1 : 2,
-                              ");\n"));
-  }
-  // A coarse logic fingerprint: the cell count (computed at codegen). It is not a
-  // full structural hash, but it makes a logic-only change (added/removed cells —
-  // same state layout) flip the hash, so a stale checkpoint still warns.
-  {
-    size_t _ncells = 0;
-    for ([[maybe_unused]] auto node : g->body().nodes()) {
-      ++_ncells;
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a(_h, \"",
+                                s.inst,
+                                "\"); _h = hlop::ckpt::fnv1a_u64(_h, ",
+                                s.inst,
+                                ".design_hash());\n"));
     }
-    fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(_h, ", _ncells, ");\n"));
-  }
-  fout->append("  return _h;\n}\n");
+    // Interface (every I/O port name+width+direction) so a port change warns.
+    for (const auto& io : ios) {
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a_u64(hlop::ckpt::fnv1a(_h, \"",
+                                io.field,
+                                "\"), ",
+                                io.bits,
+                                "), ",
+                                io.is_input ? 1 : 2,
+                                ");\n"));
+    }
+    // A coarse logic fingerprint: the cell count (computed at codegen). It is not a
+    // full structural hash, but it makes a logic-only change (added/removed cells —
+    // same state layout) flip the hash, so a stale checkpoint still warns.
+    {
+      size_t _ncells = 0;
+      for ([[maybe_unused]] auto node : g->body().nodes()) {
+        ++_ncells;
+      }
+      fout->append(absl::StrCat("  _h = hlop::ckpt::fnv1a_u64(_h, ", _ncells, ");\n"));
+    }
+    fout->append("  return _h;\n}\n");
 
-  // ---- describe_signals / probe_signals: the observable scalar state by
-  // hierarchical name (flops, pipe stages, sync-read regs, inputs; whole memories
-  // and combinational outputs are excluded). describe_* lists name+bits+kind for
-  // --list-signals; probe_* reads the current values for --probe / --break-when. ----
-  fout->append("void ", mod, "::describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const {\n");
-  for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  _v.push_back({_p + \"", s, "\", ", f.bits, ", \"pipe\"});\n"));
+    // ---- describe_signals / probe_signals: the observable scalar state by
+    // hierarchical name (flops, pipe stages, sync-read regs, inputs; whole memories
+    // and combinational outputs are excluded). describe_* lists name+bits+kind for
+    // --list-signals; probe_* reads the current values for --probe / --break-when. ----
+    fout->append("void ", mod, "::describe_signals(const std::string& _p, std::vector<hlop::ckpt::Signal>& _v) const {\n");
+    for (const auto& f : flops) {
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  _v.push_back({_p + \"", s, "\", ", f.bits, ", \"pipe\"});\n"));
+      }
+      fout->append(absl::StrCat("  _v.push_back({_p + \"", f.member, "\", ", f.bits, ", \"flop\"});\n"));
     }
-    fout->append(absl::StrCat("  _v.push_back({_p + \"", f.member, "\", ", f.bits, ", \"flop\"});\n"));
-  }
-  for (const auto& m : mems) {
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _v.push_back({_p + \"", m.member, "_q", p.rdidx, "\", ", m.bits, ", \"memrd\"});\n"));
+    for (const auto& m : mems) {
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(absl::StrCat("  _v.push_back({_p + \"", m.member, "_q", p.rdidx, "\", ", m.bits, ", \"memrd\"});\n"));
+        }
       }
     }
-  }
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      fout->append(absl::StrCat("  _v.push_back({_p + \"__in.", io.field, "\", ", io.bits, ", \"input\"});\n"));
-    }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  ", s.inst, ".describe_signals(_p + \"", s.inst, ".\", _v);\n"));
-  }
-  fout->append("}\n");
-
-  fout->append("void ", mod, "::probe_signals(const std::string& _p, std::map<std::string, long>& _m) const {\n");
-  for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_i64_low();\n"));
-    }
-    fout->append(absl::StrCat("  _m[_p + \"", f.member, "\"] = ", f.member, ".to_i64_low();\n"));
-  }
-  for (const auto& m : mems) {
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _m[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_i64_low();\n"));
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        fout->append(absl::StrCat("  _v.push_back({_p + \"__in.", io.field, "\", ", io.bits, ", \"input\"});\n"));
       }
     }
-  }
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      fout->append(absl::StrCat("  _m[_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_i64_low();\n"));
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".describe_signals(_p + \"", s.inst, ".\", _v);\n"));
     }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  ", s.inst, ".probe_signals(_p + \"", s.inst, ".\", _m);\n"));
-  }
-  fout->append("}\n");
+    fout->append("}\n");
 
-  // ---- observe_signals / observe_mem: the LOSSLESS query surface (2f-sim B) ----
-  // Same hierarchical walk as probe_signals, with the two things the query engine
-  // needs that the legacy probe map cannot express:
-  //   * FULL-WIDTH values. `to_i64_low()` returns the raw low limb, so every
-  //     signal wider than 64 bits was silently truncated in --probe rows and in
-  //     --break-when comparisons. `to_hex(digits)` renders the whole vector, and
-  //     the digit count is pinned to ceil(bits/4) so the text is fixed-width and
-  //     a reader can recover the value without knowing the sign convention.
-  //   * OUTPUTS, served from __last_out (recorded by cycle()). Inputs keep their
-  //     historical `__in.` spelling here; the catalog publishes the clean port
-  //     name and carries this one as an alias.
-  fout->append("void ", mod, "::observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const {\n");
-  const auto hexdigits = [](int bits) { return std::to_string((std::max(1, bits) + 3) / 4); };
-  for (const auto& f : flops) {
-    for (const auto& s : f.stages) {
-      fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_hex(", hexdigits(f.bits), ");\n"));
+    fout->append("void ", mod, "::probe_signals(const std::string& _p, std::map<std::string, long>& _m) const {\n");
+    for (const auto& f : flops) {
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_i64_low();\n"));
+      }
+      fout->append(absl::StrCat("  _m[_p + \"", f.member, "\"] = ", f.member, ".to_i64_low();\n"));
     }
-    fout->append(absl::StrCat("  _m[_p + \"", f.member, "\"] = ", f.member, ".to_hex(", hexdigits(f.bits), ");\n"));
-  }
-  for (const auto& m : mems) {
-    for (const auto& p : m.ports) {
-      if (p.rd && m.type == 1) {
-        fout->append(absl::StrCat("  _m[_p + \"",
-                                  m.member,
-                                  "_q",
-                                  p.rdidx,
-                                  "\"] = ",
-                                  m.member,
-                                  "_q",
-                                  p.rdidx,
-                                  ".to_hex(",
-                                  hexdigits(m.bits),
-                                  ");\n"));
+    for (const auto& m : mems) {
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(
+              absl::StrCat("  _m[_p + \"", m.member, "_q", p.rdidx, "\"] = ", m.member, "_q", p.rdidx, ".to_i64_low();\n"));
+        }
       }
     }
-  }
-  for (const auto& io : ios) {
-    if (io.is_input) {
-      // Keyed by the CLEAN port name, which is what the catalog publishes and
-      // therefore what a query asks for. probe_signals keeps the historical
-      // `__in.<field>` spelling (pinned by lhd_sim_observe_test.sh) and the
-      // catalog carries it as an alias, but observe_signals is new and only the
-      // query engine reads it, so it has no legacy shape to preserve. Keying it
-      // the old way made every INPUT unqueryable: the catalog offered `acc.din`
-      // while the stream only held `acc.__in.din`, so a perfectly valid name
-      // came back "not observable".
-      fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __in.", io.field, ".to_hex(", hexdigits(io.bits), ");\n"));
-    } else {
-      fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __last_out.", io.field, ".to_hex(", hexdigits(io.bits), ");\n"));
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        fout->append(absl::StrCat("  _m[_p + \"__in.", io.field, "\"] = __in.", io.field, ".to_i64_low();\n"));
+      }
     }
-  }
-  for (const auto& s : subs) {
-    fout->append(absl::StrCat("  ", s.inst, ".observe_signals(_p + \"", s.inst, ".\", _m);\n"));
-  }
-  fout->append("}\n");
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".probe_signals(_p + \"", s.inst, ".\", _m);\n"));
+    }
+    fout->append("}\n");
 
-  // One COMMITTED memory word by member name. `_n` is relative to this instance
-  // ("mem" here, "sub.mem" one level down), so the walk mirrors the catalog's
-  // dotted names. Staged same-cycle writes are transient between ticks by
-  // construction, so what is read here is exactly the entry array.
-  fout->append("bool ", mod, "::observe_mem(const std::string& _n, long _i, std::string& _o) const {\n");
-  for (const auto& m : mems) {
-    fout->append(absl::StrCat("  if (_n == \"", m.member, "\") {\n"));
-    fout->append(absl::StrCat("    if (_i < 0 || _i >= ", m.size, ") { return false; }\n"));
-    fout->append(absl::StrCat("    _o = ", m.member, "[static_cast<size_t>(_i)].to_hex(", hexdigits(m.bits), ");\n"));
-    fout->append("    return true;\n  }\n");
-  }
-  for (const auto& s : subs) {
-    if (s.loop) {
-      fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, "[\") == 0) {\n"));
-      fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size(), "), _i, _o);\n  }\n"));
-    } else {
-      fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, ".\") == 0) {\n"));
-      fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size() + 1, "), _i, _o);\n  }\n"));
+    // ---- observe_signals / observe_mem: the LOSSLESS query surface (2f-sim B) ----
+    // Same hierarchical walk as probe_signals, with the two things the query engine
+    // needs that the legacy probe map cannot express:
+    //   * FULL-WIDTH values. `to_i64_low()` returns the raw low limb, so every
+    //     signal wider than 64 bits was silently truncated in --probe rows and in
+    //     --break-when comparisons. `to_hex(digits)` renders the whole vector, and
+    //     the digit count is pinned to ceil(bits/4) so the text is fixed-width and
+    //     a reader can recover the value without knowing the sign convention.
+    //   * OUTPUTS, served from __last_out (recorded by cycle()). Inputs keep their
+    //     historical `__in.` spelling here; the catalog publishes the clean port
+    //     name and carries this one as an alias.
+    fout->append("void ", mod, "::observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const {\n");
+    const auto hexdigits = [](int bits) { return std::to_string((std::max(1, bits) + 3) / 4); };
+    for (const auto& f : flops) {
+      for (const auto& s : f.stages) {
+        fout->append(absl::StrCat("  _m[_p + \"", s, "\"] = ", s, ".to_hex(", hexdigits(f.bits), ");\n"));
+      }
+      fout->append(absl::StrCat("  _m[_p + \"", f.member, "\"] = ", f.member, ".to_hex(", hexdigits(f.bits), ");\n"));
     }
+    for (const auto& m : mems) {
+      for (const auto& p : m.ports) {
+        if (p.rd && m.type == 1) {
+          fout->append(absl::StrCat("  _m[_p + \"",
+                                    m.member,
+                                    "_q",
+                                    p.rdidx,
+                                    "\"] = ",
+                                    m.member,
+                                    "_q",
+                                    p.rdidx,
+                                    ".to_hex(",
+                                    hexdigits(m.bits),
+                                    ");\n"));
+        }
+      }
+    }
+    for (const auto& io : ios) {
+      if (io.is_input) {
+        // Keyed by the CLEAN port name, which is what the catalog publishes and
+        // therefore what a query asks for. probe_signals keeps the historical
+        // `__in.<field>` spelling (pinned by lhd_sim_observe_test.sh) and the
+        // catalog carries it as an alias, but observe_signals is new and only the
+        // query engine reads it, so it has no legacy shape to preserve. Keying it
+        // the old way made every INPUT unqueryable: the catalog offered `acc.din`
+        // while the stream only held `acc.__in.din`, so a perfectly valid name
+        // came back "not observable".
+        fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __in.", io.field, ".to_hex(", hexdigits(io.bits), ");\n"));
+      } else {
+        fout->append(absl::StrCat("  _m[_p + \"", io.field, "\"] = __last_out.", io.field, ".to_hex(", hexdigits(io.bits), ");\n"));
+      }
+    }
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".observe_signals(_p + \"", s.inst, ".\", _m);\n"));
+    }
+    fout->append("}\n");
+
+    // One COMMITTED memory word by member name. `_n` is relative to this instance
+    // ("mem" here, "sub.mem" one level down), so the walk mirrors the catalog's
+    // dotted names. Staged same-cycle writes are transient between ticks by
+    // construction, so what is read here is exactly the entry array.
+    fout->append("bool ", mod, "::observe_mem(const std::string& _n, long _i, std::string& _o) const {\n");
+    for (const auto& m : mems) {
+      fout->append(absl::StrCat("  if (_n == \"", m.member, "\") {\n"));
+      fout->append(absl::StrCat("    if (_i < 0 || _i >= ", m.size, ") { return false; }\n"));
+      fout->append(absl::StrCat("    _o = ", m.member, "[static_cast<size_t>(_i)].to_hex(", hexdigits(m.bits), ");\n"));
+      fout->append("    return true;\n  }\n");
+    }
+    for (const auto& s : subs) {
+      if (s.loop) {
+        fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, "[\") == 0) {\n"));
+        fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size(), "), _i, _o);\n  }\n"));
+      } else {
+        fout->append(absl::StrCat("  if (_n.compare(0, ", s.inst.size() + 1, ", \"", s.inst, ".\") == 0) {\n"));
+        fout->append(absl::StrCat("    return ", s.inst, ".observe_mem(_n.substr(", s.inst.size() + 1, "), _i, _o);\n  }\n"));
+      }
+    }
+    fout->append("  return false;\n}\n");
   }
-  fout->append("  return false;\n}\n");
 
   if (color_runtime_root) {
     const auto find_site_output = [&](size_t site_index, hhds::Port_id port) {
@@ -9405,14 +9409,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (direct_color_eval_shards.empty()) {
       fout->append("  switch (__color_index) {\n");
     } else {
+      fout->append("  switch (__color_index) {\n");
       for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
-        fout->append("  if (__color_index < ",
-                     std::to_string(direct_color_eval_shards[shard].second),
-                     ") { __color_eval_part_",
-                     std::to_string(shard),
-                     "(__color_index); return; }\n");
+        const auto [begin, end] = direct_color_eval_shards[shard];
+        for (size_t color = begin; color < end; ++color) {
+          fout->append("  case ",
+                       std::to_string(color),
+                       ": __color_eval_part_",
+                       std::to_string(shard),
+                       "(__color_index); return;\n");
+        }
       }
-      fout->append("  assert(false && \"invalid color index\");\n}\n");
+      fout->append("  default: assert(false && \"invalid color index\"); return;\n  }\n}\n");
     }
     const auto root_fout              = fout;
     size_t     color_eval_shard       = 0;
@@ -9494,6 +9502,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       absl::flat_hash_map<std::string, std::pair<std::string, size_t>> extraction_cse;
       local_version_value.reserve(members.size());
       direct_member_bodies.reserve(members.size());
+      // AND two optional predicates: an empty side contributes nothing. Every
+      // guard/enable/activation conjunction below funnels through this so the
+      // spelling (and the parenthesization the string matchers rely on) is one.
+      const auto combine_activation = [](std::string lhs, std::string_view rhs) {
+        if (lhs.empty()) {
+          return std::string(rhs);
+        }
+        if (rhs.empty()) {
+          return lhs;
+        }
+        return absl::StrCat("(", lhs, " && ", rhs, ")");
+      };
       size_t temporary = 0;
       for (const size_t member : members) {
         const auto& version = color_plan_->version_sites()[member];
@@ -9902,6 +9922,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               etest = "false";
             }
             const std::string din_expr = din.is_invalid() ? state : stored_value_operand(din, state_bits, state_unsign);
+            // The ENABLE stays in the pending value even though it also joins
+            // the activation predicate below. The predicate is a scheduling
+            // hint that the domain analysis may legitimately widen (or drop
+            // entirely, when another member's guard reads this `_din`, or when
+            // a reader's domain merges into it); the hold mux is what MAKES a
+            // de-asserted enable hold, so it may never be the only copy.
             const auto        next_of  = [&](const std::string& source, const std::string& hold) {
               return etest.empty() ? source : absl::StrCat("(", etest, " ? ", source, " : ", hold, ")");
             };
@@ -9995,8 +10021,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // bind graph inputs and state Qs explicitly before falling back to
               // the ordinary expression resolver.
               for (const auto& guard : local_flop->clock_guards) {
-                const std::string test = absl::StrCat("(", guard_expr(guard), ").is_known_true()");
-                commit_test            = commit_test.empty() ? test : absl::StrCat("(", commit_test, " && ", test, ")");
+                commit_test = combine_activation(commit_test, absl::StrCat("(", guard_expr(guard), ").is_known_true()"));
               }
             }
             if (commit_test.empty() && node.get_graph() != g) {
@@ -10047,8 +10072,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     if (guard_value.empty()) {
                       guard_value = guard_expr(guard);
                     }
-                    const auto test = absl::StrCat("(", guard_value, ").is_known_true()");
-                    commit_test     = commit_test.empty() ? test : absl::StrCat("(", commit_test, " && ", test, ")");
+                    commit_test = combine_activation(commit_test, absl::StrCat("(", guard_value, ").is_known_true()"));
                   }
                   break;
                 }
@@ -10065,18 +10089,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 break;
               }
             }
-            if (const auto activation = conditional_activation_expr(site.node); !activation.empty()) {
-              commit_test = commit_test.empty() ? activation : absl::StrCat("(", commit_test, " && ", activation, ")");
-            }
+            commit_test = combine_activation(commit_test, conditional_activation_expr(site.node));
             if (local_flop != nullptr && !local_flop->sec_clock.is_invalid()) {
               const std::string current = absl::StrCat("(", guard_expr(local_flop->sec_clock), ").is_known_true()");
               const std::string edge    = local_flop->posedge ? absl::StrCat("(", current, " && !", local_flop->prev_member, ")")
                                                               : absl::StrCat("(!", current, " && ", local_flop->prev_member, ")");
-              commit_test               = commit_test.empty() ? edge : absl::StrCat("(", commit_test, " && ", edge, ")");
+              commit_test               = combine_activation(commit_test, edge);
             }
             if (local_flop != nullptr && !local_flop->tick_field.empty()) {
-              const std::string tick = absl::StrCat("__in.", local_flop->tick_field, "__tick");
-              commit_test            = commit_test.empty() ? tick : absl::StrCat("(", commit_test, " && ", tick, ")");
+              commit_test = combine_activation(commit_test, absl::StrCat("__in.", local_flop->tick_field, "__tick"));
             }
             // A folded ICG may leave its enable latch behind a transparent cast
             // or a Clock_cell output. Normalize any same-occurrence/same-edge Q
@@ -10110,6 +10131,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
               }
             }
+            const std::string normal_activation = combine_activation(commit_test, etest);
             // Do not enqueue a register boundary that would write exactly its
             // current representation back. This retains edge/reset semantics
             // (the pending value was computed above) while avoiding the commit
@@ -10146,8 +10168,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // no per-register reset mux.
               fout->append(next_value_body);
               emit_state_commit_flag(member, value_changed);
-              member_activation
-                  = commit_test.empty() ? absl::StrCat("!", rtest) : absl::StrCat("(!", rtest, " && ", commit_test, ")");
+              member_activation = combine_activation(absl::StrCat("!", rtest), normal_activation);
 
               const auto reset_body_mark = fout->mark();
               emit_reset_value();
@@ -10156,7 +10177,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             } else {
               fout->append(next_value_body);
               emit_state_commit_flag(member, value_changed);
-              member_activation = commit_test;
+              member_activation = normal_activation;
             }
           } else if (version.role == livehd::sim::Color_plan::Version_role::data) {
             if (op == Ntype_op::Clock_cell) {
@@ -10165,8 +10186,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               I(cone.has_value());
               std::string enabled;
               for (const auto& enable : cone->enables) {
-                const auto test = absl::StrCat("(", operand(enable, 1), ").is_known_true()");
-                enabled         = enabled.empty() ? test : absl::StrCat("(", enabled, " && ", test, ")");
+                enabled = combine_activation(enabled, absl::StrCat("(", operand(enable, 1), ").is_known_true()"));
               }
               const auto output = node.get_driver_pin(0);
               I(!output.is_invalid());
@@ -10590,7 +10610,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         activation_members[it->second].push_back(position);
       }
       for (size_t activation = 0; activation < activation_order.size(); ++activation) {
-        fout->append("  if (", activation_order[activation], ") {\n");
+        fout->append("  if (", activation_order[activation], ") [[unlikely]] {\n");
         for (const size_t position : activation_members[activation]) {
           fout->append(direct_member_bodies[position].text);
         }
@@ -10608,7 +10628,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         reset_members[it->second].push_back(position);
       }
       for (size_t reset = 0; reset < reset_order.size(); ++reset) {
-        fout->append("  if (", reset_order[reset], ") {  // reset slow path\n");
+        fout->append("  if (", reset_order[reset], ") [[unlikely]] {  // reset slow path\n");
         for (const size_t position : reset_members[reset]) {
           fout->append(direct_reset_bodies[position].text);
         }
@@ -10678,12 +10698,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             !pipe_min.is_invalid() && is_const_pin(pipe_min)) {
           pipe_depth = std::max<int>(1, static_cast<int>(hydrate_const(pipe_min).to_just_i64()));
         }
-        fout->append("    bool __changed = false;\n");
-        for (int index = 0; index < pipe_depth - 1; ++index) {
-          const auto stage = absl::StrCat(state, "_p", index);
-          fout->append("    __changed |= slop_update(", stage, ", ", stage, "_din) != 0;\n");
+        if (pipe_depth == 1) {
+          // The dynamic commit flag is emitted only after proving D != Q, so a
+          // scalar state commit need not repeat the same identical() test.
+          fout->append("    ", state, " = ", state, "_din;\n");
+          fout->append("    constexpr bool __changed = true;\n");
+        } else {
+          fout->append("    bool __changed = false;\n");
+          for (int index = 0; index < pipe_depth - 1; ++index) {
+            const auto stage = absl::StrCat(state, "_p", index);
+            fout->append("    __changed |= slop_update(", stage, ", ", stage, "_din) != 0;\n");
+          }
+          fout->append("    __changed |= slop_update(", state, ", ", state, "_din) != 0;\n");
         }
-        fout->append("    __changed |= slop_update(", state, ", ", state, "_din) != 0;\n");
         fout->append("    __rt.__color_state_changed |= __changed;\n");
       }
       if (color_dirty_) {

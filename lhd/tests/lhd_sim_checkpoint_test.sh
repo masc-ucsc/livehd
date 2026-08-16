@@ -67,11 +67,39 @@ grep -q 'dump_state(_p + "' "$TOPCPP" || fail "dump_state does not recurse into 
 grep -q '#include "checkpoint.hpp"' "$TOPCPP" || fail "module source does not include checkpoint.hpp"
 
 grep -q 'fork_checkpoint'       "$DRV" || fail "driver lacks the fork-checkpoint cadence"
+grep -Fq '_cad.due())) [[unlikely]]' "$DRV" || fail "checkpoint body is not marked as an unlikely path"
 grep -q 'prune_checkpoints'     "$DRV" || fail "driver lacks checkpoint pruning"
 grep -q '"/tb.json"'            "$DRV" || fail "driver does not write the testbench frame"
 grep -q '_tb\["total"\]'        "$DRV" || fail "driver does not checkpoint the tb local 'total'"
 grep -q '"--ckpt-dir"'          "$DRV" || fail "driver does not accept --ckpt-dir"
 grep -q '"--no-checkpoint"'     "$DRV" || fail "driver does not accept --no-checkpoint"
+
+# An explicit checkpoint-off setup with no observation request is the lean
+# performance form: omit the large state-walk bodies and every driver call to
+# them. The generated marker lets --run-only reject a later invocation that
+# forgets the setup-time choice instead of failing at link time.
+"$LHD" sim "$W/ck.prp" --setup-only --set sim.checkpoint=false --workdir "$W/lean" -q >/dev/null 2>&1 \
+  || fail "lean setup-only failed"
+LEAN_TOPCPP="$W/lean/sim/ck.top.cpp"
+LEAN_DRV="$W/lean/sim/drv.cpp"
+grep -q 'runtime-control-support: false' "$LEAN_DRV" || fail "lean driver lacks its runtime-support marker"
+if grep -q '::dump_state' "$LEAN_TOPCPP"; then fail "lean cgen retained dump_state"; fi
+if grep -q 'fork_checkpoint' "$LEAN_DRV"; then fail "lean driver retained checkpoint calls"; fi
+
+RO="$("$LHD" sim "$W/ck.prp" --run-only --workdir "$W/lean" -q 2>&1)" \
+  && fail "run-only accepted a lean setup without repeating sim.checkpoint=false"
+echo "$RO" | grep -q 'without checkpoint/observation support' \
+  || fail "wrong stale lean-build message: $RO"
+
+# Observation requests override the lean checkpoint setting: the same setup
+# must retain both hierarchical mirrors and their state-walk support.
+"$LHD" sim "$W/ck.prp" --setup-only --set sim.checkpoint=false --probe acc.acc --workdir "$W/observed" -q >/dev/null 2>&1 \
+  || fail "checkpoint-off observed setup failed"
+OBS_TOPCPP="$W/observed/sim/ck.top.cpp"
+OBS_DRV="$W/observed/sim/drv.cpp"
+grep -q 'hierarchical-observation: true' "$OBS_DRV" || fail "probe setup lacks its observation marker"
+grep -q 'runtime-control-support: true' "$OBS_DRV" || fail "probe setup did not restore runtime support"
+grep -q '::dump_state' "$OBS_TOPCPP" || fail "probe setup omitted the shared state-walk methods"
 
 # ---- error: an unknown sim.* flag is rejected with the namespace hint ----------
 EO="$("$LHD" sim "$W/ck.prp" --set sim.checkpoint_bogus=1 --setup-only --workdir "$W/e" -q 2>&1)" \

@@ -165,11 +165,12 @@ private:
   bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
   std::string node_expr(const hhds::Node_class& node, int wbits);
 
-  std::string vcd_file;        // --set compile.sim.vcd=FILE ("" = no VCD)
-  std::string top;             // --top: only this module bakes the VCD path (avoids file collisions)
-  bool        vcd_fakedelay;   // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
-                               // false = plain edge-aligned updates (no X, no delay)
-  bool        observation_on;  // compile-time hierarchical value instrumentation (VCD/probe/query)
+  std::string vcd_file;            // --set compile.sim.vcd=FILE ("" = no VCD)
+  std::string top;                 // --top: only this module bakes the VCD path (avoids file collisions)
+  bool        vcd_fakedelay;       // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
+                                   // false = plain edge-aligned updates (no X, no delay)
+  bool        observation_on;      // compile-time hierarchical value instrumentation (VCD/probe/query)
+  bool        runtime_support_on;  // checkpoint/probe/query state-walk methods; false for lean performance builds
   // --set sim.flatten=N: structurally inline a Sub whose callee body has <= N
   // nodes into its parent before emitting. 0 = off. See flatten_small_subs().
   int         flatten_budget = 0;
@@ -228,12 +229,13 @@ public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
-           bool _slop_u = true, bool _color_dirty = true, bool _debug = false)
+           bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
       , vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off"))
       , observation_on(_observation_on || !_vcd.empty())
+      , runtime_support_on(_runtime_support_on || _observation_on || !_vcd.empty())
       , flatten_budget(_flatten)
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
