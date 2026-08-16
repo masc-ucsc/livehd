@@ -1,8 +1,8 @@
 .claude
 cov
 samples
-sim_alu
+sim_*
 sim_cpu
 tmp*
-verif_sim
+verif*
 tmp

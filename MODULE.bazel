@@ -82,7 +82,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "ec14d40406cbcced7d10ad6bc8b47f1dbf1ec79b",  # optimized get_mask_op_opt
+    commit = "d88782929e23fc5455c129ed144c0256b127a7af",  # likely unchanged slop updates
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:

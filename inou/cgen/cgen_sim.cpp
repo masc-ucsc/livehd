@@ -925,18 +925,42 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   const auto operation_operand = [&](const hhds::Pin_class& pin) { return raw_operand(pin, operation_width(pin)); };
 
   // 1-to-1 fold: `Slop<W>::op(a, b, ...)` over operands read at their OWN widths.
-  // Left-associated to match the previous member-chain result exactly.
-  auto fold = [&](const char* method) -> std::string {
+  // Arithmetic stays left-associated to match the previous member-chain result
+  // exactly. Associative bitwise ops use bounded-depth emission: wide
+  // decoder/packing nodes can have hundreds of inputs, and spelling those as
+  // a left-deep C++ expression needlessly exceeds Clang's default
+  // bracket-depth limit.
+  auto fold = [&](const char* method, bool balance) -> std::string {
     if (e.empty()) {
       return absl::StrCat("Slop<", tw, ">::create_integer(0)");
+    }
+    if (e.size() == 1) {
+      // A single operand still has to land at the node width.
+      return absl::StrCat("Slop<", tw, ">{", operation_operand(e[0].driver), "}");
+    }
+    if (balance) {
+      std::vector<std::string> layer;
+      layer.reserve(e.size());
+      for (const auto& edge : e) {
+        layer.push_back(operation_operand(edge.driver));
+      }
+      while (layer.size() > 1) {
+        std::vector<std::string> next;
+        next.reserve((layer.size() + 1) / 2);
+        for (size_t i = 0; i < layer.size(); i += 2) {
+          if (i + 1 == layer.size()) {
+            next.push_back(std::move(layer[i]));
+          } else {
+            next.push_back(absl::StrCat("Slop<", tw, ">::", method, "(", layer[i], ", ", layer[i + 1], ")"));
+          }
+        }
+        layer = std::move(next);
+      }
+      return std::move(layer.front());
     }
     std::string s = operation_operand(e[0].driver);
     for (size_t i = 1; i < e.size(); ++i) {
       s = absl::StrCat("Slop<", tw, ">::", method, "(", s, ", ", operation_operand(e[i].driver), ")");
-    }
-    if (e.size() == 1) {
-      // A single operand still has to land at the node width.
-      return absl::StrCat("Slop<", tw, ">{", s, "}");
     }
     return s;
   };
@@ -957,10 +981,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       return result;
     }
-    case Ntype_op::And : return fold("and_op");
-    case Ntype_op::Or  : return fold("or_op");
-    case Ntype_op::Xor : return fold("xor_op");
-    case Ntype_op::Mult: return fold("mult_op");
+    case Ntype_op::And : return fold("and_op", true);
+    case Ntype_op::Or  : return fold("or_op", true);
+    case Ntype_op::Xor : return fold("xor_op", true);
+    case Ntype_op::Mult: return fold("mult_op", false);
     case Ntype_op::Div : {
       // Binary, order-sensitive, and sign-aware (slop div_op dispatches on the
       // operand sign). Without this case Div fell through to the default and
@@ -1432,6 +1456,24 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       const int   sel_w = is_const_pin(e[0].driver) ? std::max({wbits_of(e[0].driver), hydrate_const(e[0].driver).get_bits(), 1})
                                                     : std::max(wbits_of(e[0].driver), 1);
       const auto  sel   = operand(e[0].driver, sel_w, /*unsigned=*/-1);
+      if (op == Ntype_op::Hotmux && n_vals > 192) {
+        // A parameter-pack Hotmux instantiates one concept operand per arm;
+        // Clang's default expression-depth limit is 256. Do not replace it
+        // with an initializer-list array: that eagerly materializes every arm
+        // on every evaluation. A one-hot selector semantically names exactly
+        // one arm, so a switch is both constant-depth and lazy.
+        std::string result = absl::StrCat("([&]() -> Slop<",
+                                          tw,
+                                          "> { const auto __hotmux_sel = ",
+                                          sel,
+                                          "; assert(__hotmux_sel.popcount() == 1 && \"hotmux select must be one-hot\"); switch "
+                                          "(__hotmux_sel.get_first_bit_set()) {");
+        for (size_t i = 1; i < e.size(); ++i) {
+          absl::StrAppend(&result, " case ", i - 1, ": return Slop<", tw, ">{", operand(e[i].driver, wbits), "};");
+        }
+        absl::StrAppend(&result, " default: return Slop<", tw, ">::invalid(); } }())");
+        return result;
+      }
       std::string vals;
       for (size_t i = 1; i < e.size(); ++i) {
         if (!vals.empty()) {
@@ -1942,6 +1984,9 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // A normal non-VCD/non-probe/non-query build has no observation boundary
 // slots, publication assignments, runtime observation branches, VCD storage,
 // or VCD tick updates.
+// simgen-61: associative bitwise nodes use bounded-depth folds and oversized
+// Hotmux nodes emit a lazy switch, keeping generated C++ parser/template depth
+// logarithmic or constant for very wide decode cones.
 // simgen-60: generated unsigned proof landings default to mask-free
 // Slop_u::from_proven; sim.debug retains materializing Slop_u::land checks.
 // The color planner uses word-oriented structural refinement hashes.
@@ -1994,7 +2039,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-60";
+static constexpr std::string_view kSimGenVersion = "simgen-61";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
