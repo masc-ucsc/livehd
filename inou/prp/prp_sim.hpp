@@ -48,8 +48,11 @@ struct Test_info {
 // `tests`; on an unsupported construct or parse error returns non-zero + sets
 // `err`. `vcd_dir` (empty = no VCD): each test points its DUT at
 // `<vcd_dir>/<test_name>.vcd` so every test dumps its own waveform.
+// `unknown_zero` (sim.unknown_zero) fills a testbench literal's `?` bits with 0
+// instead of drawing them from hlop's seeded PRNG; it mirrors the flag
+// inou.cgen.sim applies to the DUT so one knob covers the whole simulation.
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             bool observation_on, bool runtime_support_on, std::vector<Test_info>& tests, std::string& err);
+             bool observation_on, bool runtime_support_on, bool unknown_zero, std::vector<Test_info>& tests, std::string& err);
 
 // Parse `file` for its `test` blocks (matching `test_sel`, empty = all) and fill
 // `tests` with their dotted names + parameters — without lowering any DUT. On

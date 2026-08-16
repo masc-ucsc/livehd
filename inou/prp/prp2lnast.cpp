@@ -1116,22 +1116,6 @@ void wire_lane_add(Wire_lanes& lanes, std::string_view w, std::string_view m, bo
   it->second = av->or_op(*mv)->to_pyrope();
 }
 
-// Is `nid` a statement-level `w = nil` (a 2-child store of const nil)? Such a
-// re-nil UN-drives w on its straight-line path (the `wire w = nil` declare emits
-// no store, so any store(w, nil) reaching here is a real re-assignment).
-bool prp_wire_nil_store(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
-  if (!Lnast_ntype::is_store(ln.get_type(nid))) {
-    return false;
-  }
-  auto c0 = ln.get_first_child(nid);
-  if (c0.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c0)) || ln.get_name(c0) != w) {
-    return false;
-  }
-  auto c1 = ln.get_sibling_next(c0);
-  return !c1.is_invalid() && ln.get_sibling_next(c1).is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))
-         && ln.get_name(c1) == "nil";
-}
-
 }  // namespace
 
 namespace {
@@ -1224,7 +1208,12 @@ void wire_lanes_merge(Wire_lanes& dst, const Wire_lanes& src, bool detect) {
   }
 }
 
-void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out,
+// `out` is the driver count along the WORST straight-line path through this
+// subtree: writes in one block ADD, arms of one if/match take the MAX (they are
+// mutually exclusive, so `if c { w = a } else { w = b }` is ONE driver while
+// `if c { w = a; w = b }` is two — the shape a presence-set could not tell
+// apart).
+void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_map<std::string, int>& out,
                                 absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
   const auto t = ln.get_type(nid);
   if (Lnast_ntype::is_stmts(t)) {
@@ -1232,7 +1221,7 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
       const auto w = prp_store_ref_name(ln, c);
       if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
-        out.insert(std::string(w));
+        ++out[std::string(w)];
         std::string m;
         if (!prp_wire_partial_store(ln, c, prev, w, &m)) {
           full.insert(std::string(w));
@@ -1242,8 +1231,12 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
       }
       const auto ct = ln.get_type(c);
       if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)) {
-        Wire_lanes sub;  // ONE construct == one union over its arms
-        gather_subtree_write_wires(ln, c, out, full, sub);
+        Wire_lanes                            sub;  // ONE construct == one union over its arms
+        absl::flat_hash_map<std::string, int> sub_count;
+        gather_subtree_write_wires(ln, c, sub_count, full, sub);
+        for (const auto& [ww, k] : sub_count) {
+          out[ww] += k;  // the construct runs after the writes above it
+        }
         wire_lanes_merge(lanes, sub, /*detect=*/true);
       } else if (Lnast_ntype::is_stmts(ct)) {
         gather_subtree_write_wires(ln, c, out, full, lanes);  // a plain block: same straight line
@@ -1254,30 +1247,37 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
   if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t)) {
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(ln.get_type(c))) {
-        Wire_lanes arm;
-        gather_subtree_write_wires(ln, c, out, full, arm);
-        wire_lanes_merge(lanes, arm, /*detect=*/false);  // arms never both run
+        Wire_lanes                            arm;
+        absl::flat_hash_map<std::string, int> arm_count;
+        gather_subtree_write_wires(ln, c, arm_count, full, arm);
+        for (const auto& [ww, k] : arm_count) {
+          auto& slot = out[ww];
+          slot       = std::max(slot, k);  // arms never both run
+        }
+        wire_lanes_merge(lanes, arm, /*detect=*/false);
       }
     }
   }
 }
 
-// Mirror of prp_count_wire_drivers + prp_stmts_cover_wire, for all wires in one
-// straight-line pass over `stmts`. `count` = top-level driver-statement count;
-// `cover` = wires driven on EVERY straight-line path through `stmts`; `full` =
-// wires that have at least one WHOLE-value driver (so a >1 count on a wire
-// absent from `full` is a bit-field assembly, not a multiple-driver error).
-void gather_count_cover_wires(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
-                              absl::flat_hash_set<std::string>& cover, absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
+// Mirror of prp_count_wire_drivers, for all wires in one straight-line pass over
+// `stmts`. `count` = top-level driver-statement count; `full` = wires that have
+// at least one WHOLE-value driver (so a >1 count on a wire absent from `full` is
+// a bit-field assembly, not a multiple-driver error).
+//
+// 2c-wire — COVERAGE is deliberately NOT tracked: a wire driven on only SOME
+// control paths is legal. Its one driver defines the net, so the write behaves
+// as if it were unconditional (upass.tolg fills the unwritten paths with the
+// written value — see lower_if's wire don't-care fill). What stays illegal is a
+// SECOND driver, which is what `count`/`full`/`lanes` measure.
+void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
+                               absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
   Lnast_nid prev;
   for (auto c = ln.get_first_child(stmts); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
     const auto t = ln.get_type(c);
     const auto w = prp_store_ref_name(ln, c);
-    if (!w.empty() && prp_wire_nil_store(ln, c, w)) {
-      cover.erase(std::string(w));  // `w = nil` un-drives this straight-line path
-    } else if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+    if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
       ++count[std::string(w)];
-      cover.insert(std::string(w));
       std::string m;
       if (!prp_wire_partial_store(ln, c, prev, w, &m)) {
         full.insert(std::string(w));
@@ -1285,58 +1285,36 @@ void gather_count_cover_wires(const Lnast& ln, const Lnast_nid& stmts, absl::fla
         wire_lane_add(lanes, w, m, /*detect=*/true);
       }
     } else if (Lnast_ntype::is_if_like(t)) {
-      // An if/match that writes a wire (any arm) is ONE driver of that wire.
-      absl::flat_hash_set<std::string> writes;
-      Wire_lanes                       arm_lanes;
+      // An if/match contributes the driver count of its WORST arm: writing the
+      // net once in each of two exclusive arms is ONE driver, writing it twice
+      // inside one arm is two.
+      absl::flat_hash_map<std::string, int> writes;
+      Wire_lanes                            arm_lanes;
       gather_subtree_write_wires(ln, c, writes, full, arm_lanes);
-      for (const auto& ww : writes) {
-        ++count[ww];
+      for (const auto& [ww, k] : writes) {
+        count[ww] += k;
       }
       // The construct's lanes, unioned across its arms, now meet the lanes this
       // straight-line scope already drives — and THERE an overlap is real.
       wire_lanes_merge(lanes, arm_lanes, /*detect=*/true);
-      // It covers a wire iff it has an else arm AND every arm-stmts covers it
-      // (mirror prp_if_covers_wire) — i.e. the intersection of per-arm covers.
-      int  nch        = 0;
-      bool last_stmts = false;
+      // A per-arm rescan only to propagate the arm's OWN lane conflicts (an arm
+      // that double-drives the same bits is a conflict wherever it sits).
       for (auto a = ln.get_first_child(c); !a.is_invalid(); a = ln.get_sibling_next(a)) {
-        ++nch;
-        last_stmts = Lnast_ntype::is_stmts(ln.get_type(a));
-      }
-      if ((nch % 2 == 1) && last_stmts) {
-        absl::flat_hash_set<std::string> inter;
-        bool                             first = true;
-        for (auto a = ln.get_first_child(c); !a.is_invalid(); a = ln.get_sibling_next(a)) {
-          if (!Lnast_ntype::is_stmts(ln.get_type(a))) {
-            continue;
-          }
-          absl::flat_hash_map<std::string, int> ac;
-          absl::flat_hash_set<std::string>      acov;
-          Wire_lanes                            al;  // per-arm: its own conflicts still propagate
-          gather_count_cover_wires(ln, a, ac, acov, full, al);
-          for (const auto& ww : al.overlap) {
-            lanes.overlap.insert(ww);
-          }
-          if (first) {
-            inter = std::move(acov);
-            first = false;
-          } else {
-            absl::erase_if(inter, [&](const std::string& k) { return !acov.contains(k); });
-          }
+        if (!Lnast_ntype::is_stmts(ln.get_type(a))) {
+          continue;
         }
-        for (const auto& ww : inter) {
-          cover.insert(ww);
+        absl::flat_hash_map<std::string, int> ac;
+        Wire_lanes                            al;
+        gather_count_wire_drivers(ln, a, ac, full, al);
+        for (const auto& ww : al.overlap) {
+          lanes.overlap.insert(ww);
         }
       }
     } else if (Lnast_ntype::is_stmts(t)) {
       absl::flat_hash_map<std::string, int> nc;
-      absl::flat_hash_set<std::string>      ncov;
-      gather_count_cover_wires(ln, c, nc, ncov, full, lanes);  // a plain block: same straight line
+      gather_count_wire_drivers(ln, c, nc, full, lanes);  // a plain block: same straight line
       for (const auto& [ww, k] : nc) {
         count[ww] += k;
-      }
-      for (const auto& ww : ncov) {
-        cover.insert(ww);
       }
     }
   }
@@ -1486,14 +1464,21 @@ void Prp2lnast::check_wire_drivers() const {
 }
 
 void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
-  // At each `stmts` scope, enforce the single-driver rules on every `wire`
-  // declared directly in it (its drivers live in this scope; count/cover recurse
-  // into nested if/match and plain blocks).
+  // At each `stmts` scope, enforce the single-driver rules on every `wire` — and
+  // the single-BIND rule on every `const` — declared directly in it (their
+  // drivers live in this scope; the count recurses into nested if/match and
+  // plain blocks).
   if (Lnast_ntype::is_stmts(lnast->get_type(node))) {
     // Collect the wires declared directly in this scope first, then gather every
     // wire's driver metrics in ONE walk of the scope (was a full-subtree walk per
     // wire — O(wires * nodes); see the gatherers above).
     std::vector<std::pair<Lnast_nid, std::string_view>> scope_wires;
+    // `const` names declared in this scope. A `const` is SINGLE-ASSIGNMENT, so
+    // the same driver count applies — but only the >1 half: a `const x = nil`
+    // that is never bound is a legal "no value yet" declaration (reading it is
+    // what errors), so there is no undriven diagnostic here. This catches the
+    // RUNTIME rebind the comptime `vbound` tally in upass.attributes cannot see.
+    std::vector<std::pair<Lnast_nid, std::string_view>> scope_consts;
     for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (!Lnast_ntype::is_declare(lnast->get_type(c))) {
         continue;
@@ -1505,21 +1490,24 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
         continue;
       }
       const auto mode = lnast->get_name(mode_n);
+      if (mode == "const" || mode.starts_with("const ")) {
+        scope_consts.emplace_back(c, lnast->get_name(name_n));
+        continue;
+      }
       if (mode != "wire" && !mode.starts_with("wire ")) {
         continue;
       }
       scope_wires.emplace_back(c, lnast->get_name(name_n));
     }
-    if (!scope_wires.empty()) {
+    if (!scope_wires.empty() || !scope_consts.empty()) {
       absl::flat_hash_set<std::string>      field_wires;
       absl::flat_hash_set<std::string>      loop_wires;
       absl::flat_hash_map<std::string, int> driver_count;
-      absl::flat_hash_set<std::string>      covered_wires;
       absl::flat_hash_set<std::string>      full_driven_wires;
       Wire_lanes                            lanes;
       gather_field_store_wires(*lnast, node, field_wires);
       gather_loop_driven_wires(*lnast, node, /*in_loop=*/false, loop_wires);
-      gather_count_cover_wires(*lnast, node, driver_count, covered_wires, full_driven_wires, lanes);
+      gather_count_wire_drivers(*lnast, node, driver_count, full_driven_wires, lanes);
       for (const auto& [c, wname] : scope_wires) {
         // A tuple-bundle wire (`wire io:(a,b)` driven by per-field `io.a = …`) is
         // single-driver PER LEAF; the base-level count is meaningless. detuple
@@ -1527,14 +1515,13 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
         if (field_wires.contains(wname)) {
           continue;
         }
-        // A wire driven inside a loop is unrolled later — its coverage/multiplicity
-        // is unknowable here; defer to tolg's post-unroll checks.
+        // A wire driven inside a loop is unrolled later — its multiplicity is
+        // unknowable here; defer to tolg's post-unroll checks.
         if (loop_wires.contains(wname)) {
           continue;
         }
         const auto dit     = driver_count.find(wname);
         const int  drivers = dit == driver_count.end() ? 0 : dit->second;
-        const bool covered = covered_wires.contains(wname);
         // A net ASSEMBLED from DISJOINT bit fields (`w#[0..=3] = a;
         // w#[4..=7] = b`) has many write statements but ONE driver — each
         // refines the same value, and upass.tolg accumulates the whole chain
@@ -1548,21 +1535,51 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
                        "wire-multiple-drivers",
                        "name",
                        std::format("wire '{}' has more than one driver — a `wire` is a single-driver net", wname),
-                       "give it exactly one assignment, or one `if`/`match` that drives it on every path");
-        } else if (!covered) {
-          if (drivers == 0) {
-            report_error(c,
-                         "wire-undriven",
-                         "name",
-                         std::format("wire '{}' is declared but never driven", wname),
-                         "assign it (a `wire` must have exactly one driver), or remove the declaration");
-          } else {
-            report_error(c,
-                         "wire-incomplete-driver",
-                         "name",
-                         std::format("wire '{}' is incompletely driven — a control path leaves it undriven", wname),
-                         "drive it on every path (add an `else`, or cover every `match` case)");
+                       "give it exactly one assignment (one `if`/`match` counts as a single driver)");
+        } else if (drivers == 0) {
+          // A CONDITIONAL single driver is legal: the write may sit inside an
+          // `if`/`match` with no `else`. Wherever it lands it is still the net's
+          // ONE driver, so the wire carries that value on every path — the same
+          // as if the assignment had been written unconditionally. Only "no
+          // driver at all" is an error here.
+          report_error(c,
+                       "wire-undriven",
+                       "name",
+                       std::format("wire '{}' is declared but never driven", wname),
+                       "assign it (a `wire` must have exactly one driver), or remove the declaration");
+        }
+      }
+      // A name DECLARED twice in one scope is either a legal match-local reuse
+      // (`match const t = a(); …` twice — each match scope closes, so the second
+      // `t` is a fresh binding, not a rebind) or a redeclaration upass.semacheck
+      // already reports. Either way the scope-wide driver count cannot be
+      // attributed to one of the two declares, so skip the name.
+      absl::flat_hash_set<std::string> redeclared_consts;
+      {
+        absl::flat_hash_set<std::string> seen;
+        for (const auto& [c, cname] : scope_consts) {
+          (void)c;
+          if (!seen.insert(std::string(cname)).second) {
+            redeclared_consts.insert(std::string(cname));
           }
+        }
+      }
+      for (const auto& [c, cname] : scope_consts) {
+        // Same exemptions as a wire: a per-field bundle bind is one bind per
+        // LEAF, and a loop's writes are unrolled later.
+        if (field_wires.contains(cname) || loop_wires.contains(cname) || redeclared_consts.contains(cname)) {
+          continue;
+        }
+        const auto dit     = driver_count.find(cname);
+        const int  drivers = dit == driver_count.end() ? 0 : dit->second;
+        // Disjoint bit-field assembly is ONE bind, exactly as for a wire.
+        if (drivers > 1 && (full_driven_wires.contains(cname) || lanes.overlap.contains(std::string(cname)))) {
+          report_error(c,
+                       "const-rebind",
+                       "name",
+                       std::format("const '{}' rebind — a `const` is assigned exactly once", cname),
+                       "declare it `mut` for last-write-wins, or give it a single assignment (one `if`/`match` counts "
+                       "as one)");
         }
       }
     }

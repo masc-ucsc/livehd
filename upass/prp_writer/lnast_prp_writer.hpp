@@ -427,6 +427,10 @@ private:
   // minted `__pinw` aliases.  Dead-signal removal and instance-output inlining
   // must not fold a name an attr string spells out by name.
   std::unordered_set<std::string>                                  pin_cone_;
+  // Wires emitted as `const X:T = nil` forward declarations instead: their
+  // single write precedes every read, so position independence is not needed
+  // and the `const` form additionally states single-bind / def-before-use.
+  std::unordered_set<std::string>                                  const_nil_wire_;
   // Collect the body-variable names a defining statement READS (operands after
   // child0), following single-use folded temps into their definitions so a
   // `gclk = clk_b & inv` whose `& ` is an inlined temp still reports `inv`.

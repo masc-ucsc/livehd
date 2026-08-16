@@ -1439,6 +1439,24 @@ void Lnast_prp_writer::write_module() {
     {
       std::unordered_set<std::string>              top_decl, nonmut_decl, store_lhs;
       std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")
+      // The `stmts` that declares each nested wire, and the body order of that
+      // declaration.  A wire whose whole reference footprint sits inside its own
+      // declaring scope, with nothing mentioning it earlier, needs NO hoist: the
+      // in-place declaration is already visible everywhere the net is used, and
+      // leaving it there keeps it next to the first use instead of thousands of
+      // lines away at the function top (XiangShan's SSIT declares ~4k of these
+      // inside one `if`).
+      absl::flat_hash_map<std::string, Lnast_nid>  nested_wire_scope;
+      absl::flat_hash_map<std::string, uint32_t>   nested_wire_order;
+      absl::flat_hash_map<std::string, uint32_t>   first_touch_order;
+      uint32_t                                     walk_order = 0;
+      // Body order of each name's first WRITE and first READ (a declare's own
+      // name is not a read).  A net whose SINGLE write precedes every read needs
+      // no position independence, so it can be emitted as a `const X:T = nil`
+      // forward declaration instead of a `wire` — same hardware, but the
+      // re-parse also gets def-before-use and single-bind checking.
+      absl::flat_hash_map<std::string, uint32_t>   first_def_order;
+      absl::flat_hash_map<std::string, uint32_t>   first_read_order;
       // Nested `mut` declares, keyed name -> the declaration the hoist must
       // REBUILD.  This MUST carry the type and the initializer, not just the name:
       // the hoisted prologue below re-emits the declaration and `suppress_decl_`
@@ -1487,6 +1505,7 @@ void Lnast_prp_writer::write_module() {
         if (is_def && first_def_scope.find(nm) == first_def_scope.end()) {
           first_def_scope.emplace(nm, sc);
         }
+        first_touch_order.try_emplace(nm, walk_order);
         auto& v = touch_scope[nm];
         if (std::find(v.begin(), v.end(), sc) == v.end()) {
           v.push_back(sc);
@@ -1494,6 +1513,7 @@ void Lnast_prp_writer::write_module() {
       };
       auto                                        scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
         for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+          ++walk_order;  // pre-order body position, for the def-before-use test below
           const auto t     = lnast->get_type(c);
           auto       v     = lnast->get_child(c);
           const bool v_ref = !v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v));
@@ -1504,6 +1524,7 @@ void Lnast_prp_writer::write_module() {
             auto dn = std::string(strip_prefix(lnast->get_name(v)));
             ++def_count[dn];
             note_scope(dn, n, /*is_def=*/true);
+            first_def_order.try_emplace(dn, walk_order);
             if (!top) {
               nested_def.insert(std::move(dn));
             }
@@ -1516,13 +1537,24 @@ void Lnast_prp_writer::write_module() {
               collect_node_reads(c, rr);
             } else if (v_ref && defines_child0(t)) {
               collect_driver_reads(c, rr);
+            } else if (Lnast_ntype::is_stmts(t)) {
+              // A nested block owns its own scope: the recursion below notes its
+              // reads against the BLOCK. Collecting them here instead pinned an
+              // if-ARM's whole body on the `if` NODE — a scope no declaration
+              // can be written in, so every name used inside any `if` looked
+              // un-contained and had to be hoisted.
             } else if (t != Lnast_ntype::Lnast_ntype_if && t != Lnast_ntype::Lnast_ntype_unique_if) {
               collect_node_reads(c, rr);
             } else if (auto cond = lnast->get_child(c); !cond.is_invalid()) {
               collect_node_reads(cond, rr);  // an if's CONDITION only; arms recurse
             }
+            const std::string self_decl
+                = (v_ref && Lnast_ntype::is_declare(t)) ? std::string(strip_prefix(lnast->get_name(v))) : std::string{};
             for (const auto& r : rr) {
               note_scope(r, n, /*is_def=*/false);
+              if (r != self_decl) {
+                first_read_order.try_emplace(r, walk_order);
+              }
             }
           }
           if (v_ref && Lnast_ntype::is_declare(t)) {
@@ -1546,6 +1578,8 @@ void Lnast_prp_writer::write_module() {
               // independent driver) and drop the in-place nested declare.
               if (!top && mode == "wire" && !nested_wire_decl.count(nm)) {
                 nested_wire_decl.emplace(nm, c1.is_invalid() ? std::string{} : render_type_at(c1));
+                nested_wire_scope.emplace(nm, n);
+                nested_wire_order.emplace(nm, walk_order);
               }
             } else if (!top) {
               // declare( ref, type, const(qualifier), [init] ) — same child walk as
@@ -1576,7 +1610,13 @@ void Lnast_prp_writer::write_module() {
             // v/type = 0` lines from call sites like `mul(a=in1, b=in2)`.
             store_lhs.insert(std::string(strip_prefix(lnast->get_name(v))));
           }
-          self(self, c, false);
+          if (!Lnast_ntype::is_declare(t)) {
+            // A declare's children are its own name / type / mode — the block
+            // above already read them. Descending re-collects the declared name
+            // as a READ of itself, which made every name look read before its
+            // own def.
+            self(self, c, false);
+          }
         }
       };
       scan(scan, stmts_nid, true);
@@ -1693,20 +1733,19 @@ void Lnast_prp_writer::write_module() {
       // The map's value is the declaration to rebuild: empty for a store-driven var
       // (no declare to take a type/init from — its width comes from the store's
       // RHS, and `0` is just a seed), the nested declare's own type/init otherwise.
-      // True when `nm`'s whole def/read footprint fits inside the scope of its
-      // FIRST def, i.e. declaring it at that def is visible everywhere it is
-      // used. Walks parents because a nested scope is still covered by an
-      // enclosing one (`stmts` nest inside `if` inside `stmts`).
-      auto scope_contained = [&](const std::string& nm) {
-        auto fit = first_def_scope.find(nm);
+      // True when `nm`'s whole def/read footprint fits inside `anchor`, i.e. a
+      // declaration placed in `anchor` is visible everywhere the name is used.
+      // Walks parents because a nested scope is still covered by an enclosing
+      // one (`stmts` nest inside `if` inside `stmts`).
+      auto scope_covers = [&](Lnast_nid anchor, const std::string& nm) {
         auto tit = touch_scope.find(nm);
-        if (fit == first_def_scope.end() || tit == touch_scope.end()) {
-          return false;  // no def seen: keep the conservative hoist
+        if (anchor.is_invalid() || tit == touch_scope.end()) {
+          return false;
         }
         for (const auto& sc : tit->second) {
           bool covered = false;
           for (auto up = sc; !up.is_invalid(); up = lnast->get_parent(up)) {
-            if (up == fit->second) {
+            if (up == anchor) {
               covered = true;
               break;
             }
@@ -1716,6 +1755,15 @@ void Lnast_prp_writer::write_module() {
           }
         }
         return true;
+      };
+      // The same test anchored at the scope of `nm`'s FIRST def — declaring it
+      // at that def is then visible everywhere it is used.
+      auto scope_contained = [&](const std::string& nm) {
+        auto fit = first_def_scope.find(nm);
+        if (fit == first_def_scope.end()) {
+          return false;  // no def seen: keep the conservative hoist
+        }
+        return scope_covers(fit->second, nm);
       };
       std::unordered_map<std::string, Nested_mut> need;
       for (const auto& nm : store_lhs) {
@@ -1802,18 +1850,70 @@ void Lnast_prp_writer::write_module() {
       // (no `= 0` — the body store is the wire's single, position-independent
       // driver; a default init would make it multi-driven).  The in-place nested
       // declare is dropped via suppress_decl_.
+      //
+      // EXCEPT when the declaring scope already covers the net's whole footprint
+      // AND nothing mentions the name before the declaration: then the in-place
+      // declaration is legal Pyrope on its own, so keep it and give the reader a
+      // declaration next to the first use.  (A wire declared inside an `if` and
+      // used only there is the Verilog reader's shape for a procedural
+      // `automatic`; hoisting those to the top separated 4096 of SSIT's 4101
+      // wire declarations from their uses by ~24k lines.)
+      // A `wire` whose SINGLE write precedes every read is emitted as a
+      // `const X:T = nil` forward declaration: a `const` is bound exactly once
+      // and its bind — conditional or not — defines the net on every path, so
+      // the hardware is identical, and saying `const` states the intent while
+      // buying def-before-use checking on re-parse.  A net a declare or a folded
+      // clock/reset attr reads keeps `wire` (those emit ahead of the body), and
+      // so does one read before its write — that is what position independence
+      // is FOR.
+      auto const_nil_ok = [&](const std::string& nm) {
+        auto dc = def_count.find(nm);
+        if (dc == def_count.end() || dc->second != 1 || pin_cone_.count(nm) != 0u || folded_attr_refs_.count(nm) != 0u
+            || decl_read.count(nm) != 0u) {
+          return false;
+        }
+        auto di = first_def_order.find(nm);
+        if (di == first_def_order.end()) {
+          return false;
+        }
+        auto ri = first_read_order.find(nm);
+        return ri == first_read_order.end() || di->second < ri->second;
+      };
+      for (const auto& [nm, ty] : nested_wire_decl) {
+        (void)ty;
+        if (const_nil_ok(nm)) {
+          const_nil_wire_.insert(nm);
+        }
+      }
       std::vector<std::string> wpre;
       for (const auto& [nm, ty] : nested_wire_decl) {
         if (!top_decl.count(nm) && !declared_.count(nm) && !instance_output_inlined_.count(nm)) {
+          // A net a DECLARE reads — a `clock_pin=ref X` / `reset_pin=ref X`
+          // folded onto a reg, or any other read from a declare — must stay at
+          // the top: every declare emits before every body statement, so a
+          // declaration sunk into the body would come after its reader.  The
+          // scope test cannot see a FOLDED attr (it is a string by then), which
+          // is why pin_cone_/folded_attr_refs_/decl_read are checked by name.
+          auto oit = nested_wire_order.find(nm);
+          auto fit = first_touch_order.find(nm);
+          if (oit != nested_wire_order.end() && fit != first_touch_order.end() && oit->second <= fit->second
+              && pin_cone_.count(nm) == 0u && folded_attr_refs_.count(nm) == 0u && decl_read.count(nm) == 0u
+              && scope_covers(nested_wire_scope[nm], nm)) {
+            continue;  // declared where it is used — no hoist, keep the in-place declare
+          }
           wpre.push_back(nm);
         }
       }
       std::sort(wpre.begin(), wpre.end());
       for (const auto& nm : wpre) {
         print_indent();
-        os << "wire " << nm;
+        const bool as_const = const_nil_wire_.count(nm) != 0u;
+        os << (as_const ? "const " : "wire ") << nm;
         if (const auto& ty = nested_wire_decl[nm]; !ty.empty()) {
           os << ":" << ty;
+        }
+        if (as_const) {
+          os << " = nil";
         }
         os << "\n";
         declared_.insert(nm);
@@ -3251,6 +3351,14 @@ void Lnast_prp_writer::write_declare() {
     extra_attr = "latch=true";
   }
 
+  // See const_nil_wire_ (write_module): a `wire` whose single write precedes
+  // every read is spelled as the equivalent `const X:T = nil` forward
+  // declaration.
+  const bool wire_as_const = kw == "wire" && const_nil_wire_.count(std::string(lhs)) != 0u;
+  if (wire_as_const) {
+    kw = "const";
+  }
+
   print(kw);
   print(" ");
   print(lhs);
@@ -3274,7 +3382,9 @@ void Lnast_prp_writer::write_declare() {
     print(extra_attr);
     print("]");
   }
-  if (has_value && !nil_value) {
+  if (wire_as_const) {
+    print(" = nil");  // a forward declaration: the body store is its one bind
+  } else if (has_value && !nil_value) {
     print(" = ");
     if (current_ntype() == Lnast_ntype::Lnast_ntype_tuple_add) {
       write_tuple_literal();  // memory init: a bare tuple_add (no LHS child)

@@ -135,6 +135,15 @@ public:
   void notify_init_construction_begin() override { ++init_construction_depth_; }
   void notify_init_construction_end() override { --init_construction_depth_; }
 
+  // A RUNTIME if-arm: the runner walks EVERY arm, so `if c { x = a } else
+  // { x = b }` reaches record_assign twice for a `const x` even though exactly
+  // ONE bind happens per cycle. Counting stores cannot tell that apart from a
+  // real rebind, so the tally pauses inside an uncertain arm and the
+  // control-flow-aware check in inou.prp (check_wire_scope, which takes the max
+  // driver count over an if/match's arms) owns the runtime case.
+  void notify_uncertain_arm_begin() override { ++uncertain_arm_depth_; }
+  void notify_uncertain_arm_end() override { --uncertain_arm_depth_; }
+
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
 
@@ -376,6 +385,10 @@ private:
   // notify_init_construction_* overrides) — record_assign skips the const
   // single-bind tally for the synthesized constructor stores.
   int init_construction_depth_ = 0;
+
+  // >0 while the runner is inside a runtime (non-comptime-decided) if-arm —
+  // see the notify_uncertain_arm_* overrides.
+  int uncertain_arm_depth_ = 0;
 
   // Read evaluator (read.cpp): compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

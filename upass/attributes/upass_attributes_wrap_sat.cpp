@@ -198,7 +198,7 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   // Dlop single-bind enforcement. Skipped inside an init-construction
   // window: the runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) are one logical binding, not user re-binds.
-  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && was_bound) {
+  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && uncertain_arm_depth_ == 0 && was_bound) {
     upass::error(lm->current_span(),
                  "uPass_attributes: const `{}` rebind (assigned {} times)\n",
                  lhs,

@@ -24,7 +24,8 @@ generated code with `lhd` (last section).
     - a concrete value (`0`, `false`, `""`, `(x=1)`) — the normal case
     - `nil` — invalid / "no value yet"; *reading* it is an error; the default
       for tuples; `reg x = nil` declares a register with **no reset**;
-      `wire x = nil` forward-declares an as-yet-undriven net (see Wire below)
+      `const x = nil` / `wire x = nil` forward-declare an as-yet-unbound net
+      (see Wire below)
     - `0sb?` / `0ub?` / `0ub10??01` — unknown bits (Verilog `x`); a valid
       integer value that x-propagates (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`)
     - There is **no bare `?`**, **no `_` default**, and **no `0b` prefix**
@@ -226,10 +227,18 @@ const also = nx + 1    // same-cycle consumer reads the same net
 
 * **Exactly one driver.** A mux (an `if`/`match` *expression*, or mutually-
   exclusive conditional writes) counts as one driver. A second unconditional
-  assignment, a never-driven net, or a partially-driven net is a compile error.
+  assignment or a never-driven net is a compile error. The driver may be
+  CONDITIONAL and need not cover every path: a `wire` is defined by its one
+  assignment, so writing it inside an `if` with no `else` means the same as
+  writing it unconditionally (an un-taken path is a don't-care, not an `x`).
 * `wire` removes *textual* ordering only, **not cyclic dataflow**: a net that
   combinationally feeds itself is a real comb loop, rejected (SCC check). A
   ring is legal only when a `reg` breaks it.
+* `const x [:T] = nil` is the same forward declaration WITHOUT the ordering
+  exemption: bound exactly once (a rebind is an error), that bind defines the
+  value on every path exactly as a `wire`'s does, but it must precede every
+  read. Prefer it when the write already comes first — `wire` is for the case a
+  read genuinely comes before its driver.
 
 ## Pipelining inside `mod`
 

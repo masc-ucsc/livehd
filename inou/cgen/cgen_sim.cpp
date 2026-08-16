@@ -554,17 +554,51 @@ hhds::Pin_class Cgen_sim::find_driver_pin(const hhds::Node_class& node, std::str
 }
 
 namespace {
-// Pyrope text for a constant, with any UNKNOWN bit forced to 0.
+// The sim.unknown_zero=false runtime x-fill, emitted after `#include
+// "slop.hpp"` into every generated prelude (the module header AND the
+// standalone canonical-kernel .cpp files, which do not include that header).
+// The include guard makes a second copy inside one translation unit -- two
+// module headers -- a no-op; identical copies across TUs are ordinary header
+// semantics.
+//
+// Drawing ONCE per (width, spelling) is required, not an optimization. The same
+// LGraph constant is emitted at several sites (the color writing `__out` and
+// the one writing `__last_out`, plus any canonical kernel), and an independent
+// draw per site would hand ONE net two different values. A function template's
+// local static is a single object across every TU, so the key collapses them;
+// it also initializes on FIRST CALL, which is after main() has run
+// hlop_set_random_seed() -- a namespace-scope object would instead be
+// initialized before main and could never see `--seed`.
+//
+// Two DISTINCT nets that carry the same spelling at the same width share the
+// draw. That is the deliberate reading: an x constant has one value per run.
+constexpr std::string_view kUnknownLiteralHelper
+    = "#ifndef LHD_SIM_UNKNOWN_LITERAL\n"
+      "#define LHD_SIM_UNKNOWN_LITERAL\n"
+      "// sim.unknown_zero=false: the `?` bits of this literal are drawn once from\n"
+      "// hlop's seeded PRNG, on first call (after main() sets the seed).\n"
+      "template <int W, unsigned long long K>\n"
+      "inline Slop<W> __lhd_unknown_literal(const char* __txt) {\n"
+      "  static const Slop<W> __v = Slop<W>::from_pyrope(__txt);\n"
+      "  return __v;\n"
+      "}\n"
+      "#endif\n";
+
+// Pyrope text for a constant. Under sim.unknown_zero every UNKNOWN bit is
+// forced to 0 here; otherwise the `?` characters SURVIVE into the emitted
+// literal and Slop::from_pyrope draws each one at run time.
 //
 // Slop is a value type with no runtime unknowns, so the simulator has no way to
-// represent an `x`: a `?` bit is simulated as 0. Emitting the raw `0sb1????...`
-// form made the generated C++ carry a literal that from_pyrope cannot
-// constant-evaluate, which forced every wide constant through a runtime parse
-// (27.8% of simulation time on the dino CPU). Substituting the `?` up front
-// makes every emitted literal foldable at compile time.
-std::string sim_const_text(const Dlop& c) {
+// represent an `x`: a `?` bit must become a concrete 0 or 1. Under
+// sim.unknown_zero=true it is 0, and the whole literal then folds at C++
+// compile time -- emitting the raw `0sb1????...` form forces a runtime parse,
+// which was 27.8% of simulation time on the dino CPU when EVERY wide constant
+// took that path. The default instead randomizes (see sim_const_expr): the draw
+// is once per literal, so only the literals that actually carry a `?` pay, and
+// they pay it once rather than per cycle.
+std::string sim_const_text(const Dlop& c, bool unknown_zero) {
   auto txt = c.to_pyrope();
-  if (c.has_unknowns()) {
+  if (unknown_zero && c.has_unknowns()) {
     std::replace(txt.begin(), txt.end(), '?', '0');
   }
   return txt;
@@ -577,20 +611,32 @@ std::string sim_const_text(const Dlop& c) {
 // a bare sub-expression in a hot loop, is free NOT to -- 27.8% of simulation
 // time on the dino CPU before the constexpr-local wrapper below). Take the
 // integer path whenever the SIMULATED value fits an int64: that includes the
-// unknown-bit constants, because simulation forces every `?` to 0 and the
-// forced value is usually a small integer (`0ub??0` -> `0ub000` -> 0). Only
-// genuinely wide values and the non-Integer types (Boolean/String/Nil, which
-// create_integer would flatten) still need the parse.
+// unknown-bit constants under sim.unknown_zero, because that policy forces every
+// `?` to 0 and the forced value is usually a small integer (`0ub??0` -> `0ub000`
+// -> 0). Only genuinely wide values and the non-Integer types (Boolean/String/
+// Nil, which create_integer would flatten) still need the parse.
 std::string sim_const_expr(std::string_view pyrope_text, std::string_view width) {
+  // A literal that still carries `?` is the sim.unknown_zero=false path: it is
+  // NOT constant-evaluable (Slop::random_bit_ throws when constant-evaluated,
+  // since a compile-time random is not meaningful), so it must be a real
+  // runtime parse -- routed through the kUnknownLiteralHelper template so the
+  // parse, and the PRNG draw inside it, happen ONCE per (width, spelling) for
+  // the whole program. See that helper for why once is required.
+  if (pyrope_text.find('?') != std::string_view::npos) {
+    uint64_t key = 0xcbf29ce484222325ULL;  // fnv1a over the spelling: the template's identity key
+    for (unsigned char ch : pyrope_text) {
+      key ^= ch;
+      key *= 0x100000001b3ULL;
+    }
+    return absl::StrCat("__lhd_unknown_literal<", width, ", ", key, "ull>(\"", pyrope_text, "\")");
+  }
   // Same bits by construction: create_integer and from_pyrope both leave the
   // value UNMASKED in base_[0] and sign-extend into the upper words, and
   // is_just_i64() (<= 62 bits, no unknowns) makes the int64 round-trip exact.
   if (const auto v = Dlop::from_pyrope(std::string{pyrope_text}); v && v->is_integer() && v->is_just_i64()) {
     return absl::StrCat("Slop<", width, ">::create_integer(", v->to_just_i64(), ")");
   }
-  // Folded at COMPILE time via a constexpr local. Only legal because the caller
-  // has already forced unknown bits to 0; a literal still carrying `?` is not
-  // constant-evaluable.
+  // Folded at COMPILE time via a constexpr local.
   return absl::StrCat("([]{ constexpr auto _k = Slop<", width, ">::from_pyrope(\"", pyrope_text, "\"); return _k; }())");
 }
 
@@ -700,7 +746,7 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     if (c.is_integer() && c.is_just_i64()) {  // fast path -- the overwhelmingly common case
       return absl::StrCat("Slop<", tw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    return sim_const_expr(sim_const_text(c), tw);
+    return sim_const_expr(sim_const_text(c, unknown_zero_), tw);
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -773,7 +819,7 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    return sim_const_expr(sim_const_text(c), fw);
+    return sim_const_expr(sim_const_text(c, unknown_zero_), fw);
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -807,7 +853,7 @@ std::string Cgen_sim::stored_operand(const hhds::Pin_class& dpin, int fallback_b
     if (c.is_integer() && c.is_just_i64()) {
       return absl::StrCat("Slop<", fw, ">::create_integer(", c.to_just_i64(), ")");
     }
-    return sim_const_expr(sim_const_text(c), fw);
+    return sim_const_expr(sim_const_text(c, unknown_zero_), fw);
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
@@ -1992,6 +2038,11 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // The color planner uses word-oriented structural refinement hashes.
 // simgen-59: generated color simulation is serial and no longer emits or stages
 // Taskflow; large color evaluators are split into bounded translation units.
+// simgen-61: an unknown (`?`) literal bit is drawn from the run's seeded PRNG
+// (once per literal, behind a `static const`) unless sim.unknown_zero forces the
+// old deterministic zero. Drawing ONCE is what keeps simgen-58's color
+// classification true: the value is still constant across periods, so such a
+// color is not per-period random work.
 // simgen-58: unknown literal bits are deterministic zero in simulation, so
 // they no longer make their colors run every period as runtime-random work.
 // simgen-53: verified canonical bodies are digest-named translation units with
@@ -2655,6 +2706,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
     gd          = fnv1a(gd, color_dirty_ ? 1u : 0u);
     gd          = fnv1a(gd, debug_ ? 1u : 0u);
+    gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
     if (color_root) {
       gd = fnv1a(gd, observation_on ? 1u : 0u);
     }
@@ -2683,6 +2735,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append(
       "#pragma once\n#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n#include <vector>\n"
       "#include \"slop.hpp\"\n#include \"memory.hpp\"\n");
+  hout->append(kUnknownLiteralHelper);
   if (color_root) {
     hout->append("#include <memory>\n");
   }
@@ -4780,8 +4833,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       I(use.consumer_version < direct_value_uses_by_consumer.size());
       direct_value_uses_by_consumer[use.consumer_version].push_back(&use);
     }
-    // Unknown literal bits do not make a color random: sim_const_text()
-    // deterministically replaces them with zero before emitting the C++.
+    // Unknown literal bits do not make a color random: sim.unknown_zero
+    // replaces them with zero before emitting the C++, and the default random
+    // fill is drawn ONCE per literal (a `static const` inside the emitted
+    // expression), so the value is constant across periods either way.
     // Keep this classification aligned with Color_plan::runtime_random so
     // stable constant-only colors participate in ordinary dirty gating.
     direct_random_color.assign(color_plan_->colors().size(), false);
@@ -9205,6 +9260,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           "// Generated canonical simulator kernel. Do not edit.\n"
           "#include <cassert>\n#include <cstddef>\n#include <cstdint>\n");
       kernel_out->append("#include \"slop.hpp\"\n\n");
+      kernel_out->append(kUnknownLiteralHelper);  // standalone TU: it does not see the module header
       kernel_out->append("std::uint64_t ", kernel_name(kernel->signature), "(void** __bind) {\n");
       // The pointed-to TYPE has to match what the binding site took the address
       // of, byte for byte -- this ABI is a void* type-pun, so a mismatch is
@@ -10889,9 +10945,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           const auto guard = "";
           if (!slot.literal.empty()) {
             // Runs every cycle: take the create_integer fast path when the
-            // simulated value fits an int64 (see sim_const_expr).
+            // simulated value fits an int64 (see sim_const_expr). A `?` bit
+            // survives unless sim.unknown_zero, and sim_const_expr then draws it
+            // once behind a `static const` -- never per cycle.
             auto literal = slot.literal;
-            std::replace(literal.begin(), literal.end(), '?', '0');
+            if (unknown_zero_) {
+              std::replace(literal.begin(), literal.end(), '?', '0');
+            }
             fout->append(absl::StrCat("  ", guard, destination, " = ", sim_const_expr(literal, std::to_string(slot.width)), ";\n"));
           } else {
             const auto field = input_field(slot.producer_port);
@@ -10914,7 +10974,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         I(!destination.empty());
         if (!slot.literal.empty()) {
           auto literal = slot.literal;
-          std::replace(literal.begin(), literal.end(), '?', '0');
+          if (unknown_zero_) {
+            std::replace(literal.begin(), literal.end(), '?', '0');
+          }
           fout->append(absl::StrCat("  ", destination, " = ", sim_const_expr(literal, std::to_string(slot.width)), ";\n"));
         } else {
           const auto field = input_field(slot.producer_port);

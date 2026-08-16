@@ -3601,6 +3601,15 @@ bool uPass_runner::try_lower_typecast() {
   if (symbol_table_.known_const_scalar(arg_name).has_value()) {
     return false;  // folds to a known scalar → comptime
   }
+  // `string(...)` is comptime-ONLY: the switch below has no hardware lowering
+  // for it, just the runtime-string-cast error. So an x-carrying comptime value
+  // must not reach it — `0sb?` IS a bound Dlop (a compile-time value), and
+  // known_const_scalar refuses it only because INLINING unknown bits into
+  // hardware is LEC-breaking. Rendering it as text is not hardware, so hand the
+  // cast to constprop, which spells the unknown bits `?`.
+  if (tc->kind == upass::Typecast_kind::to_string && symbol_table_.comptime_scalar(arg_name).has_value()) {
+    return false;
+  }
 
   // Operand kind + range: the bitwidth-stamped binding (tightest), falling back
   // to the declared envelope (a module input never gets a per-write bw_*).

@@ -333,6 +333,14 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "false",      Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
      "Explicit initial values and runtime reset values are unchanged"                                      },
+    {           "unknown_zero",
+     "false",      Sim_set_option::Kind::boolean,
+     "fill every unknown (`?`) literal bit with 0 instead of a random 0/1. Slop carries no runtime X, so a `?` must "
+     "become some concrete bit; the default DRAWS it from the run's seeded PRNG (--seed / lhd.seed, reported as "
+     "run.seed + rng_draws) so an unspecified bit cannot be silently relied on, and the draw is once per literal "
+     "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
+     "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
+     "having neither an initializer nor a reset"                                                           },
     {             "checkpoint",
      "true",      Sim_set_option::Kind::boolean,
      "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"    },

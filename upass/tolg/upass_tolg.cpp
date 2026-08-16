@@ -364,10 +364,10 @@ public:
     resolve_pending_tgets();
     // 2c-wire — wire each `wire` net's buffer input to its single accumulated
     // driver (position-independent reads already bind to the buffer output),
-    // and enforce the single-driver / undriven / incomplete-driver rules. Runs
-    // after finalize_regs so a `reset_pin = <wire>` resolves the wire's buffer
-    // pin, and after resolve_pending_tgets so a driver that reads a forward
-    // call result is bound first.
+    // and enforce the single-driver / undriven rules. Runs after finalize_regs
+    // so a `reset_pin = <wire>` resolves the wire's buffer pin, and after
+    // resolve_pending_tgets so a driver that reads a forward call result is
+    // bound first.
     finalize_wires();
     cur_color_ = 0;  // the last wire's region must not leak into output glue
 
@@ -890,16 +890,18 @@ private:
   // the time-checker's SCC sees through it: a real comb loop is an error; a
   // ring is legal only when a register breaks it.
 
-  // The single-driver / undriven / incomplete-driver rules are enforced in the
-  // FRONTEND (prp2lnast check_wire_drivers) on the pre-elaborate tree, before
-  // lnastfmt drops a dead first write (which would hide a double-drive). tolg
-  // only wires the net and lets the time-checker flag a real comb loop.
+  // The single-driver rule is enforced in the FRONTEND (prp2lnast
+  // check_wire_drivers) on the pre-elaborate tree, before lnastfmt drops a dead
+  // first write (which would hide a double-drive). COVERAGE is NOT a rule: one
+  // driver may be conditional, and the merges below fill the unwritten paths
+  // with the written value (see is_wire_din). tolg only wires the net and lets
+  // the time-checker flag a real comb loop.
 
   // Wire every declared wire's buffer input to its single accumulated driver
-  // (the din shadow the branch-mux machinery merged). The single-driver /
-  // undriven / incomplete-driver rules are enforced in the frontend; here a
-  // missing driver only survives for a Verilog net (legal X) or a loop-built
-  // Pyrope wire the frontend skipped — wire it to nil rather than miscompile.
+  // (the din shadow the branch-mux machinery merged). The single-driver rule is
+  // enforced in the frontend; here a missing driver only survives for a Verilog
+  // net (legal X) or a loop-built Pyrope wire the frontend skipped — wire it to
+  // nil rather than miscompile.
   void finalize_wires() {
     const bool verilog = lnast_->is_verilog_origin();
     for (const auto& name : wire_order_) {
@@ -1868,8 +1870,8 @@ private:
   // OUTPUT so every read — including one before the driver appears textually —
   // resolves to the net (position-independent). Stores record the din shadow;
   // finalize_wires() wires the buffer input to the single accumulated driver
-  // and enforces the single-driver / undriven / incomplete-driver rules. No
-  // flop.
+  // and enforces the undriven rule (the single-driver rule is a frontend
+  // check). No flop.
   void lower_wire_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& decl_nid) {
     auto name = lnast_->get_name(name_nid);
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))) {
@@ -2003,6 +2005,9 @@ private:
         // CANONICAL key: set_mask_base tests it against pin_map_, which
         // record()/resolve() key on the backtick-stripped name.
         scalar_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
+      }
+      if (mode == "const" || mode.starts_with("const ")) {
+        const_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
       }
       return;
     }
@@ -2177,6 +2182,40 @@ private:
     }
     return std::nullopt;
   }
+
+  // 2c-wire — is `var` the din shadow key of a declared `wire`? Unlike a reg, a
+  // wire has NO hold value on a branch path that does not write it: the net is
+  // defined by its ONE driver, so an unwritten path is a DON'T-CARE, not an X.
+  // A conditionally written wire therefore carries the driver's value on EVERY
+  // path — exactly as if the assignment had been written unconditionally (the
+  // frontend allows the conditional form for that reason). The branch merges
+  // below fill the unwritten paths with a WRITTEN value instead of nil, so a
+  // single writing arm needs no mux at all.
+  [[nodiscard]] bool is_wire_din(std::string_view var) const {
+    constexpr std::string_view din_prefix{
+        "\x01"
+        "din:"};
+    // Heterogeneous lookup: this runs per merge variable, so do not mint a
+    // std::string just to probe the set.
+    return var.starts_with(din_prefix) && wire_names_.contains(var.substr(din_prefix.size()));
+  }
+
+  // The same don't-care rule for a `const` still carrying no value at this
+  // point. `const` is SINGLE-ASSIGNMENT: the one bind defines it, so — exactly
+  // like a `wire` — a branch path that does not write it is a don't-care, and
+  // `const x:T = nil; if c { x = v }` means `x == v`, not `c ? v : x`.
+  // `mut` is deliberately NOT included: it is last-write-wins, so an unwritten
+  // path legitimately keeps the pre-if value, and slang's poison-init
+  // accumulators DEPEND on that value staying the `0sb?`/nil seed.
+  // Only reached with no pre-if value in pin_map_, i.e. genuinely unbound.
+  [[nodiscard]] bool is_unbound_const(std::string_view var) const {
+    return !const_decl_.empty() && !var.empty() && var.front() != '\x01' && const_decl_.contains(logical_key(var));
+  }
+
+  // Either single-driver net shape: a `wire` din shadow, or a still-unbound
+  // `const`. Both fill an unwritten branch path with a WRITTEN value instead
+  // of nil, so a single writing arm needs no mux at all.
+  [[nodiscard]] bool is_single_bind_net(std::string_view var) const { return is_wire_din(var) || is_unbound_const(var); }
 
   // Cached 1/0 const pins for the enable shadow (node identity doubles as the
   // "still unconditionally true/false" test in finalize_regs).
@@ -6923,7 +6962,30 @@ private:
       // the else value up into the then/elif arms, clobbering `pre`. For a
       // reg's enable shadow this collapsed a conditional enable into constant
       // true (write-every-cycle); for its din it forced the else value.
-      auto base = pin_map_.find(var);
+      auto      base      = pin_map_.find(var);
+      auto      ew        = else_writes.find(var);
+      const int n         = static_cast<int>(branches.size());
+      const int last_cond = has_else ? n - 2 : n - 1;
+      // 2c-wire — a wire's din shadow has no pre-if value to hold and no X to
+      // fall back to (see is_wire_din): the unwritten paths are don't-cares, so
+      // fill them with a value the wire IS written with. `wire_seed` is the
+      // lowest-priority writing arm, which becomes the chain's base — with a
+      // single writing arm that leaves the driver bare, no mux at all.
+      Pin       wire_fill;
+      int       wire_seed = -1;
+      if (base == pin_map_.end() && is_single_bind_net(var)) {
+        if (ew != else_writes.end()) {
+          wire_fill = ew->second;
+        } else {
+          for (int i = last_cond; i >= 0; --i) {
+            if (auto wr = branches[i].writes.find(var); wr != branches[i].writes.end()) {
+              wire_fill = wr->second;
+              wire_seed = i;
+              break;
+            }
+          }
+        }
+      }
       // A non-writing branch falls back to `pre`. For a reg's din shadow with
       // no recorded pre-value (a pure conditional write, no prior write and no
       // read), `pre` is the reg's q (hold) — NOT a don't-care.
@@ -6932,11 +6994,15 @@ private:
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
         pre = *hold;
+      } else if (!wire_fill.is_invalid()) {
+        pre = wire_fill;
       } else {
         pre = nil_pin();
       }
-      auto ew  = else_writes.find(var);
-      Pin  cur = (ew != else_writes.end()) ? ew->second : pre;
+      // A wire arm that writes nothing selects nothing: skip it (and the seed
+      // arm, already the chain's base) instead of muxing in a don't-care.
+      auto skip_arm = [&](int i, bool writes) { return !wire_fill.is_invalid() && (i == wire_seed || !writes); };
+      Pin  cur      = (ew != else_writes.end()) ? ew->second : pre;
 
       // The merged value's width is the widest among the branch sources;
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
@@ -6965,8 +7031,6 @@ private:
         }
       };
       note_arm(cur);
-      int n         = static_cast<int>(branches.size());
-      int last_cond = has_else ? n - 2 : n - 1;
       // A merge is only as unsigned as its ARMS. bind_result stamps UNSIGNED
       // unconditionally, which is a lie the moment one arm can go negative, so
       // every consumer that widens the merge zero-fills a value that had to
@@ -6983,6 +7047,9 @@ private:
       // assert_ifelse2.pick_max).
       for (int i = last_cond; i >= 0; --i) {
         auto wr = branches[i].writes.find(var);
+        if (skip_arm(i, wr != branches[i].writes.end())) {
+          continue;
+        }
         if (wr != branches[i].writes.end()) {
           note_arm(wr->second);
         } else {
@@ -6994,16 +7061,21 @@ private:
         }
       }
       const auto mw = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
+      bool       minted = false;
       for (int i = last_cond; i >= 0; --i) {
-        auto& br       = branches[i];
-        auto  wr       = br.writes.find(var);
-        Pin   true_val = (wr != br.writes.end()) ? wr->second : pre;
+        auto& br = branches[i];
+        auto  wr = br.writes.find(var);
+        if (skip_arm(i, wr != br.writes.end())) {
+          continue;
+        }
+        Pin true_val = (wr != br.writes.end()) ? wr->second : pre;
 
         auto mux = make_node(Ntype_op::Mux);
         mux.create_sink_pin(0).connect_driver(br.cond);   // selector
         mux.create_sink_pin(1).connect_driver(cur);       // false / else
         mux.create_sink_pin(2).connect_driver(true_val);  // true / then
-        cur = mux.create_driver_pin(0);
+        cur    = mux.create_driver_pin(0);
+        minted = true;
         if (i != 0) {  // inner mux; bind_result stamps the outermost (i==0) below
           if (any_signed) {
             set_sbits(cur, mw);
@@ -7011,6 +7083,13 @@ private:
             set_ubits(cur, mw);
           }
         }
+      }
+      if (!minted) {
+        // 2c-wire with a single writing arm: `cur` IS that arm's driver pin,
+        // owned by the node that produced it. record() it (bind_result would
+        // re-stamp a pin this merge did not mint).
+        record(var, cur, mw);
+        continue;
       }
       bind_result(var, cur, mw);
       if (any_signed) {
@@ -7066,18 +7145,52 @@ private:
       // below drives the hold instead of `Dlop::unknown`. A non-reg var
       // (combinational match-expression result) keeps has_pre=false →
       // don't-care none-of slot.
-      Pin  pre;
+      auto       ew      = else_writes.find(var);
+      const bool has_ev  = ew != else_writes.end();
+      // 2c-wire — a wire's din shadow has no hold and no X fallback (see
+      // is_wire_din): every unwritten arm and the none-of slot are don't-cares,
+      // so fill them with a value the wire IS written with instead of an
+      // unknown. When that is the ONLY value written, the wire's driver needs no
+      // Hotmux at all.
+      Pin        wire_fill;
+      if (!has_pre && is_single_bind_net(var)) {
+        if (has_ev) {
+          wire_fill = ew->second;
+        } else {
+          for (int i = n_conds - 1; i >= 0; --i) {
+            if (auto wr = branches[i].writes.find(var); wr != branches[i].writes.end()) {
+              wire_fill = wr->second;
+              break;
+            }
+          }
+        }
+        if (!wire_fill.is_invalid()) {
+          bool uniform = true;
+          for (const auto& br : branches) {
+            if (auto wr = br.writes.find(var); wr != br.writes.end() && !(wr->second == wire_fill)) {
+              uniform = false;
+              break;
+            }
+          }
+          if (uniform) {  // one distinct driver over all arms: that IS the net
+            record(var, wire_fill, std::max<int32_t>(1, pin_mw_of(wire_fill)));
+            continue;
+          }
+        }
+      }
+      Pin pre;
       if (has_pre) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
         pre     = *hold;
         has_pre = true;
+      } else if (!wire_fill.is_invalid()) {
+        pre     = wire_fill;
+        has_pre = true;
       } else {
         pre = nil_pin();
       }
-      auto       ew       = else_writes.find(var);
-      const bool has_ev   = ew != else_writes.end();
-      Pin        else_val = has_ev ? ew->second : pre;
+      Pin else_val = has_ev ? ew->second : pre;
 
       // The Hotmux result width is the WIDEST among its REAL arm sources,
       // exactly as the Mux chain above sizes itself. mw_lookup alone holds
@@ -7227,6 +7340,8 @@ private:
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
   absl::flat_hash_set<std::string>                    scalar_decl_;
+  // Scalar names declared `const` (see is_unbound_const).
+  absl::flat_hash_set<std::string>                    const_decl_;
   // Declared TYPE width per LOGICAL name (canonical, SSA suffix stripped), for
   // the one op whose semantics depend on the DECLARED width rather than on
   // whatever value currently drives the name: Concat.

@@ -62,6 +62,10 @@ void Inou_cgen::setup() {
   m2.add_label_optional("debug",
                         "retain runtime Slop_u landing masks for checking bitwidth-proven unsigned values (true/false)",
                         "false");
+  m2.add_label_optional("unknown_zero",
+                        "sim.unknown_zero: fill every unknown (`?`) literal bit with 0 instead of a 0/1 drawn once "
+                        "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
+                        "false");
   register_inou("cgen", m2);
 }
 
@@ -139,6 +143,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto       slop_u_s          = var.get("slop_u");
   auto       color_dirty_s     = var.get("color_dirty");
   auto       debug_s           = var.get("debug");
+  auto       unknown_zero_s    = var.get("unknown_zero");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
@@ -155,6 +160,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const bool slop_u_on          = flag_on("sim.slop_u", slop_u_s);
   const bool color_dirty_on     = flag_on("sim.color_dirty", color_dirty_s);
   const bool debug_on           = flag_on("sim.debug", debug_s);
+  const bool unknown_zero_on    = flag_on("sim.unknown_zero", unknown_zero_s);
   flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
   if (bad_flag) {
     return;
@@ -353,7 +359,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   runtime_support_on,
                   slop_u_on,
                   color_dirty_on,
-                  debug_on);
+                  debug_on,
+                  unknown_zero_on);
     p.do_from_graph(g);
   }
 }

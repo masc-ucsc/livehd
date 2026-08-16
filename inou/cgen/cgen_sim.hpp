@@ -229,7 +229,8 @@ public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
-           bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false)
+           bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,
+           bool _unknown_zero = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -241,7 +242,8 @@ public:
       , compact_kernel_(_compact_kernel)
       , slop_u_(_slop_u)
       , color_dirty_(_color_dirty)
-      , debug_(_debug) {}
+      , debug_(_debug)
+      , unknown_zero_(_unknown_zero) {}
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
@@ -262,6 +264,15 @@ private:
   // uses from_proven(), whose width check is compile-time and whose runtime
   // work is only a carrier copy.
   bool                           debug_          = false;
+  // sim.unknown_zero — Slop carries no runtime X, so every `?` bit of a literal
+  // must become a concrete 0 or 1. false (the default) DRAWS it from hlop's
+  // seeded PRNG (hlop_set_random_seed, the driver's --seed) once per literal, so
+  // an unspecified bit cannot be silently relied on while a run stays
+  // reproducible. The draw is once, not per cycle: a constant stays constant, so
+  // the value never flickers and Color_plan::runtime_random (per-period random
+  // work, which defeats quiescence detection) stays false for it. true forces
+  // zero, which also lets the literal fold at C++ compile time.
+  bool                           unknown_zero_   = false;
 
 public:
   // The C++ TYPE a stored unsigned value of `bits` literal LiveHD bits is

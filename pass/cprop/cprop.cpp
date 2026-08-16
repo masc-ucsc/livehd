@@ -1662,17 +1662,37 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
     replace_node(node, result);
 
   } else if (op == Ntype_op::EQ) {
-    bool eq    = true;
     // EQ is a single-port, multi-edge "all drivers on port a are equal" cell.
     // When both comparator operands resolve to the SAME driver pin (e.g.
     // const==const), HHDS collapses the duplicate driver->sink edges into one,
     // leaving a single input edge. A 1-input "all-equal" is trivially true, and
     // the loop below already yields that (it starts at index 1), so no >1
     // assertion is warranted (try_constant_prop only calls this with n>=1).
-    auto first = hydrate_const(inp_edges_ordered[0].driver);
+    //
+    // Dlop::eq_op is THREE-valued: a known/known bit mismatch decides `false`,
+    // all-agree decides `true`, and an otherwise-agreeing pair with unknown bits
+    // is UNDECIDABLE (unknown_bool). Collapsing that third case with
+    // `!is_known_false()` folded `0ub0? == 0` to a definite 1 — which then made
+    // `c != 0` a definite 0 and comptime-DECIDED the enclosing if/match arm (the
+    // `match` form went further: two arms both folding to 1 built a non-one-hot
+    // Hotmux selector, which the unique-if check then reported as overlapping).
+    // Leave the cell alone instead — the same three-valued discipline the
+    // LT/GT fold below already follows. A DEFINITE mismatch still folds: it
+    // decides the all-equal regardless of unknown bits elsewhere.
+    auto first   = hydrate_const(inp_edges_ordered[0].driver);
+    bool eq      = true;
+    bool any_unk = false;
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = hydrate_const(inp_edges_ordered[i].driver);
-      eq     = eq && !first.eq_op(c)->is_known_false();
+      auto r = first.eq_op(c);
+      if (r->is_known_false()) {
+        eq = false;
+        break;
+      }
+      any_unk = any_unk || r->has_unknowns();
+    }
+    if (eq && any_unk) {
+      return;  // undecidable on ?-bits: keep the node
     }
 
     Dlop result;

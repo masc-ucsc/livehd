@@ -44,8 +44,13 @@ static Dlop stringify_one(const Dlop& v) {
     return v;
   }
   // `string(bool)` renders the literal word, not the bool's signed all-ones
-  // decimal ("-1"/"0"). (2f-string_cast ruling.)
-  if (v.is_bool() && !v.has_unknowns()) {
+  // decimal ("-1"/"0"). (2f-string_cast ruling.) A bool whose bit is UNKNOWN
+  // (a compare over an `0sb?` operand) is neither word — spell it `0ub?` rather
+  // than letting to_pyrope's Boolean branch claim "false".
+  if (v.is_bool()) {
+    if (v.has_unknowns()) {
+      return *Dlop::from_string("0ub?");
+    }
     return *Dlop::from_string(v.is_known_true() ? "true" : "false");
   }
   // Render the value to a string Dlop (the result feeds a TEXT concat in
@@ -56,8 +61,11 @@ static Dlop stringify_one(const Dlop& v) {
 }
 
 // Stringify each entry in `vals` and text-concat them. Returns nullopt if any
-// entry is invalid or has unknown bits (caller should bail and retry later);
-// returns an empty string Dlop for an empty input.
+// entry is invalid (caller should bail and retry later); returns an empty string
+// Dlop for an empty input. An entry with UNKNOWN bits is NOT a bail: `0sb?` is a
+// concrete comptime value, it just renders as its Pyrope spelling (`0ub????`) —
+// unlike `known_const_scalar`, which refuses unknowns because inlining them into
+// hardware is LEC-breaking; text has no such hazard.
 static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& vals) {
   if (vals.empty()) {
     return *Dlop::from_string("");
@@ -65,7 +73,7 @@ static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& va
   Dlop acc;
   bool first = true;
   for (const auto& v : vals) {
-    if (v.is_invalid() || v.has_unknowns()) {
+    if (v.is_invalid()) {
       return std::nullopt;
     }
     auto s = stringify_one(v);
@@ -101,8 +109,9 @@ static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>&
       acc = *acc.concat_op(*Dlop::from_string("="));
     }
     if (tl.leaf_count == 1 && !tl.has_leafs) {  // a bare scalar leaf
-      if (tl.scalar.is_invalid() || tl.scalar.has_unknowns()) {
-        return std::nullopt;  // a runtime / x-carrying field cannot be stringified
+      if (tl.scalar.is_invalid()) {
+        return std::nullopt;  // a runtime field cannot be stringified (an
+                              // x-carrying one can: it spells as `0ub????`)
       }
       acc = *acc.concat_op(stringify_one(tl.scalar));
     } else {  // a sub-bundle: recurse into it
@@ -121,6 +130,9 @@ static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>&
 // Group an MSB-first binary string (from Dlop::to_binary) into a power-of-two
 // base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
 // `:h`/`:x`/`:X` interpolation specs so they share one two's-complement bit view.
+// An unknown bit (`?`, from an `0sb?`-carrying value) poisons its whole digit —
+// a nibble with any unknown bit has no hex digit, so it renders `?` (Verilog's
+// `%h` convention, spelled with Pyrope's `?`).
 static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
   static constexpr std::string_view lo     = "0123456789abcdef";
   static constexpr std::string_view hi     = "0123456789ABCDEF";
@@ -132,12 +144,17 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
   padded.append(bits);
   std::string out;
   for (size_t i = 0; i < padded.size(); i += static_cast<size_t>(bpd)) {
-    unsigned v = 0;
+    unsigned v   = 0;
+    bool     unk = false;
     for (int k = 0; k < bpd; ++k) {
-      v = (v << 1) | (padded[i + static_cast<size_t>(k)] == '1' ? 1U : 0U);
+      const char c = padded[i + static_cast<size_t>(k)];
+      unk |= (c == '?');
+      v    = (v << 1) | (c == '1' ? 1U : 0U);
     }
-    out.push_back(digits[v]);
+    out.push_back(unk ? '?' : digits[v]);
   }
+  // Leading-zero drop stops at the first `?` too (find_first_not_of('0')), so an
+  // all-unknown value keeps every digit rather than collapsing to "0".
   auto first = out.find_first_not_of('0');
   return first == std::string::npos ? std::string("0") : out.substr(first);
 }
@@ -237,20 +254,32 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   const int   w = static_cast<int>(width);
   std::string out;
   bool        bad = i != spec.size();
+  // An `0sb?`-carrying value is a comptime value like any other, it just has no
+  // digit for the unknown bits. `:b` renders them straight through (Dlop's
+  // to_binary already emits `?`); `:o`/`:h`/`:x`/`:X` poison the enclosing digit
+  // via bits_to_grouped; `:d` has no positional rendering at all, so it falls
+  // back to the value's Pyrope spelling (`0ub????`) — the same text a bare
+  // `"{v}"` produces — and skips the pad/group cosmetics.
+  const bool unk = v.has_unknowns();
   if (!bad) {
     switch (base) {
-      case 'd': out = v.to_decimal(w, sep); break;
+      case 'd': out = unk ? v.to_pyrope() : v.to_decimal(w, sep); break;
       case 'b': out = v.to_binary(w, sep); break;
       case 'h':
-      case 'x': out = v.to_hex(w, sep, false); break;
-      case 'X': out = v.to_hex(w, sep, true); break;
+      case 'x': out = unk ? bits_to_grouped(v.to_binary(), 4, false) : v.to_hex(w, sep, false); break;
+      case 'X': out = unk ? bits_to_grouped(v.to_binary(), 4, true) : v.to_hex(w, sep, true); break;
       case 'o':  // octal has no Slop/Dlop renderer; regroup the bit string
-        out = Dlop::pad_digits(bits_to_grouped(v.to_binary(), 3, false), w);
-        if (sep) {
-          out = Dlop::group_digits(std::move(out), 4);
-        }
+        out = bits_to_grouped(v.to_binary(), 3, false);
         break;
       default: bad = true;
+    }
+    // Shared width/separator cosmetics for the bit-regrouped bases (`:o` always,
+    // `:h`/`:x`/`:X` on the unknown path); the Dlop renderers do their own.
+    if (!bad && (base == 'o' || (unk && base != 'd' && base != 'b'))) {
+      out = Dlop::pad_digits(std::move(out), w);
+      if (sep) {
+        out = Dlop::group_digits(std::move(out), 4);
+      }
     }
   }
   if (bad) {
@@ -3677,7 +3706,9 @@ void uPass_constprop::process_func_call() {
       // `test` block reaches here as a string placeholder — the sim driver
       // renders it (Slop::to_hex/...), and tolg skips %-test combs, so
       // leaving the call is harmless (vs erroring on a formattable value).
-      if (!val.is_invalid() && !val.has_unknowns() && !val.is_string() && spec.is_string()) {
+      // A value with UNKNOWN bits DOES fold: `0sb?` is comptime-known, and
+      // format_interp_value renders its unknown digits as `?`.
+      if (!val.is_invalid() && !val.is_string() && spec.is_string()) {
         store_trivial(dst, *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->current_span())));
       }
     }

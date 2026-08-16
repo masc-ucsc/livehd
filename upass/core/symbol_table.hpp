@@ -184,6 +184,25 @@ public:
     return get_trivial(name);
   }
 
+  // The COMPTIME read: same trivial-scalar binding as known_const_scalar, but
+  // unknown-carrying values (`0sb?`) come through. Any bound Dlop IS a
+  // compile-time value — `0ub????` is as elaborated as `0xA`. The two readers
+  // differ only in what they are FOR: known_const_scalar feeds hardware
+  // inlining, where substituting x-bits is LEC-breaking; this one feeds
+  // comptime-only consumers (cputs) that merely render the value as text.
+  std::optional<Dlop> comptime_scalar(std::string_view name) const {
+    if (name.empty() || !has_trivial(name)) {
+      return std::nullopt;
+    }
+    if (auto b = get_bundle(name); b && !b->is_trivial_scalar()) {
+      return std::nullopt;
+    }
+    if (const auto& v = get_trivial(name); !v.is_invalid()) {
+      return v;
+    }
+    return std::nullopt;
+  }
+
   // Runtime tuple-slot refs (loop-migration Step 1): dst tuple →
   // slot → source ref name, for slots whose value is runtime (the bundle
   // stores null there). The runner rewrites `t[slot]` / `for x in t` into a

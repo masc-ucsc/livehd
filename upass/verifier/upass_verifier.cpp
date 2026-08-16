@@ -300,11 +300,15 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
     return upass::Emit_decision::drop();
   }
 
+  // comptime_scalar, not known_const_scalar: a bound Dlop is a comptime value
+  // even when it carries unknown bits, and cputs only renders it as text (the
+  // `?` digits included) — the LEC hazard that makes known_const_scalar refuse
+  // unknowns is about inlining them into hardware, which never happens here.
   std::optional<Dlop> val;
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     val = *Dlop::from_pyrope(current_text());
   } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
-    val = runner_st->known_const_scalar(current_text());
+    val = runner_st->comptime_scalar(current_text());
   }
 
   // Reject named or multi-argument forms in this slice. A trailing
@@ -319,7 +323,7 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
                     "call cputs with a single comptime string operand");
     return upass::Emit_decision::drop();
   }
-  if (!val || val->is_invalid() || val->has_unknowns()) {
+  if (!val || val->is_invalid()) {
     emit_cputs_diag(fcall_nid,
                     "cputs-not-comptime",
                     "cputs operand is not comptime-known",

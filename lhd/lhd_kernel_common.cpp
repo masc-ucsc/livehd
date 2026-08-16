@@ -1300,6 +1300,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["color_dirty"] = v;
     } else if (k == "sim.debug") {
       labels["debug"] = v;
+    } else if (k == "sim.unknown_zero") {
+      labels["unknown_zero"] = v;
     }
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path

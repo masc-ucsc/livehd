@@ -1046,9 +1046,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
     for (const auto& edge : plan.sites_[consumer].node.inp_edges()) {
-      // Unknown literal bits are not runtime randomness in simulation:
-      // cgen_sim's sim_const_text() deterministically concretizes them to zero.
-      // Only operations that actually draw from hlop's seeded PRNG (currently
+      // Unknown literal bits are not runtime randomness in simulation. Under
+      // sim.unknown_zero cgen_sim's sim_const_text() concretizes them to zero;
+      // by default sim_const_expr() draws them from hlop's seeded PRNG ONCE,
+      // behind a `static const`, so the literal is still a constant across
+      // periods. Only operations that draw on EVERY period (currently
       // ordering="none" memory collisions above) require random scheduling.
       const auto producer_it = index.find(edge.driver.get_master_node().get_occurrence_index());
       if (producer_it == index.end() || !plan.sites_[producer_it->second].live) {
