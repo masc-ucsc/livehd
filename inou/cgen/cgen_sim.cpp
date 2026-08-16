@@ -3007,13 +3007,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       used_member_names.insert(member_of(d.name));
     }
   }
-  auto unique_member = [&used_member_names](std::string base) -> std::string {
-    if (base.empty()) {
-      base = "u";
+  auto unique_member = [&used_member_names](std::string candidate) -> std::string {
+    if (candidate.empty()) {
+      candidate = "u";
     }
-    std::string name = base;
+    std::string name = candidate;
     for (int i = 2; !used_member_names.insert(name).second; ++i) {
-      name = absl::StrCat(base, "__i", i);
+      name = absl::StrCat(candidate, "__i", i);
     }
     return name;
   };
@@ -3783,7 +3783,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     bool        activation_skip_safe = false;
     std::string reset_run_condition;
     if (loop.activation_input) {
-      const auto& resets   = reset_guard_ports(s.node.get_subnode_graph(), port_cache);
+      const auto  child_graph = s.node.get_subnode_graph();
+      const auto& resets      = reset_guard_ports(child_graph, port_cache);
       activation_skip_safe = resets.complete && resets.ports.size() <= 1;
       if (activation_skip_safe && !resets.ports.empty()) {
         const auto& rp = resets.ports.front();
@@ -3799,13 +3800,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
     }
-    auto lane_prefix_expr = [](std::string_view base, std::string_view ordinal) {
+    auto lane_prefix_expr = [](std::string_view path_expr, std::string_view ordinal) {
       return absl::StrCat("(",
-                          base,
+                          path_expr,
                           ".empty() ? std::string{} : ",
-                          base,
+                          path_expr,
                           ".substr(0, ",
-                          base,
+                          path_expr,
                           ".size() - 1)) + \"[\" + std::to_string(",
                           ordinal,
                           ") + \"].\"");
@@ -4193,13 +4194,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         reserve_port(decl.name);
       }
     }
-    const auto unique = [&](std::string base) {
-      if (base.empty()) {
-        base = "u";
+    const auto unique = [&](std::string candidate) {
+      if (candidate.empty()) {
+        candidate = "u";
       }
-      std::string name = base;
+      std::string name = candidate;
       for (int suffix = 2; !used.insert(name).second; ++suffix) {
-        name = absl::StrCat(base, "__i", suffix);
+        name = absl::StrCat(candidate, "__i", suffix);
       }
       return name;
     };
@@ -7099,8 +7100,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // combinational value in scope, so the next value has to be parked here);
       // `_low`, the latch's low-window staging, stays a settle-local because it is
       // produced and consumed entirely inside this pass.
-      auto        next_name  = [&](const std::string& base) { return absl::StrCat(base, latch_low ? "_low" : "_din"); };
-      auto        hold_name  = [&](const std::string& base) { return latch_high ? absl::StrCat(base, "_low") : base; };
+      auto        next_name  = [&](const std::string& signal) { return absl::StrCat(signal, latch_low ? "_low" : "_din"); };
+      auto        hold_name  = [&](const std::string& signal) { return latch_high ? absl::StrCat(signal, "_low") : signal; };
       const char* decl       = latch_low ? "auto " : "";
       // LAZY GUARDED NEXT-STATE: a gated flop whose commit will not fire this
       // period does not need its `_din` computed at all — and with single-use
@@ -9375,7 +9376,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
         const std::string filename = absl::StrCat(fstem, ".color-eval-", shard, ".cpp");
         auto              out      = std::make_shared<File_output>(odir.empty() ? filename : absl::StrCat(odir, "/", filename));
-        const auto [begin, end]    = direct_color_eval_shards[shard];
         out->append("// Generated simulator color evaluator shard. Do not edit.\n");
         out->append("#include \"", fstem, ".color-runtime.hpp\"\n");
         out->append("#include <cassert>\n#include <cstddef>\n");

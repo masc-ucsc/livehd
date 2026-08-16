@@ -166,6 +166,7 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t
                        .first              = 0,
                        .step               = 1,
                        .count              = count,
+                       .index_input        = std::nullopt,
                        .activation_input   = 1,
                        .next_active_output = 3,
                    });
@@ -221,7 +222,15 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
   auto top  = top_io->create_graph();
   auto loop = graph_util::create_typed_node(*top, Ntype_op::Sub);
   loop.set_name("loop_site");
-  loop.set_subnode(body_io, hhds::Subnode_loop{.first = first, .step = 1, .count = count, .index_input = 0});
+  loop.set_subnode(body_io,
+                   hhds::Subnode_loop{
+                       .first              = first,
+                       .step               = 1,
+                       .count              = count,
+                       .index_input        = 0,
+                       .activation_input   = std::nullopt,
+                       .next_active_output = std::nullopt,
+                   });
   top->get_input_pin("x").connect_sink(loop.create_sink_pin(1));
   graph_util::create_const(*top, *Dlop::create_integer(0)).connect_sink(loop.create_sink_pin(2));
   auto result = loop.create_driver_pin(3);

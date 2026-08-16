@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <print>
 #include <string>
 #include <tuple>
 #include <utility>

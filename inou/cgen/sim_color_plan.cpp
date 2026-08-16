@@ -2817,8 +2817,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
     }
   }
-  const auto body_reuse_worth_preserving = [&](size_t root) {
-    return std::ranges::any_of(members[root], [&](size_t member) {
+  const auto         body_reuse_worth_preserving = [&](size_t color_root) {
+    return std::ranges::any_of(members[color_root], [&](size_t member) {
       const auto* definition = plan.sites_[plan.version_sites_[member].base_site].node.get_graph();
       return selected_reuse_bodies.contains(definition);
     });
@@ -3111,7 +3111,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                                                   Boundary_kind kind,
                                                   State_version version,
                                                   size_t        owner_site,
-                                                  size_t        producer_version,
+                                                  size_t        producer_version_index,
                                                   size_t        producer_color,
                                                   hhds::Port_id producer_port,
                                                   hhds::Port_id public_port,
@@ -3119,7 +3119,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                                                   bool          unsign) {
     if (const auto it = slot_index.find(signature); it != slot_index.end()) {
       auto& slot = plan.boundary_slots_[it->second];
-      if (slot.kind != kind || slot.owner_site != owner_site || slot.producer_version != producer_version
+      if (slot.kind != kind || slot.owner_site != owner_site || slot.producer_version != producer_version_index
           || slot.producer_color != producer_color || slot.producer_port != producer_port || slot.public_port != public_port
           || slot.width != width || slot.unsign != unsign) {
         plan.summary_.boundary_one_writer = false;
@@ -3139,7 +3139,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                         slot.unsign,
                         boundary_kind_name(kind),
                         owner_site,
-                        producer_version,
+                        producer_version_index,
                         producer_color,
                         producer_port,
                         public_port,
@@ -3153,7 +3153,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     slot.kind             = kind;
     slot.version          = version;
     slot.owner_site       = owner_site;
-    slot.producer_version = producer_version;
+    slot.producer_version = producer_version_index;
     slot.producer_color   = producer_color;
     slot.producer_port    = producer_port;
     slot.public_port      = public_port;

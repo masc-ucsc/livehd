@@ -108,6 +108,11 @@ struct Query_result {
   std::string engine;
   long long   elapsed_ms = -1;
 
+  // Time spent inside formal solver calls only. Unlike elapsed_ms, this excludes
+  // parsing, graph transforms, encoding, and CVC5 term construction. Hierarchical
+  // scheduling uses this value to draw down formal.timeout.
+  long long solve_ms = 0;
+
   // The case-split selector that produced this verdict ("" = no split). The
   // structured twin of the "case-split <name>[Nb]" detail text: the verdict
   // cache persists it as a strategy hint (keyed by def entity name) and replays

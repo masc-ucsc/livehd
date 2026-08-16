@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -63,6 +64,28 @@ static std::string strerror_threadsafe(int err) {
   return "Unknown error " + std::to_string(err);
 #endif
 }
+
+namespace {
+
+#if defined(__APPLE__)
+timespec stat_atime(const struct stat& st) { return st.st_atimespec; }
+timespec stat_mtime(const struct stat& st) { return st.st_mtimespec; }
+#else
+timespec stat_atime(const struct stat& st) { return st.st_atim; }
+timespec stat_mtime(const struct stat& st) { return st.st_mtim; }
+#endif
+
+bool same_time(const timespec& lhs, const timespec& rhs) { return lhs.tv_sec == rhs.tv_sec && lhs.tv_nsec == rhs.tv_nsec; }
+
+timespec next_time(timespec value) {
+  if (++value.tv_nsec == 1000000000L) {
+    ++value.tv_sec;
+    value.tv_nsec = 0;
+  }
+  return value;
+}
+
+}  // namespace
 
 // Does the file already hold EXACTLY the bytes we are about to write? Then the
 // write is a no-op that would still stamp a new mtime, and every downstream
@@ -153,6 +176,9 @@ File_output::~File_output() {
 
   //---------------------------------- OPEN
 
+  struct stat before_stat{};
+  const bool  existed = ::stat(filename.c_str(), &before_stat) == 0;
+
   int fd = ::open(filename.c_str(), O_RDWR | O_CREAT, 0644);
   I(fd >= 0);  // throw std::runtime_error(std::format("could not create destination {} file (permissions?)", filename));
 
@@ -179,10 +205,22 @@ File_output::~File_output() {
   }
 
   //---------------------------------- CLOSE
+  ok = ::msync(base, map_size, MS_SYNC);
+  I(ok == 0);
   ::munmap(base, map_size);
   if (map_size != sz) {
     auto ok2 = ftruncate(fd, sz);
-    (void)ok2;
+    I(ok2 == 0);
+  }
+  if (existed) {
+    struct stat after_stat{};
+    ok = ::fstat(fd, &after_stat);
+    I(ok == 0);
+    if (same_time(stat_mtime(before_stat), stat_mtime(after_stat))) {
+      const timespec times[2] = {stat_atime(after_stat), next_time(stat_mtime(before_stat))};
+      ok                      = ::futimens(fd, times);
+      I(ok == 0);
+    }
   }
   ::close(fd);
 }

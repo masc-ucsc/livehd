@@ -68,7 +68,15 @@ std::shared_ptr<hhds::Graph> build_compact_loop(const std::string& dir, uint64_t
   auto top  = top_io->create_graph();
   auto loop = create_typed_node(*top, Ntype_op::Sub);
   loop.set_name("loop_site");
-  loop.set_subnode(body_io, hhds::Subnode_loop{.first = 0, .step = 1, .count = count});
+  loop.set_subnode(body_io,
+                   hhds::Subnode_loop{
+                       .first              = 0,
+                       .step               = 1,
+                       .count              = count,
+                       .index_input        = std::nullopt,
+                       .activation_input   = std::nullopt,
+                       .next_active_output = std::nullopt,
+                   });
   top->get_input_pin("x").connect_sink(loop.create_sink_pin(0));
   auto out = loop.create_driver_pin(1);
   livehd::graph_util::set_bits(out, 9);

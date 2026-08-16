@@ -180,7 +180,15 @@ TEST(ReplicaExpand, MultipleSitesShareModuleOrdinalSpace) {
   auto f      = build_compact("lgdb_rexp_multi_site", 4);
   auto second = gu::create_typed_node(*f.parent, Ntype_op::Sub);
   second.set_name("tail");
-  second.set_subnode(f.body_io, hhds::Subnode_loop{.first = 0, .step = 1, .count = 2, .index_input = kPidIdx});
+  second.set_subnode(f.body_io,
+                     hhds::Subnode_loop{
+                         .first              = 0,
+                         .step               = 1,
+                         .count              = 2,
+                         .index_input        = kPidIdx,
+                         .activation_input   = std::nullopt,
+                         .next_active_output = std::nullopt,
+                     });
 
   ASSERT_EQ(materialize_occurrences(f.parent.get(), "test"), 2);
   std::vector<std::string> names;

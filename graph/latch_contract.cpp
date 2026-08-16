@@ -763,8 +763,9 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
         sio != nullptr && (sio->get_name() == gu::lgassert_module_name || sio->get_name() == gu::fproperty_module_name)) {
       continue;
     }
-    const auto& child = clock_input_interface(n.get_subnode_graph(), cache);
-    result.complete   = result.complete && child.complete;
+    const auto  child_graph = n.get_subnode_graph();
+    const auto& child       = clock_input_interface(child_graph, cache);
+    result.complete         = result.complete && child.complete;
     for (const auto cp : child.ports) {
       bool found = false;
       for (const auto& e : n.inp_edges()) {
@@ -842,8 +843,9 @@ const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& d
         sio != nullptr && (sio->get_name() == gu::lgassert_module_name || sio->get_name() == gu::fproperty_module_name)) {
       continue;
     }
-    const auto& child = reset_input_ports(n.get_subnode_graph(), cache);
-    result.complete   = result.complete && child.complete;
+    const auto  child_graph = n.get_subnode_graph();
+    const auto& child       = reset_input_ports(child_graph, cache);
+    result.complete         = result.complete && child.complete;
     for (const auto& rp : child.ports) {
       bool found = false;
       for (const auto& e : n.inp_edges()) {
@@ -917,7 +919,8 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const st
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
-    const auto& clk_pids = clock_input_ports(n.get_subnode_graph(), port_cache);
+    const auto  child_graph = n.get_subnode_graph();
+    const auto& clk_pids    = clock_input_ports(child_graph, port_cache);
     if (clk_pids.empty()) {
       continue;
     }

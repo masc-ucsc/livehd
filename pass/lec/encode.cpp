@@ -3301,8 +3301,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (ci.is_invalid()) {
             return false;
           }
-          const std::string nm{gu::pin_name_of(ci)};
-          return clk_inputs.count(nm) > 0 || livehd::latch_contract::Design_clocks::name_looks_like_clock(nm);
+          const std::string input_name{gu::pin_name_of(ci)};
+          return clk_inputs.count(input_name) > 0 || livehd::latch_contract::Design_clocks::name_looks_like_clock(input_name);
         };
         // AMBIGUITY IS A REFUSAL, not a coin flip: if two operands both look
         // like clocks this is not an ICG (it is an AND of two clocks), and
@@ -3822,9 +3822,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (mc.is_comb || mc.is_whole || n_wr == 0) {
         return mc.is_comb ? a_next : ((mc.fwd && !mc.fwd->is_known_false()) ? a_next : mc.a_cur);
       }
-      size_t prefix = 0;
-      while (prefix < n_wr && fwd_bit(r, prefix)) {
-        ++prefix;
+      size_t forwarded_writes = 0;
+      while (forwarded_writes < n_wr && fwd_bit(r, forwarded_writes)) {
+        ++forwarded_writes;
       }
       // Scan for a set bit BEYOND the prefix FIRST: a row with a hole (e.g.
       // 0b10 from a legacy `fwd=2` or an explicit __memory matrix) is not
@@ -3832,15 +3832,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // UNDER-forward and — because `rd_src == a_cur` sets `shared_cur` — let
       // the two designs' douts be assumed equal on equal addresses, which is a
       // false PROVEN. Over-forwarding (a_next) is the safe direction.
-      for (size_t w = prefix; w < n_wr; ++w) {
+      for (size_t w = forwarded_writes; w < n_wr; ++w) {
         if (fwd_bit(r, w)) {
           return a_next;  // historical coarse behavior
         }
       }
-      if (prefix == 0) {
+      if (forwarded_writes == 0) {
         return mc.a_cur;
       }
-      return a_after[applied_upto[prefix]];
+      return a_after[applied_upto[forwarded_writes]];
     };
     for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
       const Term& rd_src = rd_source(k);

@@ -254,8 +254,13 @@ echo "ok: forcing the normalized side to a P=1 time base FAILS (the harness disc
 # Negative control 2: swap the two slot predicates in the normalized Verilog. A
 # slot table that put the transparent-low latch with the negedge flop (and vice
 # versa) would produce exactly this netlist, so the harness must reject it.
-slot0=$(grep -oE '^if \(eq_[0-9]+\) begin' "$W/norm.v" | head -1 | grep -oE 'eq_[0-9]+')
-slot1=$(grep -oE '^if \(eq_[0-9]+\) begin' "$W/norm.v" | grep -oE 'eq_[0-9]+' | grep -v "^$slot0$" | head -1)
+mapfile -t slot_predicates < <(
+  grep -oE '^if \([A-Za-z_][A-Za-z0-9_]*\) begin' "$W/norm.v" \
+    | sed -E 's/^if \(([^)]*)\) begin$/\1/' \
+    | awk '!seen[$0]++ { print; if (++count == 2) exit }'
+)
+slot0=${slot_predicates[0]:-}
+slot1=${slot_predicates[1]:-}
 [ -n "$slot0" ] && [ -n "$slot1" ] || fail "could not find the two slot predicates in the normalized Verilog"
 sed "s/^if ($slot0) begin/if (__T__) begin/; s/^if ($slot1) begin/if ($slot0) begin/; s/^if (__T__) begin/if ($slot1) begin/" \
   "$W/norm.v" > "$W/norm_swap.v"

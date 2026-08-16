@@ -723,7 +723,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                           const std::function<std::string(std::string_view)>&   canon,
                           hhds::Graph*                                          top_g) {
     livehd::lec::Clock_forest forest;
-    const std::string         top_name = canon(top_g->get_name());
+    const std::string         canonical_top_name = canon(top_g->get_name());
 
     // Resolve one driver INSIDE parent `pname` to a root name, following the
     // derivations. Returns "" when it does not reach a known root.
@@ -741,7 +741,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (auto* r = forest.find(canon(cr.net.get_graph()->get_name()), port)) {
           return *r;
         }
-        return pname == top_name ? port : std::string{};  // a top port IS a root
+        return pname == canonical_top_name ? port : std::string{};  // a top port IS a root
       }
       if (gu::is_const_pin(cr.net)) {
         return "";
@@ -795,7 +795,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             continue;
           }
           auto sio = node.get_subnode_io();
-          if (sio == nullptr || canon(sio->get_name()) != top_name) {
+          if (sio == nullptr || canon(sio->get_name()) != canonical_top_name) {
             continue;
           }
           absl::flat_hash_map<std::string, std::vector<std::string>> by_net;
@@ -881,7 +881,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       return x;
     };
     {
-      auto& row = forest.port_root[top_name];
+      auto& row = forest.port_root[canonical_top_name];
       for (auto node : top_g->grouped_hierarchy().nodes()) {
         const auto op = gu::type_op_of(node);
         if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Latch) {
@@ -1041,7 +1041,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     {
       std::string only_root;
       bool        one = true;
-      if (auto tit = forest.port_root.find(top_name); tit != forest.port_root.end()) {
+      if (auto tit = forest.port_root.find(canonical_top_name); tit != forest.port_root.end()) {
         for (const auto& [pn, r] : tit->second) {
           if (pn.empty()) {
             continue;
@@ -1168,20 +1168,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<uint8_t>                         proven(order.size(), 0);  // each slot written by its owning task
   // Budget scheduler: `settled` marks a def whose verdict is DEFINITIVE (Proven or
   // Refuted), for the straggler diagnosis. When `budget_on` (timeout>0, rlimit==0,
-  // timeout>0, >1 def), `base.timeout` is a soft TOTAL WALL budget for the DAG's
-  // solving: each def's per-query cap is the wall time remaining since dispatch
-  // (see run_def — wall, not a sum of per-def times, so concurrent defs don't
-  // drain it jobs-times faster than real time; the TOP def is exempt and keeps
-  // the full cap). `solve_spent_ms` still accumulates prove_equal time for
-  // diagnostics. A 1s floor once spent, so a straggler still gets a quick
-  // attempt. It is a HINT/target — a bit over or under is fine. Off ⇒ each def
+  // timeout>0, >1 def), `base.timeout` is a soft TOTAL solver-time budget for
+  // the DAG. Parsing, transforms, encoding, and CVC5 term construction do not
+  // draw it down. The TOP def is exempt and keeps the full cap. A 1s floor once
+  // spent gives a straggler a quick attempt. It is a HINT/target — a bit over
+  // or under is fine. Off ⇒ each def
   // keeps the full base.timeout per-query cap (pre-scheduler behavior).
   std::vector<uint8_t>                         settled(order.size(), 0);
   bool                                         budget_on = false;
   std::atomic<long long>                       solve_spent_ms{0};
   std::atomic<int>                             defs_floored{0};  // defs dispatched past the soft total, on the min_timeout floor
   std::atomic<int>                             defs_solved{0};   // defs actually handed to the solver (the "units" of the report)
-  std::chrono::steady_clock::time_point        budget_t0{};      // DAG dispatch start; the wall clock the budget draws from
   livehd::lec::Query_result                    top_result;
   // formal.stats: the RUN total. Every def gets its own cvc5::Solver (several,
   // under the portfolio), so no single Query_result holds the run's effort —
@@ -1303,24 +1300,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     livehd::lec::Lec_options o = base;
     o.design_assumes           = base.design_assumes && assume_cones.contains(name);
     if (budget_on && name != top_key) {
-      // This def's per-query cap = the WALL budget remaining since the DAG
-      // dispatch began (1s floor once spent; 0 would read as UNBOUNDED to the
-      // engine). Draw down by WALL CLOCK, not by summing per-def solve times:
-      // defs run CONCURRENTLY under formal.jobs, and the old sum drained the
-      // budget jobs-times faster than real time — two 120s stragglers running
-      // side by side zeroed the budget for every def dispatched after them
-      // (the top got a 1s cap), even though only ~120s of real time had
-      // passed. Under wall accounting a def that proves instantly standalone
-      // is never starved by a concurrent straggler: any def dispatched inside
-      // the window sees the full remaining window.
+      // This def's per-query cap is the solver budget left by completed defs.
+      // Concurrent defs may temporarily oversubscribe the soft total, but no
+      // parsing, transformation, or representation-building time is charged.
       //   The TOP def is exempt: it is the proof the user actually asked for,
       // and it is scheduled LAST (leaves-first DAG), exactly where a soft
       // total budget has nothing left. Starving it turns the whole run
       // UNKNOWN after every block proved. One full per-query cap for one def
       // keeps the run bounded (~2x timeout worst case), matching the
       // pre-scheduler behavior a standalone --top run gives it.
-      const long long spent_s
-          = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - budget_t0).count();
+      const long long spent_s     = solve_spent_ms.load(std::memory_order_relaxed) / 1000;
       const long long remaining_s = static_cast<long long>(base.timeout) - spent_s;
       const long long floor_s     = std::max<long long>(1, base.min_timeout);
       if (remaining_s < floor_s) {
@@ -1887,7 +1876,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     disclose_lec_helpers(r, o);
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     if (budget_on) {
-      solve_spent_ms += ms;  // only solver (prove_equal) time draws down the budget
+      solve_spent_ms += r.solve_ms;
       defs_solved.fetch_add(1);
     }
     // formal.stats run total. OUTSIDE the budget_on gate (accounting is on iff
@@ -2027,13 +2016,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
   // ── Budget scheduler ──────────────────────────────────────────────────────
   // With a finite timeout and no rlimit, on a multi-def hierarchy,
-  // `base.timeout` is a soft TOTAL WALL budget for the DAG's solving: each
-  // def's per-query cap becomes the wall time remaining since dispatch
-  // (run_def, above) — so N hard defs share ~one budget of solver effort
-  // instead of one budget EACH (the D×T hazard). Wall clock, not a sum of
-  // per-def solve times: under formal.jobs concurrency the sum drained the
-  // budget jobs-times faster than real time and starved every def dispatched
-  // after a straggler pair. The TOP def keeps the full per-query cap (it is
+  // `base.timeout` is a soft TOTAL solver-time budget for the DAG: each def's
+  // per-query cap becomes the solver time remaining after completed defs
+  // (run_def, above), so translation and CVC5 representation construction are
+  // excluded. The TOP def keeps the full per-query cap (it is
   // the requested proof and runs last — see run_def). Fast defs (the common
   // case) finish well under budget and still see the full cap, so a design
   // that fits is never regressed; only a run that would out-solve `timeout`
@@ -2042,7 +2028,6 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // lone def. A single DAG pass: the verdict cache / Unknown-ledger and per-def
   // progress stay exactly as before.
   budget_on = base.timeout > 0 && base.rlimit == 0 && order.size() > 1;
-  budget_t0 = std::chrono::steady_clock::now();
   dispatch_dag();
 
   // ── DISCHARGE the top-down premises, then ESCALATE only where one failed ───
@@ -2231,8 +2216,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // failure, because a run that quietly took 3x its budget is the thing an agent
   // loop needs to see.
   if (budget_on) {
-    const long long spent_s
-        = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - budget_t0).count();
+    const long long spent_s = solve_spent_ms.load(std::memory_order_relaxed) / 1000;
     const int floored = defs_floored.load();
     if (spent_s > base.timeout || floored > 0) {
       std::print("lec[hier]: budget {}s target / {}s actual over {} def(s) solved, {} on the {}s floor\n",

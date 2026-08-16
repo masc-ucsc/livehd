@@ -374,7 +374,8 @@ void put_cvc5_stats(std::string& b, const Cvc5_stats& st) {
 
 // Serialize a Query_result over the worker pipe (same binary on both ends, so
 // native-endian POD is fine). Layout: verdict byte, witness, detail, engine,
-// elapsed_ms (i64), then the two unmatched-cut-point lists.
+// elapsed_ms (i64), then the two unmatched-cut-point lists. Solver-only time is
+// a best-effort tail so older/truncated worker blobs retain their old meaning.
 std::string serialize_result(const Query_result& r) {
   std::string b;
   b.push_back(static_cast<char>(static_cast<uint8_t>(r.verdict)));
@@ -429,6 +430,7 @@ std::string serialize_result(const Query_result& r) {
   for (const auto& certificate : r.loop_certificates) {
     put_str(b, certificate);
   }
+  put_i64(b, r.solve_ms);  // best-effort tail: solver-only budget accounting
   return b;
 }
 
@@ -697,6 +699,10 @@ bool deserialize_result(std::string_view b, Query_result& r) {
       return true;
     }
     r.loop_certificates.push_back(std::move(certificate));
+  }
+  int64_t solve_ms = 0;
+  if (get_i64(b, solve_ms)) {
+    r.solve_ms = solve_ms;
   }
   return true;
 }
@@ -1209,6 +1215,7 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   r.verdict          = Verdict::Unknown;
   r.engine           = "auto(ind|bmc)";
   r.elapsed_ms       = total_ms;
+  r.solve_ms         = ind.solve_ms + bmc.solve_ms;
   // Both engines share ONE encoder, so a refusal on either leg means the design
   // was never encoded — carry it so the CLI hard-fails instead of warning (M0).
   r.unsupported      = ind.unsupported || bmc.unsupported;
@@ -1329,12 +1336,14 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   if (rb.verdict == Verdict::Refuted) {
     rb.detail  = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
     rb.cvc5   += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
+    rb.solve_ms += ri.solve_ms;
     return rb;
   }
   Query_result bp;
   if (try_bounded_proven(rb, bp)) {  // bp is a copy of rb, so it already carries rb.cvc5
     bp.elapsed_ms  = now_ms(t0);
     bp.cvc5       += ri.cvc5;
+    bp.solve_ms   += ri.solve_ms;
     return bp;
   }
   return make_inconclusive(ri, rb, opts, now_ms(t0));  // merges both legs itself
@@ -1713,9 +1722,11 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   // first-REFUTED cube's numbers would hide the whole sweep's cost. A worker
   // that was killed (or never deserialized) contributes an empty struct.
   Cvc5_stats  cubes;
+  long long   cubes_solve_ms = 0;
   for (int i = 0; i < nworkers; ++i) {
     if (done[i]) {
       cubes += got[i].cvc5;
+      cubes_solve_ms += got[i].solve_ms;
     }
   }
   if (refuter >= 0) {
@@ -1725,6 +1736,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
     out.elapsed_ms   = now_ms(t0);
     out.detail       = "auto: case-split " + tag + " REFUTED; " + out.detail;
     out.cvc5         = cubes;  // assign: got[refuter].cvc5 is already one of the summands
+    out.solve_ms     = cubes_solve_ms;
     return out;
   }
   int proven = 0, unknown = 0;
@@ -1740,6 +1752,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   out.split_used = pick.name;
   out.elapsed_ms = now_ms(t0);
   out.cvc5       = cubes;
+  out.solve_ms   = cubes_solve_ms;
   if (unknown == 0) {
     out.verdict = Verdict::Proven;
     // PREPEND onto a worker's detail rather than replacing it. Assigning here
@@ -1769,6 +1782,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   // rides along on whatever verdict this function ends up returning; without
   // this a `--stats` report silently under-counts a hinted run.
   Cvc5_stats carried;
+  long long  carried_solve_ms = 0;
   // Cache hints are ordering only. Try the previous winner once; if an edit
   // made it inconclusive, continue through the unchanged auto portfolio below.
   if (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc") {
@@ -1794,9 +1808,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     if (trusted) {
       hr.detail  = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
       hr.cvc5   += carried;
+      hr.solve_ms += carried_solve_ms;
       return hr;
     }
     carried += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
+    carried_solve_ms += hr.solve_ms;
   }
   if (opts._isolated_worker) {
     // The hierarchy Taskflow already supplies parallelism and process
@@ -1813,6 +1829,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
     if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
       ri.cvc5 += carried;
+      ri.solve_ms += carried_solve_ms;
       return ri;
     }
     Lec_options ob = opts;
@@ -1825,6 +1842,8 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     if (rb.verdict == Verdict::Refuted) {
       rb.cvc5 += ri.cvc5;  // the ind leg of this ladder ran too
       rb.cvc5 += carried;
+      rb.solve_ms += ri.solve_ms;
+      rb.solve_ms += carried_solve_ms;
       return rb;
     }
     Query_result bp;
@@ -1832,10 +1851,13 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
       bp.cvc5       += ri.cvc5;
       bp.cvc5       += carried;
+      bp.solve_ms   += ri.solve_ms;
+      bp.solve_ms   += carried_solve_ms;
       return bp;
     }
     Query_result inc  = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
     inc.cvc5         += carried;
+    inc.solve_ms     += carried_solve_ms;
     return inc;
   }
   // Purely combinational pair: skip the bmc racer (and the fork). Run one ind
@@ -1852,9 +1874,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
         Query_result cs = run_case_split(ref, impl, opts, sub_lib);
         if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
           cs.cvc5 += carried;
+          cs.solve_ms += carried_solve_ms;
           return cs;
         }
         carried += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
+        carried_solve_ms += cs.solve_ms;
       }
       Lec_options o    = opts;
       o.engine         = "ind";
@@ -1864,6 +1888,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       r.elapsed_ms     = now_ms(tc);
       r.detail         = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
       r.cvc5          += carried;
+      r.solve_ms      += carried_solve_ms;
       return r;
     }
   }
@@ -1911,8 +1936,10 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   Cvc5_stats both  = race.results[0].cvc5;
   both            += race.results[1].cvc5;
   both            += carried;
-  auto with        = [&both](Query_result r) {
+  const long long both_solve_ms = race.results[0].solve_ms + race.results[1].solve_ms + carried_solve_ms;
+  auto            with          = [&both, both_solve_ms](Query_result r) {
     r.cvc5 = both;
+    r.solve_ms = both_solve_ms;
     return r;
   };
   if (race.winner >= 0) {
@@ -3172,15 +3199,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     solver.setOption("rlimit-per", std::to_string(opts.rlimit));
   }
 
-  // ── One shared wall-clock allowance for this query (encode + solve) ─────────
-  // `formal.timeout` is ONE budget for the whole query, not one per phase. It used to
-  // be handed out twice at full value — once to each Encoder (set_encode_budget)
-  // and again to every checkSat (tlimit-per above) — so `formal.timeout=120` licensed
-  // ~120s of encoding PLUS ~120s of solving and a "120s" cap really cost ~250s of
-  // wall clock (measured on a whole-CPU BMC miter: 13s fixed + 2xT, T in {15,30,120}
-  // -> 43s/67s/251s). Encoding is not free on a big unroll, so it must draw from the
-  // same purse: the encoders now take what is LEFT, and each checkSat is re-armed to
-  // what is left after that (arm_solve_budget, called at every checkSat site).
+  // ── One shared solver allowance for this query ──────────────────────────────
+  // `formal.timeout` covers formal solving only. Parsing, graph transforms, and
+  // construction of the CVC5 representation are deliberately outside it. Each
+  // checkSat is capped by the allowance left after earlier solver calls.
   //
   // SOUND: shrinking a bound only ever turns a checkSat into `unknown` (-> Unknown),
   // never a false Proven/Refuted — the same degrade the fixed tlimit-per already had.
@@ -3188,40 +3210,42 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // instead of a 0 that would read as UNBOUNDED to cvc5.
   // OFF (byte-identical to the old per-phase behavior) for the deterministic
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
-  const auto      budget_t0       = std::chrono::steady_clock::now();
   const bool      budget_on       = opts.timeout > 0 && opts.rlimit == 0;
   const long long budget_ms       = static_cast<long long>(opts.timeout) * 1000;
   // formal.min_timeout: the floor this query never drops below once the shared
   // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
   const long long budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
+  std::chrono::steady_clock::duration solve_spent{};
   auto            budget_left_ms  = [&]() -> long long {
-    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - budget_t0).count();
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
     return std::max<long long>(budget_floor_ms, budget_ms - spent);
   };
-  // Encoder budget in SECONDS (its unit), rounded up so a sub-second remainder is
-  // still a positive bound rather than 0 == unbounded.
-  auto encode_budget_s  = [&]() -> int { return budget_on ? static_cast<int>((budget_left_ms() + 999) / 1000) : opts.timeout; };
-  // Re-arm the per-checkSat cap to the budget remaining. Must be called immediately
-  // before each decisive checkSat; a no-op when the budget is off.
+  // Run one solver query against the remaining allowance and accumulate only
+  // time spent inside cvc5. The counter includes every check even when the wall
+  // budget is disabled so formal.stats remains accurate.
   //
   // INVARIANT (verified by grep, and the reason the counter lives here): every
-  // solver.checkSat() in this function is immediately preceded by exactly one
-  // arm_solve_budget() call -- 1:1, no exceptions. cvc5 exposes NO checkSat
+  // solver.checkSat() in this function goes through solve_check. cvc5 exposes NO checkSat
   // counter under bv-solver=bitblast-internal (the whole
   // theory::bv::BVSolverBitblast::cadical::* family is absent), so LiveHD counts
-  // them itself here. Adding a checkSat WITHOUT an arm_solve_budget() in front
-  // both leaves it unbounded and makes `--stats` undercount.
+  // them itself here. Adding a raw checkSat both bypasses the shared budget and
+  // makes `--stats` undercount.
   //
   // The increment is deliberately OUTSIDE the `if (budget_on)` body: budget_on is
   // false whenever formal.timeout=0 or formal.rlimit>0, so counting inside would
   // report 0 checks on the common configurations.
-  auto arm_solve_budget = [&]() {
+  auto solve_check = [&]() -> cvc5::Result {
     if (acc != nullptr) {
       ++acc->checks;
     }
     if (budget_on) {
       solver.setOption("tlimit-per", std::to_string(budget_left_ms()));
     }
+    const auto t0 = std::chrono::steady_clock::now();
+    auto       r  = solver.checkSat();
+    solve_spent += std::chrono::steady_clock::now() - t0;
+    res.solve_ms = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+    return r;
   };
 
   // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
@@ -3524,7 +3548,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   if (opts.engine == "bmc") {
     const int N = opts.bound > 0 ? opts.bound : 6;
     Encoder   enc(tm);
-    enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
@@ -4762,8 +4785,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail += bbin_models_hint(res.unmatched_impl);
     }
     if (opts.assumptions != nullptr || opts.design_assumes) {
-      arm_solve_budget();
-      cvc5::Result ar = solver.checkSat();
+      cvc5::Result ar = solve_check();
       if (!ar.isSat()) {
         res.verdict  = Verdict::Unknown;
         res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
@@ -4793,8 +4815,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (const auto& [dn, dt] : decomp_diffs) {
         solver.push();
         solver.assertFormula(dt);
-        arm_solve_budget();
-        cvc5::Result dr = solver.checkSat();
+        cvc5::Result dr = solve_check();
         solver.pop();
         if (!dr.isUnsat()) {
           all_unsat = false;  // SAT or unknown -> let the monolithic solve decide + build the witness
@@ -4820,8 +4841,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
     solver.assertFormula(bad);
-    arm_solve_budget();
-    cvc5::Result r = solver.checkSat();
+    cvc5::Result r = solve_check();
     if (r.isUnsat()) {
       if (incomplete) {
         res.verdict  = Verdict::Unknown;
@@ -5435,7 +5455,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // reports Unknown and leaves the refutation to BMC-from-reset.
   if (ind_use_plan && (ind_ref_plan.multi || ind_impl_plan.multi)) {
     Encoder penc(tm);
-    penc.set_encode_budget(encode_budget_s());
     penc.set_sub_lib(sub_lib);
     penc.set_name_alias(&name_alias);
     penc.set_collapse_defs(collapse_ptr);
@@ -5593,8 +5612,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           solver.push();
           solver.assertFormula(d.term);
-          arm_solve_budget();
-          const auto sr = solver.checkSat();
+          const auto sr = solve_check();
           solver.pop();
           if (!sr.isUnsat() && std::getenv("LEC_PHASE_STEP_LOG") != nullptr) {
             std::fprintf(stderr,
@@ -5845,7 +5863,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return res;
     }
     if (opts.design_assumes) {
-      const auto ar = solver.checkSat();
+      const auto ar = solve_check();
       if (!ar.isSat()) {
         res.verdict  = Verdict::Unknown;
         res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
@@ -5860,13 +5878,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (const auto& [lbl, d] : pdiffs) {
         solver.push();
         solver.assertFormula(d);
-        const auto one = solver.checkSat();
+        const auto one = solve_check();
         std::fprintf(stderr, "[LEC_PHASE] %-52s %s\n", lbl.c_str(), one.isUnsat() ? "equal" : (one.isSat() ? "DIFF" : "unknown"));
         solver.pop();
       }
     }
     solver.assertFormula(pbad);
-    const auto pr = solver.checkSat();
+    const auto pr = solve_check();
     if (pr.isUnsat()) {
       res.verdict = Verdict::Proven;
       return res;
@@ -5880,7 +5898,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
 
   Encoder enc(tm);
-  enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
@@ -6726,8 +6743,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
 
   if (opts.assumptions != nullptr || opts.design_assumes) {
-    arm_solve_budget();
-    cvc5::Result ar = solver.checkSat();
+    cvc5::Result ar = solve_check();
     if (!ar.isSat()) {
       res.verdict  = Verdict::Unknown;
       res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
@@ -6822,8 +6838,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         solver.push();
         solver.assertFormula(bad.substitute(sel, vc));                  // folded miter
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {sel, vc}));  // pin sel so the witness reads it
-        arm_solve_budget();
-        cvc5::Result cr = solver.checkSat();
+        cvc5::Result cr = solve_check();
         if (cr.isSat()) {
           res.witness = build_witness();
           solver.pop();
@@ -6868,8 +6883,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const auto cut_t0 = std::chrono::steady_clock::now();
       solver.push();
       solver.assertFormula(dt);
-      arm_solve_budget();
-      cvc5::Result dr = solver.checkSat();
+      cvc5::Result dr = solve_check();
       solver.pop();
       const auto cut_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - cut_t0).count();
       if (dr.isUnsat()) {
@@ -6914,8 +6928,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // through to the monolithic solve for the definitive verdict + witness.
   }
   solver.assertFormula(bad);
-  arm_solve_budget();
-  cvc5::Result r = solver.checkSat();
+  cvc5::Result r = solve_check();
 
   if (r.isUnsat()) {
     // COMMON outputs agree. Proven only if the correspondence is also complete.
@@ -7667,6 +7680,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   if (rb.verdict == Verdict::Refuted) {
     rb.detail  = died_note + rb.detail;
     rb.cvc5   += ri.cvc5;  // the ind retry worker ran too
+    rb.solve_ms += ri.solve_ms;
     return rb;
   }
   Query_result bp;
@@ -7674,6 +7688,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
     bp.detail      = died_note + bp.detail;
     bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
     bp.cvc5       += ri.cvc5;
+    bp.solve_ms   += ri.solve_ms;
     return bp;
   }
   Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
@@ -7707,10 +7722,12 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
     // on mask/extract/memory-heavy cones, so its give-up is the EXPECTED case).
     first.detail += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
     first.cvc5   += r2.cvc5;  // the retry really ran (formal.stats)
+    first.solve_ms += r2.solve_ms;
     return first;
   }
   r2.detail  = "int-blast retry (BV gave up; re-solved as unbounded integers at " + std::to_string(o2.timeout) + "s): " + r2.detail;
   r2.cvc5   += first.cvc5;  // the BV leg's effort was still spent
+  r2.solve_ms += first.solve_ms;
   return r2;
 }
 
@@ -8241,7 +8258,6 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   }
 
   Encoder enc(tm);
-  enc.set_encode_budget(opts.timeout);  // 2f-lec: bound per-cycle encode wall-clock like each checkSat
   enc.set_sub_lib(sub_lib);
   enc.set_emit_props(true);
   // Submodule port taps: a monitor may bind a SUBMODULE port (Src::output with
