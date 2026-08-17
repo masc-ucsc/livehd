@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -19,18 +20,38 @@ namespace {
 // a destroyed graph reallocated at the same address leaves stale entries).
 // Correctness comes from the pin_const_value attr being the identity.
 struct Per_graph_const_state {
+  std::mutex                                      mutex;
   absl::flat_hash_map<std::string, hhds::Port_id> serialized_to_pid;
   hhds::Port_id                                   next_big_pid = livehd::graph_util::Const_small_pid_count;
 };
 
-absl::flat_hash_map<const hhds::Graph*, Per_graph_const_state>& registry() {
-  static absl::flat_hash_map<const hhds::Graph*, Per_graph_const_state> r;
+absl::flat_hash_map<const hhds::Graph*, std::unique_ptr<Per_graph_const_state>>& registry() {
+  static absl::flat_hash_map<const hhds::Graph*, std::unique_ptr<Per_graph_const_state>> r;
   return r;
 }
 
 std::mutex& registry_mutex() {
   static std::mutex m;
   return m;
+}
+
+Per_graph_const_state& state_for(const hhds::Graph* graph) {
+  // The registry owns stable heap objects, so the process-global map lock is
+  // needed only on a thread's first encounter with a graph.  Steady-state
+  // constant creation locks that graph's state, allowing independent module
+  // transformations to proceed concurrently.
+  thread_local absl::flat_hash_map<const hhds::Graph*, Per_graph_const_state*> local;
+  if (const auto it = local.find(graph); it != local.end()) {
+    return *it->second;
+  }
+
+  std::lock_guard<std::mutex> lock(registry_mutex());
+  auto&                       state = registry()[graph];
+  if (!state) {
+    state = std::make_unique<Per_graph_const_state>();
+  }
+  local.emplace(graph, state.get());
+  return *state;
 }
 
 }  // namespace
@@ -54,8 +75,8 @@ hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
   // allocates a fresh port_id >= Const_small_pid_count.
   auto serialized = value.serialize();
 
-  std::lock_guard<std::mutex> lk(registry_mutex());
-  auto&                       reg = registry()[&g];
+  auto&                       reg = state_for(&g);
+  std::lock_guard<std::mutex> lk(reg.mutex);
 
   if (auto it = reg.serialized_to_pid.find(serialized); it != reg.serialized_to_pid.end()) {
     // Verify against the graph itself: the entry may be stale (a previous

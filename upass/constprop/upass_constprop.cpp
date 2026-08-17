@@ -147,9 +147,9 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
     unsigned v   = 0;
     bool     unk = false;
     for (int k = 0; k < bpd; ++k) {
-      const char c = padded[i + static_cast<size_t>(k)];
-      unk |= (c == '?');
-      v    = (v << 1) | (c == '1' ? 1U : 0U);
+      const char c  = padded[i + static_cast<size_t>(k)];
+      unk          |= (c == '?');
+      v             = (v << 1) | (c == '1' ? 1U : 0U);
     }
     out.push_back(unk ? '?' : digits[v]);
   }
@@ -260,7 +260,7 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   // via bits_to_grouped; `:d` has no positional rendering at all, so it falls
   // back to the value's Pyrope spelling (`0ub????`) — the same text a bare
   // `"{v}"` produces — and skips the pad/group cosmetics.
-  const bool unk = v.has_unknowns();
+  const bool  unk = v.has_unknowns();
   if (!bad) {
     switch (base) {
       case 'd': out = unk ? v.to_pyrope() : v.to_decimal(w, sep); break;
@@ -371,7 +371,12 @@ void uPass_constprop::end_run() {
 }
 
 void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value) {
-  if (value.is_invalid() || value.is_nil() || value.is_string() || value.has_unknowns() || value.is_negative()) {
+  // Compiler temporaries can inherit an operand's declared facts while an
+  // if-expression is being lowered.  Those facts are not a declaration on
+  // the temporary: sibling arms may legally be wider, and the typed user
+  // destination is checked after the arms merge.
+  if (Lnast::is_tmp(lhs) || value.is_invalid() || value.is_nil() || value.is_string() || value.has_unknowns()
+      || value.is_negative()) {
     return;
   }
   const auto umax = decl_unsigned_max_of(lhs);
@@ -430,7 +435,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .pass     = "upass.constprop",
               .message  = std::format("array element `{}` is an integer but is written a boolean value "
                                       "(a variable's type cannot change)",
-                                      field_key),
+                                     field_key),
               .span     = lm->current_span(),
               .hint     = "cast the boolean explicitly, e.g. `u1(v)` or `unsigned(v)`",
           });
@@ -444,7 +449,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .pass     = "upass.constprop",
               .message  = std::format("array element `{}` is a boolean but is written an integer value "
                                       "(a variable's type cannot change)",
-                                      field_key),
+                                     field_key),
               .span     = lm->current_span(),
               .hint     = "compare to make a boolean, e.g. `v != 0`",
           });
@@ -459,8 +464,8 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
                 .pass     = "upass.constprop",
                 .message  = std::format("array element `{}` (value {}) does not fit its declared range "
                                         "(the element type is unsigned)",
-                                        field_key,
-                                        value.to_decimal_string()),
+                                       field_key,
+                                       value.to_decimal_string()),
                 .span     = lm->current_span(),
                 .hint     = "widen to a signed element type, or store a non-negative value",
             });
@@ -500,9 +505,9 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
         .category = "type",
         .pass     = "upass.constprop",
         .message  = std::format("`{}` is {} but is written a {} value (a variable's type cannot change)",
-                                field_key,
-                                cur_str ? "a string" : "an integer",
-                                v_str ? "string" : "integer"),
+                               field_key,
+                               cur_str ? "a string" : "an integer",
+                               v_str ? "string" : "integer"),
         .span     = lm->current_span(),
         .hint     = "keep the field's declared kind, or declare it with the intended type",
     });
@@ -3943,10 +3948,10 @@ void uPass_constprop::process_func_call() {
               .category = "type",
               .pass     = "upass.constprop",
               .message  = std::format("value {} does not fit the `{}` cast range [{}, {}]",
-                                      v.to_decimal_string(),
-                                      fname,
-                                      tmin.to_decimal_string(),
-                                      tmax.to_decimal_string()),
+                                     v.to_decimal_string(),
+                                     fname,
+                                     tmin.to_decimal_string(),
+                                     tmax.to_decimal_string()),
               .span     = lm->current_span(),
               .hint     = "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` "
                           "prefix to drop bits intentionally",
@@ -4051,8 +4056,8 @@ void uPass_constprop::process_range() {
           .category = "type",
           .pass     = "upass.constprop",
           .message  = std::format("invalid descending range: {} never reaches {} (only ascending ranges are allowed)",
-                                  start.to_decimal_string(),
-                                  end.to_decimal_string()),
+                                 start.to_decimal_string(),
+                                 end.to_decimal_string()),
           .span     = std::move(span),
           .hint     = "swap the bounds so the range ascends, e.g. `0..=5`",
       });
@@ -4240,7 +4245,7 @@ void uPass_constprop::process_tuple_get() {
       const auto           fpath = std::string_view(key).substr(src.size() + 1);
       const Bundle::Entry& fe    = sb->get_entry(bundle_path::of_string(fpath));
       const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
-                                   || !fe.decl_min.is_invalid() || fe.comptime;
+                         || !fe.decl_min.is_invalid() || fe.comptime;
       if (facts) {
         if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial(bundle_path::of_string("0"))) {
           Bundle::Entry e = db->get_entry(bundle_path::of_string("0"));
@@ -4289,10 +4294,10 @@ void uPass_constprop::process_tuple_get() {
         .span     = lm->current_span(),
         .hint     = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
                                 "(reading an absent field is a compile error)",
-                                src,
-                                first_seg,
-                                src,
-                                first_seg),
+                            src,
+                            first_seg,
+                            src,
+                            first_seg),
     });
     store_trivial(dst, *Dlop::nil());
   } else if (st().has_trivial(src)) {
@@ -4314,11 +4319,11 @@ void uPass_constprop::process_tuple_get() {
           .message  = std::format("`{}` has no field `{}` (a scalar has no fields)", shown, first_seg),
           .span     = lm->current_span(),
           .hint     = std::format("`{}` is a built-in attribute — read it with `{}.[{}]`, not `{}.{}`",
-                                  first_seg,
-                                  shown,
-                                  first_seg,
-                                  shown,
-                                  first_seg),
+                              first_seg,
+                              shown,
+                              first_seg,
+                              shown,
+                              first_seg),
       });
       store_trivial(dst, *Dlop::nil());
       return;
@@ -5001,7 +5006,7 @@ static std::optional<int> positional_array_elem_bits(const Bundle* b) {
   }
   // `get_bits()` counts the sign slot, so a non-negative envelope states one
   // bit more than the lane holds. A signed envelope needs the wider of the two.
-  const int64_t elem_bits = elem_min.is_negative() ? std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits())
+  const int64_t elem_bits = elem_min.is_negative()     ? std::max<int64_t>(elem_max.get_bits(), elem_min.get_bits())
                             : elem_max.is_known_zero() ? 0
                                                        : static_cast<int64_t>(elem_max.get_bits()) - 1;
   if (elem_bits <= 0 || elem_bits > std::numeric_limits<int>::max()) {
@@ -5011,7 +5016,7 @@ static std::optional<int> positional_array_elem_bits(const Bundle* b) {
 }
 
 std::optional<Dlop> uPass_constprop::positional_array_bitview(const upass::Operand& o) {
-  std::shared_ptr<const Bundle> b = o.name.empty() ? o.bundle : st().get_bundle(o.name);
+  std::shared_ptr<const Bundle> b     = o.name.empty() ? o.bundle : st().get_bundle(o.name);
   const auto                    ebits = positional_array_elem_bits(b.get());
   if (!ebits) {
     return std::nullopt;
@@ -5069,10 +5074,9 @@ bool uPass_constprop::scatter_positional_array(std::string_view name, const Dlop
   const int  elem_bits = *ebits;
   const Dlop lane_mask = *Dlop::get_mask_value(elem_bits);
   for (size_t pos = 0; pos < b->unnamed_top_count(); ++pos) {
-    const auto    key  = std::to_string(pos);
-    const auto    path = bundle_path::of_string(key);
-    Dlop          shifted
-        = pos == 0 ? packed : *packed.sra_op(*Dlop::create_integer(static_cast<int64_t>(pos) * elem_bits));
+    const auto    key     = std::to_string(pos);
+    const auto    path    = bundle_path::of_string(key);
+    Dlop          shifted = pos == 0 ? packed : *packed.sra_op(*Dlop::create_integer(static_cast<int64_t>(pos) * elem_bits));
     Dlop          lane    = *shifted.and_op(lane_mask);
     Bundle::Entry e       = b->value_entry(path, false, lane);
     b->set(path, std::move(e));

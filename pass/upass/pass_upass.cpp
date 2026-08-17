@@ -65,6 +65,22 @@ std::vector<std::string> parse_order_csv(std::string_view txt_view) {
   throw std::runtime_error(std::string(msg));
 }
 
+// uPass_constprop consults this registry only while pass.upass is running.
+// Keeping owning Lnast pointers in its static map until process teardown both
+// retains an imported forest unnecessarily and lets Lnast/Source_locator
+// destruction run after HHDS static infrastructure has started shutting down.
+// Scope it to the pass, including exceptional exits.
+class Constprop_registry_scope {
+public:
+  explicit Constprop_registry_scope(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
+    uPass_constprop::set_function_registry(lnasts);
+  }
+  ~Constprop_registry_scope() { uPass_constprop::clear_function_registry(); }
+
+  Constprop_registry_scope(const Constprop_registry_scope&)            = delete;
+  Constprop_registry_scope& operator=(const Constprop_registry_scope&) = delete;
+};
+
 // Parse a non-negative integer option. Returns -1 on absent/empty/invalid
 // to match the "don't check" sentinel used by the verifier.
 int parse_expected_count(const upass::Options_map& opts, std::string_view key) {
@@ -255,7 +271,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // Named-constant provenance: a folded `pkg.PARAM` materializes as the
   // symbolic ref, for `--emit-dir pyrope:`. tolg cannot wire one, so refuse the
   // combination loudly instead of silently nil-wiring the design.
-  auto prov_txt          = get_label("preserve_param_provenance");
+  auto prov_txt             = get_label("preserve_param_provenance");
   preserve_param_provenance = prov_txt == "true" || prov_txt == "1";
   if (preserve_param_provenance && run_tolg) {
     livehd::diag::err("pass.upass", "provenance-needs-lnast", "config")
@@ -474,7 +490,7 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
-  uPass_constprop::set_function_registry(var.lnasts);
+  Constprop_registry_scope constprop_registry_scope(var.lnasts);
 
   // Shared comb-call-inliner registry, built ONCE and reused by every per-unit
   // runner below. ensure() walks each lnast body exactly once across the whole
@@ -562,6 +578,24 @@ void Pass_upass::work(Eprp_var& var) {
     const bool is_function_body = idx >= original_lnast_count;
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
+    }
+    // In auto mode the coalescer disables itself for Verilog-origin SSA trees.
+    // Remove it before constructing the runner as well: leaving the disabled
+    // plugin in the dispatch vector still made every generated operation pay a
+    // virtual call (millions per large module). An explicit coalescer setting
+    // continues to win and keeps the plugin in the requested order.
+    // The "auto" test must match uPass_coalescer::set_options, which lowercases
+    // the value before comparing — otherwise `coalescer=AUTO` reads as explicit
+    // here and as auto there.
+    const auto coalescer_opt   = up.pass_options.find("coalescer");
+    bool       coalescer_auto  = coalescer_opt == up.pass_options.end();
+    if (!coalescer_auto) {
+      std::string v = coalescer_opt->second;
+      std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      coalescer_auto = v == "auto";
+    }
+    if (ln->is_verilog_origin() && coalescer_auto) {
+      order.erase(std::remove(order.begin(), order.end(), "coalescer"), order.end());
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
     // toln:0 && tolg:0: nothing consumes the rewritten LNAST, so skip building

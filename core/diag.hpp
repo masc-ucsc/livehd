@@ -11,9 +11,11 @@
 // inou/prp can all route their errors through it without a dependency cycle.
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <format>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -107,7 +109,7 @@ struct Diagnostic {
   // completion (e.g. cgen still emits) instead of aborting after the step. Used
   // for a refuted formal property — see pass/formal (the FAIL is reported and
   // the design still compiles, with the failing check kept as a runtime check).
-  bool deferred = false;
+  bool                     deferred = false;
 
   // Optional structured payload for machine-parseable progress/info records (a
   // long-running pass emits one per resolved unit; pass.lec emits one per block).
@@ -165,7 +167,7 @@ public:
   void flush(Severity sev, std::string_view text);
 
   // Any recorded error (halting or deferred) -> the build is a failure.
-  [[nodiscard]] bool has_errors() const { return error_count_ > 0; }
+  [[nodiscard]] bool   has_errors() const { return error_count_ > 0; }
   // Errors that abort the pass pipeline (excludes deferred errors, which are
   // recorded + fail the build but let the pipeline run to completion). The
   // per-step pipeline gate uses this so a refuted formal property does not
@@ -195,8 +197,8 @@ public:
   // outlive its registration — prefer the RAII Locator_scope below, which the
   // emitting stages (parse, upass, tolg) wrap around their per-artifact
   // locator. Null = no excerpts (locations still print).
-  void                                      set_locator(const hhds::Source_locator* sl) noexcept { locator_ = sl; }
-  [[nodiscard]] const hhds::Source_locator* locator() const noexcept { return locator_; }
+  void                                      set_locator(const hhds::Source_locator* sl) noexcept;
+  [[nodiscard]] const hhds::Source_locator* locator() const noexcept;
 
 private:
   void init_output();  // lazily read env (once) unless overridden
@@ -205,14 +207,16 @@ private:
 
   std::vector<Diagnostic>     records_;
   absl::flat_hash_set<size_t> seen_;  // per-step dedup keys
-  std::optional<Diagnostic>   staged_;
   std::string                 step_;
-  uint64_t                    seq_                  = 0;
-  size_t                      error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
-  size_t                      deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
-  size_t                      warn_count_           = 0;
-  size_t                      note_count_           = 0;
-  size_t                      info_count_           = 0;  // progress/info records (never an error)
+  uint64_t                    seq_ = 0;
+  // Counters are written under mutex_ but READ by has_errors()/count() without
+  // it (those are on hot per-node paths). Atomics keep such a read well-defined
+  // while a bounded parallel step (parse / cprop / prp_writer) is emitting.
+  std::atomic<size_t> error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
+  std::atomic<size_t> deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
+  std::atomic<size_t> warn_count_           = 0;
+  std::atomic<size_t> note_count_           = 0;
+  std::atomic<size_t> info_count_           = 0;  // progress/info records (never an error)
 
   enum class Json { uninit, none, stderr_, file };
   Json        json_out_ = Json::uninit;
@@ -222,7 +226,10 @@ private:
   bool        stderr_jsonl_ = false;  // stderr channel renders JSONL, not text
   bool        configured_   = false;  // env read or setter called
 
-  const hhds::Source_locator* locator_ = nullptr;  // excerpt provider (not owned)
+  // emit() is shared by the bounded parallel source parser.  Parse-local
+  // staged diagnostics and excerpt locators are thread_local (diag.cpp); this
+  // mutex protects the accumulated records, counters, dedup set and streams.
+  mutable std::mutex mutex_;
 };
 
 // The active process-global sink.

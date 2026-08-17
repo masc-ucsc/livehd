@@ -3,6 +3,8 @@
 #include "pass_prp_writer.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
 #include <format>
 #include <fstream>
 #include <map>
@@ -10,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -22,9 +25,7 @@ static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
 void Pass_prp_writer::setup() {
   Eprp_method m1("pass.prp_writer", "emit LNAST as Pyrope 3.0 source files", &Pass_prp_writer::work);
   m1.add_label_optional("odir", "output directory for .prp files", ".");
-  m1.add_label_optional("debug",
-                        "emit /* TODO */ for unimplemented constructs instead of failing the compile",
-                        "false");
+  m1.add_label_optional("debug", "emit /* TODO */ for unimplemented constructs instead of failing the compile", "false");
   register_pass(m1);
 }
 
@@ -100,79 +101,140 @@ void Pass_prp_writer::work(Eprp_var& var) {
     by_file[full.substr(0, full.find('.'))].push_back(ln);
   }
 
+  struct File_job {
+    const std::string*                   file_name;
+    std::vector<std::shared_ptr<Lnast>>* units;
+  };
+  struct File_result {
+    std::string                                      write_error;
+    std::vector<std::pair<std::string, std::string>> unimplemented;
+    std::exception_ptr                               error;
+  };
+
+  std::vector<File_job> jobs;
+  jobs.reserve(by_file.size());
   for (auto& [file_name, units] : by_file) {
     // File-level unit (name == file) first, then the lambdas in name order, so
     // the emission is deterministic and the file scope precedes its users.
     std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
       return a->get_top_module_name() < b->get_top_module_name();
     });
+    jobs.push_back(File_job{.file_name = &file_name, .units = &units});
+  }
 
-    TRACE_EVENT("pass", "prp_writer.file", "unit", file_name);
-    auto fname = std::format("{}/{}.prp", out_dir, file_name);
+  std::vector<File_result> results(jobs.size());
+  auto                     emit_file = [&](size_t job_idx) {
+    const auto& file_name = *jobs[job_idx].file_name;
+    auto&       units     = *jobs[job_idx].units;
+    auto&       result    = results[job_idx];
 
-    // Two phases: collect the (deduped) file-scope import header from every
-    // unit, then render the bodies below it.
-    std::vector<std::string>                       header;
-    std::vector<std::unique_ptr<Lnast_prp_writer>> writers;
-    std::vector<std::ostringstream>                bodies(units.size());
-    writers.reserve(units.size());
-    for (size_t i = 0; i < units.size(); ++i) {
-      auto w = std::make_unique<Lnast_prp_writer>(bodies[i], units[i]);
-      w->set_debug(debug_on);
-      w->set_known_modules(&emitted_modules);
-      w->set_instantiated_modules(&instantiated_modules);
-      w->set_header_sink(&header);
-      w->collect_header();
-      writers.emplace_back(std::move(w));
-    }
-    for (size_t i = 0; i < units.size(); ++i) {
-      writers[i]->write_all();
-    }
+    try {
+      TRACE_EVENT("pass", "prp_writer.file", "unit", file_name);
+      auto fname = std::format("{}/{}.prp", out_dir, file_name);
 
-    std::ofstream out(fname);
-    if (!out.is_open()) {
-      livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", fname).fatal();
-      return;
-    }
-    for (const auto& l : header) {
-      out << l;
-    }
-    if (!header.empty()) {
-      out << "\n";
-    }
-    bool first = true;
-    for (auto& b : bodies) {
-      auto text = b.str();
-      if (text.empty()) {
-        continue;
-      }
-      if (!first) {
-        out << "\n";
-      }
-      first = false;
-      out << text;
-      if (text.back() != '\n') {
-        out << "\n";
-      }
-    }
-    out.close();
-
-    if (!debug_on) {
+      // Two phases: collect the (deduped) file-scope import header from every
+      // unit, then render the bodies below it.
+      std::vector<std::string>                       header;
+      std::vector<std::unique_ptr<Lnast_prp_writer>> writers;
+      std::vector<std::ostringstream>                bodies(units.size());
+      writers.reserve(units.size());
       for (size_t i = 0; i < units.size(); ++i) {
-        if (!writers[i]->has_unimplemented()) {
+        auto w = std::make_unique<Lnast_prp_writer>(bodies[i], units[i]);
+        w->set_debug(debug_on);
+        w->set_known_modules(&emitted_modules);
+        w->set_instantiated_modules(&instantiated_modules);
+        w->set_header_sink(&header);
+        w->collect_header();
+        writers.emplace_back(std::move(w));
+      }
+      for (size_t i = 0; i < units.size(); ++i) {
+        writers[i]->write_all();
+      }
+
+      std::ofstream out(fname);
+      if (!out.is_open()) {
+        result.write_error = fname;
+        return;
+      }
+      for (const auto& l : header) {
+        out << l;
+      }
+      if (!header.empty()) {
+        out << "\n";
+      }
+      bool first = true;
+      for (auto& b : bodies) {
+        auto text = b.str();
+        if (text.empty()) {
           continue;
         }
-        std::string feats;
-        for (const auto& f : writers[i]->unimplemented()) {
-          feats += feats.empty() ? "" : "; ";
-          feats += f;
+        if (!first) {
+          out << "\n";
         }
-        livehd::diag::err("pass.prp_writer", "unimplemented", "unsupported")
-            .msg("cannot emit Pyrope for '{}': unimplemented construct(s): {}", units[i]->get_top_module_name(), feats)
-            .hint("the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
-                  "output and let the compile pass")
-            .emit();
+        first = false;
+        out << text;
+        if (text.back() != '\n') {
+          out << "\n";
+        }
       }
+      out.close();
+
+      if (!debug_on) {
+        for (size_t i = 0; i < units.size(); ++i) {
+          if (!writers[i]->has_unimplemented()) {
+            continue;
+          }
+          std::string feats;
+          for (const auto& f : writers[i]->unimplemented()) {
+            feats += feats.empty() ? "" : "; ";
+            feats += f;
+          }
+          result.unimplemented.emplace_back(units[i]->get_top_module_name(), std::move(feats));
+        }
+      }
+    } catch (...) {
+      result.error = std::current_exception();
+    }
+  };
+
+  // Source-file groups share no writer state and target different output
+  // paths. Render a bounded batch concurrently; the cap avoids excessive
+  // transient analysis maps on machines with very high core counts.
+  std::atomic<size_t>      next{0};
+  const size_t             hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const size_t             nw = std::min({jobs.size(), hw, size_t{16}});
+  std::vector<std::thread> workers;
+  workers.reserve(nw);
+  for (size_t w = 0; w < nw; ++w) {
+    workers.emplace_back([&] {
+      while (true) {
+        const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+        if (i >= jobs.size()) {
+          break;
+        }
+        emit_file(i);
+      }
+    });
+  }
+  for (auto& worker : workers) {
+    worker.join();
+  }
+
+  // Publish failures in stable file order even though rendering was parallel.
+  for (const auto& result : results) {
+    if (result.error) {
+      std::rethrow_exception(result.error);
+    }
+    if (!result.write_error.empty()) {
+      livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", result.write_error).fatal();
+    }
+    for (const auto& [unit, feats] : result.unimplemented) {
+      livehd::diag::err("pass.prp_writer", "unimplemented", "unsupported")
+          .msg("cannot emit Pyrope for '{}': unimplemented construct(s): {}", unit, feats)
+          .hint(
+              "the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
+              "output and let the compile pass")
+          .emit();
     }
   }
 }

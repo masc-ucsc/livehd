@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -12,7 +13,7 @@
 
 class Cprop {
 private:
-  static inline int trace_module_cnt = 0;
+  static inline std::atomic<int> trace_module_cnt = 0;
 
 protected:
   hhds::Graph* current_graph = nullptr;

@@ -152,6 +152,7 @@ public:
   bool scatter_positional_array(std::string_view name, const Dlop& packed);
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
+  static void clear_function_registry() noexcept { function_registry.clear(); }
 
   // Unresolved live imports recorded during the walk: (unit that
   // hit the import, import string as written). pass.upass either surfaces

@@ -211,7 +211,42 @@ struct Lnast_io_entry {
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
   std::vector<Lnast_io_entry> outputs;
-  bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
+
+  // Declaration queries are frequent in the runner. Keep the ordered vectors
+  // as the signature contract, but index names lazily instead of scanning all
+  // ports for each lookup. Encoded indices avoid pointers invalidated by vector
+  // growth; callers that mutate either vector invalidate the cache explicitly.
+  mutable absl::flat_hash_map<std::string, size_t> name_index_;
+  mutable bool                                     name_index_valid_ = false;
+
+  [[nodiscard]] const Lnast_io_entry* find(std::string_view name) const {
+    if (!name_index_valid_) {
+      name_index_.clear();
+      name_index_.reserve(inputs.size() + outputs.size());
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        name_index_.try_emplace(inputs[i].name, i);
+      }
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        name_index_.try_emplace(outputs[i].name, inputs.size() + i);
+      }
+      name_index_valid_ = true;
+    }
+    const auto it = name_index_.find(name);
+    if (it == name_index_.end()) {
+      return nullptr;
+    }
+    if (it->second < inputs.size()) {
+      return &inputs[it->second];
+    }
+    return &outputs[it->second - inputs.size()];
+  }
+
+  void invalidate_index() noexcept {
+    name_index_valid_ = false;
+    name_index_.clear();
+  }
+
+  bool empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
 // One `pub` export of a file unit (the LiveHD docs).
@@ -446,6 +481,10 @@ public:
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
   void                         set_name(const Lnast_nid& nid, std::string_view name);
+  // Copy an already-interned name between Lnasts in the same compile. All
+  // Lnasts on the active thread share active_name_pool(), so this avoids a
+  // resolve + hash/intern round trip in staging-tree rebuilds.
+  void                         set_name_id(const Lnast_nid& nid, int32_t id);
 
   // Interned int32 name id of a node (0 when unnamed). This is the value passes
   // should compare / use as a map key instead of the resolved string: negative
@@ -461,6 +500,12 @@ public:
   // single-threaded compile). New Lnasts default their name pool to this so
   // node-name ids stay valid as trees move between Lnasts within a compile.
   static const std::shared_ptr<Lnast_name_pool>& active_name_pool();
+
+  // Move a tree built on another thread into `pool`. Name ids are
+  // pool-relative, so rewrite each distinct old id once and then retarget the
+  // Lnast. This is used when parallel source parsing publishes units into the
+  // single-threaded compile closure.
+  void rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool);
 
   // Parsed value of a `const` node's literal text, parsed ONCE per distinct
   // literal and memoized on this Lnast (const_value_cache_). Constants live in

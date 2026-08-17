@@ -265,7 +265,7 @@ protected:
 
   // Drain the dotted-bake stash (Symbol_table::pending_decl_facts):
   // apply declared facts to fields that just received their first value.
-  void apply_pending_field_facts();
+  void apply_pending_field_facts(std::string_view root);
 
   // Push the block scope for the stmts node under the cursor and mark
   // it uncertain when entering an unresolved if-arm. Pop side: callers run

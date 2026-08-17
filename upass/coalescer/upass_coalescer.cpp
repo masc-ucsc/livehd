@@ -46,9 +46,23 @@ void uPass_coalescer::begin_iteration() {
   // replaces the former `is_verilog_origin` default-off, which was a proxy for
   // "SSA-shaped" that mis-charged SSA-shaped Pyrope and needed the `::[hdl]`
   // origin bit. An explicit `coalescer:0/1` (enabled_forced) still wins.
-  if (!enabled_forced) {
-    prescan_repeat_writes();
+  if (enabled_forced) {
+    return;
   }
+
+  const auto& ln = lm->get_lnast();
+  if (ln && ln->is_verilog_origin()) {
+    // Slang's flattened SSA form has many names repeated across mutually
+    // exclusive scopes, but almost no two writes that this boundary-flushing
+    // pass can actually coalesce. The full-unit repeat-name pre-scan therefore
+    // over-approximates heavily and turns into pure park/flush work. Pyrope
+    // re-emitted from Verilog carries timecheck=false, which restores this
+    // origin bit on re-read, so the same fast path covers the round trip.
+    enabled = false;
+    repeat_names_.clear();
+    return;
+  }
+  prescan_repeat_writes();
 }
 
 void uPass_coalescer::prescan_repeat_writes() {

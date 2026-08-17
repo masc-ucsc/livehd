@@ -6989,7 +6989,7 @@ private:
       // A non-writing branch falls back to `pre`. For a reg's din shadow with
       // no recorded pre-value (a pure conditional write, no prior write and no
       // read), `pre` is the reg's q (hold) — NOT a don't-care.
-      Pin  pre;
+      Pin pre;
       if (base != pin_map_.end()) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
@@ -7137,8 +7137,8 @@ private:
     set_ubits(sel, n_conds + 1);
 
     for (const auto& var : all_vars) {
-      auto base    = pin_map_.find(var);
-      bool has_pre = base != pin_map_.end();
+      auto       base    = pin_map_.find(var);
+      bool       has_pre = base != pin_map_.end();
       // A reg's din shadow with no recorded pre-value still HOLDS on an
       // unwritten / none-of arm: fall back to the reg's q (current value), not
       // a don't-care. Treat that q as a real pre-value so the none-of slot
@@ -8404,6 +8404,24 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return *cache_slot;
 }
 
+// Registry-wide ABI facts are immutable during one tolg invocation. Keep the
+// linear call-graph analysis outside Lnast: the cache owns no units and is
+// replaced when a different registry is presented, so it cannot extend Lnast
+// lifetime or alter the object's layout/destructor state.
+struct Registry_abi_cache {
+  const uPass_tolg::Registry*             registry = nullptr;
+  absl::flat_hash_map<const Lnast*, bool> needs_clock;
+  absl::flat_hash_map<const Lnast*, bool> needs_reset;
+  absl::flat_hash_map<const Lnast*, bool> activation_capable;
+};
+
+Registry_abi_cache& registry_abi_cache() {
+  static thread_local Registry_abi_cache cache;
+  return cache;
+}
+
+void prepare_registry_abi(const uPass_tolg::Registry& registry);
+
 // Memoized, cycle-guarded transitive "does this module (or any pipe/mod callee)
 // satisfy `declares`" walk. `declares` is the per-tree leaf predicate — a plain
 // reg declare (needs a clock) or a reset-carrying reg declare (needs a reset).
@@ -8441,6 +8459,10 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 
 [[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().needs_clock.find(lnast.get()); it != registry_abi_cache().needs_clock.end()) {
+    return it->second;
+  }
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reg);
 }
 
@@ -8572,6 +8594,10 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 
 [[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().needs_reset.find(lnast.get()); it != registry_abi_cache().needs_reset.end()) {
+    return it->second;
+  }
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reset_reg);
 }
 
@@ -8611,6 +8637,134 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return out;
 }
 
+void prepare_registry_abi(const uPass_tolg::Registry& registry) {
+  auto& cache = registry_abi_cache();
+  if (cache.registry == &registry) {
+    return;
+  }
+  cache.registry = nullptr;
+  cache.needs_clock.clear();
+  cache.needs_reset.clear();
+  cache.activation_capable.clear();
+
+  std::vector<std::shared_ptr<Lnast>> units;
+  units.reserve(registry.size());
+  absl::flat_hash_map<const Lnast*, size_t> by_ptr;
+  absl::flat_hash_map<std::string, size_t>  by_exact_name;
+  for (const auto& ln : registry) {
+    if (!ln) {
+      continue;
+    }
+    const size_t idx = units.size();
+    units.push_back(ln);
+    by_ptr.emplace(ln.get(), idx);
+    by_exact_name[std::string(ln->get_top_module_name())] = idx;
+  }
+
+  auto resolve_index = [&](std::string_view name) -> std::optional<size_t> {
+    if (const auto it = by_exact_name.find(name); it != by_exact_name.end()) {
+      return it->second;
+    }
+    auto ln = resolve_callee_lnast(name, registry);
+    if (!ln) {
+      return std::nullopt;
+    }
+    const auto it = by_ptr.find(ln.get());
+    return it == by_ptr.end() ? std::nullopt : std::optional<size_t>{it->second};
+  };
+
+  std::vector<std::vector<size_t>> edges(units.size());
+  std::vector<std::vector<size_t>> state_reverse(units.size());
+  std::vector<uint8_t>             activation(units.size(), 0);
+  std::vector<uint8_t>             clock(units.size(), 0);
+  std::vector<uint8_t>             reset(units.size(), 0);
+
+  std::vector<uint8_t> control_root(units.size(), 0);
+  for (size_t i = 0; i < units.size(); ++i) {
+    clock[i]        = tree_declares_reg(units[i]);
+    reset[i]        = tree_declares_reset_reg(units[i]);
+    control_root[i] = std::any_of(units[i]->io_meta().outputs.begin(),
+                                  units[i]->io_meta().outputs.end(),
+                                  [](const auto& e) { return e.name == "__next_active"; });
+    // Only a NON-template unit is a caller the activation flood may start
+    // from (the pre-index scan skipped templates on the caller side); a
+    // template's own `__next_active` output still makes it capable, but that
+    // is added after the flood so it never spreads to its callees.
+    // OR, never assign: an EARLIER unit's guarded-callee loop below may already
+    // have marked this one, and overwriting that mark loses the whole reason it
+    // is activation capable (the caller precedes the callee in registry order
+    // whenever the callee is imported, which is the common case).
+    if (!units[i]->is_template()) {
+      activation[i] |= control_root[i];
+    }
+
+    for (const auto& name : collect_callee_names(units[i])) {
+      const auto child = resolve_index(name);
+      if (!child.has_value()) {
+        continue;
+      }
+      edges[i].push_back(*child);
+      const auto kind = units[*child]->get_lambda_kind();
+      if (kind == "pipe" || kind == "mod") {
+        state_reverse[*child].push_back(i);
+      }
+    }
+    if (units[i]->is_template()) {
+      continue;
+    }
+    for (const auto& name : collect_guarded_callee_names(units[i])) {
+      if (const auto child = resolve_index(name); child.has_value()) {
+        activation[*child] = 1;
+      }
+    }
+  }
+
+  auto flood = [](std::vector<uint8_t>& marked, const std::vector<std::vector<size_t>>& adjacency) {
+    std::vector<size_t> queue;
+    queue.reserve(marked.size());
+    for (size_t i = 0; i < marked.size(); ++i) {
+      if (marked[i]) {
+        queue.push_back(i);
+      }
+    }
+    for (size_t head = 0; head < queue.size(); ++head) {
+      for (const auto next : adjacency[queue[head]]) {
+        if (!marked[next]) {
+          marked[next] = 1;
+          queue.push_back(next);
+        }
+      }
+    }
+  };
+  flood(activation, edges);
+  flood(clock, state_reverse);
+  flood(reset, state_reverse);
+  // A unit that itself publishes `__next_active` is activation capable no
+  // matter who reaches it — including a template, which is never a flood root.
+  for (size_t i = 0; i < units.size(); ++i) {
+    activation[i] |= control_root[i];
+  }
+
+  cache.needs_clock.reserve(units.size());
+  cache.needs_reset.reserve(units.size());
+  cache.activation_capable.reserve(units.size());
+  for (size_t i = 0; i < units.size(); ++i) {
+    cache.needs_clock.emplace(units[i].get(), clock[i] != 0);
+    cache.needs_reset.emplace(units[i].get(), reset[i] != 0);
+    cache.activation_capable.emplace(units[i].get(), activation[i] != 0);
+  }
+  cache.registry = &registry;
+}
+
+void reset_registry_abi(const uPass_tolg::Registry& registry) {
+  auto& cache    = registry_abi_cache();
+  cache.registry = nullptr;
+  cache.needs_clock.clear();
+  cache.needs_reset.clear();
+  cache.activation_capable.clear();
+  prepare_registry_abi(registry);
+}
+
 [[nodiscard]] bool activation_reaches(const std::shared_ptr<Lnast>& from, const std::shared_ptr<Lnast>& target,
                                       const uPass_tolg::Registry& registry, absl::flat_hash_set<std::string>& visiting) {
   if (from == target || from->get_top_module_name() == target->get_top_module_name()) {
@@ -8632,6 +8786,11 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 }
 
 [[nodiscard]] bool is_activation_capable(const std::shared_ptr<Lnast>& target, const uPass_tolg::Registry& registry) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().activation_capable.find(target.get());
+      it != registry_abi_cache().activation_capable.end()) {
+    return it->second;
+  }
   // Runtime-control loops can deactivate later occurrences through
   // __next_active even when their compact call is not inside a source if.
   for (const auto& e : target->io_meta().outputs) {
@@ -8904,6 +9063,11 @@ void uPass_tolg::detect_lg_collisions(const Registry& registry) {
     }
     seen.emplace_back(std::move(gname), std::move(unit));
   }
+
+  // A Registry is normally stack-owned, so a later invocation may reuse the
+  // same address with different Lnast objects. Refresh the non-owning ABI
+  // analysis once per lowering pass rather than trusting pointer identity.
+  reset_registry_abi(registry);
 }
 
 // A compiler-minted (`%`-named entity) unit — the comb a `test` block lowers

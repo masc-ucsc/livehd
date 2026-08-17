@@ -83,6 +83,7 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   // recorded dead-statement marks (the Lnast overload below re-transfers the
   // staging's own marks after this).
   dce_dead_stmts_.clear();
+  tolg_scan_cache_ = {};
 }
 
 void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
@@ -220,9 +221,7 @@ std::string_view Lnast::get_name(const Lnast_nid& nid) const {
   return id == 0 ? std::string_view{} : name_pool_->resolve(id);
 }
 
-int32_t Lnast::get_name_id(const Lnast_nid& nid) const {
-  return nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
-}
+int32_t Lnast::get_name_id(const Lnast_nid& nid) const { return nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0}); }
 
 const Dlop& Lnast::get_const_value(std::string_view const_text) const {
   // The parse memo lives in hlop (Dlop::from_pyrope_cached) so EVERY Dlop client
@@ -242,6 +241,39 @@ void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
     return;
   }
   nid.attr(lnast_attrs::lnast_name).set(name_pool_->intern(name));
+}
+
+void Lnast::set_name_id(const Lnast_nid& nid, int32_t id) {
+  auto ref = nid.attr(lnast_attrs::lnast_name);
+  if (id == 0) {
+    if (ref.has()) {
+      ref.del();
+    }
+    return;
+  }
+  ref.set(id);
+}
+
+void Lnast::rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool) {
+  I(pool, "rehome_name_pool: null target pool");
+  if (pool == name_pool_) {
+    return;
+  }
+
+  absl::flat_hash_map<int32_t, int32_t> remap;
+  for (auto nid : tree_->pre_order()) {
+    auto       ref = nid.attr(lnast_attrs::lnast_name);
+    const auto old = ref.get_or(int32_t{0});
+    if (old == 0) {
+      continue;
+    }
+    auto [it, inserted] = remap.try_emplace(old, 0);
+    if (inserted) {
+      it->second = pool->intern(name_pool_->resolve(old));
+    }
+    ref.set(it->second);
+  }
+  name_pool_ = pool;
 }
 
 uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {
