@@ -2,12 +2,15 @@
 // Compile pipeline: validation, elaboration, scanning, lowering, and synthesis.
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <thread>
 
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -390,7 +393,8 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
   for (const auto& ln : var.lnasts) {
     loaded.insert(std::string(ln->get_top_module_name()));
   }
-  size_t next_scan = n_imports;
+  absl::flat_hash_map<std::string, std::vector<std::string>> import_cache;
+  size_t                                                     next_scan = n_imports;
   while (true) {
     std::map<std::string, std::string>           found;       // logical name -> file to parse
     std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
@@ -403,7 +407,12 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
         continue;  // a unit with no known on-disk origin (e.g. a derived tree)
       }
       const std::string dir = dit->second;
-      for (const auto& raw : collect_imports(ln)) {
+      const std::string unit_name(ln->get_top_module_name());
+      auto [iit, inserted] = import_cache.try_emplace(unit_name);
+      if (inserted) {
+        iit->second = collect_imports(ln);
+      }
+      for (const auto& raw : iit->second) {
         if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
           continue;  // artifact imports resolve elsewhere, not on-disk source
         }
@@ -462,19 +471,69 @@ void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::st
       throw classify_engine_failure("ambiguous import resolution");
     }
 
-    bool progress = false;
+    struct Parse_job {
+      std::string              name;
+      std::string              path;
+      std::shared_ptr<Lnast>   lnast;
+      std::vector<std::string> imports;
+      std::exception_ptr       error;
+    };
+    std::vector<Parse_job> jobs;
+    jobs.reserve(found.size());
     for (const auto& [name, path] : found) {
       if (!parsed_paths.insert(abspath_of(path)).second) {
         continue;  // already parsed under some name — don't double-load the file
       }
-      Prp2lnast converter(path, name);
-      var.add(converter.get_lnast());
-      loaded.insert(name);
-      unit_dir[name] = dir_of(path);
-      progress       = true;
+      jobs.push_back(Parse_job{.name = name, .path = path, .lnast = {}, .imports = {}, .error = {}});
+    }
+
+    // Imported source units are independent parse jobs.  Parse a bounded
+    // batch in parallel, then publish the results in the deterministic logical
+    // name order above.  Sixteen workers avoids oversubscribing large machines
+    // and keeps the transient parser/source-buffer footprint small beside the
+    // retained LNAST closure.  Diagnostics serialize through diag::Sink while
+    // their staged record and source locator remain thread-local.
+    if (!jobs.empty()) {
+      std::atomic<size_t>      next{0};
+      const size_t             hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+      const size_t             nw = std::min({jobs.size(), hw, size_t{16}});
+      std::vector<std::thread> workers;
+      workers.reserve(nw);
+      for (size_t w = 0; w < nw; ++w) {
+        workers.emplace_back([&] {
+          while (true) {
+            const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+            if (i >= jobs.size()) {
+              break;
+            }
+            try {
+              Prp2lnast converter(jobs[i].path, jobs[i].name);
+              jobs[i].lnast   = converter.get_lnast();
+              jobs[i].imports = collect_imports(jobs[i].lnast);
+            } catch (...) {
+              jobs[i].error = std::current_exception();
+            }
+          }
+        });
+      }
+      for (auto& worker : workers) {
+        worker.join();
+      }
+      for (const auto& job : jobs) {
+        if (job.error) {
+          std::rethrow_exception(job.error);
+        }
+      }
+      for (auto& job : jobs) {
+        job.lnast->rehome_name_pool(Lnast::active_name_pool());
+        var.add(std::move(job.lnast));
+        loaded.insert(job.name);
+        unit_dir[job.name] = dir_of(job.path);
+        import_cache.emplace(job.name, std::move(job.imports));
+      }
     }
     next_scan = scan_end;
-    if (!progress) {
+    if (jobs.empty()) {
       break;
     }
   }
@@ -1187,6 +1246,13 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   // blocked file with its unresolved import strings (covers both true
   // cycles and missing units). Import-free invocations take the single-pass
   // fast path (no clones, no defer mode).
+  // NOTE: this test must stay origin-AGNOSTIC. Pyrope re-emitted from Verilog
+  // carries `::[hdl]` (is_verilog_origin) AND a real file-scope
+  // `const X = import("X.X")` header, and it needs the retry loop exactly like
+  // hand-written Pyrope does — skipping such trees here made `tmod` fail to
+  // resolve `tpkg` on recompile (//lhd/tests:slang_param_provenance_test).
+  // Cheapening the `pristine` snapshot for large generated RTL has to happen
+  // inside the clone, not by disarming the retry.
   bool imports_present = false;
   for (const auto& ln : var.lnasts) {
     if (!collect_imports(ln).empty()) {

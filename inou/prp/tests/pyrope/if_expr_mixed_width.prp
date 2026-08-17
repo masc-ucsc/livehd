@@ -1,0 +1,12 @@
+/*
+:name: if_expr_mixed_width
+:type: compile
+*/
+
+// An if-expression result is a compiler temporary.  Its first arm may carry a
+// narrower declared type than a later constant arm; that operand type is not a
+// declaration on the temporary.  The arms must widen together before the real
+// destination's u6 envelope is checked.
+comb if_expr_mixed_width(c:bool, d:u5) -> (o:u6) {
+  o = if c { d } else { 47 }
+}

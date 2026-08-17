@@ -17,3 +17,17 @@ index 68cb6cd72c76..2a63cd664612 100644
  
  #ifdef LLVM_ON_UNIX
  # include <sys/resource.h> // for getrlimit
+diff --git a/llvm/include/llvm/IR/CFG.h b/llvm/include/llvm/IR/CFG.h
+--- a/llvm/include/llvm/IR/CFG.h
++++ b/llvm/include/llvm/IR/CFG.h
+@@ -180,6 +180,10 @@
+   };
+ 
+ public:
++  // Singular iterator. A C++17 forward iterator must be
++  // DefaultConstructible; libstdc++ 15 enforces that when
++  // std::reverse_iterator wraps this type (Support/CFGDiff.h reverse_if).
++  inline SuccIterator() : Inst(nullptr), Idx(0) {}
+   // begin iterator
+   explicit inline SuccIterator(InstructionT *Inst) : Inst(Inst), Idx(0) {}
+   // end iterator

@@ -1049,6 +1049,9 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
     if (m.HasMember("out") && m["out"].IsArray()) {
       read_entries(m["out"], ln.io_meta().outputs);
     }
+    // Lnast_tree_io::find() memoizes a name -> position index; every mutation of
+    // the port vectors must retire it or later lookups miss the loaded ports.
+    ln.io_meta().invalidate_index();
   }
   if (u.HasMember("bw_meta") && u["bw_meta"].IsArray()) {
     for (const auto& e : u["bw_meta"].GetArray()) {

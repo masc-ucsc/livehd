@@ -60,6 +60,7 @@ cc_library(
 ) for test_name in [
     "node_count_test",
     "ge_weight_smoke",
+    "const_pin_test",
     "latch_contract_test",
     "occurrence_materialize_test",
 ]]

@@ -3,7 +3,6 @@
 #include "upass_detuple.hpp"
 
 #include <algorithm>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -119,12 +118,9 @@ private:
   Lnast_nid copy_subtree(const Lnast_nid& src_n, const Lnast_nid& dst_parent) {
     const auto type = type_of(src_n);
     Lnast_nid  d;
-    if (Lnast_ntype::is_ref(type)) {
-      d = dst_->add_child(dst_parent, Lnast_node::create_ref(name_of(src_n)));
-    } else if (Lnast_ntype::is_const(type)) {
-      d = dst_->add_child(dst_parent, Lnast_node::create_const(name_of(src_n)));
-    } else {
-      d = dst_->add_child(dst_parent, type);
+    d = dst_->add_child(dst_parent, type);
+    if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+      dst_->set_name_id(d, src_->get_name_id(src_n));
     }
     if (Lnast::srcid_carries(type)) {
       carry(src_n, d);
@@ -541,17 +537,29 @@ private:
       };
       // Pre-order walk (same node order as before), carrying the signature flag
       // down. A `tuple_add` directly under a `func_def` is a signature region.
-      std::function<void(const Lnast_nid&, bool)> walk = [&](const Lnast_nid& n, bool in_sig) {
+      struct Pending {
+        Lnast_nid node;
+        bool      in_sig;
+      };
+      std::vector<Pending> stack;
+      stack.push_back({src_->get_root(), false});
+      std::vector<Lnast_nid> children;
+      while (!stack.empty()) {
+        const auto [n, in_sig] = stack.back();
+        stack.pop_back();
         if (n.is_invalid()) {
-          return;
+          continue;
         }
         scan_node(n, in_sig);
         const bool fdef = Lnast_ntype::is_func_def(type_of(n));
+        children.clear();
         for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c)) {
-          walk(c, in_sig || (fdef && Lnast_ntype::is_tuple_add(type_of(c))));
+          children.push_back(c);
         }
-      };
-      walk(src_->get_root(), false);
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+          stack.push_back({*it, in_sig || (fdef && Lnast_ntype::is_tuple_add(type_of(*it)))});
+        }
+      }
     }
 
     // Finalize: a candidate becomes a split iff its leaf fields are known and
@@ -963,12 +971,9 @@ private:
       // Verbatim copy of this node, recursing into children with rewrites.
       const auto type = type_of(c);
       Lnast_nid  d;
-      if (Lnast_ntype::is_ref(type)) {
-        d = dst_->add_child(dst_parent, Lnast_node::create_ref(name_of(c)));
-      } else if (Lnast_ntype::is_const(type)) {
-        d = dst_->add_child(dst_parent, Lnast_node::create_const(name_of(c)));
-      } else {
-        d = dst_->add_child(dst_parent, type);
+      d = dst_->add_child(dst_parent, type);
+      if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+        dst_->set_name_id(d, src_->get_name_id(c));
       }
       if (Lnast::srcid_carries(type)) {
         carry(c, d);

@@ -87,8 +87,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   for (auto n : g->body().nodes()) {
     if (is_comb(n)) {
       comb_nodes.push_back(n);
-      indeg.try_emplace(n, 0);
     }
+  }
+  indeg.reserve(comb_nodes.size());
+  succ.reserve(comb_nodes.size());
+  for (const auto& n : comb_nodes) {
+    indeg.emplace(n, 0);
   }
   for (auto& n : comb_nodes) {
     for (auto e : n.inp_edges()) {
@@ -110,6 +114,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     }
   }
   std::vector<hhds::Node_class> q;
+  q.reserve(comb_nodes.size());
   for (auto& [n, d] : indeg) {
     if (d == 0) {
       q.push_back(n);
@@ -132,12 +137,11 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       std::print("split[dbg]:   indeg {} = {} <-{}\n", gu::debug_name(n), d, drvs);
     }
   }
-  absl::flat_hash_set<hhds::Node_class> removed;
   while (!q.empty()) {
     auto n = q.back();
     q.pop_back();
-    removed.insert(n);
-    auto it = succ.find(n);
+    indeg[n] = -1;
+    auto it  = succ.find(n);
     if (it == succ.end()) {
       continue;
     }
@@ -148,8 +152,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     }
   }
   absl::flat_hash_set<hhds::Node_class> in_cycle;
+  in_cycle.reserve(comb_nodes.size());
   for (auto& n : comb_nodes) {
-    if (!removed.contains(n)) {
+    if (indeg[n] >= 0) {
       in_cycle.insert(n);
     }
   }

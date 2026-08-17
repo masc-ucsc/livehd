@@ -58,6 +58,24 @@ constexpr bool stmt_is_scope_barrier(Lnast_ntype::Lnast_ntype_int t) {
          Lnast_ntype::is_func_continue(t) || Lnast_ntype::is_func_return(t);
 }
 
+// Return the separator/digit offsets for a private SSA version suffix.
+std::optional<std::pair<size_t, size_t>> stale_ssa_suffix(std::string_view name) {
+  const auto pos = name.rfind("___ssa_");
+  if (pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const size_t digit_pos = pos + 7;
+  if (digit_pos >= name.size()) {
+    return std::nullopt;
+  }
+  for (size_t i = digit_pos; i < name.size(); ++i) {
+    if (name[i] < '0' || name[i] > '9') {
+      return std::nullopt;
+    }
+  }
+  return std::pair{pos, digit_pos};
+}
+
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
@@ -151,17 +169,9 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast> &src,
                              const std::shared_ptr<Lnast> &dst,
                              const Lnast_nid &dst_parent) {
   auto type = src->get_type(src_nid);
-  Lnast_nid new_nid;
-  if (Lnast_ntype::is_ref(type)) {
-    new_nid = dst->add_child(dst_parent,
-                             Lnast_node::create_ref(src->get_name(src_nid)));
-  } else if (Lnast_ntype::is_const(type)) {
-    new_nid = dst->add_child(dst_parent,
-                             Lnast_node::create_const(src->get_name(src_nid)));
-  } else if (Lnast_ntype::is_invalid(type)) {
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_invalid());
-  } else {
-    new_nid = dst->add_child(dst_parent, type);
+  auto new_nid = dst->add_child(dst_parent, type);
+  if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+    dst->set_name_id(new_nid, src->get_name_id(src_nid));
   }
   // Carry (same-locator: the staging body replaces src's own body).
   if (Lnast::srcid_carries(type)) {
@@ -183,13 +193,15 @@ void uPass_ssa::copy_with_rename(
     // Heterogeneous lookup: no temporary std::string allocation per ref.
     std::string_view name = src->get_name(src_nid);
     auto it = rename_map.find(name);
-    new_nid = dst->add_child(
-        dst_parent, Lnast_node::create_ref(it != rename_map.end()
-                                               ? std::string_view{it->second}
-                                               : name));
+    new_nid = dst->add_child(dst_parent, type);
+    if (it != rename_map.end()) {
+      dst->set_name(new_nid, it->second);
+    } else {
+      dst->set_name_id(new_nid, src->get_name_id(src_nid));
+    }
   } else if (Lnast_ntype::is_const(type)) {
-    new_nid = dst->add_child(dst_parent,
-                             Lnast_node::create_const(src->get_name(src_nid)));
+    new_nid = dst->add_child(dst_parent, type);
+    dst->set_name_id(new_nid, src->get_name_id(src_nid));
   } else if (Lnast_ntype::is_invalid(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_invalid());
   } else {
@@ -252,7 +264,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   // against targets already handed out) and bumped until it is free. The map
   // keeps the rename consistent: every occurrence of one stale name lands on
   // the same demoted name, which is what preserves the def/use links.
-  {
+  // Freshly parsed trees cannot contain this private suffix. Check that cheap
+  // path before allocating/copying every node name into the collision set used
+  // only when an already-lowered tree is sent through SSA again.
+  bool has_stale_ssa = false;
+  for (auto nid : lnast->depth_preorder(root)) {
+    if (!nid.is_invalid() && stale_ssa_suffix(lnast->get_name(nid))) {
+      has_stale_ssa = true;
+      break;
+    }
+  }
+  if (has_stale_ssa) {
     absl::flat_hash_set<std::string>              taken;   // every name in the body
     absl::flat_hash_map<std::string, std::string> demote;  // stale name -> demoted
     for (auto nid : lnast->depth_preorder(root)) {
@@ -264,25 +286,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
       if (nid.is_invalid()) {
         continue;
       }
-      std::string_view nm  = lnast->get_name(nid);
-      auto             pos = nm.rfind("___ssa_");
-      if (pos == std::string_view::npos) {
+      const std::string_view nm     = lnast->get_name(nid);
+      const auto             suffix = stale_ssa_suffix(nm);
+      if (!suffix) {
         continue;
       }
-      const size_t d = pos + 7;  // first char past "___ssa_"
-      if (d >= nm.size()) {
-        continue;  // bare "___ssa_" with no version — leave intact
-      }
-      bool all_digits = true;
-      for (size_t i = d; i < nm.size(); ++i) {
-        if (nm[i] < '0' || nm[i] > '9') {
-          all_digits = false;
-          break;
-        }
-      }
-      if (!all_digits) {
-        continue;  // not a pure-digit SSA suffix — not our version form
-      }
+      const auto [pos, d] = *suffix;
       std::string stale(nm);
       auto        it = demote.find(stale);
       if (it == demote.end()) {
@@ -548,6 +557,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
                      flat_outputs, 0, 0);
     }
   }
+  meta.invalidate_index();
   meta.inputs = flat_inputs;
   meta.outputs = flat_outputs;
 

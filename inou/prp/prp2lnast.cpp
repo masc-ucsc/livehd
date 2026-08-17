@@ -1687,13 +1687,9 @@ namespace {
 // Copy one LNAST node (preserving ref/const text) under dst_parent.
 Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& dst, const Lnast_nid& dst_parent) {
   const auto t = src.get_type(src_nid);
-  Lnast_nid  nn;
-  if (Lnast_ntype::is_ref(t)) {
-    nn = dst.add_child(dst_parent, Lnast_node::create_ref(src.get_name(src_nid)));
-  } else if (Lnast_ntype::is_const(t)) {
-    nn = dst.add_child(dst_parent, Lnast_node::create_const(src.get_name(src_nid)));
-  } else {
-    nn = dst.add_child(dst_parent, t);
+  Lnast_nid  nn = dst.add_child(dst_parent, t);
+  if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
+    dst.set_name_id(nn, src.get_name_id(src_nid));
   }
   // Carry the SourceId across the decl-merge rebuild — one integer attr,
   // copied unconditionally for every def-bearing kind (the dst tree

@@ -1398,11 +1398,11 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .span     = std::move(span),
         .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
                                 "(e.g. `{}:u{}` or `{}:s{}`)",
-                                cit->second,
-                                dest_name,
-                                cit->second,
-                                dest_name,
-                                cit->second),
+                            cit->second,
+                            dest_name,
+                            cit->second,
+                            dest_name,
+                            cit->second),
     });
     return;
   }
@@ -1980,6 +1980,14 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
 bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
   bool any_drop = false;
   for (auto& entry : upasses) {
+    // Push hooks receive fully-resolved operands and are required to leave the
+    // read cursor where they found it. Restoring the bookmark unconditionally
+    // for every pass on every operation dominated generated RTL (tens of
+    // millions of successful dispatches), so the restore now runs only on the
+    // exceptional path; the balance is asserted in debug builds. The bookmark
+    // itself stays complete (nid + parent-stack depth): a handler that throws
+    // mid-descent has also PUSHED parents, and leaving those on the stack makes
+    // every later move_to_parent() return the wrong node.
     const auto here = lm->save_cursor();
     const auto t0   = dispatch_stats_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     try {
@@ -1988,12 +1996,13 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       }
     } catch (const std::runtime_error& e) {
       std::print(stderr, "upass pass error: {}\n", e.what());
+      lm->restore_cursor(here);
     }
+    I(lm->get_current_nid() == here.current, "push handler left the LNAST cursor unbalanced");
     if (dispatch_stats_) {
       entry.stat_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
       ++entry.stat_calls;
     }
-    lm->restore_cursor(here);
   }
   // Lazy install: a dst the passes populated becomes the name's live bundle
   // ("the first write installs the bundle"). VALUE-vs-FACT split: constprop
@@ -2023,8 +2032,8 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       // fail cleanly instead of tripping a hard invariant abort.
       {
         const Bundle::Entry& e0 = now->get_entry(bundle_path::of_string("0"));
-        if (!e0.trivial.is_invalid() && e0.trivial.is_integer() && !e0.trivial.has_unknowns() && !e0.bw_max.is_invalid()
-            && !e0.bw_min.is_invalid()) {
+        if (!Lnast::is_tmp(rn.dst_name) && !e0.trivial.is_invalid() && e0.trivial.is_integer() && !e0.trivial.has_unknowns()
+            && !e0.bw_max.is_invalid() && !e0.bw_min.is_invalid()) {
           const bool over  = e0.trivial.gt_op(e0.bw_max)->is_known_true();
           const bool under = e0.trivial.lt_op(e0.bw_min)->is_known_true();
           if ((over || under) && !livehd::diag::sink().has_errors()) {
@@ -2034,10 +2043,10 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
                 .category = "bitwidth",
                 .pass     = "upass.runner",
                 .message  = std::format("`{}` (value {}) does not fit its declared range [{}, {}]",
-                                        rn.dst_name,
-                                        e0.trivial.to_decimal_string(),
-                                        e0.bw_min.to_decimal_string(),
-                                        e0.bw_max.to_decimal_string()),
+                                       rn.dst_name,
+                                       e0.trivial.to_decimal_string(),
+                                       e0.bw_min.to_decimal_string(),
+                                       e0.bw_max.to_decimal_string()),
                 .span     = lm->current_span(),
                 .hint     = "widen the declared type, force fewer bits with a bit-select, or adjust the value",
             });
@@ -2051,22 +2060,32 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       (void)symbol_table_.set(root, rn.dst);
     }
   }
-  if (!symbol_table_.pending_decl_facts.empty()) {
-    apply_pending_field_facts();
+  if (!symbol_table_.pending_decl_facts.empty() && !rn.dst_name.empty()) {
+    apply_pending_field_facts(Bundle::get_first_level(rn.dst_name));
   }
   return any_drop;
 }
 
-// Drain the dotted-bake stash: any pending field whose root binding
+// Drain one root's dotted-bake stash: any pending field whose root binding
 // now holds a trivial at that path gets its declared facts written (and the
-// pending entry erased). Called per dispatched node; the map is empty except
-// in the few statements between an inliner type_spec prologue and the
-// argument store, so the common-path cost is one empty() check.
-void uPass_runner::apply_pending_field_facts() {
+// pending entry erased). Only the just-written destination root can have
+// materialized a field, so use the reverse index instead of rescanning facts
+// belonging to every other live root after every dispatched node.
+void uPass_runner::apply_pending_field_facts(std::string_view root) {
+  auto root_it = symbol_table_.pending_keys_by_root.find(root);
+  if (root_it == symbol_table_.pending_keys_by_root.end()) {
+    return;
+  }
+
   auto& pending = symbol_table_.pending_decl_facts;
-  for (auto it = pending.begin(); it != pending.end();) {
-    const auto    root  = Bundle::get_first_level(it->first);
-    const auto    fpath = Bundle::get_all_but_first_level(it->first);
+  auto& keys    = root_it->second;
+  auto  out     = keys.begin();
+  for (const auto& key : keys) {
+    auto it = pending.find(key);
+    if (it == pending.end()) {
+      continue;
+    }
+    const auto    fpath = Bundle::get_all_but_first_level(key);
     // READ-ONLY probe first: never clone just to poll. This stash is drained
     // once per dispatched node, and the COW unshare inside get_bundle_for_write
     // (the old probe) cloned the whole root bundle on every poll — O(N^2) on a
@@ -2075,7 +2094,7 @@ void uPass_runner::apply_pending_field_facts() {
     // scope exit (Symbol_table::leave_scope) so the stash stays bounded.
     const Bundle* rb_ro = symbol_table_.peek_writable_bundle(root);
     if (rb_ro == nullptr || !rb_ro->has_trivial(bundle_path::of_string(fpath))) {
-      ++it;
+      *out++ = key;
       continue;
     }
     // Field materialized → apply. Unshare for the write only now (rare path).
@@ -2097,7 +2116,11 @@ void uPass_runner::apply_pending_field_facts() {
     }
     fe.comptime = fe.comptime || pf.comptime;
     rb->set(bundle_path::of_string(fpath), std::move(fe));
-    pending.erase(it++);
+    pending.erase(it);
+  }
+  keys.erase(out, keys.end());
+  if (keys.empty()) {
+    symbol_table_.pending_keys_by_root.erase(root_it);
   }
 }
 
@@ -5438,7 +5461,7 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
     // this shape. Named values still require an explicit non-reg mode so a
     // registered/typed array cannot be mistaken for a constant ROM tuple.
     const bool muxable_mode   = (!facts && std::string_view(src).starts_with("%"))
-                                || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
+                              || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
     if (is_array_typed || !muxable_mode) {
       return false;
     }
@@ -5870,7 +5893,7 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   const bool is_for     = Lnast_ntype::is_for(t);
   // Child 0 of a defining statement names its target, not a read.
   const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
-                          || Lnast_ntype::is_tuple_get(t);
+                       || Lnast_ntype::is_tuple_get(t);
 
   const auto target = ln.get_first_child(nid);
   const auto target_name

@@ -198,11 +198,7 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   // just `bits` — lets downstream max/min derivation and overload range-fit use
   // the precise bounds instead of a power-of-two `bits` window (review cat 1 R1).
   if (ti.kind == Num::none && ti.bits == 0 && ln != nullptr) {
-    const auto& io         = ln->io_meta();
     auto        merge_port = [&](const Lnast_io_entry& pe) {
-      if (pe.name != var) {
-        return false;
-      }
       if (pe.bits == 0 && pe.kind != Io_kind::boolean && !pe.has_range) {
         return false;  // unbounded/untyped (template port) — nothing to pin
       }
@@ -222,16 +218,14 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
       any = true;
       return true;
     };
-    bool hit = false;
-    for (const auto& pe : io.inputs) {
-      if (merge_port(pe)) {
-        hit = true;
-        break;
-      }
-    }
-    if (!hit) {
-      for (const auto& pe : io.outputs) {
-        if (merge_port(pe)) {
+    // The index resolves inputs before outputs, matching the pre-index scan.
+    // That scan also FELL THROUGH to the output list when the name-matching
+    // input was itself untyped/unbounded, so keep that second chance: a leaf
+    // that is an untyped input and a typed output must still pin its range.
+    const auto* pe = ln->io_meta().find(var);
+    if (pe != nullptr && !merge_port(*pe)) {
+      for (const auto& oe : ln->io_meta().outputs) {
+        if (oe.name == var && merge_port(oe)) {
           break;
         }
       }

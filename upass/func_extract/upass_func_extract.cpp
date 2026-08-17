@@ -116,8 +116,10 @@ struct Lambda_extractor {
   // ── tree-copy helpers (into an extracted-function Lnast; verbatim) ──────
   void copy_current_subtree(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent) {
     const auto type       = lm->current_type();
-    auto       new_parent = (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) ? dst->add_child(parent, lm->current_node())
-                                                                                       : dst->add_child(parent, type);
+    auto       new_parent = dst->add_child(parent, type);
+    if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+      dst->set_name_id(new_parent, lm->get_lnast()->get_name_id(lm->get_current_nid()));
+    }
     if (Lnast::srcid_carries(type)) {
       const auto& src = lm->get_lnast();
       if (const auto id = src->get_srcid(lm->get_current_nid()); id != hhds::SourceId_invalid) {
@@ -463,14 +465,21 @@ struct Lambda_extractor {
         latest_outer_import[lhs_name] = imit->second;
         return;
       }
+      // Self-referential copy (`a = b`, both already outer values): the
+      // `operator[]` insert can rehash the very map the iterator points into,
+      // so materialize the source BEFORE the insert. Reading `it->second` as
+      // the assignment's RHS is a use-after-free (absl aborts with "Use of
+      // destroyed hash table" on the nested bundle map).
       auto lvit = latest_outer_value.find(rhs_text);
       if (lvit != latest_outer_value.end()) {
-        latest_outer_value[lhs_name] = lvit->second;
+        auto copy                    = lvit->second;
+        latest_outer_value[lhs_name] = std::move(copy);
         return;
       }
       auto lbit = latest_outer_bundle.find(rhs_text);
       if (lbit != latest_outer_bundle.end()) {
-        latest_outer_bundle[lhs_name] = lbit->second;
+        auto copy                     = lbit->second;
+        latest_outer_bundle[lhs_name] = std::move(copy);
         return;
       }
     }

@@ -13,6 +13,11 @@
 
 namespace livehd::diag {
 
+namespace {
+thread_local std::optional<Diagnostic>   tls_staged;
+thread_local const hhds::Source_locator* tls_locator = nullptr;
+}  // namespace
+
 std::string_view to_string(Severity s) {
   switch (s) {
     case Severity::error  : return "error";
@@ -262,9 +267,9 @@ std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl) {
   out += d.message;
   // Compact human suffix for a progress/info record: ` [verdict=… engine=… …ms]`.
   if (!d.verdict.empty() || !d.engine.empty() || d.duration_ms >= 0) {
-    out += " [";
-    bool first = true;
-    auto sep   = [&] {
+    out        += " [";
+    bool first  = true;
+    auto sep    = [&] {
       if (!first) {
         out += ' ';
       }
@@ -380,6 +385,7 @@ void Sink::write_json(const std::string& line) {
 }
 
 void Sink::emit(Diagnostic d) {
+  const std::lock_guard lock(mutex_);
   // The category vocabulary is pinned (diag.hpp kCategories); a typo here
   // would silently fragment the machine-readable stream, so fail loudly in
   // debug builds at the first occurrence.
@@ -405,7 +411,7 @@ void Sink::emit(Diagnostic d) {
   }
   if (human_stderr_) {
     if (!stderr_jsonl_) {
-      std::fputs(to_text(d, locator_).c_str(), stderr);
+      std::fputs(to_text(d, tls_locator).c_str(), stderr);
       std::fputc('\n', stderr);
     } else if (json_out_ != Json::stderr_) {  // already written above when the JSONL channel targets stderr
       std::fputs(to_jsonl(d, seq_).c_str(), stderr);
@@ -434,6 +440,7 @@ size_t Sink::count(Severity s) const {
 }
 
 void Sink::clear() {
+  const std::lock_guard lock(mutex_);
   records_.clear();
   seen_.clear();
   step_.clear();
@@ -443,7 +450,7 @@ void Sink::clear() {
   warn_count_           = 0;
   note_count_           = 0;
   info_count_           = 0;
-  staged_.reset();
+  tls_staged.reset();
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);
     json_fp_ = nullptr;
@@ -451,11 +458,13 @@ void Sink::clear() {
 }
 
 void Sink::set_step(std::string_view step) {
+  const std::lock_guard lock(mutex_);
   step_ = step;
   seen_.clear();
 }
 
 void Sink::set_jsonl_path(std::string_view path) {
+  const std::lock_guard lock(mutex_);
   configured_ = true;
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);
@@ -472,18 +481,22 @@ void Sink::set_jsonl_path(std::string_view path) {
 }
 
 void Sink::set_human_stderr(bool on) {
+  const std::lock_guard lock(mutex_);
   configured_   = true;
   human_stderr_ = on;
 }
 
-void Sink::set_stderr_jsonl(bool on) { stderr_jsonl_ = on; }
+void Sink::set_stderr_jsonl(bool on) {
+  const std::lock_guard lock(mutex_);
+  stderr_jsonl_ = on;
+}
 
-void Sink::stage(Diagnostic d) { staged_ = std::move(d); }
+void Sink::stage(Diagnostic d) { tls_staged = std::move(d); }
 
 void Sink::flush(Severity sev, std::string_view text) {
-  if (staged_) {
-    emit(std::move(*staged_));
-    staged_.reset();
+  if (tls_staged) {
+    emit(std::move(*tls_staged));
+    tls_staged.reset();
   } else {
     emit(Diagnostic{.severity = sev,
                     .code     = (sev == Severity::warning ? "warning" : "error"),
@@ -492,6 +505,10 @@ void Sink::flush(Severity sev, std::string_view text) {
                     .message  = std::string(text)});
   }
 }
+
+void Sink::set_locator(const hhds::Source_locator* sl) noexcept { tls_locator = sl; }
+
+const hhds::Source_locator* Sink::locator() const noexcept { return tls_locator; }
 
 Sink& sink() {
   static Sink s;
