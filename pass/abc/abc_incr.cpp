@@ -60,6 +60,17 @@ uint64_t           hstr(std::string_view s) {
   return h;
 }
 
+size_t graph_node_count(hhds::Graph* g) {
+  size_t count = 0;
+  if (g != nullptr) {
+    for (const auto& n : g->body().nodes()) {
+      (void)n;
+      ++count;
+    }
+  }
+  return count;
+}
+
 // Re-declare a Sub's child def (`cio`) into `dst` if absent, cloning its IO
 // (names/widths/signs/port-ids/loop_break) -- never a copy_from (which asserts on
 // a body-less decl). `with_body` mints an empty body: REQUIRED in a cache library
@@ -190,6 +201,61 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
   }
   auto it = rows_.find(rb.module_name);
   if (it == rows_.end()) {
+    // EXPERIMENTAL measurement: ask whether a freshly partitioned region is
+    // identical to an already-seen region with a different module name.  This
+    // is intentionally gated to compare-only studies until a benchmark proves
+    // there is enough repetition to justify production cache/index changes.
+    if (std::getenv("ABC_INCR_CROSS_NAME") != nullptr) {
+      const size_t fresh_nodes = graph_node_count(pre_body);
+      absl::flat_hash_set<std::string_view> fin, fout;
+      fin.reserve(rb.inputs.size());
+      fout.reserve(rb.outputs.size());
+      for (const auto& p : rb.inputs) {
+        fin.insert(p.name);
+      }
+      for (const auto& p : rb.outputs) {
+        fout.insert(p.name);
+      }
+      livehd::semdiff::Semdiff_options so;
+      so.matching_names = true;
+      so.blackbox_subs  = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
+      for (const auto& [candidate_name, candidate] : rows_) {
+        if (candidate.recipe != recipe || candidate.pre_nodes != fresh_nodes || candidate.in.size() != fin.size()
+            || candidate.out.size() != fout.size()) {
+          continue;
+        }
+        bool ports_match = true;
+        for (const auto& p : candidate.in) {
+          ports_match &= fin.contains(p);
+        }
+        for (const auto& p : candidate.out) {
+          ports_match &= fout.contains(p);
+        }
+        if (!ports_match) {
+          continue;
+        }
+        auto pio = cached_pre_lib().find_io(candidate.pre);
+        if (!pio) {
+          continue;
+        }
+        auto cached_pre = pio->get_graph();
+        if (!cached_pre) {
+          continue;
+        }
+        bool same = livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so);
+        if (!same && std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr) {
+          same = livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
+        }
+        if (!same) {
+          continue;
+        }
+        res.hit         = true;
+        res.row         = &candidate;
+        res.crit_output = fout.contains(candidate.crit_output) ? candidate.crit_output : std::string{};
+        std::print("[abc-incr] CROSS {} <- {}\n", rb.module_name, candidate_name);
+        return res;
+      }
+    }
     dbg("no cached row for this module name");
     return res;
   }
@@ -374,6 +440,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.crit_output  = q.crit_output;
   row.crit_src     = q.crit_src;
   row.div_blackbox = q.div_blackbox;
+  row.pre_nodes    = graph_node_count(rb.pre_body);
 
   rows_[rb.module_name] = std::move(row);
   dirty_                = true;
@@ -390,6 +457,7 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
+  row.pre_nodes = graph_node_count(rb.pre_body);
   row.in.reserve(rb.inputs.size());
   row.out.reserve(rb.outputs.size());
   for (const auto& p : rb.inputs) {

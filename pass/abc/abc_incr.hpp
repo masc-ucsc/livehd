@@ -56,6 +56,7 @@ public:
     std::string              crit_output;  // region output port with the worst arrival (a name)
     std::string              crit_src;
     int                      div_blackbox = 0;
+    size_t                   pre_nodes    = 0;  // transient cross-name experiment prefilter
   };
 
   struct Compare_result {

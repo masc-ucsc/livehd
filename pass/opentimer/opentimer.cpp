@@ -554,7 +554,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
   overwrite_dpin2net.clear();
 
-  Pin_tracker<std::string> pin_tracker("zero");
+  constexpr std::string_view kZeroNet = "__lhd_ot_zero__";
+  Pin_tracker<std::string>   pin_tracker(std::string{kZeroNet});
+  // A tracker result can be known zero (padding, an out-of-range unsigned
+  // slice, or a shift fill). Give those cell inputs a real, driverless OT net:
+  // constants have no transition/arrival, while falling back to the glue
+  // node's synthetic name would leave the timing pin unconnected.
+  timer.insert_net(std::string{kZeroNet});
 
   auto gio = g->get_io();
 
@@ -923,9 +929,12 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       if (root_track) {
         const auto& pv = pin_tracker.get_pin_vector(wname);
 
-        if (pv.size() == 1) {  // single bit tracking result
+        if (pv.empty()) {
+          set_overwrite(dnet, dpin, std::string{kZeroNet});
+        } else if (pv.size() == 1) {  // single bit tracking result
           if (pv[0].pos < 0) {
-            continue;  // no connection
+            set_overwrite(dnet, dpin, std::string{kZeroNet});
+            continue;
           }
           if (pv[0].pos) {
             auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
@@ -933,7 +942,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           } else {
             set_overwrite(dnet, dpin, pv[0].id);
           }
-        } else if (pv.size() > 1 && pv[0].pos >= 0 && !is_overwritten(dnet, dpin)) {
+        } else if (pv.size() > 1 && pv[0].pos < 0 && !is_overwritten(dnet, dpin)) {
+          set_overwrite(dnet, dpin, std::string{kZeroNet});
+        } else if (pv.size() > 1 && !is_overwritten(dnet, dpin)) {
           // MULTI-bit tracker result: a module-boundary packed bus (pass.abc
           // glue). bit 0 is the real signal, higher bits are const padding for a
           // wide port, so a 1-bit cell reading this driver reads bit 0 — map it
@@ -952,61 +963,69 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  // 4th: populate the cells (Sub instances). Whole-design mode iterates the
-  // flattened leaf set (forward_hier descends design modules; Liberty-cell
-  // leaves are yielded via opaque_gids_), so gates from every instance land in
-  // the single ot::Timer under their hier-unique names.
+  // 4th: create every sequential-boundary PI BEFORE queuing any gate
+  // connection. leaf_nodes() is deliberately not ordered in flat mode, so a
+  // single mixed loop can encounter a consuming gate before the flop/memory
+  // that creates its bit-net PI. OpenTimer then rejects the connection while
+  // still returning success, and the PI appears later -- leaving a silently
+  // incomplete timing graph.
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
+    if (op != Ntype_op::Flop && op != Ntype_op::Memory) {
       continue;
     }
-    if (Ntype::is_pin_trackable(op)) {
-      continue;
+    // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops/memories
+    // native — the Liberty stays combinational. Each consumed output (a flop Q,
+    // a memory read-data port) becomes a virtual primary input arriving at 0, so
+    // flop-to-flop segments are scored; the din/en/addr cones end at their
+    // driving gate pins, which compute_timing already reads. Clock/reset nets
+    // are not timed (no clock tree in this estimate).
+    //
+    // out_pins() does NOT materialize these outputs — a flop Q is an implicit
+    // port-0 pin, and a MEMORY exposes each read-data port only on its
+    // consuming edges (out_pins() is empty). Collect the actually-driven output
+    // pins from out_edges (deduped by pin) so every read port becomes a net.
+    std::vector<hhds::Occurrence_pin>           bpins;
+    absl::flat_hash_set<hhds::Occurrence_index> seen;
+    for (const auto& e : node.out_edges()) {
+      if (!e.driver.is_invalid() && seen.insert(e.driver.get_occurrence_index()).second) {
+        bpins.push_back(e.driver);
+      }
     }
-    if (op == Ntype_op::Flop || op == Ntype_op::Memory) {
-      // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops/memories
-      // native — the Liberty stays combinational. Each consumed output (a flop Q,
-      // a memory read-data port) becomes a virtual primary input arriving at 0, so
-      // flop-to-flop segments are scored; the din/en/addr cones end at their
-      // driving gate pins, which compute_timing already reads. Clock/reset nets
-      // are not timed (no clock tree in this estimate).
-      //
-      // out_pins() does NOT materialize these outputs — a flop Q is an implicit
-      // port-0 pin, and a MEMORY exposes each read-data port only on its
-      // consuming edges (out_pins() is empty). Collect the actually-driven output
-      // pins from out_edges (deduped by pin) so every read port becomes a net.
-      std::vector<hhds::Occurrence_pin>           bpins;
-      absl::flat_hash_set<hhds::Occurrence_index> seen;
-      for (const auto& e : node.out_edges()) {
-        if (!e.driver.is_invalid() && seen.insert(e.driver.get_occurrence_index()).second) {
-          bpins.push_back(e.driver);
-        }
+    if (bpins.empty()) {  // no consuming edge (a dead flop): fall back to port 0
+      auto dpin0 = node.get_driver_pin(0);
+      if (!dpin0.is_invalid()) {
+        bpins.push_back(dpin0);
       }
-      if (bpins.empty()) {  // no consuming edge (a dead flop): fall back to port 0
-        auto dpin0 = node.get_driver_pin(0);
-        if (!dpin0.is_invalid()) {
-          bpins.push_back(dpin0);
-        }
+    }
+    for (auto& dpin : bpins) {
+      if (dpin.is_invalid() || dpin.out_edges().empty()) {
+        continue;
       }
-      for (auto& dpin : bpins) {
-        if (dpin.is_invalid() || dpin.out_edges().empty()) {
-          continue;
-        }
-        auto dnet = net_of_node(node, dpin, hier_mode_);  // flop/mem output (driver side)
-        if (is_overwritten(dnet, dpin)) {
-          continue;  // drives a primary output directly: already a PO net
-        }
-        auto       wname = dnet;
-        const auto bits  = bits_of(dpin);
-        timer.insert_primary_input(wname);  // idempotent net insert underneath
-        set_input_delays(wname);
-        for (auto i = 1; i < bits; ++i) {
-          auto bus_bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
-          timer.insert_primary_input(bus_bit_name);
-          set_input_delays(bus_bit_name);
-        }
+      auto dnet = net_of_node(node, dpin, hier_mode_);  // flop/mem output (driver side)
+      if (is_overwritten(dnet, dpin)) {
+        continue;  // drives a primary output directly: already a PO net
       }
+      auto       wname = dnet;
+      const auto bits  = bits_of(dpin);
+      timer.insert_primary_input(wname);  // idempotent net insert underneath
+      set_input_delays(wname);
+      for (auto i = 1; i < bits; ++i) {
+        auto bus_bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
+        timer.insert_primary_input(bus_bit_name);
+        set_input_delays(bus_bit_name);
+      }
+    }
+  }
+
+  // 5th: populate the combinational cells (Sub instances). Whole-design mode
+  // iterates the flattened leaf set (forward_hier descends design modules;
+  // Liberty-cell leaves are yielded via opaque_gids_), so gates from every
+  // instance land in the single ot::Timer under their hier-unique names.
+  for (auto& node : leaf_nodes(g)) {
+    auto op = type_op_of(node);
+    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op) || op == Ntype_op::Flop
+        || op == Ntype_op::Memory) {
       continue;
     }
     if (op != Ntype_op::Sub) {
@@ -1077,7 +1096,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  // 5th: zero-default the inputs/outputs at the OT side.
+  // 6th: zero-default the inputs/outputs at the OT side.
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
       auto pin = g->get_input_pin(d.name);
@@ -1120,6 +1139,32 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
   timer.update_timing();
+
+  // OpenTimer logs and skips a connect_pin whose pin/net is absent, but does
+  // not return an error to its caller. Never publish QoR from such a partial
+  // graph: every Liberty-cell input in a mapped netlist must have a net.
+  size_t                   unconnected = 0;
+  std::vector<std::string> examples;
+  for (const auto& [name, pin] : timer.pins()) {
+    if (pin.gate() != nullptr && pin.is_input() && pin.net() == nullptr) {
+      ++unconnected;
+      if (examples.size() < 4) {
+        examples.push_back(name);
+      }
+    }
+  }
+  if (unconnected != 0) {
+    std::string sample;
+    for (const auto& name : examples) {
+      sample += sample.empty() ? name : std::format(", {}", name);
+    }
+    livehd::diag::err("pass.opentimer", "unconnected-pin", "internal")
+        .msg("pass.opentimer built an incomplete timing graph: {} Liberty input pin(s) are unconnected (first: {})",
+             unconnected,
+             sample)
+        .fatal();
+    return;
+  }
 
   max_delay = 0;
   std::string max_pin;
