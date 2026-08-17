@@ -948,6 +948,21 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "sim_color_llvm_smoke",
+    size = "large",
+    srcs = ["sim_color_llvm_smoke.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_reg_const.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
+        "//inou/prp:tests/sim/mem_sim_gated_clock.prp",
+        "//lhd",
+    ],
+)
+
 # LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
 # latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
 # DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and

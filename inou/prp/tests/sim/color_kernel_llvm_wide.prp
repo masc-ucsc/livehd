@@ -1,0 +1,21 @@
+/*
+:name: color_kernel_llvm_wide
+:type: simulation
+*/
+// A 130-bit boundary forces three packed ABI limbs. Keep high bits live across
+// arithmetic, shifts, and bitwise operations so truncation to uint64_t fails.
+pub mod llvm_wide(d:u130, e:u130) -> (result:u130@[0]) {
+  const rotated = (d << 79) | (d >> 51)
+  result = ((rotated + e) ^ (e << 113))#[0..=129]
+}
+
+test llvm_wide.packed_limbs {
+  mut acc = llvm_wide
+  tick 1 {
+    acc.d = (1 << 120) | (1 << 65) | 0x12345
+    acc.e = (1 << 96) | (1 << 3) | 7
+    step
+    const rotated = (acc.d << 79) | (acc.d >> 51)
+    assert(acc.result == (((rotated + acc.e) ^ (acc.e << 113))#[0..=129]))
+  }
+}

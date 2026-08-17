@@ -30,10 +30,11 @@ void Inou_cgen::setup() {
   m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
 
-  // inou.cgen.sim — executable Slop C++ from an Lgraph (TODO 3d). Per-module
+  // inou.cgen.sim — executable simulator code from an Lgraph (TODO 3d). Per-module
   // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
   // them is written by the kernel's emit_sim_outputs.
-  Eprp_method m2("inou.cgen.sim", "export executable slop C++ from an Lgraph", &Inou_cgen::to_cgen_sim);
+  Eprp_method m2("inou.cgen.sim", "export executable simulator code from an Lgraph", &Inou_cgen::to_cgen_sim);
+  m2.add_label_optional("backend", "sim.backend: slop (reference C++) or llvm (direct native color objects)", "slop");
   m2.add_label_optional("vcd",
                         "baked-in VCD trace path (the sim.vcd knob: the kernel maps false->none, true-><top>.vcd, "
                         "FILE->that path); empty = no VCD",
@@ -144,11 +145,16 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto       color_dirty_s     = var.get("color_dirty");
   auto       debug_s           = var.get("debug");
   auto       unknown_zero_s    = var.get("unknown_zero");
+  auto       backend           = var.get("backend");
+  if (backend != "slop" && backend != "llvm") {
+    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("sim.backend expects slop|llvm, got '{}'", backend).emit();
+    return;
+  }
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
-  bool       bad_flag          = false;
-  const auto flag_on           = [&bad_flag](std::string_view label, std::string_view v) {
+  bool       bad_flag = false;
+  const auto flag_on  = [&bad_flag](std::string_view label, std::string_view v) {
     if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
       livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
       bad_flag = true;
@@ -360,7 +366,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   slop_u_on,
                   color_dirty_on,
                   debug_on,
-                  unknown_zero_on);
+                  unknown_zero_on,
+                  backend == "llvm");
     p.do_from_graph(g);
   }
 }

@@ -20,6 +20,28 @@ bazel_dep(name = "rules_cc", version = "0.2.22")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+bazel_dep(name = "apple_support", version = "1.24.2", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "protobuf", version = "33.4", repo_name = "com_google_protobuf")
+bazel_dep(name = "zlib-ng", version = "2.3.3", repo_name = "llvm_zlib")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.1", repo_name = "llvm_zstd")
+
+# LLVM is linked into lhd for the opt-in direct simulator backend. LLVM's
+# official source archive carries its Bazel overlay under utils/bazel; expose
+# the raw tree and instantiate that overlay as @llvm-project. This remains
+# hermetic when LiveHD is consumed as a Bazel dependency and tracks the current
+# LLVM 22.1 patch release without relying on the system toolchain's libraries.
+http_archive(
+    name = "llvm-raw",
+    build_file_content = "exports_files([\"WORKSPACE\"])",
+    patch_args = ["-p1"],
+    patches = ["//packages:llvm22-bazel-root.patch"],
+    sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
+    strip_prefix = "llvm-project-22.1.8.src",
+    urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"],
+)
+
+llvm_configure = use_repo_rule("@llvm-raw//utils/bazel:configure.bzl", "llvm_configure")
+llvm_configure(name = "llvm-project", targets = ["AArch64", "X86"])
 
 bazel_dep(name = "abseil-cpp", version = "20250814.2") # version = "20240722.1")
 bazel_dep(name = "google_benchmark", version = "1.9.5")
@@ -82,7 +104,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "d88782929e23fc5455c129ed144c0256b127a7af",  # likely unchanged slop updates
+    commit = "fd3028fccd3b92e58445002a3b089024e5574e5a",  # packed-word transport for generated native-code ABIs
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:

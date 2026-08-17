@@ -230,7 +230,7 @@ public:
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,
-           bool _unknown_zero = false)
+           bool _unknown_zero = false, bool _llvm_backend = false)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -240,6 +240,7 @@ public:
       , flatten_budget(_flatten)
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
+      , llvm_backend_(_llvm_backend)
       , slop_u_(_slop_u)
       , color_dirty_(_color_dirty)
       , debug_(_debug)
@@ -248,6 +249,7 @@ public:
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
   bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
+  bool                           llvm_backend_   = false;    // direct native object lowering requested for supported colors
   // sim.slop_u — materialize every value whose LGraph driver pin is proven
   // unsigned in the CANONICAL-unsigned Slop_u<n> (one mask at the write),
   // instead of the lazily-masked Slop<n> (one mask at every read).

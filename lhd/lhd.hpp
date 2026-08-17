@@ -271,14 +271,18 @@ int  run_meta_command(const Options& opts);
 // derive from it, so the three can never drift. `inline constexpr` so it is one
 // shared definition across translation units.
 struct Sim_set_option {
-  enum class Kind { boolean, non_neg_num, bool_or_file };  // value grammar enforced on --set
-  std::string_view name;                                   // flag under sim.*, e.g. "checkpoint_min_secs"
-  std::string_view default_value;                          // shown by `lhd list options`
+  enum class Kind { boolean, non_neg_num, bool_or_file, backend };  // value grammar enforced on --set
+  std::string_view name;                                            // flag under sim.*, e.g. "checkpoint_min_secs"
+  std::string_view default_value;                                   // shown by `lhd list options`
   Kind             kind;
   std::string_view help;  // full help (also `lhd describe sim.flag`)
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
+    {                "backend",
+     "slop",      Sim_set_option::Kind::backend,
+     "slop|llvm — simulator color-kernel backend. llvm is experimental and emits native object files directly; "
+     "unsupported colors fall back to the reference Slop C++ lowering"                                     },
     {                    "vcd",
      "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
@@ -324,7 +328,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "true",      Sim_set_option::Kind::boolean,
      "cross-cycle color activation cache. false executes every color once in its existing static phase order and "
      "emits direct boundary assignments instead of change comparisons and dirty propagation; intended for measured "
-     "scheduler-overhead comparisons"                                                                       },
+     "scheduler-overhead comparisons"                                                                      },
     {                  "debug",
      "false",      Sim_set_option::Kind::boolean,
      "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "

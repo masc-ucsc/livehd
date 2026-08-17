@@ -1,0 +1,19 @@
+diff --git a/WORKSPACE b/WORKSPACE
+new file mode 100644
+index 000000000000..e69de29bb2d1
+--- /dev/null
++++ b/WORKSPACE
+@@ -0,0 +1 @@
++workspace(name = "llvm_raw")
+diff --git a/llvm/lib/Support/ProgramStack.cpp b/llvm/lib/Support/ProgramStack.cpp
+index 68cb6cd72c76..2a63cd664612 100644
+--- a/llvm/lib/Support/ProgramStack.cpp
++++ b/llvm/lib/Support/ProgramStack.cpp
+@@ -9,6 +9,7 @@
+ #include "llvm/Support/ProgramStack.h"
+ #include "llvm/Config/config.h"
+ #include "llvm/Support/Compiler.h"
++#include <cstdlib>
+ 
+ #ifdef LLVM_ON_UNIX
+ # include <sys/resource.h> // for getrlimit

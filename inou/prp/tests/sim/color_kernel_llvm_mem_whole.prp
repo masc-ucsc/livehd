@@ -1,0 +1,34 @@
+/*
+:name: color_kernel_llvm_mem_whole
+:type: simulation
+*/
+// The combinational half is the semantic oracle for owner callbacks. Keep the
+// registered half in the graph as structural coverage for staged whole-array
+// callbacks; the legacy direct-color backend does not yet satisfy the existing
+// mem_whole registered-read assertion, so this regression does not disguise
+// that independent issue as an LLVM failure.
+mod llvm_mem_whole(inp:u80, idx:u3, cinp:u80, cidx:u3) -> (r:u10@[0], allout:u80@[0], cr:u10@[0], call:u80@[0]) {
+  reg arr:[8]u10 = nil
+  arr = inp
+  r = arr[idx]
+  allout = arr
+
+  mut carr:[8]u10
+  carr = cinp
+  cr = carr[cidx]
+  call = carr
+}
+
+test llvm_mem_whole.update_read_all {
+  mut acc = llvm_mem_whole
+  const packed = (0x155 << 70) | (0x2aa << 40) | (0x123 << 10) | 0x3ab
+  tick 1 {
+    acc.inp  = 0
+    acc.idx  = 0
+    acc.cinp = packed
+    acc.cidx = 7
+    step
+    assert(acc.cr == 0x155, "whole-array indexed read keeps the high packed limb")
+    assert(acc.call == packed, "whole-array read_all preserves all packed limbs")
+  }
+}

@@ -1,0 +1,44 @@
+/*
+:name: color_kernel_llvm_reg
+:type: simulation
+*/
+// A wide state endpoint exercises the register ABI across three packed limbs.
+// Reset, enabled capture, and hold must agree with the Slop backend while the
+// existing phase barrier retains ownership of the actual Q commit.
+pub mod llvm_reg(en:bool, d:u130) -> (q:u130@[0], lane:u2@[0]) {
+  reg state:u130 = (1 << 129) | (1 << 65) | 3
+  q = state
+  // The planner resolves this packed field to an LSB-aligned internal value.
+  // LLVM must honor that exact-use extraction inside the color, not apply the
+  // concat's original [5,7) coordinates to the already narrow two-bit lane.
+  const state_lane:u2 = state#[9..=10]
+  const data_lane:u5  = d#[0..=4]
+  lane = concat(state_lane, data_lane)#[5..=6]
+  if en {
+    state = ((d << 17) ^ (d >> 7) ^ (1 << 125))#[0..=129]
+  }
+}
+
+test llvm_reg.wide_reset_enable_hold {
+  const initial = (1 << 129) | (1 << 65) | 3
+  const d1      = (1 << 121) | (1 << 70) | 0x12345
+  const d2      = (1 << 127) | (1 << 66) | 0xabc
+  const q1      = ((d1 << 17) ^ (d1 >> 7) ^ (1 << 125))#[0..=129]
+  const q2      = ((d2 << 17) ^ (d2 >> 7) ^ (1 << 125))#[0..=129]
+  mut acc = llvm_reg
+  tick 5 {
+    acc.reset = clock == 0
+    acc.en    = (clock == 1) or (clock == 3)
+    acc.d = d1
+    if clock >= 3 {
+      acc.d = d2
+    }
+    step
+    assert((clock == 0) implies (acc.q == initial), "wide register reset")
+    assert(((clock == 1) or (clock == 2)) implies (acc.q == q1), "wide register capture and hold")
+    assert((clock >= 3) implies (acc.q == q2), "wide register second capture")
+    assert((clock == 0) implies (acc.lane == initial#[9..=10]), "packed state lane reset")
+    assert(((clock == 1) or (clock == 2)) implies (acc.lane == q1#[9..=10]), "packed state lane first capture")
+    assert((clock >= 3) implies (acc.lane == q2#[9..=10]), "packed state lane second capture")
+  }
+}

@@ -16,8 +16,29 @@ cc_library(
     deps = [
         "//graph",
         "//pass/common:pass",
-    ],
+        "@llvm-project//llvm:CodeGen",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:Passes",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:TargetParser",
+    ] + select({
+        "@platforms//cpu:aarch64": ["@llvm-project//llvm:AArch64CodeGen"],
+        "@platforms//cpu:x86_64": ["@llvm-project//llvm:X86CodeGen"],
+        "//conditions:default": ["@llvm-project//llvm:AllTargetsCodeGens"],
+    }),
     alwayslink = True,
+)
+
+cc_test(
+    name = "cgen_llvm_test",
+    srcs = ["cgen_llvm_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":inou_cgen",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(

@@ -601,6 +601,9 @@ void check_known_set_passes(const Options& opts) {
           && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
       }
+      if (opt->kind == Sim_set_option::Kind::backend && value != "slop" && value != "llvm") {
+        throw Lhd_error{"usage", std::format("--set/--config sim.backend expects slop|llvm, got '{}'", value), ""};
+      }
       // The numeric checkpoint knobs must be non-negative numbers, else a typo would
       // silently reach the driver as 0 (checkpoint every cycle / divide-by-zero cadence).
       if (opt->kind == Sim_set_option::Kind::non_neg_num) {
@@ -1290,6 +1293,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       labels["vcd"] = v;
+    } else if (k == "sim.backend") {
+      labels["backend"] = v;
     } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
       labels["vcd_fake_delay"] = v;
     } else if (k == "sim.flatten") {
@@ -1484,17 +1489,36 @@ std::string sim_hlop_path(const Options& opts) {
 }
 
 // The `-I` directory that resolves `#include "slop.hpp"` (and blop.hpp /
-// vcd_writer.hpp): the `hlop/` subdir of the hlop module root. Falls back to the
-// module root itself in case `--set sim.hlop_dir=` already points at the
-// header dir. Empty result -> slop.hpp not located (the caller reports it).
+// vcd_writer.hpp): the `hlop/` subdir of the hlop module root, falling back to
+// the module root itself in case the root already points at the header dir.
+//
+// PRECEDENCE: an explicit `--set sim.hlop_dir=DIR` is the ONLY authority when
+// it is given -- it must not silently resolve against bazel runfiles instead,
+// or a deliberate override would be ignored, so an explicit root that has no
+// slop.hpp returns empty and the caller reports it. Without an override the
+// runfiles copy wins over the `../hlop` guess: inside a bazel test the sibling
+// checkout may not exist at all, and if it does it is not the tree the test
+// was built against.
 std::string sim_hlop_include_dir(const Options& opts) {
+  bool explicit_root = false;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "sim.hlop_dir" && !value.empty()) {
+      explicit_root = true;
+      break;
+    }
+  }
+  if (!explicit_root) {
+    if (const auto runfiles = find_header_in_runfiles("slop.hpp"); !runfiles.empty()) {
+      return runfiles;
+    }
+  }
   const auto root = sim_hlop_path(opts);
   for (const auto& cand : {root + "/hlop", root}) {
     if (::access((cand + "/slop.hpp").c_str(), R_OK) == 0) {
       return cand;
     }
   }
-  return find_header_in_runfiles("slop.hpp");  // bazel runfiles fallback
+  return {};  // the runfiles probe above already ran for the non-explicit case
 }
 
 // The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
@@ -1570,6 +1594,7 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
   auto                     names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
   const auto               hlop  = sim_hlop_path(opts);
   std::vector<std::string> color_aux_sources;
+  std::vector<std::string> color_objects;
   {
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
@@ -1580,9 +1605,12 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
       if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos)
           && filename.ends_with(".cpp")) {
         color_aux_sources.push_back(filename);
+      } else if (filename.find(".color-kernel-") != std::string::npos && filename.ends_with(".llvm.o")) {
+        color_objects.push_back(filename);
       }
     }
     std::ranges::sort(color_aux_sources);
+    std::ranges::sort(color_objects);
   }
 
   // MODULE.bazel — standalone root. bzlmod honors only ROOT overrides, so we
@@ -1622,6 +1650,9 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     for (const auto& source : color_aux_sources) {
       ofs << std::format("        \"{}\",\n", source);
     }
+    for (const auto& object : color_objects) {
+      ofs << std::format("        \"{}\",\n", object);
+    }
     ofs << "    ],\n";
     ofs << "    hdrs = glob([\"*.hpp\"]),\n";
     ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
@@ -1649,6 +1680,12 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     std::ostringstream oss;
     oss << ifs.rdbuf();
     manifest.emplace_back(source, hash_bytes(oss.str()));
+  }
+  for (const auto& object : color_objects) {
+    std::ifstream      ifs(std::format("{}/{}", dir, object), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    manifest.emplace_back(object, hash_bytes(oss.str()));
   }
   write_manifest(dir, "sim", manifest);
   res.outputs.push_back(dir);

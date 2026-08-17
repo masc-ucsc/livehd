@@ -1852,6 +1852,7 @@ void sim_command(Options& opts, Result& res) {
   // The DUT bodies: every non-driver *.cpp in simdir. inou.cgen.sim does NOT emit
   // the `%`-named `test` units, so these are exactly the real module bodies.
   std::vector<std::string> bodies;
+  std::vector<std::string> direct_objects;
   {
     std::error_code ec;
     for (auto& de : fs::directory_iterator(simdir, ec)) {
@@ -1859,6 +1860,10 @@ void sim_command(Options& opts, Result& res) {
         continue;
       }
       auto fn = de.path().filename().string();
+      if (fn.ends_with(".llvm.o")) {
+        direct_objects.push_back(de.path().string());
+        continue;
+      }
       if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".cpp") {
         continue;
       }
@@ -1868,6 +1873,7 @@ void sim_command(Options& opts, Result& res) {
       bodies.push_back(de.path().string());
     }
     std::sort(bodies.begin(), bodies.end());
+    std::sort(direct_objects.begin(), direct_objects.end());
   }
 
   const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
@@ -2033,6 +2039,9 @@ void sim_command(Options& opts, Result& res) {
     for (const auto& o : objs) {
       nf << " " << nesc(o);
     }
+    for (const auto& o : direct_objects) {
+      nf << " " << nesc(o);
+    }
     nf << "\n\ndefault " << nesc(exe) << "\n";
   }
 
@@ -2171,6 +2180,9 @@ void sim_command(Options& opts, Result& res) {
 
     std::string link = shell_quote(cxx);
     for (const auto& o : objs) {
+      link += " " + shell_quote(o);
+    }
+    for (const auto& o : direct_objects) {
       link += " " + shell_quote(o);
     }
     link          += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture

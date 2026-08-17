@@ -22,7 +22,12 @@ grep -Eq 'kernel-reuses=[1-9][0-9]*' "$plan" || fail "the repeated pair occurren
 kernel=""
 kernel_file=""
 for candidate in $(sed -n 's/.*= &\(__lhd_color_kernel_[^;]*\);/\1/p' "$body" | sort | uniq -d); do
-  candidate_file="$(grep -l "std::uint64_t $candidate(void\*\*" "$work"/setup/sim/*.color-kernel-*.cpp | head -1)"
+  # A kernel returns void and takes (owner, bindings, changed-bitset): the
+  # changed word is an OUT parameter, so a color with more than 64 boundary
+  # writes is expressible. `|| true` keeps `set -e`/`pipefail` from killing the
+  # loop (silently, with no diagnostic) on a candidate that matches nothing.
+  candidate_file="$(grep -l "void $candidate(\[\[maybe_unused\]\] void\* __owner" \
+    "$work"/setup/sim/*.color-kernel-*.cpp | head -1 || true)"
   if [ -n "$candidate_file" ] && grep -q 'std::uint64_t{1} << 1' "$candidate_file"; then
     kernel="$candidate"
     kernel_file="$candidate_file"
