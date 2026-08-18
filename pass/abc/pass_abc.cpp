@@ -56,10 +56,21 @@ void Pass_abc::setup() {
       "command/alias reference: https://github.com/berkeley-abc/abc/blob/master/abc.rc "
       "(and `<cmd> -h` inside an ABC shell for each command's switches)",
       "");
+  m.add_label_optional("small_flow",
+                       "optional ABC command string used for regions whose pre-ABC mappable-GE estimate is in "
+                       "[small_min_ge, small_ge]; "
+                       "empty disables size-tiered mapping. Explicit region_opts flow overrides this selection",
+                       "");
+  m.add_label_optional("small_min_ge", "inclusive lower mappable-GE bound for small_flow (0 means no lower bound)", "0");
+  m.add_label_optional("small_ge", "non-negative mappable-GE threshold for small_flow (0 disables it)", "0");
   m.add_label_optional("register",
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
                        "true");
+  m.add_label_optional("register_max_bits",
+                       "with register=true, keep a region's flops native when their total Q width exceeds this many bits "
+                       "(0 disables the guard)",
+                       "0");
   m.add_label_optional("memory",
                        "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
                        "native memory instance (false)",
@@ -161,18 +172,22 @@ std::string jesc(std::string_view s) {
 // cross-region paths; pass.opentimer is the whole-design scorer.
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
               const std::string& qor_path, const livehd::abc::Incr_cache* incr) {
-  int    tgates = 0;
-  double tarea  = 0.0;
-  int    tdivbb = 0;   // blackboxed div/mod cones (the score under-reports)
-  int    worst  = -1;  // index of the region with the worst delay
+  int      tgates       = 0;
+  double   tarea        = 0.0;
+  int      tdivbb       = 0;  // blackboxed div/mod cones (the score under-reports)
+  uint64_t tinput_nodes = 0;
+  uint64_t tinput_ge    = 0;
+  int      worst        = -1;  // index of the region with the worst delay
   // Where the run's time went, split by what the cache did with each region.
   // hits/misses alone cannot distinguish "the cache saved nothing" from "the
   // cache saved everything there was to save" — these can.
-  double hit_ms = 0.0, miss_ms = 0.0;
+  double   hit_ms = 0.0, miss_ms = 0.0;
   for (size_t r = 0; r < qor.size(); ++r) {
     tgates                                                       += qor[r].gates;
     tarea                                                        += qor[r].area;
     tdivbb                                                       += qor[r].div_blackbox;
+    tinput_nodes                                                 += qor[r].input_nodes;
+    tinput_ge                                                    += qor[r].input_ge;
     (std::string_view{qor[r].cache} == "hit" ? hit_ms : miss_ms) += qor[r].ms;
     if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
       worst = static_cast<int>(r);
@@ -217,7 +232,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
-  j += std::format("\"total\":{{\"regions\":{},\"gates\":{},\"area\":{:.4f}", qor.size(), tgates, tarea);
+  j += std::format("\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f}",
+                   qor.size(),
+                   tinput_nodes,
+                   tinput_ge,
+                   tgates,
+                   tarea);
   if (tdivbb > 0) {
     j += std::format(",\"div_blackbox\":{}", tdivbb);
   }
@@ -247,12 +267,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     if (r != 0) {
       j += ",";
     }
-    j += std::format("{{\"module\":\"{}\",\"color\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f}",
-                     jesc(q.module),
-                     q.color,
-                     q.gates,
-                     q.area,
-                     q.ms);
+    j += std::format(
+        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f}",
+        jesc(q.module),
+        q.color,
+        q.input_nodes,
+        q.input_ge,
+        q.gates,
+        q.area,
+        q.ms);
     if (q.cache[0] != '\0') {
       j += std::format(",\"cache\":\"{}\"", q.cache);
     }
@@ -355,23 +378,27 @@ void Pass_abc::work(Eprp_var& var) {
     }
   }
 
-  auto top            = std::string{var.get("top", "")};
-  auto out            = std::string{var.get("out", "")};
-  auto library        = std::string{var.get("library", "")};
-  auto flow           = std::string{var.get("flow", "")};
-  bool map_register   = truthy(var.get("register", "true"));
-  bool map_memory     = truthy(var.get("memory", "false"));
-  auto delay          = std::string{var.get("delay", "")};
-  auto load           = std::string{var.get("load", "")};
-  bool verbose        = truthy(var.get("verbose", "false"));
-  auto adder_s        = std::string{var.get("adder", "rca")};
-  auto bs_s           = std::string{var.get("block_size", "0")};
-  auto mult_s         = std::string{var.get("multiplier", "array")};
-  auto qor_path       = std::string{var.get("qor", "")};
-  auto region_opts_s  = std::string{var.get("region_opts", "")};
-  auto mem_budget_s   = std::string{var.get("memory_budget_mb", "0")};
-  bool allow_oversize = truthy(var.get("allow_oversize", "false"));
-  auto flatten        = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
+  auto top                 = std::string{var.get("top", "")};
+  auto out                 = std::string{var.get("out", "")};
+  auto library             = std::string{var.get("library", "")};
+  auto flow                = std::string{var.get("flow", "")};
+  auto small_flow          = std::string{var.get("small_flow", "")};
+  auto small_min_ge_s      = std::string{var.get("small_min_ge", "0")};
+  auto small_ge_s          = std::string{var.get("small_ge", "0")};
+  bool map_register        = truthy(var.get("register", "true"));
+  bool map_memory          = truthy(var.get("memory", "false"));
+  auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
+  auto delay               = std::string{var.get("delay", "")};
+  auto load                = std::string{var.get("load", "")};
+  bool verbose             = truthy(var.get("verbose", "false"));
+  auto adder_s             = std::string{var.get("adder", "rca")};
+  auto bs_s                = std::string{var.get("block_size", "0")};
+  auto mult_s              = std::string{var.get("multiplier", "array")};
+  auto qor_path            = std::string{var.get("qor", "")};
+  auto region_opts_s       = std::string{var.get("region_opts", "")};
+  auto mem_budget_s        = std::string{var.get("memory_budget_mb", "0")};
+  bool allow_oversize      = truthy(var.get("allow_oversize", "false"));
+  auto flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
   if (!region_opts_s.empty()) {
@@ -404,6 +431,48 @@ void Pass_abc::work(Eprp_var& var) {
       return;
     }
   }
+  uint64_t small_ge = 0;
+  {
+    auto* b      = small_ge_s.data();
+    auto* e      = small_ge_s.data() + small_ge_s.size();
+    auto [p, ec] = std::from_chars(b, e, small_ge);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-small-ge", "io")
+          .msg("pass.abc: small_ge must be a non-negative integer, got '{}'", small_ge_s)
+          .fatal();
+      return;
+    }
+  }
+  uint64_t small_min_ge = 0;
+  {
+    auto* b      = small_min_ge_s.data();
+    auto* e      = small_min_ge_s.data() + small_min_ge_s.size();
+    auto [p, ec] = std::from_chars(b, e, small_min_ge);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-small-min-ge", "io")
+          .msg("pass.abc: small_min_ge must be a non-negative integer, got '{}'", small_min_ge_s)
+          .fatal();
+      return;
+    }
+  }
+  if (small_ge != 0 && small_min_ge > small_ge) {
+    livehd::diag::err("pass.abc", "bad-small-ge-range", "io")
+        .msg("pass.abc: small_min_ge ({}) must not exceed small_ge ({})", small_min_ge, small_ge)
+        .fatal();
+    return;
+  }
+  uint64_t register_max_bits = 0;
+  {
+    auto* b      = register_max_bits_s.data();
+    auto* e      = register_max_bits_s.data() + register_max_bits_s.size();
+    auto [p, ec] = std::from_chars(b, e, register_max_bits);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-register-max-bits", "io")
+          .msg("pass.abc: register_max_bits must be a non-negative integer, got '{}'", register_max_bits_s)
+          .fatal();
+      return;
+    }
+  }
   int block_size = 0;
   {
     auto* b      = bs_s.data();
@@ -418,18 +487,22 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   livehd::abc::Map_options opts;
-  opts.flow             = flow;
-  opts.map_register     = map_register;
-  opts.map_memory       = map_memory;
-  opts.dff_cell         = std::string{var.get("dff_cell", "")};
-  opts.delay            = delay;
-  opts.load             = load;
-  opts.verbose          = verbose;
-  opts.adder            = adder.value();
-  opts.block_size       = block_size;
-  opts.multiplier       = multiplier.value();
-  opts.memory_budget_mb = memory_budget_mb;
-  opts.allow_oversize   = allow_oversize;
+  opts.flow              = flow;
+  opts.small_flow        = small_flow;
+  opts.small_min_ge      = small_min_ge;
+  opts.small_ge          = small_ge;
+  opts.map_register      = map_register;
+  opts.map_memory        = map_memory;
+  opts.register_max_bits = register_max_bits;
+  opts.dff_cell          = std::string{var.get("dff_cell", "")};
+  opts.delay             = delay;
+  opts.load              = load;
+  opts.verbose           = verbose;
+  opts.adder             = adder.value();
+  opts.block_size        = block_size;
+  opts.multiplier        = multiplier.value();
+  opts.memory_budget_mb  = memory_budget_mb;
+  opts.allow_oversize    = allow_oversize;
   if (allow_oversize) {
     // Loud on purpose: this is the flag that lets a run take the machine down,
     // so it must be visible in the log of whatever ran afterwards.

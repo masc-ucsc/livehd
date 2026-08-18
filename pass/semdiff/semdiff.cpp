@@ -1019,7 +1019,8 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
 
 // Per-side analysis: forward/backward signatures + node order.
 struct Side {
-  hhds::Graph*                                     g = nullptr;
+  hhds::Graph*                                     g                 = nullptr;
+  bool                                             matching_io_names = true;
   std::vector<hhds::Node_class>                    order;  // forward_class order
   // Identity Get_mask nodes are representation-only boundaries. They are not
   // members of the structural node bijection; signatures walk through them.
@@ -1126,7 +1127,9 @@ void collect_structural_sinks(const hhds::Pin_class& sink, std::vector<hhds::Pin
 bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
   auto structural_drv = skip_identity_get_masks(drv);
   if (gu::is_graph_input_pin(structural_drv)) {
-    out = hcombine(hstr("\x01in"), hstr(structural_drv.get_pin_name()));
+    out = hcombine(hstr("\x01in"),
+                   s.matching_io_names ? hstr(structural_drv.get_pin_name())
+                                       : static_cast<uint64_t>(static_cast<uint32_t>(structural_drv.get_port_id())));
     return true;
   }
   if (gu::is_const_pin(structural_drv)) {
@@ -1164,7 +1167,8 @@ bool cut_signature(const Side& s, const hhds::Node_class& node, uint64_t& out) {
 Side analyze(hhds::Graph* g, const Semdiff_options& opts,
              const absl::flat_hash_map<hhds::Class_index, uint64_t>* state_seeds = nullptr) {
   Side s;
-  s.g = g;
+  s.g                 = g;
+  s.matching_io_names = opts.matching_io_names;
 
   // Seed state cells (cut points). With matching_names they get a cross-side
   // identity by hierarchical name so structure flows through them in BOTH
@@ -1484,7 +1488,8 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
       auto onode = s.g->get_output_node();
       if (!onode.is_invalid()) {
         for (const auto& e : onode.inp_edges()) {
-          auto     key  = "o:" + std::string(gu::pin_name_of(e.sink));
+          auto     key  = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(e.sink))
+                                              : "p:" + std::to_string(static_cast<uint32_t>(e.sink.get_port_id()));
           uint64_t dsig = 0;
           if (resolve_driver(s, e.driver, dsig)) {
             k.emplace(key, dsig);
@@ -2495,18 +2500,23 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     }
   };
 
-  // Seed 1: graph inputs by name.
+  // Seed 1: graph inputs by name normally, or by port id for a deliberately
+  // renamable enclosing region boundary.
   {
-    absl::flat_hash_map<std::string_view, hhds::Pin_class> bin;
+    absl::flat_hash_map<std::string, hhds::Pin_class> bin;
+    auto                                              input_key = [&](const hhds::Pin_class& pin) {
+      return opts.matching_io_names ? std::string{pin.get_pin_name()} : std::to_string(static_cast<uint32_t>(pin.get_port_id()));
+    };
     for (const auto& e : b->get_input_node().out_edges()) {
-      bin.try_emplace(e.driver.get_pin_name(), e.driver);
+      bin.try_emplace(input_key(e.driver), e.driver);
     }
-    absl::flat_hash_set<std::string_view> adone;
+    absl::flat_hash_set<std::string> adone;
     for (const auto& e : a->get_input_node().out_edges()) {
-      if (!adone.insert(e.driver.get_pin_name()).second) {
+      auto key = input_key(e.driver);
+      if (!adone.insert(key).second) {
         continue;
       }
-      auto it = bin.find(e.driver.get_pin_name());
+      auto it = bin.find(key);
       if (it != bin.end()) {
         enqueue(e.driver, it->second);
       }
@@ -2651,7 +2661,7 @@ namespace {
 // `visiting` are shared across the whole canonical_digest() call so shared
 // children in the instance DAG are digested once and a cycle is caught.
 Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
-                            absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold) {
+                            absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold, bool matching_io_names) {
   Canonical_digest d;
   if (g == nullptr) {
     return d;
@@ -2667,9 +2677,10 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   }
 
   Semdiff_options opts;
-  opts.matching_names = true;  // state cells keyed by hierarchical name — lec's
-                               // correspondence basis, so digest-equal transfers
-  Side s              = analyze(g, opts);
+  opts.matching_names    = true;  // state cells keyed by hierarchical name — lec's
+  opts.matching_io_names = matching_io_names;
+  // correspondence basis, so digest-equal transfers
+  Side s                 = analyze(g, opts);
 
   // Order-independent fold: one token per node (fsig = input-cone identity,
   // bsig = output-cone identity, kind = local shape), sorted so allocation /
@@ -2707,7 +2718,7 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
             if (!visiting.insert(gid).second) {
               return {};  // instantiation cycle: not digestable
             }
-            cd = digest_one(child, resolve, memo, visiting, sub_fold);
+            cd = digest_one(child, resolve, memo, visiting, sub_fold, true);
             visiting.erase(gid);
             memo.emplace(gid, cd);
           }
@@ -2728,13 +2739,13 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   // fallback — graph_util::real_width), so digest-equal implies encode-equal.
   auto gio = g->get_io();
   for (const auto& dio : gio->get_input_pin_decls()) {
-    uint64_t t = hcombine(hstr("\x01idecl"), hstr(dio.name));
+    uint64_t t = hcombine(hstr("\x01idecl"), matching_io_names ? hstr(dio.name) : static_cast<uint64_t>(dio.port_id));
     t          = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_input_pin(dio.name), *gio, dio.name))));
     t          = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
     toks.push_back(t);
   }
   for (const auto& dio : gio->get_output_pin_decls()) {
-    uint64_t t = hcombine(hstr("\x01odecl"), hstr(dio.name));
+    uint64_t t = hcombine(hstr("\x01odecl"), matching_io_names ? hstr(dio.name) : static_cast<uint64_t>(dio.port_id));
     t = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_output_pin(dio.name), *gio, dio.name))));
     t = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
     toks.push_back(t);
@@ -2755,13 +2766,14 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
 
 }  // namespace
 
-Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve, Sub_fold sub_fold) {
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve, Sub_fold sub_fold, bool matching_io_names) {
   absl::flat_hash_map<hhds::Gid, Canonical_digest> memo;
-  return canonical_digest(g, resolve, memo, sub_fold);
+  return canonical_digest(g, resolve, memo, sub_fold, matching_io_names);
 }
 
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
-                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold) {
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold,
+                                  bool matching_io_names) {
   if (g == nullptr) {
     return {};
   }
@@ -2770,7 +2782,7 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
   }
   absl::flat_hash_set<hhds::Gid> visiting;
   visiting.insert(g->get_gid());  // catch self-instantiation
-  auto d = digest_one(g, resolve, memo, visiting, sub_fold);
+  auto d = digest_one(g, resolve, memo, visiting, sub_fold, matching_io_names);
   memo.emplace(g->get_gid(), d);
   return d;
 }

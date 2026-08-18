@@ -33,10 +33,14 @@ namespace livehd::semdiff {
 [[nodiscard]] bool is_persistent_state(const hhds::Node_class& node);
 
 struct Semdiff_options {
-  std::string alg            = "structural";  // v1; future: region | functional
-  bool        matching_names = false;         // anchor internal flops/mems by hier name
-  bool        state_pairing  = false;         // tier-2: full-match (SRP/ERP signature) pairing
-                                              // of name-unmatched state cells (2f-lec consumer)
+  std::string                                      alg               = "structural";  // v1; future: region | functional
+  bool                                             matching_names    = false;         // anchor internal flops/mems by hier name
+  // Region-netlist reuse may rename only the enclosing module's boundary. In
+  // that mode graph IO is paired by port id/shape; internal state and Sub-cell
+  // interfaces retain their normal name-based identity.
+  bool                                             matching_io_names = true;
+  bool                                             state_pairing     = false;  // tier-2: full-match (SRP/ERP signature) pairing
+                                                                               // of name-unmatched state cells (2f-lec consumer)
   // Treat EVERY Sub as an opaque blackbox cut point (not just is_loop_break ones):
   // its outputs are seeded sources, its inputs still folded as a compare-point
   // obligation. Breaks combinational loops that run THROUGH a submodule and keys
@@ -44,24 +48,24 @@ struct Semdiff_options {
   // region reuse ONLY -- a child body is a separate cache entry, so a child edit
   // must not invalidate the parent (mirrors the digest path's interface mode).
   // UNSOUND for general LEC, where a comb Sub's input->output relation matters.
-  bool        blackbox_subs  = false;
+  bool                                             blackbox_subs     = false;
   // Explicit cross-side state correspondence supplied by the caller (lec.match):
   // {a_name, b_name} raw hier names. Each resolvable pair becomes a tier-1
   // anchor (a resolved point) exactly like a name match, so the tier-2
   // signatures build on the user's certain pairs. Unresolvable names are
   // ignored (the consumer validates its own inputs).
   std::vector<std::pair<std::string, std::string>> seed_pairs;
-  std::string id_granularity = "pair";        // pair | region
-  bool        verbose        = false;         // print per-side statistics
-  bool        dump_state     = false;         // per-state-cell listing (algorithm iteration aid)
-  double      name_noise     = 0.0;           // NL2NL-style experiment: destroy this fraction of
-                                              // impl-side state keys before tier-1 (0 = off)
-  uint64_t    noise_seed     = 1;             // selects WHICH keys are destroyed (deterministic)
-  uint32_t    synalign_maxiter = 64;          // tier-2 fixed-point round cap (64 ~ run to
-                                              // convergence; 1 = single pass, no propagation)
-  uint32_t    explain_noise  = 0;             // deep-dump up to N noised-but-unrecovered cells:
-                                              // ground-truth twin's vs the cell's SRP/ERP with
-                                              // named anchors + distances, set diff, bucket members
+  std::string                                      id_granularity   = "pair";  // pair | region
+  bool                                             verbose          = false;   // print per-side statistics
+  bool                                             dump_state       = false;   // per-state-cell listing (algorithm iteration aid)
+  double                                           name_noise       = 0.0;     // NL2NL-style experiment: destroy this fraction of
+                                                                               // impl-side state keys before tier-1 (0 = off)
+  uint64_t                                         noise_seed       = 1;       // selects WHICH keys are destroyed (deterministic)
+  uint32_t                                         synalign_maxiter = 64;      // tier-2 fixed-point round cap (64 ~ run to
+                                                                               // convergence; 1 = single pass, no propagation)
+  uint32_t                                         explain_noise    = 0;       // deep-dump up to N noised-but-unrecovered cells:
+                                                                               // ground-truth twin's vs the cell's SRP/ERP with
+                               // named anchors + distances, set diff, bucket members
 };
 
 // State-cell (Flop/Latch/Fflop/Memory) correspondence statistics for ONE def
@@ -71,18 +75,18 @@ struct Semdiff_options {
 // since an ambiguous bucket is matcher headroom while a no-counterpart cell is
 // a genuine diff).
 struct State_stats {
-  uint32_t a_total = 0, b_total = 0;  // state cells per side
-  uint32_t a_mems = 0, b_mems = 0;    // Memory subset of the totals
-  uint32_t name_pairs     = 0;        // tier-1: state_key 1:1 across the sides
+  uint32_t a_total = 0, b_total = 0;                // state cells per side
+  uint32_t a_mems = 0, b_mems = 0;                  // Memory subset of the totals
+  uint32_t name_pairs     = 0;                      // tier-1: state_key 1:1 across the sides
   uint32_t a_name_grouped = 0, b_name_grouped = 0;  // key on both sides but colliding within one
-  uint32_t seed_pairs = 0;            // caller-supplied seed_pairs that resolved (anchored) a cell pair
-  uint32_t full_pairs = 0;            // tier-2 full-match pairs (state_pairing)
+  uint32_t seed_pairs     = 0;                      // caller-supplied seed_pairs that resolved (anchored) a cell pair
+  uint32_t full_pairs     = 0;                      // tier-2 full-match pairs (state_pairing)
   // Memory subset of the pair counts (a_mems/b_mems are the memory subset of the
   // TOTALS). regs-vs-mems is the split a design health check reports, and only
   // these two make it derivable: paired_regs = name_pairs+full_pairs - these.
-  uint32_t name_pairs_mem = 0;        // tier-1 pairs that are Memory
-  uint32_t full_pairs_mem = 0;        // tier-2 pairs that are Memory
-  uint32_t rounds     = 0;            // fixed-point rounds that added a pair
+  uint32_t name_pairs_mem = 0;                // tier-1 pairs that are Memory
+  uint32_t full_pairs_mem = 0;                // tier-2 pairs that are Memory
+  uint32_t rounds         = 0;                // fixed-point rounds that added a pair
   uint32_t a_ambiguous = 0, b_ambiguous = 0;  // unpaired: signature shared by >1 candidate
   uint32_t a_unpaired = 0, b_unpaired = 0;    // unpaired at every tier (includes ambiguous)
   // name_noise experiment: ground truth is known (the destroyed key), so tier-2
@@ -91,26 +95,26 @@ struct State_stats {
   uint32_t explained = 0;  // explain_noise budget consumed by this def
 
   State_stats& operator+=(const State_stats& o) {
-    a_total += o.a_total;
-    b_total += o.b_total;
-    a_mems += o.a_mems;
-    b_mems += o.b_mems;
-    name_pairs += o.name_pairs;
-    a_name_grouped += o.a_name_grouped;
-    b_name_grouped += o.b_name_grouped;
-    seed_pairs += o.seed_pairs;
-    full_pairs += o.full_pairs;
-    name_pairs_mem += o.name_pairs_mem;
-    full_pairs_mem += o.full_pairs_mem;
-    rounds += o.rounds;
-    a_ambiguous += o.a_ambiguous;
-    b_ambiguous += o.b_ambiguous;
-    a_unpaired += o.a_unpaired;
-    b_unpaired += o.b_unpaired;
-    noised += o.noised;
+    a_total          += o.a_total;
+    b_total          += o.b_total;
+    a_mems           += o.a_mems;
+    b_mems           += o.b_mems;
+    name_pairs       += o.name_pairs;
+    a_name_grouped   += o.a_name_grouped;
+    b_name_grouped   += o.b_name_grouped;
+    seed_pairs       += o.seed_pairs;
+    full_pairs       += o.full_pairs;
+    name_pairs_mem   += o.name_pairs_mem;
+    full_pairs_mem   += o.full_pairs_mem;
+    rounds           += o.rounds;
+    a_ambiguous      += o.a_ambiguous;
+    b_ambiguous      += o.b_ambiguous;
+    a_unpaired       += o.a_unpaired;
+    b_unpaired       += o.b_unpaired;
+    noised           += o.noised;
     noised_recovered += o.noised_recovered;
-    noised_correct += o.noised_correct;
-    explained += o.explained;
+    noised_correct   += o.noised_correct;
+    explained        += o.explained;
     return *this;
   }
 };
@@ -129,10 +133,10 @@ struct State_pair {
 };
 
 struct Match_result {
-  uint32_t regions     = 0;  // distinct match ids assigned (> 0)
-  uint32_t a_matched   = 0, a_unmatched = 0;
-  uint32_t b_matched   = 0, b_unmatched = 0;
-  double   similarity  = 0;  // matched / total (both sides)
+  uint32_t                 regions   = 0;  // distinct match ids assigned (> 0)
+  uint32_t                 a_matched = 0, a_unmatched = 0;
+  uint32_t                 b_matched = 0, b_unmatched = 0;
+  double                   similarity      = 0;  // matched / total (both sides)
   // COMPARE-POINT OBLIGATIONS. `a_unmatched == 0 && b_unmatched == 0` establishes a
   // node-set BIJECTION, not an edge-preserving isomorphism: a state cell's fsig is a
   // hash of its NAME and the pass short-circuits before folding its din, so swapping
@@ -144,12 +148,12 @@ struct Match_result {
   // A compare point is a name-paired state cell, a graph output, or (matching_names)
   // a name-paired cut Sub. Its inputs are folded with the forward pass's own operand
   // rule and compared pairwise across the sides.
-  uint32_t cut_obligations = 0;  // compare points checked
-  uint32_t cut_discharged  = 0;  // ... proven equal
-  uint32_t cut_violated    = 0;  // ... proven DIFFERENT (a real diff the node set hides)
-  uint32_t cut_unknown     = 0;  // ... undecidable: an operand had no forward signature
-  std::vector<std::string> cut_violations;  // the violated compare points, for diagnostics
-  State_stats state;         // filled when matching_names or state_pairing is set
+  uint32_t                 cut_obligations = 0;  // compare points checked
+  uint32_t                 cut_discharged  = 0;  // ... proven equal
+  uint32_t                 cut_violated    = 0;  // ... proven DIFFERENT (a real diff the node set hides)
+  uint32_t                 cut_unknown     = 0;  // ... undecidable: an operand had no forward signature
+  std::vector<std::string> cut_violations;       // the violated compare points, for diagnostics
+  State_stats              state;                // filled when matching_names or state_pairing is set
   // state_pairing only: the concrete tier-2 pairs, and the still-unpaired state
   // cells as "name (reason)" lines — reason is one of `ambiguous` (signature
   // shared by >1 same-kind candidate), `kind/init mismatch` (a cross-side cell
@@ -258,9 +262,9 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // different graphs — swap the fan-outs of two anonymous flops — to one digest),
 // or the instance graph is cyclic.
 struct Canonical_digest {
-  uint64_t h0    = 0;
-  uint64_t h1    = 0;  // two independent chains: a 64-bit collision is a wrong verdict
-  bool     valid = false;
+  uint64_t h0                                        = 0;
+  uint64_t h1                                        = 0;  // two independent chains: a 64-bit collision is a wrong verdict
+  bool     valid                                     = false;
   bool     operator==(const Canonical_digest&) const = default;
 };
 
@@ -284,7 +288,8 @@ enum class Sub_fold { merkle, interface };
 // instance DAG, so shared children are computed once.
 using Digest_resolver = std::function<hhds::Graph*(hhds::Gid)>;
 
-Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {}, Sub_fold sub_fold = Sub_fold::merkle);
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {}, Sub_fold sub_fold = Sub_fold::merkle,
+                                  bool matching_io_names = true);
 
 // Batch form: `memo` (keyed by def gid) persists ACROSS calls, so a driver
 // digesting every def of one library (the hier-LEC loop) computes each subtree
@@ -292,7 +297,7 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
 // O(defs x subtree) on a deep hierarchy. One memo per side (a gid must resolve
 // to one body), and one memo per Sub_fold mode.
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
-                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
-                                  Sub_fold sub_fold = Sub_fold::merkle);
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold = Sub_fold::merkle,
+                                  bool matching_io_names = true);
 
 }  // namespace livehd::semdiff

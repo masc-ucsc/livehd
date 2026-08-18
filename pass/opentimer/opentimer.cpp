@@ -971,15 +971,17 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // incomplete timing graph.
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
-    if (op != Ntype_op::Flop && op != Ntype_op::Memory) {
+    if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
       continue;
     }
-    // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops/memories
-    // native — the Liberty stays combinational. Each consumed output (a flop Q,
-    // a memory read-data port) becomes a virtual primary input arriving at 0, so
-    // flop-to-flop segments are scored; the din/en/addr cones end at their
-    // driving gate pins, which compute_timing already reads. Clock/reset nets
-    // are not timed (no clock tree in this estimate).
+    // Path boundary, not a cell (2opt-freq D): pass.abc keeps
+    // flops/latches/memories native — the Liberty stays combinational. Each
+    // consumed output (a flop/latch Q, a memory read-data port) becomes a
+    // virtual primary input arriving at 0, so state-to-state segments are
+    // scored; the din/en/addr cones end at their driving gate pins, which
+    // compute_timing already reads. A latch is deliberately a hard color/timing
+    // break here: transparency and time borrowing are not modeled. Clock/reset
+    // nets are not timed (no clock tree in this estimate).
     //
     // out_pins() does NOT materialize these outputs — a flop Q is an implicit
     // port-0 pin, and a MEMORY exposes each read-data port only on its
@@ -1025,7 +1027,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op) || op == Ntype_op::Flop
-        || op == Ntype_op::Memory) {
+        || op == Ntype_op::Latch || op == Ntype_op::Memory) {
       continue;
     }
     if (op != Ntype_op::Sub) {

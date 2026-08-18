@@ -661,7 +661,7 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
     return dpin;
   }
 
-  auto a_tposs = create_typed_node(*g, Ntype_op::Get_mask);
+  auto          a_tposs      = create_typed_node(*g, Ntype_op::Get_mask);
   // Constants do not carry a pin-width attribute, but the RTLIL cell port does.
   // Use that declared operand width so the explicit to-positive boundary never
   // leaves an unbounded Get_mask for cprop to guess later.
@@ -2270,6 +2270,24 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       set_type_op(exit_node, Ntype_op::Latch);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
+      // Keep both identities, just like the flop importer above: the cell
+      // name identifies the native state node, while Q's wire name identifies
+      // the packed state bus.  pass.color cuts at this node and pass.abc uses
+      // one boundary PI per Q bit, so the pin name is what lets read-back join
+      // those bits to the original bus instead of a synthetic latch_<nid> net.
+      std::string inst_name{cell->name.str()};
+      if (!inst_name.empty()) {
+        std::string nm = inst_name[0] == '\\' ? inst_name.substr(1) : inst_name;
+        exit_node.attr(hhds::attrs::name).set(nm);
+      }
+      if (cell->hasPort(ID::Q)) {
+        const RTLIL::Wire* wire = cell->getPort(ID::Q).chunks().at(0).wire;
+        if (wire) {
+          std::string wname(&wire->name.c_str()[1]);
+          set_pin_name(exit_node.create_driver_pin(0), wname);
+        }
+      }
+
       if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
         setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(0)));
       }
@@ -2710,9 +2728,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           mem_mixed = true;
           log_warning(
               "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s). The Memory cell has ONE "
-              "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
-              "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
-              "--set formal.ignore_memory=<name>, which blackboxes it).\n",
+               "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
+               "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
+               "--set formal.ignore_memory=<name>, which blackboxes it).\n",
               cell->name.c_str(),
               edge_why.c_str(),
               kind,

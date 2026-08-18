@@ -85,6 +85,10 @@ void Pass_color::setup() {
   m.add_label_optional("instance", "path: comma-separated seed instance names (forward-only)", "");
   m.add_label_optional("min_count", "reduce: occurrences a repeated subgraph needs before it is extracted as a shared def", "3");
   m.add_label_optional("min_nodes", "reduce: smallest cone (in nodes) worth extracting", "3");
+  m.add_label_optional("max_nodes",
+                       "reduce: split maximal fanout-free cones into disjoint sub-cones of at most this many nodes "
+                       "before similarity matching (0 = keep maximal cones)",
+                       "0");
   m.add_label_optional("min_win",
                        "reduce: required PER-SITE Verilog line win (estimated lines saved minus the instance's "
                        "ports+2). 0 disables the guard and extracts on node count alone",
@@ -320,6 +324,7 @@ void Pass_color::color(Eprp_var& var) {
     Reduce_opts ropts;
     ropts.min_count = parse_count(var, "min_count", "3");
     ropts.min_nodes = parse_count(var, "min_nodes", "3");
+    ropts.max_nodes = parse_count(var, "max_nodes", "0");
     ropts.min_win   = parse_count(var, "min_win", "1");
     ropts.verbose   = opts.verbose;
     if (ropts.min_count < 2) {
@@ -331,6 +336,12 @@ void Pass_color::color(Eprp_var& var) {
     }
     if (ropts.min_nodes < 1) {
       livehd::diag::err("pass.color", "bad-count", "io").msg("pass.color: reduce min_nodes must be at least 1 (got 0)").fatal();
+      return;
+    }
+    if (ropts.max_nodes != 0 && ropts.max_nodes < ropts.min_nodes) {
+      livehd::diag::err("pass.color", "bad-count", "io")
+          .msg("pass.color: reduce max_nodes ({}) must be 0 or at least min_nodes ({})", ropts.max_nodes, ropts.min_nodes)
+          .fatal();
       return;
     }
 

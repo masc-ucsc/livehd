@@ -50,7 +50,12 @@ public:
           continue;
         }
       }
-      sum += gu::ge_weight(n);  // a black box is worth its boundary, and nothing more
+      // Use the same bit-blast cost as the synthesis size window. A single
+      // wide dynamic shift is one graph node but tens of thousands of mapping
+      // GE; scalar node weight would inline a deliberately shared pattern back
+      // into every caller and recreate the ABC explosion reduction removed.
+      // A body-less Sub remains a cheap black-box boundary under this metric.
+      sum += gu::mappable_ge_weight(n);
     }
     on_path_.erase(gid);
     memo_.emplace(gid, sum);

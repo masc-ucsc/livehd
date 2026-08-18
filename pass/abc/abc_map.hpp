@@ -20,28 +20,39 @@ class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
+  // Optional size-tiered flow. Regions in [`small_min_ge`, `small_ge`] use it;
+  // explicit color-keyed region_opts still win. This lets large replicated
+  // logic use a deliberately cheap mapper without sacrificing the QoR of
+  // small timing-sensitive cones. Disabled when empty or small_ge == 0.
+  std::string       small_flow;
+  uint64_t          small_min_ge      = 0;
+  uint64_t          small_ge          = 0;
   // Sequential technology-mapping knobs (independent because their cost differs:
   // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
   // array + address decode). register=true maps flops to Liberty DFF cells (falls
   // back to native flops when the library has none); false keeps them native
   // (cgen emits `always @(posedge clk)`). memory=true bit-blasts a Memory into a
   // register array + read/write mux logic; false keeps it as a native instance.
-  bool              map_register = true;
-  bool              map_memory   = false;
+  bool              map_register      = true;
+  bool              map_memory        = false;
+  // Keep an oversized register payload native even when map_register is true.
+  // ABC represents every bit as a separate latch and some generated blocks put
+  // thousands of state bits in one color; 0 disables the per-region guard.
+  uint64_t          register_max_bits = 0;
   // Optional explicit DFF cell name for register mapping (empty => auto-detect a
   // plain posedge D-flop from the Liberty).
   std::string       dff_cell;
   std::string       delay;  // {D} substitution
   std::string       load;   // {L} substitution
-  bool              verbose    = false;
+  bool              verbose          = false;
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).
-  arith::Adder_kind adder      = arith::Adder_kind::rca;
-  int               block_size = 0;
+  arith::Adder_kind adder            = arith::Adder_kind::rca;
+  int               block_size       = 0;
   // Combinational multiplier architecture for Mult (partial-product adds use the
   // `adder`/`block_size` above). Only `array` today; the enum is the extension
   // point for Booth/Wallace-tree variants.
-  arith::Mult_kind  multiplier = arith::Mult_kind::array;
+  arith::Mult_kind  multiplier       = arith::Mult_kind::array;
   // Memory admission (2opt-incr subtask 0). A region is bit-blasted into ABC,
   // which for a whole-design region means millions of gates and several network
   // forms held at once; an XSCore flat run reached 221 GB on a 64 GiB host and
@@ -78,22 +89,24 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 // crossing region/blackbox boundaries are invisible here (pass.opentimer is
 // the whole-design scorer).
 struct Region_qor {
-  std::string module;         // region module name (<top>__c<color>)
-  int         color = 0;
-  int         gates = 0;      // mapped standard cells
-  double      area  = 0.0;    // sum of Liberty cell areas
-  float       delay = -1.0f;  // critical arrival in library time units; <0 => unavailable
-  std::string crit_output;    // region output port with the worst arrival
-  std::string crit_src;       // "file:line" of that output's original driver (may be empty)
+  std::string module;  // region module name (<top>__c<color>)
+  int         color       = 0;
+  uint64_t    input_nodes = 0;      // source-region nodes before bit blasting
+  uint64_t    input_ge    = 0;      // graph_util mappable-GE estimate before ABC
+  int         gates       = 0;      // mapped standard cells
+  double      area        = 0.0;    // sum of Liberty cell areas
+  float       delay       = -1.0f;  // critical arrival in library time units; <0 => unavailable
+  std::string crit_output;          // region output port with the worst arrival
+  std::string crit_src;             // "file:line" of that output's original driver (may be empty)
   // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
   // gates/area/delay under-report — the score is partial until the div is
   // strength-reduced away. Surfaced so an agent never trusts a blind score.
-  int div_blackbox = 0;
+  int         div_blackbox = 0;
   // Where this region's wall time went, and whether the incremental cache was
   // able to take it. Without these two, "the cache hit 199 of 264 regions" says
   // nothing about whether the run got faster — the misses can hold all the time.
-  double      ms    = 0.0;   // wall ms this region spent in map_region
-  const char* cache = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
+  double      ms           = 0.0;  // wall ms this region spent in map_region
+  const char* cache        = "";   // "" (no cache) | hit | mapped | uncacheable | store-failed
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
@@ -116,7 +129,7 @@ public:
   // Incremental mapping (2opt-incr A+C): with a cache attached, map_region
   // digests each region first and clones the previously mapped netlist on a
   // hit instead of running ABC. nullptr = every region maps normally.
-  void set_incr(Incr_cache* c) { incr_ = c; }
+  void               set_incr(Incr_cache* c) { incr_ = c; }
   // Whether incremental caching is active -- the partitioner uses this to decide
   // whether to build each region's pre-body (the cache's compare artifact).
   [[nodiscard]] bool incremental() const { return incr_ != nullptr; }
@@ -132,9 +145,7 @@ public:
   // (a throw out of the region callback would skip stop(), leaking the ABC
   // frame and every live network), so it records the refusal and work() turns it
   // into the fatal AFTER stop() has run.
-  [[nodiscard]] const std::string* admission_refusal() const {
-    return refusal_.empty() ? nullptr : &refusal_;
-  }
+  [[nodiscard]] const std::string* admission_refusal() const { return refusal_.empty() ? nullptr : &refusal_; }
 
 private:
   std::string refusal_;
@@ -144,17 +155,17 @@ private:
   // translation got, so the diagnostic can project the finished size.
   bool over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total);
 
-  Map_options             opts_;
-  void*                   pabc_       = nullptr;  // Abc_Frame_t*
-  bool                    lib_loaded_ = false;
+  Map_options                                   opts_;
+  void*                                         pabc_       = nullptr;  // Abc_Frame_t*
+  bool                                          lib_loaded_ = false;
   // Plain posedge D-flop found in the Liberty (register mapping target). Empty
   // when map_register is off or the library has no DFF cell — the read-back then
   // keeps flops native. Detected once in start().
-  std::optional<liberty::Dff_cell> dff_;
-  hhds::GraphLibrary*     outlib_     = nullptr;  // where blackbox cell defs are declared
-  Incr_cache*             incr_       = nullptr;  // optional region cache (2opt-incr)
-  std::vector<Region_qor> qor_;
-  Region_opts_map         region_opts_cli_;
+  std::optional<liberty::Dff_cell>              dff_;
+  hhds::GraphLibrary*                           outlib_ = nullptr;  // where blackbox cell defs are declared
+  Incr_cache*                                   incr_   = nullptr;  // optional region cache (2opt-incr)
+  std::vector<Region_qor>                       qor_;
+  Region_opts_map                               region_opts_cli_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
 

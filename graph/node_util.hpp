@@ -461,8 +461,8 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
         }
         inputs += std::format("p{}:{}b", edge.sink.get_port_id(), bits_of(edge.driver));
         if (is_const_pin(edge.driver)) {
-          const auto value = hydrate_const(edge.driver);
-          inputs += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
+          const auto value  = hydrate_const(edge.driver);
+          inputs           += std::format(":const({}b,{})", value.get_bits(), value.is_negative() ? "neg" : "nonneg");
         } else if (is_graph_input_pin(edge.driver)) {
           inputs += ":$" + std::string(edge.driver.get_pin_name());
         } else {
@@ -1260,7 +1260,9 @@ struct Concat_lane {
     // whole assembled bus as logic and make any packing-heavy region look
     // enormous to the size windows.
     case Ntype_op::Concat:
-    case Ntype_op::Nconst : return 0;
+    case Ntype_op::Get_mask:
+    case Ntype_op::Set_mask:
+    case Ntype_op::Nconst  : return 0;
 
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
 

@@ -3,6 +3,7 @@
 #include "abc_incr.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "abc_map.hpp"  // Region_qor
+#include "abc_salt.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"  // Ntype_op
@@ -60,15 +62,13 @@ uint64_t           hstr(std::string_view s) {
   return h;
 }
 
-size_t graph_node_count(hhds::Graph* g) {
-  size_t count = 0;
-  if (g != nullptr) {
-    for (const auto& n : g->body().nodes()) {
-      (void)n;
-      ++count;
-    }
-  }
-  return count;
+std::string digest_key(uint64_t h0, uint64_t h1, std::string_view recipe) {
+  return std::format("{:016x}{:016x}|{}", h0, h1, recipe);
+}
+
+bool parse_hex64(std::string_view text, uint64_t& value) {
+  const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+  return ec == std::errc{} && ptr == text.data() + text.size();
 }
 
 // Re-declare a Sub's child def (`cio`) into `dst` if absent, cloning its IO
@@ -125,7 +125,7 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
   if (doc.HasParseError() || !doc.IsObject()) {
     return;
   }
-  if (auto s = doc.FindMember("schema"); s == doc.MemberEnd() || !s->value.IsInt() || s->value.GetInt() != 2) {
+  if (auto s = doc.FindMember("schema"); s == doc.MemberEnd() || !s->value.IsInt() || s->value.GetInt() != 3) {
     return;
   }
   const std::string want = std::format("{:016x}", salt_);
@@ -174,8 +174,18 @@ Incr_cache::Incr_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), p
     if (auto m = v.FindMember("div_blackbox"); m != v.MemberEnd() && m->value.IsInt()) {
       row.div_blackbox = m->value.GetInt();
     }
+    const auto digest = gets("digest");
+    if (digest.size() == 32 && parse_hex64(std::string_view{digest}.substr(0, 16), row.digest0)
+        && parse_hex64(std::string_view{digest}.substr(16), row.digest1) && (row.digest0 != 0 || row.digest1 != 0)) {
+      row.digest_valid = true;
+    }
     if (!row.module.empty() && !row.pre.empty()) {
       rows_.emplace(it->name.GetString(), std::move(row));
+    }
+  }
+  for (const auto& [name, row] : rows_) {
+    if (row.digest_valid) {
+      digest_index_[digest_key(row.digest0, row.digest1, row.recipe)].push_back(name);
     }
   }
 }
@@ -199,151 +209,129 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
     dbg("pre-body rebuild failed");
     return res;
   }
-  auto it = rows_.find(rb.module_name);
-  if (it == rows_.end()) {
-    // EXPERIMENTAL measurement: ask whether a freshly partitioned region is
-    // identical to an already-seen region with a different module name.  This
-    // is intentionally gated to compare-only studies until a benchmark proves
-    // there is enough repetition to justify production cache/index changes.
-    if (std::getenv("ABC_INCR_CROSS_NAME") != nullptr) {
-      const size_t fresh_nodes = graph_node_count(pre_body);
-      absl::flat_hash_set<std::string_view> fin, fout;
-      fin.reserve(rb.inputs.size());
-      fout.reserve(rb.outputs.size());
-      for (const auto& p : rb.inputs) {
-        fin.insert(p.name);
-      }
-      for (const auto& p : rb.outputs) {
-        fout.insert(p.name);
-      }
-      livehd::semdiff::Semdiff_options so;
-      so.matching_names = true;
-      so.blackbox_subs  = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
-      for (const auto& [candidate_name, candidate] : rows_) {
-        if (candidate.recipe != recipe || candidate.pre_nodes != fresh_nodes || candidate.in.size() != fin.size()
-            || candidate.out.size() != fout.size()) {
+  const auto digest
+      = livehd::semdiff::canonical_digest(pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
+  std::vector<const Row*> candidates;
+  if (auto it = rows_.find(rb.module_name); it != rows_.end()) {
+    candidates.push_back(&it->second);
+  }
+  if (digest.valid) {
+    if (auto it = digest_index_.find(digest_key(digest.h0, digest.h1, recipe)); it != digest_index_.end()) {
+      for (const auto& name : it->second) {
+        if (name == rb.module_name) {
           continue;
         }
-        bool ports_match = true;
-        for (const auto& p : candidate.in) {
-          ports_match &= fin.contains(p);
+        if (auto row = rows_.find(name); row != rows_.end()) {
+          candidates.push_back(&row->second);
         }
-        for (const auto& p : candidate.out) {
-          ports_match &= fout.contains(p);
-        }
-        if (!ports_match) {
-          continue;
-        }
-        auto pio = cached_pre_lib().find_io(candidate.pre);
-        if (!pio) {
-          continue;
-        }
-        auto cached_pre = pio->get_graph();
-        if (!cached_pre) {
-          continue;
-        }
-        bool same = livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so);
-        if (!same && std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr) {
-          same = livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
-        }
-        if (!same) {
-          continue;
-        }
-        res.hit         = true;
-        res.row         = &candidate;
-        res.crit_output = fout.contains(candidate.crit_output) ? candidate.crit_output : std::string{};
-        std::print("[abc-incr] CROSS {} <- {}\n", rb.module_name, candidate_name);
-        return res;
       }
     }
-    dbg("no cached row for this module name");
+  }
+  if (candidates.empty()) {
+    dbg("no same-name or same-digest cached row");
     return res;
   }
-  const Row& row = it->second;
-  if (row.recipe != recipe) {
-    dbg("recipe mismatch");
-    return res;  // recipe gate (verbatim)
-  }
-  auto pio = cached_pre_lib().find_io(row.pre);
-  if (!pio) {
-    dbg("cached pre-body missing (no GraphIO)");
-    return res;
-  }
-  auto cached_pre = pio->get_graph();
-  if (!cached_pre) {
-    dbg("cached pre-body missing (no body)");
-    return res;
-  }
-  // The structural compare: name-blind on internal temporaries, name-anchored on
-  // IO + state (matching_names). A genuine node-set bijection with every
-  // compare-point obligation discharged -- a sound YES/NO, not a hash.
-  livehd::semdiff::Semdiff_options so;
-  so.matching_names = true;
-  // Each Sub is an opaque blackbox (its body is a SEPARATE cache entry): breaks
-  // combinational loops that run THROUGH a submodule and keys on the Sub's IO
-  // wiring (def name + each port's name/width/sign, never node ids), so a
-  // child-body edit does not invalidate this parent while a child INTERFACE change
-  // does. The pre-bodies + their Sub child decls live in cached_pre_lib(), a
-  // library separate from the mapped bodies, so both compare sides resolve the same
-  // body-less decls. ON by default; opt-out via ABC_INCR_NO_BLACKBOX.
-  so.blackbox_subs  = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
-  if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
-    // The signature stalls on a genuine combinational loop (mux feedback): the
-    // loop cone gets no forward signature, so its obligations stay `cut_unknown`
-    // and structural_identical refuses even when the two regions are identical.
-    // Rescue with an EXACT parallel-traversal bijection -- it decides cyclic
-    // regions a signature cannot and cannot false-positive, so it only ever turns
-    // a false miss into a hit, never admits a region that differs. Opt out via
-    // ABC_INCR_NO_TRAVERSAL. Only reached on a signature miss, so its cost is
-    // bounded to the few refused regions.
-    bool rescued = std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr
-                   && livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
-    if (!rescued) {
+
+  for (const Row* candidate : candidates) {
+    const Row& row        = *candidate;
+    const bool cross_name = row.module != rb.module_name;
+    if (row.recipe != recipe) {
+      continue;
+    }
+    // Same-name reuse predates the digest and remains governed by the exact
+    // comparison. A digest is a cross-name discovery index, never a rejection
+    // oracle for the established path.
+    if (cross_name && (!digest.valid || !row.digest_valid || digest.h0 != row.digest0 || digest.h1 != row.digest1)) {
+      continue;
+    }
+    auto pio = cached_pre_lib().find_io(row.pre);
+    if (!pio) {
+      continue;
+    }
+    auto cached_pre = pio->get_graph();
+    if (!cached_pre) {
+      continue;
+    }
+    // The structural compare: name-blind on internal temporaries, name-anchored
+    // on IO + state. The digest only found this candidate; this exact proof is
+    // what authorizes reuse.
+    livehd::semdiff::Semdiff_options so;
+    so.matching_names    = true;
+    so.matching_io_names = !cross_name;
+    so.blackbox_subs     = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
+    if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
+      bool rescued = std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr
+                     && livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
+      if (!rescued) {
+        if (incr_debug()) {
+          auto m = livehd::semdiff::structural_match(cached_pre.get(), pre_body, so);
+          std::print(
+              "[abc-incr] MISS {} -- structural NOT equal (a_unmatched={} b_unmatched={} cut_violated={} cut_unknown={} "
+              "seed_pairs={} full_pairs={})\n",
+              rb.module_name,
+              m.a_unmatched,
+              m.b_unmatched,
+              m.cut_violated,
+              m.cut_unknown,
+              m.state.seed_pairs,
+              m.state.full_pairs);
+        }
+        continue;
+      }
       if (incr_debug()) {
-        auto m = livehd::semdiff::structural_match(cached_pre.get(), pre_body, so);
-        std::print(
-            "[abc-incr] MISS {} -- structural NOT equal (a_unmatched={} b_unmatched={} cut_violated={} cut_unknown={} "
-            "seed_pairs={} full_pairs={})\n",
-            rb.module_name,
-            m.a_unmatched,
-            m.b_unmatched,
-            m.cut_violated,
-            m.cut_unknown,
-            m.state.seed_pairs,
-            m.state.full_pairs);
+        std::print("[abc-incr] RESCUE {} -- exact traversal proved equivalent past a stalled signature\n", rb.module_name);
       }
-      return res;
     }
-    if (incr_debug()) {
-      std::print("[abc-incr] RESCUE {} -- exact traversal proved equivalent past a stalled signature\n", rb.module_name);
+
+    // A stable-name stitch: a missing port is a miss, never a guess.
+    absl::flat_hash_set<std::string_view> fin, fout;
+    fin.reserve(rb.inputs.size());
+    fout.reserve(rb.outputs.size());
+    for (const auto& p : rb.inputs) {
+      fin.insert(p.name);
     }
-  }
-  // Every cached port name must still exist on the fresh region (a stable-name
-  // stitch: a missing name is a miss, never a guess).
-  absl::flat_hash_set<std::string_view> fin, fout;
-  fin.reserve(rb.inputs.size());
-  fout.reserve(rb.outputs.size());
-  for (const auto& p : rb.inputs) {
-    fin.insert(p.name);
-  }
-  for (const auto& p : rb.outputs) {
-    fout.insert(p.name);
-  }
-  for (const auto& s : row.in) {
-    if (!fin.contains(s)) {
-      dbg("cached input port name absent on fresh region");
-      return res;
+    for (const auto& p : rb.outputs) {
+      fout.insert(p.name);
     }
-  }
-  for (const auto& s : row.out) {
-    if (!fout.contains(s)) {
-      dbg("cached output port name absent on fresh region");
-      return res;
+    bool ports_match = row.in.size() == fin.size() && row.out.size() == fout.size();
+    if (!cross_name) {
+      for (const auto& s : row.in) {
+        ports_match &= fin.contains(s);
+      }
+      for (const auto& s : row.out) {
+        ports_match &= fout.contains(s);
+      }
     }
+    if (!ports_match) {
+      continue;
+    }
+
+    res.hit = true;
+    res.row = &row;
+    if (!cross_name) {
+      res.crit_output = fout.contains(row.crit_output) ? row.crit_output : std::string{};
+    } else if (!row.crit_output.empty()) {
+      auto cached_io = cached_pre->get_io();
+      auto fresh_io  = pre_body->get_io();
+      if (cached_io && fresh_io) {
+        hhds::Port_id crit_pid = livehd::Port_invalid;
+        for (const auto& decl : cached_io->get_output_pin_decls()) {
+          if (decl.name == row.crit_output) {
+            crit_pid = decl.port_id;
+            break;
+          }
+        }
+        for (const auto& decl : fresh_io->get_output_pin_decls()) {
+          if (decl.port_id == crit_pid) {
+            res.crit_output = decl.name;
+            break;
+          }
+        }
+      }
+    }
+    return res;
   }
-  res.hit         = true;
-  res.row         = &row;
-  res.crit_output = fout.contains(row.crit_output) ? row.crit_output : std::string{};
+  dbg("cached candidates failed exact comparison");
   return res;
 }
 
@@ -440,10 +428,18 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.crit_output  = q.crit_output;
   row.crit_src     = q.crit_src;
   row.div_blackbox = q.div_blackbox;
-  row.pre_nodes    = graph_node_count(rb.pre_body);
+  const auto digest
+      = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
+  row.digest0      = digest.h0;
+  row.digest1      = digest.h1;
+  row.digest_valid = digest.valid;
 
   rows_[rb.module_name] = std::move(row);
-  dirty_                = true;
+  const auto& stored    = rows_.at(rb.module_name);
+  if (stored.digest_valid) {
+    digest_index_[digest_key(stored.digest0, stored.digest1, stored.recipe)].push_back(rb.module_name);
+  }
+  dirty_ = true;
   return true;
 }
 
@@ -457,7 +453,11 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
   row.module = rb.module_name;
   row.pre    = std::string{pre_name};
   row.recipe = std::string{recipe};
-  row.pre_nodes = graph_node_count(rb.pre_body);
+  const auto digest
+      = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
+  row.digest0      = digest.h0;
+  row.digest1      = digest.h1;
+  row.digest_valid = digest.valid;
   row.in.reserve(rb.inputs.size());
   row.out.reserve(rb.outputs.size());
   for (const auto& p : rb.inputs) {
@@ -467,7 +467,11 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
     row.out.push_back(p.name);
   }
   rows_[rb.module_name] = std::move(row);
-  dirty_                = true;
+  const auto& stored    = rows_.at(rb.module_name);
+  if (stored.digest_valid) {
+    digest_index_[digest_key(stored.digest0, stored.digest1, stored.recipe)].push_back(rb.module_name);
+  }
+  dirty_ = true;
   return true;
 }
 
@@ -537,7 +541,7 @@ void Incr_cache::save() {
     return o;
   };
 
-  std::string out   = std::format("{{\"schema\":2,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
+  std::string out   = std::format("{{\"schema\":3,\"salt\":\"{:016x}\",\"regions\":{{", salt_);
   bool        first = true;
   for (const auto* k : keys) {
     const auto& r = rows_.at(*k);
@@ -546,10 +550,10 @@ void Incr_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                         jesc(*k),
-                         jesc(r.module),
-                         jesc(r.pre),
-                         jesc(r.recipe));
+                       jesc(*k),
+                       jesc(r.module),
+                       jesc(r.pre),
+                       jesc(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.in[i]));
     }
@@ -557,13 +561,17 @@ void Incr_cache::save() {
     for (size_t i = 0; i < r.out.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.out[i]));
     }
-    out += std::format("],\"gates\":{},\"area\":{},\"delay\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{}}}",
-                       r.gates,
-                       r.area,
-                       r.delay,
-                       jesc(r.crit_output),
-                       jesc(r.crit_src),
-                       r.div_blackbox);
+    out += std::format(
+        "],\"gates\":{},\"area\":{},\"delay\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},\"digest\":\"{:"
+        "016x}{:016x}\"}}",
+        r.gates,
+        r.area,
+        r.delay,
+        jesc(r.crit_output),
+        jesc(r.crit_src),
+        r.div_blackbox,
+        r.digest0,
+        r.digest1);
   }
   out += "}}";
 
@@ -583,8 +591,9 @@ void Incr_cache::save() {
 }
 
 uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register, bool map_memory, std::string_view dff_cell) {
-  // Bump the tag whenever the mapper's read-back or the cache shape changes:
-  // stale bodies must never survive a semantic change.
+  // The generated source salt automatically covers mapper/read-back and ABC
+  // revision changes. Keep the schema tag for persistent on-disk shape changes
+  // that older readers cannot parse; stale bodies must never survive either.
   // v3: lgraph-compare cache -- keyed by module name, stores pre+mapped bodies,
   // structural_identical + verbatim recipe instead of a 128-bit digest.
   // v4: mapped body now self-contains its leaf-cell Sub decls (copy_mapped_children)
@@ -593,7 +602,9 @@ uint64_t Incr_cache::make_salt(std::string_view library_path, bool map_register,
   // cone, Proposal 2), so a v4 cache's port names no longer match.
   // v6: the formal-assume don't-care inputs left the salt with the EXDC item
   // (2026-08-01) -- a v5 salt mixed in two bools that no longer exist.
-  uint64_t      h = hstr("abc-incr-v6");
+  // v7: rows carry canonical digests and same-run cross-name reuse is enabled.
+  uint64_t h = hstr("abc-incr-v7");
+  h          = hcombine(h, kAbcSrcSalt);
   std::ifstream f{std::string{library_path}, std::ios::binary};
   if (f) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

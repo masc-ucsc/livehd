@@ -55,14 +55,14 @@ fail() {
 
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-# run_abc_lec <fix> <top> <register> <memory>: tech-map with the given knobs,
+# run_abc_lec <fix> <top> <register> <memory> [register_max_bits]: tech-map with the given knobs,
 # build the original-logic twin + gensim models, and prove the netlist equivalent.
 # Leaves the netlist verilog dir in the global NETV for the caller's structural asserts.
 NETV=""
 run_abc_lec() {
-  local fix="$1" top="$2" reg="$3" mem="$4"
+  local fix="$1" top="$2" reg="$3" mem="$4" reg_max="${5:-0}"
   local prp="inou/prp/tests/pyrope/${fix}.prp"
-  local d="$W/${fix}_r${reg}_m${mem}"
+  local d="$W/${fix}_r${reg}_m${mem}_x${reg_max}"
   mkdir -p "$d"
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
@@ -71,7 +71,8 @@ run_abc_lec() {
   run compile "$prp" --top "$top" --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1"
   run pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
   run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$LIB" \
-      --set pass.abc.register="$reg" --set pass.abc.memory="$mem" --workdir "$d/w3"
+      --set pass.abc.register="$reg" --set pass.abc.register_max_bits="$reg_max" \
+      --set pass.abc.memory="$mem" --workdir "$d/w3"
   # the original-logic twin (same module structure)
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
@@ -110,6 +111,14 @@ run_abc_lec abc_seq abc_seq.abc_seq false false
 has "$NETV" "posedge" || fail "abc_seq register=false: no native flop survived (flops lost?)"
 ! has "$NETV" "DFFx1 " || fail "abc_seq register=false: unexpected DFF cell (flop should stay native)"
 echo "PASS: register=false keeps flops native (abc_seq)"
+
+# An oversized sequential region takes the same native boundary path without
+# disabling register mapping for the rest of the design. A one-bit limit is
+# deliberately below abc_seq's state payload.
+run_abc_lec abc_seq abc_seq.abc_seq true false 1
+has "$NETV" "posedge" || fail "abc_seq register_max_bits: oversized register payload was not kept native"
+! has "$NETV" "DFFx1 " || fail "abc_seq register_max_bits: oversized register payload still entered ABC"
+echo "PASS: register_max_bits keeps only oversized state regions native (abc_seq)"
 
 # memory=false: the memory stays a native boundary instance (not bit-blasted).
 run_abc_lec abc_mem abc_mem.abc_mem true false

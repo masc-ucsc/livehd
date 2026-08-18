@@ -614,3 +614,102 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
   EXPECT_TRUE(subs_of(g.get()).empty());
   EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::And));
 }
+
+// A packed-array word select commonly lowers to a very wide dynamic right
+// shift followed by a narrow constant slice.  The two-node body is text-neutral
+// after accounting for its ports, but synthesizing hundreds of copies is very
+// expensive.  Bounded mining deliberately cuts before the widening SHL and
+// admits this one shape through the text-profit guard.
+TEST(ColorReduce, WideShiftSliceBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_shift_slice");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  auto mask = gu::create_const(*g, *Dlop::create_integer((int64_t{1} << 20) - 1));
+  auto zero = gu::create_const(*g, *Dlop::create_integer(0));
+  for (int i = 0; i < 3; ++i) {
+    auto data = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto amt  = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(data, 80);
+    gu::set_bits(amt, 7);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    data.connect_sink(shift.create_sink_pin(0));
+    amt.connect_sink(shift.create_sink_pin(1));
+    auto shifted = shift.create_driver_pin(0);
+    gu::set_bits(shifted, 80);
+
+    auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+    shifted.connect_sink(slice.create_sink_pin(0));
+    mask.connect_sink(slice.create_sink_pin(1));
+    auto word = slice.create_driver_pin(0);
+    gu::set_bits(word, 20);
+
+    auto widen = create_typed_node(*g, Ntype_op::SHL);
+    word.connect_sink(widen.create_sink_pin(0));
+    zero.connect_sink(widen.create_sink_pin(1));
+    auto packed = widen.create_driver_pin(0);
+    gu::set_bits(packed, 80);
+    packed.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SRA));
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::Get_mask));
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::SHL));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
+// One very wide dynamic shift is already an expensive synthesis cone. Three
+// structurally identical placements therefore share one body even though a
+// one-node pattern cannot satisfy the source-text profitability estimate.
+TEST(ColorReduce, WideDynamicShiftBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto value = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto amt   = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(value, 20);
+    gu::set_bits(amt, 9);
+    auto shift = create_typed_node(*g, Ntype_op::SHL);
+    value.connect_sink(shift.create_sink_pin(0));
+    amt.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 1024);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SHL));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}

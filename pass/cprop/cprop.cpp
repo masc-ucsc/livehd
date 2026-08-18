@@ -477,6 +477,12 @@ struct Hold_mux_match {
 constexpr std::pair<int, int> kFpBail{-1, -1};
 constexpr int                 kPackedSliceWalkLimit  = 64;
 constexpr int                 kPackedSliceFanInLimit = 64;
+// Canonicalizing one flat, disjoint Or/SHL pack is a bounded linear scan, not
+// the recursive slice walk guarded above. Chisel-generated state bundles can
+// legitimately carry hundreds of lanes (Rob: 520); refusing them leaves pure
+// wiring for ABC to bit-blast independently. Keep a generous hard ceiling for
+// malformed/adversarial graphs while covering normal generated aggregates.
+constexpr int                 kConcatPackFanInLimit  = 4096;
 
 // The CONSTANT shift amount of a SHL, or <0 when not a bounded constant.
 [[nodiscard]] int const_shl_amount(const hhds::Node_class& m) {
@@ -940,7 +946,7 @@ bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
   std::vector<hhds::Node_class> shifts;
   int                           fan_in = 0;
   for (const auto& e : node.inp_edges()) {
-    if (++fan_in > kPackedSliceFanInLimit) {
+    if (++fan_in > kConcatPackFanInLimit) {
       return false;
     }
     if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {

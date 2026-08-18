@@ -49,11 +49,14 @@ Per region (`Region_body` from the partition seam):
    Width note: `mult`/`sra` size their result at the LEC's literal
    `real_width`; unsigned widths contain no hidden sign slot.
 2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb and seq default
-   `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`)
-   against the `read_lib -s` Liberty (`-s` skips multi-output cells — fa/ha
+   `strash; &get -n; &dc4; &dch -f; &nf {D}; &put`) against the
+   `read_lib -s` Liberty. `&dc4` performs GIA balance/JF/factorization before
+   don't-care computation and technology mapping; an explicit `flow` replaces
+   the whole default. `-s` skips multi-output cells — fa/ha
    supergates cannot be read back and previously collapsed their cone to
    const0 silently; the read-back now also hard-errors on any unreadable
-   mapped node) → `Abc_NtkToNetlist`. Retiming (`dretime`) is deliberately
+   mapped node. The result then passes through `Abc_NtkToNetlist`. Retiming
+   (`dretime`) is deliberately
    NOT in the default seq flow (2opt-freq ruling): it reshapes the latch
    count/order, which drops register name preservation (post-synthesis LEC
    tier-1 correspondence, 3a-synth) and the din-cone source attribution, and
@@ -191,9 +194,11 @@ loop, and with `qor=FILE` the whole thing is written as JSON:
 
 ```json
 {"schema_version":1, "top":…, "library":…, "seq":…, "delay_target":…,
- "total":{"regions":N,"gates":G,"area":A,"max_delay":D,
+ "total":{"regions":N,"input_nodes":IN,"input_ge":IGE,
+          "gates":G,"area":A,"max_delay":D,
           "critical_region":…, "critical_output":…, "critical_src":"file:line"},
- "regions":[{"module":…,"color":C,"gates":g,"area":a,"delay":d,
+ "regions":[{"module":…,"color":C,"input_nodes":in,"input_ge":ige,
+             "gates":g,"area":a,"delay":d,
              "critical_output":…, "critical_src":…}, …]}
 ```
 

@@ -48,23 +48,27 @@ struct Fixture {
 };
 
 Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* name, Ntype_op op = Ntype_op::Xor,
-                    const char* flop_name = "st", int bits = 8) {
-  Fixture f;
+                    const char* flop_name = "st", int bits = 8, std::string_view port_tag = {}) {
+  Fixture    f;
+  const auto a_name = std::string{"a"} + std::string{port_tag};
+  const auto b_name = std::string{"b"} + std::string{port_tag};
+  const auto c_name = std::string{"c"} + std::string{port_tag};
+  const auto y_name = std::string{"y"} + std::string{port_tag};
 
   // --- pre-ABC logic in its own library (doubles as the pre-body) ---
   auto& slib = livehd::Hhds_graph_library::instance(srcdir);
   f.slib     = &slib;
   f.src_name = name;
   auto sgio  = slib.create_io(name);
-  sgio->add_input("a", 1);
-  sgio->add_input("b", 2);
-  sgio->add_input("c", 3);
-  sgio->add_output("y", 4);
+  sgio->add_input(a_name, 1);
+  sgio->add_input(b_name, 2);
+  sgio->add_input(c_name, 3);
+  sgio->add_output(y_name, 4);
   auto g  = sgio->create_graph();
   f.src   = g;
-  auto ia = g->get_input_pin("a");
-  auto ib = g->get_input_pin("b");
-  auto ic = g->get_input_pin("c");
+  auto ia = g->get_input_pin(a_name);
+  auto ib = g->get_input_pin(b_name);
+  auto ic = g->get_input_pin(c_name);
   set_bits(ia, bits);
   set_bits(ib, bits);
   set_bits(ic, bits);
@@ -88,33 +92,36 @@ Fixture make_region(const char* srcdir, hhds::GraphLibrary& outlib, const char* 
   }
   auto q = fl.create_driver_pin(0);
   set_bits(q, bits);
-  q.connect_sink(g->get_output_pin("y"));
+  q.connect_sink(g->get_output_pin(y_name));
   g->commit();  // the pre-body must be committed for the structural compare to read it
 
   f.nodes = {fl, x, an};  // loop-breaks first, like the partitioner
-  f.in.push_back({.name = "a", .src_driver = ia, .bits = bits, .sign = false});
-  f.in.push_back({.name = "b", .src_driver = ib, .bits = bits, .sign = false});
-  f.in.push_back({.name = "c", .src_driver = ic, .bits = bits, .sign = false});
-  f.out.push_back({.name = "y", .src_driver = q, .bits = bits, .sign = false});
+  f.in.push_back({.name = a_name, .src_driver = ia, .bits = bits, .sign = false});
+  f.in.push_back({.name = b_name, .src_driver = ib, .bits = bits, .sign = false});
+  f.in.push_back({.name = c_name, .src_driver = ic, .bits = bits, .sign = false});
+  f.out.push_back({.name = y_name, .src_driver = q, .bits = bits, .sign = false});
 
   // --- stand-in "mapped" body in outlib with the same IO ---
   auto mgio = outlib.create_io(name);
-  mgio->add_input("a", 1);
-  mgio->add_input("b", 2);
-  mgio->add_input("c", 3);
-  mgio->add_output("y", 4);
+  mgio->add_input(a_name, 1);
+  mgio->add_input(b_name, 2);
+  mgio->add_input(c_name, 3);
+  mgio->add_output(y_name, 4);
   auto m   = mgio->create_graph();
   f.mapped = m;
   auto mk  = create_typed_node(*m, Ntype_op::And);  // one marker gate
-  m->get_input_pin("a").connect_sink(mk.create_sink_pin(0));
-  m->get_input_pin("b").connect_sink(mk.create_sink_pin(0));
+  m->get_input_pin(a_name).connect_sink(mk.create_sink_pin(0));
+  m->get_input_pin(b_name).connect_sink(mk.create_sink_pin(0));
   auto md = mk.create_driver_pin(0);
   set_bits(md, bits);
-  md.connect_sink(m->get_output_pin("y"));
+  md.connect_sink(m->get_output_pin(y_name));
   m->commit();
 
   f.rb.body           = m.get();
   f.rb.src            = g.get();
+  f.rb.pre_body       = g.get();
+  f.rb.pre_lib        = &slib;
+  f.rb.pre_name       = name;
   f.rb.color          = 1;
   f.rb.module_name    = name;
   f.rb.reuse_eligible = true;
@@ -164,6 +171,26 @@ TEST(AbcIncr, StructuralEqualReuse) {
   ASSERT_TRUE(c2.reuse_hit(f2.rb, res, &out2));
   EXPECT_EQ(c2.hits(), 1);
   EXPECT_GT(node_count(f2.rb.body), 0) << "reuse fills the region body from the cache";
+}
+
+// Repeated subblocks can land in different color/module names in one compile.
+// The canonical digest discovers them, then the exact structural comparison
+// proves the reuse before the mapped body is copied under the new name.
+TEST(AbcIncr, CrossNameStructuralReuse) {
+  auto& out = livehd::Hhds_graph_library::instance("lgdb_p2x_o");
+  auto  f1  = make_region("lgdb_p2x_s1", out, "top__c1", Ntype_op::Xor, "st", 8, "_left");
+  auto  f2  = make_region("lgdb_p2x_s2", out, "top__c2", Ntype_op::Xor, "st", 8, "_right");
+
+  Incr_cache cache("lgdb_p2x_cache", 7);
+  ASSERT_TRUE(cache.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R", &out));
+  auto res = cache.lookup_compare(f2.rb, f2.src.get(), "R");
+  ASSERT_TRUE(res.hit) << "same logic and boundary under another color must reuse";
+  ASSERT_NE(res.row, nullptr);
+  EXPECT_EQ(res.row->module, "top__c1");
+  ASSERT_TRUE(cache.reuse_hit(f2.rb, res, &out));
+  EXPECT_GT(node_count(f2.rb.body), 0);
+  EXPECT_TRUE(f2.rb.body->get_io()->has_input("a_right"));
+  EXPECT_TRUE(f2.rb.body->get_io()->has_output("y_right"));
 }
 
 // A different resolved recipe must never share a cached netlist.

@@ -50,6 +50,11 @@ struct Reduce_opts {
   // TRIPLE (Eq -> Mux -> And); the text-profit guard rejects any small cone
   // whose instance would out-line its statements.
   uint64_t min_nodes = 3;  // smallest cone (in nodes) worth considering
+  // Split a maximal fanout-free cone into disjoint sub-cones no larger than
+  // this many nodes before bucketing. 0 preserves the maximal-cone behavior.
+  // This exposes repeated internal blocks hidden inside large, globally unique
+  // unrolled cones while retaining the single-output splice invariant.
+  uint64_t max_nodes = 0;
   // Required PER-SITE Verilog line win (estimated statement+decl lines saved
   // minus the ports+2 lines an instance costs). 0 = guard off. Inert here by
   // the Color_opts convention: the shipped policy (1) lives on the pass.color

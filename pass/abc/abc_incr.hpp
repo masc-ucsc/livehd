@@ -56,7 +56,9 @@ public:
     std::string              crit_output;  // region output port with the worst arrival (a name)
     std::string              crit_src;
     int                      div_blackbox = 0;
-    size_t                   pre_nodes    = 0;  // transient cross-name experiment prefilter
+    uint64_t                 digest0      = 0;
+    uint64_t                 digest1      = 0;
+    bool                     digest_valid = false;
   };
 
   struct Compare_result {
@@ -77,8 +79,8 @@ public:
   // Snapshot a freshly mapped region: copy rb.body (mapped, in `outlib`, under
   // module_name) and `pre_body` (in `pre_lib`, under `pre_name`) into the cache
   // library, and add the metadata row. Best-effort; returns false on failure.
-  bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-             const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib);
+  bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
+             std::string_view recipe, hhds::GraphLibrary* outlib);
 
   // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
   // (no mapped body, no ABC), so a second compare-only run can exercise the
@@ -89,16 +91,15 @@ public:
   // Fill rb.body (the freshly-partitioned region shell in `outlib`) IN PLACE from
   // the cached mapped body -- no clone, no port stitch, name-hash gid preserved.
   // Returns false if the cached body is missing.
-  [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res,
-                               hhds::GraphLibrary* outlib);
+  [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res, hhds::GraphLibrary* outlib);
 
   // Persist abc_cache.json (atomic tmp+rename) and the cache library. No-op when
   // nothing was stored.
   void save();
 
-  [[nodiscard]] int  hits() const { return hits_; }
-  [[nodiscard]] int  misses() const { return misses_; }
-  void               note_miss() { ++misses_; }
+  [[nodiscard]] int hits() const { return hits_; }
+  [[nodiscard]] int misses() const { return misses_; }
+  void              note_miss() { ++misses_; }
 
   [[nodiscard]] const std::string& dir() const { return dir_; }
 
@@ -115,7 +116,11 @@ private:
   bool        dirty_ = false;
   int         hits_ = 0, misses_ = 0;
 
-  absl::flat_hash_map<std::string, Row> rows_;  // module_name -> row
+  absl::flat_hash_map<std::string, Row>                      rows_;  // module_name -> row
+  // Canonical digest + recipe -> previously mapped region names. The digest is
+  // only a discovery index: every candidate still passes the exact structural
+  // comparison before its mapped body can be reused.
+  absl::flat_hash_map<std::string, std::vector<std::string>> digest_index_;
 
   // The cache is TWO libraries, deliberately kept in separate namespaces:
   //   lib()            -- the MAPPED region bodies (reuse_hit fills from here).

@@ -11,6 +11,8 @@
 #        critical_src "file:line", endpoints[]} + envelope "qor" member
 #   sequential: abc_seq mapped UNCOLORED (single region, native Flops kept) ->
 #     opentimer scores it with flops as path boundaries (Q = arrival 0)
+#   latch: an 8-bit native latch is a hard boundary, retains its Q bus name,
+#     and is never presented to OpenTimer as an unknown combinational cell
 #   negative controls: the rebuilt netlist top (region instances are not
 #     Liberty cells) and a nonexistent --top must both FAIL
 #
@@ -63,6 +65,33 @@ if grep -qE '^[WE] ' "$W/ot_seq.err"; then
   fail "OpenTimer warnings/errors on the seq netlist: $(grep -E '^[WE] ' "$W/ot_seq.err" | head -3)"
 fi
 
+# 3a. native level-sensitive latch boundary: ABC must leave the latch intact,
+# preserve the packed Q bus name across its per-bit PIs, and OpenTimer must cut
+# timing at Q rather than reject the native cell. The logic on both sides makes
+# all eight Q bits observable by timing (not merely a dead state declaration).
+LPRP="$W/latch.prp"
+cat > "$LPRP" <<'EOF'
+pub mod ot_latch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
+  reg held:u8:[latch=true]
+  if en {
+    held = a & b
+  }
+  q = held ^ a
+}
+EOF
+LTOP=ot_latch.ot_latch
+run compile "$LPRP" --top ot_latch --recipe O1 --emit-dir lg:"$W/llg" --workdir "$W/wl1"
+run pass abc --top "$LTOP" lg:"$W/llg" --emit-dir lg:"$W/lnet" --set abc.library="$LIB" --workdir "$W/wl2"
+run compile lg:"$W/lnet" --top "$LTOP" --emit verilog:"$W/latch_net.v" --workdir "$W/wl3"
+grep -Eq 'reg( signed)? \[7:0\] held;' "$W/latch_net.v" \
+  || fail "ABC latch read-back lost the original 8-bit Q bus name"
+"$LHD" pass opentimer --top "$LTOP" lg:"$W/lnet" "$LIB" --workdir "$W/wtl" \
+    -q --result-json "$W/rl.json" 2> "$W/ot_latch.err" || fail "latch opentimer -> $(cat "$W/rl.json")"
+grep -q '"max_delay":' "$W/wtl/timing.json" || fail "latch timing.json missing max_delay"
+if grep -qE '^[WE] ' "$W/ot_latch.err"; then
+  fail "OpenTimer warnings/errors on the latch netlist: $(grep -E '^[WE] ' "$W/ot_latch.err" | head -3)"
+fi
+
 # 3b. whole-design timing (hier=true): the hierarchical netlist top (wrapper +
 #     region instances) is structurally flattened into one scratch module and
 #     timed end-to-end — zero OT connect errors, module name = the real top.
@@ -96,4 +125,4 @@ if "$LHD" pass opentimer --top "no.such_module" lg:"$W/net" "$LIB" --workdir "$W
   fail "opentimer with a bogus --top passed; expected failure"
 fi
 
-echo "PASS: pass.opentimer STA on mapped regions (comb + seq flop-boundary) + timing.json/envelope + negative controls"
+echo "PASS: pass.opentimer STA on mapped regions (comb + flop/latch boundaries) + timing.json/envelope + negative controls"

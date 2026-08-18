@@ -53,11 +53,13 @@ discriminate by `"kind"`). Every annotated gate output also gets the
 
 ## Timing model
 
-- **Flops/memories are path boundaries**, not cells (pass.abc keeps them
-  native; the Liberty stays combinational). Each consumed flop Q / memory read
-  port becomes a virtual primary input arriving at 0, so flop-to-flop segments
-  are scored; din/en/addr cones end at their driving gate pins. Clock trees
-  are not modeled. `min period ≈ max_delay` up to setup/clock-skew terms.
+- **Flops/latches/memories are path boundaries**, not cells (pass.abc keeps
+  them native; the Liberty stays combinational). Each consumed flop/latch Q or
+  memory read port becomes a virtual primary input arriving at 0, so
+  state-to-state segments are scored; din/en/addr cones end at their driving
+  gate pins. A latch is a hard timing break: transparency and time borrowing
+  are intentionally not modeled. Clock trees are not modeled. `min period ≈
+  max_delay` up to setup/clock-skew terms.
 - ABC's builtin tie cells (`_const0_`/`_const1_`) contribute no arrival.
 - Primary inputs arrive at 0 with slew 0 unless an `.sdc` overrides them
   (`create_clock -period`, `set_input_delay/-transition`, `set_output_delay`;

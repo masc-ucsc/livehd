@@ -259,24 +259,75 @@ inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std
 // width, matching cvc5's BITVECTOR_LSHR / BITVECTOR_ASHR at cw. Needs only
 // zero/inv/and_/or_ from Ops (mux built inline).
 template <class Bit, class Ops>
-inline std::vector<Bit> build_shr(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill) {
-  int              w    = static_cast<int>(a.size());
-  std::vector<Bit> data = a;
-  int              nb   = static_cast<int>(amount.size());
+inline std::vector<Bit> build_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill, int out_w) {
+  const int w  = static_cast<int>(a.size());
+  const int nb = static_cast<int>(amount.size());
+  out_w        = std::clamp(out_w, 0, w);
+
+  // Work backwards from the demanded low prefix. At stage k, producing N bits
+  // after a possible shift by 2^k needs only N+2^k bits from the preceding
+  // stage (clamped to W). For a narrow slice of a very wide shifted bus this
+  // avoids constructing every unused high output while preserving the exact
+  // full-width barrel-shifter semantics.
+  std::vector<int> need(static_cast<size_t>(nb) + 1);
+  need[static_cast<size_t>(nb)] = out_w;
+  for (int k = nb - 1; k >= 0; --k) {
+    const int sh                 = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
+    need[static_cast<size_t>(k)] = sh >= w ? need[static_cast<size_t>(k + 1)] : std::min(w, need[static_cast<size_t>(k + 1)] + sh);
+  }
+
+  std::vector<Bit> data(a.begin(), a.begin() + need[0]);
   for (int k = 0; k < nb; ++k) {
     // sh = 2^k, capped to w (any shift >= w pulls everything past the MSB). The
     // k >= 31 guard keeps 1<<k from overflowing int before the >= w compare.
     int              sh   = (k >= 31 || (int64_t{1} << k) >= w) ? w : static_cast<int>(int64_t{1} << k);
     Bit              sel  = amount[k];
     Bit              nsel = ops.inv(sel);
-    std::vector<Bit> next(w);
-    for (int i = 0; i < w; ++i) {
-      Bit shifted = (i + sh) < w ? data[i + sh] : fill;                       // bit i takes bit i+sh, or fill past the top
+    std::vector<Bit> next(need[static_cast<size_t>(k + 1)]);
+    for (int i = 0; i < static_cast<int>(next.size()); ++i) {
+      Bit shifted = (i + sh) < w ? data[i + sh] : fill;                        // bit i takes bit i+sh, or fill past the top
       next[i]     = ops.or_(ops.and_(sel, shifted), ops.and_(nsel, data[i]));  // sel ? shifted : data
     }
     data = std::move(next);
   }
   return data;
+}
+
+template <class Bit, class Ops>
+inline std::vector<Bit> build_shr(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, Bit fill) {
+  return build_shr_prefix(ops, a, amount, fill, static_cast<int>(a.size()));
+}
+
+// Low `out_w` bits of a >> (index*scale + bias). This is the packed-array
+// select form produced by front ends for a dynamic word extraction. Selecting
+// directly among the possible source words costs roughly out_w*2^index_width
+// muxes instead of width*amount_width for a full generic barrel shifter.
+// Callers bound index_width before using this builder.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& index, Bit fill,
+                                                int64_t scale, int64_t bias, int out_w) {
+  const int w              = static_cast<int>(a.size());
+  out_w                    = std::clamp(out_w, 0, w);
+  const size_t     choices = size_t{1} << index.size();
+  std::vector<Bit> result(static_cast<size_t>(out_w));
+  for (int bit = 0; bit < out_w; ++bit) {
+    std::vector<Bit> level(choices);
+    for (size_t v = 0; v < choices; ++v) {
+      const int64_t pos = static_cast<int64_t>(bit) + bias + scale * static_cast<int64_t>(v);
+      level[v]          = pos >= 0 && pos < w ? a[static_cast<size_t>(pos)] : fill;
+    }
+    for (size_t k = 0; k < index.size(); ++k) {
+      const Bit        sel  = index[k];
+      const Bit        nsel = ops.inv(sel);
+      std::vector<Bit> next(level.size() / 2);
+      for (size_t j = 0; j < next.size(); ++j) {
+        next[j] = ops.or_(ops.and_(sel, level[2 * j + 1]), ops.and_(nsel, level[2 * j]));
+      }
+      level = std::move(next);
+    }
+    result[static_cast<size_t>(bit)] = level[0];
+  }
+  return result;
 }
 
 // Unsigned array multiplier `a * b`, result truncated to out_w bits: the sum of

@@ -204,6 +204,12 @@ TEST(abc_arith, shift_right_logical_and_arithmetic) {
             auto     r   = build_shr(ops, to_bits(a, w), to_bits(amt, amt_w), ops.zero());
             uint64_t exp = (amt >= static_cast<uint64_t>(w)) ? uint64_t{0} : (a >> amt) & mask;
             EXPECT_EQ(from_bits(r), exp) << "lsr w=" << w << " a=" << a << " amt=" << amt;
+            for (int prefix = 0; prefix <= w; ++prefix) {
+              auto sliced = build_shr_prefix(ops, to_bits(a, w), to_bits(amt, amt_w), ops.zero(), prefix);
+              auto pmask  = prefix == 0 ? uint64_t{0} : (uint64_t{1} << prefix) - 1;
+              EXPECT_EQ(from_bits(sliced), exp & pmask)
+                  << "lsr prefix w=" << w << " prefix=" << prefix << " a=" << a << " amt=" << amt;
+            }
           }
           // arithmetic: fill the sign bit
           {
@@ -218,6 +224,12 @@ TEST(abc_arith, shift_right_logical_and_arithmetic) {
               }
             }
             EXPECT_EQ(from_bits(r), exp) << "asr w=" << w << " a=" << a << " amt=" << amt;
+            for (int prefix = 0; prefix <= w; ++prefix) {
+              auto sliced = build_shr_prefix(ops, to_bits(a, w), to_bits(amt, amt_w), sign, prefix);
+              auto pmask  = prefix == 0 ? uint64_t{0} : (uint64_t{1} << prefix) - 1;
+              EXPECT_EQ(from_bits(sliced), exp & pmask)
+                  << "asr prefix w=" << w << " prefix=" << prefix << " a=" << a << " amt=" << amt;
+            }
           }
         }
       }
@@ -227,7 +239,30 @@ TEST(abc_arith, shift_right_logical_and_arithmetic) {
   EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x5A, 8), {}, /*fill=*/0)), 0x5Au);
   // Spot-check a wider width (full enumeration is too slow at w=16).
   EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x8001, 16), to_bits(4, 5), /*fill=*/1)), (0x0800u | 0xF000u));  // asr
-  EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x8001, 16), to_bits(4, 5), /*fill=*/0)), 0x0800u);             // lsr
+  EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x8001, 16), to_bits(4, 5), /*fill=*/0)), 0x0800u);              // lsr
+}
+
+TEST(abc_arith, affine_shift_right_prefix) {
+  ByteOps ops;
+  for (int w : {8, 17, 32}) {
+    const uint64_t value = 0xD6B79A5Cu & ((uint64_t{1} << w) - 1);
+    for (int index_w : {1, 2, 3}) {
+      for (int64_t scale : {1, 2, 4}) {
+        for (int64_t bias : {0, 1, 3}) {
+          for (int out_w = 1; out_w <= std::min(w, 7); ++out_w) {
+            for (uint64_t index = 0; index < (uint64_t{1} << index_w); ++index) {
+              auto r = build_affine_shr_prefix(ops, to_bits(value, w), to_bits(index, index_w), ops.zero(), scale, bias, out_w);
+              const uint64_t amount = index * static_cast<uint64_t>(scale) + static_cast<uint64_t>(bias);
+              const uint64_t mask   = (uint64_t{1} << out_w) - 1;
+              const uint64_t exp    = amount >= static_cast<uint64_t>(w) ? 0 : (value >> amount) & mask;
+              EXPECT_EQ(from_bits(r), exp) << "w=" << w << " index=" << index << " scale=" << scale << " bias=" << bias
+                                           << " out_w=" << out_w;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(abc_arith, multiply_array) {
@@ -240,7 +275,7 @@ TEST(abc_arith, multiply_array) {
     std::vector<uint64_t> samples = {0, 1, 2, 3, omask, omask / 2, omask / 3, omask - 1, 5, 0xA, omask >> 1};
     for (uint64_t a : samples) {
       for (uint64_t b : samples) {
-        uint64_t A = a & omask;
+        uint64_t A  = a & omask;
         uint64_t B_ = b & omask;
         for (auto adder : kKinds) {
           for (int bs : kBlocks) {

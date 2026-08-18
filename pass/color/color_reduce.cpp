@@ -344,6 +344,57 @@ uint64_t est_verilog_lines(const Cone& k) {
   return l;
 }
 
+// A two-node wide shift followed by a narrow constant slice can be expensive
+// to synthesize at every occurrence even though replacing it with an instance
+// is text-neutral. Sharing wins in mapped gates and peak memory, so allow this
+// one shape through the text-profit guard. Keep the test deliberately strict;
+// other port-heavy two-node cones retain the normal guard.
+bool is_wide_shift_slice(const Cone& k) {
+  if (k.members.size() != 2 || gu::type_op_of(k.root) != Ntype_op::Get_mask) {
+    return false;
+  }
+  const Node* shift = nullptr;
+  for (const auto& n : k.members) {
+    if (gu::type_op_of(n) == Ntype_op::SRA) {
+      shift = &n;
+    }
+  }
+  if (shift == nullptr) {
+    return false;
+  }
+  const int shift_w = gu::bits_of(shift->create_driver_pin(0));
+  const int slice_w = gu::bits_of(k.root.create_driver_pin(0));
+  return slice_w > 0 && shift_w >= 4 * slice_w;
+}
+
+// A generated packed-bus placement can be one enormous dynamic SHL (for
+// example, a 20-bit lane placed into a 10k-bit aggregate). One such primitive
+// expands to a full barrel network, so repeated occurrences are worth sharing
+// even though a one-node pattern cannot win the source-text estimate. Constants
+// are excluded: the mapper implements those as wiring already.
+bool is_wide_dynamic_shift_node(const Node& n) {
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::SHL && op != Ntype_op::SRA) {
+    return false;
+  }
+  // Do not assume port 0: imported/lowered cells can carry the live output on
+  // another driver port. The width attribute lives on the edge's driver pin,
+  // which is also what the mapper consumes.
+  int width = 0;
+  for (const auto& e : n.out_edges()) {
+    width = std::max(width, gu::bits_of(e.driver));
+  }
+  if (width < 256) {
+    return false;
+  }
+  const auto amount = gu::get_driver_of_sink_name(n, "b");
+  return !amount.is_invalid() && !gu::is_const_pin(amount);
+}
+
+bool is_synthesis_expensive_pattern(const Cone& k) {
+  return is_wide_shift_slice(k) || (k.members.size() == 1 && is_wide_dynamic_shift_node(k.root));
+}
+
 // True when the cone touches a parallel duplicate edge (same driver pin AND
 // same sink pin twice, e.g. `r+r` as two edges into one variadic port). The
 // splice and the body build recreate such wiring edge-by-edge, and hhds's
@@ -391,7 +442,7 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
   cone_of.reserve(order.size());
   for (size_t i = order.size(); i-- > 0;) {
     auto n    = order[i];
-    bool root = false;
+    bool root = opts.max_nodes != 0 && is_wide_dynamic_shift_node(n);
     bool any  = false;
     Node single{};
     for (const auto& e : n.out_edges()) {
@@ -417,18 +468,50 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
       roots.push_back(n);
       members.emplace_back();
     } else {
+      // A slice followed by a widening left shift is the common packed-array
+      // repack shape. Keep the slice with its upstream producer rather than
+      // consuming the bounded cone slot with the downstream width expansion;
+      // repeated `wide SRA -> narrow Get_mask` blocks can then become one
+      // shared definition and are synthesized once. This preference is only
+      // active for explicitly bounded mining; the default maximal-cone
+      // decomposition is unchanged.
+      const bool slice_before_expand
+          = opts.max_nodes != 0 && gu::type_op_of(n) == Ntype_op::Get_mask && gu::type_op_of(single) == Ntype_op::SHL;
+      if (slice_before_expand) {
+        cid = static_cast<int32_t>(roots.size());
+        roots.push_back(n);
+        members.emplace_back();
+        cone_of.emplace(n, cid);
+        members[cid].push_back(n);
+        continue;
+      }
       auto it = cone_of.find(single);
       if (it == cone_of.end()) {
         continue;  // its only reader was dead -- so is this chain
       }
       cid = it->second;
+      // A maximal fanout-free cone can be globally unique while containing
+      // hundreds of identical unrolled blocks. Since this walk is sinks before
+      // drivers, opening a new cone here cuts exactly one driver->sink boundary:
+      // the old cone remains single-output, and the new cone grows backward
+      // with the same invariant. The pieces are disjoint, so extraction order
+      // and overlap handling are unchanged.
+      if (opts.max_nodes != 0 && members[static_cast<size_t>(cid)].size() >= opts.max_nodes) {
+        cid = static_cast<int32_t>(roots.size());
+        roots.push_back(n);
+        members.emplace_back();
+      }
     }
     cone_of.emplace(n, cid);
     members[cid].push_back(n);
   }
 
   for (size_t c = 0; c < roots.size(); ++c) {
-    if (members[c].size() < opts.min_nodes) {
+    // Do not lower min_nodes globally just to discover expensive singleton
+    // shifts: building signatures for every ordinary one-node cone dominates
+    // reduction time on large designs. The narrow exception is classified from
+    // the node itself before any Cone allocation/signature work.
+    if (members[c].size() < opts.min_nodes && !(members[c].size() == 1 && is_wide_dynamic_shift_node(members[c].front()))) {
       continue;
     }
     Cone k;
@@ -567,7 +650,7 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       o.shape     = shape_of(d);
       o.shape.pid = 0;  // a leaf's source pid is not part of the pattern
       o.tie       = (static_cast<uint64_t>(d.get_master_node().get_debug_nid()) << 16U)
-                    ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
+              ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
     }
     by_port[static_cast<int>(e.sink.get_port_id())].push_back(std::move(o));
   }
@@ -1122,7 +1205,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     // Text-profit guard, conservative half: the instance costs at least
     // leaves+outs+2 lines (promoted consts only add). Not enough per-site win
     // => not worth a shared module. Re-checked after the const decision below.
-    if (opts.min_win != 0
+    if (opts.min_win != 0 && !is_synthesis_expensive_pattern(occs.front())
         && est_verilog_lines(occs.front()) < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
       continue;
@@ -1175,7 +1258,8 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     }
     job.identity = id;
 
-    if (opts.min_win != 0 && est_verilog_lines(rep) < rep.leaves.size() + n_promoted + rep.out_ports.size() + 2 + opts.min_win) {
+    if (opts.min_win != 0 && !is_synthesis_expensive_pattern(rep)
+        && est_verilog_lines(rep) < rep.leaves.size() + n_promoted + rep.out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
       continue;
     }

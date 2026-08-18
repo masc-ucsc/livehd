@@ -147,6 +147,33 @@ grep -q "always_latch" "$W/abc_net.v" \
   || fail "the latch did NOT survive abc as a native cell (it must be boxed, never bit-blasted)"
 echo "ok: the latch survives abc as a native boxed cell"
 
+# Yosys gives the inferred $dlatch an auto-generated CELL name distinct from
+# the Q WIRE name. That is the non-vacuous bus-identity case: color/ABC must cut
+# at the cell, then map its eight one-bit boundary PIs back to `state_bus`, not
+# to the synthetic $auto$proc_dlatch... instance name.
+cat > "$W/abc_yosys.v" <<'EOF'
+module abc_yosys(input logic en, input logic [7:0] a, b, output logic [7:0] q);
+  logic [7:0] state_bus;
+  always_latch begin
+    if (en)
+      state_bus <= a & b;
+  end
+  assign q = state_bus | a;
+endmodule
+EOF
+"$LHD" compile "$W/abc_yosys.v" --reader yosys-verilog --top abc_yosys --recipe O1 \
+  --emit-dir lg:"$W/abc_y_lg" --workdir "$W/w_acy1" -q >"$W/acy1.log" 2>&1 \
+  || { tail -3 "$W/acy1.log"; fail "yosys latch bus fixture does not compile"; }
+"$LHD" pass abc --top abc_yosys lg:"$W/abc_y_lg" --emit-dir lg:"$W/abc_y_net" \
+  --set pass.abc.library="$LIB" --workdir "$W/w_acy2" -q >"$W/acy2.log" 2>&1 \
+  || { tail -3 "$W/acy2.log"; fail "pass abc rejects the yosys latch bus fixture"; }
+"$LHD" compile lg:"$W/abc_y_net" --top abc_yosys --emit verilog:"$W/abc_y_net.v" \
+  --workdir "$W/w_acy3" -q >"$W/acy3.log" 2>&1 \
+  || { tail -3 "$W/acy3.log"; fail "cannot emit the mapped yosys latch netlist"; }
+grep -Eq 'reg( signed)? \[7:0\] state_bus;' "$W/abc_y_net.v" \
+  || { grep -nE 'reg|always_latch' "$W/abc_y_net.v"; fail "latch Q did not map back to its original packed bus name"; }
+echo "ok: a yosys latch Q maps back to its original 8-bit bus name after abc"
+
 # NOTE: the post-abc netlist cannot yet be LEC-PROVEN against its pre-abc twin —
 # the native cvc5 encoder still refuses the Latch cell (that is M4's job, and it
 # correctly exits nonzero rather than pretending). The flop-shaped twin of this

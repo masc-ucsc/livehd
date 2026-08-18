@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <numeric>
@@ -58,7 +60,7 @@ namespace livehd::abc {
 namespace {
 
 // Built-in combinational flow (task default). {D}/{L} substituted from opts.
-constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put";
+constexpr std::string_view kCombFlow = "strash; &get -n; &dc4; &dch -f; &nf {D}; &put";
 
 // Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
 // latches only carry the registers across ABC so it can optimize the logic
@@ -70,9 +72,9 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; &get -
 // (latch->source-flop mapping needs a stable count), and (c) is a
 // latency-visible transform the 2opt-freq loop's cycle-accurate gate
 // forbids. Opt in explicitly per run or per region when that is understood:
-// `--set pass.abc.flow="strash; &get -n; &fraig -x; &put; dretime; &get -n;
-// &dch -f; &nf {D}; &put"` (the read-back stays robust to reshaped latches).
-constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put";
+// `--set pass.abc.flow="strash; &get -n; &dc4; dretime; &dch -f; &nf {D};
+// &put"` (the read-back stays robust to reshaped latches).
+constexpr std::string_view kSeqFlow = "strash; &get -n; &dc4; &dch -f; &nf {D}; &put";
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -483,7 +485,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                                            mib(cost::reserve_bytes()));
   refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB){}, {}",
+                           "(was {} MiB){}, {}",
       region,
       blasted,
       total,
@@ -491,7 +493,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss),
       mib(rss_before),
       over_now ? std::string{}
-               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
+                                    : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
       budget_desc);
   return true;
 }
@@ -567,16 +569,66 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const auto since
       = [&t_start] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(); };
 
-  // Per-region option overrides (2opt-freq C): overlay onto opts_ for the
-  // duration of this region (every helper below reads opts_), restored on
-  // every exit path.
+  // Per-region options are temporary (every helper below reads opts_) and are
+  // restored on every exit path.
   const Map_options saved_opts = opts_;
   struct Opts_restore {
     Map_options*       dst;
     const Map_options* src;
     ~Opts_restore() { *dst = *src; }
   } opts_restore{&opts_, &saved_opts};
+  // Structural input size belongs in every QoR row, including cache hits. It
+  // makes recipe/runtime changes explainable without relying on module names:
+  // mapped gates are only known after ABC and can move with the very recipe
+  // being compared, while these two values describe the invariant input cone.
+  const uint64_t input_nodes = rb.nodes.size();
+  uint64_t       input_ge    = 0;
+  for (const auto& node : rb.nodes) {
+    input_ge += gu::mappable_ge_weight(node);
+  }
+
+  uint64_t register_bits = 0;
+  for (const auto& node : rb.nodes) {
+    if (!gu::is_type_flop(node)) {
+      continue;
+    }
+    const int bits  = gu::bits_of(node.create_driver_pin(0));
+      register_bits  += static_cast<uint64_t>(std::max(bits, 1));
+  }
+  if (const char* only_color = std::getenv("ABC_ONLY_COLOR"); only_color != nullptr && std::atoi(only_color) != rb.color) {
+    return;
+  }
+  if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
+    opts_.map_register = false;
+    std::print("[pass.abc] region '{}': keeping {} register bits native (limit {})\n",
+               rb.module_name,
+               register_bits,
+               opts_.register_max_bits);
+  }
+
+  // A coarse size tier is intentionally selected before color-keyed overrides:
+  // a user naming one specific region always has the final say. `input_ge` is
+  // invariant source-logic cost, unlike mapped gates, so cache recipes and
+  // threshold decisions remain stable when the mapping flow changes.
+  if (opts_.small_ge != 0 && !opts_.small_flow.empty() && input_ge >= opts_.small_min_ge && input_ge <= opts_.small_ge) {
+    opts_.flow = opts_.small_flow;
+    if (opts_.verbose) {
+      std::print("[pass.abc] region '{}': small_flow selected ({} <= {} GE <= {})\n",
+                 rb.module_name,
+                 opts_.small_min_ge,
+                 input_ge,
+                 opts_.small_ge);
+    }
+  }
   apply_region_overrides(rb);
+  if (opts_.verbose) {
+    std::print("[pass.abc] mapping region '{}': {} nodes, {} GE, {} register bits\n",
+               rb.module_name,
+               input_nodes,
+               input_ge,
+               register_bits);
+    std::fflush(stdout);
+  }
 
   // Incremental reuse (2opt-incr A+C), lgraph-compare edition: the PARTITIONER
   // rebuilt the region's pre-ABC logic into a throwaway lib (rb.pre_body, via the
@@ -586,8 +638,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // REPLACE this region's body with the cached mapped netlist IN PLACE -- ABC
   // never starts. `recipe`/`pre_g` live to the store site below (a miss
   // snapshots them). Null when reuse-ineligible or flattening (uncacheable).
-  const std::string recipe = resolve_recipe();
-  hhds::Graph*      pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
+  // The effective per-region state mode is part of the cache recipe. The comb
+  // and seq command strings can be identical, but their read-back semantics are
+  // not: one carries flops through ABC and the other preserves native state.
+  std::string recipe  = resolve_recipe();
+  recipe             += opts_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
+  hhds::Graph* pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
   // fast diagnostic for why a region misses on a comment edit.
   if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
@@ -600,9 +656,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                rb.module_name,
                !rb.reuse_eligible ? "INELIGIBLE" : (pre_g == nullptr ? "REBUILD-FAIL" : (hit ? "HIT" : "MISS")));
     Region_qor q;
-    q.module = rb.module_name;
-    q.color  = rb.color;
-    q.cache  = hit ? "hit" : "miss";
+    q.module      = rb.module_name;
+    q.color       = rb.color;
+    q.input_nodes = input_nodes;
+    q.input_ge    = input_ge;
+    q.cache       = hit ? "hit" : "miss";
     qor_.push_back(std::move(q));
     return;
   }
@@ -613,6 +671,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         Region_qor q;
         q.module       = rb.module_name;
         q.color        = rb.color;
+        q.input_nodes  = input_nodes;
+        q.input_ge     = input_ge;
         q.gates        = res.row->gates;
         q.area         = res.row->area;
         q.delay        = res.row->delay;
@@ -660,6 +720,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return net;
   };
   Abc_Obj_t* const1     = nullptr;
+  Abc_Obj_t* const0     = nullptr;
   auto       abc_const1 = [&]() {
     if (const1 == nullptr) {
       auto* node  = Abc_NtkCreateNode(manNtk);
@@ -668,20 +729,67 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     return const1;
   };
+  auto abc_const0 = [&]() {
+    if (const0 == nullptr) {
+      auto* node  = Abc_NtkCreateNode(manNtk);
+      node->pData = Hop_Not(Hop_ManConst1(manFunc));
+      const0      = new_net(node);
+    }
+    return const0;
+  };
   auto abc_not = [&](Abc_Obj_t* a) {
+    if (a == abc_const1()) {
+      return abc_const0();
+    }
+    if (a == abc_const0()) {
+      return abc_const1();
+    }
     auto* node  = Abc_NtkCreateNode(manNtk);
     node->pData = Hop_Not(Hop_IthVar(manFunc, 0));
     Abc_ObjAddFanin(node, a);
     return new_net(node);
   };
   auto abc_bin = [&](Abc_Obj_t* a, Abc_Obj_t* b, char kind) {
+    auto* zero = abc_const0();
+    auto* one  = abc_const1();
+    if (kind == '&') {
+      if (a == zero || b == zero) {
+        return zero;
+      }
+      if (a == one) {
+        return b;
+      }
+      if (b == one || a == b) {
+        return a;
+      }
+    } else if (kind == '|') {
+      if (a == one || b == one) {
+        return one;
+      }
+      if (a == zero) {
+        return b;
+      }
+      if (b == zero || a == b) {
+        return a;
+      }
+    } else {
+      if (a == zero) {
+        return b;
+      }
+      if (b == zero) {
+        return a;
+      }
+      if (a == b) {
+        return zero;
+      }
+    }
     auto* node  = Abc_NtkCreateNode(manNtk);
     node->pData = kind == '&' ? Hop_CreateAnd(manFunc, 2) : kind == '|' ? Hop_CreateOr(manFunc, 2) : Hop_CreateExor(manFunc, 2);
     Abc_ObjAddFanin(node, a);
     Abc_ObjAddFanin(node, b);
     return new_net(node);
   };
-  auto abc_const_bit = [&](bool v) { return v ? abc_const1() : abc_not(abc_const1()); };
+  auto abc_const_bit = [&](bool v) { return v ? abc_const1() : abc_const0(); };
   // 2:1 mux on ABC nets: sel ? t : f  ==  (sel & t) | (~sel & f).
   auto abc_mux       = [&](Abc_Obj_t* sel, Abc_Obj_t* t, Abc_Obj_t* f) {
     return abc_bin(abc_bin(sel, t, '&'), abc_bin(abc_not(sel), f, '&'), '|');
@@ -693,6 +801,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // unsupported-cell error has fired (the producer wrote no slots, so every
   // downstream read would otherwise flood the log).
   bool unsupported = false;
+
+  // Set_mask is wiring, not logic. Materializing every output bit is ruinous
+  // for sparse updates of a wide packed state bus (Rob: 7,760 nodes expanded
+  // to 179M bitnet hash entries). Keep the selected positions as compact runs
+  // and resolve an alias only when a downstream gate actually asks for it.
+  struct Set_mask_run {
+    int lo;
+    int hi;          // exclusive
+    int value_base;  // compact value-bit position corresponding to lo
+  };
+  struct Set_mask_alias {
+    hhds::Pin_class           base;
+    hhds::Pin_class           value;
+    std::vector<Set_mask_run> runs;
+  };
+  absl::flat_hash_map<hhds::Node_class, Set_mask_alias> set_mask_aliases;
 
   // --- bit i of an original driver pin, with sign/zero extension past width ---
   std::function<Abc_Obj_t*(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Abc_Obj_t* {
@@ -715,6 +839,58 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (gu::is_const_pin(drv)) {
       auto  val  = gu::hydrate_const(drv);
       auto* net  = abc_const_bit(val.bit_test(eff));
+      slots[eff] = net;
+      return net;
+    }
+    auto master = drv.get_master_node();
+    if (gu::type_op_of(master) == Ntype_op::Set_mask) {
+      auto [it, inserted] = set_mask_aliases.try_emplace(master);
+      auto& alias         = it->second;
+      if (inserted) {
+        alias.base       = gu::get_driver_of_sink_name(master, "a");
+        alias.value      = gu::get_driver_of_sink_name(master, "value");
+        auto mask_driver = gu::get_driver_of_sink_name(master, "mask");
+        if (gu::is_const_pin(mask_driver)) {
+          const auto mask     = gu::hydrate_const(mask_driver);
+          const bool negative = mask.is_negative();
+          const int  prefix   = std::max(0, static_cast<int>(mask.get_bits()) - (negative ? 1 : 0));
+          const int  limit    = w == 0 ? prefix : std::min(prefix, w);
+          int        run_lo   = -1;
+          int        selected = 0;
+          for (int bit = 0; bit < limit; ++bit) {
+            const bool take = negative ? !mask.bit_test(bit) : mask.bit_test(bit);
+            if (take && run_lo < 0) {
+              run_lo = bit;
+            } else if (!take && run_lo >= 0) {
+              alias.runs.push_back({run_lo, bit, selected});
+              selected += bit - run_lo;
+              run_lo    = -1;
+            }
+          }
+          if (run_lo >= 0) {
+            alias.runs.push_back({run_lo, limit, selected});
+            selected += limit - run_lo;
+          }
+          // A negative mask selects every sign-extended mask position above
+          // its explicit prefix. Merge that tail with an adjacent final run.
+          const int tail_hi = w == 0 ? prefix : w;
+          if (negative && prefix < tail_hi) {
+            if (!alias.runs.empty() && alias.runs.back().hi == prefix) {
+              alias.runs.back().hi = tail_hi;
+            } else {
+              alias.runs.push_back({prefix, tail_hi, selected});
+            }
+          }
+        }
+      }
+      for (const auto& run : alias.runs) {
+        if (eff >= run.lo && eff < run.hi) {
+          auto* net  = abc_bit(alias.value, run.value_base + eff - run.lo);
+          slots[eff] = net;
+          return net;
+        }
+      }
+      auto* net  = abc_bit(alias.base, eff);
       slots[eff] = net;
       return net;
     }
@@ -913,6 +1089,125 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // A very wide OR of non-overlapping, constant-position shifts is a packed-bus
+  // assembly, not Boolean logic. Sending its thousands of identity bits through
+  // ABC is pathological (Rob's 24x511 -> 10911 pack spent minutes in &nf).
+  // Keep the SHLs and their OR as native zero-delay wiring, just like
+  // Get_mask/Set_mask at the mapper boundary. pass.opentimer's pin tracker
+  // understands both operations, so timing identity is preserved bit-for-bit.
+  absl::flat_hash_set<hhds::Node_class> native_wiring;
+  auto node_output_width = [](const hhds::Node_class& n) {
+    int width = 0;
+    for (const auto& e : n.out_edges()) {
+      width = std::max(width, gu::bits_of(e.driver));
+    }
+    return width != 0 ? width : gu::bits_of(n.create_driver_pin(0));
+  };
+  for (const auto& n : rb.nodes) {
+    if (gu::type_op_of(n) != Ntype_op::Or || node_output_width(n) < 4096) {
+      continue;
+    }
+    struct Span {
+      int lo;
+      int hi;
+    };
+    std::vector<Span>             spans;
+    std::vector<hhds::Node_class> shifts;
+    bool                          packing = true;
+    int                           unshifted_lanes = 0;
+    std::string                   reject;
+    for (const auto& e : n.inp_edges()) {
+      if (gu::is_const_pin(e.driver)) {
+        // A constant lane is already synthesized: zero is padding and one
+        // fixes the corresponding output bit. It needs no Liberty cell and
+        // does not participate in variable-lane overlap.
+        continue;
+      }
+      const auto shl = e.driver.get_master_node();
+      if (gu::type_op_of(shl) != Ntype_op::SHL) {
+        // Packed assemblies commonly leave the low lane unshifted (Rob's low
+        // 20 bits arrive from an extracted Sub) and shift every higher lane.
+        // One such lane is safe: interval overlap below proves it is disjoint.
+        const int width = gu::bits_of(e.driver);
+        if (++unshifted_lanes > 1 || width <= 0) {
+          packing = false;
+          reject  = "multiple or widthless unshifted inputs";
+          break;
+        }
+        spans.push_back({0, width});
+        continue;
+      }
+      const auto a = gu::get_driver_of_sink_name(shl, "a");
+      const auto b = gu::get_driver_of_sink_name(shl, "b");
+      if (a.is_invalid() || !gu::is_const_pin(b)) {
+        packing = false;
+        reject  = "shift lacks data or constant amount";
+        break;
+      }
+      const int width     = gu::bits_of(a);
+      const int shl_width = node_output_width(shl);
+      if (width <= 0 || shl_width < width) {
+        packing = false;
+        reject  = "invalid shift width stamps";
+        break;
+      }
+      const int out_width = node_output_width(n);
+      // For a non-negative constant SHL, bitwidth stamps exactly
+      // input-width+amount on the result. Recover the occupied interval from
+      // those stamps, avoiding a lossy int64 conversion of an arbitrary-size
+      // Dlop constant.
+      const int lo = std::min(shl_width - width, out_width);
+      const int hi = std::min(shl_width, out_width);
+      if (lo < hi) {
+        spans.push_back({lo, hi});
+      }
+      shifts.push_back(shl);
+    }
+    if (!packing || shifts.size() < 2) {
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': rejected {}-bit shift/OR pack after {} shift(s): {}\n",
+                   rb.module_name,
+                   node_output_width(n),
+                   shifts.size(),
+                   reject.empty() ? "too few shifts" : reject);
+      }
+      continue;
+    }
+    std::ranges::sort(spans, {}, &Span::lo);
+    for (size_t i = 1; i < spans.size(); ++i) {
+      if (spans[i].lo < spans[i - 1].hi) {
+        packing = false;
+        reject  = std::format("overlap {}..{} with {}..{}", spans[i - 1].lo, spans[i - 1].hi, spans[i].lo, spans[i].hi);
+        break;
+      }
+    }
+    if (!packing) {
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': rejected {}-bit shift/OR pack after {} shift(s): {}\n",
+                   rb.module_name,
+                   node_output_width(n),
+                   shifts.size(),
+                   reject);
+      }
+      continue;
+    }
+    native_wiring.insert(n);
+    for (const auto& shl : shifts) {
+      if (region.contains(shl)) {
+        native_wiring.insert(shl);
+      }
+    }
+    if (opts_.verbose) {
+      std::print("[pass.abc] region '{}': keeping {}-bit disjoint shift/OR pack as native wiring ({} shifts)\n",
+                 rb.module_name,
+                 node_output_width(n),
+                 shifts.size());
+    }
+  }
+  if (opts_.verbose) {
+    std::fflush(stdout);
+  }
+
   // --- blackbox boundary nodes (Sub instances + memories): never bit-blasted.
   // Each consumed output driver pin becomes fresh ABC PIs (a source for the
   // surrounding logic, seeded into bitnet); each combinationally-driven input
@@ -925,6 +1220,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int             port_id;
     int             bits;
     bool            sign;
+    bool            abc_bits;
   };
   struct Bbox_in {
     int             port_id;
@@ -978,7 +1274,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // cases below and fell into the bit-blast loop, aborting the whole region.
     const bool latch_boundary = op == Ntype_op::Latch;
     if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && op != Ntype_op::Div && op != Ntype_op::Rem
-        && !flop_boundary && !latch_boundary) {
+        && !flop_boundary && !latch_boundary && !native_wiring.contains(n)) {
       continue;
     }
     if (op == Ntype_op::Div) {
@@ -1027,8 +1323,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (w == 0) {
         w = 1;
       }
+      bool needs_abc = !native_wiring.contains(n);
+      if (!needs_abc) {
+        for (const auto& e : op_pin.out_edges()) {
+          if (!native_wiring.contains(e.sink.get_master_node())) {
+            needs_abc = true;
+            break;
+          }
+        }
+      }
       int oi = static_cast<int>(bb.outs.size());
-      bb.outs.push_back({op_pin, pid, w, !gu::is_unsign(op_pin)});
+      bb.outs.push_back({op_pin, pid, w, !gu::is_unsign(op_pin), needs_abc});
+      if (!needs_abc) {
+        continue;  // boundary-to-boundary bus reconnects natively on read-back
+      }
       auto& slots = bitnet[op_pin];
       for (int b = 0; b < w; ++b) {
         auto* obj = Abc_NtkCreatePi(manNtk);
@@ -1038,15 +1346,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         bbox_pi.emplace_back(bb_idx, oi, b);
       }
     }
-    // inputs: const-driven recreated directly; comb-driven cut as POs. For a flop
-    // boundary a control pin (clock/reset/enable) that is driven straight by a
-    // region input is reconnected natively instead -- never through the AIG (see
-    // region_in_name above). The din cone still crosses as POs like any comb input.
+    // inputs: const-driven recreated directly; comb-driven cut as POs. Any pin
+    // driven straight by a region input is reconnected natively instead: there
+    // is no Boolean logic for ABC to optimize. This is essential for wide
+    // shared-Sub inputs (Rob carries a 10,260-bit source bus into hundreds of
+    // instances); routing a direct wire through ABC otherwise materializes one
+    // output buffer per bit. It also subsumes the clock/reset/enable treatment
+    // for native flop/latch boundaries.
     for (const auto& e : n.inp_edges()) {
       int pid = static_cast<int>(e.sink.get_port_id());
       if (gu::is_const_pin(e.driver)) {
         bb.const_ins.emplace_back(pid, e.driver);
-      } else if (flop_boundary && region_in_name.contains(e.driver)) {
+      } else if (region_in_name.contains(e.driver) || native_wiring.contains(e.driver.get_master_node())) {
         bb.native_ins.emplace_back(pid, e.driver);
       } else {
         int w = gu::bits_of(e.driver);
@@ -1079,7 +1390,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       auto op = gu::type_op_of(n);
       if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Div
-          || op == Ntype_op::Rem) {
+          || op == Ntype_op::Rem || native_wiring.contains(n)) {
         continue;  // blackbox boundary (Sub instance / memory / divider / remainder) -- handled separately
       }
       if (gu::is_type_flop(n)) {
@@ -1255,31 +1566,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
     } else if (op == Ntype_op::Set_mask) {
-      // out[i] = mask-selected ? value[next] : a[i].
-      auto a_drv = gu::get_driver_of_sink_name(n, "a");
+      // Pure wiring, resolved lazily by abc_bit above. Do not materialize every
+      // bit of a wide sparse-update bus here.
       auto m_drv = gu::get_driver_of_sink_name(n, "mask");
-      auto v_drv = gu::get_driver_of_sink_name(n, "value");
       if (!gu::is_const_pin(m_drv)) {
         livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
             .msg("pass.abc: set_mask with a non-constant mask in region '{}' is not supported", rb.module_name)
             .emit();
         unsupported = true;
-      } else {
-        auto mask      = gu::hydrate_const(m_drv);
-        bool neg       = mask.is_negative();
-        int  mb        = mask.get_bits();
-        int  pmb       = neg ? mb - 1 : mb;
-        int  value_pos = 0;
-        for (int b = 0; b < out_bits; ++b) {
-          bool from_value;
-          if (b < pmb) {
-            bool mbit  = mask.bit_test(b);
-            from_value = neg ? !mbit : mbit;
-          } else {
-            from_value = neg;
-          }
-          slots[b] = from_value ? abc_bit(v_drv, value_pos++) : abc_bit(a_drv, b);
-        }
       }
     } else if (op == Ntype_op::Sext) {
       // out[i] = a[min(i, from_bit)] (sign bit at from_bit replicated above).
@@ -1521,10 +1815,63 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           }
         }
       }
-      bool                    a_sign  = !gu::is_unsign(a_d);
-      int                     a_width = eff_width(a_d);  // operand width as the LEC reads it (port=bits_of, internal=real_width)
-      int                     out_w   = real_width(out_pin);                    // result magnitude width (LEC W)
-      int                     cw      = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
+      bool a_sign          = !gu::is_unsign(a_d);
+      int  a_width         = eff_width(a_d);       // operand width as the LEC reads it (port=bits_of, internal=real_width)
+      int  out_w           = real_width(out_pin);  // result magnitude width (LEC W)
+      int  cw              = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
+      int  demand_w        = out_w;
+      bool sliced_demand   = false;
+      bool boundary_output = false;
+      // A constant Get_mask is pure wiring. If every in-region consumer only
+      // selects a narrow prefix of this shift, build just the barrel-shifter
+      // window that can affect those selected bits. A region output or any
+      // other consumer conservatively demands the full result.
+      for (const auto& port : rb.outputs) {
+        if (port.src_driver == out_pin) {
+          boundary_output = true;
+          break;
+        }
+      }
+      if (!boundary_output) {
+        int  selected_hi = 0;
+        bool all_slices  = true;
+        bool saw_use     = false;
+        for (const auto& e : out_pin.out_edges()) {
+          auto sink_node = e.sink.get_master_node();
+          if (!region.contains(sink_node) || gu::type_op_of(sink_node) != Ntype_op::Get_mask) {
+            all_slices = false;
+            break;
+          }
+          auto mask_drv = gu::get_driver_of_sink_name(sink_node, "mask");
+          if (!gu::is_const_pin(mask_drv)) {
+            all_slices = false;
+            break;
+          }
+          const auto mask = gu::hydrate_const(mask_drv);
+          if (mask.is_negative()) {
+            all_slices = false;
+            break;
+          }
+          const int wanted = std::max(0, real_width(sink_node.create_driver_pin(0)));
+          int       found  = 0;
+          int       hi     = 0;
+          for (int bit = 0; bit < static_cast<int>(mask.get_bits()) && found < wanted; ++bit) {
+            if (mask.bit_test(bit)) {
+              hi = bit + 1;
+              ++found;
+            }
+          }
+          selected_hi = std::max(selected_hi, hi);
+          saw_use     = true;
+        }
+        if (all_slices && saw_use && selected_hi > 0 && selected_hi < out_w) {
+          demand_w      = selected_hi;
+          sliced_demand = true;
+        }
+      }
+      if (sliced_demand && opts_.verbose) {
+        std::print("[pass.abc] region '{}': right-shift demand reduced from {} to {} bits\n", rb.module_name, out_w, demand_w);
+      }
       std::vector<Abc_Obj_t*> av(cw);
       for (int i = 0; i < cw; ++i) {
         av[i] = abc_eff_bit(a_d, i);  // a, sign/zero-extended (past its effective width) to the shift width cw
@@ -1549,8 +1896,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           if (cw < 63) {
             amt &= (int64_t{1} << cw) - 1;
           }
-          res.resize(cw);
-          for (int i = 0; i < cw; ++i) {
+          res.resize(demand_w);
+          for (int i = 0; i < demand_w; ++i) {
             res[i] = (amt < cw && i + amt < cw) ? av[static_cast<int>(i + amt)] : fill;  // amt >= cw => all fill
           }
         }
@@ -1560,7 +1907,80 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         for (int i = 0; i < nb; ++i) {
           bv[i] = abc_bit(b_d, i);  // unsigned shift count (i < eff width, so the real bit)
         }
-        res = arith::build_shr(ops, av, bv, fill);
+        // Recognize amount = index*scale + bias. This is the canonical packed
+        // dynamic word-select lowering. With a narrow demanded prefix, select
+        // directly among source words rather than building a full-width barrel.
+        hhds::Pin_class index;
+        int64_t         scale          = 1;
+        int64_t         bias           = 0;
+        bool            affine         = false;
+        auto            positive_const = [](const hhds::Pin_class& pin, int64_t& value) {
+          if (!gu::is_const_pin(pin)) {
+            return false;
+          }
+          const auto c = gu::hydrate_const(pin);
+          if (!c.is_just_i64() || c.is_negative()) {
+            return false;
+          }
+          value = c.to_just_i64();
+          return true;
+        };
+        auto amount_node = b_d.get_master_node();
+        if (sliced_demand && region.contains(amount_node) && gu::type_op_of(amount_node) == Ntype_op::Sum) {
+          hhds::Pin_class term;
+          bool            valid = true;
+          for (const auto& e : amount_node.inp_edges()) {
+            const int sign = e.sink.get_port_id() == 1 ? -1 : 1;
+            int64_t   value;
+            if (positive_const(e.driver, value)) {
+              bias += sign * value;
+            } else if (term.is_invalid() && sign > 0) {
+              term = e.driver;
+            } else {
+              valid = false;
+            }
+          }
+          if (valid && !term.is_invalid() && bias >= 0 && region.contains(term.get_master_node())
+              && gu::type_op_of(term.get_master_node()) == Ntype_op::Mult) {
+            scale = 1;
+            for (const auto& e : term.get_master_node().inp_edges()) {
+              int64_t value;
+              if (positive_const(e.driver, value)) {
+                if (value == 0 || scale > INT64_MAX / value) {
+                  valid = false;
+                  break;
+                }
+                scale *= value;
+              } else if (index.is_invalid()) {
+                index = e.driver;
+              } else {
+                valid = false;
+                break;
+              }
+            }
+            affine = valid && !index.is_invalid() && scale > 0;
+          }
+        }
+        const int index_w = affine ? eff_width(index) : 0;
+        if (affine && index_w > 0 && index_w <= 16
+            && (uint64_t{1} << index_w) * static_cast<uint64_t>(demand_w)
+                   < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1))) {
+          std::vector<Abc_Obj_t*> iv(index_w);
+          for (int i = 0; i < index_w; ++i) {
+            iv[i] = abc_bit(index, i);
+          }
+          res = arith::build_affine_shr_prefix(ops, av, iv, fill, scale, bias, demand_w);
+          if (opts_.verbose) {
+            std::print("[pass.abc] region '{}': affine right shift selected ({} output bits, {}-bit index, scale {}, bias {})\n",
+                       rb.module_name,
+                       demand_w,
+                       index_w,
+                       scale,
+                       bias);
+          }
+        } else {
+          res = arith::build_shr_prefix(ops, av, bv, fill, demand_w);
+        }
       }
       // result = low out_w bits of the cw-wide shift. The bit(s) above the
       // magnitude width follow the RESULT's sign, which Verilog takes from the
@@ -1683,13 +2103,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int         w    = port.bits == 0 ? 1 : port.bits;
     for (int b = 0; b < w; ++b) {
       auto* value = abc_bit(port.src_driver, b);
-      auto* buf   = Abc_NtkCreateNode(manNtk);
-      buf->pData  = Hop_IthVar(manFunc, 0);
-      Abc_ObjAddFanin(buf, value);
-      auto* onet = new_net(buf);
-      auto  nm   = std::format("{}_b{}", port.name, b);
+      auto  nm    = std::format("__po{}_{}_b{}", po, port.name, b);
+      auto* onet  = Abc_NtkCreateNet(manNtk);
       Abc_ObjAssignName(onet, const_cast<char*>(nm.c_str()), nullptr);
+      Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
       auto* obj = Abc_NtkCreatePo(manNtk);
+      // A PO is already a connectivity boundary. An explicit identity node
+      // here becomes a real Liberty buffer after mapping; wide shared-Sub
+      // inputs then pay one bogus cell per boundary bit (Rob: 523 x 10,260).
+      // Give the same source node a uniquely named NET alias instead: ABC's
+      // netlist checker requires unique CO net names, but an alias carries no
+      // Boolean node and therefore maps to no cell. Read-back pairs POs by
+      // creation order.
       Abc_ObjAddFanin(obj, onet);
       po_order.emplace_back(po, b);
     }
@@ -1697,20 +2122,37 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // --- blackbox combinational inputs -> per-bit ABC POs (appended after the
   // region outputs so the region-output read-back stays index-aligned) ---
-  std::vector<std::tuple<int, int, int>> bbox_po;  // appended PO -> (bbox, in, bit)
+  struct Bbox_po_target {
+    int bx;
+    int input;
+    int bit;
+  };
+  // One ABC PO per UNIQUE (source driver, bit), with every blackbox input that
+  // consumes it. Repeated shared instances often read the same very wide bus;
+  // emitting a PO per consumer duplicates pure interface work quadratically.
+  std::vector<std::vector<Bbox_po_target>>                   bbox_po;
+  absl::flat_hash_map<hhds::Pin_class, std::vector<int32_t>> bbox_po_index;
   for (size_t bi = 0; bi < bboxes.size(); ++bi) {
     auto& bb = bboxes[bi];
     for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
-      const auto& in = bb.ins[ii];
+      const auto& in    = bb.ins[ii];
+      auto&       index = bbox_po_index[in.drv];
+      if (static_cast<int>(index.size()) < in.bits) {
+        index.resize(in.bits, -1);
+      }
       for (int b = 0; b < in.bits; ++b) {
-        auto* value = abc_bit(in.drv, b);
-        auto* buf   = Abc_NtkCreateNode(manNtk);
-        buf->pData  = Hop_IthVar(manFunc, 0);
-        Abc_ObjAddFanin(buf, value);
-        auto* onet = new_net(buf);
-        auto* obj  = Abc_NtkCreatePo(manNtk);
-        Abc_ObjAddFanin(obj, onet);
-        bbox_po.emplace_back(static_cast<int>(bi), static_cast<int>(ii), b);
+        if (index[b] < 0) {
+          auto* value = abc_bit(in.drv, b);
+          auto  nm    = std::format("__bb{}_i{}_b{}", bi, ii, b);
+          auto* onet  = Abc_NtkCreateNet(manNtk);
+          Abc_ObjAssignName(onet, const_cast<char*>(nm.c_str()), nullptr);
+          Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
+          auto* obj = Abc_NtkCreatePo(manNtk);
+          Abc_ObjAddFanin(obj, onet);
+          index[b] = static_cast<int32_t>(bbox_po.size());
+          bbox_po.emplace_back();
+        }
+        bbox_po[static_cast<size_t>(index[b])].push_back({static_cast<int>(bi), static_cast<int>(ii), b});
       }
     }
   }
@@ -1741,8 +2183,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // blackbox boundary are pass.opentimer's job, not scored here.
   {
     Region_qor q;
-    q.module = rb.module_name;
-    q.color  = rb.color;
+    q.module      = rb.module_name;
+    q.color       = rb.color;
+    q.input_nodes = input_nodes;
+    q.input_ge    = input_ge;
     for (const auto& bb : bboxes) {
       if (bb.op == Ntype_op::Div || bb.op == Ntype_op::Rem) {
         ++q.div_blackbox;  // unmapped cone: the region score is partial
@@ -1864,6 +2308,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // wired in pass 2c once their driving cones resolve. Const inputs are wired now.
   struct Bbox_recon {
     hhds::Node_class                          node;
+    std::vector<hhds::Pin_class>              out_pin;  // [out idx] -> reconstructed full-width driver
     std::vector<std::vector<hhds::Pin_class>> out_bit;  // [out idx][bit] -> body driver
     std::vector<std::vector<hhds::Pin_class>> in_bit;   // [in idx][bit] -> body driver (filled pass 3)
   };
@@ -1893,6 +2338,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       nn.attr(hhds::attrs::name).set(std::string{nm});
     }
     br.node = nn;
+    br.out_pin.resize(bb.outs.size());
     br.out_bit.resize(bb.outs.size());
     for (size_t oi = 0; oi < bb.outs.size(); ++oi) {
       const auto& o  = bb.outs[oi];
@@ -1901,7 +2347,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (o.sign) {
         gu::set_sign(dp);
       }
+      br.out_pin[oi] = dp;
+      // A native boundary output is split into one ABC PI per bit and then
+      // reassembled here.  Width/sign alone are not enough: for a latch the
+      // driver pin is the state bus, and its pin_name is the stable RTL name
+      // used by cgen/OpenTimer after the mapped region is read back.  Losing it
+      // renames a wide latch to the synthetic node name (or, for non-zero
+      // ports, <node>_<pid>) and makes the per-bit boundary impossible to map
+      // back to the original bus.  Keep the same pin metadata partition does.
+      if (auto pn = gu::pin_name_of(o.src_pin); !pn.empty()) {
+        gu::set_pin_name(dp, pn);
+      }
+      if (auto off = o.src_pin.attr(livehd::attrs::pin_offset); off.has()) {
+        dp.attr(livehd::attrs::pin_offset).set(off.get());
+      }
       br.out_bit[oi].resize(o.bits);
+      if (!o.abc_bits) {
+        continue;
+      }
       if (o.bits == 1) {
         br.out_bit[oi][0] = dp;
       } else {
@@ -1952,6 +2415,25 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     br.in_bit.resize(bb.ins.size());
     for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
       br.in_bit[ii].assign(bb.ins[ii].bits, hhds::Pin_class{});
+    }
+  }
+  // Reconnect native boundary-to-boundary buses without exploding them into
+  // ABC PIs/POs. This is what makes a wide SHL -> packing OR chain remain one
+  // named bus on read-back instead of millions of per-bit interface objects.
+  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> native_boundary_driver;
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    for (size_t oi = 0; oi < bboxes[bi].outs.size(); ++oi) {
+      native_boundary_driver.emplace(bboxes[bi].outs[oi].src_pin, bbox_recon[bi].out_pin[oi]);
+    }
+  }
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    for (const auto& [pid, src_drv] : bboxes[bi].native_ins) {
+      if (region_in_name.contains(src_drv)) {
+        continue;  // already connected above from the body input pin
+      }
+      if (auto it = native_boundary_driver.find(src_drv); it != native_boundary_driver.end()) {
+        it->second.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
+      }
     }
   }
   if (unsupported) {
@@ -2374,13 +2856,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (i < static_cast<int>(po_order.size())) {
       out_bits[po_order[i].first][po_order[i].second] = drv;
     } else if (int j = i - static_cast<int>(po_order.size()); j < static_cast<int>(bbox_po.size())) {
-      auto [bx, ii, b]             = bbox_po[j];
-      bbox_recon[bx].in_bit[ii][b] = drv;  // wired to the recon node sink below
+      for (const auto& target : bbox_po[static_cast<size_t>(j)]) {
+        bbox_recon[target.bx].in_bit[target.input][target.bit] = drv;  // wired to the recon node sink below
+      }
     }
   }
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
   // captured PO drivers (multi-bit reassembled with a Set_mask concat).
+  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> reassembled_bbox_input;
   for (size_t bx = 0; bx < bboxes.size(); ++bx) {
     auto& bb = bboxes[bx];
     auto& br = bbox_recon[bx];
@@ -2388,6 +2872,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       int   w    = bb.ins[ii].bits;
       auto  sink = br.node.create_sink_pin(bb.ins[ii].port_id);
       auto& dbit = br.in_bit[ii];
+      if (auto it = reassembled_bbox_input.find(bb.ins[ii].drv); it != reassembled_bbox_input.end()) {
+        it->second.connect_sink(sink);
+        continue;
+      }
       for (int b = 0; b < w; ++b) {
         if (dbit[b].is_invalid()) {
           dbit[b] = const0_pin();
@@ -2395,6 +2883,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       if (w == 1 && !bb.ins[ii].sign) {
         dbit[0].connect_sink(sink);  // unsigned 1-bit: drive the sink directly
+        reassembled_bbox_input.emplace(bb.ins[ii].drv, dbit[0]);
         continue;
       }
       hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
@@ -2416,6 +2905,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // the final value that reaches the sink carries the sign.
       bb.ins[ii].sign ? gu::set_sign(acc) : gu::set_unsign(acc);
       acc.connect_sink(sink);
+      reassembled_bbox_input.emplace(bb.ins[ii].drv, acc);
     }
   }
 
@@ -2568,7 +3058,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         crit += std::format(" @ {}", q.crit_src);
       }
     }
-    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}{}\n", rb.module_name, q.gates, q.area, q.delay, crit);
+    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}, {:.0f} ms{}\n",
+               rb.module_name,
+               q.gates,
+               q.area,
+               q.delay,
+               since(),
+               crit);
   }
 
   // rb.body now holds the complete mapped netlist: snapshot it (and the pre-abc
@@ -2584,12 +3080,87 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 }
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {
-  (void)graphs;
   std::print("pass.abc stats: top='{}' library='{}' register={} memory={}\n",
              top,
              opts.library,
              opts.map_register,
              opts.map_memory);
+  struct Op_stats {
+    uint64_t nodes  = 0;
+    uint64_t ge     = 0;
+    uint64_t max_ge = 0;
+  };
+  struct Region_stats {
+    uint64_t                               nodes         = 0;
+    uint64_t                               ge            = 0;
+    uint64_t                               register_bits = 0;
+    absl::btree_map<std::string, uint64_t> op_ge;
+  };
+  absl::btree_map<std::string, Op_stats>                     by_op;
+  absl::btree_map<std::pair<std::string, int>, Region_stats> by_region;
+  uint64_t                                                   total_nodes = 0;
+  uint64_t                                                   total_ge    = 0;
+  for (const auto& graph : graphs) {
+    for (const auto& node : graph->body().nodes()) {
+      if (gu::is_builtin_node(node)) {
+        continue;
+      }
+      const auto ge      = gu::mappable_ge_weight(node);
+      const auto op_name = std::string{Ntype::get_name(gu::type_op_of(node))};
+      auto&      s       = by_op[op_name];
+      ++s.nodes;
+      s.ge     += ge;
+      s.max_ge  = std::max(s.max_ge, ge);
+      ++total_nodes;
+      total_ge        += ge;
+      // pass.partition treats an uncolored node as color zero, so the read-only
+      // report must do the same. Newly extracted pattern definitions are
+      // intentionally uncolored until the next color pass; omitting them here
+      // hid exactly the shared body an optimization run needed to inspect.
+      const int color  = gu::has_color(node) ? gu::color_of(node) : 0;
+      auto&     rs     = by_region[{std::string{graph->get_name()}, color}];
+      ++rs.nodes;
+      rs.ge             += ge;
+      rs.op_ge[op_name] += ge;
+      if (gu::is_type_flop(node)) {
+        rs.register_bits += static_cast<uint64_t>(std::max(gu::bits_of(node.create_driver_pin(0)), 1));
+      }
+    }
+  }
+  std::vector<std::pair<std::string_view, const Op_stats*>> ranked;
+  ranked.reserve(by_op.size());
+  for (const auto& [name, stats] : by_op) {
+    ranked.emplace_back(name, &stats);
+  }
+  std::ranges::sort(ranked, [](const auto& lhs, const auto& rhs) { return lhs.second->ge > rhs.second->ge; });
+  std::print("  operation GE: {} nodes, {} total MAPPABLE GE across {} def(s)\n", total_nodes, total_ge, graphs.size());
+  for (const auto& [name, stats] : ranked) {
+    std::print("    {:<12} nodes {:>8}  GE {:>12}  max/node {:>10}\n", name, stats->nodes, stats->ge, stats->max_ge);
+  }
+  if (opts.verbose) {
+    std::print("  regions (definition color: nodes, GE, register bits, leading operation GE):\n");
+    for (const auto& [key, stats] : by_region) {
+      std::vector<std::pair<std::string_view, uint64_t>> ops;
+      ops.reserve(stats.op_ge.size());
+      for (const auto& [name, ge] : stats.op_ge) {
+        ops.emplace_back(name, ge);
+      }
+      std::ranges::sort(ops, [](const auto& lhs, const auto& rhs) {
+        return lhs.second != rhs.second ? lhs.second > rhs.second : lhs.first < rhs.first;
+      });
+      std::string leaders;
+      for (size_t i = 0; i < std::min<size_t>(ops.size(), 6); ++i) {
+        leaders += std::format("{}{}={}", i == 0 ? "" : ",", ops[i].first, ops[i].second);
+      }
+      std::print("    {} c{}: nodes {}  GE {}  reg_bits {}  {}\n",
+                 key.first,
+                 key.second,
+                 stats.nodes,
+                 stats.ge,
+                 stats.register_bits,
+                 leaders);
+    }
+  }
   std::print("  (run with --emit-dir lg:DIR to produce the mapped netlist library)\n");
 }
 
