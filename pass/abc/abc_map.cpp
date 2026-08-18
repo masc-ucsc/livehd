@@ -595,9 +595,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     const int bits  = gu::bits_of(node.create_driver_pin(0));
     register_bits  += static_cast<uint64_t>(std::max(bits, 1));
   }
-  if (const char* only_color = std::getenv("ABC_ONLY_COLOR"); only_color != nullptr && std::atoi(only_color) != rb.color) {
-    return;
-  }
   if (opts_.map_register && opts_.register_max_bits != 0 && register_bits > opts_.register_max_bits) {
     opts_.map_register = false;
     std::print("[pass.abc] region '{}': keeping {} register bits native (limit {})\n",
@@ -993,6 +990,56 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     region_in_name.emplace(port.src_driver, port.name);
   }
 
+  // A region consisting solely of a constant left shift is pure bus wiring.
+  // ABC turns the zero-padding into one mapped object per output bit (Rob has
+  // hundreds of these regions, growing to 10k bits each). Rebuild the typed
+  // wiring node directly; OpenTimer tracks constant SHL bit identity and no
+  // Liberty delay is being skipped because there is no Boolean gate here.
+  if (rb.nodes.size() == 1 && gu::type_op_of(rb.nodes.front()) == Ntype_op::SHL) {
+    const auto src_node = rb.nodes.front();
+    const auto a        = gu::get_driver_of_sink_name(src_node, "a");
+    const auto b        = gu::get_driver_of_sink_name(src_node, "b");
+    auto       ait      = region_in_name.find(a);
+    if (!a.is_invalid() && gu::is_const_pin(b) && (gu::is_const_pin(a) || ait != region_in_name.end())) {
+      auto node = gu::create_typed_node(*rb.body, Ntype_op::SHL);
+      if (gu::is_const_pin(a)) {
+        gu::create_const(*rb.body, gu::hydrate_const(a)).connect_sink(gu::setup_sink_by_name(node, "a"));
+      } else {
+        rb.body->get_input_pin(ait->second).connect_sink(gu::setup_sink_by_name(node, "a"));
+      }
+      gu::create_const(*rb.body, gu::hydrate_const(b)).connect_sink(gu::setup_sink_by_name(node, "b"));
+      auto out = node.create_driver_pin(0);
+      int  bits = 1;
+      for (const auto& port : rb.outputs) {
+        bits = std::max(bits, port.bits);
+      }
+      gu::set_bits(out, bits);
+      if (!gu::is_unsign(src_node.create_driver_pin(0))) {
+        gu::set_sign(out);
+      }
+      if (auto pn = gu::pin_name_of(src_node.create_driver_pin(0)); !pn.empty()) {
+        gu::set_pin_name(out, pn);
+      }
+      for (const auto& port : rb.outputs) {
+        out.connect_sink(rb.body->get_output_pin(port.name));
+      }
+      Region_qor q;
+      q.module       = rb.module_name;
+      q.color        = rb.color;
+      q.input_nodes  = input_nodes;
+      q.input_ge     = input_ge;
+      q.gates        = 0;
+      q.area         = 0;
+      q.delay        = 0;
+      q.cache        = "miss";
+      q.ms           = since();
+      qor_.push_back(std::move(q));
+      std::print("[pass.abc] region '{}': constant SHL kept as native wiring, {:.0f} ms\n", rb.module_name, since());
+      Abc_NtkDelete(manNtk);
+      return;
+    }
+  }
+
   std::vector<Seq_flop>                 flops;
   absl::flat_hash_set<hhds::Node_class> clk_demoted;  // registers demoted to boundary: clock from region-internal logic
   if (opts_.map_register) {
@@ -1326,7 +1373,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       bool needs_abc = !native_wiring.contains(n);
       if (!needs_abc) {
         for (const auto& e : op_pin.out_edges()) {
-          if (!native_wiring.contains(e.sink.get_master_node())) {
+          const auto sink_node = e.sink.get_master_node();
+          if (region.contains(sink_node) && !native_wiring.contains(sink_node)) {
             needs_abc = true;
             break;
           }
@@ -2118,8 +2166,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // --- region outputs -> per-bit ABC POs ---
   std::vector<std::pair<size_t, int>> po_order;  // PO index -> (output port, bit)
+  std::vector<bool>                   direct_native_output(rb.outputs.size(), false);
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
     const auto& port = rb.outputs[po];
+    if (native_wiring.contains(port.src_driver.get_master_node())) {
+      direct_native_output[po] = true;
+      continue;
+    }
     int         w    = port.bits == 0 ? 1 : port.bits;
     for (int b = 0; b < w; ++b) {
       auto* value = abc_bit(port.src_driver, b);
@@ -2454,6 +2507,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (auto it = native_boundary_driver.find(src_drv); it != native_boundary_driver.end()) {
         it->second.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
       }
+    }
+  }
+  for (size_t po = 0; po < rb.outputs.size(); ++po) {
+    if (!direct_native_output[po]) {
+      continue;
+    }
+    if (auto it = native_boundary_driver.find(rb.outputs[po].src_driver); it != native_boundary_driver.end()) {
+      it->second.connect_sink(body->get_output_pin(rb.outputs[po].name));
     }
   }
   if (unsupported) {
@@ -2930,6 +2991,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
+    if (direct_native_output[po]) {
+      continue;
+    }
     const auto& port = rb.outputs[po];
     int         w    = port.bits == 0 ? 1 : port.bits;
     auto        opin = body->get_output_pin(port.name);
