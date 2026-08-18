@@ -3,6 +3,19 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
+# Hashed into //pass/abc:abc_salt: the partitioner decides region boundaries and
+# boundary port names, which is exactly what the ABC incremental cache keys on,
+# so a change here must invalidate cached mapped bodies (docs/opt_loop_incr.md
+# L2, finding F8).
+filegroup(
+    name = "partition_srcs",
+    srcs = glob([
+        "*.cpp",
+        "*.hpp",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "pass_partition",
     srcs = glob(

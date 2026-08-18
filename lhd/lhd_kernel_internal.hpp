@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -138,6 +139,47 @@ private:
   int saved_fd_ = -1;
 };
 
+// Scoped wall clock for ONE pipeline phase: appends {name, elapsed ms} to
+// res.phase_ms when the scope ends. RAII rather than a start/stop pair because
+// the timed regions exit early (a failed build returns, a halting pass throws)
+// and a phase that ran must still be reported with the time it burned.
+class Phase_timer {
+public:
+  Phase_timer(Result& res, std::string_view name) : res_(res), name_(name), t0_(std::chrono::steady_clock::now()) {}
+  Phase_timer(const Phase_timer&)            = delete;
+  Phase_timer& operator=(const Phase_timer&) = delete;
+  ~Phase_timer() { stop(); }
+
+  // Record now instead of at scope end, for a phase whose region cannot be a
+  // scope of its own (the sim host build: its two branches declare locals the
+  // code after them does not use, but wrapping them would reindent the world).
+  // Idempotent, so the destructor is still the safety net on an early return.
+  //
+  // noexcept, and it means it: ~Phase_timer is implicitly noexcept, so an
+  // exception escaping here while a pass unwinds calls std::terminate — abort,
+  // no error envelope, exactly on the whole-design ABC/LEC runs where
+  // install_memory_backstop() makes `new -> bad_alloc` a designed-for path
+  // (pass/cost/host_mem.hpp). The vector growth inside emplace_back is the only
+  // thing that can throw; losing one timing row beats losing the diagnosis.
+  void stop() noexcept {
+    if (done_) {
+      return;
+    }
+    done_                                              = true;
+    const std::chrono::duration<double, std::milli> dt = std::chrono::steady_clock::now() - t0_;
+    try {
+      res_.phase_ms.emplace_back(std::move(name_), dt.count());
+    } catch (...) {  // NOLINT(bugprone-empty-catch) — see above: dropping the row is the fix
+    }
+  }
+
+private:
+  Result&                               res_;
+  std::string                           name_;
+  std::chrono::steady_clock::time_point t0_;
+  bool                                  done_ = false;
+};
+
 std::string       join_csv(const std::vector<std::string>& values);
 void              ensure_dir(const std::string& path);
 void              check_inputs_exist(const std::vector<std::string>& files);
@@ -224,7 +266,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // source unit in var.lnasts (earlier entries are pre-loaded ln: imports).
 // Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
 // a pre-compile to lg: just to resolve its imports).
-void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::string>& seed_files);
+void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files);
 void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);

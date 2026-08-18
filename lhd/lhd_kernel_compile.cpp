@@ -319,9 +319,16 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
 // to two distinct files is an error, never a silent first-hit.
 std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln);  // defined below
 
-void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::string>& seed_files) {
+void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files) {
   TRACE_EVENT("pyrope", "discover_imports");
-  auto dir_of = [](std::string_view p) -> std::string {
+  // The other half of the Pyrope front end, and for the one-seed-file shape
+  // (`lhd compile top.prp`, what ../lhdsuite/bench/matrix.sh runs) by far the
+  // BIGGER half: the threaded Prp2lnast parse of every transitively imported
+  // unit happens here, not in the "inou.prp" run_step that parsed the seeds.
+  // Disjoint from it — that run_step's timer closed before this call — so the
+  // two never double-count; sum them for the whole parse.
+  Phase_timer phase(res, "inou.prp.imports");
+  auto        dir_of = [](std::string_view p) -> std::string {
     auto s = p.rfind('/');
     return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
   };
@@ -580,7 +587,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   // 2i-import S1 — transitively pull in imported sibling sources from each
   // importing file's own directory, so a single-file compile needs no
   // dependency list (and the LSP resolves the same way).
-  discover_imports(var, n_imports, opts.files);
+  discover_imports(var, res, n_imports, opts.files);
   if (lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
   }
@@ -1362,6 +1369,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     return;  // no lg/verilog emit requested -> skip the tolg lowering
   }
   {
+    Phase_timer   phase(res, "lnast.tolg");
     Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
     // 2f-lg: reject two units pinned to the same artifact name (lg="…")
     // before any GraphIO is created.
@@ -1471,6 +1479,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           .emit();
       if (!lib_path.empty()) {
         TRACE_EVENT("pass", "lg.save");
+        Phase_timer phase(res, "lg.save");
         livehd::Hhds_graph_library::save(lib_path);
       }
       res.outputs.push_back(lg_out->path);
@@ -1478,7 +1487,10 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       // By construction lib_path == the lg output dir whenever one was
       // declared (tolg/copy targeted it), so saving the library is the emit.
       TRACE_EVENT("pass", "lg.save");
-      livehd::Hhds_graph_library::save(lib_path);
+      {
+        Phase_timer phase(res, "lg.save");
+        livehd::Hhds_graph_library::save(lib_path);
+      }
       res.outputs.push_back(lg_out->path);
     }
   }

@@ -135,10 +135,20 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
                       Eprp_var& var) {
   res.inputs.push_back(path);
   if (kind == "lg") {
+    // "lec.load" times ONLY the lg: deserialization, never the file-typed sides
+    // below: those already report their front-end as inou.prp / inou.slang /
+    // inou.yosys.tolg / lnast.tolg run_steps, so a timer spanning the whole
+    // function would double-count them (the consumer SUMS the array). lg-to-lg
+    // is the only shape the lec ledger row runs and it emitted no phase at all
+    // for the loads. Expect a SMALL number here: GraphLibrary::load is lazy, so
+    // two 32 MB minion libraries measure ~0.1 ms and the bodies materialize
+    // inside pass.lec. The unattributed 15% on that shape was NOT this — it is
+    // the run_id content hash in main(), now timed as "lhd.run_id".
     if (!fs::is_directory(path)) {
       throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
     }
-    auto& lib = livehd::Hhds_graph_library::instance(path);
+    Phase_timer load_phase(res, "lec.load");
+    auto&       lib = livehd::Hhds_graph_library::instance(path);
     for (const hhds::Gid id : lib.all_gids()) {
       auto g = lib.get_graph(id);
       if (g) {
@@ -212,7 +222,7 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
             }
             b = e + 1;
           }
-          discover_imports(var, /*n_imports=*/0, seeds);
+          discover_imports(var, res, /*n_imports=*/0, seeds);
         }
       } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
         check_inputs_exist({path});
@@ -2217,7 +2227,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // loop needs to see.
   if (budget_on) {
     const long long spent_s = solve_spent_ms.load(std::memory_order_relaxed) / 1000;
-    const int floored = defs_floored.load();
+    const int       floored = defs_floored.load();
     if (spent_s > base.timeout || floored > 0) {
       std::print("lec[hier]: budget {}s target / {}s actual over {} def(s) solved, {} on the {}s floor\n",
                  base.timeout,
@@ -3572,6 +3582,14 @@ void lec_command(Options& opts, Result& res) {
   load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
   opts.sets.resize(assume_sets);
+
+  // "pass.lec" = the proof itself, everything after both sides are loaded. It
+  // is NOT a run_step (lec drives the engine in-kernel rather than through
+  // EPRP), so without this the `lec` phase would report only the reader steps
+  // that load_side_graphs above already timed. Runs to the end of the function
+  // and is recorded during unwinding too, so a refuted/timed-out proof still
+  // reports the time it spent.
+  Phase_timer lec_phase(res, "pass.lec");
 
   // Pick the top module on each side: explicit --{ref,impl}-top, else --top,
   // else the sole module (pick_top_graph: exact name or unambiguous entity
@@ -6026,7 +6044,15 @@ void formal_verify_command(Options& opts, Result& res) {
                     "state the property as a design-body assert (it is gated automatically), or drop the formal block"};
   }
 
-  auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
+  // The proof itself — the dominant phase of `lhd formal verify` (minutes, next
+  // to milliseconds of front-end). Named "pass.lec" to match its own recipe line
+  // above and the `lhd lec` path: same engine, same bare step name, so the
+  // ledger's `formal` row keys on it exactly as the `lec` row does. stop() right
+  // after the call rather than at scope end (the verdict reporting below is not
+  // proof time); the destructor still records it if prove_properties throws.
+  Phase_timer prove_phase(res, "pass.lec");
+  auto        r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
+  prove_phase.stop();
   if (r.oversize_refused) {
     throw Lhd_error{"unsupported",
                     std::format("formal verify refused '{}': {}", g->get_name(), r.detail),

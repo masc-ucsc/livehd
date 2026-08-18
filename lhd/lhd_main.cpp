@@ -3,6 +3,7 @@
 // lhd — the stateless, hermetic LiveHD CLI kernel.
 // See lhd.hpp and the LiveHD docs.
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -92,7 +93,19 @@ int main(int argc, char** argv) {
   }
 
   try {
-    res.run_id = lhd::compute_run_id(opts);
+    // The run_id content hash is size-dependent WORK, not a constant preamble:
+    // it reads every input's bytes, and for `lhd lec` with two lg: sides that is
+    // the per-side slice of both libraries — measured 0.4 s of a 2.6 s proof on
+    // two 32 MB minion libraries, which is where the lg-to-lg gap actually was
+    // (the graph library's own load() is lazy: see "lec.load", ~0.1 ms). Timed
+    // inline rather than with Phase_timer, which lives in the kernel-internal
+    // header; init_engine() is pass registration only and stays in the residual.
+    {
+      const auto t0                                      = std::chrono::steady_clock::now();
+      res.run_id                                         = lhd::compute_run_id(opts);
+      const std::chrono::duration<double, std::milli> dt = std::chrono::steady_clock::now() - t0;
+      res.phase_ms.emplace_back("lhd.run_id", dt.count());
+    }
     lhd::init_engine();
     lhd::run_engine_command(opts, res);
   } catch (const lhd::Lhd_error& e) {

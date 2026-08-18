@@ -584,7 +584,13 @@ void pass_command(Options& opts, Result& res) {
     };
     merge_sets(opts, "pass.liberty", labels);
     run_step("pass.liberty", var, labels, opts, res);
-    livehd::Hhds_graph_library::save(lg_out->path);
+    {
+      // Serializing the library IS the emit here, and on a big netlist it is
+      // seconds — timed under the same "lg.save" name the compile path uses so
+      // a `pass`-command run has no unexplained gap against its wall clock.
+      Phase_timer phase(res, "lg.save");
+      livehd::Hhds_graph_library::save(lg_out->path);
+    }
     res.outputs.push_back(lg_out->path);
     return;
   }
@@ -628,7 +634,10 @@ void pass_command(Options& opts, Result& res) {
       labels["stats"] = "true";  // CLI sugar for pass.color.stats; either form turns it on
     }
     run_step("pass.color", var, labels, opts, res);
-    livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
+    {
+      Phase_timer phase(res, "lg.save");
+      livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
+    }
     res.outputs.push_back(lg_in);
 
     // `--emit-dir lg:OUT` fuses pass.partition: emit the per-(def,color) module
@@ -649,7 +658,10 @@ void pass_command(Options& opts, Result& res) {
       plabels["out"] = lg_out->path;
       merge_sets(opts, "pass.partition", plabels);
       run_step("pass.partition", var, plabels, opts, res);
-      livehd::Hhds_graph_library::save(lg_out->path);
+      {
+        Phase_timer phase(res, "lg.save");
+        livehd::Hhds_graph_library::save(lg_out->path);
+      }
       res.outputs.push_back(lg_out->path);
     }
   } else if (sub == "partition") {
@@ -673,7 +685,10 @@ void pass_command(Options& opts, Result& res) {
     merge_sets(opts, "pass.partition", labels);
     run_step("pass.partition", var, labels, opts, res);
     if (lg_out != nullptr) {
-      livehd::Hhds_graph_library::save(lg_out->path);
+      {
+        Phase_timer phase(res, "lg.save");
+        livehd::Hhds_graph_library::save(lg_out->path);
+      }
       res.outputs.push_back(lg_out->path);
     }
   } else if (sub == "abc") {
@@ -710,7 +725,10 @@ void pass_command(Options& opts, Result& res) {
     }
     run_step("pass.abc", var, labels, opts, res);
     if (lg_out != nullptr) {
-      livehd::Hhds_graph_library::save(lg_out->path);
+      {
+        Phase_timer phase(res, "lg.save");
+        livehd::Hhds_graph_library::save(lg_out->path);
+      }
       res.outputs.push_back(lg_out->path);
     }
     embed_qor_sidecar(labels, res);
@@ -804,7 +822,10 @@ void pass_command(Options& opts, Result& res) {
     merge_sets(opts, "pass.single_edge", labels);
     run_step("pass.single_edge", var, labels, opts, res);
     if (lg_out != nullptr) {
-      livehd::Hhds_graph_library::save(lg_out->path);
+      {
+        Phase_timer phase(res, "lg.save");
+        livehd::Hhds_graph_library::save(lg_out->path);
+      }
       res.outputs.push_back(lg_out->path);
     }
   } else if (sub == "analyze") {

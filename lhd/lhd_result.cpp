@@ -12,6 +12,7 @@
 #include <print>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -364,8 +365,43 @@ void write_pretty(const Options& opts, const Result& res) {
   std::print("{}\n", head);
 
   if (opts.verbose) {
+    // Show the timings next to the steps they belong to. A phase name is the
+    // BARE step name and both lists are in execution order, so walk them
+    // together: for each step, take the next not-yet-shown phase of that name.
+    // Phases with no recipe step of their own (lg.save, sim.hostbuild,
+    // inou.prp.imports, lec.load, …) print after, so the rows always add up to
+    // the same total the JSON "phases" carries — a partial view would be worse
+    // than none.
+    std::vector<bool> shown(res.phase_ms.size(), false);
+    size_t            next  = 0;
+    double            total = 0;
+    for (const auto& [name, ms] : res.phase_ms) {
+      total += ms;
+    }
     for (const auto& step : res.recipe_steps) {
-      std::print("  step: {}\n", step);
+      const std::string_view bare{step.data(), std::min(step.find(' '), step.size())};
+      size_t                 hit = res.phase_ms.size();
+      for (size_t i = next; i < res.phase_ms.size(); ++i) {
+        if (!shown[i] && res.phase_ms[i].first == bare) {
+          hit = i;
+          break;
+        }
+      }
+      if (hit == res.phase_ms.size()) {
+        std::print("  step: {}\n", step);
+      } else {
+        shown[hit] = true;
+        next       = hit + 1;
+        std::print("  step: {}  ({:.3f} ms)\n", step, res.phase_ms[hit].second);
+      }
+    }
+    for (size_t i = 0; i < res.phase_ms.size(); ++i) {
+      if (!shown[i]) {
+        std::print("  phase: {}  ({:.3f} ms)\n", res.phase_ms[i].first, res.phase_ms[i].second);
+      }
+    }
+    if (!res.phase_ms.empty()) {
+      std::print("  phases: {} timed, {:.3f} ms total\n", res.phase_ms.size(), total);
     }
   }
   for (const auto& out : res.outputs) {
@@ -532,6 +568,26 @@ void write_result(const Options& opts, const Result& res) {
     w.String(s.c_str());
   }
   w.EndArray();
+
+  // Per-phase wall clock, in execution order. ABSENT (not []) when nothing was
+  // timed, so a command that records no phase keeps its old envelope byte for
+  // byte. A name repeats when the step ran twice — the consumer sums.
+  if (!res.phase_ms.empty()) {
+    w.Key("phases");
+    w.StartArray();
+    for (const auto& [name, ms] : res.phase_ms) {
+      w.StartObject();
+      w.Key("name");
+      w.String(name.c_str());
+      w.Key("ms");
+      // Fixed 3 decimals: rapidjson's shortest round-trip would print raw
+      // steady_clock noise (41234.512000000002) into a schema that says ms.
+      const auto ms_txt = std::format("{:.3f}", ms);
+      w.RawValue(ms_txt.data(), ms_txt.size(), rapidjson::kNumberType);
+      w.EndObject();
+    }
+    w.EndArray();
+  }
 
   w.Key("inputs");
   w.StartArray();

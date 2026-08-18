@@ -65,7 +65,7 @@ struct Semdiff_options {
                                                                                // convergence; 1 = single pass, no propagation)
   uint32_t                                         explain_noise    = 0;       // deep-dump up to N noised-but-unrecovered cells:
                                                                                // ground-truth twin's vs the cell's SRP/ERP with
-                               // named anchors + distances, set diff, bucket members
+  // named anchors + distances, set diff, bucket members
 };
 
 // State-cell (Flop/Latch/Fflop/Memory) correspondence statistics for ONE def
@@ -295,7 +295,9 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
 // digesting every def of one library (the hier-LEC loop) computes each subtree
 // once — the per-call form above re-walks shared children per root, which is
 // O(defs x subtree) on a deep hierarchy. One memo per side (a gid must resolve
-// to one body), and one memo per Sub_fold mode.
+// to one body), and one memo per Sub_fold mode. A matching_io_names=false root
+// deliberately bypasses the memo in BOTH directions (the key has no room for the
+// mode, and only a root is ever port-id-keyed); its children still share it.
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
                                   absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold = Sub_fold::merkle,
                                   bool matching_io_names = true);

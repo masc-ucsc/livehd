@@ -2122,6 +2122,11 @@ void sim_command(Options& opts, Result& res) {
     }
   };
 
+  // "sim.hostbuild": compiling + linking the generated driver into drv.bin,
+  // whichever of the two build paths runs. Recorded on a failed build too (the
+  // destructor fires on the early return) — a build that burned two minutes and
+  // then failed is exactly the number an incremental study wants.
+  Phase_timer build_phase(res, "sim.hostbuild");
   if (!ninja_bin.empty()) {
     // ninja owns compile AND link, and skips whatever is already up to date.
     // Its own output is already per-edge buffered and ordered, so it is both
@@ -2193,6 +2198,7 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
   }
+  build_phase.stop();
 
   // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes
   // `--test`; an explicit `--seed` and every `lhd sim --arg key=value` are
@@ -2350,8 +2356,12 @@ void sim_command(Options& opts, Result& res) {
   // through to the user's stderr UNCHANGED — that is where the driver prints its
   // warnings (e.g. a `--arg` that matches no test parameter) and usage errors, so
   // they stay visible in JSON mode too (not only in the pretty relay below).
-  int  rc  = 0;
-  auto out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+  int         rc = 0;
+  std::string out;
+  {
+    Phase_timer run_phase(res, "sim.run");  // the driver binary itself, argv assembly excluded
+    out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+  }
 
   // Read back the per-test result array (present whenever the driver ran, even on
   // assert failure); embedded as the envelope's "tests" member. Absent if the

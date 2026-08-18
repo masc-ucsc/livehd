@@ -189,6 +189,94 @@ Rules: a row without `pdk_version` + `host` is unusable (§3). Rows from
 different hosts are never compared directly — only *deltas within one host*
 are. `bazel run //bench:show` should grow a mode that diffs two `config_id`s.
 
+The ledger is shared with `todo_incr.md`'s incremental loop (that plan's I10),
+so **every row carries a `flow` field** (`"synth"` here, `"incr"` there). The
+two loops run on the same box, the same PDK and the same lhd sha, and they
+interact in both directions: a W2 recipe change moves the abc cache hit rate,
+and a cache-key change alters which netlist is being scored. One ledger keeps
+that visible.
+
+### M0.4b — `current_opt_loop_synth.html`, the standing scoreboard
+
+A JSONL ledger answers "what happened in run 47"; it does not answer "are we
+ahead of where we started". Every iteration must therefore also refresh a single
+rendered summary — **baseline vs current, per bench** — so the state of the loop
+is one file away at any moment. This mirrors `current_opt_loop_incr.html` (see
+`todo_incr.md` H6b); keep the two pages structurally identical so one glance
+reads either.
+
+> ### ⚠ The page is a LIVE STATUS DISPLAY, not an end-of-run report
+>
+> **Write it as soon as each result exists, and keep rewriting it as more
+> arrive** — the moment a single measurement lands, stamp it into the ledger and
+> re-render. Not at the end of the target, not at the end of the iteration. A
+> synthesis sweep runs for tens of minutes per target; the value of rendering it
+> at all is watching it fill in, so a wrong number is caught while the run that
+> produced it is still on screen, and a crash partway does not discard
+> everything measured before it.
+>
+> Same requirement, same mechanism as the sibling loop: a measurement driver
+> publishes each row through `bench/ledger.py add` + `render` as it is produced
+> (`../lhdsuite/bench/matrix.sh` `publish()` is the reference implementation),
+> and a render failure is reported and then ignored so it cannot take down the
+> expensive half of the run.
+>
+> Two corollaries:
+> - **A partial page is the normal state.** Every cell must render honestly when
+>   its measurement has not happened yet — `-`, never a blank that reads as
+>   zero, and never a derived number (a QoR delta, an `area` guardrail verdict)
+>   computed from a missing input.
+> - **Keep fixing the page as results expose it.** Real rows will keep finding
+>   renderer defects — a verdict pointing the wrong way on a metric nobody
+>   classified, a `div_blackbox` row averaged into a "no regression" claim. Fix
+>   those in the same sitting; a scoreboard that is wrong once is not trusted
+>   again.
+
+- **Path:** `current_opt_loop_synth.html`, at the livehd repo root.
+- **Derived, never authored.** The ledger is the single source of truth; this is
+  a pure rendering, reproducible by re-running the renderer over
+  `../lhdsuite/bench/ledger.jsonl` filtered to `flow="synth"`. **Generated, not
+  committed** — it is per-host by construction, so `.gitignore` it. Nothing may
+  live only in the HTML.
+- **One host per page.** Several hosts in the ledger render as several sections,
+  never a cross-host diff. The header carries `host`, `lhd_git_sha`,
+  `lhdsuite_git_sha`, **`pdk_version`** (§3 — a page without it is unusable),
+  the baseline `config_id` and date, and the current `config_id` and date.
+- **One row per (target, metric)**, three cells — baseline / current / delta —
+  and a verdict computed from the §M0.6 noise floor:
+
+  | target | metric | baseline | current | Δ | verdict |
+  |---|---|---|---|---|---|
+  | xs_alu | `sta_delay` | 4.82 ns | 4.41 ns | −8.5% | ✅ better |
+  | xs_alu | `area` | 1 240 µm² | 1 249 µm² | +0.7% | ➖ within guardrail |
+  | minion | `max_delay` | 6.10 ns | 6.02 ns | −1.3% | ➖ within noise |
+  | minion | `abc_ms` | 1 168 | 1 174 | +0.5% | ➖ within noise |
+
+  (illustrative shape only — not measured, and not a target.)
+
+- **The verdict column is the §4.4 gate, computed rather than eyeballed.** It
+  must encode the rules that are easy to skip by hand:
+  - `sta_delay` is the authority; `max_delay` is the cheap signal (R3);
+  - **flag any row where `max_delay` and `sta_delay` move in opposite
+    directions** — §4.4 rule 3 says stop and explain before landing, and a
+    partitioning change (W1) is the most likely cause (§10 T2);
+  - `area` regressing past **1%** is a guardrail breach, not a note;
+  - a `div_blackbox=true` row renders its QoR cells as **invalid**, never as
+    numbers (§10 T1) — do not let a partial score average into a
+    "no regression" claim.
+- **Also carry** the derived `{D}` in force (§6, so a QoR delta can be
+  attributed to it), the §2 hard-constraint status for `xs_exu` / `xs_backend`
+  (completed / time / no OOM), and the correctness gate (R5).
+- **Refreshed continuously while measuring** (see the banner above), and again
+  at step 5 of §8, on land *and* on revert, so a measured negative
+  result is visible and the same idea is not retried silently.
+- **The baseline column does not move** with each land: it stays the §M1
+  baseline for this host, so the page answers "how far have we come since the
+  loop started". Re-baseline only on a host, PDK (§3, T6) or toolchain change,
+  and say so in the header when it happens.
+- **Keep it plain.** Static table, no external assets, readable in a terminal
+  browser.
+
 ### M0.5 — the robustness gate
 
 A `xs_exu` / `xs_backend` target fails on: non-zero exit, signal death, ABC
@@ -403,8 +491,12 @@ Each iteration:
    dino LEC before landing.
 5. **Land or revert**, and append the row either way — a measured *negative*
    result is worth as much as a positive one and stops the same idea being
-   retried.
-6. Every land bumps the ledger's `config_id` and becomes the new baseline.
+   retried. Then **regenerate `current_opt_loop_synth.html`** (§M0.4b), on land
+   *and* on revert, so the scoreboard never lags the ledger.
+6. Every land bumps the ledger's `config_id`. **The baseline column does not
+   move** — it stays the §M1 baseline for this host, so the page always answers
+   "how far have we come since the loop started". Re-baseline only on a host,
+   PDK (§3) or toolchain change.
 
 **Periodic (weekly, and before any land):** `xs_exu`, `xs_backend`, the Verilog
 input path, and `dino` LEC (`synth_lec_flat` / `synth_lec_synth`).

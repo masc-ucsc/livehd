@@ -66,13 +66,27 @@ const char* op_name(Ntype_op op) {
 // graph, before emission. Returns #rewired reads.
 // One dissolve pass. Rewrites are DEFERRED to the end, so a reader cannot see
 // another reader's rewrite until the next pass -- the wrapper below iterates.
-// `unresolved_out`/`cap_out` report on-cycle reads this pass could not dissolve
-// (and whether the node budget was the cause) for the wrapper's final diagnostic.
-static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out) {
+// Why a slice descent gave up. These used to be one bool named `cap_hit`, and
+// the warning it fed said "node-creation budget exhausted" for every one of
+// them — which is how an investigation came to raise a budget that, measured,
+// changed nothing at all on the design that triggered the message. Naming the
+// real limit is the difference between "give it more nodes" (budget), "the
+// expression nests deeper than the walker goes" (depth) and "this operand shape
+// is not one the pass can descend into" (shape).
+enum Stop_reason : unsigned {
+  kStopBudget = 1u,  // per-reader or global node-creation allowance
+  kStopDepth  = 2u,  // deeper than the kMaxDepth recursion guard
+  kStopShape  = 4u,  // invalid pin or a degenerate slice range
+};
+
+// `unresolved_out` reports the on-cycle reads this pass could not dissolve;
+// `stop_reasons_out` is the OR of the `kStop*` bits saying which limit stopped
+// them, for the wrapper's final diagnostic.
+static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out) {
   namespace gu = livehd::graph_util;
 
-  unresolved_out = 0;
-  cap_out        = false;
+  unresolved_out   = 0;
+  stop_reasons_out = 0;
 
   auto is_comb = [](const hhds::Node_class& n) {
     auto op = gu::type_op_of(n);
@@ -354,6 +368,15 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // library). Per-reader budgeting makes each read pay only for its own subtree;
   // the global ceiling is the real anti-blowup net and is loose because distinct
   // sub-slices are memoized and shared across readers.
+  //
+  // MEASURED 2026-08-17, and the answer is that raising this does NOT help the
+  // design that motivated asking. XiangShan `Rob` leaves 914 on-cycle reads
+  // undissolved with the node budget reported as exhausted; growing the
+  // allowance 8x ran three extra fixpoint rounds, rewired exactly the same
+  // 315,791 reads, and cost +5.5% wall and 10.4 GB peak RSS for nothing. The
+  // hint that says "raise the split budget" was believed because `cap_hit`
+  // conflated every refusal into one bit -- see `Stop_reason` below, which now
+  // says which of the three actually fired.
   constexpr int per_reader_cap = 16384;
   const int     global_cap     = 16384 + 8 * static_cast<int>(comb_nodes.size());
   int           created        = 0;  // per-reader (reset at each reader below)
@@ -369,9 +392,38 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // capped frame would otherwise poison every later resolution through that
   // slice (the BlockCipherModule 21-bit sbox hit exactly this).
   absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>>                  on_stack;
-  bool                                                                          cap_hit = false;
+  // The recursion guard, and the REAL limiter on large packed designs.
+  //
+  // MEASURED on XiangShan `Rob`, 2026-08-17: 914 on-cycle reads survive, and
+  // once the refusal reasons were separated (see `Stop_reason`) the only one
+  // that fires is this depth cap — the node budget had taken the blame for
+  // years because both set the same flag, and raising the budget 8x dissolved
+  // exactly zero of them.
+  //
+  // Raising THIS constant is not the fix either, and that is measured too:
+  // 256 changes nothing at all (same 914, same 315,791 rewired — the failing
+  // descents go far deeper), and 1024 dies with a stack overflow partway
+  // through the same compile. So the fix is to make `resolve` ITERATIVE, with
+  // an explicit work stack, which removes the constant instead of tuning it.
+  // Until then 64 is the honest setting: it is the value that is stack-safe
+  // with margin, and nothing between it and the crash point buys anything.
+  //
+  // `on_stack` above catches a genuine bit-level self-dependency exactly, so
+  // this is purely a stack-exhaustion net and never a semantic limit.
+  constexpr int                                                                 kMaxDepth    = 64;
+  bool                                                                          cap_hit      = false;
+  // WHICH limit stopped a descent, not merely THAT one did. These were a single
+  // bool, and the resulting diagnostic blamed the node budget for every one of
+  // the six refusal conditions -- which sent an investigation into raising a
+  // budget that turned out to change nothing (see the comment on per_reader_cap
+  // above). Depth and an unhandled operand shape are entirely different problems
+  // with different fixes.
+  unsigned                                                                      stop_reasons = 0;
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
-    if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > per_reader_cap || total_created > global_cap) {
+    const bool over_budget = created > per_reader_cap || total_created > global_cap;
+    const bool too_deep    = depth > kMaxDepth;
+    const bool bad_shape   = v.is_invalid() || lo < 0 || hi <= lo;
+    if (too_deep || bad_shape || over_budget) {
       if (split_dbg) {
         std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n",
                    depth,
@@ -381,7 +433,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
                    total_created,
                    v.is_invalid());
       }
-      cap_hit = true;
+      stop_reasons |= (over_budget ? kStopBudget : 0u) | (too_deep ? kStopDepth : 0u) | (bad_shape ? kStopShape : 0u);
+      cap_hit       = true;
       return {};
     }
     const int w          = hi - lo;
@@ -848,15 +901,21 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // graph (created helper nodes are new and never on the cycle).
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
-  int  unresolved_on_cycle = 0;      // on-cycle bit-field reads we could not dissolve (diagnostic)
-  bool any_cap_hit         = false;  // ... and whether the budget (vs a genuine loop) was the cause
+  int      unresolved_on_cycle = 0;  // on-cycle bit-field reads we could not dissolve (diagnostic)
+  unsigned any_stop_reasons    = 0;  // ... and WHICH limit stopped them (kStop* bits)
   for (auto& R : comb_nodes) {
     if (!in_cycle.contains(R)) {
       continue;
     }
-    created  = 0;      // per-reader budget: this read pays only for its own subtree
-    cap_hit  = false;  // per-reader cap-taint detection (the memoization guard in resolve)
-    auto rop = gu::type_op_of(R);
+    created      = 0;      // per-reader budget: this read pays only for its own subtree
+    cap_hit      = false;  // per-reader cap-taint detection (the memoization guard in resolve)
+    // Per-reader too, and for the same reason `cap_hit` is: a descent that was
+    // refused once and then succeeded from a shallower frame still set its bit,
+    // so carrying the bits across readers would attribute an EARLIER read's
+    // recovered refusal to whichever later read actually failed -- reintroducing
+    // by accumulation exactly the conflation this enum exists to remove.
+    stop_reasons = 0;
+    auto rop     = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
       auto md = drv_at(R, 2);
       if (md.is_invalid() || !gu::is_const_pin(md)) {
@@ -877,7 +936,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       auto res = resolve(resolve, vd, rlo, rhi, 0);
       if (res.is_invalid()) {
         ++unresolved_on_cycle;
-        any_cap_hit |= cap_hit;
+        any_stop_reasons |= stop_reasons;
         continue;
       }
       gm_rewires.emplace_back(R, res, mask_const(0, rhi - rlo));
@@ -941,7 +1000,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       if (res.is_invalid()) {
         ++unresolved_on_cycle;
-        any_cap_hit |= cap_hit;
+        any_stop_reasons |= stop_reasons;
         continue;
       }
       and_rewires.emplace_back(R, other, res);
@@ -972,12 +1031,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     // their (possibly still cyclic) reads and fail loudly if unresolvable.
     res.connect_sink(A.create_sink_pin(static_cast<hhds::Port_id>(0)));
   }
-  const int nrew = static_cast<int>(gm_rewires.size() + and_rewires.size());
+  const int nrew   = static_cast<int>(gm_rewires.size() + and_rewires.size());
   // Report the survivors to the caller (the iterating wrapper decides whether to
   // warn -- an intermediate round leaves nested reads unresolved only because the
   // next round's rewrites are not applied yet, so warning per pass would spam).
-  unresolved_out = unresolved_on_cycle;
-  cap_out        = any_cap_hit;
+  unresolved_out   = unresolved_on_cycle;
+  stop_reasons_out = any_stop_reasons;
   if (nrew > 0) {
     // The edge rewires above only INCREMENTALLY patch forward_class's in-edge
     // counts; its cached Pass-2 deferral order was built while the graph still had
@@ -997,30 +1056,67 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
   // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
-  constexpr int max_rounds = 16;
-  int           total      = 0;
-  int           unresolved = 0;
-  bool          cap_hit    = false;
-  for (int round = 0; round < max_rounds; ++round) {
-    const int n  = split_selfref_pass(g, unresolved, cap_hit);
+  constexpr int max_rounds   = 16;
+  int           total        = 0;
+  int           unresolved   = 0;
+  unsigned      stop_reasons = 0;
+  int           rounds       = 0;
+  bool          fixpoint     = false;
+  for (; rounds < max_rounds; ++rounds) {
+    const int n  = split_selfref_pass(g, unresolved, stop_reasons);
     total       += n;
     if (n == 0) {
-      break;  // fixpoint: nothing left to rewrite (cycle gone, or genuinely stuck)
+      ++rounds;         // count the fixpoint round that proved there was nothing left
+      fixpoint = true;  // ... and record WHY the loop ended
+      break;            // cycle gone, or genuinely stuck
     }
   }
   // Never fail silently: a surviving word-level cycle makes downstream encode /
   // cgen / sim scheduling reject the graph, and the caller (cprop) discards this
   // count. `unresolved` is the final pass's remaining on-cycle reads.
   if (unresolved > 0) {
+    // Report the rounds ACTUALLY run, not `max_rounds`. Printing the constant
+    // made the two failure modes indistinguishable in a log -- "stuck after 3
+    // rounds" and "still making progress when the round cap cut it off" both
+    // read as 16, and they call for opposite fixes.
+    // From the exit REASON, not the count: a fixpoint reached on the last
+    // allowed round also leaves `rounds == max_rounds`, and reporting that as
+    // "the cap cut it off" is the same class of misdiagnosis as the old
+    // one-bool `cap_hit` -- it points at a limit that was never the problem.
+    const bool  rounds_exhausted = !fixpoint;
+    std::string why;
+    for (const auto& [bit, name] : {
+             std::pair{kStopBudget,     "node-budget"},
+             std::pair{ kStopDepth, "recursion-depth"},
+             std::pair{ kStopShape,   "operand-shape"}
+    }) {
+      if (stop_reasons & bit) {
+        why += why.empty() ? name : std::string(",") + name;
+      }
+    }
+    if (why.empty()) {
+      why = "no-rule";  // every descent was refused by an unhandled operator, not by a limit
+    }
     livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
         .msg(
-            "{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
+            "{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es){}; stopped by {}); a "
             "word-level combinational cycle may remain",
             unresolved,
             total,
-            max_rounds)
-        .hint(cap_hit ? "node-creation budget exhausted on a read -- raise the split budget if this is not a real loop"
-                      : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
+            rounds,
+            rounds_exhausted ? ", round cap reached" : "",
+            why)
+        // MEASURED on XiangShan `Rob` (2026-08-17): the budget hint used to be
+        // printed for every refusal, and acting on it -- 8x the allowance,
+        // three extra fixpoint rounds -- dissolved exactly zero additional
+        // reads at +5.5% wall and 10.4 GB peak RSS. Do not send the next reader
+        // down that path unless `node-budget` is the ONLY reason listed.
+        .hint(stop_reasons == kStopBudget ? "only the node-creation budget stopped it; raising the split budget may finish the job"
+              : rounds_exhausted          ? "the rewrite was still making progress when the round cap stopped it"
+              : (stop_reasons & (kStopDepth | kStopShape))
+                  ? "a descent hit the recursion guard or an operand shape this pass cannot split -- more budget will "
+                    "NOT help; run with LIVEHD_SIM_SPLIT_DEBUG=1 to see the refusing slice"
+                  : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
         .emit();
   }
   return total;

@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -120,14 +121,55 @@ private:
   absl::flat_hash_map<std::string, std::string> clk_memo_;
 
   // Incremental generation: one structural digest per module, persisted in
-  // <odir>/gen_digests.json — a matching digest with existing outputs skips
-  // the module's C++ emission entirely (the abc_cache region-digest idea
-  // applied to sim; hashing is one cheap traversal, emission is many).
-  uint64_t                                      sim_graph_digest(hhds::Graph* g);
-  void                                          load_gen_digests();
-  void                                          save_gen_digests();
-  absl::flat_hash_map<std::string, std::string> gen_digests_;
-  bool                                          gen_digests_loaded_ = false;
+  // <odir>/gen_digests.json — a matching digest with every recorded artifact
+  // still on disk skips the module's C++ emission entirely (the abc_cache
+  // region-digest idea applied to sim; hashing is one cheap traversal,
+  // emission is many).
+  //
+  // TWO properties make that sound, and both were added together because
+  // neither is safe without the other:
+  //
+  //  * the digest is HIERARCHICAL (hier_graph_digest). A module's own body
+  //    hash folds only a child's NAME, but the code emitted for a parent
+  //    genuinely depends on the child's subtree — clock-guard forwarding at
+  //    call sites, Moore/state-only classification through a Memory, and, for
+  //    the occurrence-wide color root, every node in the cone. Folding each
+  //    child's digest is the merkle discipline semdiff already uses, and it is
+  //    what lets the color root participate at all: its plan spans the whole
+  //    occurrence tree, so a leaf edit MUST move the root's key.
+  //
+  //  * the record carries the COMPLETE artifact set the emission produced, not
+  //    a hard-coded {hpp,cpp,iface.json} triple. The root also owns the color
+  //    runtime/kernel headers, one TU per canonical kernel, the evaluator and
+  //    state-commit shards, and (LLVM backend) one relocatable object per
+  //    color. One missing artifact is a MISS — never a partial restore.
+  struct Gen_record {
+    std::string              digest;
+    std::vector<std::string> files;  // basenames under odir, sorted
+  };
+  uint64_t                                     sim_graph_digest(hhds::Graph* g);
+  uint64_t                                     hier_graph_digest(hhds::Graph* g);
+  // The full generation key: the hierarchical body hash folded with every
+  // option that changes what is emitted. Deliberately does NOT fold the color
+  // plan — the plan is DERIVED from exactly these inputs, and its report()
+  // degenerates to summary counts past 100k version sites, so it is both
+  // redundant and too weak to key on.
+  std::string                                  generation_key(hhds::Graph* g, bool color_root);
+  void                                         load_gen_digests();
+  void                                         save_gen_digests();
+  absl::flat_hash_map<std::string, Gen_record> gen_digests_;
+  absl::flat_hash_map<hhds::Gid, uint64_t>     hier_digest_memo_;
+  absl::flat_hash_map<hhds::Gid, uint64_t>*    shared_digest_memo_ = nullptr;
+  std::string                                  gen_key_;  // this module's key, recorded on a clean emission
+  bool                                         gen_digests_loaded_ = false;
+
+  // Every generated file this module owns, in emission order. `open_out` is
+  // the only way the emitter creates one, so the manifest cannot drift from
+  // what was actually written; `note_emitted` covers the LLVM objects, which
+  // are produced by the codegen backend rather than by File_output.
+  std::vector<std::string>     emitted_files_;
+  std::shared_ptr<File_output> open_out(std::string_view basename);
+  void                         note_emitted(std::string_view basename);
 
   // Per-graph liveness (backward reach from IO/state/Sub/Memory sinks): only
   // live comb nodes emit — dead trees stranded by graph passes (e.g.
@@ -227,6 +269,32 @@ public:
   bool prepare_graph(const std::shared_ptr<hhds::Graph>& graph);
 
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
+
+  // Is `g`'s generated C++ already current in `odir`? Same question
+  // do_from_graph()'s internal gate answers, exposed so the CALLER can answer it
+  // BEFORE building the occurrence color plan — on a large design the plan
+  // discovery is the single most expensive step in the emitter (measured: ~25 s
+  // of a 32 s warm XiangShan `Rob` codegen, against ~4 s of actual emission), and
+  // it is a pure function of the same cone and options the key already folds, so
+  // a hit has nothing to learn from re-deriving it.
+  //
+  // `color_root` is what the caller is ABOUT to decide: whether this graph gets
+  // a plan. The instance may be constructed with a null plan; every other
+  // constructor argument must match the one that would emit, or the key does
+  // not describe the same generation.
+  //
+  // The graph must already be prepare_graph()'d — the key is over the body AS
+  // EMITTED, and prepare_graph rewrites it.
+  [[nodiscard]] bool generation_current(hhds::Graph* g, bool color_root);
+
+  // Share ONE hierarchical-digest memo across every Cgen_sim of a run. Without
+  // it each instance re-walks its own cone, so a hierarchy costs
+  // O(modules x cone) node visits instead of O(nodes) — on a large design that
+  // is seconds of pure repetition, paid twice over (once by the pre-plan probe,
+  // once by the emitter). The pointed-to map must outlive every instance, and
+  // the graphs must not be structurally rewritten while it is in use — which
+  // holds, because prepare_graph() runs over the whole library first.
+  void share_digest_memo(absl::flat_hash_map<hhds::Gid, uint64_t>* memo) { shared_digest_memo_ = memo; }
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,

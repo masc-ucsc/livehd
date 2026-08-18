@@ -282,41 +282,12 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
     return result;
   };
-  bool wrote_plan = false;
-  for (const auto& g : sim_graphs) {
-    if (!g) {
-      continue;
-    }
-    const std::string full(g->get_name());
-    const auto        pos      = full.find_last_of("./");
-    const std::string entity   = pos == std::string::npos ? full : full.substr(pos + 1);
-    const bool        selected = !top.empty() ? (top == full || top == entity) : !instantiated.contains(full);
-    if (!selected || (!entity.empty() && entity.front() == '%')) {
-      continue;
-    }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty());
-    plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
-    if (!plan.complete()) {
-      livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
-          .msg("occurrence-wide simulator discovery is incomplete for '{}'", full)
-          .hint(plan.errors().empty() ? "inspect the generated .color-plan.txt report" : plan.errors().front())
-          .emit();
-      return;
-    }
-    root_color_plans.emplace(g.get(), std::move(plan));
-    wrote_plan = true;
-  }
-  if (!wrote_plan && !sim_graphs.empty()) {
-    livehd::diag::err("inou.cgen.sim", "color-plan-root", "usage")
-        .msg("could not select top '{}' for occurrence-wide simulator discovery", top)
-        .emit();
-    return;
-  }
-
-  // A compact loop is one outer color whose native ordinal walk currently
-  // calls a definition-local body kernel. Mark that callee closure so ordinary
-  // hierarchy definitions can be emitted as storage-only records, while the
-  // compact kernel and anything it directly invokes retain their body surface.
+  // A compact loop is one outer color whose native ordinal walk currently calls
+  // a definition-local body kernel. Marked BEFORE the plan loop because it is a
+  // constructor argument of every Cgen_sim, including the cheap probes below —
+  // a probe built with the wrong flag would compute a key for a different
+  // generation than the one that emits. It depends only on `subnode_loop()`, so
+  // hoisting it past the plan changes nothing else.
   absl::flat_hash_set<const hhds::Graph*>   compact_kernel_defs;
   std::vector<std::shared_ptr<hhds::Graph>> compact_work;
   for (const auto& g : sim_graphs) {
@@ -346,10 +317,111 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
   }
 
+  // ONE hierarchical-digest memo for the whole run. Every module's key folds its
+  // callees' keys, so without sharing, a hierarchy re-walks the same subtrees
+  // once per ancestor AND once more in the emitter — O(modules x cone) node
+  // visits instead of O(nodes), which on XiangShan `Rob` is seconds of pure
+  // repetition. Safe because prepare_graph() has already run over the whole
+  // library, so no body changes shape while the memo is alive.
+  absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
+  const auto                               probe_for = [&](const std::shared_ptr<hhds::Graph>& g) {
+    return Cgen_sim(dir,
+                    vcd_out,
+                    top,
+                    fakedelay,
+                    flatten_budget,
+                    /*color_plan=*/nullptr,
+                    compact_kernel_defs.contains(g.get()),
+                    observe_on,
+                    runtime_support_on,
+                    slop_u_on,
+                    color_dirty_on,
+                    debug_on,
+                    unknown_zero_on,
+                    backend == "llvm");
+  };
+  const auto is_selected_root = [&](std::string_view full, std::string_view entity) {
+    return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
+  };
+  // Which modules are already generated. Asked BEFORE the color plan, because
+  // on a large design discovery dominates the emitter — measured on XiangShan
+  // `Rob`, ~25 s of a ~32 s warm codegen against ~4 s of actual C++ emission.
+  // Nothing about the plan enters the key (the plan is DERIVED from the same
+  // cone and options), so a module whose key and complete artifact set are
+  // already on disk needs neither the plan nor the emission.
+  absl::flat_hash_set<const hhds::Graph*> already_generated;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const std::string full(g->get_name());
+    const auto        pos    = full.find_last_of("./");
+    const std::string entity = pos == std::string::npos ? full : full.substr(pos + 1);
+    if (!entity.empty() && entity.front() == '%') {
+      continue;  // a `test` block's minted comb is never emitted at all
+    }
+    const bool root  = is_selected_root(full, entity);
+    auto       probe = probe_for(g);
+    probe.share_digest_memo(&digest_memo);
+    if (!probe.generation_current(g.get(), root)) {
+      continue;
+    }
+    // A root additionally owns its plan report. It is documentation rather than
+    // a build input, but regenerating it is exactly what the skip avoids, so a
+    // missing one has to count as a miss or `lhd sim` would silently stop
+    // producing it.
+    if (root && !dir.empty() && !std::filesystem::exists(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"))) {
+      continue;
+    }
+    already_generated.insert(g.get());
+  }
+
+  bool wrote_plan = false;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const std::string full(g->get_name());
+    const auto        pos      = full.find_last_of("./");
+    const std::string entity   = pos == std::string::npos ? full : full.substr(pos + 1);
+    const bool        selected = is_selected_root(full, entity);
+    if (!selected || (!entity.empty() && entity.front() == '%')) {
+      continue;
+    }
+    if (already_generated.contains(g.get())) {
+      wrote_plan = true;  // the previous run's plan is still the current one
+      continue;
+    }
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty());
+    plan.write_report(absl::StrCat(dir, "/", file_stem(full), ".color-plan.txt"));
+    if (!plan.complete()) {
+      livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
+          .msg("occurrence-wide simulator discovery is incomplete for '{}'", full)
+          .hint(plan.errors().empty() ? "inspect the generated .color-plan.txt report" : plan.errors().front())
+          .emit();
+      return;
+    }
+    root_color_plans.emplace(g.get(), std::move(plan));
+    wrote_plan = true;
+  }
+  if (!wrote_plan && !sim_graphs.empty()) {
+    livehd::diag::err("inou.cgen.sim", "color-plan-root", "usage")
+        .msg("could not select top '{}' for occurrence-wide simulator discovery", top)
+        .emit();
+    return;
+  }
+
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
   for (const auto& g : sim_graphs) {
     if (!g) {
+      continue;
+    }
+    // Already current. do_from_graph() would reach the same verdict on its own,
+    // but only after being handed a plan — and for a skipped ROOT there is now
+    // no plan to hand it, so a null one would key as a non-root and re-emit the
+    // whole module against the wrong generation.
+    if (already_generated.contains(g.get())) {
       continue;
     }
     const auto  plan_it = root_color_plans.find(g.get());
@@ -368,6 +440,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   debug_on,
                   unknown_zero_on,
                   backend == "llvm");
+    p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }
 }

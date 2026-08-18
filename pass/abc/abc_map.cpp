@@ -485,7 +485,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                                            mib(cost::reserve_bytes()));
   refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-                           "(was {} MiB){}, {}",
+      "(was {} MiB){}, {}",
       region,
       blasted,
       total,
@@ -493,7 +493,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss),
       mib(rss_before),
       over_now ? std::string{}
-                                    : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
+               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
       budget_desc);
   return true;
 }
@@ -593,7 +593,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     const int bits  = gu::bits_of(node.create_driver_pin(0));
-      register_bits  += static_cast<uint64_t>(std::max(bits, 1));
+    register_bits  += static_cast<uint64_t>(std::max(bits, 1));
   }
   if (const char* only_color = std::getenv("ABC_ONLY_COLOR"); only_color != nullptr && std::atoi(only_color) != rb.color) {
     return;
@@ -1096,7 +1096,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // Get_mask/Set_mask at the mapper boundary. pass.opentimer's pin tracker
   // understands both operations, so timing identity is preserved bit-for-bit.
   absl::flat_hash_set<hhds::Node_class> native_wiring;
-  auto node_output_width = [](const hhds::Node_class& n) {
+  auto                                  node_output_width = [](const hhds::Node_class& n) {
     int width = 0;
     for (const auto& e : n.out_edges()) {
       width = std::max(width, gu::bits_of(e.driver));
@@ -1113,7 +1113,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     };
     std::vector<Span>             spans;
     std::vector<hhds::Node_class> shifts;
-    bool                          packing = true;
+    bool                          packing         = true;
     int                           unshifted_lanes = 0;
     std::string                   reject;
     for (const auto& e : n.inp_edges()) {
@@ -1156,8 +1156,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // input-width+amount on the result. Recover the occupied interval from
       // those stamps, avoiding a lossy int64 conversion of an arbitrary-size
       // Dlop constant.
-      const int lo = std::min(shl_width - width, out_width);
-      const int hi = std::min(shl_width, out_width);
+      const int lo        = std::min(shl_width - width, out_width);
+      const int hi        = std::min(shl_width, out_width);
       if (lo < hi) {
         spans.push_back({lo, hi});
       }
@@ -1389,8 +1389,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         continue;
       }
       auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Div
-          || op == Ntype_op::Rem || native_wiring.contains(n)) {
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Div || op == Ntype_op::Rem
+          || native_wiring.contains(n)) {
         continue;  // blackbox boundary (Sub instance / memory / divider / remainder) -- handled separately
       }
       if (gu::is_type_flop(n)) {
@@ -1961,8 +1961,28 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             affine = valid && !index.is_invalid() && scale > 0;
           }
         }
-        const int index_w = affine ? eff_width(index) : 0;
-        if (affine && index_w > 0 && index_w <= 16
+        const int  index_w     = affine ? eff_width(index) : 0;
+        // The two lowerings must agree, because only a COST heuristic picks
+        // between them. The generic barrel reads the amount as the nb-bit net it
+        // actually is, so an index*scale+bias that overflows that net WRAPS to a
+        // small shift and selects real data; build_affine_shr_prefix rebuilds the
+        // untruncated math value instead and would fill those bits. Take the
+        // affine form only when no reachable index can overflow the amount net,
+        // so the choice stays a pure performance decision.
+        const bool affine_fits = [&] {
+          if (!affine || index_w <= 0 || index_w > 16) {
+            return false;
+          }
+          if (nb >= 62) {
+            return true;  // any 16-bit index * scale below fits; avoids the shift UB
+          }
+          const int64_t max_index = (int64_t{1} << index_w) - 1;
+          if (max_index != 0 && scale > (INT64_MAX - bias) / max_index) {
+            return false;  // the product alone overflows int64: certainly not nb bits
+          }
+          return scale * max_index + bias < (int64_t{1} << nb);
+        }();
+        if (affine_fits
             && (uint64_t{1} << index_w) * static_cast<uint64_t>(demand_w)
                    < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1))) {
           std::vector<Abc_Obj_t*> iv(index_w);

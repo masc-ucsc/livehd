@@ -6,11 +6,14 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
+#include "file_output.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -618,22 +621,28 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error) {
   pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
   pipeline.run(*impl_->module, module_analyses);
 
-  std::error_code      ec;
-  llvm::raw_fd_ostream object(llvm::StringRef(path), ec, llvm::sys::fs::OF_None);
-  if (ec) {
-    error = ec.message();
-    return false;
-  }
-  llvm::legacy::PassManager emit;
+  // Emit into MEMORY, then hand the bytes to File_output rather than writing
+  // the file directly. The object is a link input keyed on mtime by the
+  // generated build.ninja, so an unconditional truncate+rewrite forced a relink
+  // on every single `lhd sim` — including one where nothing changed at all and
+  // the object came out byte-identical. Every other generated artifact in the
+  // sim tree already goes through the same write-if-different path; this one
+  // was the lone hole, and it is why the LLVM backend could never reach a
+  // no-work warm rebuild.
+  //
+  // Object files are the smallest thing in that tree (the C++ they replace is
+  // far larger), so buffering one is a cheaper trade than the relink it avoids.
+  llvm::SmallVector<char, 0>  buffer;
+  llvm::raw_svector_ostream   object(buffer);
+  llvm::legacy::PassManager   emit;
   if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {
     error = "LLVM target cannot emit object files";
     return false;
   }
   emit.run(*impl_->module);
-  object.flush();
-  if (object.has_error()) {
-    error = object.error().message();
-    return false;
+  {
+    File_output out{path};
+    out.append(std::string_view(buffer.data(), buffer.size()));
   }
   return true;
 }

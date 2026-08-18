@@ -204,6 +204,21 @@ struct Result {
   std::vector<std::string> outputs;
   std::vector<std::string> recipe_steps;  // the expanded steps that actually ran
 
+  // Per-phase wall clock (steady_clock), milliseconds, in COMPLETION order —
+  // the result's "phases" member. A row is appended when its phase ENDS, so
+  // today (no Phase_timer nests inside another) the array reads as execution
+  // order; a future nested timer would land AFTER the phases it contains, and
+  // would also double-count under the "the consumer sums" rule below, so keep
+  // the timed regions disjoint. Deliberately SEPARATE from recipe_steps:
+  // recipe_steps is the human-readable expanded recipe, carrying the
+  // label-decorated step string ("pass.abc cache_dir:… recipe:…") plus purely
+  // informational lines that never ran as a timed phase. phase_ms holds only
+  // genuinely timed work, keyed by the BARE step name ("pass.abc"), so a
+  // performance consumer can key on it. A name may repeat when a step runs
+  // more than once in a pipeline (the array is ordered; the consumer sums).
+  // Never part of run_id — a wall-clock value in a content hash breaks caching.
+  std::vector<std::pair<std::string, double>> phase_ms;
+
   // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
   // embedded verbatim as the result's "scan" member.
   std::string scan_json;

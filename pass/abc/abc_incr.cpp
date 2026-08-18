@@ -314,6 +314,10 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
       auto cached_io = cached_pre->get_io();
       auto fresh_io  = pre_body->get_io();
       if (cached_io && fresh_io) {
+        // Port_invalid must stay unmatched: without the guard an unresolvable
+        // cached name falls through to whatever fresh decl happens to carry an
+        // invalid port id, which is a GUESS at the critical output -- the same
+        // "a missing port is a miss, never a guess" rule the stitch above keeps.
         hhds::Port_id crit_pid = livehd::Port_invalid;
         for (const auto& decl : cached_io->get_output_pin_decls()) {
           if (decl.name == row.crit_output) {
@@ -321,10 +325,12 @@ Incr_cache::Compare_result Incr_cache::lookup_compare(const livehd::partition::R
             break;
           }
         }
-        for (const auto& decl : fresh_io->get_output_pin_decls()) {
-          if (decl.port_id == crit_pid) {
-            res.crit_output = decl.name;
-            break;
+        if (crit_pid != livehd::Port_invalid) {
+          for (const auto& decl : fresh_io->get_output_pin_decls()) {
+            if (decl.port_id == crit_pid) {
+              res.crit_output = decl.name;
+              break;
+            }
           }
         }
       }
@@ -550,10 +556,10 @@ void Incr_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                       jesc(*k),
-                       jesc(r.module),
-                       jesc(r.pre),
-                       jesc(r.recipe));
+                         jesc(*k),
+                         jesc(r.module),
+                         jesc(r.pre),
+                         jesc(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.in[i]));
     }

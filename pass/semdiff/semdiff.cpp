@@ -2777,13 +2777,24 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
   if (g == nullptr) {
     return {};
   }
-  if (auto it = memo.find(g->get_gid()); it != memo.end()) {
-    return it->second;  // this def was already digested as some other root's child
+  // The memo is keyed by gid ALONE, so it can only ever hold one flavor per def
+  // -- and children are always digested with matching_io_names=true (only the
+  // ROOT's boundary is renamable). A port-id-keyed root therefore neither reads
+  // nor writes the shared memo: reading it would return the name-keyed digest of
+  // the same def, and writing it would hand that port-id digest to a later
+  // caller that asked for the name-keyed one. Its children still populate the
+  // memo normally, so the sharing that makes the batch form O(nodes) is intact.
+  if (matching_io_names) {
+    if (auto it = memo.find(g->get_gid()); it != memo.end()) {
+      return it->second;  // this def was already digested as some other root's child
+    }
   }
   absl::flat_hash_set<hhds::Gid> visiting;
   visiting.insert(g->get_gid());  // catch self-instantiation
   auto d = digest_one(g, resolve, memo, visiting, sub_fold, matching_io_names);
-  memo.emplace(g->get_gid(), d);
+  if (matching_io_names) {
+    memo.emplace(g->get_gid(), d);
+  }
   return d;
 }
 

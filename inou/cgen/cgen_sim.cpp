@@ -20,6 +20,7 @@
 #include "attrs.hpp"
 #include "cell.hpp"  // Ntype / Ntype_op
 #include "cgen_llvm.hpp"
+#include "cgen_salt.hpp"       // livehd::kCgenSrcSalt — emitter content hash (L2)
 #include "diag.hpp"            // livehd::diag::err — Stage 0 comb-loop safety net
 #include "inline_sub.hpp"      // //graph — sim.flatten structural inline of a small sub-instance
 #include "latch_contract.hpp"  // //graph — inline_clock_gate_cells (ICG gate -> local AND cone)
@@ -2050,6 +2051,13 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // simgen-62: the opt-in LLVM backend emits every supported canonical color
 // kernel, including classes with one occurrence, as a native object plus a
 // narrow packed-word ABI adapter.
+// simgen-63: gen_digests.json records the COMPLETE artifact set per module
+// alongside a HIERARCHICAL key, so the occurrence-wide color root — the most
+// expensive module in the tree, and the only one that was excluded — reuses
+// its generation like every other module. The bump is load-bearing twice
+// over: the on-disk record shape changed (a bare digest string became
+// {"d","f"}), and the key changed meaning (a child edit now moves every
+// ancestor's key, which is what makes the root reusable at all).
 // simgen-60: generated unsigned proof landings default to mask-free
 // Slop_u::from_proven; sim.debug retains materializing Slop_u::land checks.
 // The color planner uses word-oriented structural refinement hashes.
@@ -2107,7 +2115,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-62";
+static constexpr std::string_view kSimGenVersion = "simgen-63";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {
@@ -2192,6 +2200,65 @@ uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
   return h;
 }
 
+// A module's key over its OWN body plus the bodies of everything it
+// instantiates, transitively. `sim_graph_digest` folds only a child's NAME, so
+// on its own it cannot see a leaf edit -- and the code emitted for an ancestor
+// does depend on the descendant subtree (clock-guard forwarding at call sites,
+// Moore/state-only classification through a Memory, and for the color root the
+// entire occurrence plan). Folding the children turns the per-module digest
+// into a merkle hash, which is the same discipline semdiff's canonical digest
+// uses and the reason the color root can be reused at all.
+//
+// Memoized per Gid: a diamond hierarchy would otherwise re-walk a shared leaf
+// once per path, and a cyclic instance graph (which HHDS does not allow, but a
+// malformed library could present) would not terminate.
+uint64_t Cgen_sim::hier_graph_digest(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  auto&      memo = shared_digest_memo_ != nullptr ? *shared_digest_memo_ : hier_digest_memo_;
+  const auto gid  = g->get_gid();
+  if (auto it = memo.find(gid); it != memo.end()) {
+    return it->second;
+  }
+  memo[gid] = 0;  // cycle guard: a re-entry folds 0 rather than recursing
+
+  uint64_t h = sim_graph_digest(g);
+  // Sorted, so the fold does not depend on node iteration order -- the parent's
+  // own body hash already carries the instantiation structure.
+  std::vector<uint64_t> children;
+  for (auto n : g->body().nodes()) {
+    if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    if (auto cg = n.get_subnode_graph()) {
+      children.push_back(hier_graph_digest(cg.get()));
+    }
+  }
+  std::sort(children.begin(), children.end());
+  children.erase(std::unique(children.begin(), children.end()), children.end());
+  for (auto c : children) {
+    h = fnv1a(h, c);
+  }
+  memo[gid] = h;
+  return h;
+}
+
+// The `"gen"` tag: the human-facing generator version AND the emitter content
+// salt. Carrying the salt here as well as in each key means an emitter edit
+// drops the whole index in one step, instead of leaving every record to
+// mismatch individually — which would strand a record for a module that no
+// longer exists in the design.
+static std::string gen_schema_tag() {
+  return absl::StrCat(kSimGenVersion, "-", absl::Hex(livehd::kCgenSrcSalt, absl::kZeroPad16));
+}
+
+// {"gen":"simgen-63-<salt>","modules":{"file.entity":{"d":"0123456789abcdef",
+//                                                     "f":["file.entity.cpp",...]}}}
+//
+// Hand-rolled, like the abc and formal caches: the shapes are fixed and adding
+// a JSON dependency to the emitter is not worth it. Anything that does not
+// parse is treated as a cold start, never as a partial record.
 void Cgen_sim::load_gen_digests() {
   gen_digests_loaded_ = true;
   std::ifstream ifs(absl::StrCat(std::string(odir), "/gen_digests.json"));
@@ -2201,10 +2268,9 @@ void Cgen_sim::load_gen_digests() {
   std::stringstream ss;
   ss << ifs.rdbuf();
   const std::string t = ss.str();
-  if (t.find(absl::StrCat("\"gen\":\"", kSimGenVersion, "\"")) == std::string::npos) {
-    return;  // other generator version -> cold
+  if (t.find(absl::StrCat("\"gen\":\"", gen_schema_tag(), "\"")) == std::string::npos) {
+    return;  // other generator version or a changed emitter -> cold
   }
-  // {"gen":"simgen-1","modules":{"file.entity":"0123456789abcdef",...}}
   size_t p = t.find("\"modules\"");
   if (p == std::string::npos) {
     return;
@@ -2214,19 +2280,52 @@ void Cgen_sim::load_gen_digests() {
     return;
   }
   ++p;
+  const auto quoted = [&](size_t& at, std::string& out) {
+    size_t q0 = t.find('"', at);
+    if (q0 == std::string::npos) {
+      return false;
+    }
+    size_t q1 = t.find('"', q0 + 1);
+    if (q1 == std::string::npos) {
+      return false;
+    }
+    out = t.substr(q0 + 1, q1 - q0 - 1);
+    at  = q1 + 1;
+    return true;
+  };
   while (true) {
-    size_t k0 = t.find('"', p);
-    if (k0 == std::string::npos) {
+    std::string module;
+    if (!quoted(p, module)) {
       break;
     }
-    size_t k1 = t.find('"', k0 + 1);
-    size_t v0 = k1 == std::string::npos ? std::string::npos : t.find('"', k1 + 1);
-    size_t v1 = v0 == std::string::npos ? std::string::npos : t.find('"', v0 + 1);
-    if (v1 == std::string::npos) {
+    size_t rec = t.find('{', p);  // the per-module record
+    if (rec == std::string::npos) {
       break;
     }
-    gen_digests_[t.substr(k0 + 1, k1 - k0 - 1)] = t.substr(v0 + 1, v1 - v0 - 1);
-    p                                           = v1 + 1;
+    size_t end = t.find('}', rec);
+    if (end == std::string::npos) {
+      break;
+    }
+    Gen_record record;
+    size_t     dp = t.find("\"d\":", rec);
+    if (dp == std::string::npos || dp > end || !(dp += 4, quoted(dp, record.digest))) {
+      break;
+    }
+    size_t fp = t.find("\"f\":[", rec);
+    if (fp != std::string::npos && fp < end) {
+      fp += 5;
+      const size_t list_end = t.find(']', fp);
+      std::string  name;
+      while (list_end != std::string::npos && fp < list_end && quoted(fp, name)) {
+        record.files.push_back(name);
+      }
+    }
+    // A record with no artifact list is from an older schema (or truncated):
+    // drop it rather than let an empty list read as "nothing to check".
+    if (!record.files.empty()) {
+      gen_digests_[module] = std::move(record);
+    }
+    p = end + 1;
   }
 }
 
@@ -2237,15 +2336,92 @@ void Cgen_sim::save_gen_digests() {
     keys.push_back(k);
   }
   std::sort(keys.begin(), keys.end());  // stable file bytes
-  std::ofstream ofs(absl::StrCat(std::string(odir), "/gen_digests.json"));
-  ofs << "{\"gen\":\"" << kSimGenVersion << "\",\"modules\":{";
-  bool first = true;
+  std::string text = absl::StrCat("{\"gen\":\"", gen_schema_tag(), "\",\"modules\":{");
+  bool        first = true;
   for (const auto& k : keys) {
-    ofs << (first ? "" : ",") << "\"" << k << "\":\"" << gen_digests_.at(k) << "\"";
+    const auto& record = gen_digests_.at(k);
+    absl::StrAppend(&text, first ? "" : ",", "\"", k, "\":{\"d\":\"", record.digest, "\",\"f\":[");
+    for (size_t i = 0; i < record.files.size(); ++i) {
+      absl::StrAppend(&text, i ? ",\"" : "\"", record.files[i], "\"");
+    }
+    absl::StrAppend(&text, "]}");
     first = false;
   }
-  ofs << "}}\n";
+  absl::StrAppend(&text, "}}\n");
+  // Through File_output like every other generated artifact: an unchanged
+  // warm run then leaves the whole sim tree, this index included, untouched.
+  File_output out{absl::StrCat(std::string(odir), "/gen_digests.json")};
+  out.append(text);
 }
+
+std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
+  const std::string gname(g->get_name());
+  const auto        entity = gname.substr(gname.rfind('.') + 1);
+  const bool        is_top = top.empty() || entity == top || gname == top;
+
+  uint64_t gd = hier_graph_digest(g);
+  // The build-time content hash of every inou/cgen source. This, not the
+  // hand-bumped kSimGenVersion below, is what makes a forgotten version bump
+  // harmless: change the emitter and every cached generation invalidates on the
+  // next run, with no human in the loop (docs/opt_loop_incr.md L2 / trap T4).
+  gd          = fnv1a(gd, livehd::kCgenSrcSalt);
+  gd          = fnv1a_str(gd, kSimGenVersion);
+  gd          = fnv1a_str(gd, vcd_file);
+  gd          = fnv1a_str(gd, top);
+  gd          = fnv1a(gd, (is_top ? 2u : 0u) | (vcd_fakedelay ? 1u : 0u));
+  gd          = fnv1a(gd, compact_kernel_ ? 1u : 0u);
+  gd          = fnv1a(gd, runtime_support_on ? 1u : 0u);
+  gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
+  gd          = fnv1a(gd, color_dirty_ ? 1u : 0u);
+  gd          = fnv1a(gd, debug_ ? 1u : 0u);
+  gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
+  gd          = fnv1a(gd, llvm_backend_ ? 1u : 0u);
+  gd          = fnv1a(gd, (color_root ? 2u : 0u) | (observation_on ? 1u : 0u));
+  char hex[17];
+  std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
+  return hex;
+}
+
+bool Cgen_sim::generation_current(hhds::Graph* g, bool color_root) {
+  if (odir.empty()) {
+    return false;
+  }
+  if (!gen_digests_loaded_) {
+    load_gen_digests();
+  }
+  const std::string gname(g->get_name());
+  gen_key_ = generation_key(g, color_root);
+
+  auto it = gen_digests_.find(gname);
+  if (it != gen_digests_.end() && it->second.digest == gen_key_) {
+    std::error_code ec;
+    const bool      complete = std::ranges::all_of(it->second.files, [&](const std::string& f) {
+      return std::filesystem::exists(absl::StrCat(odir, "/", f), ec);
+    });
+    if (complete) {
+      return true;
+    }
+    // The key matched but an artifact is gone (a hand-deleted file, a
+    // half-swept directory). Retract the record on disk BEFORE re-emitting: if
+    // this emission then dies partway, a run after it must not find a matching
+    // key over a tree we were in the middle of rewriting. This is the only
+    // repair path that needs an extra index write, and it is rare — the
+    // ordinary miss leaves a record whose key already differs from the one the
+    // next run computes, which is self-invalidating.
+    gen_digests_.erase(gname);
+    save_gen_digests();
+  }
+  gen_digests_.erase(gname);  // re-recorded only after a clean emission
+  return false;
+}
+
+std::shared_ptr<File_output> Cgen_sim::open_out(std::string_view basename) {
+  note_emitted(basename);
+  return std::make_shared<File_output>(odir.empty() ? std::string(basename)
+                                                    : absl::StrCat(odir, "/", basename));
+}
+
+void Cgen_sim::note_emitted(std::string_view basename) { emitted_files_.emplace_back(basename); }
 
 // ICG FOLD (todo/livehd/2f-latch M5). A clock-gating cell's output is
 // `<clock> & <enable>`: it has a rising edge exactly on the reference clock's
@@ -2706,43 +2882,34 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   const std::string fstem  = sim_file_stem(gname);
   const std::string base   = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
 
-  // Incremental generation: matching structural digest + existing outputs ->
-  // this module's C++ is already up to date, skip the emission (and the file
-  // rewrite) entirely. MUST happen before File_output creation (truncation).
-  if (!odir.empty()) {
-    if (!gen_digests_loaded_) {
-      load_gen_digests();
-    }
-    uint64_t gd = sim_graph_digest(g);
-    gd          = fnv1a_str(gd, kSimGenVersion);
-    gd          = fnv1a_str(gd, vcd_file);
-    gd          = fnv1a_str(gd, top);
-    gd          = fnv1a(gd, (is_top ? 2u : 0u) | (vcd_fakedelay ? 1u : 0u));
-    gd          = fnv1a(gd, compact_kernel_ ? 1u : 0u);
-    gd          = fnv1a(gd, runtime_support_on ? 1u : 0u);
-    gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
-    gd          = fnv1a(gd, color_dirty_ ? 1u : 0u);
-    gd          = fnv1a(gd, debug_ ? 1u : 0u);
-    gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
-    gd          = fnv1a(gd, llvm_backend_ ? 1u : 0u);
-    if (color_root) {
-      gd = fnv1a(gd, observation_on ? 1u : 0u);
-    }
-    if (color_root) {
-      gd = fnv1a_str(gd, color_plan_->report());
-    }
-    char hex[17];
-    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
-    auto            it = gen_digests_.find(gname);
-    std::error_code ec;
-    if (!color_root && it != gen_digests_.end() && it->second == hex && std::filesystem::exists(base + ".hpp", ec)
-        && std::filesystem::exists(base + ".cpp", ec) && std::filesystem::exists(base + ".iface.json", ec)) {
-      return;
-    }
-    gen_digests_[gname] = hex;  // persisted below, after a clean emission
+  // Incremental generation: matching HIERARCHICAL digest + every recorded
+  // artifact still present -> this module's C++ is already up to date, so skip
+  // the emission (and the file rewrite) entirely. MUST happen before
+  // File_output creation, which truncates.
+  //
+  // The color ROOT participates here too, which it did not before. It is by far
+  // the most expensive module to emit -- it owns the evaluator and state-commit
+  // shards, every canonical kernel TU and, under the LLVM backend, one LLVM
+  // codegen per color -- so excluding it meant a no-change rebuild still paid
+  // essentially the whole generation cost. Two things had to be true first:
+  //
+  //   * the digest must see the whole cone (hier_graph_digest), because the
+  //     root's code is derived from an occurrence plan spanning every
+  //     descendant, and a leaf edit leaves the root's own body untouched;
+  //   * the record must list EVERY artifact the emission produced, so a
+  //     hit restores a complete set and a half-swept directory misses cold.
+  //
+  // `color_plan_->report()` deliberately no longer feeds the key. It is a
+  // DERIVED value -- the plan is a pure function of the cone plus
+  // `observation_on`, both of which are folded here -- and it is not a safe
+  // substitute anyway: past 100k version sites the report drops its exhaustive
+  // per-site detail and degenerates into summary counts, which two different
+  // designs can share. Keying on the inputs is both sound and cheaper.
+  if (!odir.empty() && generation_current(g, color_root)) {
+    return;
   }
-  auto hout = std::make_shared<File_output>(absl::StrCat(base, ".hpp"));  // interface
-  auto fout = std::make_shared<File_output>(absl::StrCat(base, ".cpp"));  // definitions ("the slop")
+  auto hout = open_out(absl::StrCat(fstem, ".hpp"));  // interface
+  auto fout = open_out(absl::StrCat(fstem, ".cpp"));  // definitions ("the slop")
 
   // Header (<name>.hpp): data members + In/Out + method DECLARATIONS only. A
   // module that instantiates this one #includes this small header (by-value
@@ -5406,7 +5573,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (color_runtime_root) {
     const std::string runtime_header_name = fstem + ".color-runtime.hpp";
     auto              runtime_header
-        = std::make_shared<File_output>(odir.empty() ? runtime_header_name : absl::StrCat(odir, "/", runtime_header_name));
+        = open_out(runtime_header_name);
     runtime_header->append("// Generated simulator color runtime. Do not edit.\n#pragma once\n");
     runtime_header->append("#include \"", fstem, ".hpp\"\n");
     runtime_header->append("\n");
@@ -9665,7 +9832,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // storage is supplied only through the ordered boundary ABI below.
     const std::string kernel_header_name = fstem + ".color-kernels.hpp";
     auto              kernel_header
-        = std::make_shared<File_output>(odir.empty() ? kernel_header_name : absl::StrCat(odir, "/", kernel_header_name));
+        = open_out(kernel_header_name);
     kernel_header->append("// Generated canonical simulator kernels. Do not edit.\n#pragma once\n#include <cstdint>\n");
     fout->append("#include \"", kernel_header_name, "\"\n");
     absl::flat_hash_set<std::string> expected_kernel_files;
@@ -9864,7 +10031,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto   instance_stem  = kernel_instance_file_stem(color_index, kernel->signature);
       kernel_header->append("void ", instance_name, "(void*, void**, std::uint64_t*);\n");
       const std::string kernel_path = instance_stem + ".cpp";
-      auto       kernel_out = std::make_shared<File_output>(odir.empty() ? kernel_path : absl::StrCat(odir, "/", kernel_path));
+      auto       kernel_out = open_out(kernel_path);
       const auto slot_is_u
           = [&](size_t slot_index) { return slot_index < direct_slot_is_u.size() && direct_slot_is_u[slot_index]; };
       // The ABI is a void* type-pun: the cast has to name the type the binding
@@ -10741,6 +10908,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               .emit();
           return false;
         }
+        // Objects are link inputs, so they belong in the module's artifact
+        // manifest exactly like the generated .cpp files: a warm run that finds
+        // one missing must miss cold rather than skip and then fail to link.
+        note_emitted(llvm_object);
         return true;
       };
       const bool llvm_emitted = emit_llvm_object();
@@ -11056,7 +11227,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       color_eval_outputs.reserve(direct_color_eval_shards.size());
       for (size_t shard = 0; shard < direct_color_eval_shards.size(); ++shard) {
         const std::string filename = absl::StrCat(fstem, ".color-eval-", shard, ".cpp");
-        auto              out      = std::make_shared<File_output>(odir.empty() ? filename : absl::StrCat(odir, "/", filename));
+        auto              out      = open_out(filename);
         out->append("// Generated simulator color evaluator shard. Do not edit.\n");
         out->append("#include \"", fstem, ".color-runtime.hpp\"\n");
         out->append("#include \"", kernel_header_name, "\"\n");
@@ -12647,7 +12818,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
       for (size_t shard = 0; shard < direct_commit_shards.size(); ++shard) {
         const std::string filename = absl::StrCat(fstem, ".color-commit-", shard, ".cpp");
-        auto              out      = std::make_shared<File_output>(odir.empty() ? filename : absl::StrCat(odir, "/", filename));
+        auto              out      = open_out(filename);
         out->append("// Generated simulator color-commit shard. Do not edit.\n#include \"",
                     fstem,
                     ".color-runtime.hpp\"\n#include <cassert>\n\n");
@@ -13026,7 +13197,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Names here are cpp_id()/cpp_port_path() output (identifier chars plus '.' for
   // tuple leaves), so no JSON string escaping is required.
   {
-    auto        jout     = std::make_shared<File_output>(absl::StrCat(base, ".iface.json"));
+    auto        jout     = open_out(absl::StrCat(fstem, ".iface.json"));
     const auto  decl_reg = [](int b, bool /*uns*/) { return b; };
     std::string j;
     absl::StrAppend(&j,
@@ -13174,10 +13345,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     jout->append(j);
   }
 
-  // Persist the (updated) generation digests only after a CLEAN emission — a
-  // Stage-0 comb-loop failure must not record a digest that would make the
-  // next run skip over the same broken files.
-  if (!odir.empty() && !cycle_reported_ && !cycle_unresolved_) {
+  // Persist the (updated) generation digests only after a CLEAN emission. What
+  // must never be recorded is a run that FAILED: the next run would skip the
+  // emission and a build that legitimately errors would turn green. The
+  // artifact list is recorded here, and only here, for the same reason — a
+  // record whose files were never finished would authorize a skip over a
+  // half-written tree.
+  //
+  // "Clean" is the absence of a reported ERROR, NOT the absence of the internal
+  // `cycle_unresolved_` flag. On the occurrence-wide color ROOT that flag fires
+  // on ordinary register reads — a flop's value is bound by the color runtime
+  // rather than by pin2var, so operand() takes its "no binding must mean a
+  // back-edge" branch and sets it without anything being wrong (measured: dino
+  // reports `flop_368:pc`, its program counter). Gating on it therefore excluded
+  // precisely the one module this reuse exists for, on every design with a
+  // register. A genuine unresolved cycle still blocks the record, because the
+  // paths that find one set `cycle_reported_` and emit an error.
+  if (!odir.empty() && !cycle_reported_ && !livehd::diag::sink().has_errors()) {
+    std::sort(emitted_files_.begin(), emitted_files_.end());
+    emitted_files_.erase(std::unique(emitted_files_.begin(), emitted_files_.end()), emitted_files_.end());
+    gen_digests_[std::string(gname)] = Gen_record{gen_key_, std::move(emitted_files_)};
     save_gen_digests();
   }
 }

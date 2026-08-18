@@ -409,6 +409,9 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   TRACE_EVENT("pass", perfetto::DynamicString{std::string(method)});
   auto log = next_log_path(opts, method);
   {
+    // The phase time is the pass body alone, under the BARE method name (the
+    // recipe line below adds the label decorations; "phases" stays keyable).
+    Phase_timer   phase(res, method);
     Stdout_to_log redirect(log);
     Pass::eprp.run_method_now(method, var, labels);
   }
@@ -1605,7 +1608,14 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
       if (!entry.is_regular_file()) {
         continue;
       }
-      if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos)
+      // `.color-commit-` belongs here with the other two: a design large enough
+      // to shard its state commit (>512 members) emits those TUs exactly like
+      // the evaluator shards, and omitting them left the generated BUILD and
+      // manifest.json describing a tree that cannot link. `lhd sim`'s own build
+      // globs the directory, so only the hand-buildable bazel/manifest path was
+      // affected — which is precisely the path nothing in CI exercises.
+      if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos
+           || filename.find(".color-commit-") != std::string::npos)
           && filename.ends_with(".cpp")) {
         color_aux_sources.push_back(filename);
       } else if (filename.find(".color-kernel-") != std::string::npos && filename.ends_with(".llvm.o")) {
