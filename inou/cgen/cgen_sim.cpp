@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -590,8 +591,10 @@ namespace {
 constexpr std::string_view kUnknownLiteralHelper
     = "#ifndef LHD_SIM_UNKNOWN_LITERAL\n"
       "#define LHD_SIM_UNKNOWN_LITERAL\n"
-      "// sim.unknown_zero=false: the `?` bits of this literal are drawn once from\n"
-      "// hlop's seeded PRNG, on first call (after main() sets the seed).\n"
+      "// One parse per (width, spelling) for the whole program. Serves the\n"
+      "// sim.unknown_zero=false case -- the `?` bits are drawn once from hlop's\n"
+      "// seeded PRNG, on first call, after main() sets the seed -- and every\n"
+      "// literal too wide to constant-evaluate.\n"
       "template <int W, unsigned long long K>\n"
       "inline Slop<W> __lhd_unknown_literal(const char* __txt) {\n"
       "  static const Slop<W> __v = Slop<W>::from_pyrope(__txt);\n"
@@ -637,13 +640,19 @@ std::string sim_const_expr(std::string_view pyrope_text, std::string_view width)
   // runtime parse -- routed through the kUnknownLiteralHelper template so the
   // parse, and the PRNG draw inside it, happen ONCE per (width, spelling) for
   // the whole program. See that helper for why once is required.
-  if (pyrope_text.find('?') != std::string_view::npos) {
-    uint64_t key = 0xcbf29ce484222325ULL;  // fnv1a over the spelling: the template's identity key
+  // fnv1a over the spelling is the template's identity key, so one (width,
+  // spelling) has exactly ONE static in the whole program however many sites
+  // emit it. Shared with the too-wide-to-constant-evaluate path below.
+  const auto once_per_program = [&] {
+    uint64_t key = 0xcbf29ce484222325ULL;
     for (unsigned char ch : pyrope_text) {
       key ^= ch;
       key *= 0x100000001b3ULL;
     }
     return absl::StrCat("__lhd_unknown_literal<", width, ", ", key, "ull>(\"", pyrope_text, "\")");
+  };
+  if (pyrope_text.find('?') != std::string_view::npos) {
+    return once_per_program();
   }
   // Same bits by construction: create_integer and from_pyrope both leave the
   // value UNMASKED in base_[0] and sign-extend into the upper words, and
@@ -651,7 +660,43 @@ std::string sim_const_expr(std::string_view pyrope_text, std::string_view width)
   if (const auto v = Dlop::from_pyrope(std::string{pyrope_text}); v && v->is_integer() && v->is_just_i64()) {
     return absl::StrCat("Slop<", width, ">::create_integer(", v->to_just_i64(), ")");
   }
-  // Folded at COMPILE time via a constexpr local.
+  // Folded at COMPILE time via a constexpr local... but only while the compiler
+  // can actually fold it. `from_pyrope` is a digit-by-digit parse, so its
+  // constexpr cost grows with digits x words, and past a few thousand bits it
+  // blows clang's -fconstexpr-steps budget and the generated C++ DOES NOT
+  // COMPILE:
+  //
+  //   error: constexpr variable '_k' must be initialized by a constant expression
+  //   note: constexpr evaluation hit maximum step limit; possible infinite loop?
+  //
+  // Measured on XiangShan `Rob`: a Slop<10922> literal in one color-eval shard
+  // killed the whole host build, so the design could be lowered and then not
+  // built. A width threshold is not a guess here — it is the difference between
+  // a design that simulates and one that does not.
+  //
+  // Above the threshold, route the literal through the SAME kUnknownLiteralHelper
+  // template the `?` path uses. It keeps the property that actually mattered
+  // (the parse happens ONCE for the whole program, which is what bought the
+  // 27.8% noted above — the cost was re-parsing per evaluation, not the parse
+  // itself) while asking the compiler to constant-evaluate nothing. Ruling I3 is
+  // satisfied: one guarded load per use instead of an immediate, against one
+  // parse per program either way.
+  //
+  // A `static const` inside a per-site lambda would NOT keep that property:
+  // every emission site is a distinct closure type with its own static, so N
+  // uses of one wide literal would be N parses and N copies in .bss. The helper
+  // is keyed on (width, spelling), so it is genuinely once.
+  //
+  // Raising -fconstexpr-steps instead would only move the cliff, and it would
+  // move it in a flag the generated build does not own on every toolchain.
+  constexpr uint64_t kMaxConstexprBits = 2048;
+  uint64_t           bits              = 0;
+  const auto         w                 = std::from_chars(width.data(), width.data() + width.size(), bits);
+  // A width that does not parse means "I cannot prove this is small", so it
+  // takes the path that always compiles rather than the one with a cliff in it.
+  if (w.ec != std::errc{} || bits > kMaxConstexprBits) {
+    return once_per_program();
+  }
   return absl::StrCat("([]{ constexpr auto _k = Slop<", width, ">::from_pyrope(\"", pyrope_text, "\"); return _k; }())");
 }
 
@@ -2051,6 +2096,13 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // simgen-62: the opt-in LLVM backend emits every supported canonical color
 // kernel, including classes with one occurrence, as a native object plus a
 // narrow packed-word ABI adapter.
+// simgen-64: a literal wider than 2048 bits goes through the shared
+// __lhd_unknown_literal<W,K> helper instead of a `constexpr` local. Past that
+// width the digit-by-digit from_pyrope parse exceeds clang's -fconstexpr-steps
+// budget and the generated C++ fails to compile outright (measured: a
+// Slop<10922> in a XiangShan `Rob` color-eval shard). The helper is keyed on
+// (width, spelling), so it stays one parse per program however many sites emit
+// it.
 // simgen-63: gen_digests.json records the COMPLETE artifact set per module
 // alongside a HIERARCHICAL key, so the occurrence-wide color root — the most
 // expensive module in the tree, and the only one that was excluded — reuses
@@ -2115,7 +2167,7 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
 // unknown memory power-on fills per ENTRY instead of through one whole-array
 // Slop. The bump is not cosmetic: a warm workdir would otherwise pair a fresh
 // parent with a stale child that declares no `refresh_negedge()`.
-static constexpr std::string_view kSimGenVersion = "simgen-63";
+static constexpr std::string_view kSimGenVersion = "simgen-64";
 
 static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
   for (int i = 0; i < 8; ++i) {

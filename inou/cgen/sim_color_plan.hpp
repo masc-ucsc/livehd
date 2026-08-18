@@ -196,6 +196,14 @@ public:
     uint64_t compact_loops             = 0;
     uint64_t conditional_regions       = 0;
     uint64_t carry_edges_cut           = 0;
+    // Version edges dropped because producer == consumer. A precedence edge from
+    // a site to ITSELF is UNSATISFIABLE, not merely vacuous: it is a genuine
+    // self-dependency that reached version identity. Dropping it keeps the Kahn
+    // stall diagnostic readable; the plan is still failed (versioning_complete =
+    // false, one witness in errors_) so the module is refused rather than
+    // silently scheduled against a stale value.
+    // MEASURED 2026-08-18: no design has produced one (XiangShan `Backend` is 0).
+    uint64_t self_edges_dropped        = 0;
     uint64_t version_sites             = 0;
     uint64_t version_edges             = 0;
     uint64_t fine_colors               = 0;

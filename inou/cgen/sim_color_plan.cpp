@@ -1114,6 +1114,29 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
 
   absl::flat_hash_map<std::pair<size_t, size_t>, size_t> version_edges;
   auto add_version_edge = [&](size_t producer, size_t consumer, uint64_t boundary_bits) {
+    // A self precedence edge says "run this site before itself". It is lethal to
+    // the topological sort -- the site can never reach indegree 0, so it stalls,
+    // and so does everything reachable from it -- but it is NOT vacuous, it is
+    // UNSATISFIABLE: a genuine self-dependency (`w = w + 1`) that reached version
+    // identity. Dropping it silently would schedule the site anyway and read a
+    // stale value, so drop it only to keep the Kahn diagnostic readable and fail
+    // the plan exactly as the stall did.
+    //
+    // MEASURED on XiangShan `Backend` 2026-08-18: `self-edges-dropped=0`. No
+    // design has produced one; the 307,612 blocked sites there come from a
+    // 77-hop combinational ring, NOT from self edges (see the cycle extractor
+    // below, and docs/opt_loop_incr.md). Do not read this guard as the fix for
+    // that stall.
+    if (producer == consumer) {
+      if (plan.summary_.self_edges_dropped == 0) {  // one witness is enough; the count carries the rest
+        plan.errors_.push_back(std::format("version site {} precedes ITSELF: an unsatisfiable ordering constraint, i.e. a "
+                                           "genuine self-dependency at version granularity",
+                                           plan.version_sites_[producer].structural_id));
+      }
+      ++plan.summary_.self_edges_dropped;
+      plan.summary_.versioning_complete = false;
+      return;
+    }
     const auto [it, inserted]
         = version_edges.emplace(std::pair<size_t, size_t>{producer, consumer}, plan.version_dependencies_.size());
     if (inserted) {
@@ -2447,11 +2470,175 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         ++blocked_count;
       }
     }
+    // WHICH cycle, not merely that there is one. The witness list alone is a
+    // wall of structural hashes: measured on XiangShan `Backend`, 307,612
+    // blocked sites out of 2.95 M, and nothing in the report says what the loop
+    // is MADE of — so nobody can tell a missing cut from a real combinational
+    // loop in the design. Everything downstream (700k dominance errors, the
+    // cyclic condensation, the refusal to lower the module at all) is one
+    // domino chain from this single line, so this line has to carry the
+    // evidence.
+    //
+    // Extract ONE concrete cycle from the residual subgraph — every site with
+    // indegree>0 after Kahn stalls is on or downstream of a cycle, so an
+    // iterative DFS following only residual edges is guaranteed to close a
+    // loop — and report the slot/role/version sequence around it. That is the
+    // shape a fix acts on: a cycle whose every hop is the same role is a
+    // missing cut of that role, while a mixed one is a genuine dependency.
+    std::string cycle_desc;
+    {
+      // CSR, not a bucket per site. `version_sites_` runs to 2.95 M on exactly
+      // the designs this diagnostic exists for, while only the BLOCKED sites
+      // (307 k, ~10%) carry a residual edge -- so a vector-per-site pays a
+      // 24-byte vector header for all 2.95 M plus one malloc per non-empty
+      // bucket plus growth reallocs, where two flat arrays pay (N+1)+E size_t
+      // in two allocations. Counts, inclusive prefix, then a REVERSE fill with
+      // a decrementing cursor, so each bucket ends up in version_dependencies_
+      // order -- the same successor order a push_back build gave, hence the
+      // same cycle reported.
+      const size_t n_sites     = plan.version_sites_.size();
+      const auto   is_residual = [&indegree](const Color_plan::Version_dependency& dep) {
+        return indegree[dep.consumer] != 0 && indegree[dep.producer] != 0;
+      };
+      std::vector<size_t> residual_at(n_sites + 1, 0);  // residual_at[i]..residual_at[i+1] indexes residual_to
+      size_t              n_residual = 0;
+      for (const auto& dep : plan.version_dependencies_) {
+        if (is_residual(dep)) {
+          ++residual_at[dep.producer];
+          ++n_residual;
+        }
+      }
+      for (size_t i = 1; i < n_sites; ++i) {
+        residual_at[i] += residual_at[i - 1];
+      }
+      residual_at[n_sites] = n_residual;
+      std::vector<size_t> residual_to(n_residual);
+      for (auto it = plan.version_dependencies_.rbegin(); it != plan.version_dependencies_.rend(); ++it) {
+        if (is_residual(*it)) {
+          residual_to[--residual_at[it->producer]] = it->consumer;
+        }
+      }
+      // Iterative DFS for a BACK EDGE, which is the only sound way to name a
+      // cycle here. A greedy walk is not: the residual subgraph contains sites
+      // that are merely DOWNSTREAM of the cycle, so following any out-edge can
+      // dead-end, and reporting the path at that point invents a cycle that is
+      // not there. (It did: the first version of this reported "cycle-length=1"
+      // for XiangShan `Backend`, which sent a fix at self-edges that turned out
+      // not to exist — self-edges-dropped came back 0.)
+      //
+      // gray = on the current DFS path, black = fully explored. An edge into a
+      // gray node closes a real cycle; an edge into a black node does not.
+      enum : char { kWhite = 0, kGray = 1, kBlack = 2 };
+      std::vector<char>   dfs_color(n_sites, kWhite);
+      std::vector<size_t> path;
+      std::vector<size_t> back_edge;  // the closing cycle, once found
+      for (size_t seed = 0; seed < indegree.size() && back_edge.empty(); ++seed) {
+        if (indegree[seed] == 0 || dfs_color[seed] != kWhite) {
+          continue;
+        }
+        // (site, next-successor-index) frames, so the walk is heap-allocated
+        // rather than a recursion over a 3 M-node graph.
+        std::vector<std::pair<size_t, size_t>> stack{{seed, 0}};
+        dfs_color[seed] = kGray;
+        path.clear();
+        path.push_back(seed);
+        while (!stack.empty() && back_edge.empty()) {
+          auto& [at, next] = stack.back();
+          if (next >= residual_at[at + 1] - residual_at[at]) {
+            dfs_color[at] = kBlack;
+            stack.pop_back();
+            path.pop_back();
+            continue;
+          }
+          const size_t to = residual_to[residual_at[at] + next++];
+          if (dfs_color[to] == kGray) {  // back edge: `to` .. `at` -> `to` is a cycle
+            const auto begin = std::find(path.begin(), path.end(), to);
+            back_edge.assign(begin, path.end());
+            break;
+          }
+          if (dfs_color[to] == kWhite) {
+            dfs_color[to] = kGray;
+            path.push_back(to);
+            stack.emplace_back(to, 0);
+          }
+        }
+      }
+      if (!back_edge.empty()) {
+        // Name the ring in terms a person can act on: the OP, the node name and
+        // the occurrence path of each hop, plus the port that carries each
+        // edge. The structural ids alone are hashes — enough to prove a cycle
+        // exists, useless for deciding whether it is real. A ring whose hops
+        // are all the same op on the same module, connected through the same
+        // port, is a granularity artifact; one that walks through unrelated
+        // logic is a genuine combinational loop in the design.
+        constexpr size_t kMaxHops = 12;
+        const size_t     shown    = std::min(back_edge.size(), kMaxHops);
+        // The producer_port/consumer_port pair of the base dependency that
+        // carries each printed hop, when there is one (a version edge may
+        // summarize several uses; the first is representative for shape).
+        // Collected in ONE pass over plan.dependencies_: that vector runs to
+        // millions of entries on exactly the designs this diagnostic exists for,
+        // so a full scan per hop is a scan too many.
+        absl::flat_hash_map<std::pair<size_t, size_t>, std::string> via_of;
+        for (size_t i = 0; i < shown; ++i) {
+          via_of.try_emplace({plan.version_sites_[back_edge[i]].base_site,
+                              plan.version_sites_[back_edge[(i + 1) % back_edge.size()]].base_site},
+                             std::string{});
+        }
+        for (const auto& dep : plan.dependencies_) {
+          auto it = via_of.find(std::pair<size_t, size_t>{dep.producer, dep.consumer});
+          if (it != via_of.end() && it->second.empty()) {
+            it->second = std::format(" via p{}->p{}/{}", dep.producer_port, dep.consumer_port, dependency_kind_name(dep.kind));
+          }
+        }
+        std::string hops;
+        for (size_t i = 0; i < shown; ++i) {
+          const size_t idx  = back_edge[i];
+          const size_t next = back_edge[(i + 1) % back_edge.size()];
+          const auto&  vs   = plan.version_sites_[idx];
+          const auto&  site = plan.sites_[vs.base_site];
+          hops += std::format("\n    {:>2}. {} op={} name={} depth={} ge={}{}",
+                              i,
+                              vs.structural_id.substr(0, 10),
+                              Ntype::get_name(gu::type_op_of(site.node)),
+                              gu::has_name(site.node.base_node()) ? gu::node_name_of(site.node) : std::string_view{"-"},
+                              site.node.path().steps().size(),
+                              site.gate_equivalents,
+                              via_of[std::pair<size_t, size_t>{vs.base_site, plan.version_sites_[next].base_site}]);
+        }
+        // Op histogram over the WHOLE ring, not just the printed prefix: the
+        // single most diagnostic number here is "how many distinct ops", because
+        // a one-op ring is a tracking artifact and a many-op ring is real logic.
+        absl::flat_hash_map<std::string_view, size_t> op_hist;
+        for (size_t idx : back_edge) {
+          op_hist[Ntype::get_name(gu::type_op_of(plan.sites_[plan.version_sites_[idx].base_site].node))]++;
+        }
+        std::vector<std::pair<std::string_view, size_t>> ops(op_hist.begin(), op_hist.end());
+        // Tie-break on the NAME: the source is an absl::flat_hash_map, whose
+        // iteration order is randomized per process, and std::ranges::sort is not
+        // stable -- so counting alone would print a different `cycle-ops=` on
+        // every run of the same input (the same hazard the path_rank sort above
+        // documents).
+        std::ranges::sort(ops, [](const auto& a2, const auto& b2) {
+          return a2.second != b2.second ? a2.second > b2.second : a2.first < b2.first;
+        });
+        std::string hist;
+        for (const auto& [name, n] : ops) {
+          hist += std::format("{}{}x{}", hist.empty() ? "" : ",", n, name);
+        }
+        cycle_desc = std::format("; cycle-length={} cycle-ops={} cycle={}{}",
+                                 back_edge.size(), hist, hops,
+                                 back_edge.size() > shown ? "\n    ... (truncated)" : "");
+      } else {
+        cycle_desc = "; cycle=NONE FOUND (blocked sites are downstream of one, or the residual graph is malformed)";
+      }
+    }
     plan.errors_.push_back(
-        std::format("fine-color dependency cycle remains after state and compact-loop carry cuts; blocked-count={} witnesses={}{}",
+        std::format("fine-color dependency cycle remains after state and compact-loop carry cuts; blocked-count={} witnesses={}{}{}",
                     blocked_count,
                     blocked,
-                    blocked_count > max_cycle_witnesses ? ",..." : ""));
+                    blocked_count > max_cycle_witnesses ? ",..." : "",
+                    cycle_desc));
   }
   plan.summary_.version_sites = plan.version_sites_.size();
   plan.summary_.version_edges = plan.version_dependencies_.size();
@@ -3698,7 +3885,7 @@ std::string Color_plan::report() const {
   result += std::format("runtime-random {}\n", summary_.runtime_random ? "true" : "false");
   result += std::format(
       "counts grouped-sites={} outer-sites={} live-sites={} independent-sites={} compact-loops={} "
-      "conditional-regions={} carry-edges-cut={} version-sites={} version-edges={} fine-colors={} colors={} "
+      "conditional-regions={} carry-edges-cut={} self-edges-dropped={} version-sites={} version-edges={} fine-colors={} colors={} "
       "color-merges={} value-uses={} boundary-slots={} boundary-bits={} kernel-classes={} kernel-reuses={}\n",
       summary_.grouped_sites,
       summary_.outer_sites,
@@ -3707,6 +3894,7 @@ std::string Color_plan::report() const {
       summary_.compact_loops,
       summary_.conditional_regions,
       summary_.carry_edges_cut,
+      summary_.self_edges_dropped,
       summary_.version_sites,
       summary_.version_edges,
       summary_.fine_colors,

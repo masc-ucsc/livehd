@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <exception>
+#include <pthread.h>
 #include <print>
 #include <string>
 #include <tuple>
@@ -75,14 +77,37 @@ const char* op_name(Ntype_op op) {
 // is not one the pass can descend into" (shape).
 enum Stop_reason : unsigned {
   kStopBudget = 1u,  // per-reader or global node-creation allowance
-  kStopDepth  = 2u,  // deeper than the kMaxDepth recursion guard
+  kStopDepth  = 2u,  // deeper than the `max_depth` recursion guard
   kStopShape  = 4u,  // invalid pin or a degenerate slice range
 };
 
+// The recursion guard is a STACK budget, so the numbers below have to be read
+// together -- keeping them apart is how a guard comes to be sized for a stack
+// the pass does not actually run on.
+//
+// MEASURED on XiangShan `Rob`, 2026-08-17: the walk crashed at depth 1024 on an
+// 8 MB stack, i.e. ~8 KB per frame for this 470-line lambda.
+inline constexpr size_t kSplitFrameBytes = 8u * 1024;
+// The stack the ESCALATED walk gets (see split_packed_selfref_wires). Reserved
+// address space only: pages commit as deep as the walk actually goes.
+inline constexpr size_t kSplitStackBytes = 512UL * 1024 * 1024;
+// Depth guard for the escalated walk, backstopping a runaway well inside the
+// stack above.
+inline constexpr int kSplitWorkerDepth = 16384;
+// Depth guard when the walk runs on the CALLER's stack. It has to be safe on the
+// SMALLEST stack a caller can have, and pass/cprop fans this pass out over
+// `std::thread` workers whose default stack is 512 KB on macOS -- so this stays
+// the value that shipped before the escalation existed, not one scaled to 8 MB.
+inline constexpr int kSplitInlineDepth = 64;
+static_assert(static_cast<size_t>(kSplitWorkerDepth) * kSplitFrameBytes <= kSplitStackBytes,
+              "the escalated depth guard must fit inside the escalated stack");
+static_assert(kSplitInlineDepth < kSplitWorkerDepth, "the inline guard is the conservative one");
+
 // `unresolved_out` reports the on-cycle reads this pass could not dissolve;
 // `stop_reasons_out` is the OR of the `kStop*` bits saying which limit stopped
-// them, for the wrapper's final diagnostic.
-static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out) {
+// them, for the wrapper's final diagnostic. `max_depth` is the recursion guard,
+// a property of the STACK THIS CALL RUNS ON -- see the constants above.
+static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out, int max_depth) {
   namespace gu = livehd::graph_util;
 
   unresolved_out   = 0;
@@ -392,25 +417,19 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   // capped frame would otherwise poison every later resolution through that
   // slice (the BlockCipherModule 21-bit sbox hit exactly this).
   absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>>                  on_stack;
-  // The recursion guard, and the REAL limiter on large packed designs.
+  // The recursion guard arrives as `max_depth`. `on_stack` above already catches
+  // a genuine bit-level self-dependency EXACTLY, so this is purely a
+  // stack-exhaustion net and never a semantic limit — which means the right
+  // value is "as deep as the stack THIS CALL runs on safely allows", and that is
+  // the caller's to decide (kSplitInlineDepth on its own stack,
+  // kSplitWorkerDepth on the escalated one), not a constant here.
   //
-  // MEASURED on XiangShan `Rob`, 2026-08-17: 914 on-cycle reads survive, and
-  // once the refusal reasons were separated (see `Stop_reason`) the only one
-  // that fires is this depth cap — the node budget had taken the blame for
-  // years because both set the same flag, and raising the budget 8x dissolved
-  // exactly zero of them.
-  //
-  // Raising THIS constant is not the fix either, and that is measured too:
-  // 256 changes nothing at all (same 914, same 315,791 rewired — the failing
-  // descents go far deeper), and 1024 dies with a stack overflow partway
-  // through the same compile. So the fix is to make `resolve` ITERATIVE, with
-  // an explicit work stack, which removes the constant instead of tuning it.
-  // Until then 64 is the honest setting: it is the value that is stack-safe
-  // with margin, and nothing between it and the crash point buys anything.
-  //
-  // `on_stack` above catches a genuine bit-level self-dependency exactly, so
-  // this is purely a stack-exhaustion net and never a semantic limit.
-  constexpr int                                                                 kMaxDepth    = 64;
+  // MEASURED on XiangShan `Rob`, 2026-08-17: at 64 this was the ONLY limit that
+  // fired (the node budget took the blame for years because both set the same
+  // flag; raising the budget 8x dissolved zero reads). 256 changed nothing —
+  // the failing descents go far deeper — and 1024 died with a stack overflow on
+  // an 8 MB stack. Making `resolve` ITERATIVE would remove the guard entirely
+  // and is still the eventual answer.
   bool                                                                          cap_hit      = false;
   // WHICH limit stopped a descent, not merely THAT one did. These were a single
   // bool, and the resulting diagnostic blamed the node budget for every one of
@@ -421,7 +440,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   unsigned                                                                      stop_reasons = 0;
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
     const bool over_budget = created > per_reader_cap || total_created > global_cap;
-    const bool too_deep    = depth > kMaxDepth;
+    const bool too_deep    = depth > max_depth;
     const bool bad_shape   = v.is_invalid() || lo < 0 || hi <= lo;
     if (too_deep || bad_shape || over_budget) {
       if (split_dbg) {
@@ -1051,29 +1070,47 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   return nrew;
 }
 
-int split_packed_selfref_wires(hhds::Graph* g) {
+// What one fixpoint run of the splitter ended up with. RETURNED rather than
+// reported on the spot: the wrapper may run the walk twice (a shallow attempt on
+// the caller's stack, then a deep one on a big-stack worker), and one call must
+// not turn into two contradictory warnings.
+struct Split_result {
+  int      total        = 0;  // reads rewired
+  int      unresolved   = 0;  // on-cycle reads the last pass could not dissolve
+  unsigned stop_reasons = 0;  // OR of the kStop* bits
+  int      rounds       = 0;  // fixpoint rounds ACTUALLY run
+  bool     fixpoint     = false;
+};
+
+static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth) {
   // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
   // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
-  constexpr int max_rounds   = 16;
-  int           total        = 0;
-  int           unresolved   = 0;
-  unsigned      stop_reasons = 0;
-  int           rounds       = 0;
-  bool          fixpoint     = false;
-  for (; rounds < max_rounds; ++rounds) {
-    const int n  = split_selfref_pass(g, unresolved, stop_reasons);
-    total       += n;
+  constexpr int max_rounds = 16;
+  Split_result  r;
+  for (; r.rounds < max_rounds; ++r.rounds) {
+    const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth);
+    r.total     += n;
     if (n == 0) {
-      ++rounds;         // count the fixpoint round that proved there was nothing left
-      fixpoint = true;  // ... and record WHY the loop ended
-      break;            // cycle gone, or genuinely stuck
+      ++r.rounds;         // count the fixpoint round that proved there was nothing left
+      r.fixpoint = true;  // ... and record WHY the loop ended
+      break;              // cycle gone, or genuinely stuck
     }
   }
-  // Never fail silently: a surviving word-level cycle makes downstream encode /
-  // cgen / sim scheduling reject the graph, and the caller (cprop) discards this
-  // count. `unresolved` is the final pass's remaining on-cycle reads.
+  return r;
+}
+
+// Never fail silently: a surviving word-level cycle makes downstream encode /
+// cgen / sim scheduling reject the graph, and the caller (cprop) discards the
+// rewire count. Raised by the WRAPPER, on the caller's own thread, exactly once
+// -- `livehd::diag`'s source locator is thread_local, so a warning emitted from
+// the escalation worker would lose its excerpt.
+static void report_split_stall(const Split_result& r) {
+  const int      total        = r.total;
+  const int      unresolved   = r.unresolved;
+  const int      rounds       = r.rounds;
+  const unsigned stop_reasons = r.stop_reasons;
   if (unresolved > 0) {
     // Report the rounds ACTUALLY run, not `max_rounds`. Printing the constant
     // made the two failure modes indistinguishable in a log -- "stuck after 3
@@ -1083,7 +1120,7 @@ int split_packed_selfref_wires(hhds::Graph* g) {
     // allowed round also leaves `rounds == max_rounds`, and reporting that as
     // "the cap cut it off" is the same class of misdiagnosis as the old
     // one-bool `cap_hit` -- it points at a limit that was never the problem.
-    const bool  rounds_exhausted = !fixpoint;
+    const bool  rounds_exhausted = !r.fixpoint;
     std::string why;
     for (const auto& [bit, name] : {
              std::pair{kStopBudget,     "node-budget"},
@@ -1119,7 +1156,6 @@ int split_packed_selfref_wires(hhds::Graph* g) {
                   : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
         .emit();
   }
-  return total;
 }
 
 void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
@@ -1408,6 +1444,88 @@ int flatten_false_loop_subs(hhds::Graph* g) {
     }
   }  // fixpoint rounds
   return flattened;
+}
+
+// The pass walks packed bit-slices RECURSIVELY, one frame per nesting level, at
+// roughly kSplitFrameBytes a frame. A stack that only reaches ~1000 frames is
+// not deep enough for XiangShan's packed structs, and the residual "word-level
+// combinational cycle" it leaves behind makes the occurrence color scheduler
+// refuse the module, taking the whole design's simulation with it.
+//
+// Depth is therefore a STACK budget. Rather than cap the design, ESCALATE: run
+// the walk on the caller's own stack first under the conservative
+// kSplitInlineDepth guard, and only when a descent actually reports
+// `recursion-depth` re-run it on a private kSplitStackBytes worker under
+// kSplitWorkerDepth. The overwhelmingly common case -- this pass is a strict
+// no-op unless a genuine word-level comb cycle exists -- then costs neither a
+// thread nor a 512 MB mapping, which matters because pass/cprop calls it once
+// per module from up to 16 concurrent workers.
+//
+// Running it twice is safe: the walk is a fixpoint over the graph it is handed,
+// so the deep run simply continues from what the shallow one left.
+//
+// pthreads directly, not std::thread, because the stack size is the whole point
+// and std::thread cannot set it.
+namespace {
+struct Split_job {
+  hhds::Graph*       g = nullptr;
+  Split_result       result;
+  std::exception_ptr error;  // rethrown on the CALLER's thread after the join
+};
+
+void* split_worker(void* arg) {
+  auto* job = static_cast<Split_job*>(arg);
+  // An exception must never escape a pthread start routine: that is
+  // std::terminate, and it would bypass pass/cprop's per-graph
+  // `catch (...) { errors[i] = std::current_exception(); }` recovery.
+  try {
+    job->result = split_packed_selfref_wires_body(job->g, kSplitWorkerDepth);
+  } catch (...) {
+    job->error = std::current_exception();
+  }
+  return nullptr;
+}
+
+// Run the deep walk on a private big stack. Returns false when no such stack
+// could be had (an unusual rlimit, thread exhaustion); the caller then keeps the
+// shallow result rather than running the deep guard on a stack too small to hold
+// it.
+bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out) {
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) {
+    return false;
+  }
+  Split_job job{.g = g};
+  pthread_t tid{};
+  int       rc = pthread_attr_setstacksize(&attr, kSplitStackBytes);
+  if (rc == 0) {
+    rc = pthread_create(&tid, &attr, split_worker, &job);
+  }
+  pthread_attr_destroy(&attr);
+  if (rc != 0) {
+    return false;
+  }
+  pthread_join(tid, nullptr);
+  if (job.error) {
+    std::rethrow_exception(job.error);
+  }
+  out = job.result;
+  return true;
+}
+}  // namespace
+
+int split_packed_selfref_wires(hhds::Graph* g) {
+  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth);
+  if ((r.stop_reasons & kStopDepth) != 0) {
+    Split_result deep;
+    if (run_deep_on_big_stack(g, deep)) {
+      deep.total  += r.total;  // the shallow run's rewires already landed in `g`
+      deep.rounds += r.rounds;
+      r            = deep;
+    }
+  }
+  report_split_stall(r);
+  return r.total;
 }
 
 }  // namespace livehd::graph_util

@@ -1302,6 +1302,118 @@ The work, in order:
    play: coarsening is gated on acyclicity alone. A change that merely lets a
    cyclic plan through would produce a wrong schedule, which is an I2 violation.
 
+> ### Investigated 2026-08-17/18 — the cycle is NAMED now, and it is not what F22 guessed
+>
+> Four measurements, in order, each killing the previous hypothesis:
+>
+> | tried | result |
+> |---|---|
+> | node-creation budget x8 in `split_selfref` | **0** extra reads dissolved (+5.5% wall, 10.4 GB RSS) |
+> | recursion guard 64 -> 256 | **0** change; 64 -> 1024 **stack overflow** |
+> | run the split pass on a **512 MB stack**, guard 16384 | depth wall gone — the stop reason moved from `recursion-depth` to **`no-rule`**, and the same 914 reads survive. So `split_selfref` is missing RULES, not stack or budget. |
+> | self-edge guard in the version DAG | `self-edges-dropped=0` — there were none. That fix was chasing a **bug in the diagnostic**, not in the planner (see below). |
+>
+> Both of those landed, but neither is free, so both landed *guarded*: the deep
+> walk is an ESCALATION (shallow guard on the caller's stack first; the 512 MB
+> worker only after a descent actually reports `recursion-depth`), because
+> `pass/cprop` calls the splitter once per module from up to 16 `std::thread`
+> workers whose default stack is 512 KB on macOS — a guard sized for 8 MB is not
+> safe there, and a 512 MB mapping per module is not free. And the self-edge is
+> dropped but the plan is still FAILED, since a site preceding itself is
+> unsatisfiable, not vacuous: silently dropping it would trade a loud refusal
+> for a stale read.
+>
+> **The diagnostic was lying, and that mattered.** The first cycle extractor
+> followed any residual out-edge and reported the path when it dead-ended, which
+> printed `cycle-length=1` and sent a whole iteration at self-edges that do not
+> exist. The residual subgraph contains sites merely DOWNSTREAM of the cycle, so
+> only a proper back-edge search is sound. Replaced with an iterative
+> gray/black DFS.
+>
+> **What `Backend` actually has**, once the extractor was correct:
+>
+> ```
+> blocked-count=307612  cycle-length=77
+> cycle=s:ea2d8c75[pre-rise-eval/data/pre-rise] -> s:2273b911[pre-rise-eval/data/pre-rise]
+>       -> ... 77 hops, EVERY ONE pre-rise-eval / data / pre-rise
+> ```
+>
+> A **77-node pure combinational ring**: one slot, one role, no state, no
+> carry — so no existing cut applies and none should. That is either a real
+> combinational loop in the design (implausible: it synthesizes) or, far more
+> likely, the **false loop from word-level tracking of packed structs** that F22
+> suspected — the same family as `split_selfref`'s `no-rule` residue. The chain
+> is: a packed read the splitter cannot dissolve -> a word-level false
+> dependency -> a 77-site ring -> versioning fails -> coarsening off -> 2.95 M
+> colors, 0 merges -> cyclic condensation -> 700,854 dominance errors -> refusal.
+> ONE root error; everything else is downstream.
+>
+> ### 2026-08-18 — the mechanism, end to end, and a 99.2% fix that is still not enough
+>
+> **The chain, confirmed:**
+>
+> 1. XiangShan is wall-to-wall **packed structs**. A module port is one very wide
+>    bundle and its fields are read with `get_mask` and rebuilt with
+>    `concat`/`or`. The dependency graph tracks the WORD, not the field.
+> 2. `split_selfref` exists to dissolve exactly that — rewrite a slice-of-a-concat
+>    into a direct reference to the lane, so independent fields become
+>    independent dependency nodes.
+> 3. It was failing at scale. On `Backend`, **~165,000 undissolved on-cycle reads
+>    across 13 modules**, every one `stopped by recursion-depth`: the recursive
+>    descent hit the 64-frame guard, which existed only because a frame of that
+>    470-line lambda costs ~8 KB against a default 8 MB stack.
+> 4. **FIXED** by running the pass on a 512 MB worker stack (guard raised to
+>    16384): `Backend`'s residue fell to **1,337 reads across 2 modules — 99.2%
+>    gone** — and every remaining one now stops for a different reason,
+>    `no-rule`, i.e. an operand shape the splitter has no descent rule for.
+> 5. **Still blocked**, and that is consistent rather than surprising: ONE
+>    surviving false edge closes a ring. The plan's errors fell 700,856 ->
+>    667,551 and the ring shrank from 77 hops to 49, but a cyclic version DAG is
+>    a boolean.
+>
+> **What the surviving ring is** (`Backend`, post-fix):
+>
+> ```
+> cycle-length=49  cycle-ops=10xget_mask,9xconcat,8xor,5xmux,5xand,3xsub,3xeq,3xxor,2xsra,1xshl
+>   0. op=sub  name=inner_vecRegion depth=1 ge=1   via p2192->p0/control
+>   1. op=get_mask  depth=1                        via p0->p16/data
+>   2. op=concat    depth=4                        via p0->p0/data
+>   ...
+> ```
+>
+> **19 of the 49 hops (39%) are pure bit-field plumbing** (`get_mask` +
+> `concat`), and the ring is entered at a *named module instance*,
+> `inner_vecRegion`, through **port 2192** — a bundle port thousands of bits
+> wide. So the loop is: one field of that instance's wide output feeds, through
+> slicing and reassembly, a DIFFERENT field of its own wide input. At the bit
+> level that is acyclic; at word level it is a self-dependency. The same
+> granularity artifact as (1), one level up — at the Sub boundary rather than
+> inside a body.
+>
+> **Confidence.** Not proven false, but a real combinational loop through a
+> vector-region submodule would also have to be rejected by synthesis, and the
+> design synthesizes. Treat "false, from word-level tracking" as the strong
+> hypothesis and the 39% plumbing plus the 2192-wide port as the evidence.
+>
+> **Why one edge costs the whole design:** cyclic version DAG ->
+> `versioning_complete=false` -> `coarsen_supported` IS that flag
+> (`sim_color_plan.cpp`) -> coarsening skipped entirely -> **3,074,582 colors, 0
+> merges** (`Rob` gets 5,855 from 638 k sites) -> the condensation graph over 3 M
+> colors is cyclic -> dominance fails at 667 k boundary slots ->
+> `!color_runtime_root` -> `lhd sim` refuses the module.
+>
+> **Next**, in order: (a) teach `split_selfref` the `no-rule` operand shapes —
+> its `And`/`Or` descents require provable footprint disjointness and that is
+> what fails; (b) failing that, split the dependency node at a **Sub port
+> boundary** by field rather than by word, which is what the `p2192` hop says is
+> needed and would break this ring without touching the splitter.
+
+> **So the next step is `split_selfref` rule COVERAGE, not the planner.** Run
+> `LIVEHD_SIM_SPLIT_DEBUG=1` (output lands in `<workdir>/logs/*pass_cprop*.log`,
+> not the terminal) and attack the operand shapes that refuse; on `Rob` the
+> refusals propagate through `And` (174,816) and `Or` (86,037), whose descent
+> rules have disjointness preconditions that are failing.
+
 - **Moves:** unblocks `xs_backend` for the sim phase entirely; expected to help
   every large design's `sim_setup_ms`, since 2.93 M colors is also a codegen
   cost. Watch `kernel-reuses` (2,773,962 on Backend) — good reuse today is

@@ -55,5 +55,5 @@ difftest_*/
 # Optimization-loop scoreboards (docs/opt_loop_incr.md H6b, docs/opt_loop_synth.md
 # M0.4b): pure renderings of ../lhdsuite/bench/ledger.jsonl, per-host by
 # construction. Regenerate with `bazel run //bench:ledger -- render`.
-current_opt_loop_incr.html
-current_opt_loop_synth.html
+#current_opt_loop_incr.html
+#current_opt_loop_synth.html

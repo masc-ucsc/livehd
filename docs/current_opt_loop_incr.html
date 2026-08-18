@@ -1,0 +1,378 @@
+<title>Incremental rebuild loop — full vs cold vs incremental</title>
+<style>
+body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:2rem;max-width:82rem}
+table{border-collapse:collapse;margin:1rem 0;width:100%}
+th,td{border:1px solid #bbb;padding:.25rem .5rem;text-align:right}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{background:#eee}
+h2{border-top:3px solid #333;padding-top:.6rem;margin-top:2.5rem}
+h4{margin:1.2rem 0 0}
+.better{color:#0a0;font-weight:bold}.worse{color:#c00;font-weight:bold}
+.warn{color:#a60;font-weight:bold}.noise{color:#888}.miss{color:#999}
+.unknown{color:#66c;font-style:italic}
+.guard{background:#fff6f6}.una{color:#666}.total{background:#f7f7f7;font-weight:bold}
+code{background:#f4f4f4;padding:0 .2rem}
+dt{font-weight:bold;margin-top:.4rem}
+</style>
+<h1>Incremental rebuild loop — full vs cold vs incremental</h1>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-18 02:46. Derived, never authored — re-run <code>bazel run //bench:ledger -- render</code> to refresh. Verdicts use an epsilon of <b>3.0%</b>; anything inside it is not a win. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
+<h2>At a glance</h2>
+<table><tr><th>target</th><th>phase</th><th>full (ms)</th><th>cold (ms)</th><th>incremental (ms)</th><th>incr speedup</th></tr>
+<tr><td>dino</td><td>compile</td><td class="">95.0</td><td class="">94.0</td><td class="">95.0</td><td class="noise">1.0&times;</td></tr>
+<tr><td>dino</td><td>synth</td><td class="">1,687.0</td><td class="">1,803.0</td><td class="">1,335.0</td><td class="better">1.4&times;</td></tr>
+<tr><td>dino</td><td>sim</td><td class="">15,480.0</td><td class="">17,480.0</td><td class="">228.0</td><td class="better">76.7&times;</td></tr>
+<tr><td>dino</td><td>lec</td><td class="">175.0</td><td class="">181.0</td><td class="">52.0</td><td class="better">3.5&times;</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td class="">19,909.0</td><td class="">20,871.0</td><td class="">145.0</td><td class="better">143.9&times;</td></tr>
+<tr><td>minion</td><td>compile</td><td class="">6,358.0</td><td class="">6,329.0</td><td class="">6,357.0</td><td class="noise">1.0&times;</td></tr>
+<tr><td>minion</td><td>synth</td><td class="">86,113.0</td><td class="">92,273.0</td><td class="">2,278.0</td><td class="better">40.5&times;</td></tr>
+<tr><td>minion</td><td>sim</td><td class="">93,539.0</td><td class="">93,554.0</td><td class="">3,587.0</td><td class="better">26.1&times;</td></tr>
+<tr><td>minion</td><td>lec</td><td class="">306,652.0</td><td class="">278,402.0</td><td class="">6,446.0</td><td class="better">43.2&times;</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td class="">110,304.0</td><td class="">106,515.0</td><td class="">3,660.0</td><td class="better">29.1&times;</td></tr>
+<tr><td>xs_alu</td><td>compile</td><td class="">85.0</td><td class="">82.0</td><td class="">88.0</td><td class="worse">0.9&times;</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td class="">1,917.0</td><td class="">2,495.0</td><td class="">581.0</td><td class="better">4.3&times;</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td class="">13,040.0</td><td class="">5,209.0</td><td class="">131.0</td><td class="better">39.8&times;</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td class="">4,963.0</td><td class="">5,368.0</td><td class="">134.0</td><td class="better">40.1&times;</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td class="">369,675.0</td><td class="">366,856.0</td><td class="">147,433.0</td><td class="better">2.5&times;</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td class="">2,983,362.0</td><td class="">2,993,313.0</td><td class="">85,426.0</td><td class="better">35.0&times;</td></tr>
+</table>
+<p><b>compile</b> gets nothing from the incremental machinery (&le;1.1&times; on all 3 target(s) measured); lec, sim, sim_llvm, synth reuse at <b>1.4&times;&ndash;144&times;</b> (best: sim_llvm).</p>
+<details><summary><b>How to read this page</b> — what the three columns mean, and the four verdict states</summary>
+
+<p><b>The verdict column has four states, not two.</b>
+<span class="better">better</span> / <span class="worse">worse</span> is a move
+past the epsilon in the direction this page knows the metric runs;
+<span class="noise">noise</span> is inside it; and
+<span class="unknown">unclassified</span> means <b>this page has no direction
+rule for that metric</b> — the delta is shown and deliberately NOT judged,
+because a guessed direction paints a regression green. Add the name to
+<code>LOWER_IS_BETTER</code> / <code>HIGHER_IS_BETTER</code> in
+<code>bench/ledger.py</code> to give it a verdict.</p>
+
+
+<h2>What the three columns mean</h2>
+<dl>
+<dt>full</dt><dd>&mdash; Every cache that has an off switch is <b>off</b>
+(<code>pass.abc.cache=false</code>, <code>formal.cache=false</code>), every output
+directory fresh. This is what the flow costs with <b>no incremental machinery at
+all</b>: the honest denominator.</dd>
+<dt>cold</dt><dd>&mdash; Caches <b>on</b>, every directory still fresh: the same
+work as <code>full</code> <b>plus the cost of populating the caches</b>. The
+difference is the price of admission for incrementality, charged on every clean
+build.</dd>
+<dt>incremental</dt><dd>&mdash; The <b>identical command again</b> over that
+workdir, after a comment-only touch to the source. Nothing semantic changed, so
+every content-keyed cache must hit. This is the number the loop exists to
+move.</dd>
+</dl>
+<p>Where a phase has no cache off-switch today, <code>full</code> and
+<code>cold</code> run the same command and are expected to match within noise —
+that is a measurement, not redundancy.</p>
+
+</details>
+<h2>host: mascm1</h2>
+<p>lhd <code>741ccf424</code> &middot; lhdsuite <code>a4f2584</code> &middot; pdk <code>e8daeda73ca8f5814dbc0b11d1d05802251a3750</code><br>baseline <b>I1-sim-generation-reuse</b> &rarr; current <b>I1-sim-generation-reuse</b> (latest row 2026-08-18T02:46:38)</p>
+<p class="warn">no hard failure; control drift past 10% (T12 — this sitting&#x27;s absolute numbers are not comparable): xs_rob 6.417x, xs_rob 0.622x; dino/synth +6.9%; dino/sim +12.9%; minion/synth +7.2%; xs_alu/synth +30.2%; xs_alu/sim_llvm +8.2%</p>
+<p>control probe (trap T12 — this class of box throttles mid-session): dino 35 ms &rarr; 36 ms (1.029&times;); xs_alu 37 ms &rarr; 37 ms (1&times;); minion 36 ms &rarr; 36 ms (1&times;); minion 36 ms &rarr; 36 ms (1&times;); minion 35 ms &rarr; 37 ms (1.057&times;); xs_rob 36 ms &rarr; 231 ms (6.417&times;); xs_rob 38 ms &rarr; 35 ms (0.921&times;); xs_rob 37 ms &rarr; 23 ms (0.622&times;). A drift far from 1.00 means no absolute number in this sitting compares to another's.</p>
+<h3>1. Wall clock — full vs cold vs incremental</h3>
+<p><b>incr speedup</b> = cold / incremental: what the machinery buys on a rebuild. <b>cache cost</b> = (cold &minus; full) / full: what it charges on a first run — flagged past <b>+5%</b>. A cell reading &quot;-&quot; is a mode that was not run; it is never a zero. <b>A mode that did not pass is shown but never used</b>: its wall clock is the time to a crash, not the time to an answer, so both derived columns read &quot;-&quot;.</p>
+<p><b>load</b> is the 1-minute run queue while the three modes ran, highest of the three. It is not a result — it is how much to trust the row. The control probe is single-threaded and cannot see this: one desktop app pinning one core leaves the control at 36&nbsp;ms while tripling a parallel host C++ build, which is exactly what happened during the first sitting of this page. A load well above the core count means the absolute milliseconds are inflated; the <i>ratio</i> columns, measured back to back, survive it better than the raw cells do.</p>
+<table><tr><th>target</th><th>phase</th><th>full (ms)</th><th>cold (ms)</th><th>incremental (ms)</th><th>incr speedup</th><th>cache cost</th><th>load</th></tr>
+<tr><td>dino</td><td>compile</td><td class="">95.0</td><td class="">94.0</td><td class="">95.0</td><td class="noise">0.99&times;</td><td class="noise">-1.1%</td><td class="miss">-</td></tr>
+<tr><td>dino</td><td>synth</td><td class="">1,687.0</td><td class="">1,803.0</td><td class="">1,335.0</td><td class="better">1.35&times;</td><td class="warn">+6.9% WARN</td><td class="miss">-</td></tr>
+<tr><td>dino</td><td>sim</td><td class="">15,480.0</td><td class="">17,480.0</td><td class="">228.0</td><td class="better">76.67&times;</td><td class="warn">+12.9% WARN</td><td class="miss">-</td></tr>
+<tr><td>dino</td><td>lec</td><td class="">175.0</td><td class="">181.0</td><td class="">52.0</td><td class="better">3.48&times;</td><td class="">+3.4%</td><td class="miss">-</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td class="">19,909.0</td><td class="">20,871.0</td><td class="">145.0</td><td class="better">143.94&times;</td><td class="">+4.8%</td><td class="miss">-</td></tr>
+<tr><td>minion</td><td>compile</td><td class="">6,358.0</td><td class="">6,329.0</td><td class="">6,357.0</td><td class="noise">1.00&times;</td><td class="noise">-0.5%</td><td class="miss">-</td></tr>
+<tr><td>minion</td><td>synth</td><td class="">86,113.0</td><td class="">92,273.0</td><td class="">2,278.0</td><td class="better">40.51&times;</td><td class="warn">+7.2% WARN</td><td class="miss">-</td></tr>
+<tr><td>minion</td><td>sim</td><td class="">93,539.0</td><td class="">93,554.0</td><td class="">3,587.0</td><td class="better">26.08&times;</td><td class="noise">+0.0%</td><td class="miss">-</td></tr>
+<tr><td>minion</td><td>lec</td><td class="">306,652.0</td><td class="">278,402.0</td><td class="">6,446.0</td><td class="better">43.19&times;</td><td class="">-9.2%</td><td class="">2.3</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td class="">110,304.0</td><td class="">106,515.0</td><td class="">3,660.0</td><td class="better">29.10&times;</td><td class="">-3.4%</td><td class="miss">-</td></tr>
+<tr><td>xs_alu</td><td>compile</td><td class="">85.0</td><td class="">82.0</td><td class="">88.0</td><td class="worse">0.93&times;</td><td class="">-3.5%</td><td class="miss">-</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td class="">1,917.0</td><td class="">2,495.0</td><td class="">581.0</td><td class="better">4.29&times;</td><td class="warn">+30.2% WARN</td><td class="miss">-</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td class="">13,040.0</td><td class="">5,209.0</td><td class="">131.0</td><td class="better">39.76&times;</td><td class="">-60.1%</td><td class="miss">-</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td class="">4,963.0</td><td class="">5,368.0</td><td class="">134.0</td><td class="better">40.06&times;</td><td class="warn">+8.2% WARN</td><td class="miss">-</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td class="">369,675.0</td><td class="">366,856.0</td><td class="">147,433.0</td><td class="better">2.49&times;</td><td class="noise">-0.8%</td><td class="warn">27.4</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td class="">2,983,362.0</td><td class="">2,993,313.0</td><td class="">85,426.0</td><td class="better">35.04&times;</td><td class="noise">+0.3%</td><td class="">3.0</td></tr>
+</table>
+<p class="warn">cache cost over +5% on: dino/synth +6.9%, dino/sim +12.9%, minion/synth +7.2%, xs_alu/synth +30.2%, xs_alu/sim_llvm +8.2% — the incremental machinery is charging a first build more than it should.</p>
+<h3>2. I3 guardrail — the built thing's own speed</h3>
+<p>Each mode against the <b>reference</b> mode (full, or cold when full was not run). Incremental reuse must not produce a slower binary: a regression here rejects the change regardless of net wall time (&sect;8.3). A reference of <b>0</b> with a non-zero mode is an infinite regression, not an absent one.</p>
+<table><tr><th>target</th><th>phase</th><th>metric</th><th>full</th><th>cold</th><th>incremental</th><th>full vs ref</th><th>cold vs ref</th><th>incremental vs ref</th></tr>
+<tr class="guard"><td>dino</td><td>sim</td><td>sim_exec_ms</td><td class="">87</td><td class="">89</td><td class="">86</td><td class="noise">ref</td><td class="noise">+2.3% noise</td><td class="noise">-1.1% noise</td></tr>
+<tr class="guard"><td>dino</td><td>sim_llvm</td><td>sim_exec_ms</td><td class="">102</td><td class="">69</td><td class="">69</td><td class="noise">ref</td><td class="better">-32.4% better</td><td class="better">-32.4% better</td></tr>
+<tr class="guard"><td>minion</td><td>sim</td><td>sim_exec_ms</td><td class="">5,005</td><td class="">5,143</td><td class="">5,141</td><td class="noise">ref</td><td class="noise">+2.8% noise</td><td class="noise">+2.7% noise</td></tr>
+<tr class="guard"><td>minion</td><td>sim_llvm</td><td>sim_exec_ms</td><td class="">5,303</td><td class="">5,355</td><td class="">5,341</td><td class="noise">ref</td><td class="noise">+1.0% noise</td><td class="noise">+0.7% noise</td></tr>
+<tr class="guard"><td>xs_alu</td><td>sim</td><td>sim_exec_ms</td><td class="">47</td><td class="">47</td><td class="">46</td><td class="noise">ref</td><td class="noise">+0.0% noise</td><td class="noise">-2.1% noise</td></tr>
+<tr class="guard"><td>xs_alu</td><td>sim_llvm</td><td>sim_exec_ms</td><td class="">49</td><td class="">50</td><td class="">50</td><td class="noise">ref</td><td class="noise">+2.0% noise</td><td class="noise">+2.0% noise</td></tr>
+<tr class="guard"><td>xs_rob</td><td>sim</td><td>sim_exec_ms</td><td class="">3,928</td><td class="">3,916</td><td class="">3,920</td><td class="noise">ref</td><td class="noise">-0.3% noise</td><td class="noise">-0.2% noise</td></tr>
+<tr class="guard"><td>xs_rob</td><td>sim_llvm</td><td>sim_exec_ms</td><td class="">5,422</td><td class="">5,493</td><td class="">5,483</td><td class="noise">ref</td><td class="noise">+1.3% noise</td><td class="noise">+1.1% noise</td></tr>
+</table>
+<h3>3. Non-time gates</h3>
+<p>The gates a time-only scoreboard tempts you to forget (&sect;8.4): <code>store_failed</code> must be 0, <code>refused</code> must be <i>attributed</i> (a principled refusal is data, an unexplained one is a bug), warm must equal cold byte for byte, and cache size is a cost.</p>
+<table><tr><th>target</th><th>phase</th><th>passed (per mode)</th><th>warm==cold</th><th>rewritten</th><th>store_failed</th><th>refused</th><th>workdir bytes</th></tr>
+<tr><td>dino</td><td>compile</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>-</td></tr>
+<tr><td>dino</td><td>synth</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>0</td><td class=''>-</td><td>-</td></tr>
+<tr><td>dino</td><td>sim</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>6,995,968</td></tr>
+<tr><td>dino</td><td>lec</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>-</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>7,462,912</td></tr>
+<tr><td>minion</td><td>compile</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>-</td></tr>
+<tr><td>minion</td><td>synth</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>0</td><td class=''>-</td><td>-</td></tr>
+<tr><td>minion</td><td>sim</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>163,360,768</td></tr>
+<tr><td>minion</td><td>lec</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>-</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>165,666,816</td></tr>
+<tr><td>xs_alu</td><td>compile</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>-</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>0</td><td class=''>-</td><td>-</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>6,160,384</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>6,299,648</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>219,070,464</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td class="">full=yes cold=yes incremental=yes</td><td class=''>-</td><td>-</td><td class=''>-</td><td class=''>-</td><td>428,494,848</td></tr>
+</table>
+<h3>4. Other recorded metrics</h3>
+<p>Every remaining number on the rows, per mode — the contract's cache columns (<code>hits</code>, <code>misses</code>, <code>redone_ms</code> &mdash; the I4 number), the synthesis QoR block, and anything a driver added since. The last column is what this page knows about the metric: a <span class="unknown">direction unknown</span> metric is reported and never given a verdict.</p>
+<table><tr><th>target</th><th>phase</th><th>metric</th><th>full</th><th>cold</th><th>incremental</th><th>direction</th></tr>
+<tr><td>dino</td><td>synth</td><td><code>abc_hits</code></td><td class="miss">-</td><td class="">0</td><td class="">7</td><td class="noise">higher is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>abc_misses</code></td><td class="miss">-</td><td class="">7</td><td class="">0</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>abc_regions</code></td><td class="">7</td><td class="">7</td><td class="">7</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>abc_hit_ms</code></td><td class="miss">-</td><td class="">0</td><td class="">18</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>abc_miss_ms</code></td><td class="miss">-</td><td class="">1,392</td><td class="">0</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">249</td><td class="">328</td><td class="">134</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim</td><td><code>sim_cc_ms</code></td><td class="">15,231</td><td class="">17,152</td><td class="">94</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim</td><td><code>sim_run_ms</code></td><td class="">15,231</td><td class="">17,152</td><td class="">94</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim</td><td><code>sim_cycles</code></td><td class="">200,000</td><td class="">200,000</td><td class="">200,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td><code>sim_setup_ms</code></td><td class="">353</td><td class="">473</td><td class="">87</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td><code>sim_cc_ms</code></td><td class="">19,556</td><td class="">20,398</td><td class="">58</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td><code>sim_run_ms</code></td><td class="">19,556</td><td class="">20,398</td><td class="">58</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>sim_llvm</td><td><code>sim_cycles</code></td><td class="">200,000</td><td class="">200,000</td><td class="">200,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>abc_hits</code></td><td class="miss">-</td><td class="">0</td><td class="">133</td><td class="noise">higher is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>abc_misses</code></td><td class="miss">-</td><td class="">133</td><td class="">0</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>abc_regions</code></td><td class="">134</td><td class="">134</td><td class="">134</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>abc_hit_ms</code></td><td class="miss">-</td><td class="">0</td><td class="">703</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>abc_miss_ms</code></td><td class="miss">-</td><td class="">90,359</td><td class="">23</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">12,121</td><td class="">12,146</td><td class="">2,994</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim</td><td><code>sim_cc_ms</code></td><td class="">80,918</td><td class="">80,894</td><td class="">79</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim</td><td><code>sim_run_ms</code></td><td class="">81,418</td><td class="">81,408</td><td class="">593</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim</td><td><code>sim_cycles</code></td><td class="">200,000</td><td class="">200,000</td><td class="">200,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td><code>sim_setup_ms</code></td><td class="">20,367</td><td class="">20,392</td><td class="">3,035</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td><code>sim_cc_ms</code></td><td class="">89,407</td><td class="">85,588</td><td class="">91</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td><code>sim_run_ms</code></td><td class="">89,937</td><td class="">86,123</td><td class="">625</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>sim_llvm</td><td><code>sim_cycles</code></td><td class="">200,000</td><td class="">200,000</td><td class="">200,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>abc_hits</code></td><td class="miss">-</td><td class="">0</td><td class="">6</td><td class="noise">higher is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>abc_misses</code></td><td class="miss">-</td><td class="">6</td><td class="">0</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>abc_regions</code></td><td class="">6</td><td class="">6</td><td class="">6</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>abc_hit_ms</code></td><td class="miss">-</td><td class="">0</td><td class="">14</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>abc_miss_ms</code></td><td class="miss">-</td><td class="">1,973</td><td class="">0</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">195</td><td class="">152</td><td class="">75</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td><code>sim_cc_ms</code></td><td class="">12,845</td><td class="">5,057</td><td class="">56</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td><code>sim_run_ms</code></td><td class="">12,845</td><td class="">5,057</td><td class="">56</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim</td><td><code>sim_cycles</code></td><td class="">500,000</td><td class="">500,000</td><td class="">500,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td><code>sim_setup_ms</code></td><td class="">176</td><td class="">171</td><td class="">76</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td><code>sim_cc_ms</code></td><td class="">4,787</td><td class="">5,197</td><td class="">58</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td><code>sim_run_ms</code></td><td class="">4,787</td><td class="">5,197</td><td class="">58</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>sim_llvm</td><td><code>sim_cycles</code></td><td class="">500,000</td><td class="">500,000</td><td class="">500,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">177,443</td><td class="">176,411</td><td class="">146,970</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td><code>sim_cc_ms</code></td><td class="">192,036</td><td class="">190,250</td><td class="">267</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td><code>sim_run_ms</code></td><td class="">192,232</td><td class="">190,445</td><td class="">463</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim</td><td><code>sim_cycles</code></td><td class="">20,000</td><td class="">20,000</td><td class="">20,000</td><td class="noise">reported, not trended</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td><code>sim_setup_ms</code></td><td class="">2,684,638</td><td class="">2,691,899</td><td class="">84,897</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td><code>sim_cc_ms</code></td><td class="">298,453</td><td class="">301,140</td><td class="">255</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td><code>sim_run_ms</code></td><td class="">298,724</td><td class="">301,414</td><td class="">529</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_rob</td><td>sim_llvm</td><td><code>sim_cycles</code></td><td class="">20,000</td><td class="">20,000</td><td class="">20,000</td><td class="noise">reported, not trended</td></tr>
+</table>
+<h3>5. Where the time goes — per-pass breakdown</h3>
+<p>One table per (target, phase). <b>Sorted by cold-mode ms, descending</b>, so the pass that owns the rebuild is the first row. Each mode's percent column is that pass's share of that mode's wall clock; <b>(unattributed)</b> is wall minus the sum of the reported passes, so the column adds to 100%.</p>
+<h4>dino / compile</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">24.2</td><td class="">25.5%</td><td class="">24.3</td><td class="">25.8%</td><td class="">24.3</td><td class="">25.6%</td></tr>
+<tr class=""><td><code>pass.formal</code></td><td class="">10.5</td><td class="">11.0%</td><td class="">10.3</td><td class="">11.0%</td><td class="">10.2</td><td class="">10.7%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">8.5</td><td class="">8.9%</td><td class="">8.5</td><td class="">9.1%</td><td class="">10.0</td><td class="">10.6%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">4.8</td><td class="">5.0%</td><td class="">4.7</td><td class="">5.0%</td><td class="">3.3</td><td class="">3.5%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">4.3</td><td class="">4.5%</td><td class="">4.3</td><td class="">4.6%</td><td class="">4.2</td><td class="">4.4%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">2.8</td><td class="">3.0%</td><td class="">2.6</td><td class="">2.7%</td><td class="">2.6</td><td class="">2.7%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.2</td><td class="">2.3%</td><td class="">2.2</td><td class="">2.4%</td><td class="">2.2</td><td class="">2.3%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.3</td><td class="">0.3%</td><td class="">0.2</td><td class="">0.2%</td><td class="">0.2</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">37.5</td><td class="">39.5%</td><td class="">36.8</td><td class="">39.2%</td><td class="">38.0</td><td class="">40.0%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">95.0</td><td class="">100.0%</td><td class="">94.0</td><td class="">100.0%</td><td class="">95.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>dino / synth</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.abc</code></td><td class="">1,586.7</td><td class="">94.1%</td><td class="">1,701.5</td><td class="">94.4%</td><td class="">1,221.5</td><td class="">91.5%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">10.6</td><td class="">0.6%</td><td class="">10.1</td><td class="">0.6%</td><td class="">16.8</td><td class="">1.3%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">5.5</td><td class="">0.3%</td><td class="">5.8</td><td class="">0.3%</td><td class="">6.0</td><td class="">0.4%</td></tr>
+<tr class=""><td><code>pass.color</code></td><td class="">3.3</td><td class="">0.2%</td><td class="">3.3</td><td class="">0.2%</td><td class="">3.3</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">80.9</td><td class="">4.8%</td><td class="">82.3</td><td class="">4.6%</td><td class="">87.4</td><td class="">6.5%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">1,687.0</td><td class="">100.0%</td><td class="">1,803.0</td><td class="">100.0%</td><td class="">1,335.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>dino / sim</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">14,305.0</td><td class="">92.4%</td><td class="">16,913.1</td><td class="">96.8%</td><td class="">17.4</td><td class="">7.6%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">164.8</td><td class="">1.1%</td><td class="">214.3</td><td class="">1.2%</td><td class="">3.3</td><td class="">1.5%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">868.4</td><td class="">5.6%</td><td class="">175.4</td><td class="">1.0%</td><td class="">8.8</td><td class="">3.9%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">24.0</td><td class="">0.2%</td><td class="">30.2</td><td class="">0.2%</td><td class="">36.5</td><td class="">16.0%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">8.4</td><td class="">0.1%</td><td class="">10.6</td><td class="">0.1%</td><td class="">12.8</td><td class="">5.6%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">4.4</td><td class="">0.0%</td><td class="">5.8</td><td class="">0.0%</td><td class="">6.6</td><td class="">2.9%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">2.8</td><td class="">0.0%</td><td class="">3.8</td><td class="">0.0%</td><td class="">4.1</td><td class="">1.8%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.3</td><td class="">0.0%</td><td class="">2.9</td><td class="">0.0%</td><td class="">3.3</td><td class="">1.4%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.5</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.3%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">99.6</td><td class="">0.6%</td><td class="">123.1</td><td class="">0.7%</td><td class="">134.4</td><td class="">59.0%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">15,480.0</td><td class="">100.0%</td><td class="">17,480.0</td><td class="">100.0%</td><td class="">228.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>dino / lec</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.lec</code></td><td class="">127.9</td><td class="">73.1%</td><td class="">135.2</td><td class="">74.7%</td><td class="">9.0</td><td class="">17.2%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">9.3</td><td class="">5.3%</td><td class="">9.0</td><td class="">5.0%</td><td class="">8.1</td><td class="">15.6%</td></tr>
+<tr class=""><td><code>lec.load</code></td><td class="">0.0</td><td class="">0.0%</td><td class="">0.0</td><td class="">0.0%</td><td class="">0.0</td><td class="">0.1%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">37.8</td><td class="">21.6%</td><td class="">36.7</td><td class="">20.3%</td><td class="">34.9</td><td class="">67.1%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">175.0</td><td class="">100.0%</td><td class="">181.0</td><td class="">100.0%</td><td class="">52.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>dino / sim_llvm</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">19,322.8</td><td class="">97.1%</td><td class="">20,210.3</td><td class="">96.8%</td><td class="">10.6</td><td class="">7.3%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">254.4</td><td class="">1.3%</td><td class="">341.4</td><td class="">1.6%</td><td class="">2.6</td><td class="">1.8%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">167.3</td><td class="">0.8%</td><td class="">136.2</td><td class="">0.7%</td><td class="">5.9</td><td class="">4.0%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">27.1</td><td class="">0.1%</td><td class="">35.1</td><td class="">0.2%</td><td class="">24.1</td><td class="">16.6%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">9.5</td><td class="">0.0%</td><td class="">12.3</td><td class="">0.1%</td><td class="">8.4</td><td class="">5.8%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">4.8</td><td class="">0.0%</td><td class="">6.7</td><td class="">0.0%</td><td class="">4.3</td><td class="">3.0%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">3.1</td><td class="">0.0%</td><td class="">4.2</td><td class="">0.0%</td><td class="">2.6</td><td class="">1.8%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.5</td><td class="">0.0%</td><td class="">3.2</td><td class="">0.0%</td><td class="">2.4</td><td class="">1.7%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.6</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td><td class="">0.4</td><td class="">0.3%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">116.8</td><td class="">0.6%</td><td class="">120.8</td><td class="">0.6%</td><td class="">83.7</td><td class="">57.8%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">19,909.0</td><td class="">100.0%</td><td class="">20,871.0</td><td class="">100.0%</td><td class="">145.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>minion / compile</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.formal</code></td><td class="">3,521.7</td><td class="">55.4%</td><td class="">3,520.9</td><td class="">55.6%</td><td class="">3,514.6</td><td class="">55.3%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">1,738.8</td><td class="">27.3%</td><td class="">1,719.7</td><td class="">27.2%</td><td class="">1,728.9</td><td class="">27.2%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">551.4</td><td class="">8.7%</td><td class="">554.0</td><td class="">8.8%</td><td class="">616.5</td><td class="">9.7%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">239.4</td><td class="">3.8%</td><td class="">229.9</td><td class="">3.6%</td><td class="">230.0</td><td class="">3.6%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">121.8</td><td class="">1.9%</td><td class="">123.1</td><td class="">1.9%</td><td class="">120.6</td><td class="">1.9%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">107.2</td><td class="">1.7%</td><td class="">105.0</td><td class="">1.7%</td><td class="">69.5</td><td class="">1.1%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">5.2</td><td class="">0.1%</td><td class="">5.2</td><td class="">0.1%</td><td class="">5.1</td><td class="">0.1%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.8</td><td class="">0.0%</td><td class="">0.3</td><td class="">0.0%</td><td class="">0.3</td><td class="">0.0%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">71.8</td><td class="">1.1%</td><td class="">70.8</td><td class="">1.1%</td><td class="">71.4</td><td class="">1.1%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">6,358.0</td><td class="">100.0%</td><td class="">6,329.0</td><td class="">100.0%</td><td class="">6,357.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>minion / synth</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.abc</code></td><td class="">85,073.4</td><td class="">98.8%</td><td class="">91,223.9</td><td class="">98.9%</td><td class="">1,236.4</td><td class="">54.3%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">378.6</td><td class="">0.4%</td><td class="">349.7</td><td class="">0.4%</td><td class="">352.3</td><td class="">15.5%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">246.6</td><td class="">0.3%</td><td class="">254.9</td><td class="">0.3%</td><td class="">268.1</td><td class="">11.8%</td></tr>
+<tr class=""><td><code>pass.color</code></td><td class="">100.2</td><td class="">0.1%</td><td class="">99.2</td><td class="">0.1%</td><td class="">99.9</td><td class="">4.4%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">314.2</td><td class="">0.4%</td><td class="">345.3</td><td class="">0.4%</td><td class="">321.4</td><td class="">14.1%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">86,113.0</td><td class="">100.0%</td><td class="">92,273.0</td><td class="">100.0%</td><td class="">2,278.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>minion / sim</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">80,453.3</td><td class="">86.0%</td><td class="">80,443.7</td><td class="">86.0%</td><td class="">16.7</td><td class="">0.5%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">9,247.8</td><td class="">9.9%</td><td class="">9,242.0</td><td class="">9.9%</td><td class="">112.3</td><td class="">3.1%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">1,705.4</td><td class="">1.8%</td><td class="">1,727.7</td><td class="">1.8%</td><td class="">1,707.8</td><td class="">47.6%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">910.9</td><td class="">1.0%</td><td class="">909.4</td><td class="">1.0%</td><td class="">523.9</td><td class="">14.6%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">547.2</td><td class="">0.6%</td><td class="">551.8</td><td class="">0.6%</td><td class="">547.8</td><td class="">15.3%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">228.8</td><td class="">0.2%</td><td class="">228.7</td><td class="">0.2%</td><td class="">229.6</td><td class="">6.4%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">127.1</td><td class="">0.1%</td><td class="">124.7</td><td class="">0.1%</td><td class="">123.5</td><td class="">3.4%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">5.6</td><td class="">0.0%</td><td class="">5.6</td><td class="">0.0%</td><td class="">5.5</td><td class="">0.2%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.7</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">312.2</td><td class="">0.3%</td><td class="">319.8</td><td class="">0.3%</td><td class="">319.2</td><td class="">8.9%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">93,539.0</td><td class="">100.0%</td><td class="">93,554.0</td><td class="">100.0%</td><td class="">3,587.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>minion / lec</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.lec</code></td><td class="">306,252.0</td><td class="">99.9%</td><td class="">278,006.3</td><td class="">99.9%</td><td class="">6,028.9</td><td class="">93.5%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">356.1</td><td class="">0.1%</td><td class="">352.0</td><td class="">0.1%</td><td class="">370.5</td><td class="">5.7%</td></tr>
+<tr class=""><td><code>lec.load</code></td><td class="">0.1</td><td class="">0.0%</td><td class="">0.1</td><td class="">0.0%</td><td class="">0.1</td><td class="">0.0%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">43.8</td><td class="">0.0%</td><td class="">43.6</td><td class="">0.0%</td><td class="">46.5</td><td class="">0.7%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">306,652.0</td><td class="">100.0%</td><td class="">278,402.0</td><td class="">100.0%</td><td class="">6,446.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>minion / sim_llvm</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">88,953.5</td><td class="">80.6%</td><td class="">85,113.1</td><td class="">79.9%</td><td class="">18.6</td><td class="">0.5%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">17,480.1</td><td class="">15.8%</td><td class="">17,477.8</td><td class="">16.4%</td><td class="">126.3</td><td class="">3.4%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">1,696.5</td><td class="">1.5%</td><td class="">1,722.5</td><td class="">1.6%</td><td class="">1,716.4</td><td class="">46.9%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">924.8</td><td class="">0.8%</td><td class="">948.2</td><td class="">0.9%</td><td class="">546.6</td><td class="">14.9%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">548.9</td><td class="">0.5%</td><td class="">552.0</td><td class="">0.5%</td><td class="">555.6</td><td class="">15.2%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">227.8</td><td class="">0.2%</td><td class="">233.5</td><td class="">0.2%</td><td class="">231.8</td><td class="">6.3%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">124.6</td><td class="">0.1%</td><td class="">123.8</td><td class="">0.1%</td><td class="">124.9</td><td class="">3.4%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">5.5</td><td class="">0.0%</td><td class="">5.6</td><td class="">0.0%</td><td class="">5.6</td><td class="">0.2%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.7</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td><td class="">0.7</td><td class="">0.0%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">341.5</td><td class="">0.3%</td><td class="">337.7</td><td class="">0.3%</td><td class="">333.5</td><td class="">9.1%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">110,304.0</td><td class="">100.0%</td><td class="">106,515.0</td><td class="">100.0%</td><td class="">3,660.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_alu / compile</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">16.4</td><td class="">19.2%</td><td class="">16.3</td><td class="">19.9%</td><td class="">18.1</td><td class="">20.6%</td></tr>
+<tr class=""><td><code>pass.formal</code></td><td class="">9.0</td><td class="">10.6%</td><td class="">9.1</td><td class="">11.1%</td><td class="">9.8</td><td class="">11.2%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">7.0</td><td class="">8.2%</td><td class="">6.7</td><td class="">8.2%</td><td class="">6.9</td><td class="">7.9%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">5.3</td><td class="">6.3%</td><td class="">5.4</td><td class="">6.6%</td><td class="">7.1</td><td class="">8.1%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">3.8</td><td class="">4.5%</td><td class="">3.9</td><td class="">4.8%</td><td class="">2.8</td><td class="">3.1%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.3</td><td class="">2.7%</td><td class="">2.3</td><td class="">2.8%</td><td class="">2.5</td><td class="">2.9%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">1.6</td><td class="">1.8%</td><td class="">1.4</td><td class="">1.7%</td><td class="">1.5</td><td class="">1.7%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.3</td><td class="">0.4%</td><td class="">0.1</td><td class="">0.1%</td><td class="">0.1</td><td class="">0.1%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">39.3</td><td class="">46.3%</td><td class="">36.9</td><td class="">45.0%</td><td class="">39.3</td><td class="">44.6%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">85.0</td><td class="">100.0%</td><td class="">82.0</td><td class="">100.0%</td><td class="">88.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_alu / synth</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>pass.abc</code></td><td class="">1,813.3</td><td class="">94.6%</td><td class="">2,366.3</td><td class="">94.8%</td><td class="">437.6</td><td class="">75.3%</td></tr>
+<tr class=""><td><code>lg.save</code></td><td class="">8.1</td><td class="">0.4%</td><td class="">9.5</td><td class="">0.4%</td><td class="">10.0</td><td class="">1.7%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">4.2</td><td class="">0.2%</td><td class="">5.0</td><td class="">0.2%</td><td class="">6.0</td><td class="">1.0%</td></tr>
+<tr class=""><td><code>pass.color</code></td><td class="">1.9</td><td class="">0.1%</td><td class="">2.2</td><td class="">0.1%</td><td class="">2.5</td><td class="">0.4%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">89.5</td><td class="">4.7%</td><td class="">111.9</td><td class="">4.5%</td><td class="">124.8</td><td class="">21.5%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">1,917.0</td><td class="">100.0%</td><td class="">2,495.0</td><td class="">100.0%</td><td class="">581.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_alu / sim</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">12,600.0</td><td class="">96.6%</td><td class="">4,845.7</td><td class="">93.0%</td><td class="">10.0</td><td class="">7.6%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">192.8</td><td class="">1.5%</td><td class="">162.2</td><td class="">3.1%</td><td class="">5.5</td><td class="">4.2%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">95.7</td><td class="">0.7%</td><td class="">77.6</td><td class="">1.5%</td><td class="">1.7</td><td class="">1.3%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">20.9</td><td class="">0.2%</td><td class="">16.6</td><td class="">0.3%</td><td class="">16.4</td><td class="">12.5%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">8.7</td><td class="">0.1%</td><td class="">6.5</td><td class="">0.1%</td><td class="">6.4</td><td class="">4.9%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">6.8</td><td class="">0.1%</td><td class="">5.4</td><td class="">0.1%</td><td class="">5.5</td><td class="">4.2%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.9</td><td class="">0.0%</td><td class="">2.3</td><td class="">0.0%</td><td class="">2.2</td><td class="">1.7%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">2.1</td><td class="">0.0%</td><td class="">1.6</td><td class="">0.0%</td><td class="">1.5</td><td class="">1.2%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.4</td><td class="">0.0%</td><td class="">0.3</td><td class="">0.0%</td><td class="">0.3</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">109.8</td><td class="">0.8%</td><td class="">91.0</td><td class="">1.7%</td><td class="">81.6</td><td class="">62.3%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">13,040.0</td><td class="">100.0%</td><td class="">5,209.0</td><td class="">100.0%</td><td class="">131.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_alu / sim_llvm</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">4,422.7</td><td class="">89.1%</td><td class="">4,987.2</td><td class="">92.9%</td><td class="">10.3</td><td class="">7.7%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">302.8</td><td class="">6.1%</td><td class="">159.7</td><td class="">3.0%</td><td class="">5.5</td><td class="">4.1%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">98.4</td><td class="">2.0%</td><td class="">97.5</td><td class="">1.8%</td><td class="">1.9</td><td class="">1.4%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">16.4</td><td class="">0.3%</td><td class="">16.5</td><td class="">0.3%</td><td class="">16.5</td><td class="">12.3%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">6.8</td><td class="">0.1%</td><td class="">6.5</td><td class="">0.1%</td><td class="">6.2</td><td class="">4.7%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">5.3</td><td class="">0.1%</td><td class="">5.4</td><td class="">0.1%</td><td class="">5.3</td><td class="">4.0%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">2.3</td><td class="">0.0%</td><td class="">2.3</td><td class="">0.0%</td><td class="">2.3</td><td class="">1.7%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">1.8</td><td class="">0.0%</td><td class="">1.5</td><td class="">0.0%</td><td class="">1.5</td><td class="">1.1%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">0.3</td><td class="">0.0%</td><td class="">0.3</td><td class="">0.0%</td><td class="">0.2</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">106.2</td><td class="">2.1%</td><td class="">91.3</td><td class="">1.7%</td><td class="">84.3</td><td class="">62.9%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">4,963.0</td><td class="">100.0%</td><td class="">5,368.0</td><td class="">100.0%</td><td class="">134.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_rob / sim</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">191,100.3</td><td class="">51.7%</td><td class="">189,336.2</td><td class="">51.6%</td><td class="">12.0</td><td class="">0.0%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">51,007.7</td><td class="">13.8%</td><td class="">49,919.6</td><td class="">13.6%</td><td class="">52,497.1</td><td class="">35.6%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">37,362.3</td><td class="">10.1%</td><td class="">37,588.1</td><td class="">10.2%</td><td class="">37,417.8</td><td class="">25.4%</td></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">34,418.9</td><td class="">9.3%</td><td class="">34,460.2</td><td class="">9.4%</td><td class="">1,797.3</td><td class="">1.2%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">30,182.8</td><td class="">8.2%</td><td class="">30,139.9</td><td class="">8.2%</td><td class="">30,593.5</td><td class="">20.8%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">19,616.0</td><td class="">5.3%</td><td class="">19,383.3</td><td class="">5.3%</td><td class="">19,781.1</td><td class="">13.4%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">3,581.5</td><td class="">1.0%</td><td class="">3,629.6</td><td class="">1.0%</td><td class="">3,671.4</td><td class="">2.5%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">896.5</td><td class="">0.2%</td><td class="">901.2</td><td class="">0.2%</td><td class="">220.4</td><td class="">0.1%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">331.1</td><td class="">0.1%</td><td class="">311.2</td><td class="">0.1%</td><td class="">335.9</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">1,178.0</td><td class="">0.3%</td><td class="">1,186.7</td><td class="">0.3%</td><td class="">1,106.6</td><td class="">0.8%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">369,675.0</td><td class="">100.0%</td><td class="">366,856.0</td><td class="">100.0%</td><td class="">147,433.0</td><td class="">100.0%</td></tr>
+</table>
+<h4>xs_rob / sim_llvm</h4>
+<table><tr><th>pass</th><th>full ms</th><th>full %</th><th>cold ms</th><th>cold %</th><th>incremental ms</th><th>incremental %</th></tr>
+<tr class=""><td><code>inou.cgen.sim</code></td><td class="">2,601,044.7</td><td class="">87.2%</td><td class="">2,607,869.2</td><td class="">87.1%</td><td class="">1,158.1</td><td class="">1.4%</td></tr>
+<tr class=""><td><code>sim.hostbuild</code></td><td class="">297,341.6</td><td class="">10.0%</td><td class="">299,717.9</td><td class="">10.0%</td><td class="">32.9</td><td class="">0.0%</td></tr>
+<tr class=""><td><code>pass.upass</code></td><td class="">27,885.0</td><td class="">0.9%</td><td class="">27,828.4</td><td class="">0.9%</td><td class="">27,885.7</td><td class="">32.6%</td></tr>
+<tr class=""><td><code>pass.cprop</code></td><td class="">23,041.1</td><td class="">0.8%</td><td class="">23,237.8</td><td class="">0.8%</td><td class="">23,114.0</td><td class="">27.1%</td></tr>
+<tr class=""><td><code>lnast.tolg</code></td><td class="">17,122.0</td><td class="">0.6%</td><td class="">17,317.3</td><td class="">0.6%</td><td class="">17,156.1</td><td class="">20.1%</td></tr>
+<tr class=""><td><code>inou.prp</code></td><td class="">12,100.3</td><td class="">0.4%</td><td class="">12,067.2</td><td class="">0.4%</td><td class="">12,122.4</td><td class="">14.2%</td></tr>
+<tr class=""><td><code>inou.prp.imports</code></td><td class="">2,367.9</td><td class="">0.1%</td><td class="">2,379.9</td><td class="">0.1%</td><td class="">2,344.7</td><td class="">2.7%</td></tr>
+<tr class=""><td><code>sim.run</code></td><td class="">1,204.0</td><td class="">0.0%</td><td class="">1,175.2</td><td class="">0.0%</td><td class="">307.3</td><td class="">0.4%</td></tr>
+<tr class=""><td><code>lhd.run_id</code></td><td class="">208.7</td><td class="">0.0%</td><td class="">207.1</td><td class="">0.0%</td><td class="">208.9</td><td class="">0.2%</td></tr>
+<tr class="una"><td>(unattributed)</td><td class="">1,046.6</td><td class="">0.0%</td><td class="">1,512.9</td><td class="">0.1%</td><td class="">1,095.9</td><td class="">1.3%</td></tr>
+<tr class="total"><td><b>total (wall)</b></td><td class="">2,983,362.0</td><td class="">100.0%</td><td class="">2,993,313.0</td><td class="">100.0%</td><td class="">85,426.0</td><td class="">100.0%</td></tr>
+</table>
+<h3>6. &sect;8 gate — baseline <code>I1-sim-generation-reuse</code> &rarr; current <code>I1-sim-generation-reuse</code></h3>
+<p>only one config_id on this host yet — nothing to gate against. The baseline column does not move once set (&sect;9.6).</p>
