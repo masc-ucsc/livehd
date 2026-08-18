@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "abc_arith.hpp"  // arith::Adder_kind
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 #include "liberty_dff.hpp"     // livehd::liberty::Dff_cell
 #include "pass_partition.hpp"  // livehd::partition::Region_body
@@ -38,7 +40,7 @@ struct Map_options {
   // Keep an oversized register payload native even when map_register is true.
   // ABC represents every bit as a separate latch and some generated blocks put
   // thousands of state bits in one color; 0 disables the per-region guard.
-  uint64_t          register_max_bits = 0;
+  uint64_t          register_max_bits = 4096;
   // Optional explicit DFF cell name for register mapping (empty => auto-detect a
   // plain posedge D-flop from the Liberty).
   std::string       dff_cell;
@@ -112,19 +114,29 @@ struct Region_qor {
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts);
 
-// Drives the ABC frame across a whole decomposition. One Abc_Start/Stop per
-// run; read_lib once before the region loop; the current network is reset per
-// region. Each region body is rebuilt as a standard-cell netlist of 1-bit
-// blackbox Sub cells.
+// Drives the ABC frame across a whole decomposition. The frame and Liberty are
+// initialized on the first cache miss, then reused for the remaining regions.
+// An all-hit incremental run never starts ABC or parses Liberty. The current
+// network is reset per mapped region. Each region body is rebuilt as a
+// standard-cell netlist of 1-bit blackbox Sub cells.
 class Mapper {
 public:
-  explicit Mapper(const Map_options& opts) : opts_(opts) {}
+  explicit Mapper(const Map_options& opts) : startup_opts_(opts), opts_(opts) {}
+  ~Mapper() { stop(); }
 
-  bool start();  // Abc_Start + read_lib (false + diag on failure)
-  void stop();   // Abc_Stop
+  // Idempotent lazy initialization: Abc_Start + read_lib on the first miss.
+  // The destructor is a backstop for diagnostics that unwind a region callback.
+  bool start();
+  void stop();  // Abc_Stop
   void map_region(const livehd::partition::Region_body& rb);
 
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
+
+  // Whole-design flatten: the run maps ONE region and the emitted netlist is
+  // contracted to hold exactly one module (lhd_abc_flat_test). Suppresses the
+  // shared input-bit splitter def, which would be a second module -- with a
+  // single region there is nothing to share it with anyway.
+  void set_flat(bool f) { flat_ = f; }
 
   // Incremental mapping (2opt-incr A+C): with a cache attached, map_region
   // digests each region first and clones the previously mapped netlist on a
@@ -140,6 +152,8 @@ public:
 
   // QoR rows accumulated by map_region, one per successfully mapped region.
   [[nodiscard]] const std::vector<Region_qor>& qor() const { return qor_; }
+  // False only when every region was restored from the incremental cache.
+  [[nodiscard]] bool                           abc_started() const { return lib_loaded_; }
 
   // Set when a region was refused by memory admission. map_region cannot throw
   // (a throw out of the region callback would skip stop(), leaking the ABC
@@ -155,7 +169,11 @@ private:
   // translation got, so the diagnostic can project the finished size.
   bool over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total);
 
+  // Startup uses the run-level options, not a region's temporary overrides
+  // (notably register_max_bits can turn register mapping off for one region).
+  Map_options                                   startup_opts_;
   Map_options                                   opts_;
+  bool                                          flat_       = false;
   void*                                         pabc_       = nullptr;  // Abc_Frame_t*
   bool                                          lib_loaded_ = false;
   // Plain posedge D-flop found in the Liberty (register mapping target). Empty
@@ -168,6 +186,37 @@ private:
   Region_opts_map                               region_opts_cli_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
+  // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared
+  // by all of its colored Region_body callbacks, so doing it once per region is
+  // an accidental O(regions * def_nodes) cost (528 full RenameBuffer walks).
+  absl::flat_hash_set<hhds::Graph*>             rems_rewritten_graphs_;
+  // ABC is bit-level, but a partition boundary is a packed LGraph bus.  A
+  // naïve read-back emits one constant SRA per input bit in EVERY region. Rob
+  // has hundreds of regions reading the same 10k-bit bus, so that duplicates
+  // millions of identical unpacking nodes. Keep one native unpacker definition
+  // per width and instantiate it from each mapped region instead.
+  //
+  // The def is all-or-nothing (every declared output pin must exist on the
+  // instance), so a region uses it only when it demands most of the bus --
+  // see the three gates in map_region's `input_bit`.
+  struct Input_splitter {
+    std::shared_ptr<hhds::GraphIO> io;
+    std::vector<hhds::Port_id>     bit_port;
+  };
+  absl::flat_hash_map<int, Input_splitter> input_splitters_;
+
+  // Mio gate descriptors are shared by every instance of a Liberty cell. Rob
+  // contains tens of millions of mapped cell instances, so reconstructing the
+  // same pin-name vector and repeating the library name lookup for each one is
+  // measurable wall time. Key by the stable Mio_Gate pointer owned by ABC's
+  // run-level Liberty library (kept opaque here so abc headers stay in .cpp).
+  struct Cell_desc {
+    std::shared_ptr<hhds::GraphIO> io;
+    std::string                    name;
+    std::string                    output_name;
+    std::vector<std::string>       input_names;
+  };
+  absl::flat_hash_map<const void*, Cell_desc> cell_descs_;
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;

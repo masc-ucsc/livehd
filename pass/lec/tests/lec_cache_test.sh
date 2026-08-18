@@ -50,7 +50,7 @@ C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
-  OUT=$("$LHD" lec "$@" --top top --set formal.lec.hier=true --workdir "$WD" 2>&1); RC=$?
+  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec "$@" --top top --set formal.lec.hier=true --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.
@@ -58,6 +58,7 @@ H --ref "lg:$WORK/A" --impl "lg:$WORK/B"
 if [ "$RC" -ne 0 ]; then echo "FAIL: cold A/B rc=$RC (want PROVEN)"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[cache\]: 0 hit(s), 3 stored"; then echo "FAIL: cold run did not store 3 verdicts"; fail=1
 elif [ ! -f "$WD/formal_cache.json" ]; then echo "FAIL: formal_cache.json not written"; fail=1
+elif ! echo "$OUT" | grep -q "\[LEC_FOREST "; then echo "FAIL: cold solver run did not build the clock forest"; fail=1
 else echo "ok: cold run stores 3 verdicts"; fi
 
 # 2) Identical re-run: every def settles from the cache, no solver at all.
@@ -67,6 +68,8 @@ if [ "$RC" -ne 0 ]; then echo "FAIL: warm A/B rc=$RC"; fail=1
 # what this case pins is that every def settled FROM THE CACHE with no solver.
 elif ! echo "$OUT" | grep -qE "3/3 def\(s\) proven .*\(3 via cache, 0 via semdiff, 0 via solver\)"; then
   echo "FAIL: warm re-run not fully cache-settled"; echo "$OUT" | grep "lec\[hier\]"; fail=1
+elif echo "$OUT" | grep -q "\[LEC_FOREST "; then
+  echo "FAIL: all-hit warm run built a solver-only clock forest"; fail=1
 else echo "ok: identical re-run is 3/3 via cache"; fi
 
 # 3) Edit ONE def (mid, in B2): leaf is BELOW the edit so its digest is

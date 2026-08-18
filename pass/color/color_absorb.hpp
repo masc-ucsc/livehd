@@ -26,9 +26,9 @@
 namespace livehd::color {
 
 struct Absorb_stats {
-  uint64_t defs_absorbed = 0;   // distinct defs that were below min
-  uint64_t sites_inlined = 0;   // instantiation sites folded (>= defs_absorbed)
-  uint64_t ge_duplicated = 0;   // GE added by inlining a def at more than one site
+  uint64_t defs_absorbed = 0;  // distinct defs that were below min
+  uint64_t sites_inlined = 0;  // instantiation sites folded (>= defs_absorbed)
+  uint64_t ge_duplicated = 0;  // GE added by inlining a def at more than one site
 };
 
 // Inline every reachable bodied def whose TOTAL gate-equivalent weight (its own
@@ -36,6 +36,10 @@ struct Absorb_stats {
 // `top`. Children-first, so a def is only ever inlined once its own small
 // children are already part of its body -- which is what lets the underlying
 // transform stay single-level.
+//
+// Content-addressed `pat_*` defs made by color.reduce are never absorbed: their
+// boundary is the explicit sharing contract and must survive a following synth
+// coloring pass.
 //
 // `top` itself is never absorbed. Body-less defs (liberty cells, external IP,
 // fproperty/lgassert markers) are skipped: there is nothing to inline, and they

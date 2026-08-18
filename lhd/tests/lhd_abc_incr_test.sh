@@ -81,12 +81,14 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
 compile_and_color lg0
 abc_incr lg0 net0
 expect_incr 0 3 "cold run"
+[ "$(incr_field abc_started)" = 1 ] || fail "cold run did not start ABC"
 [ -f "$W/wabc/abc_cache/abc_cache.json" ] || fail "cache metadata not persisted under <workdir>/abc_cache"
 lec_gate net0 lg0 "cold mapping"
 
 # --- 2. NoChange: same design, fresh out dir => all hits, zero ABC ----------
 abc_incr lg0 net1
 expect_incr 3 0 "NoChange re-run"
+[ "$(incr_field abc_started)" = 0 ] || fail "all-hit run still started ABC/read Liberty"
 run compile lg:"$W/net1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
 diff -r "$W/net0v" "$W/net1v" >/dev/null || fail "warm clone differs from the cold mapping"
 echo "PASS: NoChange run is all hits and byte-identical Verilog"
@@ -98,11 +100,13 @@ grep -q "o = a + b + 1" "$W/dut.prp" || fail "edit did not apply"
 compile_and_color lg1
 abc_incr lg1 net2
 expect_incr 2 1 "top-only edit"
+[ "$(incr_field abc_started)" = 1 ] || fail "one-miss edit did not start ABC"
 lec_gate net2 lg1 "edited design (2 cached + 1 fresh region)"
 
 # --- 4. the edited design is now cached too ----------------------------------
 abc_incr lg1 net3
 expect_incr 3 0 "NoChange after the edit"
+[ "$(incr_field abc_started)" = 0 ] || fail "all-hit edited run still started ABC/read Liberty"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # cache=false: no cache is touched and the envelope carries no counters.

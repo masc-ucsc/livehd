@@ -190,6 +190,9 @@ std::string Mapper::resolve_recipe() const {
 }
 
 bool Mapper::start() {
+  if (pabc_ != nullptr) {
+    return lib_loaded_;
+  }
   Abc_Start();
   pabc_ = Abc_FrameGetGlobalFrame();
   if (pabc_ == nullptr) {
@@ -206,10 +209,10 @@ bool Mapper::start() {
   // -s skips multi-output cells (sky130 fa/ha/...): the gate read-back speaks
   // single-output Mio gates only — a multi-output supergate would previously
   // read back as a null-pData node and silently collapse its cone to const0.
-  auto cmd = std::string{"read_lib -s "} + opts_.library;
+  auto cmd = std::string{"read_lib -s "} + startup_opts_.library;
   if (Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
     livehd::diag::err("pass.abc", "read-lib", "unsupported")
-        .msg("ABC could not read the Liberty library '{}'", opts_.library)
+        .msg("ABC could not read the Liberty library '{}'", startup_opts_.library)
         .fatal();
     return false;
   }
@@ -219,13 +222,13 @@ bool Mapper::start() {
   // read_lib already dropped it, so this is a separate text scan). A missing DFF
   // cell is not fatal — the read-back keeps flops native (the same shape as
   // register=false) so the netlist stays correct, just not fully cell-mapped.
-  if (opts_.map_register) {
-    dff_ = liberty::find_dff_cell(opts_.library, opts_.dff_cell);
+  if (startup_opts_.map_register) {
+    dff_ = liberty::find_dff_cell(startup_opts_.library, startup_opts_.dff_cell);
     if (!dff_.has_value()) {
       livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
           .msg("pass.abc register=true: no {} in '{}' — keeping flops native (no DFF-cell mapping)",
-               opts_.dff_cell.empty() ? "plain posedge D-flop cell" : std::format("cell '{}'", opts_.dff_cell),
-               opts_.library)
+               startup_opts_.dff_cell.empty() ? "plain posedge D-flop cell" : std::format("cell '{}'", startup_opts_.dff_cell),
+               startup_opts_.library)
           .emit();
     }
   }
@@ -485,7 +488,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                                            mib(cost::reserve_bytes()));
   refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB){}, {}",
+                           "(was {} MiB){}, {}",
       region,
       blasted,
       total,
@@ -493,7 +496,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss),
       mib(rss_before),
       over_now ? std::string{}
-               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
+                                    : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
       budget_desc);
   return true;
 }
@@ -568,6 +571,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const auto t_start = std::chrono::steady_clock::now();
   const auto since
       = [&t_start] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(); };
+  const auto trace_stage = [&](std::string_view stage) {
+    if (!opts_.verbose) {
+      return;
+    }
+    std::print("[pass.abc] region '{}': stage {} at {:.0f} ms\n", rb.module_name, stage, since());
+    std::fflush(stdout);
+  };
 
   // Per-region options are temporary (every helper below reads opts_) and are
   // restored on every exit path.
@@ -619,11 +629,25 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   apply_region_overrides(rb);
   if (opts_.verbose) {
+    uint64_t input_bits  = 0;
+    uint64_t output_bits = 0;
+    for (const auto& port : rb.inputs) {
+      input_bits += static_cast<uint64_t>(std::max(port.bits, 1));
+    }
+    for (const auto& port : rb.outputs) {
+      output_bits += static_cast<uint64_t>(std::max(port.bits, 1));
+    }
     std::print("[pass.abc] mapping region '{}': {} nodes, {} GE, {} register bits\n",
                rb.module_name,
                input_nodes,
                input_ge,
                register_bits);
+    std::print("[pass.abc] region '{}': {} input port(s)/{} bits, {} output port(s)/{} bits\n",
+               rb.module_name,
+               rb.inputs.size(),
+               input_bits,
+               rb.outputs.size(),
+               output_bits);
     std::fflush(stdout);
   }
 
@@ -689,6 +713,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     incr_->note_miss();
+  }
+
+  // Do not pay Abc_Start/read_lib for an all-hit rebuild. The cache salt has
+  // already folded the Liberty content and run-level mapping modes, while the
+  // exact pre-body comparison authorized the reused result. Only a real miss
+  // needs the mapper process and parsed library.
+  if (!start()) {
+    return;  // diagnostic already emitted
   }
 
   auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
@@ -813,7 +845,32 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     hhds::Pin_class           value;
     std::vector<Set_mask_run> runs;
   };
-  absl::flat_hash_map<hhds::Node_class, Set_mask_alias> set_mask_aliases;
+  absl::flat_hash_map<hhds::Node_class, Set_mask_alias>               set_mask_aliases;
+  absl::node_hash_map<hhds::Pin_class, absl::flat_hash_set<int>>      resolving_wiring_bit;
+  // Decoded lane table per Concat node. concat_lanes() walks inp_edges and
+  // allocates a map + a vector on every call, and the lazy path asks for one
+  // bit at a time -- without this the decode (and the lane-layout check, a
+  // per-NODE property) would run once per demanded BIT. node_hash_map, not
+  // flat: the arm holds a reference into this table across a recursive
+  // abc_bit() that can decode a nested concat and rehash it.
+  absl::node_hash_map<hhds::Node_class, std::vector<gu::Concat_lane>> concat_lanes_of;
+
+  // Region inputs are bit-demanded, not eagerly exploded. Wide packed-state
+  // ports often expose tens of thousands of bits while this region reads only
+  // a small slice; creating every unused PI also forces readback to build an
+  // equally large selector forest. `pi_order` records the exact lazy creation
+  // order, so the mapped PI readback remains positional and deterministic.
+  enum class Pi_kind : uint8_t { region_input, bbox_output };
+  struct Pi_origin {
+    Pi_kind kind;
+    size_t  index;
+  };
+  std::vector<std::pair<size_t, int>>          pi_order;
+  std::vector<Pi_origin>                       all_pi_order;
+  absl::flat_hash_map<hhds::Pin_class, size_t> region_input_index;
+  for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
+    region_input_index.emplace(rb.inputs[pi].src_driver, pi);
+  }
 
   // --- bit i of an original driver pin, with sign/zero extension past width ---
   std::function<Abc_Obj_t*(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Abc_Obj_t* {
@@ -839,8 +896,33 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       slots[eff] = net;
       return net;
     }
+    if (auto it = region_input_index.find(drv); it != region_input_index.end()) {
+      const size_t pi  = it->second;
+      auto*        obj = Abc_NtkCreatePi(manNtk);
+      auto*        net = Abc_NtkCreateNet(manNtk);
+      auto         nm  = std::format("{}_b{}", rb.inputs[pi].name, eff);
+      Abc_ObjAssignName(net, const_cast<char*>(nm.c_str()), nullptr);
+      Abc_ObjAddFanin(net, obj);
+      slots[eff] = net;
+      all_pi_order.push_back({Pi_kind::region_input, pi_order.size()});
+      pi_order.emplace_back(pi, eff);
+      return net;
+    }
     auto master = drv.get_master_node();
     if (gu::type_op_of(master) == Ntype_op::Set_mask) {
+      auto& resolving = resolving_wiring_bit[drv];
+      if (!resolving.insert(eff).second) {
+        if (!unsupported) {
+          livehd::diag::err("pass.abc", "combinational-cycle", "unsupported")
+              .msg("pass.abc: region '{}': bit {} of '{}' has a combinational wiring cycle",
+                   rb.module_name,
+                   eff,
+                   gu::debug_name(master))
+              .emit();
+          unsupported = true;
+        }
+        return abc_const_bit(false);
+      }
       auto [it, inserted] = set_mask_aliases.try_emplace(master);
       auto& alias         = it->second;
       if (inserted) {
@@ -884,27 +966,93 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         if (eff >= run.lo && eff < run.hi) {
           auto* net  = abc_bit(alias.value, run.value_base + eff - run.lo);
           slots[eff] = net;
+          resolving.erase(eff);
           return net;
         }
       }
       auto* net  = abc_bit(alias.base, eff);
       slots[eff] = net;
+      resolving.erase(eff);
+      return net;
+    }
+    if (gu::type_op_of(master) == Ntype_op::Concat) {
+      auto& resolving = resolving_wiring_bit[drv];
+      if (!resolving.insert(eff).second) {
+        if (!unsupported) {
+          livehd::diag::err("pass.abc", "combinational-cycle", "unsupported")
+              .msg("pass.abc: region '{}': bit {} of '{}' has a combinational wiring cycle",
+                   rb.module_name,
+                   eff,
+                   gu::debug_name(master))
+              .emit();
+          unsupported = true;
+        }
+        return abc_const_bit(false);
+      }
+      auto [lane_it, lane_new] = concat_lanes_of.try_emplace(master);
+      if (lane_new) {
+        lane_it->second = gu::concat_lanes(master);
+        if (!lane_it->second.empty()) {
+          // A lane's window width is an explicit const operand precisely
+          // because it is NOT recoverable from its driver, so an overlapping or
+          // receding window would shift every lane ABOVE the bad one -- a
+          // silent miscompile. Once per node, on its first demanded bit.
+          const auto lane_bad = gu::concat_lane_violation(lane_it->second);
+          I(lane_bad.empty(), lane_bad.c_str());
+        }
+      }
+      const auto& lanes = lane_it->second;
+      if (lanes.empty()) {
+        // Empty means MALFORMED (odd/missing pin, non-const or non-positive
+        // lane width), never "zero lanes" -- fail closed like the non-constant
+        // mask/position arms rather than emitting a const0 bus.
+        if (!unsupported) {
+          livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
+              .msg("pass.abc: malformed concat (missing lane operand, or a non-constant lane width) in region '{}'", rb.module_name)
+              .emit();
+          unsupported = true;
+        }
+        resolving.erase(eff);
+        return abc_const_bit(false);
+      }
+      Abc_Obj_t* net = nullptr;
+      for (const auto& lane : lanes) {
+        if (eff < lane.offset || eff >= lane.offset + lane.width) {
+          continue;
+        }
+        const int bit = eff - lane.offset;
+        if (gu::is_const_pin(lane.value)) {
+          net = abc_bit(lane.value, bit);
+        } else {
+          const int ew = std::max(1, gu::real_width(lane.value));
+          net          = bit < ew ? abc_bit(lane.value, bit)
+                                  : (gu::is_unsign(lane.value) ? abc_const_bit(false) : abc_bit(lane.value, ew - 1));
+        }
+        break;
+      }
+      if (net == nullptr) {
+        net = abc_const_bit(false);  // output stamp above the concat contract width
+      }
+      slots[eff] = net;
+      resolving.erase(eff);
       return net;
     }
     // A region-internal node not yet materialized (a genuine node-level cycle
     // the fixpoint scheduler could not resolve) or an unexpected boundary:
-    // emit a constant 0 so the netlist stays structurally valid, and say so —
-    // a silent const0 here miscompiles the whole downstream cone. Suppressed
-    // once the region is already known-unsupported (the producer legitimately
-    // wrote no slots after its own error).
+    // use a temporary constant only to let translation unwind, but reject the
+    // region. Accepting that placeholder would silently miscompile the whole
+    // downstream cone. Suppress follow-on diagnostics once the first missing
+    // producer has identified the region-level failure.
     if (!unsupported) {
-      livehd::diag::warn("pass.abc", "unmaterialized-driver", "internal")
-          .msg("pass.abc: region '{}': bit {} of driver '{}' (node op {}) read before it was materialized — emitted const0",
+      livehd::diag::err("pass.abc", "unmaterialized-driver", "internal")
+          .msg("pass.abc: region '{}': bit {} of driver '{}' (node op {}) could not be materialized",
                rb.module_name,
                eff,
                gu::debug_name(drv.get_master_node()),
                Ntype::get_name(gu::type_op_of(drv.get_master_node())))
+          .hint("the colored region contains a combinational cycle or an invalid boundary; refusing to emit a wrong netlist")
           .emit();
+      unsupported = true;
     }
     auto* net  = abc_const_bit(false);
     slots[eff] = net;
@@ -951,22 +1099,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   ops.or_fn  = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '|'); };
   ops.xor_fn = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '^'); };
 
-  // --- region inputs -> per-bit ABC PIs (creation order == readback order) ---
-  std::vector<std::pair<size_t, int>> pi_order;  // PI index -> (input port, bit)
-  for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
-    const auto& port = rb.inputs[pi];
-    int         w    = port.bits == 0 ? 1 : port.bits;
-    for (int b = 0; b < w; ++b) {
-      auto* obj = Abc_NtkCreatePi(manNtk);
-      auto* net = Abc_NtkCreateNet(manNtk);
-      auto  nm  = std::format("{}_b{}", port.name, b);
-      Abc_ObjAssignName(net, const_cast<char*>(nm.c_str()), nullptr);
-      Abc_ObjAddFanin(net, obj);
-      bitnet[port.src_driver][b] = net;
-      pi_order.emplace_back(pi, b);
-    }
-  }
-
   // --- sequential: each region Flop -> N 1-bit ABC latches (seq=true only) ---
   // The latch output (Q) seeds bitnet so the combinational cells read it as a
   // source; the latch input (D) is wired to the folded next-state cone AFTER the
@@ -1008,7 +1140,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         rb.body->get_input_pin(ait->second).connect_sink(gu::setup_sink_by_name(node, "a"));
       }
       gu::create_const(*rb.body, gu::hydrate_const(b)).connect_sink(gu::setup_sink_by_name(node, "b"));
-      auto out = node.create_driver_pin(0);
+      auto out  = node.create_driver_pin(0);
       int  bits = 1;
       for (const auto& port : rb.outputs) {
         bits = std::max(bits, port.bits);
@@ -1024,15 +1156,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         out.connect_sink(rb.body->get_output_pin(port.name));
       }
       Region_qor q;
-      q.module       = rb.module_name;
-      q.color        = rb.color;
-      q.input_nodes  = input_nodes;
-      q.input_ge     = input_ge;
-      q.gates        = 0;
-      q.area         = 0;
-      q.delay        = 0;
-      q.cache        = "miss";
-      q.ms           = since();
+      q.module      = rb.module_name;
+      q.color       = rb.color;
+      q.input_nodes = input_nodes;
+      q.input_ge    = input_ge;
+      q.gates       = 0;
+      q.area        = 0;
+      q.delay       = 0;
+      q.cache       = "miss";
+      q.ms          = since();
       qor_.push_back(std::move(q));
       std::print("[pass.abc] region '{}': constant SHL kept as native wiring, {:.0f} ms\n", rb.module_name, since());
       Abc_NtkDelete(manNtk);
@@ -1043,10 +1175,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   std::vector<Seq_flop>                 flops;
   absl::flat_hash_set<hhds::Node_class> clk_demoted;  // registers demoted to boundary: clock from region-internal logic
   if (opts_.map_register) {
-    for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
-      if (!region.contains(n)) {
-        continue;
-      }
+    for (const auto& n : rb.nodes) {
       if (!gu::is_type_flop(n)) {
         continue;
       }
@@ -1251,6 +1380,45 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                  shifts.size());
     }
   }
+  // A wide packed-bus assembler exported directly by the region is also
+  // wiring, not a Boolean cone. Keeping it as a native boundary avoids an ABC
+  // PO for every bit of every exported packed bus (Rob c33: 27.7M interface
+  // bits for only 19.8k GE). Its narrow computed lane inputs still become ABC
+  // POs, while wide base/region-input lanes reconnect natively below.
+  std::vector<hhds::Node_class> exported_wiring;
+  for (const auto& port : rb.outputs) {
+    const auto n            = port.src_driver.get_master_node();
+    const auto op           = gu::type_op_of(n);
+    const bool constant_shl = op == Ntype_op::SHL && gu::is_const_pin(gu::get_driver_of_sink_name(n, "b"));
+    const bool wide_pack    = node_output_width(n) >= 4096 && (op == Ntype_op::Concat || op == Ntype_op::Set_mask);
+    if (!region.contains(n) || (!constant_shl && !wide_pack)) {
+      continue;
+    }
+    if (native_wiring.insert(n).second) {
+      exported_wiring.push_back(n);
+    }
+  }
+  for (size_t head = 0; head < exported_wiring.size(); ++head) {
+    for (const auto& e : exported_wiring[head].inp_edges()) {
+      if (e.driver.is_invalid() || gu::is_const_pin(e.driver)) {
+        continue;
+      }
+      const auto parent = e.driver.get_master_node();
+      const auto op     = gu::type_op_of(parent);
+      if (!region.contains(parent) || node_output_width(parent) < 4096 || (op != Ntype_op::Concat && op != Ntype_op::Set_mask)) {
+        continue;
+      }
+      if (native_wiring.insert(parent).second) {
+        exported_wiring.push_back(parent);
+      }
+    }
+  }
+  if (opts_.verbose && !exported_wiring.empty()) {
+    std::print("[pass.abc] region '{}': kept {} exported packed-wiring node(s) native including ancestors\n",
+               rb.module_name,
+               exported_wiring.size());
+  }
+
   if (opts_.verbose) {
     std::fflush(stdout);
   }
@@ -1293,14 +1461,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // clock cone, by contrast, IS genuine logic and does cross as a PO.
   // Convert the trivially-mappable remainders BEFORE the boundary scan, so the
   // refusal below only fires for a shape that genuinely has no gate translation.
-  rewrite_trivial_rems(rb.src);
+  if (rems_rewritten_graphs_.insert(rb.src).second) {
+    rewrite_trivial_rems(rb.src);
+  }
 
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
-  for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
-    if (!region.contains(n)) {
-      continue;
-    }
+  for (const auto& n : rb.nodes) {
     auto       op             = gu::type_op_of(n);
     // A flop in a !seq (combinational-only) map is kept as a native boundary,
     // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
@@ -1370,7 +1537,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (w == 0) {
         w = 1;
       }
-      bool needs_abc = !native_wiring.contains(n);
+      // A one-node native boundary has no combinational consumer inside this
+      // region. Its output can reconnect straight to the region output; making
+      // one ABC PI/PO buffer per bit is pure overhead (Rob has 20k--42k-bit
+      // register-only regions).
+      bool needs_abc = rb.nodes.size() != 1 && !native_wiring.contains(n);
       if (!needs_abc) {
         for (const auto& e : op_pin.out_edges()) {
           const auto sink_node = e.sink.get_master_node();
@@ -1391,6 +1562,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         auto* net = Abc_NtkCreateNet(manNtk);
         Abc_ObjAddFanin(net, obj);
         slots[b] = net;
+        all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
         bbox_pi.emplace_back(bb_idx, oi, b);
       }
     }
@@ -1424,22 +1596,21 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // on the DINO top, where a wide packed-bus Get_mask was read by an Sra a
   // thousand nodes before the Get_mask was visited). A single pass would then
   // read the unmaterialized operand as const0 and silently miscompile the
-  // whole cone. Schedule to a FIXPOINT first: a node is ready when every comb
-  // operand is a constant or already materialized (seeded boundary or an
-  // earlier-blasted node); an acyclic region always converges, and a stuck
-  // remainder (a genuine node-level cycle) is appended in traversal order so
-  // abc_bit's unmaterialized-driver diagnostic pinpoints the const0 reads.
+  // whole cone. Schedule with a dependency queue: a node is ready when every
+  // comb operand is a constant, a region input, a seeded boundary, or an
+  // earlier-blasted node. A repeated whole-pending-list fixpoint is quadratic
+  // on reverse-ordered cones (Rob has 12k-node regions); the queue visits every
+  // dependency once. A stuck remainder (a genuine node-level cycle or broken
+  // boundary) is appended in traversal order so abc_bit's unmaterialized-driver
+  // diagnostic pinpoints the const0 reads.
   std::vector<hhds::Node_class> blast_order;
   {
     std::vector<hhds::Node_class> pending;
-    for (auto n : rb.src->body().nodes(hhds::Node_order::forward)) {
-      if (!region.contains(n)) {
-        continue;
-      }
+    for (const auto& n : rb.nodes) {
       auto op = gu::type_op_of(n);
       if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Div || op == Ntype_op::Rem
           || native_wiring.contains(n)) {
-        continue;  // blackbox boundary (Sub instance / memory / divider / remainder) -- handled separately
+        continue;  // native boundary -- never eagerly bit-blasted
       }
       if (gu::is_type_flop(n)) {
         continue;  // flop: a 1-bit latch in seq mode, a native boundary in !seq mode -- never bit-blasted
@@ -1454,37 +1625,105 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     for (const auto& kv : bitnet) {
       ready.insert(kv.first);
     }
-    auto operands_ready = [&](const hhds::Node_class& n) -> bool {
+    absl::flat_hash_map<hhds::Node_class, size_t>                       unresolved;
+    absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Node_class>> waiters;
+    std::vector<hhds::Node_class>                                       queue;
+    unresolved.reserve(pending.size());
+    waiters.reserve(pending.size());
+    queue.reserve(pending.size());
+    for (const auto& n : pending) {
+      size_t count = 0;
       for (const auto& e : n.inp_edges()) {
         const auto& d = e.driver;
-        if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d)) {
+        if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d) || region_input_index.contains(d)) {
           continue;
         }
-        return false;
+        ++count;
+        waiters[d].push_back(n);
       }
-      return true;
-    };
+      unresolved.emplace(n, count);
+      if (count == 0) {
+        queue.push_back(n);
+      }
+    }
     blast_order.reserve(pending.size());
-    while (!pending.empty()) {
-      std::vector<hhds::Node_class> next;
-      next.reserve(pending.size());
+    size_t scheduled_count = 0;
+    for (size_t head = 0; head < queue.size(); ++head) {
+      const auto n = queue[head];
+      ++scheduled_count;
+      // Concat has no Boolean logic. Keep it in this dependency queue so all
+      // lane producers precede its consumers, but resolve only demanded bits
+      // through abc_bit instead of eagerly copying every bit of every lane.
+      if (gu::type_op_of(n) != Ntype_op::Concat) {
+        blast_order.push_back(n);
+      }
+      absl::flat_hash_set<hhds::Pin_class> produced;
+      for (const auto& e : n.out_edges()) {
+        produced.insert(e.driver);
+      }
+      if (produced.empty()) {
+        produced.insert(n.create_driver_pin(0));
+      }
+      for (const auto& d : produced) {
+        ready.insert(d);
+        auto wit = waiters.find(d);
+        if (wit == waiters.end()) {
+          continue;
+        }
+        for (const auto& consumer : wit->second) {
+          auto& count = unresolved.at(consumer);
+          if (--count == 0) {
+            queue.push_back(consumer);
+          }
+        }
+      }
+    }
+    if (scheduled_count != pending.size()) {
+      std::vector<hhds::Node_class> stuck;
+      stuck.reserve(pending.size() - scheduled_count);
       for (const auto& n : pending) {
-        if (operands_ready(n)) {
-          blast_order.push_back(n);
-          ready.insert(n.create_driver_pin(0));
-        } else {
-          next.push_back(n);
+        if (unresolved.at(n) != 0) {
+          stuck.push_back(n);
         }
       }
-      if (next.size() == pending.size()) {
-        for (const auto& n : next) {
+      if (opts_.verbose) {
+        std::print("[pass.abc] region '{}': scheduler stuck with {} node(s); unresolved dependencies:\n",
+                   rb.module_name,
+                   stuck.size());
+        size_t shown = 0;
+        for (const auto& n : stuck) {
+          for (const auto& e : n.inp_edges()) {
+            const auto& d = e.driver;
+            if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d) || region_input_index.contains(d)) {
+              continue;
+            }
+            const auto dn = d.get_master_node();
+            std::print("  {} ({}) <- {} ({}) p{} region={} seeded={}\n",
+                       gu::debug_name(n),
+                       Ntype::get_name(gu::type_op_of(n)),
+                       gu::debug_name(dn),
+                       Ntype::get_name(gu::type_op_of(dn)),
+                       d.get_port_id(),
+                       region.contains(dn),
+                       bitnet.contains(d));
+            if (++shown == 32) {
+              break;
+            }
+          }
+          if (shown == 32) {
+            break;
+          }
+        }
+        std::fflush(stdout);
+      }
+      for (const auto& n : stuck) {
+        if (gu::type_op_of(n) != Ntype_op::Concat) {
           blast_order.push_back(n);
         }
-        break;
       }
-      pending = std::move(next);
     }
   }
+  trace_stage("scheduled");
   // Memory admission: sample our own RSS as the region is bit-blasted, and stop
   // before the ABC flow if this region will not fit. The first sample is at ~5%
   // of the work (early enough that a hopeless region dies cheaply), then every
@@ -1496,6 +1735,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   size_t         blasted     = 0;
 
   for (const auto& n : blast_order) {
+    if (opts_.verbose && blasted != 0 && blasted % 1000 == 0) {
+      std::print("[pass.abc] region '{}': blast {}/{} before {} at {:.0f} ms\n",
+                 rb.module_name,
+                 blasted,
+                 blast_total,
+                 Ntype::get_name(gu::type_op_of(n)),
+                 since());
+      std::fflush(stdout);
+    }
     if (!opts_.allow_oversize && ++blasted % sample_step == 0 && blasted >= blast_total / 20) {
       if (over_budget(rb.module_name, rss_before, blasted, blast_total)) {
         Abc_NtkDelete(manNtk);  // emit no partial result; work() raises refusal_ after stop()
@@ -1636,57 +1884,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         int from_bit = static_cast<int>(gu::hydrate_const(b_drv).to_just_i64());
         for (int b = 0; b < out_bits; ++b) {
           slots[b] = abc_bit(a_drv, std::min(b, from_bit));
-        }
-      }
-    } else if (op == Ntype_op::Concat) {
-      // out[offset_i + k] = lane_i[k] for k < w_i. Pure wiring: the output
-      // literals ALIAS the lane input literals, so a concat costs no AIG node
-      // at all (the cheapest arm here) — nothing to optimize or map.
-      //
-      // The lane widths MUST come from the shared decoder. A lane's window
-      // width is an explicit const operand precisely because it is NOT
-      // recoverable from its driver (bits_of is an upper bound that
-      // bitwidth/cprop are free to narrow, and the value's significant bits are
-      // narrower still); re-deriving it here would shift every lane ABOVE the
-      // one guessed wrong — a silent miscompile, not a build error.
-      const auto lanes = gu::concat_lanes(n);
-      if (lanes.empty()) {
-        // Empty means MALFORMED (odd/missing pin, non-const or non-positive
-        // width), never "zero lanes" — fail closed like the non-constant
-        // mask/position arms rather than emitting a const0 bus.
-        livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-            .msg("pass.abc: malformed concat (missing lane operand, or a non-constant lane width) in region '{}'", rb.module_name)
-            .emit();
-        unsupported = true;
-      } else {
-        const int  total    = gu::concat_total_width(lanes);  // already decoded above
-        const auto lane_bad = gu::concat_lane_violation(lanes);
-        I(lane_bad.empty(), lane_bad.c_str());
-        // abc_eff_bit, not abc_bit: a lane window wider than its driver's
-        // literal width must be filled the way the LEC reads that operand.
-        // A signed lane still
-        // sign-replicates, so a negative value lands as its two's-complement
-        // pattern (-1 at w=3 -> 0b111) exactly as the cell contract requires.
-        // Every lane, at its full declared window. The blast width is the CELL
-        // CONTRACT sum(w), never `out_bits`: the
-        // const sinks carry the intended bit spacing, and a stamp is not
-        // allowed to move a lane. This used to `break` on `pos >= out_bits`,
-        // which dropped the top lanes whenever anything narrowed the pin — and
-        // pass.bitfuzz deliberately STRIPS the stamp, leaving out_bits at the
-        // `== 0 -> 1` fallback and blasting a one-bit concat. `slots` is a map
-        // keyed by bit index, so there is no bound to stay inside.
-        for (const auto& l : lanes) {
-          for (int k = 0; k < l.width; ++k) {
-            slots[l.offset + k] = abc_eff_bit(l.value, k);
-          }
-        }
-        // Any over-stamped bits above sum(w) are known zero. One shared const0
-        // net: abc_const_bit builds an inverter per call, so a per-bit call
-        // would litter the AIG with dead gates.
-        const int fill_to = std::max(out_bits, total);
-        auto*     zero    = abc_const_bit(false);
-        for (int b = total; b < fill_to; ++b) {
-          slots[b] = zero;
         }
       }
     } else if (op == Ntype_op::Sum) {
@@ -2122,6 +2319,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Abc_NtkDelete(manNtk);
     return;
   }
+  trace_stage("blast-complete");
 
   // --- sequential: wire each latch's data-in (D) to the folded next-state ---
   // The native LGraph flop's next state is  reset? rval : (enable? din : Q).
@@ -2165,15 +2363,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   // --- region outputs -> per-bit ABC POs ---
-  std::vector<std::pair<size_t, int>> po_order;  // PO index -> (output port, bit)
-  std::vector<bool>                   direct_native_output(rb.outputs.size(), false);
+  std::vector<std::pair<size_t, int>>  po_order;  // PO index -> (output port, bit)
+  std::vector<bool>                    direct_native_output(rb.outputs.size(), false);
+  absl::flat_hash_set<hhds::Pin_class> direct_boundary_outputs;
+  bool                                 has_dummy_po = false;
+  for (const auto& bb : bboxes) {
+    for (const auto& out : bb.outs) {
+      if (!out.abc_bits) {
+        direct_boundary_outputs.insert(out.src_pin);
+      }
+    }
+  }
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
     const auto& port = rb.outputs[po];
-    if (native_wiring.contains(port.src_driver.get_master_node())) {
+    if (native_wiring.contains(port.src_driver.get_master_node()) || direct_boundary_outputs.contains(port.src_driver)) {
       direct_native_output[po] = true;
       continue;
     }
-    int         w    = port.bits == 0 ? 1 : port.bits;
+    int w = port.bits == 0 ? 1 : port.bits;
     for (int b = 0; b < w; ++b) {
       auto* value = abc_bit(port.src_driver, b);
       auto  nm    = std::format("__po{}_{}_b{}", po, port.name, b);
@@ -2192,6 +2399,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       po_order.emplace_back(po, b);
     }
   }
+  trace_stage("region-pos");
 
   // --- blackbox combinational inputs -> per-bit ABC POs (appended after the
   // region outputs so the region-output read-back stays index-aligned) ---
@@ -2229,6 +2437,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
   }
+  trace_stage("bbox-pos");
+
+  // A region made entirely of direct native boundaries has no real ABC
+  // outputs. ABC's dch implementation crashes on that empty network; retain a
+  // single unobserved constant PO as a mapper sentinel. Readback intentionally
+  // ignores it because it is absent from both po_order and bbox_po.
+  if (Abc_NtkPoNum(manNtk) == 0) {
+    has_dummy_po = true;
+    auto* value  = abc_const_bit(false);
+    auto* onet   = Abc_NtkCreateNet(manNtk);
+    char  name[] = "__livehd_dummy_po";
+    Abc_ObjAssignName(onet, name, nullptr);
+    Abc_ObjAddFanin(onet, Abc_ObjFanin0(value));
+    auto* obj = Abc_NtkCreatePo(manNtk);
+    Abc_ObjAddFanin(obj, onet);
+  }
 
   Abc_NtkFinalizeRead(manNtk);
   if (!Abc_NtkCheck(manNtk)) {
@@ -2236,18 +2460,25 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Abc_NtkDelete(manNtk);
     return;
   }
+  trace_stage("translated");
 
   // --- run the flow: logic -> optimize -> map ---
   auto* frame  = static_cast<Abc_Frame_t*>(pabc_);
   auto* pLogic = Abc_NtkToLogic(manNtk);
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
-  Abc_FrameSetCurrentNetwork(frame, pLogic);
+  // Regions are independent synthesis jobs, not interactive ABC undo steps.
+  // SetCurrentNetwork links the previous (potentially enormous) region as a
+  // backup; carrying that network into every later job caused tiny regions to
+  // stall after Rob's 10k-bit pack.  Replace deletes the old current network
+  // while retaining the parsed Liberty library and command aliases.
+  Abc_FrameReplaceCurrentNetwork(frame, pLogic);
   auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
   }
+  trace_stage("flow-complete");
 
   // --- QoR read-back (2opt-freq A): critical delay/area/gates from the Liberty
   // pin-to-pin data while the flow's result is still a mapped LOGIC network
@@ -2302,6 +2533,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     return;
   }
+  trace_stage("netlist-ready");
 
   // --- read back: each mapped gate -> a 1-bit blackbox Sub in the body ---
   auto* body = rb.body;
@@ -2329,25 +2561,118 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
 
   // find-or-declare a 1-bit blackbox cell def (Liberty pins) in the out library
-  auto blackbox_io = [&](Mio_Gate_t* g) -> std::shared_ptr<hhds::GraphIO> {
-    std::string cell{Mio_GateReadName(g)};
-    if (auto existing = outlib_->find_io(cell)) {
-      return existing;
+  auto cell_desc = [&](Mio_Gate_t* g) -> Cell_desc& {
+    if (auto it = cell_descs_.find(g); it != cell_descs_.end()) {
+      return it->second;
     }
-    auto          io  = outlib_->create_io(cell);
+    auto [it, inserted] = cell_descs_.try_emplace(g);
+    I(inserted);
+    auto& desc       = it->second;
+    desc.name        = Mio_GateReadName(g);
+    desc.output_name = Mio_GateReadOutName(g);
+    desc.io          = outlib_->find_io(desc.name);
+    const bool fresh = !desc.io;
+    if (fresh) {
+      desc.io = outlib_->create_io(desc.name);
+    }
     hhds::Port_id pid = 1;
     for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
-      io->add_input(Mio_PinReadName(pin), pid++);
-      io->set_bits(Mio_PinReadName(pin), 1);
+      desc.input_names.emplace_back(Mio_PinReadName(pin));
+      if (fresh) {
+        desc.io->add_input(desc.input_names.back(), pid);
+        desc.io->set_bits(desc.input_names.back(), 1);
+      }
+      ++pid;
     }
-    io->add_output(Mio_GateReadOutName(g), pid++);
-    io->set_bits(Mio_GateReadOutName(g), 1);
-    return io;
+    if (fresh) {
+      desc.io->add_output(desc.output_name, pid);
+      desc.io->set_bits(desc.output_name, 1);
+    }
+    return desc;
   };
 
-  // lazily build bit b of a body input pin (Get_mask bit-select; pin itself if 1-bit)
+  // Select one bit without materializing the one-hot bigint `(1 << b)` used by
+  // Get_mask. For a one-bit result, `(bus >> b)` is exactly bit b for signed
+  // and unsigned buses alike; stamping the result to one bit discards the
+  // arithmetic-fill tail. This keeps a W-bit boundary's selector constants
+  // O(W log W) instead of O(W^2) serialized bigint storage.
+  auto extract_body_bit = [&](const hhds::Pin_class& bus, int b) {
+    auto shift = gu::create_typed_node(*body, Ntype_op::SRA);
+    bus.connect_sink(gu::setup_sink_by_name(shift, "a"));
+    gu::create_const(*body, *Dlop::create_integer(b)).connect_sink(gu::setup_sink_by_name(shift, "b"));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 1);
+    gu::set_unsign(out);
+    return out;
+  };
+
+  // Lazily build bit b of a body input pin (compact shift-select; pin itself if 1-bit).
   std::vector<std::vector<hhds::Pin_class>> in_bit(rb.inputs.size());
-  auto                                      input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
+  std::vector<hhds::Pin_class>              body_input_pin(rb.inputs.size());
+  std::vector<hhds::Node_class>             body_input_splitter(rb.inputs.size());
+  for (size_t port_idx = 0; port_idx < rb.inputs.size(); ++port_idx) {
+    body_input_pin[port_idx] = body->get_input_pin(rb.inputs[port_idx].name);
+  }
+  // Bits of each region input the mapping actually reads. `pi_order` is FINAL
+  // here -- abc_bit appends to it during bit-blast and creates each (port, bit)
+  // PI at most once -- so the read-back knows every port's exact demand before
+  // it materializes anything. Without it the unpacker choice below would have
+  // to assume the whole bus is read.
+  std::vector<int> port_demand(rb.inputs.size(), 0);
+  for (const auto& [demanded_pi, demanded_bit] : pi_order) {
+    (void)demanded_bit;
+    ++port_demand[demanded_pi];
+  }
+  auto shared_input_splitter = [&](int width) -> Input_splitter& {
+    if (auto it = input_splitters_.find(width); it != input_splitters_.end()) {
+      return it->second;
+    }
+
+    Input_splitter split;
+    auto           name = std::format("__livehd_abc_input_bits_{}", width);
+    split.bit_port.resize(width);
+    // FIND-or-create, exactly like blackbox_io above: an incremental cache HIT
+    // re-declares the splitter defs a reused body references, and a second
+    // pass.abc into the same output library sees the ones this run created.
+    // A second create_io under a live name aborts the library.
+    split.io         = outlib_->find_io(name);
+    const bool fresh = !split.io;
+    if (fresh) {
+      split.io = outlib_->create_io(name);
+      split.io->add_input("a", 1);
+      split.io->set_bits("a", width);
+    }
+    // HHDS stores a node's nonzero-port pins in ascending order. Adding ports
+    // in descending order always inserts at the head; ascending order rescans
+    // the whole list for every bit (O(width^2), 52M comparisons at 10260b).
+    for (int b = width - 1; b >= 0; --b) {
+      split.bit_port[b] = static_cast<hhds::Port_id>(b + 2);
+      if (fresh) {
+        auto output = std::format("b{}", b);
+        split.io->add_output(output, split.bit_port[b]);
+        split.io->set_bits(output, 1);
+      }
+    }
+    if (!split.io->get_graph()) {  // a re-declared def carries the IO only
+      auto split_body = split.io->create_graph();
+      auto input      = split_body->get_input_pin("a");
+      for (int b = width - 1; b >= 0; --b) {
+        auto output = std::format("b{}", b);
+        auto shift  = gu::create_typed_node(*split_body, Ntype_op::SRA);
+        input.connect_sink(gu::setup_sink_by_name(shift, "a"));
+        gu::create_const(*split_body, *Dlop::create_integer(b)).connect_sink(gu::setup_sink_by_name(shift, "b"));
+        auto bit = shift.create_driver_pin(0);
+        gu::set_bits(bit, 1);
+        gu::set_unsign(bit);
+        bit.connect_sink(split_body->get_output_pin(output));
+      }
+      split_body->commit();
+    }
+    auto [it, inserted] = input_splitters_.emplace(width, std::move(split));
+    I(inserted);
+    return it->second;
+  };
+  auto input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
     auto&       cache = in_bit[port_idx];
     const auto& port  = rb.inputs[port_idx];
     int         w     = port.bits == 0 ? 1 : port.bits;
@@ -2357,24 +2682,65 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (!cache[b].is_invalid()) {
       return cache[b];
     }
-    auto ipin = body->get_input_pin(port.name);
+    auto ipin = body_input_pin[port_idx];
     if (w == 1) {
       cache[b] = ipin;
       return ipin;
     }
-    auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
-    ipin.connect_sink(gu::setup_sink_by_name(gm, "a"));
-    gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
-    auto d = gm.create_driver_pin(0);
-    gu::set_bits(d, 1);
-    gu::set_unsign(d);
-    cache[b] = d;
-    return d;
+    // A shared splitter DEF is an ALL-OR-NOTHING unpacker: its def declares one
+    // output per bit and the instance has to expose all of them (a reader may
+    // probe any declared output pin), so the first demanded bit materializes the
+    // whole width. It only pays when this region reads MOST of a wide bus --
+    // on a region that reads 20 bits of a 10k-bit port it would cost 500x the
+    // work the lazy PI path just avoided. It is not free otherwise either: it
+    // puts a non-cell module in the emitted netlist (a whole-design flatten is
+    // contracted to emit exactly ONE module, see lhd_abc_flat_test) and it has
+    // to be carried through the region cache. Below any of the three gates,
+    // extract the demanded bits in place -- the same shift-select the
+    // blackbox/latch read-back uses, at 2 nodes per DEMANDED bit.
+    constexpr int kSharedSplitterMinBits = 256;
+    if (flat_ || w < kSharedSplitterMinBits || port_demand[port_idx] < w - w / 2) {
+      cache[b] = extract_body_bit(ipin, b);
+      return cache[b];
+    }
+    auto& inst = body_input_splitter[port_idx];
+    if (inst.is_invalid()) {
+      auto& split = shared_input_splitter(w);
+      inst        = gu::create_typed_node(*body, Ntype_op::Sub);
+      inst.set_subnode(split.io);
+      ipin.connect_sink(inst.create_sink_pin(1));
+      // Retain every handle so the PI loop never searches the splitter node's
+      // long linked pin list. Descending creation itself is linear as well.
+      for (int bit = w - 1; bit >= 0; --bit) {
+        cache[bit] = inst.create_driver_pin(split.bit_port[bit]);
+      }
+    }
+    return cache[b];
   };
 
-  absl::flat_hash_map<Abc_Obj_t*, hhds::Pin_class> net2drv;
-  int                                              i    = 0;
-  Abc_Obj_t*                                       pObj = nullptr;
+  // ABC object IDs are dense indices. Direct vectors avoid two pointer-hash
+  // operations for every mapped edge during read-back (millions on Rob).
+  const auto                    mapped_obj_slots = static_cast<size_t>(Abc_NtkObjNumMax(mapped));
+  std::vector<hhds::Pin_class>  net2drv(mapped_obj_slots);
+  std::vector<hhds::Node_class> mapped_node2sub(mapped_obj_slots);
+  auto                          set_net_driver = [&](Abc_Obj_t* net, const hhds::Pin_class& driver) {
+    I(net != nullptr);
+    const auto id = static_cast<size_t>(Abc_ObjId(net));
+    I(id < net2drv.size());
+    net2drv[id] = driver;
+  };
+  auto get_net_driver = [&](Abc_Obj_t* net) -> hhds::Pin_class {
+    if (net == nullptr) {
+      return {};
+    }
+    const auto id = static_cast<size_t>(Abc_ObjId(net));
+    if (id >= net2drv.size()) {
+      return {};
+    }
+    return net2drv[id];
+  };
+  int        i    = 0;
+  Abc_Obj_t* pObj = nullptr;
 
   // pass 1.bbox: rebuild each blackbox node (Sub instance / memory) natively.
   // Its output pins drive the boundary PIs (mapped in pass 1a); its inputs are
@@ -2442,13 +2808,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         br.out_bit[oi][0] = dp;
       } else {
         for (int b = 0; b < o.bits; ++b) {
-          auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
-          dp.connect_sink(gu::setup_sink_by_name(gm, "a"));
-          gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
-          auto d = gm.create_driver_pin(0);
-          gu::set_bits(d, 1);
-          gu::set_unsign(d);
-          br.out_bit[oi][b] = d;
+          br.out_bit[oi][b] = extract_body_bit(dp, b);
         }
       }
     }
@@ -2521,17 +2881,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Abc_NtkDelete(mapped);
     return;
   }
+  trace_stage("readback-boundaries");
 
   // pass 1a: PI nets -> body input bit drivers (match by creation order — ABC
   // preserves CI/CO order across the flow, more robust than name parsing).
   Abc_NtkForEachPi(mapped, pObj, i) {
-    if (i < static_cast<int>(pi_order.size())) {
-      net2drv[Abc_ObjFanout0(pObj)] = input_bit(pi_order[i].first, pi_order[i].second);
-    } else if (int j = i - static_cast<int>(pi_order.size()); j < static_cast<int>(bbox_pi.size())) {
-      auto [bx, oi, b]              = bbox_pi[j];
-      net2drv[Abc_ObjFanout0(pObj)] = bbox_recon[bx].out_bit[oi][b];
+    if (i >= static_cast<int>(all_pi_order.size())) {
+      continue;
+    }
+    const auto origin = all_pi_order[i];
+    if (origin.kind == Pi_kind::region_input) {
+      const auto [pi, b] = pi_order[origin.index];
+      set_net_driver(Abc_ObjFanout0(pObj), input_bit(pi, b));
+    } else {
+      const auto [bx, oi, b] = bbox_pi[origin.index];
+      set_net_driver(Abc_ObjFanout0(pObj), bbox_recon[bx].out_bit[oi][b]);
     }
   }
+  trace_stage("readback-pis");
 
   // pass 1b: each mapped gate -> a Sub; map its output net -> Sub output pin
   std::vector<std::pair<hhds::Node_class, Abc_Obj_t*>> gates;
@@ -2549,16 +2916,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       Abc_NtkDelete(mapped);
       return;
     }
-    auto io  = blackbox_io(g);
-    auto sub = gu::create_typed_node(*body, Ntype_op::Sub);
-    sub.set_subnode(io);
-    sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(pObj), Mio_GateReadName(g)));
-    auto outpin = sub.create_driver_pin(Mio_GateReadOutName(g));
+    auto& desc = cell_desc(g);
+    auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
+    sub.set_subnode(desc.io);
+    sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(pObj), desc.name));
+    auto outpin = sub.create_driver_pin(desc.output_name);
     gu::set_bits(outpin, 1);
     gu::set_unsign(outpin);
-    net2drv[Abc_ObjFanout0(pObj)] = outpin;
+    set_net_driver(Abc_ObjFanout0(pObj), outpin);
+    const auto obj_id = static_cast<size_t>(Abc_ObjId(pObj));
+    I(obj_id < mapped_node2sub.size());
+    mapped_node2sub[obj_id] = sub;
     gates.emplace_back(sub, pObj);
   }
+  trace_stage("readback-gates");
 
   // pass 1c (seq): each ABC latch -> a native LGraph Flop. Flops are never
   // mapped to library DFFs (locked design decision): the latch only carried the
@@ -2709,14 +3080,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         if (k == 1) {
           qd = Fq;
         } else {
-          auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
-          Fq.connect_sink(gu::setup_sink_by_name(gm, "a"));
-          gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
-          qd = gm.create_driver_pin(0);
-          gu::set_bits(qd, 1);
-          gu::set_unsign(qd);
+          qd = extract_body_bit(Fq, b);
         }
-        net2drv[qnet] = qd;
+        set_net_driver(qnet, qd);
         rf.dnet.push_back(dnet);
       }
       recon.push_back(std::move(rf));
@@ -2753,7 +3119,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         auto q = sub.create_driver_pin(dff_->q_pin);
         gu::set_bits(q, 1);
         gu::set_unsign(q);
-        net2drv[qnet] = q;
+        set_net_driver(qnet, q);
         if (auto lclk = owner_clk(k); !lclk.is_invalid()) {
           lclk.connect_sink(sub.create_sink_pin(dff_->clk_pin));
         }
@@ -2841,27 +3207,25 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             dff_->name)
         .emit();
   }
+  trace_stage("readback-cells");
 
   // pass 2: wire each Sub's fanins (fanin k <-> Liberty pin k)
   auto const0_pin = [&]() { return gu::create_const(*body, *Dlop::create_integer(0)); };
   for (auto& [sub, obj] : gates) {
-    auto*                    g = static_cast<Mio_Gate_t*>(obj->pData);
-    std::vector<std::string> pins;
-    for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
-      pins.emplace_back(Mio_PinReadName(pin));
-    }
-    int        k   = 0;
-    Abc_Obj_t* fin = nullptr;
+    auto*       g    = static_cast<Mio_Gate_t*>(obj->pData);
+    const auto& pins = cell_desc(g).input_names;
+    int         k    = 0;
+    Abc_Obj_t*  fin  = nullptr;
     Abc_ObjForEachFanin(obj, fin, k) {
       if (k >= static_cast<int>(pins.size())) {
         break;
       }
-      auto spin = sub.create_sink_pin(pins[k]);
+      auto spin   = sub.create_sink_pin(pins[k]);
       // No set_bits on this cell-input SINK: `bits` is a driver-pin property (the
       // 1-bit width lives on the gate's GraphIO port + the 1-bit driver net).
-      auto it   = net2drv.find(fin);
-      if (it != net2drv.end()) {
-        it->second.connect_sink(spin);
+      auto driver = get_net_driver(fin);
+      if (!driver.is_invalid()) {
+        driver.connect_sink(spin);
       } else {
         const0_pin().connect_sink(spin);  // structurally complete; should not occur
       }
@@ -2875,8 +3239,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int                          k = rf.bits;
     std::vector<hhds::Pin_class> dbits(k);
     for (int b = 0; b < k; ++b) {
-      auto it  = net2drv.find(rf.dnet[b]);
-      dbits[b] = it != net2drv.end() ? it->second : const0_pin();
+      auto driver = get_net_driver(rf.dnet[b]);
+      dbits[b]    = !driver.is_invalid() ? driver : const0_pin();
     }
     auto din_sink = gu::setup_sink_by_name(rf.node, "din");
     if (k == 1) {
@@ -2900,10 +3264,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // pass 2b (register=true): wire each mapped DFF Sub's D pin from its latch's
   // data-in net (each DFF cell is 1-bit, so no Set_mask reassembly is needed).
   for (auto& rd : dff_recon) {
-    auto it = net2drv.find(rd.dnet);
-    auto d  = it != net2drv.end() ? it->second : const0_pin();
+    auto d = get_net_driver(rd.dnet);
+    if (d.is_invalid()) {
+      d = const0_pin();
+    }
     d.connect_sink(rd.sub.create_sink_pin(dff_->d_pin));
   }
+  trace_stage("readback-fanins");
 
   // pass 3: POs -> reassemble multi-bit outputs (Set_mask concat). Match by
   // creation order (po_order), consistent with the PI readback.
@@ -2912,7 +3279,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int w = rb.outputs[po].bits == 0 ? 1 : rb.outputs[po].bits;
     out_bits[po].resize(w);
   }
-  if (Abc_NtkPoNum(mapped) != static_cast<int>(po_order.size() + bbox_po.size())) {
+  if (Abc_NtkPoNum(mapped) != static_cast<int>(po_order.size() + bbox_po.size() + (has_dummy_po ? 1 : 0))) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
         .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {}) — read-back misaligned",
              rb.module_name,
@@ -2923,9 +3290,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         .emit();
   }
   Abc_NtkForEachPo(mapped, pObj, i) {
+    if (has_dummy_po && i >= static_cast<int>(po_order.size() + bbox_po.size())) {
+      continue;  // the all-native sentinel PO: no read-back target, and its net
+                 // has no driver entry (a lookup here would warn and leak a const)
+    }
     auto* net = Abc_ObjFanin0(pObj);
-    auto  dit = net2drv.find(net);
-    if (dit == net2drv.end()) {
+    auto  drv = get_net_driver(net);
+    if (drv.is_invalid()) {
       livehd::diag::warn("pass.abc", "abc-readback", "internal")
           .msg("pass.abc: region '{}': PO {} ('{}') fanin net has no read-back driver — emitted const0",
                rb.module_name,
@@ -2933,7 +3304,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                Abc_ObjName(pObj))
           .emit();
     }
-    auto drv = dit != net2drv.end() ? dit->second : const0_pin();
+    if (drv.is_invalid()) {
+      drv = const0_pin();
+    }
     if (i < static_cast<int>(po_order.size())) {
       out_bits[po_order[i].first][po_order[i].second] = drv;
     } else if (int j = i - static_cast<int>(po_order.size()); j < static_cast<int>(bbox_po.size())) {
@@ -2942,6 +3315,37 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
   }
+
+  // Reassemble a vector of LSB-first one-bit drivers as one canonical Concat
+  // (whose lanes are MSB-first). The old Set_mask chain created W nodes and W
+  // progressively wider mask constants for a W-bit boundary, turning a wide
+  // region interface into quadratic graph-construction work.
+  hhds::Pin_class concat_width_one;
+  auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
+    I(!dbit.empty());
+    if (dbit.size() == 1) {
+      return dbit.front();
+    }
+    if (concat_width_one.is_invalid()) {
+      concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
+    }
+    auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
+    if (sid != hhds::SourceId_invalid) {
+      concat.attr(hhds::attrs::srcid).set(sid);
+    }
+    // Port IDs still encode MSB-first lanes, but create them in descending
+    // order. HHDS's per-node pin list is sorted; ascending creation rescans the
+    // growing list for every pin and makes a W-bit Concat O(W^2).
+    for (size_t b = 0; b < dbit.size(); ++b) {
+      auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
+      concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
+      dbit[b].connect_sink(concat.create_sink_pin(data_pid));
+    }
+    auto out = concat.create_driver_pin(0);
+    gu::set_bits(out, static_cast<int>(dbit.size()));
+    sign ? gu::set_sign(out) : gu::set_unsign(out);
+    return out;
+  };
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
   // captured PO drivers (multi-bit reassembled with a Set_mask concat).
@@ -2967,24 +3371,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         reassembled_bbox_input.emplace(bb.ins[ii].drv, dbit[0]);
         continue;
       }
-      hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
-      for (int b = 0; b < w; ++b) {
-        auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
-        acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
-        gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
-        dbit[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
-        acc = sm.create_driver_pin(0);
-        gu::set_bits(acc, b + 1);
-        gu::set_unsign(acc);
-      }
-      gu::set_bits(acc, w);
-      // Preserve the operand's signedness on the reassembled value. For a Div the
-      // LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs zero-extend),
-      // so a signed operand narrower than the divider's width must stay signed or
-      // ref/impl diverge. Harmless for Sub/Memory (their LEC compare never extends
-      // an input up to a larger width). The intermediate accs stay unsigned; only
-      // the final value that reaches the sink carries the sign.
-      bb.ins[ii].sign ? gu::set_sign(acc) : gu::set_unsign(acc);
+      auto acc = assemble_bits(dbit, bb.ins[ii].sign);
       acc.connect_sink(sink);
       reassembled_bbox_input.emplace(bb.ins[ii].drv, acc);
     }
@@ -3007,36 +3394,19 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       bits[0].connect_sink(opin);
       continue;
     }
-    // acc = const0; acc = Set_mask(acc, 1<<b, bit_b)  for each bit
-    hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
-    for (int b = 0; b < w; ++b) {
-      auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
-      if (po_srcid[po] != hhds::SourceId_invalid) {
-        sm.attr(hhds::attrs::srcid).set(po_srcid[po]);
-      }
-      acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
-      gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
-      bits[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
-      acc = sm.create_driver_pin(0);
-      gu::set_bits(acc, b + 1);
-      gu::set_unsign(acc);
-    }
-    gu::set_bits(acc, w);
+    auto acc = assemble_bits(bits, port.sign, po_srcid[po]);
     acc.connect_sink(opin);
   }
+  trace_stage("readback-outputs");
 
   // --- source-map carry-through: stamp each mapped gate with the srcid of the
-  // original output cone(s) it feeds. Backward-DFS from every PO over the mapped
-  // netlist; a gate reached from a single output gets that output's srcid, one
-  // fanning out to several gets combine() (order = ascending output index, so
-  // the lowest-index output is the primary anchor). ABC's optimization is lossy
-  // so exact per-gate lineage is unrecoverable — the output cone is the
-  // faithful-yet-cheap approximation. ---
+  // original output cone it feeds. Walk output roots in ascending order with
+  // ONE global visited set, so each mapped gate is attributed to the first
+  // (lowest-index) output that reaches it. A shared gate therefore gets a stable
+  // primary anchor rather than a combined source set. ABC's optimization is
+  // lossy either way, and this keeps attribution linear in gates+edges instead
+  // of re-walking the whole cone once per boundary output (minutes on Rob). ---
   {
-    absl::flat_hash_map<Abc_Obj_t*, hhds::Node_class> node2sub;
-    for (auto& [sub, obj] : gates) {
-      node2sub[obj] = sub;
-    }
     // roots = the mapped gate driving each PO bit, grouped by output port
     std::vector<std::vector<Abc_Obj_t*>> port_roots(rb.outputs.size());
     std::vector<hhds::SourceId>          cone_srcid(po_srcid);
@@ -3087,49 +3457,43 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
     }
-    // per output, DFS its fanin cone and record the port on each reached gate
-    absl::flat_hash_map<Abc_Obj_t*, std::vector<int>> cone_ports;
+    // Per output, claim every not-yet-attributed gate in its fanin cone.
+    std::vector<uint8_t> attributed(mapped_obj_slots);
     for (size_t po = 0; po < port_roots.size(); ++po) {
       if (cone_srcid[po] == hhds::SourceId_invalid) {
         continue;  // no provenance to attribute this cone with
       }
-      absl::flat_hash_set<Abc_Obj_t*> visited;
-      std::vector<Abc_Obj_t*>         stack = port_roots[po];
+      std::vector<Abc_Obj_t*> stack = port_roots[po];
       while (!stack.empty()) {
         auto* g = stack.back();
         stack.pop_back();
-        if (!visited.insert(g).second) {
+        // `attributed` is both the global claim set and this walk's visited set:
+        // a gate claimed by an earlier output already had its whole fanin cone
+        // claimed by that same walk, so stopping here loses nothing.
+        const auto gid = static_cast<size_t>(Abc_ObjId(g));
+        if (gid >= attributed.size() || attributed[gid]) {
           continue;
         }
-        if (node2sub.contains(g)) {
-          cone_ports[g].push_back(static_cast<int>(po));
+        attributed[gid] = 1;
+        if (!mapped_node2sub[gid].is_invalid()) {
+          mapped_node2sub[gid].attr(hhds::attrs::srcid).set(cone_srcid[po]);
         }
         Abc_Obj_t* fin = nullptr;
         int        k   = 0;
         Abc_ObjForEachFanin(g, fin, k) {
           auto* d = Abc_ObjFanin0(fin);  // fanin net -> its driving node
-          if (d != nullptr && Abc_ObjIsNode(d) && !visited.contains(d)) {
+          if (d != nullptr && Abc_ObjIsNode(d)) {
+            const auto did = static_cast<size_t>(Abc_ObjId(d));
+            if (did >= attributed.size() || attributed[did]) {
+              continue;
+            }
             stack.push_back(d);
           }
         }
       }
     }
-    for (auto& [g, ports] : cone_ports) {
-      std::vector<hhds::SourceId> ids;
-      for (int po : ports) {
-        auto id = cone_srcid[static_cast<size_t>(po)];
-        if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
-          ids.push_back(id);  // distinct outputs may share a srcid; keep it unique
-        }
-      }
-      if (ids.empty()) {
-        continue;
-      }
-      auto sid
-          = ids.size() == 1 ? ids.front() : body->source_locator().combine(std::span<const hhds::SourceId>(ids.data(), ids.size()));
-      node2sub[g].attr(hhds::attrs::srcid).set(sid);
-    }
   }
+  trace_stage("readback-srcmap");
 
   {
     // One QoR line per region (stdout is the step log under lhd). qor_.back()
@@ -3150,6 +3514,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                since(),
                crit);
   }
+  trace_stage("readback-complete");
 
   // rb.body now holds the complete mapped netlist: snapshot it (and the pre-abc
   // body built above) into the cache so the next run's identical region is a
@@ -3161,6 +3526,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   qor_.back().cache = "miss";
   qor_.back().ms    = since();
   Abc_NtkDelete(mapped);
+  // &get/&dc4/&dch/&nf leave GIA managers in the global frame even after
+  // &put.  A large region then poisons the next tiny job (Rob's 438-node
+  // NewRobDeqPtrWrapper stalled for minutes after a 10k-bit pack, versus
+  // 0.35 s in a fresh frame).  Clear all per-network/GIA workspace while
+  // retaining the frame's parsed Liberty library and installed aliases.
+  Abc_FrameDeleteAllNetworks(frame);
 }
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {

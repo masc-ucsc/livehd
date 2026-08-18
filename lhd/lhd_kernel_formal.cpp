@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -1122,10 +1123,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
   };
-  const livehd::lec::Clock_forest ref_forest  = build_forest(ref_by_name, canon_ref, ref_top_g);
-  const livehd::lec::Clock_forest impl_forest = build_forest(impl_by_name, canon_impl, impl_top_g);
-  dump_forest("ref", ref_forest);
-  dump_forest("impl", impl_forest);
+  // A verdict-cache hit returns before phase planning, so it never consumes a
+  // clock forest. Building both forests eagerly made an all-hit incremental run
+  // rescan both complete libraries for data that was then discarded. Tasks may
+  // miss concurrently; call_once keeps the first miss responsible for the
+  // shared build while every later miss reads the completed immutable maps.
+  livehd::lec::Clock_forest ref_forest;
+  livehd::lec::Clock_forest impl_forest;
+  std::once_flag            forest_once;
+  auto                      ensure_forests = [&]() {
+    std::call_once(forest_once, [&]() {
+      ref_forest  = build_forest(ref_by_name, canon_ref, ref_top_g);
+      impl_forest = build_forest(impl_by_name, canon_impl, impl_top_g);
+      dump_forest("ref", ref_forest);
+      dump_forest("impl", impl_forest);
+    });
+  };
 
   // Per-side digest resolvers for the hierarchical (Merkle) canonical digest: a
   // Sub's body resolves within its OWN side first (gids are name-hash stable,
@@ -1722,6 +1735,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // The design-wide clock forest. Carried by VALUE so it survives the isolated
     // worker fork; both sides' rows go in, since plan_phases runs over each
     // design's own graphs and looks each up by that design's def name.
+    ensure_forests();
     o.clock_forest = ref_forest;
     for (const auto& [dname, row] : impl_forest.port_root) {
       auto& dst = o.clock_forest.port_root[dname];

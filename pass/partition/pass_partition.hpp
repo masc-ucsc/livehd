@@ -17,8 +17,8 @@ namespace livehd::partition {
 // `src` is the original (pre-partition) graph, kept alive so the hook can read
 // node types, attributes and constant values, and walk the region connectivity.
 struct Region_body {
-  hhds::Graph* body = nullptr;  // fresh body to populate (IO pins materialized)
-  hhds::Graph* src  = nullptr;  // original graph (read-only)
+  hhds::Graph* body  = nullptr;  // fresh body to populate (IO pins materialized)
+  hhds::Graph* src   = nullptr;  // original graph (read-only)
   int          color = 0;
   std::string  module_name;
   // Incremental synth: false when this region's boundary cannot be given
@@ -37,7 +37,7 @@ struct Region_body {
   // "automorphism" means), so it is not a substitute for this refusal; a sound
   // reuse of these regions needs canonical (reproducible) boundary naming
   // (fixme_incremental Proposal 2), not a looser gate.
-  bool reuse_eligible = true;
+  bool         reuse_eligible = true;
 
   struct Port {
     std::string     name;        // body IO pin name
@@ -46,8 +46,8 @@ struct Region_body {
     int             bits = 0;
     bool            sign = false;
   };
-  std::vector<Port> inputs;
-  std::vector<Port> outputs;
+  std::vector<Port>                 inputs;
+  std::vector<Port>                 outputs;
   // Incremental synth: the region's PRE-hook logic (the ORIGINAL, un-mapped
   // netlist), rebuilt by the SAME build_module construction the classic no-hook
   // path uses -- so the abc cache's structural compare sees a byte-stable
@@ -58,9 +58,9 @@ struct Region_body {
   // unless the partitioner was asked to build it (build_decomposition
   // want_pre_bodies) AND this is a per-def region (never the flatten as-top
   // region). Do NOT stash past the hook's return.
-  hhds::Graph*        pre_body = nullptr;
-  hhds::GraphLibrary* pre_lib  = nullptr;
-  std::string         pre_name;
+  hhds::Graph*                      pre_body = nullptr;
+  hhds::GraphLibrary*               pre_lib  = nullptr;
+  std::string                       pre_name;
   // Region nodes (handles into `src`). A non-owning view into a buffer the
   // partitioner keeps alive for the duration of the synchronous hook call (and
   // frees right after) -- so a whole-design flatten does not copy an O(nodes)
@@ -130,6 +130,6 @@ public:
   // classic/flatten paths); the flatten as-top region never gets one.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
-                                  livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
-                                  bool want_pre_bodies = false);
+                                  livehd::partition::Flatten_mode flatten         = livehd::partition::Flatten_mode::off,
+                                  bool                            want_pre_bodies = false);
 };

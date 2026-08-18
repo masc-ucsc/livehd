@@ -111,6 +111,33 @@ TEST(ColorAbsorb, InlinesEverySiteAndReportsTheDuplication) {
   EXPECT_EQ(count_op(pg.get(), Ntype_op::And), 2u) << "the leaf's gate, once per site";
 }
 
+TEST(ColorAbsorb, ReducePatternKeepsItsBoundary) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_absorb_pattern");
+  auto  cio = make_leaf_io(lib, "pat_0123456789abcdef0123456789abcdef", 8);
+  auto  cg  = cio->create_graph();
+  fill_leaf(cg.get(), 8);
+
+  auto pio = lib.create_io("pattern_parent");
+  pio->add_input("x", 0);
+  pio->add_output("z", 1);
+  pio->set_bits("x", 8);
+  auto pg = pio->create_graph();
+  auto ix = pg->get_input_pin("x");
+  set_bits(ix, 8);
+  auto sub = create_typed_node(*pg, Ntype_op::Sub);
+  sub.set_subnode(cio);
+  ix.connect_sink(sub.create_sink_pin(0));
+  ix.connect_sink(sub.create_sink_pin(1));
+  sub.create_driver_pin(2).connect_sink(pg->get_output_pin("z"));
+
+  Absorb_stats st;
+  ASSERT_TRUE(absorb_small_defs(pg.get(), map_of({pg.get(), cg.get()}), 1000, &st));
+  EXPECT_EQ(0u, st.defs_absorbed);
+  EXPECT_EQ(0u, st.sites_inlined);
+  EXPECT_EQ(1u, count_op(pg.get(), Ntype_op::Sub));
+  EXPECT_EQ(0u, count_op(pg.get(), Ntype_op::And));
+}
+
 // A def at or above min keeps its boundary: it is big enough to be its own ABC
 // region, and inlining it would only duplicate logic for nothing.
 TEST(ColorAbsorb, BigDefKeepsItsBoundary) {

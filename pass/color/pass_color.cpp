@@ -89,6 +89,10 @@ void Pass_color::setup() {
                        "reduce: split maximal fanout-free cones into disjoint sub-cones of at most this many nodes "
                        "before similarity matching (0 = keep maximal cones)",
                        "0");
+  m.add_label_optional("max_pattern_ge",
+                       "reduce: reject a shared pattern above this many MAPPABLE gate-equivalents (0 disables). "
+                       "Bounds tiny but extremely wide arithmetic cones that max_nodes cannot see",
+                       "20000");
   m.add_label_optional("min_win",
                        "reduce: required PER-SITE Verilog line win (estimated lines saved minus the instance's "
                        "ports+2). 0 disables the guard and extracts on node count alone",
@@ -322,11 +326,12 @@ void Pass_color::color(Eprp_var& var) {
     std::sort(defs.begin(), defs.end(), [](hhds::Graph* a, hhds::Graph* b) { return a->get_name() < b->get_name(); });
 
     Reduce_opts ropts;
-    ropts.min_count = parse_count(var, "min_count", "3");
-    ropts.min_nodes = parse_count(var, "min_nodes", "3");
-    ropts.max_nodes = parse_count(var, "max_nodes", "0");
-    ropts.min_win   = parse_count(var, "min_win", "1");
-    ropts.verbose   = opts.verbose;
+    ropts.min_count      = parse_count(var, "min_count", "3");
+    ropts.min_nodes      = parse_count(var, "min_nodes", "3");
+    ropts.max_nodes      = parse_count(var, "max_nodes", "0");
+    ropts.max_pattern_ge = parse_ge_bound(var, "max_pattern_ge", "20000");
+    ropts.min_win        = parse_count(var, "min_win", "1");
+    ropts.verbose        = opts.verbose;
     if (ropts.min_count < 2) {
       livehd::diag::err("pass.color", "bad-count", "io")
           .msg("pass.color: reduce min_count must be at least 2 (got {}): a pattern seen once has nothing to share",
@@ -353,7 +358,7 @@ void Pass_color::color(Eprp_var& var) {
       // stderr on purpose: run_step dup2's fd 1 into the log file.
       std::print(stderr,
                  "[color.reduce] defs {} ({} seeded skipped); {} cones >= {} nodes; {} patterns x {} sites "
-                 "({} const params); nodes -{} +{} (net {:+}); dropped: {} verify, {} port-heavy, {} dup-edge, "
+                 "({} const params); nodes -{} +{} (net {:+}); dropped: {} verify, {} port-heavy, {} oversize, {} dup-edge, "
                  "{} reuse-fragile\n",
                  rst.defs_scanned,
                  rst.defs_skipped_seeded,
@@ -367,6 +372,7 @@ void Pass_color::color(Eprp_var& var) {
                  static_cast<int64_t>(rst.nodes_created) - static_cast<int64_t>(rst.nodes_deleted),
                  rst.verify_dropped,
                  rst.port_heavy_skipped,
+                 rst.oversize_skipped,
                  rst.dup_edge_skipped,
                  rst.reuse_refused);
     }

@@ -615,6 +615,46 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
   EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::And));
 }
 
+// A node bound does not constrain bit-level synthesis cost. The GE ceiling
+// rejects a repeated wide arithmetic body before it becomes one shared module
+// that is still too expensive for ABC to map within the optimization budget.
+TEST(ColorReduce, OversizePatternSkipped) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_oversize");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto a = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto b = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(a, 64);
+    gu::set_bits(b, 64);
+    auto mult = create_typed_node(*g, Ntype_op::Mult);
+    a.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(0));
+    auto out = mult.create_driver_pin(0);
+    gu::set_bits(out, 64);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o           = small_opts();
+  o.min_nodes      = 1;
+  o.max_nodes      = 1;
+  o.max_pattern_ge = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(0u, st.patterns);
+  EXPECT_EQ(1u, st.oversize_skipped);
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Mult));
+}
+
 // A packed-array word select commonly lowers to a very wide dynamic right
 // shift followed by a narrow constant slice.  The two-node body is text-neutral
 // after accounting for its ports, but synthesizing hundreds of copies is very
@@ -636,14 +676,14 @@ TEST(ColorReduce, WideShiftSliceBypassesTextProfitGuard) {
   for (int i = 0; i < 3; ++i) {
     auto data = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
     auto amt  = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
-    gu::set_bits(data, 80);
+    gu::set_bits(data, 1024);
     gu::set_bits(amt, 7);
 
     auto shift = create_typed_node(*g, Ntype_op::SRA);
     data.connect_sink(shift.create_sink_pin(0));
     amt.connect_sink(shift.create_sink_pin(1));
     auto shifted = shift.create_driver_pin(0);
-    gu::set_bits(shifted, 80);
+    gu::set_bits(shifted, 1024);
 
     auto slice = create_typed_node(*g, Ntype_op::Get_mask);
     shifted.connect_sink(slice.create_sink_pin(0));
@@ -655,7 +695,7 @@ TEST(ColorReduce, WideShiftSliceBypassesTextProfitGuard) {
     word.connect_sink(widen.create_sink_pin(0));
     zero.connect_sink(widen.create_sink_pin(1));
     auto packed = widen.create_driver_pin(0);
-    gu::set_bits(packed, 80);
+    gu::set_bits(packed, 1024);
     packed.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
 

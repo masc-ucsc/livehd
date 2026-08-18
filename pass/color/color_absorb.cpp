@@ -6,6 +6,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "color_reduce.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 
@@ -109,6 +110,16 @@ bool absorb_small_defs(hhds::Graph* top, const Gid2Graph& gid2graph, uint64_t mi
   for (auto* g : order) {
     if (g == top) {
       continue;  // the top has no parent to fold into
+    }
+    // color.reduce introduced this boundary specifically so every occurrence
+    // maps one shared body. Absorbing a small pattern def immediately afterwards
+    // both destroys that win and exercises the generic inliner on thousands of
+    // isomorphic sites; Rob exposed a cross-site stitch in that path. Pattern
+    // defs are synthesis units by contract, regardless of the size floor. The
+    // shared predicate, not a bare `pat_` prefix: a USER module named `pat_foo`
+    // is not one of ours and must still obey the size floor.
+    if (is_pattern_def_name(g->get_name())) {
+      continue;
     }
     const uint64_t w     = weigher.total(g);
     weight[g->get_gid()] = w;

@@ -102,6 +102,22 @@ void recreate_child_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& cio, bool
   }
 }
 
+// True when `cio` owns REAL logic, not just an IO shell. A Liberty/DFF cell decl
+// (and the empty placeholder recreate_child_decl leaves behind) has no body
+// node; abc_map's shared input-bit splitter def does. The two must be carried
+// through the cache differently: a cell is re-declared, a bodied helper def has
+// to be COPIED with its body or the reused region reads undriven bits.
+bool has_body_logic(const hhds::GraphIO& cio) {
+  auto g = const_cast<hhds::GraphIO&>(cio).get_graph();
+  if (!g) {
+    return false;
+  }
+  for ([[maybe_unused]] auto n : g->body().nodes()) {
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -381,8 +397,8 @@ void Incr_cache::copy_pre_children(const livehd::partition::Region_body& rb, hhd
 // child region already sits in lib() under its own name (stored children-first),
 // so `recreate_child_decl`'s find-or-skip leaves it untouched -- only the leaf
 // blackbox cells are added.
-void Incr_cache::copy_mapped_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& outlib) {
-  auto mio = outlib.find_io(rb.module_name);
+void Incr_cache::copy_mapped_children(std::string_view module_name, hhds::GraphLibrary& outlib) {
+  auto mio = outlib.find_io(module_name);
   if (!mio) {
     return;
   }
@@ -396,6 +412,12 @@ void Incr_cache::copy_mapped_children(const livehd::partition::Region_body& rb, 
       continue;
     }
     if (auto cio = n.get_subnode_io()) {  // resolves in outlib (cells declared during this map)
+      const std::string cname{cio->get_name()};
+      if (l.find_io(cname) == nullptr && has_body_logic(*cio)) {
+        if (l.copy_from(outlib, cname)) {
+          continue;  // bodied helper def (input-bit splitter): keep its LOGIC
+        }
+      }
       recreate_child_decl(l, *cio, /*with_body=*/true);
     }
   }
@@ -403,18 +425,21 @@ void Incr_cache::copy_mapped_children(const livehd::partition::Region_body& rb, 
 
 bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
                        const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib) {
-  // Snapshot the mapped body (rb.body, in outlib under module_name) into the mapped
-  // library and the pre-abc body (in pre_lib under pre_name) into the SEPARATE
-  // pre-body library, in memory. Kept apart so a mapped child body never shadows a
-  // parent pre-body's Sub child decl of the same name (see cached_pre_lib).
-  if (!lib().copy_from(*outlib, rb.module_name)) {
-    return false;
-  }
-  copy_mapped_children(rb, *outlib);  // self-contain the mapped body's leaf-cell decls
+  // The pre-abc body (in pre_lib under pre_name) is copied NOW, into the
+  // SEPARATE pre-body library: `pre_lib` is a per-region throwaway the
+  // partitioner destroys the moment this callback returns. The two cache
+  // libraries are kept apart so a mapped child body never shadows a parent
+  // pre-body's Sub child decl of the same name (see cached_pre_lib).
+  //
+  // The MAPPED body is NOT copied: it stays in `outlib` for the rest of the run
+  // and save() flushes it from there, so the mapping phase never holds two
+  // copies of every netlist (see the header, and Row::in_outlib for how same-run
+  // reuse finds it in the meantime).
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
   copy_pre_children(rb, pre_lib);
+  outlib_ = outlib;
 
   Row row;
   row.module = rb.module_name;
@@ -439,6 +464,7 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   row.digest0      = digest.h0;
   row.digest1      = digest.h1;
   row.digest_valid = digest.valid;
+  row.in_outlib    = true;  // body still only in `outlib`; save() flushes it
 
   rows_[rb.module_name] = std::move(row);
   const auto& stored    = rows_.at(rb.module_name);
@@ -485,7 +511,12 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
   if (!res.hit || res.row == nullptr) {
     return false;
   }
-  auto mio = lib().find_io(res.row->module);
+  // A row stored EARLIER IN THIS RUN still has its mapped body only in `outlib`
+  // (store() defers the cache-library copy to save()); a row loaded from disk
+  // has it in lib(). Same-run reuse therefore reads the netlist straight out of
+  // the output library -- no second copy has to exist for it to work.
+  hhds::GraphLibrary& src = res.row->in_outlib ? *outlib : lib();
+  auto                mio = src.find_io(res.row->module);
   if (!mio) {
     return false;
   }
@@ -505,7 +536,16 @@ bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compa
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
-    if (auto cio = n.get_subnode_io()) {  // resolves in lib() (copy_mapped_children stored it)
+    if (auto cio = n.get_subnode_io()) {  // resolves in `src` (copy_mapped_children stored it)
+      const std::string cname{cio->get_name()};
+      if (outlib->find_io(cname) == nullptr && has_body_logic(*cio)) {
+        // Bodied helper def (input-bit splitter): a decl-only clone would emit
+        // an EMPTY module and the reused region's inputs would read undriven.
+        // Unreachable when src IS outlib -- the child already resolves there.
+        if (outlib->copy_from(src, cname)) {
+          continue;
+        }
+      }
       recreate_child_decl(*outlib, *cio, /*with_body=*/false);
     }
   }
@@ -523,6 +563,29 @@ void Incr_cache::save() {
   if (!dirty_) {
     return;
   }
+  // Flush the bodies store() deferred. Doing it here, once, is what keeps the
+  // mapping phase down to ONE copy of each mapped netlist: `outlib` owns them
+  // while ABC is live, and the duplicate only exists after the last region is
+  // done. A body that has gone missing drops its row rather than persisting a
+  // metadata entry the next run would compare against and then fail to reuse.
+  if (outlib_ != nullptr) {
+    std::vector<std::string> lost;
+    for (auto& [name, row] : rows_) {
+      if (!row.in_outlib) {
+        continue;
+      }
+      if (!lib().copy_from(*outlib_, row.module)) {
+        lost.push_back(name);
+        continue;
+      }
+      copy_mapped_children(row.module, *outlib_);  // self-contain the leaf-cell decls
+      row.in_outlib = false;
+    }
+    for (const auto& name : lost) {
+      rows_.erase(name);
+    }
+  }
+
   std::vector<const std::string*> keys;
   keys.reserve(rows_.size());
   for (const auto& [k, v] : rows_) {
@@ -556,10 +619,10 @@ void Incr_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"module\":\"{}\",\"pre\":\"{}\",\"recipe\":\"{}\",\"in\":[",
-                         jesc(*k),
-                         jesc(r.module),
-                         jesc(r.pre),
-                         jesc(r.recipe));
+                       jesc(*k),
+                       jesc(r.module),
+                       jesc(r.pre),
+                       jesc(r.recipe));
     for (size_t i = 0; i < r.in.size(); ++i) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(r.in[i]));
     }

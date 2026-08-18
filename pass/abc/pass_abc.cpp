@@ -70,7 +70,7 @@ void Pass_abc::setup() {
   m.add_label_optional("register_max_bits",
                        "with register=true, keep a region's flops native when their total Q width exceeds this many bits "
                        "(0 disables the guard)",
-                       "0");
+                       "4096");
   m.add_label_optional("memory",
                        "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
                        "native memory instance (false)",
@@ -171,7 +171,7 @@ std::string jesc(std::string_view s) {
 // design max delay is the worst REGION delay — an ABC estimate blind to
 // cross-region paths; pass.opentimer is the whole-design scorer.
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
-              const std::string& qor_path, const livehd::abc::Incr_cache* incr) {
+              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started) {
   int      tgates       = 0;
   double   tarea        = 0.0;
   int      tdivbb       = 0;  // blackboxed div/mod cones (the score under-reports)
@@ -255,11 +255,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   if (incr != nullptr) {
     // The agent loop reads its "did the edit change anything" answer here: a
     // NoChange edit is hits == regions, misses == 0, in O(#regions) lookups.
-    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"hit_ms\":{:.1f},\"miss_ms\":{:.1f}}}",
+    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"hit_ms\":{:.1f},\"miss_ms\":{:.1f},\"abc_started\":{}}}",
                      incr->hits(),
                      incr->misses(),
                      hit_ms,
-                     miss_ms);
+                     miss_ms,
+                     abc_started ? 1 : 0);
   }
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
@@ -387,7 +388,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto small_ge_s          = std::string{var.get("small_ge", "0")};
   bool map_register        = truthy(var.get("register", "true"));
   bool map_memory          = truthy(var.get("memory", "false"));
-  auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
+  auto register_max_bits_s = std::string{var.get("register_max_bits", "4096")};
   auto delay               = std::string{var.get("delay", "")};
   auto load                = std::string{var.get("load", "")};
   bool verbose             = truthy(var.get("verbose", "false"));
@@ -461,7 +462,7 @@ void Pass_abc::work(Eprp_var& var) {
         .fatal();
     return;
   }
-  uint64_t register_max_bits = 0;
+  uint64_t register_max_bits = 4096;
   {
     auto* b      = register_max_bits_s.data();
     auto* e      = register_max_bits_s.data() + register_max_bits_s.size();
@@ -611,16 +612,24 @@ void Pass_abc::work(Eprp_var& var) {
         livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, opts.dff_cell));
   }
 
+  // A whole-design flatten maps ONE region and its netlist must hold exactly one
+  // module; the mapper drops its shared helper defs in that mode (set_flat).
+  bool flat_whole_design = false;
+  for (const auto& g : resolve_graphs) {
+    if (!g || (!top.empty() && g->get_name() != top)) {
+      continue;
+    }
+    flat_whole_design = livehd::partition::flatten_is_whole_design(g.get(), flatten);
+    break;
+  }
+
   livehd::abc::Mapper mapper(opts);
   mapper.set_outlib(&outlib);
+  mapper.set_flat(flat_whole_design);
   mapper.set_region_opts(std::move(region_opts));
   if (incr) {
     mapper.set_incr(incr.get());
   }
-  if (!mapper.start()) {
-    return;  // diag already emitted
-  }
-
   bool dbg = false;
   Pass_partition::build_decomposition(
       resolve_graphs,
@@ -631,7 +640,7 @@ void Pass_abc::work(Eprp_var& var) {
       flatten,
       /*want_pre_bodies=*/mapper.incremental());
 
-  mapper.stop();
+  mapper.stop();  // no-op for an all-hit incremental run
 
   // Memory admission (2opt-incr subtask 0). Raised HERE, not from map_region:
   // .fatal() throws, and build_decomposition's callback runs above stop(), so
@@ -658,5 +667,5 @@ void Pass_abc::work(Eprp_var& var) {
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get());
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started());
 }

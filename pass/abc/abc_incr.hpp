@@ -59,6 +59,10 @@ public:
     uint64_t                 digest0      = 0;
     uint64_t                 digest1      = 0;
     bool                     digest_valid = false;
+    // Stored by THIS run: the mapped body still lives only in the output
+    // library, because the copy into the cache library is deferred to save()
+    // (see store()). Never persisted -- a loaded row's body is in lib().
+    bool                     in_outlib    = false;
   };
 
   struct Compare_result {
@@ -76,9 +80,18 @@ public:
   [[nodiscard]] Compare_result lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
                                               std::string_view recipe);
 
-  // Snapshot a freshly mapped region: copy rb.body (mapped, in `outlib`, under
-  // module_name) and `pre_body` (in `pre_lib`, under `pre_name`) into the cache
-  // library, and add the metadata row. Best-effort; returns false on failure.
+  // Snapshot a freshly mapped region: add the metadata row and copy `pre_body`
+  // (in `pre_lib`, under `pre_name`) into the cache's pre library -- `pre_lib`
+  // is a per-region throwaway the partitioner destroys as soon as this call
+  // returns, so that copy cannot wait.
+  //
+  // The MAPPED body is NOT copied here. It already lives in `outlib` under
+  // module_name and stays there for the rest of the run, so copying it now
+  // would hold a second full netlist per region across the whole mapping phase
+  // -- exactly the phase whose RSS the memory-admission guard is policing.
+  // save() flushes every deferred body from `outlib` into the cache library
+  // instead, and same-run reuse reads it straight out of `outlib` (see
+  // Row::in_outlib). Best-effort; returns false on failure.
   bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
              std::string_view recipe, hhds::GraphLibrary* outlib);
 
@@ -93,8 +106,9 @@ public:
   // Returns false if the cached body is missing.
   [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res, hhds::GraphLibrary* outlib);
 
-  // Persist abc_cache.json (atomic tmp+rename) and the cache library. No-op when
-  // nothing was stored.
+  // Copy every deferred mapped body out of the output library, then persist
+  // abc_cache.json (atomic tmp+rename) and the cache libraries. No-op when
+  // nothing was stored. Must run while the output library is still alive.
   void save();
 
   [[nodiscard]] int hits() const { return hits_; }
@@ -112,6 +126,9 @@ public:
 private:
   std::string dir_;
   std::string pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
+  // The output library the deferred mapped bodies live in until save(). Set by
+  // store(); null when this run mapped nothing.
+  hhds::GraphLibrary* outlib_ = nullptr;
   uint64_t    salt_  = 0;
   bool        dirty_ = false;
   int         hits_ = 0, misses_ = 0;
@@ -146,7 +163,8 @@ private:
   // to the mapped body, so the cached body is self-contained. Then reuse_hit can
   // re-declare them into the fresh `outlib` on an all-HIT recompile that maps
   // nothing -- without it the reused netlist drops the cells at emission / LEC.
-  void copy_mapped_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& outlib);
+  // Runs from save(), next to the deferred body copy it belongs to.
+  void copy_mapped_children(std::string_view module_name, hhds::GraphLibrary& outlib);
 };
 
 }  // namespace livehd::abc

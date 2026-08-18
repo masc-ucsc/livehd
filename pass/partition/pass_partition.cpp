@@ -372,17 +372,17 @@ private:
                         const std::vector<IntEdge>& redges, const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
   // Rebuild region r's original logic into `dst_lib` under `name` (decl-only
   // Subs); returns the committed body. The abc cache's stable compare artifact.
-  hhds::Graph* build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                   const std::vector<hhds::Node_class>& rnodes);
+  hhds::Graph*                        build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                                          const std::vector<hhds::Node_class>& rnodes);
   // As above but for the single-region "as top" shape (primary IO names,
   // top_outputs_ instead of region ports) -- shared by build_module_as_top's
   // classic body and its incremental pre-body.
-  void         emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
-                                       const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
-                                       const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
-  void         emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
-  hhds::Graph* build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                     const std::vector<hhds::Node_class>& rnodes);
+  void                                emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
+                                                              const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
+                                                              const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
+  void                                emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
+  hhds::Graph*                        build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                                            const std::vector<hhds::Node_class>& rnodes);
   // Regions in a reproducible order: by color, then by the smallest member node
   // id (invariant to which member the union-find picked as representative).
   // Region indices are already deterministic; this order is what fixes the
@@ -616,6 +616,73 @@ void Partitioner::name_ports() {
       // in the same region — rare under a per-node coloring, but the norm for an
       // uncolored design that folds the whole graph into one color-0 region.
       used.insert(sanitize(gu::default_instance_name(n)));
+    }
+
+    // Stable cone hashes are needed only by a region that is actually COMPARED:
+    // a cached (or same-run reused) body is stitched into a wrapper built from a
+    // different graph, so its port names/order must be reproducible content
+    // signatures -- and the automorphism refusal below, which keeps a symmetric
+    // boundary from being reused with swapped ports, only exists on that path.
+    // A region with no pre-body is never compared: the wrapper and the mapped
+    // region are both built from this exact graph in one invocation, so cheap
+    // nid-derived names are enough. Taking the cheap path there avoids
+    // recursively hashing both sides of every boundary, which repeatedly
+    // revisits very large cones on heavily partitioned designs (Rob.Rob spent
+    // minutes here after the preceding region callback).
+    if (hook_ && !build_pre_) {
+      auto pin_less = [](const auto& a, const auto& b) {
+        auto an = a.driver.get_master_node().get_debug_nid();
+        auto bn = b.driver.get_master_node().get_debug_nid();
+        if (an != bn) {
+          return an < bn;
+        }
+        return a.driver.get_port_id() < b.driver.get_port_id();
+      };
+
+      auto& inputs = module_inputs_[r];
+      std::sort(inputs.begin(), inputs.end(), pin_less);
+      for (auto& p : inputs) {
+        std::string base;
+        if (p.from_primary && !p.primary_name.empty()) {
+          base = p.primary_name;
+        } else if (auto pn = gu::pin_name_of(p.driver); !pn.empty()) {
+          base = std::string{pn};
+        } else {
+          base = std::format("i_n{}_p{}", p.driver.get_master_node().get_debug_nid(), p.driver.get_port_id());
+        }
+        base           = sanitize(base.empty() ? std::string{"in"} : base);
+        std::string nm = base;
+        int         k  = 1;
+        while (used.contains(nm)) {
+          nm = base + "_" + std::to_string(k++);
+        }
+        used.insert(nm);
+        p.name = std::move(nm);
+      }
+
+      auto& outputs = module_outputs_[r];
+      std::sort(outputs.begin(), outputs.end(), pin_less);
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        std::string base;
+        if (auto pn = gu::pin_name_of(outputs[i].driver); !pn.empty()) {
+          base = std::string{pn};
+        } else {
+          base = std::format("o_n{}_p{}", outputs[i].driver.get_master_node().get_debug_nid(), outputs[i].driver.get_port_id());
+        }
+        base = sanitize(base.empty() ? std::string{"out"} : base);
+        if (gu::is_type_register(outputs[i].driver.get_master_node())) {
+          base += "_o";
+        }
+        std::string nm = base;
+        int         k  = 1;
+        while (used.contains(nm)) {
+          nm = base + "_" + std::to_string(k++);
+        }
+        used.insert(nm);
+        outputs[i].name               = std::move(nm);
+        out_index_[outputs[i].driver] = {r, i};
+      }
+      continue;
     }
 
     // Stable, nid-free content signatures for this region's boundary drivers:

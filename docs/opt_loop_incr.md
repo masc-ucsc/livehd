@@ -51,6 +51,12 @@ one optimizes the *rebuild*. Ownership is settled in **I10**.
 
 ## 0. Objective
 
+**Current implementation window (2026-08-17): LEC and synthesis only.** The
+compile/formal/sim findings below remain useful evidence, but they are not the
+active queue. Optimize warm `lhd lec` verdict reuse and warm partitioned
+`pass.abc` reuse; keep cold correctness and LEC-equivalence as gates. Do not
+spend routine iteration time on `xs_backend` or whole-core `XSCore`.
+
 Iterate on the cost of **recompiling a design after a small source edit**, across
 every phase lhd runs:
 
@@ -85,7 +91,7 @@ time is a net loss disguised as a win. That is ruling **I3**.
 | **I7** | **One lever per iteration; the ledger is the product.** A two-change iteration cannot be attributed. A measured negative result is recorded and is worth as much as a positive one. |
 | **I11** | **Numbers are per-host and per-baseline; nothing in this document is a target.** Every figure printed here is a proxy from one machine (see the banner above). The loop takes its own baseline on its own host before gating anything, stamps `host` / `lhd_git_sha` / `lhdsuite_git_sha` / `pdk_version` on every ledger row, and compares **only deltas within one host**. A cross-host or cross-baseline comparison is not evidence and must never appear in a land/revert decision. Re-baseline after any PDK change (T6), toolchain change, or move to a different box. |
 | **I8** | **No per-design tuning.** Every lever must be a shared default that works on all targets. The only user action a warm build may require is naming a `--workdir`; per-design cache knobs are out of scope, exactly as per-design synthesis options are in the sibling loop. |
-| **I9** | **XiangShan enters as three cores** — `xs_alu`, `xs_rob` (routine) and `xs_backend` (periodic) — over the shared `xiangshan/Backend/` tree. `xs_alu` and `xs_rob` exercise **compile, synth and sim**; `xs_backend` is **compile+synth until L11 lands**, because `lhd sim` cannot lower it at all today — a single residual fine-color cycle disables coarsening (F22). That is a lever to fix, not a permanent scope reduction. Each has a trivial in-house sim driver (§6 H2) so the I3 guardrail is measurable on the two that run. **LEC and formal incremental stay on dino/minion** — `opt_loop_synth` R5 already rules LEC to dino for scale reasons, and the XS blocks carry no verify sidecar. |
+| **I9** | **Current XS synthesis targets are `xs_alu` (routine smoke), `Dispatch` (next medium target), and `xs_rob` (periodic stress); `xs_backend` is excluded because it is too large for useful iteration latency.** LEC stays on dino/minion, whose paired Verilog/Pyrope sources provide a real oracle. A 2026-08-17 import-cone audit of the checked-in Backend snapshot found `Rob` = 566,236 lines, `Dispatch` = 832,115, `Rename` = 378,907, and `Backend` = 2,578,417. There are not two additional >1M-line sub-block cones in this snapshot; do not relabel smaller blocks to satisfy that threshold. A later `xs_rob` probe reached the 30-minute ABC cap without completing its first region, so it is not an every-edit target at the current partition grain. If more scale points are needed before another snapshot is imported, use `Dispatch` first, then `CtrlBlock`/`MemBlock`, based on measured runtime rather than the top file's line count. |
 | **I10** | **One ledger, shared with `opt_loop_synth`; rows carry a `flow` field.** Both loops run on the same box, PDK and lhd sha, and they interact in both directions (an abc recipe change moves cache hit rate; a cache-key change changes which QoR number is being reported). Ownership split: the abc **key and salt soundness fixes** (F5/F8, i.e. that plan's W4.1/W4.2) are implemented **here** and consumed there; the abc **recipe/arithmetic/partition knobs** are theirs and never touched here. |
 
 ---
@@ -96,23 +102,18 @@ All designs live in `../lhdsuite`.
 
 | target | top | source | phases exercised | cadence | role |
 |---|---|---|---|---|---|
-| `dino` | `PipelinedDualIssueCPU` | `dino/pyrope/` | compile, synth, sim, **lec**, **formal** | every iteration | small and fast; the full five-phase matrix |
-| `minion` | `minion_top` | `minion/pyrope/` | compile, synth, sim, **lec**, **formal** | every iteration | deep hierarchy, clock gating; carries the **largest measured win** (F10) |
-| `xs_alu` | `Alu` | `xiangshan/Backend/pyrope/` | compile, synth, sim | every iteration | small XS block; the cheap XS signal |
-| `xs_rob` | `Rob` | ″ | compile, synth, sim | every iteration | **one 44.6 MB / 405k-line source unit** — the decisive datapoint for the L8 grain question |
-| `xs_backend` | `Backend` | ″ | compile, synth (sim blocked on F22/L11) | periodic | largest block; scale and robustness |
-| verilog path | — | `*/verilog/` | compile, sim | periodic | must keep working; not tuned |
+| `dino` | `PipelinedDualIssueCPU` | `dino/` | **lec**, synth correctness | every LEC iteration | fast paired-language proof and netlist LEC oracle |
+| `minion` | `minion_top` | `minion/` | **lec**, synth correctness | periodic | deeper hierarchy; use after dino, within a fixed budget |
+| `xs_alu` | `Alu` | `xiangshan/Backend/` | **synth** | every synthesis iteration | cheap cache and QoR smoke test |
+| `xs_dispatch` | `Dispatch` | ″ | **synth** | next target | 832,115-line import cone; first practical additional scale point |
+| `xs_rob` | `Rob` | ″ | **synth** | periodic stress | compile/color completes, but the first ABC region exceeded the 30-minute cap in the 2026-08-17 probe |
+| `xs_ctrl` / `xs_mem` | `CtrlBlock` / `MemBlock` | full XS snapshot | **synth** | candidate | manageable hierarchy-heavy alternatives; add only after a measured cold run fits the iteration budget |
 
-**Periodic** = before any land, and at minimum weekly.
-
-> **Hard constraints (§8 rule 6), enforced as test failures:**
-> no segfault / abort / OOM-kill on any target, and **≤ 30 minutes** end-to-end
-> for any single `xs_backend` incremental scenario (three passes).
-
-`xs_div` and `xs_exu` from `opt_loop_synth` §2 are deliberately **not** here.
-`xs_div` is a QoR probe whose value depends on the `div_blackbox` fix and adds
-nothing to a rebuild-latency loop; `xs_exu` is redundant with `xs_backend` for
-scale. Both remain available if the ledger later asks for them.
+`xs_backend` and `XSCore` are robustness runs outside this loop, not land gates.
+The active large-target budget is 30 minutes for the complete three-pass
+scenario; a candidate that cannot fit is replaced rather than made routine.
+`xs_rob` currently fails that cadence even when compile/color are reused, so it
+remains a stress probe until partitioning makes its first region cacheable.
 
 ---
 
@@ -1343,7 +1344,7 @@ A change **lands** only if, on **every** routine target (§2):
 5. the correctness gate passes — dino/minion: LEC, formal and asserted sim all
    green; XS: completes, no diagnostic, sim marker present and the Pyrope and
    Verilog checksums agree;
-6. the §2 hard constraints hold on `xs_backend`;
+6. the selected §2 medium/large target completes within its fixed budget;
 7. `workdir_bytes` is reported. A lever that more than doubles cache size needs
    an explicit note and feeds open question 3.
 
@@ -1361,10 +1362,11 @@ Each iteration:
 2. **Check the shared-default constraint (I8).** If it only helps with
    per-design tuning, it is out of scope; record it under "future work" at the
    bottom of the ledger and pick another.
-3. **Measure** on the routine set: `dino`, `minion`, `xs_alu`, `xs_rob` — the
-   full §H6 row for each, all three passes.
-4. **Gate** against §8. Run `xs_backend` and the periodic dino/minion LEC before
-   landing.
+3. **Measure** on the flow-specific routine set: dino for LEC; `xs_alu` and the
+   selected medium XS block for synthesis. Use `xs_rob` periodically as a
+   partitioning stress probe. Add minion LEC before landing a broad proof-policy
+   change.
+4. **Gate** against §8. Do not make `xs_backend` a land gate.
 5. **Land or revert**, and append the row either way — a measured negative
    result is worth as much as a positive one and stops the idea being retried.
    Then **regenerate `current_opt_loop_incr.html`** (H6b), on land *and* on
@@ -1375,8 +1377,8 @@ Each iteration:
    tracks the current column; re-baseline only on a host, PDK or toolchain
    change (I11), and say so in the page header when it happens.
 
-**Periodic (weekly, and before any land):** `xs_backend`, the Verilog input
-path, and the full dino/minion LEC + formal matrix.
+**Periodic:** the Verilog input path and dino/minion LEC. `xs_backend` is an
+explicit robustness experiment only.
 
 **Baseline — do this once, on the loop's OWN machine, right after §6, before
 drawing any lever (I11).** Record a full ledger row for every target in §2 at
@@ -1539,7 +1541,55 @@ that fired; the round count printed is the one actually run, not the constant.
 
 **Next step is a rewrite, not a knob:** make the slice resolver iterative.
 
-### Still open after I-1/I-2
+### I-3 — lazy ABC/Liberty startup on cache hits — **IMPLEMENTED, validated**
+
+`Mapper::start()` used to run before region decomposition, so even an all-hit
+warm synthesis paid `Abc_Start`, alias installation, a full Liberty parse and
+DFF-cell discovery. Startup is now idempotent and occurs at the first real
+cache miss. An all-hit run restores mapped bodies without starting ABC; a mixed
+run starts it once at the first miss. The run-level mapping options are kept
+separately from temporary per-region overrides, and a destructor guarantees
+`Abc_Stop` if a diagnostic unwinds the callback.
+
+Same-host A/B on `xs_alu`, identical source, cache, PDK and 2/2 cache hits:
+
+| measurement | eager startup | lazy startup | delta |
+|---|---:|---:|---:|
+| warm `pass.abc` | 2,846.6 ms | **957.5 ms** | **2.97x faster** |
+| exact cache validation (`hit_ms`) | 245.9 ms | 246.5 ms | noise |
+| cold `pass.abc` | 6,074.3 ms | 6,021.8 ms | noise |
+
+The result JSON now reports `incremental.abc_started` as 0/1. The end-to-end
+incremental test requires 0 for both all-hit passes and 1 for cold/one-miss
+passes, while retaining the byte-identical Verilog and LEC gates.
+
+### I-4 — lazy LEC clock-forest construction — **IMPLEMENTED, validated**
+
+Hierarchical LEC used to build the ref and impl design-wide clock forests before
+checking a single verdict-cache key. Those forests are phase-planning inputs;
+an all-hit run returns before phase planning and discarded both complete graph
+scans. Forest construction now uses `std::call_once` at the first real cache
+miss. Concurrent misses still see one fully constructed immutable pair, while
+an all-hit run never creates it.
+
+Same-host optimized-build Dino probe, 17/17 verdict hits and a true one-line
+comment append:
+
+| measurement | eager forests | lazy forests | delta |
+|---|---:|---:|---:|
+| warm `pass.lec` | 18.5 ms | **17.0 ms** | **8% faster** |
+| cold `pass.lec` | 237.2 ms | 231.8 ms | noise |
+
+`lec_cache_test` runs with phase tracing: the cold miss must print a clock
+forest, and the 3/3 all-hit replay must not. The full 35-target LEC suite remains
+green. The cache digest, option key, and proof policy are unchanged.
+
+The checked-in Dino `tests/comment1/ALU.prp` is not currently a comment-only
+variant: it has drifted into a structurally different equivalent ALU. That
+fixture correctly misses for `ALU` and its Merkle parent; a fresh append to the
+current ALU hits 17/17. Do not weaken the semantic key to conceal fixture drift.
+
+### Still open after I-1/I-2/I-3/I-4
 
 **The front end.** It is ~75 s of `xs_rob`'s ~91 s warm rebuild, and nothing
 caches it. See L8 — and note that

@@ -22,6 +22,22 @@
 
 namespace livehd::color {
 
+// Our own output defs. A rerun must never mine them: a pattern body re-digests
+// to exactly the digest that names it, so with new sites elsewhere the bucket
+// would splice the body into an INSTANCE OF ITSELF (and any splice inside a
+// shared body would rewrite every site at once).
+bool is_pattern_def_name(std::string_view name) {
+  if (name.size() != 4 + 32 || !name.starts_with("pat_")) {
+    return false;
+  }
+  for (char c : name.substr(4)) {
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 namespace {
 
 namespace gu = livehd::graph_util;
@@ -151,22 +167,6 @@ bool is_eligible(const Node& n) {
     return false;
   }
   return !n.attr(livehd::attrs::runtime_check).has();
-}
-
-// Our own output defs. A rerun must never mine them: a pattern body re-digests
-// to exactly the digest that names it, so with new sites elsewhere the bucket
-// would splice the body into an INSTANCE OF ITSELF (and any splice inside a
-// shared body would rewrite every site at once).
-bool is_pattern_def_name(std::string_view name) {
-  if (name.size() != 4 + 32 || !name.starts_with("pat_")) {
-    return false;
-  }
-  for (char c : name.substr(4)) {
-    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // The stable part of a member's identity: op, LUT function (when the node IS a
@@ -344,6 +344,14 @@ uint64_t est_verilog_lines(const Cone& k) {
   return l;
 }
 
+uint64_t est_mappable_ge(const Cone& k) {
+  uint64_t ge = 0;
+  for (const auto& n : k.members) {
+    ge += gu::mappable_ge_weight(n);
+  }
+  return ge;
+}
+
 // A two-node wide shift followed by a narrow constant slice can be expensive
 // to synthesize at every occurrence even though replacing it with an instance
 // is text-neutral. Sharing wins in mapped gates and peak memory, so allow this
@@ -442,7 +450,7 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
   cone_of.reserve(order.size());
   for (size_t i = order.size(); i-- > 0;) {
     auto n    = order[i];
-    bool root = opts.max_nodes != 0 && is_wide_dynamic_shift_node(n);
+    bool root = false;
     bool any  = false;
     Node single{};
     for (const auto& e : n.out_edges()) {
@@ -461,6 +469,20 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
     }
     if (!any) {
       continue;  // dead node: nothing to extract, other passes clean it up
+    }
+
+    // A wide dynamic shift is normally cut into a singleton so bounded mining
+    // can share it without consuming an entire cone.  Keep a wide SRA with its
+    // sole narrow Get_mask consumer, though: that pair exposes only the used
+    // word at the pattern boundary.  Cutting between them forces ABC to build
+    // the full wide shift (Rob has hundreds of 10260 -> 20 bit selects) and
+    // defeats the mapper's demand-width reduction.
+    const bool wide_sra_to_narrow_slice = !root && !single.is_invalid() && gu::type_op_of(n) == Ntype_op::SRA
+                                          && gu::type_op_of(single) == Ntype_op::Get_mask
+                                          && gu::bits_of(single.create_driver_pin(0)) > 0
+                                          && gu::bits_of(n.create_driver_pin(0)) >= 4 * gu::bits_of(single.create_driver_pin(0));
+    if (opts.max_nodes != 0 && is_wide_dynamic_shift_node(n) && !wide_sra_to_narrow_slice) {
+      root = true;
     }
     int32_t cid;
     if (root) {
@@ -1208,6 +1230,11 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     if (opts.min_win != 0 && !is_synthesis_expensive_pattern(occs.front())
         && est_verilog_lines(occs.front()) < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
+      continue;
+    }
+    if (opts.max_pattern_ge != 0 && !is_synthesis_expensive_pattern(occs.front())
+        && est_mappable_ge(occs.front()) > opts.max_pattern_ge) {
+      ++st.oversize_skipped;
       continue;
     }
 

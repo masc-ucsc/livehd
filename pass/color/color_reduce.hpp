@@ -39,28 +39,35 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 #include "hhds/graph.hpp"
 
 namespace livehd::color {
 
 struct Reduce_opts {
-  uint64_t min_count = 3;  // occurrences a pattern needs before extraction
+  uint64_t min_count      = 3;  // occurrences a pattern needs before extraction
   // 3, not 4: the canonical unrolled-loop residue is a compare/select/mask
   // TRIPLE (Eq -> Mux -> And); the text-profit guard rejects any small cone
   // whose instance would out-line its statements.
-  uint64_t min_nodes = 3;  // smallest cone (in nodes) worth considering
+  uint64_t min_nodes      = 3;  // smallest cone (in nodes) worth considering
   // Split a maximal fanout-free cone into disjoint sub-cones no larger than
   // this many nodes before bucketing. 0 preserves the maximal-cone behavior.
   // This exposes repeated internal blocks hidden inside large, globally unique
   // unrolled cones while retaining the single-output splice invariant.
-  uint64_t max_nodes = 0;
+  uint64_t max_nodes      = 0;
+  // Refuse a shared body whose summed mappable gate-equivalent estimate is
+  // above this ceiling.  Node count alone misses tiny, extremely wide
+  // arithmetic cones. 0 disables the guard; explicitly recognized wide-shift
+  // sharing shapes remain eligible because extracting those is the purpose of
+  // the synthesis-aware exceptions.
+  uint64_t max_pattern_ge = 0;
   // Required PER-SITE Verilog line win (estimated statement+decl lines saved
   // minus the ports+2 lines an instance costs). 0 = guard off. Inert here by
   // the Color_opts convention: the shipped policy (1) lives on the pass.color
   // label, so a direct caller or unit test gets the raw algorithm.
-  uint64_t min_win   = 0;
-  bool     verbose   = false;
+  uint64_t min_win        = 0;
+  bool     verbose        = false;
 };
 
 struct Reduce_stats {
@@ -73,10 +80,18 @@ struct Reduce_stats {
   uint64_t nodes_created       = 0;  // pattern-body nodes + instance Subs
   uint64_t verify_dropped      = 0;  // digest-equal cones the exact walk rejected
   uint64_t port_heavy_skipped  = 0;  // buckets skipped: interface dwarfs body
+  uint64_t oversize_skipped    = 0;  // buckets skipped: projected mapping cost
   uint64_t dup_edge_skipped    = 0;  // cones refused: parallel duplicate edge
   uint64_t reuse_refused       = 0;  // rerun buckets refused: fragile port binding
   uint64_t promoted_consts     = 0;  // const slots promoted to input ports
 };
+
+// True for a def name this pass MINTED: `pat_` + the 32 hex digits of the
+// pattern identity. The single source of truth for "is this a shared pattern
+// body" -- color_reduce refuses to re-mine one, color_absorb refuses to inline
+// one away, and neither may loosen it to a bare prefix (a user module called
+// `pat_foo` is not ours).
+[[nodiscard]] bool is_pattern_def_name(std::string_view name);
 
 // Mine + extract over `defs` (each def visited once; buckets are global, so a
 // pattern repeating across defs shares one body). Rewrites the graphs and

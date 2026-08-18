@@ -214,10 +214,10 @@ the JSON) means the mapped network exposed no delay data.
 
 ABC's `strash`/`dch` destroy per-node provenance, so after mapping each gate is
 re-attributed to the **original output cone** it feeds: each output port's driver
-`srcid` is re-minted into the body locator (`import_from`), and a backward DFS
-from every PO stamps each gate `Sub` in that PO's fanin cone with the output's
-srcid (a gate feeding several outputs gets a `combine(...)`, lowest output index
-= primary). The output-concat `Set_mask` glue carries the port srcid too. The
+`srcid` is re-minted into the body locator (`import_from`), and one shared
+backward traversal stamps each gate `Sub` from the lowest-index output cone that
+reaches it (a stable primary anchor for gates shared by several outputs). The
+output `Concat` glue carries the port srcid too. The
 emitted netlist therefore points back to the pre-ABC RTL (verify with `cgen --set
 cgen.srcmap=1`). Attribution is per-cone, not per-gate — ABC's optimization is
 lossy, so exact gate lineage is unrecoverable.
