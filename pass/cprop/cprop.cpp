@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <queue>
 #include <span>
 #include <string>
 #include <utility>
@@ -41,7 +42,15 @@ namespace {
 
 void sort_inp(livehd::graph_util::Edge_vec& edges) {
   std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
-    return a.sink.get_port_id() < b.sink.get_port_id();
+    if (a.sink.get_port_id() != b.sink.get_port_id()) {
+      return a.sink.get_port_id() < b.sink.get_port_id();
+    }
+    const auto an = a.driver.get_master_node().get_debug_nid();
+    const auto bn = b.driver.get_master_node().get_debug_nid();
+    if (an != bn) {
+      return an < bn;
+    }
+    return a.driver.get_port_id() < b.driver.get_port_id();
   });
 }
 
@@ -49,6 +58,79 @@ livehd::graph_util::Edge_vec ordered_inp_edges(const hhds::Node_class& node) {
   auto e = node.inp_edges();
   sort_inp(e);
   return e;
+}
+
+// Deterministic AND topological. hhds forward order is topological but its
+// back-edge/cycle phases are not stable across processes, while a raw nid sort
+// is stable but loses the drivers-before-consumers visitation that the
+// single-sweep passes below rely on (const folds cascade producer->consumer;
+// see the "visits in forward order" comments in scalar_set_mask/try_collapse).
+// Kahn with a min-debug-nid ready heap provides both; cycle residues (never
+// ready) append in nid order at the end.
+std::vector<hhds::Node_class> stable_nodes(hhds::Graph* g) {
+  std::vector<hhds::Node_class>                   nodes;
+  absl::flat_hash_map<hhds::Class_index, size_t>  index;  // class_index -> position
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    index.emplace(node.get_class_index(), nodes.size());
+    nodes.push_back(node);
+  }
+  std::vector<uint32_t> in_deg(nodes.size(), 0);
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    for (const auto& e : nodes[i].inp_edges()) {
+      const auto driver = e.driver.get_master_node();
+      if (driver.is_invalid()) {
+        continue;
+      }
+      const auto it = index.find(driver.get_class_index());
+      if (it == index.end() || it->second == i) {
+        continue;  // driver outside the body (graph input) or a self-loop
+      }
+      ++in_deg[i];
+    }
+  }
+  auto nid_greater = [&](size_t a, size_t b) { return nodes[a].get_debug_nid() > nodes[b].get_debug_nid(); };
+  std::priority_queue<size_t, std::vector<size_t>, decltype(nid_greater)> ready(nid_greater);
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (in_deg[i] == 0) {
+      ready.push(i);
+    }
+  }
+  std::vector<hhds::Node_class> out;
+  out.reserve(nodes.size());
+  std::vector<bool> emitted(nodes.size(), false);
+  while (!ready.empty()) {
+    const auto i = ready.top();
+    ready.pop();
+    if (emitted[i]) {
+      continue;
+    }
+    emitted[i] = true;
+    out.push_back(nodes[i]);
+    for (const auto& e : nodes[i].out_edges()) {
+      const auto sink = e.sink.get_master_node();
+      if (sink.is_invalid()) {
+        continue;
+      }
+      const auto it = index.find(sink.get_class_index());
+      if (it == index.end() || it->second == i || emitted[it->second]) {
+        continue;
+      }
+      if (in_deg[it->second] != 0 && --in_deg[it->second] == 0) {
+        ready.push(it->second);
+      }
+    }
+  }
+  std::vector<size_t> residue;
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (!emitted[i]) {
+      residue.push_back(i);
+    }
+  }
+  std::sort(residue.begin(), residue.end(), [&](size_t a, size_t b) { return nodes[a].get_debug_nid() < nodes[b].get_debug_nid(); });
+  for (const auto i : residue) {
+    out.push_back(nodes[i]);
+  }
+  return out;
 }
 
 using livehd::graph_util::hydrate_const;
@@ -96,7 +178,7 @@ void enforce_lossless_carriers(hhds::Graph* g) {
   bool changed = true;
   while (changed) {
     changed = false;
-    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    for (auto node : stable_nodes(g)) {
       const auto op = type_op_of(node);
       if (op != Ntype_op::Sum && op != Ntype_op::Mult && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Not
           && op != Ntype_op::SHL && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
@@ -1017,7 +1099,7 @@ constexpr bool kOrPackEnabled = true;
 
 void canonicalize_concat_packs(hhds::Graph* g) {
   std::vector<hhds::Node_class> snapshot;
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+  for (auto node : stable_nodes(g)) {
     const auto op = type_op_of(node);
     if (op == Ntype_op::Set_mask || (kOrPackEnabled && op == Ntype_op::Or)) {
       snapshot.push_back(node);
@@ -2897,7 +2979,7 @@ bool Cprop::scalar_set_mask(hhds::Node_class& node) {
 // vanishes outright when x is already known 0/1.
 void Cprop::canonicalize_and_masks(hhds::Graph* g) {
   std::vector<hhds::Node_class> nodes;
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+  for (auto node : stable_nodes(g)) {
     if (type_op_of(node) == Ntype_op::And) {
       nodes.push_back(node);
     }
@@ -3003,7 +3085,7 @@ void Cprop::cse_pass(hhds::Graph* g) {
     };
 
     std::vector<hhds::Node_class> snapshot;
-    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    for (auto node : stable_nodes(g)) {
       snapshot.push_back(node);
     }
     for (auto& node : snapshot) {
@@ -3139,7 +3221,7 @@ void Cprop::cse_pass(hhds::Graph* g) {
 
 void Cprop::scalar_pass(hhds::Graph* g) {
   std::vector<hhds::Node_class> snapshot;
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+  for (auto node : stable_nodes(g)) {
     snapshot.push_back(node);
   }
 
@@ -3218,7 +3300,7 @@ void Cprop::scalar_pass(hhds::Graph* g) {
 
 void Cprop::canonicalize_latch_holds(hhds::Graph* g) {
   std::vector<hhds::Node_class> latches;
-  for (auto node : g->body().nodes()) {
+  for (auto node : stable_nodes(g)) {
     if (type_op_of(node) == Ntype_op::Latch) {
       latches.push_back(node);
     }

@@ -412,6 +412,8 @@ Options parse_args(int argc, char** argv) {
       opts.tool_invert = true;
     } else if (a == "--match") {  // `tool diff --match`: visualize via the semdiff `match` attribute
       opts.tool_match = true;
+    } else if (a == "--structural") {  // `tool diff --structural`: strict compile-cache H5 comparison
+      opts.tool_structural = true;
     } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;

@@ -1,0 +1,345 @@
+#!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# todo/livehd/2f-incr S1-S5 focused acceptance: cache gating/telemetry,
+# exact comment-only Tier-B reuse, semantic invalidation, corruption recovery,
+# structural warm==cold, and ghost-definition elimination.
+
+set -u
+
+LHD=lhd/lhd
+W="${TEST_TMPDIR:-/tmp/lhd_compile_cache_$$}"
+mkdir -p "$W/src"
+
+# The compile tenant must coexist with the already-landed flat cache/build
+# tenants until the shared L7 substrate migrates them. Treat these as owned by
+# abc, formal, and sim and prove compile never clears or rewrites them.
+mkdir -p "$W/w/abc_cache" "$W/w/sim"
+printf 'abc-owned\n' > "$W/w/abc_cache/owner"
+printf 'formal-owned\n' > "$W/w/formal_cache.json"
+printf 'sim-owned\n' > "$W/w/sim/owner"
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+cat > "$W/src/leaf.prp" <<'EOF'
+pub comb add1(a:u8) -> (r:u9) { r = a + 1 }
+EOF
+cat > "$W/src/side.prp" <<'EOF'
+pub comb twice(a:u8) -> (r:u9) { r = a + a }
+EOF
+cat > "$W/src/top.prp" <<'EOF'
+const leaf = import("leaf")
+const side = import("side")
+mod top(x:u8) -> (y:u9@[]) { y = leaf.add1(a=x) }
+EOF
+
+compile() {
+  local result=$1
+  shift
+  "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/lg" --emit-dir "verilog:$W/v" --workdir "$W/w" \
+    -q --result-json "$result" "$@" || fail "compile failed: $(cat "$result" 2>/dev/null)"
+}
+
+compile_lg_only() {
+  local result=$1 out=$2
+  "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$W/w" \
+    -q --result-json "$result" || fail "lg-only compile failed: $(cat "$result" 2>/dev/null)"
+}
+
+field() {
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    value = json.load(f)
+for key in sys.argv[2].split('.'):
+    value = value[key]
+print(str(value).lower() if isinstance(value, bool) else value)
+PY
+}
+
+has_phase() {
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+raise SystemExit(0 if any(p.get("name") == sys.argv[2] for p in data.get("phases", [])) else 1)
+PY
+}
+
+inode() {
+  python3 - "$1" <<'PY'
+import os, sys
+print(os.stat(sys.argv[1]).st_ino)
+PY
+}
+
+# Cold: both closure files parse/lower and the exact shared-layout artifacts land.
+compile "$W/cold.json"
+[ "$(field "$W/cold.json" compile_cache.enabled)" = true ] || fail "cache not enabled with named workdir"
+[ "$(field "$W/cold.json" compile_cache.misses)" = 3 ] || fail "cold closure did not report three misses"
+has_phase "$W/cold.json" pass.upass || fail "cold compile skipped upass"
+SCOPE="$W/w/incr/scopes/compile/top"
+[ -f "$SCOPE/inventory.json" ] || fail "scope inventory missing"
+[ -n "$(find "$SCOPE/ln" -name tree.bin -print -quit)" ] || fail "Tier-A per-unit LNAST cache missing"
+[ -f "$SCOPE/lg/graph_inventory.json" ] || fail "Tier-B inventory missing"
+cp -R "$W/lg" "$W/cold_lg" || fail "could not preserve the cold lg reference"
+ls "$W/v/"*.v >/dev/null 2>&1 || fail "cold compile emitted no verilog"
+grep -q 'input.*clock' "$W/v/"*.v && fail "combinational leaf unexpectedly clocked its parent"
+# Capture-then-validate: a here-doc fed from a failed $(python3 ...) would set
+# both names empty and every later inode-stability assertion would compare
+# directory-inode==directory-inode (vacuously green).
+SNAPSHOT_NAMES=$(python3 - "$SCOPE/inventory.json" <<'PY'
+import json, sys
+units = {u["name"]: u for u in json.load(open(sys.argv[1]))["units"]}
+print(units["leaf"]["snapshot"], units["side"]["snapshot"])
+PY
+) || fail "could not read snapshot names from the inventory"
+read -r LEAF_SNAPSHOT SIDE_SNAPSHOT <<<"$SNAPSHOT_NAMES"
+[ -n "$LEAF_SNAPSHOT" ] && [ -n "$SIDE_SNAPSHOT" ] || fail "inventory reported empty snapshot names"
+SIDE_SNAPSHOT_INODE=$(inode "$SCOPE/pyrope/$SIDE_SNAPSHOT") || fail "missing side snapshot"
+LEAF_LNAST_INODE=$(inode "$SCOPE/ln/${LEAF_SNAPSHOT%.prp}/tree.bin") || fail "missing leaf compact LNAST"
+
+# Byte-identical warm run: no parser redo and no lower/recipe/formal work.
+compile "$W/warm.json"
+[ "$(field "$W/warm.json" compile_cache.misses)" = 0 ] || fail "warm compile reported a miss"
+[ "$(field "$W/warm.json" compile_cache.hits)" -ge 6 ] || fail "warm compile did not restore parse+graph units"
+has_phase "$W/warm.json" pass.upass && fail "warm compile reran upass"
+has_phase "$W/warm.json" lnast.tolg && fail "warm compile reran tolg"
+[ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] || fail "warm lg is not structurally identical to cold"
+
+# A clean lg-only consumer reuses the immutable graph artifact as a filesystem
+# generation. It must not deserialize either IR merely to materialize a second
+# output directory, and the materialized result remains structurally exact.
+compile_lg_only "$W/artifact.json" "$W/artifact_lg"
+has_phase "$W/artifact.json" compile.cache.lg_artifact || fail "lg-only hit did not use artifact-level reuse"
+has_phase "$W/artifact.json" compile.cache.lg_lookup && fail "lg-only artifact hit deserialized the graph library"
+has_phase "$W/artifact.json" pass.lnastfmt && fail "lg-only artifact hit materialized cached LNASTs"
+[ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/artifact_lg" --structural -q)" = identical ] \
+  || fail "artifact-level lg reuse differs structurally from cold"
+
+# Comment-only source change: exactly leaf reparses, canonical LNAST stays the
+# same, and the post-formal graph closure still restores without lowering.
+python3 - "$W/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text("// comment-only edit\n" + p.read_text())
+PY
+compile "$W/comment.json"
+[ "$(field "$W/comment.json" compile_cache.misses)" = 1 ] || fail "comment edit did not reparse exactly one file"
+has_phase "$W/comment.json" pass.upass && fail "comment edit unnecessarily reran upass"
+[ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] || fail "comment-hit lg differs structurally from cold"
+# The manifest is the Tier-A commit point. A one-file comment update replaces
+# that source snapshot only; it must not rebuild the unchanged source object or
+# the semantically-identical compact LNAST merely to publish a generation.
+[ "$(inode "$SCOPE/pyrope/$SIDE_SNAPSHOT")" = "$SIDE_SNAPSHOT_INODE" ] \
+  || fail "comment update republished an unchanged source snapshot"
+[ "$(inode "$SCOPE/ln/${LEAF_SNAPSHOT%.prp}/tree.bin")" = "$LEAF_LNAST_INODE" ] \
+  || fail "comment update republished a semantically-identical LNAST"
+cmp "$W/src/leaf.prp" "$SCOPE/pyrope/$LEAF_SNAPSHOT" >/dev/null \
+  || fail "comment update did not publish the exact hermetic source snapshot"
+
+# Context identity is exact manifest data, not a 64-bit authorization hash.
+# A mismatched descriptor refuses the entire proposal and rebuilds the scope.
+python3 - "$SCOPE/inventory.json" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+d = json.loads(p.read_text())
+d["context"] += "|manufactured-collision"
+p.write_text(json.dumps(d, separators=(",", ":")) + "\n")
+PY
+compile "$W/context_mismatch.json"
+[ "$(field "$W/context_mismatch.json" compile_cache.refused)" -ge 1 ] \
+  || fail "exact context mismatch was not refused"
+[ "$(field "$W/context_mismatch.json" compile_cache.misses)" = 3 ] \
+  || fail "context mismatch did not rebuild the complete source closure"
+[ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
+  || fail "context-mismatch rebuild differs structurally from cold"
+
+# Semantic exporter edit invalidates the closure and performs a real rebuild.
+# First manufacture the only collision that a deterministic unit test can:
+# copy the new generation's semantic fingerprints into the old generation
+# while leaving its old LNAST/graphs in place. The digest must only propose;
+# exact type/name tree comparison must still reject the stale leaf and parent.
+python3 - "$W/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 1", "a + 2"))
+PY
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/collision_probe_lg" --workdir "$W/collision_probe_w" \
+  -q --result-json "$W/collision_probe.json" || fail "collision probe cold compile failed"
+python3 - "$SCOPE" "$W/collision_probe_w/incr/scopes/compile/top" <<'PY'
+import json, sys
+from pathlib import Path
+
+old = Path(sys.argv[1])
+new = Path(sys.argv[2])
+
+old_inv = json.loads((old / "inventory.json").read_text())
+new_inv = json.loads((new / "inventory.json").read_text())
+new_semantic = {u["name"]: u["semantic_hash"] for u in new_inv["units"]}
+for unit in old_inv["units"]:
+    unit["semantic_hash"] = new_semantic[unit["name"]]
+(old / "inventory.json").write_text(json.dumps(old_inv, separators=(",", ":")) + "\n")
+
+old_graph = json.loads((old / "lg/graph_inventory.json").read_text())
+new_graph = json.loads((new / "lg/graph_inventory.json").read_text())
+new_keys = {g["name"]: g.get("unit_key", "") for g in new_graph["graphs"]}
+old_graph["closure_key"] = new_graph["closure_key"]
+for graph in old_graph["graphs"]:
+    graph["unit_key"] = new_keys[graph["name"]]
+(old / "lg/graph_inventory.json").write_text(json.dumps(old_graph, separators=(",", ":")) + "\n")
+PY
+compile "$W/edit.json"
+[ "$(field "$W/edit.json" compile_cache.misses)" = 1 ] || fail "semantic edit did not miss the changed file"
+has_phase "$W/edit.json" pass.upass || fail "semantic-hash collision incorrectly restored stale graphs"
+[ "$(field "$W/edit.json" compile_cache.hits)" -ge 2 ] || fail "semantic edit did not reuse the unrelated side unit"
+[ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" != identical ] \
+  || fail "structural H5 checker accepted a real semantic edit"
+
+# Partial dirty-cone H5: compare the mixed restored+fresh result against an
+# honestly cache-disabled compile of the edited source.
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/edit_cold_lg" --workdir "$W/edit_cold_w" \
+  --set compile.cache=false -q --result-json "$W/edit_cold.json" || fail "semantic-edit cold reference failed"
+[ "$("$LHD" tool diff "lg:$W/edit_cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
+  || fail "mixed restored+fresh semantic edit differs from cold"
+
+# A damaged graph body is a refused cold miss, never an assert/abort. The fresh
+# rebuild republishes a valid graph generation.
+BODY=$(find "$SCOPE/lg" -name body.bin -print -quit)
+[ -n "$BODY" ] || fail "no cached graph body to damage"
+python3 - "$BODY" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_bytes(b"damaged")
+PY
+compile_lg_only "$W/damaged.json" "$W/lg"
+[ "$(field "$W/damaged.json" compile_cache.refused)" -ge 1 ] || fail "damaged cache was not attributed as refused"
+has_phase "$W/damaged.json" pass.upass || fail "damaged cache did not recover through a cold rebuild"
+
+# A leaf gaining state changes its implicit clock interface and therefore every
+# importer/ancestor GraphIO. The unchanged importer must rebuild, not retain a
+# stale no-clock boundary; the final mixed result must still equal cold.
+cat > "$W/src/leaf.prp" <<'EOF'
+pub mod add1(a:u8) -> (r:u9@[1]) {
+  reg q:u9 = 0
+  q = a + 2
+  r = q
+}
+EOF
+compile "$W/stateful.json"
+has_phase "$W/stateful.json" pass.upass || fail "stateful exporter did not invalidate its importer"
+grep -q 'input.*clock' "$W/v/"*.v || fail "leaf state did not re-port the parent clock"
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/stateful_cold_lg" --workdir "$W/stateful_cold_w" \
+  --set compile.cache=false -q --result-json "$W/stateful_cold.json" || fail "stateful cold reference failed"
+STATE_DIFF=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --structural -q)
+STATE_TEXT=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --top leaf.add1 -q)
+[ "$STATE_DIFF" = identical ] || fail "statefulness dirty cone differs from cold: $STATE_DIFF; $STATE_TEXT"
+
+# Tier-A damage is also a refused cold miss. Remove the exact source snapshot
+# for one unchanged unit; the compile must reparse and republish it cleanly.
+SNAPSHOT=$(python3 - "$SCOPE/inventory.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    units = json.load(f)["units"]
+print(next(u["snapshot"] for u in units if u["name"] == "top"))
+PY
+)
+rm -f "$SCOPE/pyrope/$SNAPSHOT"
+compile "$W/missing_snapshot.json"
+[ "$(field "$W/missing_snapshot.json" compile_cache.refused)" -ge 1 ] \
+  || fail "missing Tier-A snapshot was not attributed as refused"
+[ "$(field "$W/missing_snapshot.json" compile_cache.misses)" = 1 ] \
+  || fail "missing Tier-A snapshot did not reparse exactly its unit"
+
+[ "$(cat "$W/w/abc_cache/owner")" = abc-owned ] || fail "compile collided with the abc workdir tenant"
+[ "$(cat "$W/w/formal_cache.json")" = formal-owned ] || fail "compile collided with the formal workdir tenant"
+[ "$(cat "$W/w/sim/owner")" = sim-owned ] || fail "compile collided with the sim workdir tenant"
+
+# The off switch leaves no ambiguity in telemetry and always runs the full path.
+"$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/off_lg" --workdir "$W/off_w" \
+  --set compile.cache=false -q --result-json "$W/off.json" || fail "cache-off compile failed"
+[ "$(field "$W/off.json" compile_cache.enabled)" = false ] || fail "cache-off telemetry says enabled"
+[ "$(field "$W/off.json" compile_cache.hits)" = 0 ] || fail "cache-off reported hits"
+has_phase "$W/off.json" pass.upass || fail "cache-off did not run the full path"
+[ ! -e "$W/off_w/incr" ] || fail "cache-off created persistent incremental state"
+
+# I5: publishing failure is never softened into an endlessly recomputed
+# success. Make only the compile scope unwritable, require a clean nonzero exit,
+# then restore permissions so the test sandbox can clean itself.
+mkdir -p "$W/store_fail_w/incr/scopes/compile/top"
+chmod 500 "$W/store_fail_w/incr/scopes/compile/top"
+if "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/store_fail_lg" \
+  --workdir "$W/store_fail_w" -q --result-json "$W/store_fail.json"; then
+  chmod 700 "$W/store_fail_w/incr/scopes/compile/top"
+  fail "compile succeeded after a cache store failure"
+fi
+chmod 700 "$W/store_fail_w/incr/scopes/compile/top"
+[ "$(field "$W/store_fail.json" compile_cache.store_failed)" -ge 1 ] \
+  || fail "cache store failure was not reported"
+
+# Rename/delete: a semantic rebuild prunes the removed graph from both the
+# emitted library and the cache generation (no ghost defs).
+python3 - "$W/src/top.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text('mod top(x:u8) -> (y:u9@[0]) { y = x + 2 }\n')
+PY
+compile "$W/delete.json"
+# Capture-then-grep: a pipe would take grep's exit status, so a crashing
+# `tool cat` would vacuously pass the ghost checks.
+EMITTED_CAT=$("$LHD" tool cat "lg:$W/lg" -q) || fail "tool cat on emitted lg failed"
+CACHED_CAT=$("$LHD" tool cat "lg:$SCOPE/lg" -q) || fail "tool cat on cached lg failed"
+if grep -q 'leaf.add1' <<<"$EMITTED_CAT"; then
+  fail "deleted leaf graph survived in emitted lg"
+fi
+if grep -q 'leaf.add1' <<<"$CACHED_CAT"; then
+  fail "deleted leaf graph survived in cached lg"
+fi
+
+# Real shared-workdir coexistence, not just path sentinels: exercise the three
+# established sibling tenants in the same workdir, then prove this compile
+# scope still hits. Each flow owns its own namespace and may replace the
+# sentinel inside that namespace; none may damage incr/scopes/compile/top.
+"$LHD" pass abc --top top.top "lg:$W/lg" --emit-dir "lg:$W/shared_net" \
+  --set abc.library=inou/prp/tests/abc/test.lib --workdir "$W/w" -q \
+  --result-json "$W/shared_abc.json" || fail "shared-workdir abc failed"
+
+cat > "$W/src/shared_formal.prp" <<'EOF'
+mod shared_formal(sel:u3, en:bool) -> (value:u16@[0]) {
+  reg onehot:u16 = 0
+  value = onehot
+  assert((onehot & (onehot - 1)) == 0, "onehot invariant")
+  if en { onehot = 1 << sel }
+}
+EOF
+"$LHD" formal verify "$W/src/shared_formal.prp" --top shared_formal --workdir "$W/w" \
+  --set formal.bound=3 --set formal.simfail_run=false -q \
+  --result-json "$W/shared_formal.json" || fail "shared-workdir formal failed"
+
+cat > "$W/src/shared_leaf.prp" <<'EOF'
+pub comb shared_leaf(a:u8) -> (r:u8) { r = a }
+EOF
+cat > "$W/src/shared_tb.prp" <<'EOF'
+const leaf = import("shared_leaf.shared_leaf")
+test shared_tb.smoke(cycles:u20 = 1) {
+  mut dut = leaf
+  tick cycles clocks=(clock=1) {
+    dut.a = 3
+    step
+  }
+}
+EOF
+"$LHD" sim "$W/src/shared_tb.prp" --setup-only --workdir "$W/w" -q \
+  --result-json "$W/shared_sim.json" || fail "shared-workdir sim failed"
+
+compile "$W/post_shared.json"
+[ "$(field "$W/post_shared.json" compile_cache.misses)" = 0 ] \
+  || fail "sibling workdir tenants evicted the compile scope"
+[ -d "$W/w/abc_cache" ] || fail "shared-workdir abc tenant missing"
+[ -s "$W/w/formal_cache.json" ] || fail "shared-workdir formal tenant missing"
+[ -d "$W/w/sim" ] || fail "shared-workdir sim tenant missing"
+
+echo "PASS: incremental Pyrope compile cache"

@@ -589,6 +589,25 @@ void write_result(const Options& opts, const Result& res) {
     w.EndArray();
   }
 
+  if (res.compile_cache.present) {
+    w.Key("compile_cache");
+    w.StartObject();
+    w.Key("enabled");
+    w.Bool(res.compile_cache.enabled);
+    w.Key("hits");
+    w.Uint64(res.compile_cache.hits);
+    w.Key("misses");
+    w.Uint64(res.compile_cache.misses);
+    w.Key("redone_ms");
+    const auto redone_txt = std::format("{:.3f}", res.compile_cache.redone_ms);
+    w.RawValue(redone_txt.data(), redone_txt.size(), rapidjson::kNumberType);
+    w.Key("store_failed");
+    w.Uint64(res.compile_cache.store_failed);
+    w.Key("refused");
+    w.Uint64(res.compile_cache.refused);
+    w.EndObject();
+  }
+
   w.Key("inputs");
   w.StartArray();
   for (const auto& s : res.inputs) {

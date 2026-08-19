@@ -148,6 +148,22 @@ std::vector<Set_option> list_set_options() {
                            "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
                            "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
                            "SLOWER -- a diagnosis tool, not something to leave on or to time a run with"});
+  out.push_back(Set_option{
+      "compile.cache",
+      "compile",
+      "true",
+      "reuse unchanged Pyrope parse and lowered graph units when a user-named --workdir is present; false forces an honest "
+      "full compile while retaining compile_cache telemetry in --result-json. Has no effect without --workdir or on "
+      "Verilog/IR-only inputs"});
+  out.push_back(Set_option{
+      "compile.lnast_fmt",
+      "compile",
+#ifndef NDEBUG
+      "true",
+#else
+      "false",
+#endif
+      "run the pass.lnastfmt compiler self-check after parsing; defaults on in debug builds and off in optimized builds"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.

@@ -671,4 +671,9 @@ public:
   // Comments and string bodies are correctly ignored (they are not keyword
   // tokens). Throws Parse_error only on an unterminated string/backtick.
   static std::vector<std::string> scan_imports(const std::string& path);
+  // Same lexer-only scan over already-captured bytes. `path` is the virtual
+  // user-tree path used for diagnostics; no disk read occurs. Incremental
+  // compile uses this after its one-shot source snapshot so dependency
+  // discovery and the later parse observe exactly the same file contents.
+  static std::vector<std::string> scan_imports(std::string_view path, std::string_view source);
 };

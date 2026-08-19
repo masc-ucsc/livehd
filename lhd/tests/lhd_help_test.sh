@@ -142,12 +142,14 @@ echo "$CAT"  | grep -q -- '--invert-match' && fail "tool cat help leaked grep's 
 echo "$CAT"  | grep -q -- '--match'        && fail "tool cat help leaked diff's --match"
 echo "$GREP" | grep -q -- '--invert-match' || fail "tool grep help omits --invert-match"
 echo "$DIFF" | grep -q -- '--match'        || fail "tool diff help omits --match"
+echo "$DIFF" | grep -q -- '--structural'   || fail "tool diff help omits --structural"
 echo "$TREE" | grep -q -- 'kind:<X>'       || fail "tool tree help omits kind selectors"
 GREPJ=$({ "$LHD" tool grep --help --diag-fmt jsonl; } 2>&1)
 DIFFJ=$({ "$LHD" tool diff --help --diag-fmt jsonl; } 2>&1)
 TREEJ=$({ "$LHD" tool tree --help --diag-fmt jsonl; } 2>&1)
 echo "$GREPJ" | grep -q '"name":"invert-match"' || fail "tool grep JSON omits the pretty page's --invert-match"
 echo "$DIFFJ" | grep -q '"name":"match"'        || fail "tool diff JSON omits the pretty page's --match"
+echo "$DIFFJ" | grep -q '"name":"structural"'   || fail "tool diff JSON omits the pretty page's --structural"
 echo "$TREEJ" | grep -q '"name":"target".*"repeatable":true' \
   || fail "tool tree JSON omits the pretty page's repeatable kind selector"
 

@@ -99,6 +99,16 @@ sh_test(
     data = _FLOW_DATA + ["scan_imports.prp"],
 )
 
+sh_test(
+    name = "lhd_compile_cache_test",
+    size = "large",
+    srcs = ["lhd_compile_cache_test.sh"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
+)
+
 # `lhd sim` runtime test-parameter flags: each `test name(params)` parameter is a
 # `--<name>` flag on the generated driver (+ `--seed`/`--help`/validating
 # parsers); unsafe/reserved parameter names are rejected with a clear message,

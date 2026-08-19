@@ -200,6 +200,7 @@ bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
 bool              lnastfmt_enabled(const Options& opts);
+bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
 std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def);
@@ -268,7 +269,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
 // a pre-compile to lg: just to resolve its imports).
 void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files);
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path);
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);
 void scan_command(Options& opts, Result& res);

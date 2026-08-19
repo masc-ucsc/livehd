@@ -9,6 +9,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -19,6 +20,7 @@
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
+#include "semdiff.hpp"
 
 namespace lhd {
 
@@ -625,6 +627,202 @@ std::vector<std::string> tool_diff_lines(const std::string& dir, Options& opts, 
   return lines;
 }
 
+bool tool_same_io(const hhds::GraphIO& a, const hhds::GraphIO& b) {
+  auto same_pins = [](const auto& ap, const auto& bp) {
+    if (ap.size() != bp.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < ap.size(); ++i) {
+      if (ap[i].name != bp[i].name || ap[i].port_id != bp[i].port_id || ap[i].loop_break != bp[i].loop_break
+          || ap[i].bits != bp[i].bits || ap[i].unsign != bp[i].unsign) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return a.get_name() == b.get_name() && same_pins(a.get_input_pin_decls(), b.get_input_pin_decls())
+         && same_pins(a.get_output_pin_decls(), b.get_output_pin_decls());
+}
+
+// H5 is deliberately stricter than semdiff alone. semdiff proves the graph
+// bodies structurally identical; these records additionally require persisted
+// names, color/partitionability, widths, signs, and edge presentation to agree.
+// SourceId/srcmap and match annotations are intentionally absent: locations may
+// move on a comment-only edit, and match is a diagnostic artifact.
+bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
+  std::vector<Tool_record> ar;
+  std::vector<Tool_record> br;
+  tool_flat_records(a, Tool_target::all, ar);
+  tool_flat_records(b, Tool_target::all, br);
+  if (ar.size() != br.size()) {
+    return false;
+  }
+  const std::vector<std::string> cols{"kind", "name", "color", "partitionable", "bits", "signed"};
+  const auto                     record_key
+      = [&](const Tool_record& r) { return std::format("{}|{}|{}", r.type, r.ident, tool_render_pretty(r, cols)); };
+  // Materialize each key once: computing format+render inside the sort
+  // comparator costs O(n log n) renders per side for no benefit.
+  const auto sorted_keys = [&](const std::vector<Tool_record>& records) {
+    std::vector<std::string> keys;
+    keys.reserve(records.size());
+    for (const auto& r : records) {
+      keys.push_back(record_key(r));
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+  };
+  if (sorted_keys(ar) != sorted_keys(br)) {
+    return false;
+  }
+
+  auto same_attr = [](auto ahost, auto bhost, auto tag) {
+    auto aa = ahost.attr(tag);
+    auto ba = bhost.attr(tag);
+    return aa.has() == ba.has() && (!aa.has() || aa.get() == ba.get());
+  };
+  auto same_range_attr = [](auto ahost, auto bhost, auto tag) {
+    auto aa = ahost.attr(tag);
+    auto ba = bhost.attr(tag);
+    return aa.has() == ba.has() && (!aa.has() || (aa.get().min == ba.get().min && aa.get().max == ba.get().max));
+  };
+  auto same_pin_attrs = [&](auto ap, auto bp) {
+    return same_attr(ap, bp, livehd::attrs::bits) && same_attr(ap, bp, livehd::attrs::pin_offset)
+           && same_attr(ap, bp, livehd::attrs::pin_name) && same_attr(ap, bp, livehd::attrs::pin_delay)
+           && ap.attr(livehd::attrs::pin_signed).has() == bp.attr(livehd::attrs::pin_signed).has()
+           && same_attr(ap, bp, livehd::attrs::pin_const_value) && same_range_attr(ap, bp, livehd::attrs::time_range)
+           && same_range_attr(ap, bp, livehd::attrs::pending_time);
+  };
+
+  std::vector<hhds::Node_class> anodes;
+  std::vector<hhds::Node_class> bnodes;
+  for (auto node : a->body().nodes(hhds::Node_order::forward)) {
+    anodes.push_back(node);
+  }
+  for (auto node : b->body().nodes(hhds::Node_order::forward)) {
+    bnodes.push_back(node);
+  }
+  const auto node_less
+      = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) { return lhs.get_debug_nid() < rhs.get_debug_nid(); };
+  std::sort(anodes.begin(), anodes.end(), node_less);
+  std::sort(bnodes.begin(), bnodes.end(), node_less);
+  if (anodes.size() != bnodes.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < anodes.size(); ++i) {
+    auto an = anodes[i];
+    auto bn = bnodes[i];
+    if (!same_attr(an, bn, hhds::attrs::name) || !same_attr(an, bn, livehd::attrs::color)
+        || !same_attr(an, bn, livehd::attrs::place) || !same_attr(an, bn, livehd::attrs::proven)
+        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::aggregate_origin)
+        || !same_attr(an, bn, livehd::attrs::aggregate_source_index) || !same_attr(an, bn, livehd::attrs::aggregate_lane_ordinal)
+        || !same_attr(an, bn, livehd::attrs::aggregate_bit_offset) || !same_attr(an, bn, livehd::attrs::aggregate_bit_width)
+        || !same_attr(an, bn, livehd::attrs::aggregate_extent) || !same_attr(an, bn, livehd::attrs::const_value)
+        || !same_attr(an, bn, livehd::attrs::lut) || !same_range_attr(an, bn, livehd::attrs::time_range)
+        || !same_range_attr(an, bn, livehd::attrs::pending_time)) {
+      return false;
+    }
+    std::vector<hhds::Edge_class> ae;
+    std::vector<hhds::Edge_class> be;
+    for (const auto& edge : an.out_edges()) {
+      ae.push_back(edge);
+    }
+    for (const auto& edge : bn.out_edges()) {
+      be.push_back(edge);
+    }
+    const auto edge_less = [](const hhds::Edge_class& lhs, const hhds::Edge_class& rhs) {
+      const auto key = [](const hhds::Edge_class& edge) {
+        return std::tuple{edge.driver.get_master_node().get_debug_nid(),
+                          edge.driver.get_port_id(),
+                          edge.sink.get_master_node().get_debug_nid(),
+                          edge.sink.get_port_id()};
+      };
+      return key(lhs) < key(rhs);
+    };
+    std::sort(ae.begin(), ae.end(), edge_less);
+    std::sort(be.begin(), be.end(), edge_less);
+    if (ae.size() != be.size()) {
+      return false;
+    }
+    for (size_t e = 0; e < ae.size(); ++e) {
+      const auto aedge = ae[e];
+      const auto bedge = be[e];
+      if (!same_pin_attrs(aedge.driver, bedge.driver) || !same_pin_attrs(aedge.sink, bedge.sink)) {
+        return false;
+      }
+    }
+  }
+  auto ac = a->get_input_node().attr(livehd::attrs::coloring_info);
+  auto bc = b->get_input_node().attr(livehd::attrs::coloring_info);
+  return ac.has() == bc.has() && (!ac.has() || ac.get() == bc.get());
+}
+
+bool tool_structural_h5(const std::vector<std::string>& lg_dirs, const Options& opts, std::string& why) {
+  auto& alib          = livehd::Hhds_graph_library::instance(lg_dirs[0]);
+  auto& blib          = livehd::Hhds_graph_library::instance(lg_dirs[1]);
+  auto  collect_names = [&](auto& lib) {
+    std::vector<std::string> all;
+    for (const auto gid : lib.all_io_gids()) {
+      if (auto io = lib.find_io(gid)) {
+        all.emplace_back(io->get_name());
+      }
+    }
+    std::sort(all.begin(), all.end());
+    if (opts.top.empty() || std::binary_search(all.begin(), all.end(), opts.top)) {
+      return opts.top.empty() ? all : std::vector<std::string>{opts.top};
+    }
+    const auto resolved = resolve_top_name(all, opts.top, "lhd.tool.diff");
+    return resolved.empty() ? std::vector<std::string>{} : std::vector<std::string>{resolved};
+  };
+  const auto names  = collect_names(alib);
+  const auto bnames = collect_names(blib);
+  if (names != bnames || names.empty()) {
+    why = names.empty() && bnames.empty() ? "no matching graph definitions" : "definition inventories differ";
+    return false;
+  }
+  for (const auto& name : names) {
+    auto aio = alib.find_io(name);
+    auto bio = blib.find_io(name);
+    if (!aio || !bio || !tool_same_io(*aio, *bio)) {
+      why = std::format("{}: GraphIO differs", name);
+      return false;
+    }
+    if (aio->has_graph() != bio->has_graph()) {
+      why = std::format("{}: body presence differs", name);
+      return false;
+    }
+    if (!aio->has_graph()) {
+      continue;
+    }
+    auto                             ag = aio->get_graph();
+    auto                             bg = bio->get_graph();
+    livehd::semdiff::Semdiff_options semopts;
+    semopts.matching_names = true;  // persisted state identity is part of H5
+    semopts.exact_fallback = true;  // H5 needs a complete exact decision for cyclic/ambiguous signatures
+    // Every definition is compared independently below. Treating Subs as
+    // boundaries prevents a parent compare from depending on which library's
+    // child body happened to materialize first while still checking the exact
+    // Sub interface/wiring; the child body receives its own identity check.
+    semopts.blackbox_subs  = true;
+    if (!livehd::semdiff::structural_identical(ag.get(), bg.get(), semopts)) {
+      const bool traversal_identical = livehd::semdiff::structural_equivalent_traversal(ag.get(), bg.get(), semopts);
+      if (!traversal_identical) {
+        auto diagnostic    = semopts;
+        diagnostic.verbose = true;
+        (void)livehd::semdiff::structural_equivalent_traversal(ag.get(), bg.get(), diagnostic);
+      }
+      why = std::format("{}: semdiff structural identity failed (exact traversal {})",
+                        name,
+                        traversal_identical ? "agrees" : "also differs");
+      return false;
+    }
+    if (!tool_same_semantic_attrs(ag.get(), bg.get())) {
+      why = std::format("{}: semantic attributes differ", name);
+      return false;
+    }
+  }
+  return true;
+}
+
 // One node as seen by the match-aware diff: its correspondence id + a label.
 struct Match_node {
   uint32_t    id;
@@ -734,8 +932,23 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (lg_dirs.size() != 2) {
     throw Lhd_error{"usage", "tool diff takes exactly two lg: inputs", "e.g. `lhd tool diff lg:before lg:after --attr color`"};
   }
+  if (opts.tool_match && opts.tool_structural) {
+    // The two modes print incompatible outputs; silently running one would
+    // make a scripted `= identical` H5 gate fail (or pass) for the wrong reason.
+    throw Lhd_error{"usage", "tool diff --structural and --match are mutually exclusive", "pick one mode"};
+  }
   if (opts.tool_match) {  // semdiff `match`-attribute visualization
     tool_diff_match_lg(opts, lg_dirs);
+    return;
+  }
+  if (opts.tool_structural) {
+    if (!filters.empty() || !opts.tool_attr.empty() || !opts.tool_target.empty()) {
+      throw Lhd_error{"usage", "tool diff --structural compares complete graphs and does not accept filters/--attr/--target", ""};
+    }
+    std::string why;
+    std::string out = tool_structural_h5(lg_dirs, opts, why) ? "identical\n" : std::format("not identical: {}\n", why);
+    std::fwrite(out.data(), 1, out.size(), stdout);
+    std::fflush(stdout);
     return;
   }
   Tool_target tgt   = parse_tool_target(opts.tool_target);
@@ -1162,6 +1375,11 @@ void tool_command(Options& opts, Result& res) {
   if (have_ln) {
     if (!filters.empty()) {
       throw Lhd_error{"usage", "tool diff ln: does not take filters", ""};
+    }
+    if (opts.tool_structural) {
+      // Never silently degrade an H5 gate to a text/ln diff: a script keying
+      // on the strict verdict must get either the verdict or a usage error.
+      throw Lhd_error{"usage", "tool diff --structural compares lg: libraries", "pass two lg:DIR inputs"};
     }
     tool_diff_ln(opts, res, ln_tokens);
   } else if (have_lg) {

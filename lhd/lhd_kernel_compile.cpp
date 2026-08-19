@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -16,7 +17,9 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
 #include "latch_contract.hpp"
+#include "lhd_compile_cache.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lhd_prp_import.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
@@ -327,66 +330,18 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
   // unit happens here, not in the "inou.prp" run_step that parsed the seeds.
   // Disjoint from it — that run_step's timer closed before this call — so the
   // two never double-count; sum them for the whole parse.
-  Phase_timer phase(res, "inou.prp.imports");
-  auto        dir_of = [](std::string_view p) -> std::string {
-    auto s = p.rfind('/');
-    return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
-  };
-  // The unit name inou.prp gives a file: basename minus its extension — the
-  // FULL stem, cut at the LAST '.' (mirror inou_prp.cpp so our loaded-set keys
-  // line up with get_top_module_name()). pass.prp_writer emits sibling units
-  // as `file.entity.prp`, so a stem may itself contain dots.
-  auto unit_name_of = [](std::string_view p) -> std::string {
-    auto s    = p.rfind('/');
-    auto base = s == std::string_view::npos ? p : p.substr(s + 1);
-    auto d    = base.rfind('.');
-    return std::string(d == std::string_view::npos ? base : base.substr(0, d));
-  };
-  auto abspath_of = [](std::string_view p) -> std::string {
-    std::error_code ec;
-    auto            a = fs::absolute(fs::path(p), ec);
-    return ec ? std::string(p) : a.lexically_normal().string();
-  };
-  // Resolve `<stem>.prp` in `dir` case-SENSITIVELY (names are case-sensitive).
-  // Scans the directory and returns the on-disk path only when a filename
-  // matches `<stem>.prp` exactly — FS-independent (a case-insensitive host FS
-  // does not let `import("stem")` resolve a file named `Stem.prp`). Empty when
-  // absent. Listings are cached per directory: a fresh directory_iterator per
-  // import is O(import-edges × dirents) stat calls (an xs_core_prp-scale sweep
-  // is 1631 sibling files, each importing several others).
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> dir_listing;  // dir -> (fname -> path)
-  auto find_prp = [&dir_listing](const std::string& dir, const std::string& stem) -> std::string {
-    // A stem may be path-qualified (`subdir/mod`): the directory portion rides
-    // verbatim onto `dir` and only the final component is matched against the
-    // on-disk filenames.
-    std::string scan_dir = dir;
-    std::string leaf     = stem;
-    if (const auto s = stem.rfind('/'); s != std::string::npos) {
-      scan_dir = dir + "/" + stem.substr(0, s);
-      leaf     = stem.substr(s + 1);
-    }
-    auto [lit, first_visit] = dir_listing.try_emplace(scan_dir);
-    if (first_visit) {
-      std::error_code it_ec;
-      for (fs::directory_iterator it(scan_dir, it_ec), end; !it_ec && it != end; it.increment(it_ec)) {
-        if (!it->is_regular_file()) {
-          continue;
-        }
-        auto fn = it->path().filename().string();
-        if (str_tools::ends_with(fn, ".prp")) {
-          lit->second.emplace(std::move(fn), it->path().string());
-        }
-      }
-    }
-    const auto fit = lit->second.find(leaf + ".prp");
-    return fit == lit->second.end() ? std::string{} : fit->second;
-  };
+  Phase_timer             phase(res, "inou.prp.imports");
+  // Resolution itself lives in lhd_prp_import.hpp and is also used by the
+  // incremental closure scanner. Keeping one implementation is a soundness
+  // requirement: the cache must never preserve a different closure from the
+  // compiler that consumes it.
+  import_detail::Resolver resolver;
 
   absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
   absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
   for (const auto& f : seed_files) {
-    unit_dir[unit_name_of(f)] = dir_of(f);
-    parsed_paths.insert(abspath_of(f));
+    unit_dir[import_detail::unit_name_of(f)] = import_detail::dir_of(f);
+    parsed_paths.insert(import_detail::abspath_of(f));
   }
 
   // Each unit's imports are examined exactly ONCE, in the round after the unit
@@ -425,14 +380,8 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
         }
         // A trailing `.entry` after the last '/' selects a pub member, so the
         // file is the stem; otherwise the whole string is the file path.
-        std::vector<std::string> names;
-        auto                     slash = raw.rfind('/');
-        auto                     dot   = raw.rfind('.');
-        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
-          names.emplace_back(raw.substr(0, dot));
-        }
-        names.emplace_back(raw);
-        bool already = false;
+        const auto names   = import_detail::candidates(raw);
+        bool       already = false;
         for (const auto& c : names) {
           if (loaded.contains(c)) {
             already = true;
@@ -443,9 +392,9 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
           continue;
         }
         for (const auto& c : names) {
-          std::string path = find_prp(dir, c);
+          std::string path = resolver.find(dir, c);
           if (!path.empty()) {
-            seen_paths[c].insert(abspath_of(path));
+            seen_paths[c].insert(import_detail::abspath_of(path));
             found.try_emplace(c, path);
             break;
           }
@@ -488,7 +437,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
     std::vector<Parse_job> jobs;
     jobs.reserve(found.size());
     for (const auto& [name, path] : found) {
-      if (!parsed_paths.insert(abspath_of(path)).second) {
+      if (!parsed_paths.insert(import_detail::abspath_of(path)).second) {
         continue;  // already parsed under some name — don't double-load the file
       }
       jobs.push_back(Parse_job{.name = name, .path = path, .lnast = {}, .imports = {}, .error = {}});
@@ -535,7 +484,7 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
         job.lnast->rehome_name_pool(Lnast::active_name_pool());
         var.add(std::move(job.lnast));
         loaded.insert(job.name);
-        unit_dir[job.name] = dir_of(job.path);
+        unit_dir[job.name] = import_detail::dir_of(job.path);
         import_cache.emplace(job.name, std::move(job.imports));
       }
     }
@@ -551,7 +500,8 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
 // Pyrope parse phase: load ln: import units (visible to upass/inliner), then
 // parse+validate the source files. Returns the number of imported units (the
 // source units are var.lnasts[n_imports..]).
-size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& ln_import_dirs) {
+size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector<std::string>& ln_import_dirs,
+                    bool defer_cache_lnasts = false) {
   check_inputs_exist(opts.files);
   res.inputs = opts.files;
 
@@ -577,18 +527,22 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
     }
   }
 
-  run_step("inou.prp",
-           var,
-           {
-               {"files", join_csv(opts.files)}
-  },
-           opts,
-           res);
-  // 2i-import S1 — transitively pull in imported sibling sources from each
-  // importing file's own directory, so a single-file compile needs no
-  // dependency list (and the LSP resolves the same way).
-  discover_imports(var, res, n_imports, opts.files);
-  if (lnastfmt_enabled(opts)) {
+  if (res.compile_cache.enabled) {
+    compile_cache_parse_sources(opts, res, var, opts.files, defer_cache_lnasts);
+  } else {
+    run_step("inou.prp",
+             var,
+             {
+                 {"files", join_csv(opts.files)}
+    },
+             opts,
+             res);
+    // 2i-import S1 — transitively pull in imported sibling sources from each
+    // importing file's own directory, so a single-file compile needs no
+    // dependency list (and the LSP resolves the same way).
+    discover_imports(var, res, n_imports, opts.files);
+  }
+  if (!defer_cache_lnasts && lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
   }
   if (wants_dump(opts, "parse")) {  // this invocation's source units only (imports are pre-elaborated)
@@ -736,8 +690,12 @@ bool emits_need_graphs(const Options& opts) {
 // toln:0|1). --dump lnast prints that tree, so it counts; ln.cat/ln.diff
 // print/compare it, so the commands count too.
 bool emits_need_lnast(const Options& opts) {
+  // The single-file `--emit foo.prp` pyrope emit consumes the post-upass forest
+  // too (emit_pyrope_single_file runs prp_writer over var.lnasts): without it a
+  // warm graph-cache hit would skip upass and emit from raw parse-stage trees.
   return find_slot(opts.emit_dirs, "ln") != nullptr || find_slot(opts.emit_dirs, "pyrope") != nullptr
-         || find_slot(opts.emit_dirs, "lnast-dump") != nullptr || wants_dump(opts, "lnast") || opts.command == "tool";
+         || find_slot(opts.emit_dirs, "lnast-dump") != nullptr || find_slot(opts.emits, "pyrope") != nullptr
+         || wants_dump(opts, "lnast") || opts.command == "tool";
 }
 
 // A *bare* `lhd compile FILE` (no --emit/--emit-dir at all) is the
@@ -1176,6 +1134,13 @@ void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& to
 // terminal LNAST->LGraph sub-pass into the library at lib_path — the
 // CLI-level tolg:0|1 gate, derived from the requested emits.
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs) {
+  const auto redo_begin     = std::chrono::steady_clock::now();
+  auto       account_redone = [&] {
+    if (res.compile_cache.enabled) {
+      const std::chrono::duration<double, std::milli> dt  = std::chrono::steady_clock::now() - redo_begin;
+      res.compile_cache.redone_ms                        += dt.count();
+    }
+  };
   if (lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
   }
@@ -1366,6 +1331,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
 
   if (!need_graphs) {
+    account_redone();
     return;  // no lg/verilog emit requested -> skip the tolg lowering
   }
   {
@@ -1377,6 +1343,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     // Two-phase: register every module's GraphIO first so call
     // sites can bind callee GraphIOs (Sub instances) regardless of order.
     for (const auto& ln : var.lnasts) {
+      if (ln->is_graph_restored()) {
+        continue;  // graph body restored from the compile cache
+      }
       uPass_tolg::register_io(ln, lib_path, var.lnasts);
     }
     // The reset_style elaboration flag rides the upass set
@@ -1387,6 +1356,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     }
     std::vector<std::shared_ptr<hhds::Graph>> lowered;
     for (const auto& ln : var.lnasts) {
+      if (ln->is_graph_restored()) {
+        continue;  // final post-formal graph already lives in lib_path/var
+      }
       auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style);
       if (g) {
         var.add(g);
@@ -1399,65 +1371,75 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (livehd::diag::sink().has_errors()) {
     throw classify_engine_failure("lnast.tolg reported errors");
   }
+  account_redone();
 }
 
 // Graph half shared by synth and compile: recipe passes + typed emits.
 // `lib_path` is the library the graphs in `var` live in ("" when there are
 // no graphs, e.g. a pure-LNAST run).
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path) {
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final) {
   check_known_set_passes(opts);
-  for (const auto& [set_name, method] : recipe_graph_passes(opts, "O1")) {
-    if (var.graphs.empty()) {
-      break;  // nothing to optimize (validated below if an emit needs graphs)
-    }
-    Eprp_var::Eprp_dict labels;
-    merge_sets(opts, set_name, labels);
-    run_step(method, var, labels, opts, res);
-  }
-
-  // THE LATCH CONTRACT CHECK (todo/livehd/2f-latch M3). Modelling a latch as a
-  // flop-with-enable that commits at its window's closing edge is an
-  // abstraction with a PRECONDITION — no time borrowing — and a precondition
-  // must be CHECKED, never assumed. It runs after the recipe passes (so it sees
-  // the optimized graph the back end will actually consume) and BEFORE anything
-  // that relies on the abstraction. Designs with no latch pay one type scan.
-  for (const auto& gref : var.graphs) {
-    if (!livehd::latch_contract::check(gref.get())) {
-      throw classify_engine_failure("latch contract violation");
-    }
-  }
-
-  // pass.formal — single-design property checks (assert / assume / Hotmux
-  // one-hotness) on the cvc5 prover. A dedicated none|fast|normal mode step,
-  // independent of the O-level recipe above: default `fast` (small cvc5 budget),
-  // `none` under -O0/--recipe O0, override with --set compile.formal.mode=...
-  // It stamps proven / runtime-check attributes, so it precedes the lg save and
-  // cgen below.
-  if (!var.graphs.empty()) {
-    Eprp_var::Eprp_dict labels;
-    merge_sets(opts, "compile.formal", labels);
-    // formal.assume_check is the ONE canonical cross-flow option. Mirror it
-    // into the compile-only pass.formal label after the legacy compile.formal
-    // set so the shared spelling wins if both are present.
-    Eprp_var::Eprp_dict formal_labels;
-    merge_sets(opts, "formal", formal_labels);
-    if (auto it = formal_labels.find("assume_check"); it != formal_labels.end()) {
-      labels["assume_check"] = it->second;
-    }
-    const std::string recipe = opts.recipe.empty() ? "O1" : opts.recipe;
-    const std::string mode   = labels.count("mode") ? labels["mode"] : (recipe == "O0" ? "none" : "fast");
-    if (mode != "none" && mode != "fast" && mode != "normal") {
-      throw Lhd_error{"usage", std::format("--set compile.formal.mode must be none|fast|normal, got '{}'", mode), ""};
-    }
-    if (mode != "none") {
-      labels["mode"] = mode;
-      // The committed design boundary: a refutation at --top fails the build,
-      // refutations in instantiated submodules ("not enough top") only warn.
-      if (!opts.top.empty() && opts.top != "-auto-top" && !labels.count("top")) {
-        labels["top"] = opts.top;
+  const auto                       redo_begin = std::chrono::steady_clock::now();
+  Eprp_var                         fresh;
+  Eprp_var*                        active = &var;
+  absl::flat_hash_set<std::string> restored(res.compile_cache_restored_graphs.begin(), res.compile_cache_restored_graphs.end());
+  if (!restored.empty()) {
+    for (const auto& graph : var.graphs) {
+      if (graph && !restored.contains(std::string(graph->get_name()))) {
+        fresh.add(graph);
       }
-      run_step("pass.formal", var, labels, opts, res);
     }
+    active = &fresh;
+  }
+  if (!already_final) {
+    for (const auto& [set_name, method] : recipe_graph_passes(opts, "O1")) {
+      if (active->graphs.empty()) {
+        break;  // nothing to optimize (validated below if an emit needs graphs)
+      }
+      Eprp_var::Eprp_dict labels;
+      merge_sets(opts, set_name, labels);
+      run_step(method, *active, labels, opts, res);
+    }
+
+    // THE LATCH CONTRACT CHECK (todo/livehd/2f-latch M3). Modelling a latch as a
+    // flop-with-enable that commits at its window's closing edge is an
+    // abstraction with a PRECONDITION — no time borrowing — and a precondition
+    // must be CHECKED, never assumed. A restored final graph already passed the
+    // check under the same code salt and is not checked a second time.
+    for (const auto& gref : active->graphs) {
+      if (!livehd::latch_contract::check(gref.get())) {
+        throw classify_engine_failure("latch contract violation");
+      }
+    }
+
+    // pass.formal — single-design property checks (assert / assume / Hotmux
+    // one-hotness) on the cvc5 prover. It stamps the final cached graphs.
+    if (!active->graphs.empty()) {
+      Eprp_var::Eprp_dict labels;
+      merge_sets(opts, "compile.formal", labels);
+      Eprp_var::Eprp_dict formal_labels;
+      merge_sets(opts, "formal", formal_labels);
+      if (auto it = formal_labels.find("assume_check"); it != formal_labels.end()) {
+        labels["assume_check"] = it->second;
+      }
+      const std::string recipe = opts.recipe.empty() ? "O1" : opts.recipe;
+      const std::string mode   = labels.count("mode") ? labels["mode"] : (recipe == "O0" ? "none" : "fast");
+      if (mode != "none" && mode != "fast" && mode != "normal") {
+        throw Lhd_error{"usage", std::format("--set compile.formal.mode must be none|fast|normal, got '{}'", mode), ""};
+      }
+      if (mode != "none") {
+        labels["mode"] = mode;
+        if (!opts.top.empty() && opts.top != "-auto-top" && !labels.count("top")) {
+          labels["top"] = opts.top;
+        }
+        run_step("pass.formal", *active, labels, opts, res);
+      }
+    }
+  }
+
+  if (res.compile_cache.enabled && !active->graphs.empty()) {
+    const std::chrono::duration<double, std::milli> dt  = std::chrono::steady_clock::now() - redo_begin;
+    res.compile_cache.redone_ms                        += dt.count();
   }
 
   if (wants_dump(opts, "lg")) {
@@ -1641,11 +1623,29 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
 void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
   Eprp_var var;
   if (opts.language == "pyrope") {
+    // workdir() lazily creates ephemeral scratch, so capture the user's intent
+    // before the first timed pass asks for a log path. Incremental persistence
+    // is never activated merely because the kernel needed temporary files.
+    const bool user_workdir   = !opts.workdir.empty();
+    res.compile_cache.present = user_workdir;
+    res.compile_cache.enabled = user_workdir && compile_cache_enabled(opts);
     setup_diag(opts, "compile.pyrope");
-    auto        n_imports = pyrope_parse(opts, res, var, ir.ln_dirs);
-    const auto* lg_out    = find_slot(opts.emit_dirs, "lg");
-    const auto* ln_out    = find_slot(opts.emit_dirs, "ln");
-    std::string lib_path  = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    const auto* lg_out               = find_slot(opts.emit_dirs, "lg");
+    const auto* ln_out               = find_slot(opts.emit_dirs, "ln");
+    std::string lib_path             = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    const bool  need_graphs          = emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty();
+    const bool  defer_cache_lnasts   = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                       && ir.lg_dirs.empty() && !wants_dump(opts, "parse");
+    auto        n_imports            = pyrope_parse(opts, res, var, ir.ln_dirs, defer_cache_lnasts);
+    auto        materialize_deferred = [&] {
+      if (!defer_cache_lnasts) {
+        return;
+      }
+      compile_cache_materialize_sources(res, var);
+      if (lnastfmt_enabled(opts)) {
+        run_step("pass.lnastfmt", var, {}, opts, res);
+      }
+    };
     // 2f-lgimport — absorb any lg: input libraries into the working library
     // BEFORE lowering, so a source unit's `import("lg:name")` resolves to the
     // pre-compiled graph by name at tolg (the same linker mechanism the
@@ -1658,9 +1658,29 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         lib.load_merge(d);
       }
     }
+    // Tier B restores the all-clean closure as a fast path and transplants
+    // eligible units into a mixed restored+fresh dirty-cone rebuild. LNAST-
+    // observing outputs still need a complete post-upass forest, and mixed
+    // source+lg linking remains on the normal path.
+    const bool all_sources_clean
+        = res.compile_cache_clean_units.size() == res.compile_cache_unit_keys.size() && !res.compile_cache_unit_keys.empty();
+    const bool lg_artifact_only = lg_out != nullptr && opts.emit_dirs.size() == 1 && opts.emits.empty() && opts.dumps.empty();
+    if (all_sources_clean && lg_artifact_only && compile_cache_restore_lg_artifact(opts, res, lib_path)) {
+      res.outputs.push_back(lg_out->path);
+      return;
+    }
+    // A mixed dirty rebuild still needs the complete hermetic Tier-A forest.
+    // Source-level type/pub/elaboration dependencies are broader than graph
+    // ownership alone; selecting only Merkle-dirty roots produced a structurally
+    // different Minion top. The all-clean lg-only path above remains fully lazy.
+    materialize_deferred();
+    const bool graph_cache_hit = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                 && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
-    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty());
+    if (!graph_cache_hit) {
+      lower_lnasts(opts, res, var, lib_path, need_graphs);
+    }
     // An absorbed lg: library is part of the DESIGN, not just a name table for
     // `import("lg:…")` to bind against. Put its graphs on `var` so every emit
     // sees them: without this the source-side modules were emitted alone and a
@@ -1673,10 +1693,19 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     if (!ir.lg_dirs.empty()) {
       load_lg_into_var(lib_path, var);
     }
+    if (need_graphs) {
+      // F6: an lg: destination is the live closure, not an accumulating bag of
+      // definitions from prior runs. Keep real bodies and referenced blackbox
+      // declarations; remove renamed/deleted ghosts before any emit/save.
+      compile_cache_prune_graphs(var, res, lib_path);
+    }
     if (ln_out != nullptr) {
       publish_source_ln(opts, res, var, n_imports, ln_out->path);
     }
-    graph_pipeline_and_emits(opts, res, var, lib_path);
+    graph_pipeline_and_emits(opts, res, var, lib_path, graph_cache_hit);
+    if (res.compile_cache.enabled && need_graphs && !graph_cache_hit && ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
+      compile_cache_store_graphs(opts, res, var, lib_path);
+    }
   } else {
     setup_diag(opts, "compile.verilog");
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {

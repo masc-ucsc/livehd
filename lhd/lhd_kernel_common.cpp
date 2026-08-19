@@ -559,13 +559,13 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if (pass == "compile" && flag == "lnast_fmt") {
+    if (pass == "compile" && (flag == "lnast_fmt" || flag == "cache")) {
       // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
-      // self-check runs. Default is build-mode (on in dbg, off in opt); this
-      // overrides it. Folded into the run decision by lnastfmt_enabled(), and
-      // merge_sets never copies it into a pass (its `pass` matches none).
+      // self-check runs, or whether Pyrope incremental compile reuse is active.
+      // Both are folded into kernel decisions and merge_sets never copies them
+      // into a pass (their `pass` matches none).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
-        throw Lhd_error{"usage", std::format("--set/--config compile.lnast_fmt expects true|false, got '{}'", value), ""};
+        throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
     }
@@ -738,6 +738,17 @@ bool lnastfmt_enabled(const Options& opts) {
   return enabled;
 }
 
+bool compile_cache_enabled(const Options& opts) {
+  bool enabled = true;
+  for (const auto& [key, value] : opts.sets) {
+    if (key != "compile.cache") {
+      continue;
+    }
+    enabled = value == "true" || value == "1" || value == "on";
+  }
+  return enabled;
+}
+
 // Apply every `--set <channel>.log=<level>` to the livehd::log registry (the
 // channel and level were already validated by check_known_set_passes). In a
 // release build LHD_LOG is compiled out, so this just records levels nothing
@@ -830,8 +841,9 @@ uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data
 std::string json_escape_min(std::string_view s);  // defined with the scan command below
 
 // One `pub` export in a unit's manifest entry. `url` only for
-// lambda exports (`ln:<unit>.<name>`); values live in the `<unit>.__pub`
-// wrapper tree.
+// lambda exports (`ln:<unit>.<name>`). Published constant leaves also ride in
+// unit metadata so a compile-cache partial restore can register them without
+// synthesizing a separate `<unit>.__pub` wrapper.
 struct Manifest_pub {
   std::string name;
   std::string kind;  // value|comb|mod|pipe|fluid
@@ -893,6 +905,17 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
       first = false;
       ofs << "{\"n\":\"" << json_escape_min(name) << "\",\"mn\":" << e.min << ",\"mx\":" << e.max
           << ",\"u\":" << (e.unbounded ? 1 : 0) << "}";
+    }
+    ofs << "]";
+  }
+  const auto& pub_values = ln.get_pub_values();
+  if (!pub_values.empty()) {
+    ofs << ",\"pub_values\":[";
+    for (size_t i = 0; i < pub_values.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      ofs << "{\"n\":\"" << json_escape_min(pub_values[i].first) << "\",\"v\":\"" << json_escape_min(pub_values[i].second) << "\"}";
     }
     ofs << "]";
   }
@@ -1067,6 +1090,15 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
       be.unbounded = !e.HasMember("u") || e["u"].GetInt() != 0;
       ln.bw_meta().ranges.emplace(e["n"].GetString(), be);
     }
+  }
+  if (u.HasMember("pub_values") && u["pub_values"].IsArray()) {
+    std::vector<std::pair<std::string, std::string>> values;
+    for (const auto& e : u["pub_values"].GetArray()) {
+      if (e.IsObject() && e.HasMember("n") && e["n"].IsString() && e.HasMember("v") && e["v"].IsString()) {
+        values.emplace_back(e["n"].GetString(), e["v"].GetString());
+      }
+    }
+    ln.set_pub_values(std::move(values));
   }
 }
 

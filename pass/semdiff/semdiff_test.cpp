@@ -45,6 +45,44 @@ std::shared_ptr<hhds::Graph> build_and_or(const std::string& dir, const std::str
   return g;
 }
 
+std::shared_ptr<hhds::Graph> build_feedback(const std::string& dir, bool swap_op = false) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("feedback");
+  gio->add_input("sel", 0);
+  gio->add_input("d", 1);
+  gio->add_output("y", 1);
+  auto g = gio->create_graph();
+
+  auto mux = create_typed_node(*g, swap_op ? Ntype_op::Or : Ntype_op::Mux);
+  g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
+  g->get_input_pin("d").connect_sink(mux.create_sink_pin(2));
+  auto out = mux.create_driver_pin(0);
+  out.connect_sink(mux.create_sink_pin(1));
+  out.connect_sink(g->get_output_pin("y"));
+  return g;
+}
+
+std::shared_ptr<hhds::Graph> build_ambiguous_state_cuts(const std::string& dir) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("ambiguous_state");
+  gio->add_input("d", 0);
+  gio->add_output("q", 1);
+  auto g = gio->create_graph();
+
+  auto join = create_typed_node(*g, Ntype_op::Concat);
+  for (int port = 0; port < 2; ++port) {
+    auto flop = create_typed_node(*g, Ntype_op::Flop);
+    flop.set_name("duplicate_state_name");
+    g->get_input_pin("d").connect_sink(flop.create_sink_pin(3));
+    auto q = flop.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, 1);
+    livehd::graph_util::set_pin_name(q, "duplicate_state_name");
+    q.connect_sink(join.create_sink_pin(port));
+  }
+  join.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  return g;
+}
+
 std::shared_ptr<hhds::Graph> build_compact_loop(const std::string& dir, uint64_t count) {
   auto& lib = livehd::Hhds_graph_library::instance(dir);
 
@@ -236,6 +274,25 @@ TEST(Semdiff, StructuralIdenticalOpSwap) {
   an_and.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
 
   EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
+}
+
+TEST(Semdiff, StructuralIdenticalResolvesCombinationalFeedback) {
+  auto a = build_feedback("lgdb_semdiff_fb_a");
+  auto b = build_feedback("lgdb_semdiff_fb_b");
+  auto c = build_feedback("lgdb_semdiff_fb_c", true);
+
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get()));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), c.get()));
+}
+
+TEST(Semdiff, ExactArtifactFallbackResolvesAmbiguousStateCuts) {
+  auto a = build_ambiguous_state_cuts("lgdb_semdiff_amb_state_a");
+  auto b = build_ambiguous_state_cuts("lgdb_semdiff_amb_state_b");
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  options.exact_fallback = true;
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get(), options));
 }
 
 TEST(Semdiff, IdentityGetMaskIsTransparent) {

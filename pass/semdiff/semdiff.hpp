@@ -41,6 +41,10 @@ struct Semdiff_options {
   bool                                             matching_io_names = true;
   bool                                             state_pairing     = false;  // tier-2: full-match (SRP/ERP signature) pairing
                                                                                // of name-unmatched state cells (2f-lec consumer)
+  // Ask structural_identical to resolve any signature-level false miss with
+  // the exact node/edge traversal. Intended for strict artifact validation
+  // (compile-cache H5), where completeness matters more than the fast reject.
+  bool                                             exact_fallback    = false;
   // Treat EVERY Sub as an opaque blackbox cut point (not just is_loop_break ones):
   // its outputs are seeded sources, its inputs still folded as a compare-point
   // obligation. Breaks combinational loops that run THROUGH a submodule and keys
@@ -210,8 +214,12 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // cross-side class), EVERY compare-point obligation is discharged (cut_violated
 // == 0 && cut_unknown == 0 -- a bijection is not an isomorphism), AND the
 // correspondence is CERTAIN (no speculative tier-2 or seeded state pair carried
-// the match). That is exactly the predicate lec's skip already required, computed
-// without the stamping/region/similarity work.
+// the match). When a combinational feedback cone makes the signature result
+// cut_unknown, the function discharges that inconclusive case with the exact
+// parallel-traversal bijection. `exact_fallback` extends that exact decision to
+// other signature ambiguities (including exact zero-node wiring) for artifact
+// validators. That is exactly the predicate lec's skip already required,
+// computed without stamping or similarity work.
 [[nodiscard]] bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
 
 // Exact mixed-representation proof for one compact Subnode_loop against a

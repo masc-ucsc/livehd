@@ -9705,11 +9705,12 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
 // elaboration — so it is linear in file size (ms even on multi-MB sources). The
 // lexer drops comments/trivia and lexes a string body into one `string` token, so
 // an `import` inside a comment or string is never a keyword token and is ignored.
-std::vector<std::string> Prp2lnast::scan_imports(const std::string& path) {
+namespace {
+
+std::vector<std::string> scan_import_tokens(prpparse::Source_buffer buf) {
   using namespace prpparse;
   std::vector<std::string> out;
 
-  Source_buffer      buf  = Source_buffer::from_file(path);
   std::vector<Token> toks = Lexer(buf).tokenize();  // throws Parse_error on an unterminated string
 
   auto strip = [](std::string_view t) -> std::string {
@@ -9732,6 +9733,15 @@ std::vector<std::string> Prp2lnast::scan_imports(const std::string& path) {
         if (!s.empty()) {
           out.push_back(std::move(s));
         }
+      }
+    } else if (j < toks.size() && (toks[j].is(Token_kind::string) || toks[j].is(Token_kind::istring))) {
+      // statement form with a string module: `import "path/file" as alias` —
+      // the only module spelling the parser accepts for this form. Missing it
+      // would drop a dependency edge from the incremental closure and let a
+      // stale Tier-B generation restore over an edited exporter.
+      auto s = strip(toks[j].text);
+      if (!s.empty()) {
+        out.push_back(std::move(s));
       }
     } else {
       // statement form: `import file[.member…] as alias` — dep is the dotted module path.
@@ -9756,6 +9766,16 @@ std::vector<std::string> Prp2lnast::scan_imports(const std::string& path) {
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
+}
+
+}  // namespace
+
+std::vector<std::string> Prp2lnast::scan_imports(const std::string& path) {
+  return scan_import_tokens(prpparse::Source_buffer::from_file(path));
+}
+
+std::vector<std::string> Prp2lnast::scan_imports(std::string_view path, std::string_view source) {
+  return scan_import_tokens(prpparse::Source_buffer(std::string(path), std::string(source)));
 }
 
 // ---------------- Factory hook ----------------

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <deque>
 #include <format>
 #include <memory>
 #include <print>
@@ -437,11 +438,12 @@ void Pass_upass::work(Eprp_var& var) {
     uPass_constprop::set_ambiguous_units(std::move(ambiguous));
   }
 
-  // Capture original entry-point count BEFORE the lambda split spawns helper
-  // lnasts. Anything appended past this index is a function-body spawn — used
-  // below to gate the verifier off for spawn lnasts (and to mark them
-  // is_function_body) unless verifier_include_funcs:true was passed.
-  const auto original_lnast_count = var.lnasts.size();
+  // Capture the entry-point count before lambda splitting so the extraction
+  // loop does not revisit trees it appends. Track those spawned trees by
+  // identity below: an incremental order restoration may move them away from
+  // the tail before the runner reaches them.
+  const auto                        original_lnast_count = var.lnasts.size();
+  absl::flat_hash_set<const Lnast*> function_bodies;
 
   // ── Front-end lambda split (2g). Pull every comb/pipe/mod func_def out of
   // each entry-point tree into its own `top -> [io, stmts]` Lnast and drop it
@@ -466,8 +468,49 @@ void Pass_upass::work(Eprp_var& var) {
     // with no symbol table this early). Tolg has no tuples.
     uPass_detuple::run(ln);
     for (const auto& new_ln : upass::extract_lambda_functions(ln)) {
+      function_bodies.insert(new_ln.get());
       var.add(new_ln);
     }
+  }
+
+  // A mixed incremental restore has cached function trees already present,
+  // while functions owned by dirty files are created by the loop above. Put
+  // the complete forest back in the recorded cold order only now, after every
+  // missing function has been extracted. Persisted LN directories sort by
+  // name, so their on-disk order is not an execution-order substitute.
+  if (!var.lnast_order_hint.empty()) {
+    // Name -> queue, not name -> tree: duplicate top-module names are tolerated
+    // upstream (non-imported collisions), and a single-slot map would silently
+    // drop every tree after the first per name from the forest.
+    absl::flat_hash_map<std::string, std::deque<std::shared_ptr<Lnast>>> by_name;
+    for (const auto& ln : var.lnasts) {
+      by_name[std::string(ln->get_top_module_name())].push_back(ln);
+    }
+    auto take = [&](const std::string& name) -> std::shared_ptr<Lnast> {
+      auto it = by_name.find(name);
+      if (it == by_name.end() || it->second.empty()) {
+        return {};
+      }
+      auto ln = std::move(it->second.front());
+      it->second.pop_front();
+      if (it->second.empty()) {
+        by_name.erase(it);
+      }
+      return ln;
+    };
+    std::vector<std::shared_ptr<Lnast>> ordered;
+    ordered.reserve(var.lnasts.size());
+    for (const auto& name : var.lnast_order_hint) {
+      if (auto ln = take(name)) {
+        ordered.push_back(std::move(ln));
+      }
+    }
+    for (const auto& ln : var.lnasts) {
+      if (auto rest = take(std::string(ln->get_top_module_name()))) {
+        ordered.push_back(std::move(rest));
+      }
+    }
+    var.lnasts = std::move(ordered);
   }
 
   if (up.upass_order.empty()) {
@@ -570,12 +613,11 @@ void Pass_upass::work(Eprp_var& var) {
     const bool is_template = ln->is_template();
     auto       lm          = std::make_shared<upass::Lnast_manager>(ln);
 
-    // For func_extract-spawned lnasts (idx beyond the original entry-point
-    // count), strip the verifier from the order unless the test opted in
+    // For func_extract-spawned lnasts, strip the verifier unless the test opted in
     // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
     auto       order            = up.upass_order;
-    const bool is_function_body = idx >= original_lnast_count;
+    const bool is_function_body = function_bodies.contains(ln.get());
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
     }
@@ -643,6 +685,7 @@ void Pass_upass::work(Eprp_var& var) {
       if (up.run_ssa) {
         uPass_ssa::run(new_ln, &var.lnasts);
       }
+      function_bodies.insert(new_ln.get());
       var.add(new_ln);
     }
   }

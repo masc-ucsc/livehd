@@ -34,6 +34,11 @@ public:
   Eprp_graphs graphs;
   Eprp_lnasts lnasts;
 
+  // Optional stable ordering for a mixed forest reconstructed from persisted
+  // and freshly parsed units. pass.upass applies it after lambda extraction,
+  // when every named tree exists again. Empty means preserve insertion order.
+  std::vector<std::string> lnast_order_hint;
+
   // Unresolved live imports surfaced by pass.upass when invoked
   // with import_defer:1 (the kernel's iterate-until-converged loop consumes
   // them): (unit that hit the import, import string as written). Empty after
@@ -45,6 +50,7 @@ public:
     stage_dict.clear();
     graphs.clear();
     lnasts.clear();
+    lnast_order_hint.clear();
   }
 
   Eprp_var(const Eprp_dict& _dict) : dict(_dict) {}

@@ -1709,6 +1709,18 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
   absl::flat_hash_set<uint64_t> fcommon, bcommon;
   common_values(sa, sb, fcommon, bcommon);
 
+  // A combinational feedback cone can leave a compare point without a forward
+  // signature. That is an inconclusive fast match, not a difference. The exact
+  // parallel traversal is still a structural proof (a checked node/edge
+  // bijection), so use it only for this cut_unknown case. Real violated cuts,
+  // ordinary orphan nodes, and empty graphs retain the fast path's refusal.
+  auto resolve_unknown = [&]() {
+    const bool inconclusive        = res.cut_unknown != 0 || opts.exact_fallback;
+    const bool has_fast_obligation = !sa.order.empty() && !sb.order.empty();
+    return inconclusive && res.cut_violated == 0 && (has_fast_obligation || opts.exact_fallback)
+           && structural_equivalent_traversal(a, b, opts);
+  };
+
   // Node-set bijection: every node on BOTH sides must have a cross-side class.
   // The first orphan proves a difference -- record it and stop (no stamping, no
   // stats). The final verdict routes through is_structural_identity so this path
@@ -1717,7 +1729,7 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
     for (const auto& node : s->order) {
       if (!class_of(*s, node.get_class_index(), fcommon, bcommon)) {
         res.a_unmatched = 1;  // at least one orphan; the predicate only needs != 0
-        return is_structural_identity(res);
+        return resolve_unknown();
       }
     }
   }
@@ -1728,7 +1740,7 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
   // make every identical pair read as "empty".
   res.a_matched = static_cast<uint32_t>(sa.order.size());
   res.b_matched = static_cast<uint32_t>(sb.order.size());
-  return is_structural_identity(res);
+  return is_structural_identity(res) || resolve_unknown();
 }
 
 // ===========================================================================
@@ -2401,6 +2413,12 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   if (a == nullptr || b == nullptr) {
     return false;
   }
+  auto fail = [&](std::string_view reason) {
+    if (opts.verbose) {
+      std::print("semdiff exact traversal: {}\n", reason);
+    }
+    return false;
+  };
 
   // ---- Analyze both sides once: fsig pairs the acyclic majority robustly, so
   // the traversal only has to resolve the cycle cores. build_sides seeds cut
@@ -2412,7 +2430,7 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   // A proven rewiring between compare points is a real difference -- never a
   // stalled-signature false miss -- so do not try to rescue it.
   if (scratch.cut_violated != 0) {
-    return false;
+    return fail("compare-point cut violated");
   }
 
   Bimap ab, ba;  // a<->b node bijection
@@ -2457,6 +2475,29 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
         continue;
       }
       try_pair(na, it->second);
+    }
+  }
+
+  // Artifact validation compares a graph with a persistence/copy descendant.
+  // HHDS preserves debug nids across that operation, so they provide an exact
+  // discovery candidate for symmetric nodes that signatures cannot pair 1:1
+  // (notably duplicate-name state cuts, which traversal intentionally does not
+  // cross). This is enabled only by exact_fallback. The ids are not proof: the
+  // complete node-kind/interface/input-edge bijection below still verifies
+  // every candidate and rejects any rewiring or semantic change.
+  if (opts.exact_fallback) {
+    absl::flat_hash_map<uint64_t, hhds::Node_class> by_debug_nid;
+    for (const auto& node : sb.order) {
+      by_debug_nid.try_emplace(node.get_debug_nid(), node);
+    }
+    for (const auto& node : sa.order) {
+      if (ab.contains(node.get_class_index())) {
+        continue;
+      }
+      auto it = by_debug_nid.find(node.get_debug_nid());
+      if (it != by_debug_nid.end() && node_kind_key(node) == node_kind_key(it->second)) {
+        try_pair(node, it->second);
+      }
     }
   }
 
@@ -2572,7 +2613,18 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     }
     auto by_canon = [&](std::vector<hhds::Node_class>& v, bool a_side) {
       std::sort(v.begin(), v.end(), [&](const hhds::Node_class& x, const hhds::Node_class& y) {
-        return canon(x, a_side) < canon(y, a_side);
+        const auto xcanon = canon(x, a_side);
+        const auto ycanon = canon(y, a_side);
+        if (xcanon != ycanon) {
+          return xcanon < ycanon;
+        }
+        // Persistence/copy preserves debug nids, while HHDS is free to change
+        // flat-storage traversal order. Without this tie-break, equal-canonical
+        // symmetric consumers are zipped in side-local storage order and the
+        // exact verification below rejects an otherwise identical copied graph.
+        // A non-preserving build may still choose a different pairing, but the
+        // final node/edge bijection remains the sole acceptance gate.
+        return x.get_debug_nid() < y.get_debug_nid();
       });
     };
     by_canon(alist, true);
@@ -2599,7 +2651,7 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     }
   }
   if (mismatch) {
-    return false;
+    return fail("discovery produced an inconsistent pairing");
   }
 
   // ---- VERIFY: the exact, sole soundness gate. Every user node on both sides
@@ -2609,36 +2661,36 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
   // all surface here as an inequality, so a `true` is a genuine isomorphism.
   for (auto node : a->body().nodes(hhds::Node_order::forward)) {
     if (!ab.contains(node.get_class_index())) {
-      return false;  // an a node the traversal never paired
+      return fail(std::format("unpaired ref node {}", node.get_debug_nid()));
     }
   }
   size_t b_nodes = 0;
   for (auto node : b->body().nodes(hhds::Node_order::forward)) {
     if (!ba.contains(node.get_class_index())) {
-      return false;
+      return fail(std::format("unpaired impl node {}", node.get_debug_nid()));
     }
     ++b_nodes;
   }
   if (ab.size() != b_nodes) {
-    return false;  // not a bijection (size mismatch)
+    return fail("pairing is not a total bijection");
   }
   for (auto na : a->body().nodes(hhds::Node_order::forward)) {
     auto nb = b->get_node(ab.at(na.get_class_index()));
     if (gu::type_op_of(na) != gu::type_op_of(nb)) {
-      return false;
+      return fail(std::format("op mismatch at ref node {}", na.get_debug_nid()));
     }
     if (gu::type_op_of(na) == Ntype_op::Sub) {
       if (sub_iface_key(na) != sub_iface_key(nb)) {
-        return false;  // blackbox interface changed
+        return fail(std::format("Sub interface mismatch at ref node {}", na.get_debug_nid()));
       }
     } else if (node_out_bits(na) != node_out_bits(nb)) {
-      return false;
+      return fail(std::format("width mismatch at ref node {}", na.get_debug_nid()));
     }
     bool oka, okb;
     auto da = input_descs(na, true, ab, ba, oka);
     auto db = input_descs(nb, false, ab, ba, okb);
     if (!oka || !okb || da != db) {
-      return false;  // an input edge does not map under the bijection
+      return fail(std::format("input-edge mismatch at ref node {}", na.get_debug_nid()));
     }
   }
   // Graph outputs are compare points too (not forward_class nodes): the output
@@ -2649,7 +2701,7 @@ bool structural_equivalent_traversal(hhds::Graph* a, hhds::Graph* b, const Semdi
     auto da = input_descs(a->get_output_node(), true, ab, ba, oka);
     auto db = input_descs(b->get_output_node(), false, ab, ba, okb);
     if (!oka || !okb || da != db) {
-      return false;
+      return fail("graph-output edge mismatch");
     }
   }
   return true;

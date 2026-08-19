@@ -1194,6 +1194,11 @@ not on a schedule.
 
 ### L8 — the frontend / elaboration tier *(was M7)*
 
+The concrete Pyrope implementation plan, settled boundary, two-tier design,
+and acceptance scenarios are tracked in
+[`todo/livehd/2f-incr.html`](../todo/livehd/2f-incr.html). This section remains
+the loop-level dependency and measurement contract.
+
 The remaining half of F10, deliberately measurement-gated. First select and name
 the cache boundary:
 

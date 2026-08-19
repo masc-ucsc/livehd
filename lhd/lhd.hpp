@@ -98,12 +98,13 @@ struct Options {
   // sub, …) also matches exactly.
   std::vector<std::string> tool_kinds;
   std::string              tool_attr;
-  int                      tool_max     = 200;
-  int                      tool_hier    = -1;
-  int                      tool_hops    = 0;
-  int                      tool_context = 2;      // `tool diff -C n` text-line context
-  bool                     tool_invert  = false;  // `tool grep -v`: keep records that do NOT match
-  bool                     tool_match   = false;  // `tool diff --match`: visualize via the semdiff `match` attribute
+  int                      tool_max        = 200;
+  int                      tool_hier       = -1;
+  int                      tool_hops       = 0;
+  int                      tool_context    = 2;      // `tool diff -C n` text-line context
+  bool                     tool_invert     = false;  // `tool grep -v`: keep records that do NOT match
+  bool                     tool_match      = false;  // `tool diff --match`: visualize via the semdiff `match` attribute
+  bool                     tool_structural = false;  // `tool diff --structural`: strict compile-cache H5 comparison
 
   // `--stats` (canonical `--set lhd.stats=true`): ask whichever pass runs for its
   // aggregate report. Meaning is per consumer: `pass semdiff` prints the
@@ -218,6 +219,38 @@ struct Result {
   // more than once in a pipeline (the array is ordered; the consumer sums).
   // Never part of run_id — a wall-clock value in a content hash breaks caching.
   std::vector<std::pair<std::string, double>> phase_ms;
+
+  // `lhd compile` incremental front-end accounting (todo/livehd/2f-incr S1).
+  // Present for a Pyrope source compile with a user-named --workdir, including
+  // compile.cache=false (enabled=false + zero counters), so benchmark rows can
+  // distinguish an honestly disabled cache from an old binary that reports no
+  // cache telemetry. `redone_ms` is work on cache misses only; sync/lookup/store
+  // have disjoint Phase_timer rows and never ride this counter.
+  struct Compile_cache_stats {
+    bool     present{false};
+    bool     enabled{false};
+    uint64_t hits{0};
+    uint64_t misses{0};
+    double   redone_ms{0.0};
+    uint64_t store_failed{0};
+    uint64_t refused{0};
+  } compile_cache;
+
+  // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph
+  // restore/store). Not serialized; the public machine contract is the stats
+  // object above. A graph inventory independently records this closure key, so
+  // a compile that fails after updating the parse cache cannot authorize a
+  // stale pre-failure graph generation on the next run.
+  std::string                                      compile_cache_scope;
+  std::string                                      compile_cache_context;
+  std::string                                      compile_cache_closure_key;
+  std::vector<std::pair<std::string, std::string>> compile_cache_unit_keys;
+  std::vector<std::string>                         compile_cache_clean_units;
+  std::vector<std::string>                         compile_cache_restored_graphs;
+  // Unit names of this scope's PRIOR generation (empty when none/incompatible).
+  // Ghost pruning may delete artifacts of a unit that left the closure only
+  // when that unit provably belonged to this same scope's previous compile.
+  std::vector<std::string>                         compile_cache_prior_units;
 
   // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
   // embedded verbatim as the result's "scan" member.

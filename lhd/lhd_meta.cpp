@@ -487,9 +487,12 @@ const Help_doc* tool_help_doc(std::string_view name) {
         help_flag("target", "--target node|pin|edge|all", "enum", "lg: records to compare (default all)"),
         help_flag("attr", "--attr CSV", "csv", "lg: display columns"),
         help_flag("context", "-C N, --context N", "int", "unified-diff context lines", {"-C"}),
-        help_flag("match", "--match", "flag", "visualize pass.semdiff match attributes")},
+        help_flag("match", "--match", "flag", "visualize pass.semdiff match attributes"),
+        help_flag("structural", "--structural", "flag", "strict H5: semdiff identity plus IO/semantic-attribute equality")},
       {},
-      {"lhd tool diff lg:before lg:after --attr color", "lhd tool diff lg:gold lg:opt --match", "lhd tool diff old.prp new.prp"},
+      {"lhd tool diff lg:before lg:after --attr color",
+        "lhd tool diff lg:cold lg:warm --structural", "lhd tool diff lg:gold lg:opt --match",
+        "lhd tool diff old.prp new.prp"},
       {"ln", "lg", "pyrope", "verilog"},
       {"stdout"}
   };

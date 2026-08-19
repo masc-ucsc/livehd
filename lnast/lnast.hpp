@@ -326,6 +326,11 @@ private:
   // unit blocked this round may still need to inline a converged `comb`).
   // In-memory only; set by the kernel iterate loop, never serialized.
   bool                                             upass_converged_ = false;
+  // Compile-cache restore marker. This is deliberately distinct from
+  // upass_converged_: import-defer also marks successfully elaborated units
+  // converged, but those units still need their first tolg lowering. Cached
+  // units already have their final graph in the library and skip tolg.
+  bool                                             graph_restored_  = false;
   // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
   // by inou.slang on every tree it produces (the direct SV reader lowers
   // sequential `always` as comb and predates the timing conventions, so a
@@ -607,6 +612,9 @@ public:
   // ── converged in an earlier import_defer round (skip the re-walk) ──────────
   bool is_upass_converged() const noexcept { return upass_converged_; }
   void set_upass_converged(bool v) noexcept { upass_converged_ = v; }
+
+  bool is_graph_restored() const noexcept { return graph_restored_; }
+  void set_graph_restored(bool v) noexcept { graph_restored_ = v; }
 
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
