@@ -81,6 +81,7 @@ void Pass_abc::setup() {
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
+  m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
   m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("memory_budget_mb",
@@ -269,14 +270,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += ",";
     }
     j += std::format(
-        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f}",
+        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f},"
+        "\"resynth\":{}",
         jesc(q.module),
         q.color,
         q.input_nodes,
         q.input_ge,
         q.gates,
         q.area,
-        q.ms);
+        q.ms,
+        q.resynth ? 1 : 0);
     if (q.cache[0] != '\0') {
       j += std::format(",\"cache\":\"{}\"", q.cache);
     }

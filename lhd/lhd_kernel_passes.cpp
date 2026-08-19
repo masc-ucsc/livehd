@@ -709,18 +709,24 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       labels["out"] = lg_out->path;
     }
-    // QoR sidecar (2opt-freq A): default under --workdir; merge_sets below runs
-    // after, so an explicit `--set pass.abc.qor=FILE` overrides the default.
-    if (!opts.workdir.empty()) {
-      labels["qor"] = (fs::path(opts.workdir) / "qor.json").string();
+    // QoR sidecar (2opt-freq A): default under --workdir. A stats request
+    // without a user workdir gets an ephemeral sidecar so the normal result
+    // renderer still has the structured per-color rows to print/embed.
+    const bool        user_workdir  = !opts.workdir.empty();
+    const std::string ephemeral_qor = opts.stats && !user_workdir ? (fs::path(workdir(opts)) / "qor.json").string() : std::string{};
+    if (user_workdir || !ephemeral_qor.empty()) {
+      labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
     }
     merge_sets(opts, "pass.abc", labels);
+    if (opts.stats) {
+      labels["stats"] = "true";
+    }
     // Incremental region cache (2opt-incr): lives under the USER's workdir,
     // exactly like lec's formal_cache.json -- a scratch workdir would make
     // every run cold, so no --workdir means no cache. The location is kernel
     // policy, not a user knob (set AFTER merge_sets on purpose); the user
     // switch is `pass.abc.cache=true|false`.
-    if (!opts.workdir.empty()) {
+    if (user_workdir) {
       labels["cache_dir"] = (fs::path(opts.workdir) / "abc_cache").string();
     }
     run_step("pass.abc", var, labels, opts, res);
@@ -732,6 +738,9 @@ void pass_command(Options& opts, Result& res) {
       res.outputs.push_back(lg_out->path);
     }
     embed_qor_sidecar(labels, res);
+    if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
+      std::erase(res.outputs, ephemeral_qor);
+    }
   } else if (sub == "opentimer") {
     // `lhd pass opentimer --top <module> lg:net cells.lib [file.sdc file.spef]`
     // (2opt-freq D): STA on ONE tech-mapped module. Timing files are the bare
@@ -773,6 +782,9 @@ void pass_command(Options& opts, Result& res) {
     const std::string ephemeral_qor = opts.workdir.empty() ? (fs::path(workdir(opts)) / "timing.json").string() : std::string{};
     labels["qor"]                   = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
     merge_sets(opts, "pass.opentimer", labels);
+    if (opts.stats) {
+      labels["stats"] = "true";
+    }
     run_step("pass.opentimer", var, labels, opts, res);
     embed_qor_sidecar(labels, res);
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {

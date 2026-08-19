@@ -116,6 +116,35 @@ grep -q '"max_delay":' "$W/wd/timing.json" || fail "default timing.json missing 
 #     wrapper, so force a multi-region split (tiny max_ge) to get one.
 run pass color synth --top "$TOP" --set color.max_ge=1 --set color.min_ge=0 lg:"$W/lg" --workdir "$W/wsplit"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split" --set abc.library="$LIB" --workdir "$W/wa_split"
+
+# 4b. --stats keeps the whole-design critical path above and adds exactly one
+# structured row per mapped color. The cold ABC run rebuilt every row, and the
+# pretty renderer prints those same rows one per physical line.
+"$LHD" pass opentimer --top "$TOP" lg:"$W/net_split" "$LIB" --workdir "$W/wstats_cold" \
+    --stats -q --result-json "$W/rstats_cold.json" 2>"$W/ot_stats_cold.err" \
+    || fail "cold opentimer stats -> $(cat "$W/rstats_cold.json" 2>/dev/null)"
+cold_colors=$(grep -o '"resynth":1' "$W/rstats_cold.json" | wc -l | tr -d ' ')
+[ "$cold_colors" -ge 2 ] || fail "opentimer JSON did not report every split color: $(cat "$W/rstats_cold.json")"
+"$LHD" pass opentimer --top "$TOP" lg:"$W/net_split" "$LIB" --workdir "$W/wstats_pretty" \
+    --stats --diag-fmt pretty -q >"$W/ot_stats.pretty" 2>"$W/ot_stats_pretty.err" \
+    || fail "pretty opentimer stats failed"
+[ "$(grep -c '^  sta\[stats\]:' "$W/ot_stats.pretty")" = "$cold_colors" ] \
+  || fail "pretty opentimer stats are not one line per JSON color: $(cat "$W/ot_stats.pretty")"
+[ "$(grep -c 'resynth=1$' "$W/ot_stats.pretty")" = "$cold_colors" ] \
+  || fail "cold opentimer color rows did not all say resynth=1: $(cat "$W/ot_stats.pretty")"
+
+# Rebuild the same colored input through the same ABC workdir: every color is a
+# cache hit, but OpenTimer must still report every one and carry resynth=0.
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_split_hit" --set abc.library="$LIB" \
+    --workdir "$W/wa_split" --stats
+"$LHD" pass opentimer --top "$TOP" lg:"$W/net_split_hit" "$LIB" --workdir "$W/wstats_hit" \
+    --stats -q --result-json "$W/rstats_hit.json" 2>"$W/ot_stats_hit.err" \
+    || fail "incremental opentimer stats -> $(cat "$W/rstats_hit.json" 2>/dev/null)"
+[ "$(grep -o '"resynth":0' "$W/rstats_hit.json" | wc -l | tr -d ' ')" = "$cold_colors" ] \
+  || fail "incremental opentimer omitted colors or lost resynth=0: $(cat "$W/rstats_hit.json")"
+[ "$(grep -o '"resynth":1' "$W/rstats_hit.json" | wc -l | tr -d ' ')" = 0 ] \
+  || fail "incremental opentimer incorrectly marked a cache-hit color resynth=1"
+
 if "$LHD" pass opentimer --set pass.opentimer.hier=false --top "$TOP" lg:"$W/net_split" "$LIB" --workdir "$W/wn" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "opentimer hier=false on a wrapper (non-Liberty region Subs) passed; expected failure"
 fi

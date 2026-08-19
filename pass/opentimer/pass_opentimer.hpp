@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -55,6 +56,19 @@ protected:
       hier_setting_;  // `hier` label: true (default, structural flatten) | false (one module per run) | stitch (legacy walk)
   std::string report_module_;  // display name for reports; empty => the analyzed graph's own name
                                // (set when hier=true times a scratch flattened def)
+
+  bool stats_ = false;
+  struct Color_qor {
+    uint32_t    region_id = 0;
+    std::string module;
+    int         color       = 0;
+    bool        resynth     = false;
+    uint64_t    cells       = 0;      // occurrence-weighted Liberty cells in the timed top
+    float       max_arrival = -1.0F;  // end-to-end arrival at a cell output in this region
+    std::string critical_pin;
+    std::string critical_src;
+  };
+  std::vector<Color_qor> color_qor_;
 
   std::vector<std::string> qor_blocks_;  // one JSON object per analyzed design
 

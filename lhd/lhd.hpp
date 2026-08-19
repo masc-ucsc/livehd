@@ -11,6 +11,8 @@
 // livehd::Hhds_graph_library). The legacy lgshell REPL was removed
 // 2026-06-04 (lhd is the only driver; `lhd pyrope lsp` serves the LSP).
 
+#include <cstddef>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -108,7 +110,8 @@ struct Options {
 
   // `--stats` (canonical `--set lhd.stats=true`): ask whichever pass runs for its
   // aggregate report. Meaning is per consumer: `pass semdiff` prints the
-  // node/register/memory match report, `pass color` the partition-size report, and
+  // node/register/memory match report, `pass color` the partition-size report,
+  // `pass abc` / `pass opentimer` one row per mapped color (including resynth), and
   // `lhd lec` / `lhd formal verify` (canonical knob `formal.stats`) a cvc5
   // solve-insight report (problem size, conflicts = learned clauses, decisions,
   // propagations, restarts, theory lemmas, resource units, timings). The formal
@@ -251,6 +254,19 @@ struct Result {
   // Ghost pruning may delete artifacts of a unit that left the closure only
   // when that unit provably belonged to this same scope's previous compile.
   std::vector<std::string>                         compile_cache_prior_units;
+  // [mark, end) is the half-open range of diag::sink().records() produced by the
+  // GRAPH PIPELINE — upass, tolg, cprop, pass.formal — which is exactly the set
+  // of stages a warm restore SKIPS, so it is what the generation must carry and
+  // replay to stay diagnostic-equal. Both ends matter: before the mark is the
+  // front end and the deferred-source materialization, and after the end are
+  // the emits; all of those run on a warm restore too, so a record from either
+  // side would be printed twice (or, since the cache key ignores the `--emit`
+  // slots, replayed onto a run that never requested that emit).
+  size_t                                           compile_cache_diag_mark = 0;
+  // Set by graph_pipeline_and_emits once the pipeline stages are done. SIZE_MAX
+  // ("not yet closed") keeps a path that stores without running the pipeline on
+  // the old carry-everything behavior rather than silently carrying nothing.
+  size_t                                           compile_cache_diag_end  = std::numeric_limits<size_t>::max();
 
   // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
   // embedded verbatim as the result's "scan" member.

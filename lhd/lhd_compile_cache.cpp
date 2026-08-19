@@ -98,12 +98,238 @@ struct Artifact_file {
   int64_t     mtime{0};
 };
 
+// A diagnostic the GRAPH PIPELINE produced, carried with the generation so a
+// warm restore can reproduce it. A total restore skips upass, tolg, cprop and
+// pass.formal outright, so without replay a warm compile prints strictly fewer
+// records than the cold compile of the same sources — measured on minion: 44
+// cold against 24 warm. `pass.formal` warnings used to be handled by refusing
+// to store the generation at all, which cost such a design every byte of graph
+// reuse forever.
+//
+// The carried type is `livehd::diag::Diagnostic` itself, never a hand-picked
+// subset: replay is a plain `sink().emit()`, so a field added to the record
+// (the structured verdict/engine/attrs payload was already there) can never be
+// silently dropped on the warm path. Every non-error severity rides — an `info`
+// progress record from a pipeline pass (pass.bitfuzz) is skipped by a warm
+// restore exactly like a warning, and errors cannot reach here at all (the
+// store bails on has_errors()).
+
+// `String(data, size)`, never `String(c_str())`: an embedded NUL would silently
+// truncate the value, and every call would pay a strlen.
+template <typename W>
+void write_json_string(W& w, const char* key, std::string_view v) {
+  w.Key(key);
+  w.String(v.data(), static_cast<rapidjson::SizeType>(v.size()));
+}
+
+// The span is carried VERBATIM from the generation that produced it. After a
+// comment-only edit the byte offsets of the edited file have shifted, so a
+// replayed location can be stale by exactly that insertion — the srcmap
+// exemption the warm==cold rule already grants (H5). Re-resolving it would need
+// the post-parse trees the restore exists to avoid building.
+//
+// Field-for-field the same shape core/diag.cpp `append_span` writes into the
+// JSONL stream, `file_id` included: a span that carries only a producer-local
+// file id is NOT null, so dropping the member would flip is_null() and lose the
+// location outright on the way back.
+template <typename W>
+void write_span(W& w, const livehd::diag::Span& span) {
+  if (span.is_null()) {
+    w.Null();
+    return;
+  }
+  w.StartObject();
+  const auto u64 = [&](const char* k, const std::optional<uint64_t>& v) {
+    if (v) {
+      w.Key(k);
+      w.Uint64(*v);
+    }
+  };
+  const auto u32 = [&](const char* k, const std::optional<uint32_t>& v) {
+    if (v) {
+      w.Key(k);
+      w.Uint(*v);
+    }
+  };
+  u64("source_id", span.source_id);
+  u32("file_id", span.file_id);
+  if (!span.file.empty()) {
+    write_json_string(w, "file", span.file);
+  }
+  u64("start_byte", span.start_byte);
+  u64("end_byte", span.end_byte);
+  u32("start_line", span.start_line);
+  u32("start_col", span.start_col);
+  u32("end_line", span.end_line);
+  u32("end_col", span.end_col);
+  w.EndObject();
+}
+
+std::optional<livehd::diag::Span> read_span(const rapidjson::Value& v) {
+  livehd::diag::Span span;
+  if (v.IsNull()) {
+    return span;
+  }
+  if (!v.IsObject()) {
+    return std::nullopt;
+  }
+  if (v.HasMember("file") && v["file"].IsString()) {
+    span.file = v["file"].GetString();
+  }
+  const auto u64 = [&](const char* k, std::optional<uint64_t>& dst) {
+    if (v.HasMember(k) && v[k].IsUint64()) {
+      dst = v[k].GetUint64();
+    }
+  };
+  const auto u32 = [&](const char* k, std::optional<uint32_t>& dst) {
+    if (v.HasMember(k) && v[k].IsUint()) {
+      dst = v[k].GetUint();
+    }
+  };
+  u64("source_id", span.source_id);
+  u32("file_id", span.file_id);
+  u64("start_byte", span.start_byte);
+  u64("end_byte", span.end_byte);
+  u32("start_line", span.start_line);
+  u32("start_col", span.start_col);
+  u32("end_line", span.end_line);
+  u32("end_col", span.end_col);
+  return span;
+}
+
+// Severity travels by NAME, not by the enum's underlying value: the code salt
+// covers the front end and lowering, not core/diag.hpp, so a reordered enum
+// would otherwise reinterpret every stored record instead of refusing it.
+std::optional<livehd::diag::Severity> severity_from(std::string_view name) {
+  using livehd::diag::Severity;
+  for (const auto sev : {Severity::error, Severity::warning, Severity::note, Severity::info}) {
+    if (livehd::diag::to_string(sev) == name) {
+      return sev;
+    }
+  }
+  return std::nullopt;
+}
+
+template <typename W>
+void write_diag(W& w, const livehd::diag::Diagnostic& d) {
+  w.StartObject();
+  write_json_string(w, "severity", livehd::diag::to_string(d.severity));
+  write_json_string(w, "pass", d.pass);
+  write_json_string(w, "code", d.code);
+  write_json_string(w, "category", d.category);
+  write_json_string(w, "message", d.message);
+  write_json_string(w, "hint", d.hint);
+  w.Key("span");
+  write_span(w, d.span);
+  w.Key("see");
+  w.StartArray();
+  for (const auto& text : d.see) {
+    w.String(text.data(), static_cast<rapidjson::SizeType>(text.size()));
+  }
+  w.EndArray();
+  w.Key("notes");
+  w.StartArray();
+  for (const auto& note : d.notes) {
+    w.StartObject();
+    write_json_string(w, "message", note.message);
+    w.Key("span");
+    write_span(w, note.span);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("deferred");
+  w.Bool(d.deferred);
+  write_json_string(w, "verdict", d.verdict);
+  write_json_string(w, "engine", d.engine);
+  w.Key("duration_ms");
+  w.Int64(d.duration_ms);
+  w.Key("attrs");
+  w.StartArray();
+  for (const auto& [key, value] : d.attrs) {
+    w.StartObject();
+    write_json_string(w, "key", key);
+    write_json_string(w, "value", value);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+}
+
+std::optional<livehd::diag::Diagnostic> read_diag(const rapidjson::Value& v) {
+  const auto str = [&](const char* k) { return v.HasMember(k) && v[k].IsString(); };
+  if (!v.IsObject() || !str("severity") || !str("pass") || !str("code") || !str("category") || !str("message") || !str("hint")
+      || !v.HasMember("span") || !v.HasMember("see") || !v["see"].IsArray() || !v.HasMember("notes") || !v["notes"].IsArray()
+      || !v.HasMember("deferred") || !v["deferred"].IsBool() || !str("verdict") || !str("engine") || !v.HasMember("duration_ms")
+      || !v["duration_ms"].IsInt64() || !v.HasMember("attrs") || !v["attrs"].IsArray()) {
+    return std::nullopt;
+  }
+  livehd::diag::Diagnostic d;
+  const auto               sev = severity_from(v["severity"].GetString());
+  if (!sev) {
+    return std::nullopt;
+  }
+  d.severity = *sev;
+  d.pass     = v["pass"].GetString();
+  d.code     = v["code"].GetString();
+  d.category = v["category"].GetString();
+  // Sink::emit debug-asserts the pinned category vocabulary, so a damaged
+  // generation must be REFUSED here rather than abort the process on replay.
+  if (!livehd::diag::is_known_category(d.category)) {
+    return std::nullopt;
+  }
+  d.message = v["message"].GetString();
+  d.hint    = v["hint"].GetString();
+  auto span = read_span(v["span"]);
+  if (!span) {
+    return std::nullopt;
+  }
+  d.span = std::move(*span);
+  for (const auto& see_ref : v["see"].GetArray()) {
+    if (!see_ref.IsString()) {
+      return std::nullopt;
+    }
+    d.see.emplace_back(see_ref.GetString());
+  }
+  for (const auto& note : v["notes"].GetArray()) {
+    if (!note.IsObject() || !note.HasMember("message") || !note["message"].IsString() || !note.HasMember("span")) {
+      return std::nullopt;
+    }
+    auto note_span = read_span(note["span"]);
+    if (!note_span) {
+      return std::nullopt;
+    }
+    d.notes.push_back(livehd::diag::Note{note["message"].GetString(), std::move(*note_span)});
+  }
+  d.deferred    = v["deferred"].GetBool();
+  d.verdict     = v["verdict"].GetString();
+  d.engine      = v["engine"].GetString();
+  d.duration_ms = v["duration_ms"].GetInt64();
+  for (const auto& attr : v["attrs"].GetArray()) {
+    if (!attr.IsObject() || !attr.HasMember("key") || !attr["key"].IsString() || !attr.HasMember("value")
+        || !attr["value"].IsString()) {
+      return std::nullopt;
+    }
+    d.attrs.emplace_back(attr["key"].GetString(), attr["value"].GetString());
+  }
+  return d;
+}
+
 struct Graph_inventory {
-  std::string                closure_key;
-  std::vector<std::string>   lnast_order;
-  std::vector<Graph_row>     rows;
-  std::vector<Artifact_file> artifact_files;
+  std::string                           closure_key;
+  std::vector<std::string>              lnast_order;
+  std::vector<Graph_row>                rows;
+  std::vector<Artifact_file>            artifact_files;
+  std::vector<livehd::diag::Diagnostic> pipeline_diags;
 };
+
+// Re-emit a generation's stored pipeline records. Only legal when the restore
+// is TOTAL: the pipeline then ran over no graph in this process, so the
+// replayed set is exactly what a cold run would have printed.
+void replay_pipeline_diags(const Graph_inventory& inventory) {
+  for (const auto& d : inventory.pipeline_diags) {
+    livehd::diag::sink().emit(d);
+  }
+}
 
 std::string            lnast_unit_dir(std::string_view snapshot_file);
 std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_view expected_name);
@@ -255,7 +481,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
       if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
         continue;
       }
-      const auto names = import_detail::candidates(raw);
+      const auto names     = import_detail::candidates(raw);
       // An already-satisfied import must still run conflict DETECTION: skipping
       // it made "ambiguous stem" depend on unit-name traversal order, while the
       // cache-off discover_imports path errors deterministically. Resolution is
@@ -480,7 +706,7 @@ std::string context_descriptor(const Options& opts) {
   for (const auto& f : opts.files) {
     text += std::format("|src:{}", normalized_user_path(f));
   }
-  auto        sets = opts.sets;
+  auto sets = opts.sets;
   std::sort(sets.begin(), sets.end());
   for (const auto& [key, value] : sets) {
     if (key == "compile.cache") {
@@ -786,12 +1012,13 @@ bool artifact_matches(const fs::path& root, const std::vector<Artifact_file>& ex
 }
 
 void write_graph_inventory(const std::string& path, const Result& res, const std::vector<Graph_row>& rows,
-                           const std::vector<std::shared_ptr<Lnast>>& lnasts, const std::vector<Artifact_file>& files) {
+                           const std::vector<std::shared_ptr<Lnast>>& lnasts, const std::vector<Artifact_file>& files,
+                           const std::vector<livehd::diag::Diagnostic>& pipeline_diags) {
   rapidjson::StringBuffer                    sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(2);
+  w.Int(3);
   w.Key("code_salt");
   w.Uint64(livehd::kCompileSrcSalt);
   w.Key("context");
@@ -829,6 +1056,12 @@ void write_graph_inventory(const std::string& path, const Result& res, const std
     w.EndObject();
   }
   w.EndArray();
+  w.Key("pipeline_diags");
+  w.StartArray();
+  for (const auto& d : pipeline_diags) {
+    write_diag(w, d);
+  }
+  w.EndArray();
   w.Key("artifact_files");
   w.StartArray();
   for (const auto& file : files) {
@@ -862,11 +1095,12 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 2 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
+      || doc["schema_version"].GetInt() != 3 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
       || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt || !doc.HasMember("context") || !doc["context"].IsString()
       || res.compile_cache_context != doc["context"].GetString() || !doc.HasMember("closure_key") || !doc["closure_key"].IsString()
       || !doc.HasMember("lnast_order") || !doc["lnast_order"].IsArray() || !doc.HasMember("graphs") || !doc["graphs"].IsArray()
-      || !doc.HasMember("artifact_files") || !doc["artifact_files"].IsArray()) {
+      || !doc.HasMember("pipeline_diags") || !doc["pipeline_diags"].IsArray() || !doc.HasMember("artifact_files")
+      || !doc["artifact_files"].IsArray()) {
     return std::nullopt;
   }
   Graph_inventory inventory;
@@ -896,6 +1130,13 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
       row.h1 = g["h1"].GetUint64();
     }
     inventory.rows.push_back(std::move(row));
+  }
+  for (const auto& d : doc["pipeline_diags"].GetArray()) {
+    auto stored = read_diag(d);
+    if (!stored) {
+      return std::nullopt;
+    }
+    inventory.pipeline_diags.push_back(std::move(*stored));
   }
   for (const auto& f : doc["artifact_files"].GetArray()) {
     if (!f.IsObject() || !f.HasMember("path") || !f["path"].IsString() || !safe_artifact_path(f["path"].GetString())
@@ -1890,6 +2131,9 @@ bool compile_cache_restore_lg_artifact(Options& opts, Result& res, const std::st
   }
   res.compile_cache.hits
       += std::count_if(expected->rows.begin(), expected->rows.end(), [](const Graph_row& row) { return row.has_body; });
+  // Every source unit is clean here, so pass.formal runs over nothing in this
+  // process: the stored set IS the cold set.
+  replay_pipeline_diags(*expected);
   return true;
 }
 
@@ -1901,6 +2145,25 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
   Phase_timer phase(res, "compile.cache.lg_lookup");
   auto        expected = read_graph_inventory(res);
   if (!expected) {
+    return false;
+  }
+  const std::set<std::string> clean(res.compile_cache_clean_units.begin(), res.compile_cache_clean_units.end());
+  const bool                  full_clean
+      = expected->closure_key == res.compile_cache_closure_key && clean.size() == res.compile_cache_unit_keys.size();
+  // A PARTIAL restore re-runs the pipeline over the dirty cone only, so its live
+  // records and the stored ones would overlap on an unknown boundary: the stored
+  // records carry no per-graph attribution, so there is no sound way to replay
+  // just the restored half — and a generation stored from a partial run would
+  // itself hold an incomplete set. Refuse (I5: a principled refusal is COUNTED,
+  // not hidden) and let the full rebuild reproduce every record. Per-graph
+  // attribution is what would lift this.
+  //
+  // Decided BEFORE the cache library is opened: the verdict depends only on
+  // full_clean and the carried records, so digesting every cached graph first
+  // (graph_rows) just to refuse was pure waste on every incremental compile of
+  // a design that warns.
+  if (!full_clean && !expected->pipeline_diags.empty()) {
+    ++res.compile_cache.refused;
     return false;
   }
   try {
@@ -1927,9 +2190,6 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       }
     }
 
-    const std::set<std::string> clean(res.compile_cache_clean_units.begin(), res.compile_cache_clean_units.end());
-    const bool                  full_clean
-        = expected->closure_key == res.compile_cache_closure_key && clean.size() == res.compile_cache_unit_keys.size();
     if (!full_clean && clean.empty()) {
       return false;  // nothing restorable — leave the destination library untouched
     }
@@ -2080,7 +2340,14 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     }
     res.compile_cache_restored_graphs = std::move(restored_names);
     const size_t total_bodies = std::count_if(actual.begin(), actual.end(), [](const Graph_row& row) { return row.has_body; });
-    return full_clean && restored_bodies == total_bodies && restored_bodies != 0;
+    const bool   total        = full_clean && restored_bodies == total_bodies && restored_bodies != 0;
+    if (total) {
+      // Total restore: pass.formal is handed no graph, so replaying the stored
+      // set reproduces the cold diagnostics exactly. A partial restore was
+      // already refused above when the generation carries any.
+      replay_pipeline_diags(*expected);
+    }
+    return total;
   } catch (...) {
     ++res.compile_cache.refused;
     return false;
@@ -2152,13 +2419,37 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
   if (livehd::diag::sink().has_errors()) {
     return;
   }
-  // Same reproduce-the-verdicts rule for WARNING-level formal outcomes: a
-  // refutation in an instantiated submodule and an uncertain/soft-timeout
-  // verdict are deliberately warnings, and a cached generation would silence
-  // them on every warm run. Keep such runs cold rather than replaying nothing.
-  for (const auto& record : livehd::diag::sink().records()) {
-    if (record.severity == livehd::diag::Severity::warning && record.pass == "pass.formal") {
-      return;
+  // Same reproduce-the-verdicts rule for WARNING-level outcomes, but carried
+  // rather than refused: a restored graph never re-enters upass/tolg/cprop/
+  // pass.formal, so a warm run would otherwise print strictly fewer records
+  // than the cold run of the same sources. Refusing to store instead (the old
+  // `pass.formal` rule) cost such a design every byte of graph reuse forever —
+  // minion's 24 `onehot-deferred` warnings made its whole compile cache
+  // parse-only.
+  //
+  // [diag_mark, diag_end) is EXACTLY the window a warm restore skips, and both
+  // ends are load-bearing. Before the mark is the front end (Tier A: re-emitted
+  // by whichever unit reparses) plus the deferred-source materialization, which
+  // runs warm too. After the end are the EMITS — cgen verilog/sim/pyrope and
+  // lg.save — which also run warm, and whose diagnostics depend on the `--emit`
+  // slots that `context_descriptor` deliberately leaves out of the cache key:
+  // storing them would replay an `inou.cgen.sim` warning onto a later run that
+  // asked for no sim emit at all.
+  //
+  // Every non-error severity rides, not just warnings: an `info` progress
+  // record from a pipeline pass (pass.bitfuzz) is skipped by a warm restore in
+  // exactly the same way. Errors cannot reach here (has_errors() bailed above);
+  // the guard keeps it that way if that ever changes.
+  std::vector<livehd::diag::Diagnostic> pipeline_diags;
+  {
+    const auto&  records = livehd::diag::sink().records();
+    const size_t begin   = std::min(res.compile_cache_diag_mark, records.size());
+    const size_t end     = std::min(res.compile_cache_diag_end, records.size());
+    for (size_t i = begin; i < end; ++i) {
+      const auto& record = records[i];
+      if (record.severity != livehd::diag::Severity::error) {
+        pipeline_diags.push_back(record);
+      }
     }
   }
   Phase_timer phase(res, "compile.cache.lg_store");
@@ -2203,7 +2494,7 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
         save_compact_lnast(var.lnasts[i], lowered_dir / lowered_lnast_dir(i), meta_only);
       }
     }
-    write_graph_inventory(temp + "/graph_inventory.json", res, rows, var.lnasts, files);
+    write_graph_inventory(temp + "/graph_inventory.json", res, rows, var.lnasts, files, pipeline_diags);
     replace_dir(temp, res.compile_cache_scope + "/lg");
   } catch (...) {
     std::error_code cleanup_ec;

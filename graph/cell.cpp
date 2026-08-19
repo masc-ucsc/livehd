@@ -21,6 +21,9 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::pin_delay_t>("livehd::attrs::pin_delay");
     hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
     hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
+    hhds::register_attr_tag<livehd::attrs::synth_region_t>("livehd::attrs::synth_region");
+    hhds::register_attr_tag<livehd::attrs::synth_region_id_t>("livehd::attrs::synth_region_id");
+    hhds::register_attr_tag<livehd::attrs::resynth_t>("livehd::attrs::resynth");
     hhds::register_attr_tag<livehd::attrs::hier_color_t>("livehd::attrs::hier_color");
     hhds::register_attr_tag<livehd::attrs::coloring_info_t>("livehd::attrs::coloring_info");
     hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");

@@ -28,6 +28,7 @@ struct Ictx {
   Ictx*            parent = nullptr;  // enclosing context (nullptr for top)
   hhds::Node_class inst;              // the Sub node in parent->src (invalid for top)
   std::string      prefix;            // dotted instance path ("" for top)
+  uint32_t         synth_region_id = 0;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;   // src node -> flat node (cloned nodes only)
   absl::flat_hash_map<hhds::Node_class, Ictx*>            child_ctx;  // src design-Sub node -> child context
@@ -71,11 +72,15 @@ private:
 };
 
 Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix) {
-  auto& c  = arena_.emplace_back();
-  c.src    = src;
-  c.parent = parent;
-  c.inst   = inst;
-  c.prefix = std::move(prefix);
+  auto& c    = arena_.emplace_back();
+  c.src      = src;
+  c.parent   = parent;
+  c.inst     = inst;
+  c.prefix   = std::move(prefix);
+  auto input = src->get_input_node();
+  if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
+    c.synth_region_id = id.get();
+  }
   if (auto gio = src->get_io()) {
     for (const auto& d : gio->get_input_pin_decls()) {
       c.in_name2pid[d.name] = static_cast<uint32_t>(d.port_id);
@@ -107,6 +112,13 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     // through its library base chain.
     auto newid = lib_->source_map().import_from(ctx->src->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
+  }
+  // pass.abc's report identity is graph-local in the mapped library. Carry its
+  // compact key through this transient physical flatten so OpenTimer can fold
+  // end-to-end arrivals back into (definition,color) rows without storing a
+  // duplicate region-name string on every mapped cell.
+  if (ctx->synth_region_id != 0) {
+    neo.attr(livehd::attrs::synth_region_id).set(ctx->synth_region_id);
   }
   // The flat per-def color is what pass.partition consumes downstream — carry
   // it verbatim so the flattened def partitions exactly like the hierarchy did

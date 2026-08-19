@@ -28,6 +28,7 @@ void Pass_opentimer::setup() {
                         "write the timing JSON (max delay, critical pin, endpoint arrivals, source-attributed) to this file "
                         "(`lhd pass opentimer` defaults it to <workdir>/timing.json when --workdir is set)",
                         "");
+  m1.add_label_optional("stats", "report one timing row per pass.abc (definition, color), including resynth=1|0", "false");
 
   register_pass(m1);
 
@@ -90,9 +91,11 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   }
   margin_delay = 0;
 
-  qor_path      = var.get("qor", "");
-  top_filter    = var.get("top", "");
-  hier_setting_ = var.get("hier", "true");
+  qor_path               = var.get("qor", "");
+  top_filter             = var.get("top", "");
+  hier_setting_          = var.get("hier", "true");
+  const auto stats_label = std::string{var.get("stats", "false")};
+  stats_                 = stats_label != "false" && stats_label != "0" && !stats_label.empty();
   if (hier_setting_ == "1") {
     hier_setting_ = "true";
   } else if (hier_setting_ == "0") {

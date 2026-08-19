@@ -212,7 +212,7 @@ bool json_num(const rapidjson::Value& v, const char* key, double& out) {
 // kind:"sta" (pass.opentimer timing.json): an OpenSTA-style report per design
 // — max-delay summary, the critical-path Delay/Time/Description table, and
 // the worst-endpoint arrivals, each source-attributed when a src is present.
-bool write_pretty_sta(const rapidjson::Value& d) {
+bool write_pretty_sta(const rapidjson::Value& d, bool stats) {
   auto dit = d.FindMember("designs");
   if (dit == d.MemberEnd() || !dit->value.IsArray()) {
     return false;
@@ -278,6 +278,36 @@ bool write_pretty_sta(const rapidjson::Value& d) {
         std::print("    {:>8.3f}  {}{}\n", delay, json_str(e, "pin"), src.empty() ? std::string{} : std::format("  ({})", src));
       }
     }
+    if (stats) {
+      if (auto cit = des.FindMember("colors"); cit != des.MemberEnd() && cit->value.IsArray()) {
+        for (const auto& c : cit->value.GetArray()) {
+          if (!c.IsObject()) {
+            continue;
+          }
+          double color   = 0;
+          double cells   = 0;
+          double resynth = 0;
+          json_num(c, "color", color);
+          json_num(c, "cells", cells);
+          json_num(c, "resynth", resynth);
+          std::string line
+              = std::format("  sta[stats]: module='{}' color={:.0f} cells={:.0f}", json_str(c, "module"), color, cells);
+          if (double arrival = 0; json_num(c, "max_arrival", arrival)) {
+            line += std::format(" max_arrival={:.3f}{}{}", arrival, unit.empty() ? "" : " ", unit);
+            if (auto pin = json_str(c, "critical_pin"); !pin.empty()) {
+              line += std::format(" critical_pin='{}'", pin);
+            }
+            if (auto src = json_str(c, "critical_src"); !src.empty()) {
+              line += std::format(" @ {}", src);
+            }
+          } else {
+            line += " max_arrival=n/a";
+          }
+          line += std::format(" resynth={:.0f}", resynth);
+          std::print("{}\n", line);
+        }
+      }
+    }
   }
   return true;
 }
@@ -285,7 +315,7 @@ bool write_pretty_sta(const rapidjson::Value& d) {
 // kind:"abc-map" (pass.abc qor.json): the compact one-line summary (the same
 // shape as the pass's own step-log line, which fd redirection keeps off the
 // terminal).
-bool write_pretty_abc_map(const rapidjson::Value& d) {
+bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
   auto tit = d.FindMember("total");
   if (tit == d.MemberEnd() || !tit->value.IsObject()) {
     return false;
@@ -319,19 +349,57 @@ bool write_pretty_abc_map(const rapidjson::Value& d) {
     line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
   }
   std::print("{}\n", line);
+  if (stats) {
+    if (auto rit = d.FindMember("regions"); rit != d.MemberEnd() && rit->value.IsArray()) {
+      for (const auto& r : rit->value.GetArray()) {
+        if (!r.IsObject()) {
+          continue;
+        }
+        double color        = 0;
+        double input_nodes  = 0;
+        double input_ge     = 0;
+        double region_gates = 0;
+        double region_area  = 0;
+        double ms           = 0;
+        double resynth      = 0;
+        json_num(r, "color", color);
+        json_num(r, "input_nodes", input_nodes);
+        json_num(r, "input_ge", input_ge);
+        json_num(r, "gates", region_gates);
+        json_num(r, "area", region_area);
+        json_num(r, "ms", ms);
+        json_num(r, "resynth", resynth);
+        std::string row
+            = std::format("  abc[stats]: module='{}' color={:.0f} input_nodes={:.0f} input_ge={:.0f} gates={:.0f} area={:.2f}",
+                          json_str(r, "module"),
+                          color,
+                          input_nodes,
+                          input_ge,
+                          region_gates,
+                          region_area);
+        if (double delay = 0; json_num(r, "delay", delay)) {
+          row += std::format(" delay={:.3f}", delay);
+        } else {
+          row += " delay=n/a";
+        }
+        row += std::format(" ms={:.1f} resynth={:.0f}", ms, resynth);
+        std::print("{}\n", row);
+      }
+    }
+  }
   return true;
 }
 
-void write_pretty_qor(const std::string& qor_json) {
+void write_pretty_qor(const std::string& qor_json, bool stats) {
   rapidjson::Document d;
   d.Parse(qor_json.data(), qor_json.size());
   bool rendered = false;
   if (!d.HasParseError() && d.IsObject()) {
     const auto kind = json_str(d, "kind");
     if (kind == "sta") {
-      rendered = write_pretty_sta(d);
+      rendered = write_pretty_sta(d, stats);
     } else if (kind == "abc-map") {
-      rendered = write_pretty_abc_map(d);
+      rendered = write_pretty_abc_map(d, stats);
     }
   }
   if (!rendered) {
@@ -420,7 +488,7 @@ void write_pretty(const Options& opts, const Result& res) {
     std::print("  query: {}\n", res.sim_query_json);
   }
   if (!res.qor_json.empty()) {
-    write_pretty_qor(res.qor_json);
+    write_pretty_qor(res.qor_json, opts.stats);
   }
   if (res.status != "pass") {
     std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);

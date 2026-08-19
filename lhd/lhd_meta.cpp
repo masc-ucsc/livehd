@@ -1010,6 +1010,7 @@ int help_pass(const std::string& sub) {
         "flags:\n"
         "  --top M                  select the module to map\n"
         "  --emit-dir lg:OUT/       output library (must differ from the input)\n"
+        "  --stats                  add one QoR row per (definition, color); resynth=1|0\n"
         "  --set pass.abc.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"
@@ -1036,11 +1037,14 @@ int help_pass(const std::string& sub) {
         "flags:\n"
         "  --top M                        select the tech-mapped module\n"
         "  --workdir DIR                  report/build workspace\n"
+        "  --stats                        add one timing row per mapped color\n"
         "  --set pass.opentimer.flag=value  pass options (listed below)\n"
         "\n"
         "the report (timing.json / result envelope \"qor\" member):\n"
         "  max_delay (worst MAX-corner gate arrival, library time units), the critical pin,\n"
         "  the 10 worst endpoints, each `src`-attributed back to the pre-synth RTL line.\n"
+        "  With --stats, each color row has module/color, cells, max_arrival, and\n"
+        "  resynth=1|0 inherited from the pass.abc invocation that emitted the netlist.\n"
         "\n"
         "examples:\n"
         "  lhd pass abc --top m lg:g --emit-dir lg:net\n"
@@ -1157,10 +1161,10 @@ constexpr std::string_view kJsonPassSingleEdge =
     R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
 constexpr std::string_view kJsonPassAbc =
-    R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net"]})json";
+    R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
 constexpr std::string_view kJsonPassOpentimer =
-    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run)","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W"]})json";
+    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run)","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
 
 constexpr std::string_view kJsonPassLiberty =
     R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";

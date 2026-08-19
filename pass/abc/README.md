@@ -198,7 +198,7 @@ loop, and with `qor=FILE` the whole thing is written as JSON:
           "gates":G,"area":A,"max_delay":D,
           "critical_region":…, "critical_output":…, "critical_src":"file:line"},
  "regions":[{"module":…,"color":C,"input_nodes":in,"input_ge":ige,
-             "gates":g,"area":a,"delay":d,
+             "gates":g,"area":a,"delay":d,"resynth":0|1,
              "critical_output":…, "critical_src":…}, …]}
 ```
 
@@ -209,6 +209,12 @@ mapped estimate inside one region — paths crossing region or blackbox
 boundaries are invisible here (`pass.opentimer` is the whole-design scorer).
 A region whose flow fails contributes no row; a `delay` below 0 (or absent in
 the JSON) means the mapped network exposed no delay data.
+
+`--stats` keeps the aggregate/worst-path report and additionally renders every
+`regions[]` object as one pretty line. A cold/full synthesis marks every row
+`resynth=1`; an incremental run still reports every color, marking cache hits
+`resynth=0` and only rebuilt misses `resynth=1`. JSON diagnostic output keeps
+one object per color in the same `regions` array.
 
 ## Source-map carry-through
 

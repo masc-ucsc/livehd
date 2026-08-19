@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -298,7 +299,33 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   // the caller and this pass only reads it. When there is no compact Sub (the
   // common case) nothing is copied and the input graph is timed in place.
   const auto design_defs = g->definitions().graphs();
-  bool       has_compact = false;
+  if (pass.stats_) {
+    // pass.abc stamps the mapped-region identity on each region graph's input
+    // node. Seed from definitions rather than timed gates so a zero-cell/native
+    // wiring color still gets its required row. The later flattened gate walk
+    // fills occurrence-weighted cell counts and end-to-end arrivals.
+    for (const auto& def : design_defs) {
+      auto input  = def->get_input_node();
+      auto region = input.attr(livehd::attrs::synth_region);
+      if (!region.has()) {
+        continue;
+      }
+      Pass_opentimer::Color_qor row;
+      if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
+        row.region_id = id.get();
+      }
+      row.module = std::string{region.get()};
+      if (auto color = input.attr(livehd::attrs::color); color.has()) {
+        row.color = color.get();
+      }
+      row.resynth = input.attr(livehd::attrs::resynth).has();
+      pass.color_qor_.push_back(std::move(row));
+    }
+    std::sort(pass.color_qor_.begin(), pass.color_qor_.end(), [](const auto& lhs, const auto& rhs) {
+      return std::tie(lhs.module, lhs.color) < std::tie(rhs.module, rhs.color);
+    });
+  }
+  bool has_compact = false;
   for (const auto& def : design_defs) {
     for (auto n : def->body().nodes()) {
       // Deliberately NO get_subnode_graph() test: a body-less replicated black
@@ -1194,6 +1221,32 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     auto instance_name = inst_of(node, hier_mode_);
     inst2node.emplace(instance_name, node);
 
+    Color_qor* color_row = nullptr;
+    if (stats_) {
+      auto     base      = node.base_node();
+      uint32_t region_id = 0;
+      if (auto id = base.attr(livehd::attrs::synth_region_id); id.has()) {
+        region_id = id.get();
+      } else {
+        // Flat/direct timing keeps mapped cells in their region definition,
+        // where the compact key lives once on the graph input. Whole-design
+        // physical flatten stamps the same key directly on each scratch node.
+        if (auto* graph = base.get_graph(); graph != nullptr) {
+          if (auto graph_id = graph->get_input_node().attr(livehd::attrs::synth_region_id); graph_id.has()) {
+            region_id = graph_id.get();
+          }
+        }
+      }
+      if (region_id != 0) {
+        auto it
+            = std::find_if(color_qor_.begin(), color_qor_.end(), [&](const Color_qor& row) { return row.region_id == region_id; });
+        if (it != color_qor_.end()) {
+          color_row = &*it;
+          ++color_row->cells;
+        }
+      }
+    }
+
     for (auto& dpin : node.out_pins()) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
         continue;
@@ -1218,6 +1271,12 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       if (delay > 0) {
         set_delay(dpin, delay);
         arrivals.push_back({delay, pin_name, node});
+
+        if (color_row != nullptr && delay > color_row->max_arrival) {
+          color_row->max_arrival  = delay;
+          color_row->critical_pin = pin_name;
+          color_row->critical_src = src_of_node(g, node);
+        }
 
         if (delay > max_delay) {
           max_delay = delay;
@@ -1371,7 +1430,30 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
     j += "}";
   }
-  j += "]}";
+  j += "]";
+  if (stats_) {
+    j += ",\"colors\":[";
+    for (size_t i = 0; i < color_qor_.size(); ++i) {
+      const auto& row = color_qor_[i];
+      if (i != 0) {
+        j += ",";
+      }
+      j += std::format("{{\"module\":\"{}\",\"color\":{},\"cells\":{},\"resynth\":{}",
+                       jesc(row.module),
+                       row.color,
+                       row.cells,
+                       row.resynth ? 1 : 0);
+      if (row.max_arrival >= 0) {
+        j += std::format(",\"max_arrival\":{:.6g},\"critical_pin\":\"{}\"", row.max_arrival, jesc(row.critical_pin));
+        if (!row.critical_src.empty()) {
+          j += std::format(",\"critical_src\":\"{}\"", jesc(row.critical_src));
+        }
+      }
+      j += "}";
+    }
+    j += "]";
+  }
+  j += "}";
   qor_blocks_.push_back(std::move(j));
 }
 

@@ -32,6 +32,8 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 - Options: `--set pass.opentimer.margin=<0-100>` (criticality coloring
   threshold), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
   opentimer` defaults it to `<workdir>/timing.json` under `--workdir`).
+  `--stats` adds one row per mapped `(definition,color)` while retaining the
+  whole-design critical-path report.
 
 ## The timing report (`timing.json`, envelope `"qor"` member)
 
@@ -39,7 +41,9 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 {"schema_version":1,"kind":"sta","designs":[
   {"module":"m__c0","max_delay":0.6,"critical_pin":"g96_XOR2x1:Y",
    "critical_src":"design.prp:11",
-   "endpoints":[{"pin":"…","delay":…,"src":"file:line"},…]}]}
+   "endpoints":[{"pin":"…","delay":…,"src":"file:line"},…],
+   "colors":[{"module":"m__c0","color":0,"cells":42,
+               "max_arrival":0.6,"resynth":1},…]}]}
 ```
 
 `max_delay` is the worst MAX-corner arrival over all gate output pins (library
@@ -50,6 +54,13 @@ path points back at the pre-synthesis RTL line an agent should edit. Under
 result envelope's `"qor"` member (same channel as pass.abc's `abc-map` QoR;
 discriminate by `"kind"`). Every annotated gate output also gets the
 `pin_delay` pin attribute in-graph.
+
+With `--stats`, `colors` contains every mapped color, including colors with no
+Liberty cells. `max_arrival` is the largest end-to-end arrival observed at a
+cell output belonging to that color (so it includes upstream-color delay);
+`cells` is occurrence-weighted in the selected timed top. `resynth` is carried
+from the ABC-produced netlist: a full/cold build is 1, while an incremental ABC
+cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
 
 ## Timing model
 

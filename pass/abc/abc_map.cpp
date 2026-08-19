@@ -489,7 +489,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
                                                                            mib(cost::reserve_bytes()));
   refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-                           "(was {} MiB){}, {}",
+      "(was {} MiB){}, {}",
       region,
       blasted,
       total,
@@ -497,7 +497,7 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss),
       mib(rss_before),
       over_now ? std::string{}
-                                    : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
+               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
       budget_desc);
   return true;
 }
@@ -579,6 +579,31 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::print("[pass.abc] region '{}': stage {} at {:.0f} ms\n", rb.module_name, stage, since());
     std::fflush(stdout);
   };
+
+  // Reporting metadata belongs to the freshly emitted mapped library, not to
+  // the persistent cache row. Stamp it once on the graph input on every exit
+  // path (including a cache hit and the native-wiring fast path), after
+  // reuse_hit may have replaced the complete body. Do not duplicate the region
+  // string on every mapped cell; physical flattening propagates the compact id
+  // only into its transient scratch nodes for OpenTimer.
+  bool           resynthesized = incr_ == nullptr;
+  const uint32_t region_id     = next_region_id_++;
+  struct Region_report_stamp {
+    const livehd::partition::Region_body* rb;
+    uint32_t                              region_id;
+    const bool*                           resynthesized;
+    ~Region_report_stamp() {
+      auto input = rb->body->get_input_node();
+      input.attr(livehd::attrs::synth_region).set(rb->module_name);
+      input.attr(livehd::attrs::synth_region_id).set(region_id);
+      input.attr(livehd::attrs::color).set(rb->color);
+      if (*resynthesized) {
+        input.attr(livehd::attrs::resynth).set({});
+      } else {
+        input.attr(livehd::attrs::resynth).del();
+      }
+    }
+  } report_stamp{&rb, region_id, &resynthesized};
 
   // Per-region options are temporary (every helper below reads opts_) and are
   // restored on every exit path.
@@ -683,6 +708,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     q.input_nodes = input_nodes;
     q.input_ge    = input_ge;
     q.cache       = hit ? "hit" : "miss";
+    q.resynth     = !hit;
     qor_.push_back(std::move(q));
     return;
   }
@@ -702,6 +728,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         q.crit_output  = res.crit_output;
         q.div_blackbox = res.row->div_blackbox;
         q.cache        = "hit";
+        q.resynth      = false;
         q.ms           = since();
         std::print("[pass.abc] region '{}': cache hit -- {} gates, area {:.2f}, delay {:.2f} ({:.0f} ms)\n",
                    rb.module_name,
@@ -715,6 +742,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     incr_->note_miss();
   }
+
+  resynthesized = true;
 
   // Do not pay Abc_Start/read_lib for an all-hit rebuild. The cache salt has
   // already folded the Liberty content and run-level mapping modes, while the
@@ -1169,6 +1198,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       q.area        = 0;
       q.delay       = 0;
       q.cache       = "miss";
+      q.resynth     = true;
       q.ms          = since();
       qor_.push_back(std::move(q));
       std::print("[pass.abc] region '{}': constant SHL kept as native wiring, {:.0f} ms\n", rb.module_name, since());
@@ -3348,28 +3378,59 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   hhds::Pin_class concat_width_one;
   auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
     I(!dbit.empty());
-    if (dbit.size() == 1) {
-      return dbit.front();
+    const auto      w = static_cast<int>(dbit.size());
+    hhds::Pin_class out;
+    if (w == 1) {
+      out = dbit.front();
+    } else {
+      if (concat_width_one.is_invalid()) {
+        concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
+      }
+      auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
+      if (sid != hhds::SourceId_invalid) {
+        concat.attr(hhds::attrs::srcid).set(sid);
+      }
+      // Port IDs still encode MSB-first lanes, but create them in descending
+      // order. HHDS's per-node pin list is sorted; ascending creation rescans the
+      // growing list for every pin and makes a W-bit Concat O(W^2).
+      for (size_t b = 0; b < dbit.size(); ++b) {
+        auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
+        concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
+        dbit[b].connect_sink(concat.create_sink_pin(data_pid));
+      }
+      out = concat.create_driver_pin(0);
+      gu::set_bits(out, w);
+      // A Concat driver is UNSIGNED by construction and every consumer relies on
+      // it: each lane masks into its own window, so the value is in
+      // [0, 2^sum(w)). cgen_verilog forces the declaration unsigned regardless of
+      // the stamp, and graph_util::debug_check_pin_hint aborts a -c dbg build on
+      // a signed one. The old Set_mask reassembly this replaced could carry the
+      // sign on its accumulator; a Concat cannot, so it rides a Sext below.
+      gu::set_unsign(out);
     }
-    if (concat_width_one.is_invalid()) {
-      concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
+    if (!sign) {
+      return out;
     }
-    auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
+    // Preserve the operand's signedness on the reassembled value. For a Div the
+    // LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs zero-extend),
+    // so a signed operand narrower than the divider's width must stay signed or
+    // ref/impl diverge. Harmless for Sub/Memory/Latch (their LEC compare never
+    // extends an input up to a larger width).
+    //
+    // Sext(x, w) at the SAME width w is exactly that reinterpretation and nothing
+    // else -- it keeps bits [w-1:0] and stamps the result signed (the shape the
+    // yosys reader's create_pick_operator already mints for a signed pick), so no
+    // bit changes and only the extension rule downstream does.
+    auto sx = gu::create_typed_node(*body, Ntype_op::Sext);
     if (sid != hhds::SourceId_invalid) {
-      concat.attr(hhds::attrs::srcid).set(sid);
+      sx.attr(hhds::attrs::srcid).set(sid);
     }
-    // Port IDs still encode MSB-first lanes, but create them in descending
-    // order. HHDS's per-node pin list is sorted; ascending creation rescans the
-    // growing list for every pin and makes a W-bit Concat O(W^2).
-    for (size_t b = 0; b < dbit.size(); ++b) {
-      auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
-      concat_width_one.connect_sink(concat.create_sink_pin(data_pid + 1));
-      dbit[b].connect_sink(concat.create_sink_pin(data_pid));
-    }
-    auto out = concat.create_driver_pin(0);
-    gu::set_bits(out, static_cast<int>(dbit.size()));
-    sign ? gu::set_sign(out) : gu::set_unsign(out);
-    return out;
+    out.connect_sink(gu::setup_sink_by_name(sx, "a"));
+    gu::create_const(*body, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sx, "b"));
+    auto sout = sx.create_driver_pin(0);
+    gu::set_bits(sout, w);
+    gu::set_sign(sout);
+    return sout;
   };
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the

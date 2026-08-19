@@ -1441,6 +1441,10 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     const std::chrono::duration<double, std::milli> dt  = std::chrono::steady_clock::now() - redo_begin;
     res.compile_cache.redone_ms                        += dt.count();
   }
+  // Closes the window the compile cache carries (Result::compile_cache_diag_mark).
+  // Everything below is EMITS, which a warm restore re-runs — and whose targets
+  // are not part of the cache key — so their records must not ride along.
+  res.compile_cache_diag_end = livehd::diag::sink().records().size();
 
   if (wants_dump(opts, "lg")) {
     screen_dump_graphs(var, "post-recipe");
@@ -1674,8 +1678,13 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // ownership alone; selecting only Merkle-dirty roots produced a structurally
     // different Minion top. The all-clean lg-only path above remains fully lazy.
     materialize_deferred();
-    const bool graph_cache_hit = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
-                                 && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
+    // Opens the diagnostic window the graph pipeline owns. It starts HERE, not
+    // after the parse: the front end and materialize_deferred (lnastfmt) both
+    // run on a warm restore too, so their records must not be carried. The
+    // window is closed by graph_pipeline_and_emits, before the emits.
+    res.compile_cache_diag_mark = livehd::diag::sink().records().size();
+    const bool graph_cache_hit  = res.compile_cache.enabled && need_graphs && !emits_need_lnast(opts) && ir.ln_dirs.empty()
+                                  && ir.lg_dirs.empty() && compile_cache_restore_graphs(opts, res, var, lib_path);
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
     if (!graph_cache_hit) {

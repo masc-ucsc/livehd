@@ -107,8 +107,9 @@ struct Region_qor {
   // Where this region's wall time went, and whether the incremental cache was
   // able to take it. Without these two, "the cache hit 199 of 264 regions" says
   // nothing about whether the run got faster — the misses can hold all the time.
-  double      ms           = 0.0;  // wall ms this region spent in map_region
-  const char* cache        = "";   // "" (no cache) | hit | mapped | uncacheable | store-failed
+  double      ms           = 0.0;   // wall ms this region spent in map_region
+  const char* cache        = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
+  bool        resynth      = true;  // this invocation rebuilt the region (false = incremental cache hit)
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
@@ -183,6 +184,7 @@ private:
   hhds::GraphLibrary*                           outlib_ = nullptr;  // where blackbox cell defs are declared
   Incr_cache*                                   incr_   = nullptr;  // optional region cache (2opt-incr)
   std::vector<Region_qor>                       qor_;
+  uint32_t                                      next_region_id_ = 1;  // report-only key stamped on mapped region graphs
   Region_opts_map                               region_opts_cli_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;

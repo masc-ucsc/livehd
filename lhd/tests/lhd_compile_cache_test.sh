@@ -342,4 +342,145 @@ compile "$W/post_shared.json"
 [ -s "$W/w/formal_cache.json" ] || fail "shared-workdir formal tenant missing"
 [ -d "$W/w/sim" ] || fail "shared-workdir sim tenant missing"
 
+# ---------------------------------------------------------------------------
+# A `pass.formal` WARNING travels WITH the generation instead of poisoning it.
+# A DEFERRED warning used to make compile_cache_store_graphs return before it
+# ever wrote graph_inventory.json, so a design with one unprovable obligation
+# cached no graph at all and every warm compile re-ran upass + tolg + cprop +
+# pass.formal for the whole design (measured on minion: five `onehot-deferred`
+# warnings, warm 4.5 s against cold 5.0 s). The generation now carries the
+# warnings; a TOTAL restore replays them verbatim, and a partial restore -- which
+# has no per-graph attribution to split live from stored -- is a counted refusal.
+FW="$W/fw"
+mkdir -p "$FW/src"
+cat > "$FW/src/fleaf.prp" <<'EOF'
+pub mod deferred_leaf(a:u4) -> (b:u4@[0]) {
+  assert(a != 5)
+  b = a + 1
+}
+EOF
+# A third, UNRELATED unit: editing the leaf dirties the leaf and its importer,
+# so without this every unit would be dirty and the restore would take the
+# "nothing restorable" exit rather than the partial path under test.
+cat > "$FW/src/fside.prp" <<'EOF'
+pub comb fside_twice(a:u4) -> (r:u5) { r = a + a }
+EOF
+cat > "$FW/src/froot.prp" <<'EOF'
+const fleaf = import("fleaf")
+const fside = import("fside")
+mod froot(c:u4) -> (d:u4@[0], e:u5@[0]) {
+  const s = fleaf.deferred_leaf(a = 3)
+  d = s + c
+  e = fside.fside_twice(a = c)
+}
+EOF
+
+fcompile() {  # RESULT_JSON DIAG_JSONL
+  local result=$1 diag=$2
+  "$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/lg" \
+    --workdir "$FW/w" -q --result-json "$result" --emit "diagnostics:$diag" \
+    || fail "formal-warning compile failed: $(cat "$result" 2>/dev/null)"
+}
+fwarns() { grep -c '"pass":"pass.formal"' "$1" 2>/dev/null || true; }
+
+# The whole diagnostic stream as a MULTISET of (pass, code, message, span),
+# `seq` dropped. Counts and spans are both load-bearing: the sink dedups on
+# (code, span, message) within a step, so a replay that carried the message but
+# dropped the span silently collapses N distinct sites into one — measured on
+# minion, 44 cold records replaying as 29.
+fdiagset() {
+  python3 - "$1" <<'PY'
+import json, sys
+rows = []
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        d = json.loads(line)
+        sp = d.get("span") or {}
+        rows.append((d.get("pass"), d.get("code"), d.get("message"), d.get("hint", ""),
+                     sp.get("file", ""), sp.get("start_line"), sp.get("start_col")))
+print(json.dumps(sorted(map(list, rows))))
+PY
+}
+
+fcompile "$FW/cold.json" "$FW/cold.jsonl"
+grep -q '"code":"assert-deferred"' "$FW/cold.jsonl" \
+  || fail "fixture produced no pass.formal DEFERRED warning: $(cat "$FW/cold.jsonl")"
+COLD_WARNS=$(fwarns "$FW/cold.jsonl")
+[ "$COLD_WARNS" -ge 1 ] || fail "no pass.formal records to replay"
+COLD_DIAGS=$(fdiagset "$FW/cold.jsonl")
+FSCOPE="$FW/w/incr/scopes/compile/froot"
+[ -f "$FSCOPE/lg/graph_inventory.json" ] \
+  || fail "a pass.formal warning still blocks the graph generation from being stored"
+cp -R "$FW/lg" "$FW/cold_lg" || fail "could not preserve the formal-warning cold lg"
+
+# Warm, nothing changed: a total restore. No lowering, and the DEFERRED lines
+# are reproduced rather than silently dropped.
+fcompile "$FW/warm.json" "$FW/warm.jsonl"
+has_phase "$FW/warm.json" pass.upass && fail "warm compile reran upass despite a stored generation"
+has_phase "$FW/warm.json" pass.formal && fail "warm compile reran pass.formal"
+[ "$(fwarns "$FW/warm.jsonl")" = "$COLD_WARNS" ] \
+  || fail "warm restore did not replay the pass.formal warnings ($(cat "$FW/warm.jsonl"))"
+grep -q '"code":"assert-deferred"' "$FW/warm.jsonl" || fail "replayed record lost its code"
+[ "$(fdiagset "$FW/warm.jsonl")" = "$COLD_DIAGS" ] \
+  || fail "warm diagnostics differ from cold: $(fdiagset "$FW/cold.jsonl") vs $(fdiagset "$FW/warm.jsonl")"
+[ "$("$LHD" tool diff "lg:$FW/cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
+  || fail "warm restore of a warning-carrying generation is not structurally cold-equal"
+
+# Comment-only edit: still a total restore (the unit key is post-parse), so the
+# replay path is what the incremental benchmark actually exercises.
+python3 - "$FW/src/fleaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text("// comment-only edit\n" + p.read_text())
+PY
+fcompile "$FW/comment.json" "$FW/comment.jsonl"
+has_phase "$FW/comment.json" pass.upass && fail "comment-only edit reran upass"
+[ "$(fwarns "$FW/comment.jsonl")" = "$COLD_WARNS" ] \
+  || fail "comment-only restore dropped the pass.formal warnings"
+[ "$(fdiagset "$FW/comment.jsonl")" = "$COLD_DIAGS" ] \
+  || fail "comment-only restore changed the diagnostic stream"
+# The generation itself must carry every graph-pipeline record, spans included:
+# a store-side drop would only surface on some LATER restore.
+python3 - "$FSCOPE/lg/graph_inventory.json" "$COLD_WARNS" <<'PY'
+import json, sys
+inv = json.load(open(sys.argv[1]))
+stored = inv.get("pipeline_diags")
+if stored is None:
+    raise SystemExit("FAIL: generation carries no pipeline_diags array")
+if len(stored) < int(sys.argv[2]):
+    raise SystemExit(f"FAIL: generation stored {len(stored)} records, cold emitted {sys.argv[2]}")
+# The whole Diagnostic rides, not a hand-picked subset: a field dropped here is
+# a field a warm restore silently loses.
+for row in stored:
+    for key in ("severity", "pass", "code", "category", "message", "hint", "span", "see", "notes",
+                "deferred", "verdict", "engine", "duration_ms", "attrs"):
+        if key not in row:
+            raise SystemExit(f"FAIL: stored record is missing '{key}': {row}")
+    if row["severity"] == "error":
+        raise SystemExit(f"FAIL: an error-severity record was cached: {row}")
+PY
+
+# Semantic edit: the dirty cone re-runs pass.formal and emits its own warnings,
+# so the stored set must NOT be replayed on top. That is a principled refusal
+# (I5) and it is counted, not hidden.
+python3 - "$FW/src/fleaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 1", "a + 3"))
+PY
+fcompile "$FW/edit.json" "$FW/edit.jsonl"
+has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the dirty cone"
+[ "$(field "$FW/edit.json" compile_cache.refused)" -ge 1 ] \
+  || fail "a partial restore of a warning-carrying generation was not counted as refused"
+[ "$(fwarns "$FW/edit.jsonl")" = "$COLD_WARNS" ] \
+  || fail "semantic edit did not reproduce the pass.formal warnings live"
+"$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/edit_cold_lg" \
+  --workdir "$FW/edit_cold_w" --set compile.cache=false -q --result-json "$FW/edit_cold.json" \
+  || fail "formal-warning cold reference failed"
+[ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
+  || fail "refused partial restore diverged from cold"
+
 echo "PASS: incremental Pyrope compile cache"

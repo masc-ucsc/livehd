@@ -93,6 +93,39 @@ struct color_t {
 };
 inline constexpr color_t color{};
 
+// Region identity carried by a pass.abc mapped body. ABC synthesizes one
+// module per (definition, color); keeping the module name on the graph input
+// lets a later whole-design OpenTimer flatten recover that partition identity
+// without parsing generated instance names.
+struct synth_region_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_region_t synth_region{};
+
+// Compact invocation-local key for synth_region. Stored once on each mapped
+// region graph input; physical hierarchy flattening copies the integer to its
+// transient nodes so OpenTimer can aggregate without duplicating the region
+// name string on every mapped cell.
+struct synth_region_id_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_region_id_t synth_region_id{};
+
+// Present on a mapped-region node when this pass.abc invocation rebuilt the
+// region; absent means the node came from the incremental cache.  This is a
+// marker rather than a bool because flat_storage reserves the zero value as
+// "attribute absent".  synth_region distinguishes an intentional resynth=0
+// from a graph that did not come from pass.abc.
+struct resynth_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr resynth_t resynth{};
+
 // Per-node place annotation (ArchFP / physical-design floorplan rectangle).
 // Replaces Lgraph_attributes::node_place_map.
 struct place_t {
@@ -265,6 +298,12 @@ template <>
 inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>

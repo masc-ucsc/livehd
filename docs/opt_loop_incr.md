@@ -1,10 +1,12 @@
 # todo_incr — the incremental compile loop (LEC, formal, synthesis, sim)
 
-**Status:** loop, not started. The audit behind it was taken 2026-08-14 (read-only,
+**Status:** loop, running. The audit behind it was taken 2026-08-14 (read-only,
 over the four flows plus the shared `--workdir` plumbing); findings below were
 checked against the code and, where marked *reproduced*, against
 `bazel-bin/lhd/lhd`. **Converted from a milestone plan into a repeatable loop on
-2026-08-17**, with three XiangShan blocks added as targets.
+2026-08-17**, with three XiangShan blocks added as targets. Six iterations are
+logged in §9b; the **L8 front-end tier landed 2026-08-18** and a fourth XS
+target, `xs_renametable`, was added the same day.
 
 > ### ⚠ Every number in this document is a PROXY, not a baseline
 >
@@ -51,11 +53,13 @@ one optimizes the *rebuild*. Ownership is settled in **I10**.
 
 ## 0. Objective
 
-**Current implementation window (2026-08-17): LEC and synthesis only.** The
-compile/formal/sim findings below remain useful evidence, but they are not the
-active queue. Optimize warm `lhd lec` verdict reuse and warm partitioned
-`pass.abc` reuse; keep cold correctness and LEC-equivalence as gates. Do not
-spend routine iteration time on `xs_backend` or whole-core `XSCore`.
+**Current implementation window (2026-08-18): compile, LEC and synthesis.** The
+window opened onto the front end when L8 landed (I-5/I-6); `pass.formal` and sim
+findings below remain useful evidence but are not the active queue. Optimize
+warm `lhd compile` closure reuse, warm `lhd lec` verdict reuse and warm
+partitioned `pass.abc` reuse; keep cold correctness, diagnostic parity and
+LEC-equivalence as gates. Do not spend routine iteration time on `xs_backend` or
+whole-core `XSCore`.
 
 Iterate on the cost of **recompiling a design after a small source edit**, across
 every phase lhd runs:
@@ -104,9 +108,10 @@ All designs live in `../lhdsuite`.
 |---|---|---|---|---|---|
 | `dino` | `PipelinedDualIssueCPU` | `dino/` | **lec**, synth correctness | every LEC iteration | fast paired-language proof and netlist LEC oracle |
 | `minion` | `minion_top` | `minion/` | **lec**, synth correctness | periodic | deeper hierarchy; use after dino, within a fixed budget |
-| `xs_alu` | `Alu` | `xiangshan/Backend/` | **synth** | every synthesis iteration | cheap cache and QoR smoke test |
-| `xs_dispatch` | `Dispatch` | ″ | **synth** | next target | 832,115-line import cone; first practical additional scale point |
-| `xs_rob` | `Rob` | ″ | **synth** | periodic stress | compile/color completes, but the first ABC region exceeded the 30-minute cap in the 2026-08-17 probe |
+| `xs_alu` | `Alu` | `xiangshan/Backend/` | **synth**, sim, compile | every synthesis iteration | cheap cache and QoR smoke test |
+| `xs_renametable` | `RenameTableWrapper` | ″ | **compile**, sim, synth | every iteration | **added 2026-08-18.** The medium XS point: 5,973 lines at the top over five near-identical `RenameTable*` children plus three DPI wrappers, so it exercises hierarchical and replica reuse at a size where the whole five-phase matrix still fits the budget (cold compile ~25 s, cold sim ~63 s). Cross-language oracle: both trees print `sum=7374455199715033088` at 1000 cycles |
+| `xs_dispatch` | `Dispatch` | ″ | **synth** | candidate | 792,007-line import cone; the next scale point above `xs_rob` |
+| `xs_rob` | `Rob` | ″ | **synth**, compile, sim | periodic stress | compile/color completes, but the first ABC region exceeded the 30-minute cap in the 2026-08-17 probe |
 | `xs_ctrl` / `xs_mem` | `CtrlBlock` / `MemBlock` | full XS snapshot | **synth** | candidate | manageable hierarchy-heavy alternatives; add only after a measured cold run fits the iteration budget |
 
 `xs_backend` and `XSCore` are robustness runs outside this loop, not land gates.
@@ -117,53 +122,32 @@ remains a stress probe until partitioning makes its first region cacheable.
 
 ---
 
-## 2b. Start here — the first four work items, in order
+## 2b. Start here — the harness is up; run the loop
 
 Read §1 (rulings) and §8 (the gate) first; they are short and everything else
-assumes them. Then do these, in this order, because each unblocks the next.
+assumes them.
 
-**Step 1 — wire the generated DPI stubs into the build (F21).** The generator
-already exists and is verified; what is missing is making the bench use it:
-
-```bash
-# from the livehd repo root — derives all 20 sink models from the wrappers
-python3 ../lhdsuite/bench/gen_stubs.py \
-        ../lhdsuite/xiangshan/Backend/pyrope \
-        ../lhdsuite/xiangshan/Backend/synth_stubs
-```
-
-Then either commit that output once, or (preferred, keeps it generated rather
-than checked in) turn it into a genrule feeding `xiangshan/Backend/BUILD`'s
-`pyrope_stubs` / `pyrope_stub_top` filegroups. Done when
-`bazel build //bench:xs_alu_synth` analyzes and
+**The four setup items this section used to list are done** (2026-08-17/18): the
+DPI stubs are a genrule (F21), the XS cores emit sim scenarios (H1/H2), the two
+missing scenarios and the ledger exist (H4/H6), and the baseline was taken (I-0).
+So the entry point is now §9's protocol, not a setup checklist:
 
 ```bash
-lhd compile ../lhdsuite/xiangshan/Backend/pyrope/Rob.prp --top Rob \
-    ../lhdsuite/xiangshan/Backend/synth_stubs/*.prp \
-    --emit-dir lg:scratch_lg --workdir scratch_wd
+# from the lhdsuite checkout — one sitting, one config_id, live scoreboard
+MATRIX_CONFIG_ID=<lever-name> ./bench/matrix.sh dino
+MATRIX_CONFIG_ID=<lever-name> ./bench/matrix.sh xs_renametable compile synth sim
 ```
 
-exits 0 — measured `pass — 0 errors, 14 warnings`. `xs_alu` already works
-without stubs.
+Each `matrix.sh` run produces one row per (phase, mode), stamps it into
+`bench/ledger.jsonl`, and re-renders `docs/current_opt_loop_incr.html` after
+**every** row (H6b). Pin `PDK_VERSION` **and** `HAGENT_TECH_DIR` together before
+you start (T14) or the synth columns will be stamped with a library they did not
+run against.
 
-**Step 2 — make the XS cores emit the sim scenarios (H1).** Wire
-`//xiangshan/Backend:sim` into `_lhd_bench`'s `data`, add the `sim_*` keys to the
-three `CORES` entries, and switch the sim scenarios from the `synth_only`
-allowlist to `needs_cfg="sim_tb"`. Done when `bazel test //bench:xs_alu_sim_pyrope`
-passes with the checksum in H2.
-
-**Step 3 — add the two missing scenarios (H4) and the ledger (H6).** Without
-`sim_incremental` there is no I3 measurement, and without the ledger there is no
-way to compare two iterations. Do not skip the noise floor: a guardrail with an
-unmeasured epsilon cannot reject anything.
-
-**Step 4 — take the baseline (§9), then draw L1.** L1 (`pass.formal` obligation
-caching) is first because F10 measured the largest single win in the audit. L2
-(auto-salt) must land before any lever that edits `pass/abc` or `inou/cgen`,
-including the sibling plan's recipe sweeps.
-
-Everything after that is §9's protocol: one lever, measure the routine set, gate
-on §8, append the ledger row, land or revert.
+**Pick the lever from §7 and read §9b first** — six iterations are logged there,
+two of them negative, and the residual bottlenecks named at the end of §9b are
+the current queue. One lever per iteration (I7), gate on §8, append the row
+whether it lands or reverts.
 
 ---
 
@@ -171,7 +155,7 @@ on §8, append the ledger row, land or revert.
 
 | component | store | key | compare | salt / version | enabled by |
 |---|---|---|---|---|---|
-| compile / elaborate | `<lg-out>` or `<wd>/lgdb`, mutable working/output library (**not a cache**) | def name | none | none | path persistence, no cache contract |
+| compile / elaborate (**L8, landed 2026-08-18**) | `<wd>/incr/scopes/compile/<top>/{pyrope,ln,lg}` (§5.2 layout, first tenant) + `graph_inventory.json` | two tiers: **A** per source unit, keyed on the hermetic source snapshot; **B** the whole post-recipe graph closure, keyed on the transitive import-closure digest + context | exact: per-unit type/name tree compare (Tier A) and per-graph `interface_hash`/`h0`/`h1`/owner compare against the inventory (Tier B) | **auto** `kCompileSrcSalt` (`lhd/BUILD:37` genrule over the front end + lowering closure) | user `--workdir` **and** `compile.cache` (default true) |
 | `pass.formal` (in the O1 recipe) | **none** | — | — | — | never |
 | LEC / `formal verify` | `<wd>/formal_cache.json` | 128-bit 2-lane Merkle canonical digest **pair** + options | digest only | **auto** `kFormalSrcSalt` (`lhd/BUILD:17` genrule over `pass/lec` + `pass/semdiff` + the cvc5 pin) | user `--workdir` **and** `lec.cache` |
 | synthesis `pass.abc` | `<wd>/abc_cache/` + `abc_cache_pre/` (two GraphLibraries + json) | region **module name** `<top>__c<N>` + verbatim recipe | **exact structural compare vs the stored old graph**, traversal-bijection fallback | **manual** `"abc-incr-v6"` + liberty content + modes (`pass/abc/abc_incr.cpp:528`) | user `--workdir` **and** `pass.abc.cache` |
@@ -180,8 +164,10 @@ on §8, append the ledger row, land or revert.
 | color kernel reuse (intra-run) | memory | 128-bit class hash | occurrence verify | — | always |
 | `color_reduce` (intra-run) | memory | private 2-lane digest | exact walk | — | `pass.color reduce` |
 
-Three of the four target rules already exist somewhere. No two components
-implement them the same way, and `compile` implements none of them.
+All four flows now implement the target rules somewhere, and `compile` — which
+implemented none of them when this table was first written — is the only one on
+the §5.2 shared layout. No two components implement them the same way yet; that
+convergence is still L7.
 
 ---
 
@@ -971,12 +957,16 @@ is one file away at any moment.
 >   those as they surface, in the same sitting; a scoreboard that is wrong once
 >   is not trusted again.
 
-- **Path:** `current_opt_loop_incr.html`, at the livehd repo root beside this
-  plan. Its sibling loop writes `current_opt_loop_synth.html` in the same place.
+- **Path:** `docs/current_opt_loop_incr.html`, beside this plan. Its sibling loop
+  writes `docs/current_opt_loop_synth.html`. `../lhdsuite/bench/matrix.sh`
+  defaults `MATRIX_HTML` to exactly that path — it used to default to the repo
+  root, where nothing ever read it.
 - **Derived, never authored.** The ledger is the single source of truth; the
   HTML is a pure rendering and must be reproducible by re-running the renderer
-  over `../lhdsuite/bench/ledger.jsonl`. **Generated, not committed** — it is
-  per-host by construction (I11), so add it to `.gitignore`. Nothing may be
+  over `../lhdsuite/bench/ledger.jsonl`. It **is** committed (the `.gitignore`
+  entries are deliberately commented out) so the page travels with the plan;
+  that makes the per-host caveat (I11) load-bearing rather than optional —
+  a committed page is one host's page, and its header says which. Nothing may be
   recorded only in the HTML.
 - **One host per page.** If the ledger holds rows from several hosts, render one
   section per host and never diff across them (I11). The header carries `host`,
@@ -1036,6 +1026,16 @@ contradicts the order below, follow the baseline.
 > `xs_rob` rebuild)** ≫ L11 (it blocks `xs_backend` sim outright *and* was the
 > reason `Rob`'s root looked uncacheable) > L5/L1, with L1 re-scoped to "verify
 > on minion first". L2, L3, F4, F11 and most of L6 landed together as I-1.
+>
+> **And again on 2026-08-18.** L8 landed (I-5) and I-6 unblocked it, which
+> re-ranks the pool a second time: on a **total** warm restore the compile
+> pipeline — `pass.upass`, `lnast.tolg`, `pass.cprop` and `pass.formal` alike —
+> is skipped wholesale, so **L1 no longer moves the warm number at all** on any
+> design whose edit is comment-only. What L1 still owns is the **cold** run
+> (`pass.formal` is 2,270 ms of minion's 5,256 ms cold compile, 43%) and the
+> **partial**-restore path. Current order: **per-graph diagnostic attribution**
+> (the missing piece of I-6, which is what unblocks partial restores on any
+> design that warns) > L1-for-cold > L11 > L5.
 
 ### L1 — cache `pass.formal` obligations *(was M6)*
 
@@ -1050,11 +1050,14 @@ safe assertion deletion, assumption retention/removal, hierarchy-preflight
 occurrence accounting and diagnostics. Key every outcome by its obligation cone,
 hypothesis set, mode/budget semantics, top/occurrence context and code salt.
 
-- **Moves:** `compile` `warm_ms`/`edit_ms` on dino and minion.
-- **Depends on:** nothing. It is the first lever.
-- **Note:** the 43.4s → 5.1s pass-*off* figure is an upper bound from a
-  different box — not a promised warm number and not a target (I11). Re-measure
-  on minion, on the loop's own host, after this lands and before drawing L8.
+- **Moves:** `compile` **`cold_ms`** on dino and minion, plus `edit_ms` on the
+  partial-restore path. **It no longer moves `warm_ms`** — I-6 skips
+  `pass.formal` entirely on a total restore (re-scoped 2026-08-18).
+- **Depends on:** nothing.
+- **Measured here, 2026-08-18:** `pass.formal` is **2,270 ms of minion's
+  5,256 ms cold compile (43%)** and **0 ms of its 63 ms warm compile**. The
+  43.4s → 5.1s pass-*off* figure is an upper bound from a different box — not a
+  promised warm number and not a target (I11).
 
 ### L2 — auto-salt for abc, sim and compile *(was F5 / §5.3)*
 
@@ -1192,12 +1195,22 @@ not on a schedule.
   duplicate-scope contention fails cleanly; different scopes commit concurrently.
 - **Depends on:** L4 (ownership) for the external-output half.
 
-### L8 — the frontend / elaboration tier *(was M7)*
+### L8 — the frontend / elaboration tier *(was M7)* — **LANDED 2026-08-18**
 
 The concrete Pyrope implementation plan, settled boundary, two-tier design,
 and acceptance scenarios are tracked in
 [`todo/livehd/2f-incr.html`](../todo/livehd/2f-incr.html). This section remains
 the loop-level dependency and measurement contract.
+
+**Landed shape**, measured in **I-5** and completed by **I-6**: boundary (1)
+*and* (4) — a Tier-A per-source-unit parse cache and a Tier-B whole-closure
+post-recipe LGraph cache, in `<wd>/incr/scopes/compile/<top>/` (§5.2), keyed on
+the hermetic source snapshot and the transitive import-closure digest, with
+`kCompileSrcSalt` auto-derived from the front end + lowering sources. It serves
+`lhd compile` **and** `lhd sim` / the LEC prereq compiles, because all three go
+through the same `compile_sources`. Still open on this lever: per-graph
+diagnostic attribution (I-6), which is what a *partial* restore of a
+warning-carrying design needs before it can reuse anything.
 
 The remaining half of F10, deliberately measurement-gated. First select and name
 the cache boundary:
@@ -1522,6 +1535,82 @@ runtime, is how the color layer moves the abc number. Every absolute figure
 above is superseded by the H6 baseline on the resolved PDK; do not compare
 across the library change (T6) or across hosts (I11).
 
+**What a live row looks like today** — `bench/matrix.sh` writes exactly this
+shape, one JSON line per (phase, mode), and the same run renders
+`docs/current_opt_loop_incr.html`. The 2026-08-18 `I5-diag-replay` sitting on
+`mascm1` (18 cores, PDK pinned to `e3262351…`, control drift 1.04) reads:
+
+| target | phase | full (ms) | cold (ms) | incremental (ms) | speedup |
+|---|---|---:|---:|---:|---:|
+| dino | compile | 67 | 90 | 32 | 2.8× |
+| dino | synth | 1,190 | 1,243 | 122 | 10.2× |
+| dino | sim | 3,339 | 3,000 | 90 | 33.3× |
+| dino | sim_llvm | 3,830 | 3,749 | 91 | 41.2× |
+| dino | lec | 126 | 127 | 37 | 3.4× |
+| minion | compile | 4,244 | 5,256 | 63 | 83.4× |
+| minion | synth | 52,188 | 51,277 | 1,323 | 38.8× |
+| minion | sim | 49,190 | 48,779 | 1,072 | 45.5× |
+| minion | sim_llvm | 54,650 | 55,733 | 1,108 | 50.3× |
+| xs_alu | compile | 58 | 77 | 29 | 2.7× |
+| xs_alu | synth | 1,484 | 1,528 | 110 | 13.9× |
+| xs_alu | sim | 3,249 | 3,256 | 82 | 39.7× |
+| xs_alu | sim_llvm | 3,258 | 3,298 | 83 | 39.7× |
+| xs_renametable | compile | 18,919 | 24,753 | 327 | 75.7× |
+| xs_renametable | synth | 108,385 | 113,363 | 3,769 | 30.1× |
+| xs_renametable | sim | 64,618 | 64,785 | 4,030 | 16.1× |
+| xs_renametable | sim_llvm | 734,734 | 734,457 | 4,416 | 166.3× |
+| xs_rob | compile | 91,799 | 108,121 | 20,861 | 5.2× |
+| xs_rob | sim | 225,526 | 232,941 | 33,850 | 6.9× |
+
+The **I3 guardrail column** for the same sitting — the number that must NOT
+move, measured best-of-3 by re-running the binary the row just built:
+
+| target | backend | `sim_exec_ms` full / cold / incremental | cycles |
+|---|---|---|---:|
+| dino | slop | 39 / 38 / 38 | 200,000 |
+| dino | llvm | 46 / 46 / 46 | 200,000 |
+| minion | slop | 3,208 / 3,126 / 3,150 | 200,000 |
+| minion | llvm | 3,216 / 3,328 / 3,312 | 200,000 |
+| xs_alu | slop | 32 / 32 / 32 | 500,000 |
+| xs_renametable | slop | 779 / 781 / **782** | 5,000 |
+| xs_renametable | llvm | 2,551 / 2,562 / 2,525 | 5,000 |
+| xs_rob | slop | 2,607 / 2,613 / 2,499 | 20,000 |
+
+> **The dino and `xs_alu` rows above do not count.** At 200k / 500k cycles they
+> measure process startup, not the simulator (T1); the counts were raised to 2M
+> and 5M straight after this sitting, so their guardrail is *absent* here rather
+> than passing. minion, `xs_renametable` and `xs_rob` are correctly sized and do
+> count — and all three are flat across the three modes, which is what I3 asks.
+
+Read the SHAPE, not the absolutes (I11). Six durable facts in it:
+
+1. **`full` → `cold` is the price of admission, and it is real:** minion +24%,
+   `xs_renametable` +31%, `xs_rob` +18%, plus **67 MB / 277 MB / 1.06 GB** of
+   workdir against 114 KB / 8.9 KB / 7.9 KB with the cache off. Nothing collects
+   it (L4).
+2. **The two `sim` backends converge on the same warm number** on dino, minion
+   and `xs_alu`, because after L8 both are front-end bound and the front end is
+   now the same cached thing.
+3. **dino and `xs_alu` have hit the process-startup floor.** The fixed control
+   compile is 24–25 ms in this sitting, so a 29–32 ms warm compile is startup;
+   nothing in the compile column can move them further, and they are smoke
+   tests from here on rather than optimization targets.
+4. **`xs_rob`'s warm compile is 20,861 ms of which 20,273 ms is `inou.prp`** —
+   re-parsing the single touched 44.6 MB source unit. Everything downstream is
+   restored in 1.7 ms. F16/T9 has become the whole cost: the Pyrope PARSER at
+   sub-file granularity is now this target's only lever.
+5. **`sim.backend=llvm` is a bad trade on `xs_renametable`,** and this is the
+   first target that shows it at scale: 652,913 ms of `--setup-only` against the
+   slop backend's 32,619 ms (**20×** the codegen) to produce a binary that then
+   runs **3.3× slower** (2,551 ms vs 779 ms for 5,000 cycles). dino (46 vs 39)
+   and minion (3,328 vs 3,126) hint at the same direction; `xs_renametable` makes
+   it unarguable. That is an I3-shaped result about a *backend choice*, not
+   about a lever, and it belongs to whoever owns the llvm backend.
+6. **minion LEC records `refuted` in every mode** — a real, pre-existing
+   correctness failure, not a timing result. The timings are valid (the prover
+   reached a verdict) but the phase is not green, so §8 rule 5 is not satisfied
+   on minion and that is tracked separately, not by this loop.
+
 ---
 
 ## 9b. Iteration log
@@ -1706,15 +1795,164 @@ variant: it has drifted into a structurally different equivalent ALU. That
 fixture correctly misses for `ALU` and its Merkle parent; a fresh append to the
 current ALU hits 17/17. Do not weaken the semantic key to conceal fixture drift.
 
-### Still open after I-1/I-2/I-3/I-4
+### I-5 — L8: the compile / elaboration tier — **LANDED** *(commit `feec06838`)*
 
-**The front end.** It is ~75 s of `xs_rob`'s ~91 s warm rebuild, and nothing
-caches it. See L8 — and note that
-`Rob.prp` being one 44.6 MB unit does **not** make a per-source-unit grain
-useless here after all: `lhd sim <design> <tb>` compiles both in one invocation,
-so a per-unit cache would let the design unit hit while only the edited
-testbench re-parses, which is the shape of the actual edit→simulate loop. A
-comment-only edit to the design still needs a post-parse key to hit.
+The lever §7 ranked last and I-0 ranked first. Two tiers in one scope under
+`<wd>/incr/scopes/compile/<top>/` (§5.2's first tenant):
+
+- **Tier A, per source unit.** The workdir keeps a hermetic *copy* of each
+  Pyrope source and its compact post-parse LNAST. The copy is the sandbox input,
+  not a change detector: a warm compile reads the snapshot, so a mid-compile
+  edit cannot be half-consumed.
+- **Tier B, the whole post-recipe graph closure.** Keyed on the transitive
+  import-closure digest plus the resolved option context, validated per graph
+  against `graph_inventory.json` (`interface_hash`, `h0`/`h1`, owner). A
+  *total* hit skips upass, tolg, cprop, pass.formal and `lg.save` outright; a
+  clean lg-only consumer skips even the deserialize and materializes the stored
+  library as a filesystem generation (`compile.cache.lg_artifact`).
+- **`kCompileSrcSalt`** (`lhd/BUILD:37`) hashes the front end and lowering
+  closure into the key, so the T4 discipline extends to this cache too.
+- **It is not just `lhd compile`.** `lhd sim` and the LEC prereq compiles reach
+  the front end through the same `compile_sources`, so they inherit the tier.
+
+**Measured on `mascm1` the morning after it landed, before I-6** (config
+`I5-compile-cache`; `compile` phase, ms, one sitting, control drift 1.04):
+
+| target | full (cache off) | cold | incremental (comment-only) | speedup |
+|---|---:|---:|---:|---:|
+| dino | 63 | 77 | 69 | 1.1× |
+| minion | 4,149 | 5,005 | **4,549** | 1.1× |
+
+**That is the entry that matters, and it is a near-total miss.** minion reported
+178 hits and 1 miss and saved 10% of the wall clock: `inou.prp` fell 345 ms → 8 ms
+while `pass.upass` (1,532 ms), `lnast.tolg` (398 ms), `pass.cprop` (112 ms) and
+`pass.formal` (2,223 ms) all re-ran in full. Tier A was working; **Tier B had
+never been written at all** — the cold run's phase list has no
+`compile.cache.lg_store`. That is I-6.
+
+### I-6 — the generation carries its own warnings — **LANDED**
+
+**Root cause, one branch.** `compile_cache_store_graphs` returned early — before
+writing anything — if `pass.formal` had emitted any WARNING, on the reasoning
+that a restored graph never re-enters pass.formal, so replaying nothing would
+silence a verdict a cold run prints. Correct concern, wrong remedy: minion has
+24 `onehot-deferred` warnings and dino has one, so for both designs *no graph
+generation was ever stored*, and the warm compile paid the whole pipeline
+forever. `xs_alu` has zero warnings, which is exactly why it looked fine.
+
+**Fix.** The generation now CARRIES the warnings the graph pipeline produced —
+not only `pass.formal`'s: `Result::compile_cache_diag_mark` records the sink
+index right after the parse, and every warning past it is stored in
+`graph_inventory.json` (schema 3) with its pass, code, category, message, hint,
+span, `see` and notes. A **total** restore replays them verbatim; the pipeline
+ran over no graph in that process, so the replayed set is exactly the cold set.
+A **partial** restore is refused and counted (I5), because the stored records
+carry no per-graph attribution and a generation stored from a partial run would
+itself be incomplete.
+
+Three details worth keeping:
+
+- **The span is load-bearing.** The sink dedups on (code, span, message). A
+  first version stored message-without-span and minion's 44 cold records
+  replayed as 29 — twenty distinct `negative-shift` sites collapsed into five.
+  The test now compares the whole diagnostic stream as a multiset keyed on
+  (pass, code, message, hint, file, line, col).
+- **Replayed spans are the cold generation's spans.** After a comment-only edit
+  the byte offsets in the edited file have shifted, so a replayed location can
+  be stale by that insertion. That is the srcmap exemption H5 already grants;
+  re-resolving would need the trees the restore exists to avoid building.
+- **Errors still keep a run cold.** `has_errors()` is unchanged: a refuted
+  property or any failure means no generation is stored.
+
+**Result** (config `I5-diag-replay`, same host and sitting, `compile` phase, ms):
+
+| target | full | cold | incremental | speedup | vs I-5 incremental |
+|---|---:|---:|---:|---:|---:|
+| dino | 67 | 90 | **32** | 2.8× | 69 ms → 32 ms |
+| minion | 4,244 | 5,256 | **63** | **83.4×** | 4,549 ms → 63 ms (**72×**) |
+| xs_alu | 58 | 77 | **29** | 2.7× | already hitting (0 warnings) |
+| xs_renametable | 18,919 | 24,753 | **327** | **75.7×** | already hitting (0 formal warnings) |
+| xs_rob | 91,799 | 108,121 | **20,861** | 5.2× | already hitting (0 formal warnings) |
+
+dino and `xs_alu` are at the floor: the fixed control compile costs 24–25 ms in
+this sitting, so a 29–32 ms warm compile IS process startup. minion's warm
+compile is now `compile.cache.lg_artifact` (14 ms) plus one reparsed file.
+`xs_rob` is the exception that names the next lever: its 20,861 ms warm compile
+is 20,273 ms of `inou.prp` re-parsing the one touched 44.6 MB unit and 1.7 ms of
+everything else (F16/T9).
+
+The lever also reaches `lhd sim`, which shares `compile_sources`. Same sitting,
+`sim` phase, cold → incremental: minion 48,779 → 1,072 ms, `xs_renametable`
+64,785 → 4,030 ms, `xs_rob` 232,941 → 33,850 ms. minion's llvm-backend sim fell
+from 3,682 ms warm *before* the fix to 1,108 ms after, entirely inside
+`sim_setup_ms` (3,306 → 712 ms) — that is the front end, not the emitter.
+
+**Warm now equals cold in DIAGNOSTICS too, which it did not before**, and that
+half of the change applies to every design — *including the ones that were
+already hitting, where it is a correctness fix rather than a speedup*. A design
+that hit took the artifact fast path and ran no pipeline stage, so it printed
+**none** of that design's post-parse warnings; that is structural, not a
+measurement, and it is why the number below is stated as "0 by construction":
+
+| target | cold warnings | warm warnings, before | warm warnings, after (measured) |
+|---|---:|---:|---:|
+| dino | 21 | 21 — nothing was ever cached, so the pipeline re-ran | 21 |
+| minion | 44 | 44 — same reason | 44 |
+| xs_renametable | 9 | **0 by construction** — it hit, and a hit replayed nothing | 9 |
+
+**Gate (§8).** Warm improves on every target; cold moves within the sitting's
+spread (minion 5,005 → 5,256 ms, of which `compile.cache.lg_store` is 175 ms —
+the price of admission for a tier that was previously never paid *because it was
+never stored*); `sim_exec_ms` is unmoved (minion 3,126 → 3,150, xs_renametable
+781 → 782, xs_alu 32 → 32); `store_failed` is 0 everywhere and `refused` is 0 on
+these runs and attributed in the test; the structural H5 checker reports
+`identical` on every incremental compile row. `bazel test //...` **1998/1998**.
+
+**The price, and it is not small:** `workdir_bytes` after a cold compile is
+67 MB for minion and **277 MB** for `xs_renametable`, against 114 KB and 8.9 KB
+with the cache off. Cold wall time rises 24–31% on the two big targets (`full`
+→ `cold`). Feeds open question 3; GC is L4.
+
+**Still not covered:** a *semantic* edit to a design that warns re-compiles cold,
+because the partial restore is refused. Per-graph diagnostic attribution — the
+pipeline tagging each record with the graph it concerns — is the one missing
+piece, and it is now the top item in the queue below.
+
+### Still open after I-1 … I-6 — the current queue
+
+Ranked by where the 2026-08-18 rows actually show the time going. **The front
+end, which headed this list, is closed by I-5/I-6.**
+
+1. **Per-graph diagnostic attribution.** The one missing piece of I-6, and it
+   gates a whole mode rather than a percentage: a *semantic* edit to any design
+   that emits a warning is refused a partial restore and recompiles cold. The
+   fix is for each pipeline record to name the graph it concerns (the diag
+   `Builder` already has `.attr(k,v)`, and `pass.formal` iterates per graph),
+   after which a partial restore replays only the restored half. Until then
+   `edit_ms` on dino/minion is unchanged from I-5.
+2. **`pass.formal` on the COLD path (L1).** 2,270 ms of minion's 5,256 ms cold
+   compile — 43% — and untouched by any cache. It no longer helps the warm
+   number (I-6 skips the whole pipeline), which makes it a `cold_ms` and
+   price-of-admission lever, not a latency one.
+3. **Cache size (open question 3 / L4).** A cold compile leaves 67 MB for minion
+   and 277 MB for `xs_renametable`, against 114 KB / 8.9 KB with the cache off,
+   and nothing collects it. `full` → `cold` is +24% / +31% of wall time. Both
+   numbers grow with every target added to a shared workdir.
+4. **`sim` codegen on the medium targets.** With the front end cached,
+   `xs_renametable`'s warm sim is 4,030 ms of which 3,824 ms is `--setup-only` —
+   i.e. the emitter, not the parser. That is the residue I-1 left, now visible
+   because everything in front of it got cheap.
+5. **`pass.abc` region shape (L5).** Warm synthesis is already 30–39× on the big
+   targets, but `xs_renametable` re-does 1,134 ms of *hit* validation across 25
+   regions, and `xs_rob`'s first region still exceeds the 30-minute cap (I9).
+6. **L11, the residual fine-color cycle.** Unchanged and still negative (I-2):
+   the slice resolver needs to become iterative. It is what blocks `xs_backend`
+   sim outright.
+
+**Correctness, not performance, but it sits in this loop's routine set:**
+minion LEC records `refuted` in all three modes. That is a real failure of the
+§8 rule-5 gate, tracked separately; the timing rows for that phase are valid
+(the prover reached a verdict) but the phase is not green.
 
 ---
 
@@ -1753,6 +1991,30 @@ fast tier plus ownership, context and concurrency coverage.
 Gates follow `synth_incremental`'s precedent: **time re-done, not hit count**
 (I4), and a hard fail on any `store-failed` (I5).
 
+**Landed against `lhd/tests/lhd_compile_cache_test.sh` (I-6).** The compile
+tenant's own acceptance test now also covers the diagnostic contract, which is
+the half a timing benchmark cannot see:
+
+- a fixture that emits a `pass.formal` DEFERRED warning must still WRITE its
+  graph generation (`graph_inventory.json` exists);
+- a warm restore replays the whole diagnostic stream — compared as a
+  **multiset keyed on (pass, code, message, hint, file, line, col)**, because a
+  replay that keeps the message and drops the span silently collapses N sites
+  into one through the sink's own dedup;
+- the stored generation is inspected directly, so a store-side drop fails here
+  rather than on some later restore;
+- a semantic edit re-runs the pipeline, reproduces the warnings live, and is
+  counted in `refused` — a principled refusal, visible (I5).
+
+**Harness additions the same day**, all in `../lhdsuite`: the `xs_renametable`
+core (`bench/defs.bzl` + `bench/BUILD` + the `bench/matrix.sh` case), its driver
+`xiangshan/Backend/sim/xs_renametable_tb.prp`, and an
+`incremental_edit_unit = "RenameTable"` override — `RenameTableWrapper` is pure
+structure and has not one `io_… = … & 1` line, so the shared `bug1` anchor found
+no site and both incremental scenarios failed until the edit was pointed at the
+instantiated leaf (same escape hatch `xs_backend` uses for `DelayN_6`).
+Seven of its nine bazel scenarios pass; the two `*_synth` ones fail only on T15.
+
 ---
 
 ## 11. Known traps
@@ -1764,7 +2026,13 @@ Gates follow `synth_incremental`'s precedent: **time re-done, not hit count**
   ~383k cycles/s, after which the same 20k measured 52 ms of mostly startup.
   **Re-check every cycle count after any large sim speedup** — a benchmark that
   has outrun its own count reports startup, not the simulator, and would let an
-  I3 violation through.
+  I3 violation through. **It happened again on 2026-08-18**: dino read 38 ms at
+  200k cycles and `xs_alu` 32 ms at 500k, so both targets' I3 columns in that
+  sitting are startup and cannot reject anything. `matrix.sh` now uses 2M for
+  dino and 5M for `xs_alu` (and `defs.bzl` matches); `minion` 200k → 3.1 s,
+  `xs_renametable` 5k → 0.78 s and `xs_rob` 20k → 2.6 s were already correctly
+  sized. Treat the dino/`xs_alu` guardrail rows before that fix as absent, not
+  as passing.
 - **T2 — a testbench can only poke one level deep, and only 64 bits wide
   (F17).** `lhd sim` rejects a deeper write outright — "cannot write
   hierarchical path … (read-only; use sigref)", and string `sigref` is
@@ -1835,6 +2103,40 @@ Gates follow `synth_incremental`'s precedent: **time re-done, not hit count**
      dramatically cheaper", which is backwards.
   I11 says never compare across hosts; this says never compare across *time* on
   one host either. Bracket every claim with a control run of an untouched path.
+- **T13 — a warning can be the reason nothing is cached.** `compile_cache_store_graphs`
+  used to `return` before writing `graph_inventory.json` if pass.formal had
+  emitted any WARNING, so a design with one unprovable obligation cached no
+  graph at all — forever, on every run. minion has 24 `onehot-deferred`
+  warnings, so its compile cache was parse-only and its warm compile cost 91% of
+  cold while the telemetry cheerfully reported 178 hits. **The telemetry lied by
+  omission**: hits counted Tier-A parse units, and nothing counted the Tier-B
+  generation that was never written. Fixed in I-6 (the generation carries its
+  warnings and replays them). The general lesson outlives the fix: when a cache
+  reports hits and saves no time, check whether the expensive tier is being
+  *stored*, not just whether it is being *read* — a `has_phase(lg_store)` on the
+  COLD run is the one-line diagnostic.
+- **T14 — the two harnesses resolve the PDK differently, so they can disagree
+  about which library a number came from.** `bench/common.sh`'s
+  `require_tech_dir` deliberately ignores an inherited `HAGENT_TECH_DIR` and
+  takes whatever `ciel` currently has enabled, so **every `bazel test
+  //bench:*_synth` runs against `ciel current`**. `bench/matrix.sh` honours an
+  explicit pin, but only when `PDK_VERSION` **and** `HAGENT_TECH_DIR` are
+  exported *together* — set one alone and it silently re-resolves through ciel.
+  A session that inherits `e3262351…` from a shell profile while `ciel current`
+  says `e8daeda7…` therefore gets bazel benches on one library and a matrix on
+  the other. Export both, or neither, and never mix rows from the two. The
+  2026-08-18 matrix rows were taken with both pinned to `e3262351…` to stay
+  comparable with the previous sitting — one version BEHIND the resolution T6
+  describes — so their synth columns must be re-baselined before being read
+  against `opt_loop_synth`.
+- **T15 — `bazel test //bench:*_synth` needs `ciel` on the test PATH, and the
+  sandbox usually does not have it.** Every synthesis bench target fails
+  immediately with `FAIL: synthesis benchmarks require 'ciel' on PATH (see
+  README.md)` when `ciel` lives somewhere like `/opt/homebrew/bin`, because the
+  bazel test environment does not inherit the interactive PATH. It is a setup
+  precondition, not a result — `xs_alu_synth` and `xs_renametable_synth` fail
+  identically — and `bench/matrix.sh`, which runs outside bazel, is unaffected.
+  Do not read those two failures as a regression in a core you just added.
 - **T10 — the two loops interact.** An `opt_loop_synth` W2 recipe change moves
   the abc cache hit rate measured here; an L5 key change moves which netlist
   that plan is scoring. Both loops write one ledger (I10) so the interaction is
@@ -1874,30 +2176,43 @@ Resolved during plan review:
   generation.
 - **Loop vs milestones (2026-08-17):** the loop starts now; every former
   milestone is a lever (I6). Only the harness (§6) precedes it.
-- **XiangShan scope (2026-08-17):** three blocks, compile/synth/sim, with
-  trivial in-house drivers so I3 is measurable there (I9, H2). The drivers are
-  written; `xs_alu` is verified to produce an identical checksum from the Pyrope
-  and Verilog trees. `xs_rob` / `xs_backend` await **F21**.
+- **XiangShan scope (2026-08-17, extended 2026-08-18):** four blocks now —
+  `xs_alu`, `xs_renametable`, `xs_rob`, plus `xs_backend` as a robustness run —
+  compile/synth/sim, with trivial in-house drivers so I3 is measurable there
+  (I9, H2). `xs_alu` and `xs_renametable` are both verified to produce an
+  identical checksum from the Pyrope and Verilog trees
+  (`888709067567740450` and `7374455199715033088` at 1000 cycles).
+  `xs_renametable` was added because the gap between `xs_alu` (a 3.2 s cold sim)
+  and `xs_rob` (233 s) left nothing in the middle: it is the only target where a
+  full five-phase matrix and a real hierarchy coexist.
 - **Variant mechanism (2026-08-17):** synthesized in place by
   `apply_synth_only_variant`, not checked in — settled by lhdsuite `68afbda`,
   with the `xs_rob` syntax bug fixed (F20).
 
 Still open, intentionally measurement-gated:
 
-1. **L8 boundary and grain.** Choose parsed LNAST, post-uPass LNAST,
-   pre-recipe LGraph or post-recipe graph, then per-unit versus per-def, using
-   post-L1 profiles and invalidation-fanout measurements. **F16 already rules
-   per-source-unit out for `xs_rob`** — one 44.6 MB module — so the question is
-   whether per-def pays for itself elsewhere, or whether Rob needs intra-file
-   incremental parsing instead.
+1. **~~L8 boundary and grain~~ → intra-file incremental parsing.** *Answered
+   2026-08-18 (I-5): per source unit for Tier A and the whole post-recipe graph
+   closure for Tier B.* What F16 predicted is now measured rather than argued:
+   `xs_rob`'s warm compile is **20,861 ms, of which 20,273 ms is `inou.prp`**
+   re-parsing the single touched 44.6 MB unit while everything downstream is
+   restored in 1.7 ms. So the remaining question is the narrow one — **does
+   Pyrope want a sub-file parse grain, or a faster parser?** — and it now has a
+   single, unambiguous target design and a number to beat.
 2. **Validation snapshot representation.** abc already stores two full
-   GraphLibraries. LEC (both sides) and compile could make a minion or `xs_rob`
-   workdir very large. Compare full bodies against a versioned compressed
-   structural skeleton sufficient for the adapter's exact validator. Measure
-   with `workdir_bytes` on `xs_rob`, the worst case.
+   GraphLibraries. **Measured 2026-08-18, and it is the worst case F16
+   predicted:** a cold compile leaves `workdir_bytes` of 1.35 MB (dino),
+   67 MB (minion), 277 MB (`xs_renametable`) and **1.06 GB (`xs_rob`)** — the
+   last against 7.9 KB with `compile.cache=false`, and `compile.cache.store`
+   alone costs 4,901 ms of that target's cold run. Compare full bodies against a
+   versioned compressed structural skeleton sufficient for the adapter's exact
+   validator; the hermetic *source* snapshot is a large part of the Rob figure
+   and is the first thing to measure.
 3. **Retention/GC budget.** Define default size/age limits only after measuring
    real multi-top workdirs. Never evict objects referenced by a committed scope;
-   `lhd workdir clean` remains the explicit immediate cleanup path.
+   `lhd workdir clean` remains the explicit immediate cleanup path. Now urgent
+   rather than theoretical: one workdir shared across the five §2 targets holds
+   ~1.4 GB of compile scopes before any sim or abc tenant is counted.
 4. **Does L6 have an I3-safe design at all?** Finer sim reuse grain tempts a
    finer TU split, which costs cycles/s. If no fingerprint/validation scheme
    restores whole-TU artifacts without fragmenting them, L6 reduces to L3 plus

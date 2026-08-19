@@ -33,12 +33,18 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 
 # hits/misses from the LAST run's qor envelope: "incremental":{"hits":H,"misses":M,...}
 incr_field() { sed -n 's/.*"incremental":{[^}]*"'"$1"'":\([0-9]*\).*/\1/p' "$W/r.json"; }
+region_count() { grep -o '"resynth":[01]' "$W/r.json" | wc -l | tr -d ' '; }
+resynth_count() { grep -o '"resynth":1' "$W/r.json" | wc -l | tr -d ' '; }
 expect_incr() {
   local h m
   h=$(incr_field hits)
   m=$(incr_field misses)
   [ "$h" = "$1" ] || fail "$3: expected $1 hit(s), got '$h' -- $(cat "$W/r.json" | head -c 400)"
   [ "$m" = "$2" ] || fail "$3: expected $2 miss(es), got '$m'"
+}
+expect_resynth() {
+  [ "$(region_count)" = "$1" ] || fail "$3: expected $1 color row(s), got $(region_count)"
+  [ "$(resynth_count)" = "$2" ] || fail "$3: expected $2 resynthesized color(s), got $(resynth_count)"
 }
 
 [ -f "$FIX" ] || fail "missing fixture $FIX"
@@ -60,7 +66,7 @@ abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
   # (<workdir>/abc_cache, the formal.cache convention), on by default.
   run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set abc.library="$LIB" \
-      --workdir "$W/wabc"
+      --workdir "$W/wabc" --stats
 }
 
 # LEC gate: netlist modules + behavioral cell models vs the original logic
@@ -81,6 +87,7 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
 compile_and_color lg0
 abc_incr lg0 net0
 expect_incr 0 3 "cold run"
+expect_resynth 3 3 "cold run"
 [ "$(incr_field abc_started)" = 1 ] || fail "cold run did not start ABC"
 [ -f "$W/wabc/abc_cache/abc_cache.json" ] || fail "cache metadata not persisted under <workdir>/abc_cache"
 lec_gate net0 lg0 "cold mapping"
@@ -88,10 +95,21 @@ lec_gate net0 lg0 "cold mapping"
 # --- 2. NoChange: same design, fresh out dir => all hits, zero ABC ----------
 abc_incr lg0 net1
 expect_incr 3 0 "NoChange re-run"
+expect_resynth 3 0 "NoChange re-run"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit run still started ABC/read Liberty"
 run compile lg:"$W/net1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/net1v" --workdir "$W/w_nv1"
 diff -r "$W/net0v" "$W/net1v" >/dev/null || fail "warm clone differs from the cold mapping"
 echo "PASS: NoChange run is all hits and byte-identical Verilog"
+
+# Pretty rendering is one physical line per color and carries the same
+# resynthesis decision as the JSON rows. This additional all-hit run is cheap.
+"$LHD" pass abc --top "$TOP" lg:"$W/lg0" --emit-dir lg:"$W/net_pretty" --set abc.library="$LIB" \
+    --workdir "$W/wabc" --stats --diag-fmt pretty -q >"$W/pretty.out" \
+    || fail "pretty stats run failed"
+[ "$(grep -c '^  abc\[stats\]:' "$W/pretty.out")" = 3 ] \
+  || fail "pretty stats did not print exactly one line per color: $(cat "$W/pretty.out")"
+[ "$(grep -c 'resynth=0$' "$W/pretty.out")" = 3 ] \
+  || fail "pretty all-hit rows did not all say resynth=0: $(cat "$W/pretty.out")"
 
 # --- 3. edit ONE def (top's combiner); children must still hit ---------------
 # The recompile reallocates every nid; the child defs' regions must hit anyway.
@@ -100,23 +118,27 @@ grep -q "o = a + b + 1" "$W/dut.prp" || fail "edit did not apply"
 compile_and_color lg1
 abc_incr lg1 net2
 expect_incr 2 1 "top-only edit"
+expect_resynth 3 1 "top-only edit"
 [ "$(incr_field abc_started)" = 1 ] || fail "one-miss edit did not start ABC"
 lec_gate net2 lg1 "edited design (2 cached + 1 fresh region)"
 
 # --- 4. the edited design is now cached too ----------------------------------
 abc_incr lg1 net3
 expect_incr 3 0 "NoChange after the edit"
+expect_resynth 3 0 "NoChange after the edit"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit edited run still started ABC/read Liberty"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
 # cache=false: no cache is touched and the envelope carries no counters.
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set abc.library="$LIB" \
-    --set abc.cache=false --workdir "$W/wabc"
+    --set abc.cache=false --workdir "$W/wabc" --stats
 [ -z "$(incr_field hits)" ] || fail "cache=false still ran the cache"
+expect_resynth 3 3 "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
 # its default of true (the formal.cache convention).
-run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set abc.library="$LIB"
+run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set abc.library="$LIB" --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
+expect_resynth 3 3 "no-workdir full run"
 echo "PASS: cache=false and no-workdir both disable cleanly"
 
 echo "PASS: all incremental pass.abc flows"

@@ -143,7 +143,9 @@ std::vector<Set_option> list_set_options() {
                            "lhd",
                            "false",
                            "print the pass's aggregate statistics report; the canonical form of the --stats flag (either "
-                           "spelling works). Consumed by the passes that have one (pass.color, pass.semdiff, pass.lec). "
+                           "spelling works). Consumed by the passes that have one (pass.color, pass.abc, pass.opentimer, "
+                           "pass.semdiff, pass.lec). ABC/OpenTimer add one structured row per mapped color, with "
+                           "resynth=1|0 carried through incremental ABC reuse. "
                            "For `lhd lec` / `lhd formal verify` (canonical knob formal.stats) it prints a cvc5 "
                            "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
                            "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
