@@ -151,7 +151,7 @@ void Slang_context::emit_package_units() {
       continue;
     }
     const auto* cv  = package_const_value(*msym);
-    auto v64 = (cv != nullptr && cv->isInteger()) ? cv->integer().as<int64_t>() : std::optional<int64_t>{};
+    auto        v64 = (cv != nullptr && cv->isInteger()) ? cv->integer().as<int64_t>() : std::optional<int64_t>{};
     if (!v64 || *v64 != r->second) {
       continue;  // render not value-faithful — keep the literal
     }
@@ -206,7 +206,7 @@ void Slang_context::emit_package_units() {
     absl::flat_hash_map<std::string, std::string>    expr_m;
     absl::flat_hash_map<std::string, std::string>    type_m;
     std::set<std::string>                            emitted;
-    auto emit_one = [&](const std::string& param_name, const Pinfo& pi) {
+    auto                                             emit_one = [&](const std::string& param_name, const Pinfo& pi) {
       // `const` binds its value from a SEPARATE store, not the declare init
       // (only `reg` folds the init into the declare — prp2lnast). A declare-init
       // const does not bind as a known comptime value, so harvest_pub_values
@@ -216,8 +216,8 @@ void Slang_context::emit_package_units() {
       builder_.lnast->add_pub(param_name, "value");
       pub_vals.emplace_back(param_name, pi.value);
       // a defining expr may only read names DECLARED ABOVE it in this file
-      const bool refs_ok = std::all_of(pi.same_refs.begin(), pi.same_refs.end(),
-                                       [&](const std::string& n) { return emitted.count(n) != 0; });
+      const bool refs_ok
+          = std::all_of(pi.same_refs.begin(), pi.same_refs.end(), [&](const std::string& n) { return emitted.count(n) != 0; });
       if (!pi.expr.empty() && refs_ok) {
         expr_m.emplace(param_name, pi.expr);
       }
@@ -285,6 +285,12 @@ std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {
 // tokenizer splits on it), so map it to '_' BEFORE uniquing — that way two
 // distinct raws that sanitize alike still get uniquing suffixes.
 //
+// Slang includes Verilog's leading escape introducer in Symbol::name. It is
+// lexical syntax, not part of the identifier: `\state.field ` and Pyrope's
+// backticked `state.field` denote the same RTL object. Drop it before quoting;
+// retaining it made a Verilog -> Pyrope -> Verilog reread silently rename every
+// escaped state cut to `\state.field`, defeating sequential correspondence.
+//
 // '.' is deliberately NOT sanitized. It used to be, because the bundle-path
 // split read it as a field separator; `bundle_key::find_top_dot` now skips
 // dots inside `` `…` `` and quote_if_needed below quotes any name carrying
@@ -293,6 +299,9 @@ std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {
 // Pyrope that generated it (whose detupled memory IS `mem.a`) lost every
 // state name pair and fell back to structural matching.
 static std::string sanitize_name(std::string name) {
+  if (!name.empty() && name.front() == '\\') {
+    name.erase(name.begin());
+  }
   for (auto& c : name) {
     if (std::isspace(static_cast<unsigned char>(c))) {
       c = '_';
@@ -323,7 +332,14 @@ std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
     return it->second;
   }
 
-  std::string base = sanitize_name(absl::StrCat(genblk_prefix_, sym.name));
+  // The escape introducer belongs to the RAW symbol name, so it must be dropped
+  // BEFORE the generate-block prefix is prepended — sanitize_name only sees the
+  // front of the concatenation, and inside a genblk that front is the prefix.
+  std::string_view raw = sym.name;
+  if (!raw.empty() && raw.front() == '\\') {
+    raw.remove_prefix(1);
+  }
+  std::string base = sanitize_name(absl::StrCat(genblk_prefix_, raw));
   if (base.empty()) {
     base = "_anon";
   }
@@ -406,7 +422,7 @@ std::string Slang_context::const_text(const slang::SVInt& svint) {
   if (svint.hasUnknown()) {
     // x/z bits ride as `?` in an explicitly-signed binary literal (bare 0b is
     // invalid pyrope; hlop enforces 0ub/0sb).
-    auto buffer = svint.toString(slang::LiteralBase::Binary, false);
+    auto        buffer = svint.toString(slang::LiteralBase::Binary, false);
     std::string body(buffer.data(), buffer.size());
     for (auto& c : body) {
       if (c == 'x' || c == 'X' || c == 'z' || c == 'Z') {
@@ -451,8 +467,7 @@ void Slang_context::clear_pending_loc() {
   }
 }
 
-void Slang_context::emit_unsupported(slang::SourceRange range, std::string_view code, std::string message,
-                                     std::string_view hint) {
+void Slang_context::emit_unsupported(slang::SourceRange range, std::string_view code, std::string message, std::string_view hint) {
   module_failed_ = true;
   livehd::diag::Span span;
   if (sm_ != nullptr) {
@@ -467,8 +482,8 @@ void Slang_context::emit_unsupported(slang::SourceRange range, std::string_view 
                                                      .hint     = std::string(hint)});
 }
 
-void Slang_context::emit_error(slang::SourceRange range, std::string_view code, std::string_view category,
-                               std::string message, std::string_view hint) {
+void Slang_context::emit_error(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
+                               std::string_view hint) {
   module_failed_ = true;
   livehd::diag::Span span;
   if (sm_ != nullptr) {
@@ -483,8 +498,8 @@ void Slang_context::emit_error(slang::SourceRange range, std::string_view code, 
                                                      .hint     = std::string(hint)});
 }
 
-void Slang_context::emit_warning(slang::SourceRange range, std::string_view code, std::string_view category,
-                                 std::string message, std::string_view hint) {
+void Slang_context::emit_warning(slang::SourceRange range, std::string_view code, std::string_view category, std::string message,
+                                 std::string_view hint) {
   livehd::diag::Span span;
   if (sm_ != nullptr) {
     span = livehd::slang_loc::span_of(*sm_, range);

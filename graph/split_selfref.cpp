@@ -1495,7 +1495,7 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out) {
   if (pthread_attr_init(&attr) != 0) {
     return false;
   }
-  Split_job job{.g = g};
+  Split_job job{.g = g, .result = {}, .error = {}};
   pthread_t tid{};
   int       rc = pthread_attr_setstacksize(&attr, kSplitStackBytes);
   if (rc == 0) {

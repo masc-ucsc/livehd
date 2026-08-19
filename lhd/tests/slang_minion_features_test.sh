@@ -83,7 +83,7 @@ ${LHD} compile "$W/md2array.sv" --top md2array \
   || fail "2-D unpacked struct array design did not compile"
 cat "$W/md2v"/*.v >"$W/md2_all.v" 2>/dev/null
 [ -s "$W/md2_all.v" ] || fail "no verilog emitted for md2array"
-${LHD} lec --set formal.solver=lgyosys --impl verilog:"$W/md2_all.v" \
+${LHD} lec --impl verilog:"$W/md2_all.v" \
   --ref verilog:"$W/md2array.sv" --top md2array --workdir "$W/md2lec" -q \
   --result-json "$W/md2lec.json" \
   || fail "2-D unpacked struct array LEC failed: $(cat "$W/md2lec.json" 2>/dev/null)"
@@ -346,6 +346,49 @@ ${LHD} sim lg:"$W/dynamic_packed_write_lg/" "$W/dynamic_packed_write_tb.prp" \
   || fail "dynamic packed-lvalue generated simulation failed"
 echo "PASS: dynamic packed-lvalue update keeps its declared-width boundary explicit"
 
+# A runtime-read packed array is scalar-replaced by its outer dimension. Writes
+# to constant inner elements must therefore convert the inner element ordinal
+# to a BIT offset within the SROA lane. For five-bit elements, lane 1 is bits
+# 5..9 (not 1..5). This is intpipe_csr_msgs' queue-pointer shape.
+cat >"$W/packed_sroa_stride.sv" <<'EOF'
+module packed_sroa_stride (
+  input  logic             clk_i,
+  input  logic             rst_ni,
+  input  logic             tid_i,
+  input  logic [1:0]       pid_i,
+  input  logic [4:0]       d_i,
+  output logic [4:0]       q_o
+);
+  logic [1:0][3:0][4:0] ptr;
+  for (genvar t = 0; t < 2; t++) begin : gen_t
+    for (genvar p = 0; p < 4; p++) begin : gen_p
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni)
+          ptr[t][p] <= '0;
+        else if (t == tid_i && p == pid_i)
+          ptr[t][p] <= d_i;
+      end
+    end
+  end
+  assign q_o = ptr[tid_i][pid_i];
+endmodule
+EOF
+${LHD} compile "$W/packed_sroa_stride.sv" --reader slang --top packed_sroa_stride \
+  --emit-dir pyrope:"$W/packed_sroa_stride_prp/" \
+  --workdir "$W/packed_sroa_stride_w" -q \
+  || fail "packed SROA element-stride lowering failed"
+grep -q '`ptr.e0`#\[5\.\.=9\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
+  || fail "packed SROA element 1 did not use its five-bit stride"
+if grep -q '`ptr.e0`#\[1\.\.=5\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
+  fail "packed SROA element 1 used its ordinal as a bit offset"
+fi
+${LHD} lec --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
+  --ref verilog:"$W/packed_sroa_stride.sv" --top packed_sroa_stride \
+  --set formal.engine=bmc --set formal.strict=true \
+  --workdir "$W/packed_sroa_stride_lec" -q \
+  || fail "packed SROA element-stride round trip is not equivalent"
+echo "PASS: packed SROA constant writes apply the inner element bit stride"
+
 # Direct color fusion may materialize a child-internal packed expression wider
 # than the child's public output carrier. The parent must still observe the
 # declared module boundary before using that value in an ordinary operation.
@@ -478,5 +521,108 @@ EOF
 ${LHD} compile "$W/ucase.sv" --top ucase_struct --workdir "$W/uw" -q \
   || fail "struct first written inside a unique-case arm did not compile"
 echo "PASS: unique-case-arm struct writes lower (pre-declared leaves, no in-arm poison)"
+
+# Branch lowering is transactional for both the current driver and its width.
+# The then arm's `lsb = 0` is one bit wide; if that width leaks into the else
+# arm, `lsb + 1` becomes a two-bit adder and 4'h6 increments to 4'h3. This is
+# the inc_wrap_rbox_ptrs shape used by intpipe_csr_msgs.
+cat >"$W/guarded_inc.prp" <<'EOF'
+pub comb guarded_inc(a:u5, m:u4) -> (o:u4) {
+  mut lsb:u4 = a#[0..=3]
+  if lsb == m {
+    lsb = 0
+  } else {
+    lsb = (lsb + 1)#[0..=3]
+  }
+  o = lsb
+}
+EOF
+cat >"$W/guarded_inc.sv" <<'EOF'
+module guarded_inc(input logic [4:0] a, input logic [3:0] m, output logic [3:0] o);
+  logic [3:0] lsb;
+  always_comb begin
+    lsb = a[3:0];
+    if (lsb == m) lsb = '0;
+    else          lsb = lsb + 1'b1;
+    o = lsb;
+  end
+endmodule
+EOF
+${LHD} compile "$W/guarded_inc.prp" --top guarded_inc --recipe O1 \
+  --emit verilog:"$W/guarded_inc_out.v" --workdir "$W/guarded_inc_w" -q \
+  || fail "guarded increment Pyrope did not emit Verilog"
+${LHD} lec --impl verilog:"$W/guarded_inc_out.v" --ref verilog:"$W/guarded_inc.sv" \
+  --top guarded_inc --set formal.engine=ind --workdir "$W/guarded_inc_lec" -q \
+  || fail "branch-local narrow assignment leaked its width into the sibling arm"
+echo "PASS: branch rollback restores width metadata before lowering sibling arms"
+
+# Function symbols are shared by the Slang AST across call sites. Each inlined
+# call must snapshot its return value before the next call reuses that symbol;
+# otherwise `classify(a) < classify(b)` degenerates into `classify < classify`.
+cat >"$W/function_call_snapshot.sv" <<'EOF'
+module function_call_snapshot (
+  input  logic [4:0] a_i,
+  input  logic [4:0] b_i,
+  output logic       lt_o
+);
+  function automatic logic [2:0] classify(input logic [4:0] x);
+    return x[2:0] ^ {3{x[4]}};
+  endfunction
+
+  assign lt_o = classify(a_i) < classify(b_i);
+endmodule
+EOF
+${LHD} compile "$W/function_call_snapshot.sv" --top function_call_snapshot \
+  --emit-dir pyrope:"$W/function_call_snapshot_prp/" \
+  --workdir "$W/function_call_snapshot_w" -q \
+  || fail "two calls to one inlined function did not compile"
+if grep -Eq 'classify[[:space:]]*<[[:space:]]*classify' "$W/function_call_snapshot_prp"/*.prp; then
+  fail "two function calls aliased the same mutable return slot"
+fi
+${LHD} lec --impl pyrope:"$W/function_call_snapshot_prp/function_call_snapshot.prp" \
+  --ref verilog:"$W/function_call_snapshot.sv" --top function_call_snapshot \
+  --set formal.engine=bmc --set formal.strict=true \
+  --workdir "$W/function_call_snapshot_lec" -q \
+  || fail "snapshotted function-call results are not equivalent to the Verilog source"
+echo "PASS: each inlined function call snapshots its return value"
+
+# A runtime branch that updates one packed-output field must invalidate only
+# that field in uPass's comptime table. Whole-root invalidation used to erase
+# the definite sibling constants below, turning wdata into 0 and data into X.
+cat >"$W/bundle_field_uncertainty.sv" <<'EOF'
+typedef struct packed {
+  logic         wdata;
+  logic [255:0] data;
+  logic [4:0]   opcode;
+} bundle_field_uncertainty_t;
+
+module bundle_field_uncertainty (
+  input  logic                      sel_i,
+  output bundle_field_uncertainty_t req_o
+);
+  always_comb begin
+    req_o.wdata = 1'b1;
+    req_o.data = '0;
+    if (sel_i)
+      req_o.opcode = 5'd7;
+    else
+      req_o.opcode = 5'd3;
+  end
+endmodule
+EOF
+${LHD} compile "$W/bundle_field_uncertainty.sv" --top bundle_field_uncertainty \
+  --emit-dir pyrope:"$W/bundle_field_uncertainty_prp/" \
+  --workdir "$W/bundle_field_uncertainty_w" -q \
+  || fail "packed output with a conditionally-written sibling field did not compile"
+grep -Eq 'req_o\.wdata[[:space:]]*=[[:space:]]*1' "$W/bundle_field_uncertainty_prp"/*.prp \
+  || fail "conditional opcode write erased the definite wdata sibling"
+grep -Eq 'req_o\.data[[:space:]]*=[[:space:]]*0' "$W/bundle_field_uncertainty_prp"/*.prp \
+  || fail "conditional opcode write erased the definite data sibling"
+${LHD} lec --impl pyrope:"$W/bundle_field_uncertainty_prp/bundle_field_uncertainty.prp" \
+  --ref verilog:"$W/bundle_field_uncertainty.sv" --top bundle_field_uncertainty \
+  --set formal.engine=auto --set formal.strict=true \
+  --workdir "$W/bundle_field_uncertainty_lec" -q \
+  || fail "field-precise uncertainty lowering is not equivalent to the Verilog source"
+echo "PASS: uncertain packed-field writes preserve definite siblings"
 
 echo "PASS: all slang minion-feature regressions"

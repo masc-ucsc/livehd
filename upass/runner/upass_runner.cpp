@@ -4028,9 +4028,27 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
     *out_tuple_expanded = false;
   }
 
+  // Slang represents a Verilog escaped scalar port such as `\\req.a ` as the
+  // quoted LNAST identifier `` `req.a` `` so bundle processing does not split
+  // it at the dot.  gather_actuals canonicalizes the matching named actual to
+  // the bare external port name; compare the formal through the same view.
+  // Keep quotes on names containing whitespace because those identifiers
+  // genuinely need their quoted spelling downstream (the same rule tolg uses
+  // in canon_io_name).
+  const auto canonical_port_name = [](std::string_view name) {
+    if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+      const auto inner  = name.substr(1, name.size() - 2);
+      const bool has_ws = std::any_of(inner.begin(), inner.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+      if (!has_ws) {
+        return inner;
+      }
+    }
+    return name;
+  };
   auto param_index = [&](std::string_view k) -> std::size_t {
+    const auto canonical_key = canonical_port_name(k);
     for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
-      if (io.inputs[i].name == k) {
+      if (canonical_port_name(io.inputs[i].name) == canonical_key) {
         return i;
       }
     }

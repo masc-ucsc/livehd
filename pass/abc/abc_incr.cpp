@@ -435,6 +435,9 @@ bool Incr_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibr
   // and save() flushes it from there, so the mapping phase never holds two
   // copies of every netlist (see the header, and Row::in_outlib for how same-run
   // reuse finds it in the meantime).
+  if (outlib == nullptr || outlib->find_io(rb.module_name) == nullptr) {
+    return false;  // nothing to defer: keep store()'s false-on-failure contract
+  }
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -508,8 +511,8 @@ bool Incr_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Graph
 }
 
 bool Incr_cache::reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res, hhds::GraphLibrary* outlib) {
-  if (!res.hit || res.row == nullptr) {
-    return false;
+  if (!res.hit || res.row == nullptr || outlib == nullptr) {
+    return false;  // no output library -> nowhere to install the reused body (deref'd below)
   }
   // A row stored EARLIER IN THIS RUN still has its mapped body only in `outlib`
   // (store() defers the cache-library copy to save()); a row loaded from disk

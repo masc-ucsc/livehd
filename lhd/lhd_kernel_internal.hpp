@@ -213,6 +213,7 @@ std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, co
 void                     emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var);
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& output_dir);
 std::string              sim_hlop_include_dir(const Options& opts);
+std::string              find_header_in_runfiles(std::string_view header);
 std::string              sim_iassert_include_dir(const Options& opts);
 std::string              sim_host_cxx();
 void                     emit_sim_outputs(Options& opts, Result& res, Eprp_var& var);

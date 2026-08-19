@@ -284,7 +284,9 @@ static std::string normalize_reg_name(std::string_view raw) {
   if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
     s = s.substr(0, p);
   }
-  return std::string{s};
+  std::string out{s};
+  out.erase(std::remove(out.begin(), out.end(), '`'), out.end());
+  return out;
 }
 
 std::string canon_flop_name(std::string_view hier_name) {
@@ -303,6 +305,10 @@ std::string canon_flop_name(std::string_view hier_name) {
     sv = sv.substr(0, p);
   }
   std::string s(sv);
+  // Pyrope backticks quote an identifier but are not part of its RTL name.
+  // A Verilog -> Pyrope -> Verilog reread can therefore expose
+  // `state.field` while the direct reference graph carries state.field.
+  s.erase(std::remove(s.begin(), s.end(), '`'), s.end());
   // ".reg_" (the CIRCT single-field stage-register flop name) -> "_" first, so the
   // collapse survives the generic "." -> "_" flatten that follows. (A register file
   // bank "registers.regs_7" has ".regs_", not ".reg_", so it is left for the dot
@@ -2160,17 +2166,25 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (pid(0).empty()) {
             return fail("SHL missing a");
           }
-          Term a = fit(pid(0)[0], W);
-          Term acc;
+          const Val& a = pid(0)[0];
+          Term       acc;
           for (const auto& b : pid(1)) {  // one-hot amounts, ORed
             // A shift count is UNSIGNED (a bit position), so zero-extend it. Reading
             // it as signed would sign-extend a wrapped 3-bit amount like 7 (== -1)
             // to a huge value, overshifting `1 << amt` to 0 (e.g. RISC-V vlmax).
-            Term shamt = fit_to(tm_, Val{b.term, b.width, false}, W);
-            Term sh    = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, shamt});
-            acc        = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
+            // It is also SELF-DETERMINED: never truncate it to the (possibly
+            // narrower) result width. A one-bit value shifted by the unsized
+            // constant 2 must become zero, not `a << (2 truncated to 1 bit)` = a.
+            // cvc5 requires equal operand widths, so shift at a width that holds
+            // the value, result, AND full count, then narrow the result.
+            const int cw    = std::max({a.width, b.width, W, 1});
+            Term      af    = fit(a, cw);
+            Term      shamt = fit_to(tm_, Val{b.term, b.width, false}, cw);
+            Term      wide  = tm_.mkTerm(Kind::BITVECTOR_SHL, {af, shamt});
+            Term      sh    = fit_to(tm_, Val{wide, cw, a.is_signed}, W);
+            acc             = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
           }
-          result      = acc.isNull() ? a : acc;
+          result      = acc.isNull() ? fit(a, W) : acc;
           // Verilog's rule for a shift: the result's sign is the LEFT operand's
           // (the amount never counts). Same walk-through as the SRA arm below and
           // for the same reason -- the pin's own hint is stamped unsigned by
@@ -2195,7 +2209,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // (sign-replicating) only for a signed operand; logical otherwise — this
           // mirrors Verilog `>>>` (arithmetic iff the operand is signed).
           const Val& a    = pid(0)[0];
-          int        cw   = std::max(a.width, std::max(W, 1));
+          int        cw   = std::max({a.width, pid(1)[0].width, W, 1});
           Term       af   = fit(a, cw);
           Term       shf  = fit_to(tm_, Val{pid(1)[0].term, pid(1)[0].width, false}, cw);  // shift amount: unsigned
           Kind       k    = a.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR;
@@ -2617,7 +2631,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (dbg_nodes.count(nid)) {
             out.outputs[std::string("\x03"
                                     "dbg:")
-                        + std::string(prefix) + std::to_string(nid)] = Val{result, W, out_signed};
+                        + std::string(prefix) + std::to_string(nid)]
+                = Val{result, W, out_signed};
           }
         }
       }
@@ -3733,8 +3748,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
       Term din  = fit_to(tm_, Val{dv.term, dv.width, false}, mc.sig.bits);
-      // Per-bit write mask: word-enable (wensize<=1) replicates the enable hot
-      // bit across all bits; per-bit-enable (wensize>=bits) uses the mask.
+      // Per-lane write mask: word-enable (wensize<=1) replicates the enable hot
+      // bit across the whole word. Otherwise each of the `wensize` enable bits
+      // controls one contiguous `bits/wensize` lane. This must expand every lane,
+      // not treat an 8-lane byte/chunk mask as one whole-word boolean: cgen's
+      // memory wrapper lowers each lane assignment to a separate write port, and
+      // the two equivalent port decompositions only match under the real lane
+      // semantics.
       Term wmask;
       if (p.en.is_invalid()) {
         wmask = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)});
@@ -3743,8 +3763,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         if (!ok) {
           return fail("memory '" + gu::debug_name(mc.node) + "' enable not encodable");
         }
-        if (mc.wensize >= mc.sig.bits && mc.wensize > 1) {
-          wmask = fit_to(tm_, Val{ev.term, ev.width, false}, mc.sig.bits);
+        if (mc.wensize > 1 && mc.sig.bits % mc.wensize == 0) {
+          const int  lane_bits = mc.sig.bits / mc.wensize;
+          const Term lanes     = fit_to(tm_, Val{ev.term, ev.width, false}, mc.wensize);
+          Term       mask;
+          for (int lane = mc.wensize - 1; lane >= 0; --lane) {
+            const Term bit = bv_extract(tm_, lanes, lane, lane);
+            const Term hot = tm_.mkTerm(Kind::DISTINCT, {bit, bv_const(tm_, 1, 0)});
+            const Term lane_mask
+                = tm_.mkTerm(Kind::ITE,
+                             {hot, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, lane_bits, 0)}), bv_const(tm_, lane_bits, 0)});
+            mask = mask.isNull() ? lane_mask : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {mask, lane_mask});
+          }
+          wmask = mask;
         } else {
           Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
           wmask       = tm_.mkTerm(

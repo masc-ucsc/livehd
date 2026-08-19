@@ -43,9 +43,10 @@ struct uPass_tolg {
   // and cheap (linear scan); callable from any tolg orchestration site.
   static void detect_lg_collisions(const Registry& registry);
 
-  // Phase 3: gate conditionally activated instance clocks after every phase-2
-  // body exists. The classification is structural and recursive, so it cannot
-  // be performed safely while calls are lowered in arbitrary definition order.
+  // Phase 3: refresh Sub loop-break classification bottom-up and gate
+  // conditionally activated instance clocks after every phase-2 body exists.
+  // Both classifications are structural and recursive, so they cannot be
+  // performed safely while calls are lowered in arbitrary definition order.
   static void gate_activation_clocks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs);
 
   // Phase 2 — build the body graph. `reset_style` is the elaboration

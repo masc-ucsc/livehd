@@ -25,7 +25,7 @@ public:
     Scope_type                                                type;
     std::string                                               func_id;
     std::string                                               scope;  // 0.0.1 ...
-    std::vector<std::string>           declared;
+    std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope (case-sensitive)
     Scope*                                                    parent{nullptr};
     // Set by the caller (constprop's process_stmts) when this scope is the
@@ -34,7 +34,9 @@ public:
     // invalidated in its declaring scope so the unknown side-effects of the
     // arm don't leak out. See record_uncertain_modification().
     bool                                                      uncertain_cond{false};
-    // Vars modified inside this (uncertain) arm, invalidated on leave_scope.
+    // Variable or field paths modified inside this uncertain arm, invalidated
+    // on leave_scope. Field precision matters: a conditional write to `p.a`
+    // must not erase a definite value already established for sibling `p.b`.
     // A SET, not a vector: record_uncertain_modification dedups on every set()
     // inside the arm, and a linear vector scan there was O(writes^2) per arm
     // (string compares) on big always-blocks. Order does not matter (each entry
@@ -136,7 +138,7 @@ public:
     Dlop        decl_min;
     bool        comptime{false};
   };
-  absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
+  absl::flat_hash_map<std::string, Pending_decl>             pending_decl_facts;
   // Reverse index: root var name → the full pending_decl_facts keys (root.field)
   // stashed under it. leave_scope() uses it to drop a scope's still-unapplied
   // field facts in O(scope vars) when their root goes out of write-scope —

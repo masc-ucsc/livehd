@@ -287,8 +287,10 @@ std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
 // emits each single-field pipeline register as instance "<inst>.reg_<field>";
 // a hand-flattened design names the same state "<inst>_<field>". This collapses
 // ".reg_" → "_" and then flattens any remaining instance separator "." → "_", so
-// both converge to one key. Deterministic and applied identically to both designs
-// (names that already agree stay equal), so it never breaks an existing match.
+// both converge to one key. Pyrope identifier-quoting backticks are stripped as
+// syntax, so a quoted dotted state name pairs with the same direct RTL name.
+// Deterministic and applied identically to both designs (names that already
+// agree stay equal), so it never breaks an existing match.
 // Used by the encoder (current/next-state keys) and prove_equal (shared symbols).
 std::string canon_flop_name(std::string_view hier_name);
 

@@ -5,8 +5,9 @@
 // into an ABC AIG netlist, optimized + technology-mapped by ABC against a
 // Liberty library, and read back as a netlist of 1-bit blackbox Sub cells named
 // after the Liberty cells. The bit-blast boundary (multi-bit module IO <-> 1-bit
-// ABC PI/PO) is handled with Get_mask bit-selects on inputs and a Set_mask
-// concat on outputs, exactly the modern equivalent of the old Pick/Join path.
+// ABC PI/PO) is handled with shift bit-selects on inputs -- in place, or via one
+// shared unpacker def per width when a region reads most of a wide bus -- and a
+// Concat on outputs, the modern equivalent of the old Pick/Join path.
 
 #include "abc_map.hpp"
 
@@ -126,7 +127,7 @@ std::string subst(std::string s, std::string_view tok, std::string_view val) {
   return s;
 }
 
-// One-hot mask value (only bit `b` set) for Get_mask/Set_mask bit-select/concat,
+// One-hot mask value (only bit `b` set) for the flop-din Set_mask reassembly,
 // valid for ANY bit position (`int64_t{1} << b` is UB for b >= 63, so it cannot
 // build masks for buses wider than 64 bits). from_binary builds MSB->LSB, so bit
 // b is a leading '1' followed by b zeros.
@@ -845,7 +846,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     hhds::Pin_class           value;
     std::vector<Set_mask_run> runs;
   };
-  absl::flat_hash_map<hhds::Node_class, Set_mask_alias>               set_mask_aliases;
+  // node_hash_map, not flat: the Set_mask arm binds `auto& alias = it->second`
+  // and then passes `alias.value` / `alias.base` BY REFERENCE into a recursive
+  // abc_bit() that can try_emplace a nested Set_mask and rehash this very map,
+  // which would leave that reference (and the argument bound to it) dangling.
+  absl::node_hash_map<hhds::Node_class, Set_mask_alias>               set_mask_aliases;
   absl::node_hash_map<hhds::Pin_class, absl::flat_hash_set<int>>      resolving_wiring_bit;
   // Decoded lane table per Concat node. concat_lanes() walks inp_edges and
   // allocates a map + a vector on every call, and the lazy path asks for one
@@ -1590,7 +1595,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bboxes.push_back(std::move(bb));
   }
 
-  // --- bit-blast each region node in dependency order. body().nodes(hhds::Node_order::forward) is
+  // --- bit-blast each region node in dependency order. `rb.nodes` (the order
+  // the partitioner collected the region in) is
   // *mostly* topological, but it can emit a reader before its producer (the
   // same phenomenon the LEC encoder fixpoints around for forward_hier — seen
   // on the DINO top, where a wide packed-bus Get_mask was read by an Sra a
@@ -2307,8 +2313,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
           .msg(
               "pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/concat/shl/sra/const; "
-              "div/mod are blackboxed)",
+              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; "
+              "concat is pure wiring, resolved per demanded bit; div/mod are blackboxed)",
               Ntype::get_name(op),
               rb.module_name)
           .emit();
@@ -2613,15 +2619,22 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   for (size_t port_idx = 0; port_idx < rb.inputs.size(); ++port_idx) {
     body_input_pin[port_idx] = body->get_input_pin(rb.inputs[port_idx].name);
   }
-  // Bits of each region input the mapping actually reads. `pi_order` is FINAL
-  // here -- abc_bit appends to it during bit-blast and creates each (port, bit)
-  // PI at most once -- so the read-back knows every port's exact demand before
-  // it materializes anything. Without it the unpacker choice below would have
-  // to assume the whole bus is read.
-  std::vector<int> port_demand(rb.inputs.size(), 0);
+  // Which bits of each region input the mapping actually reads, MOST
+  // SIGNIFICANT FIRST. `pi_order` is FINAL here -- abc_bit appends to it during
+  // bit-blast and creates each (port, bit) PI at most once -- so the read-back
+  // knows every port's exact demand before it materializes anything. Without it
+  // the unpacker below would have to assume the whole bus is read.
+  //
+  // The descending sort is load-bearing, not cosmetic: hhds keeps a node's pins
+  // in ascending port order and both insert paths break at the list head, so a
+  // strictly DECREASING sequence costs O(1) per pin -- sparse or dense --
+  // whereas ascending rescans the whole list for every bit.
+  std::vector<std::vector<int>> port_demand(rb.inputs.size());
   for (const auto& [demanded_pi, demanded_bit] : pi_order) {
-    (void)demanded_bit;
-    ++port_demand[demanded_pi];
+    port_demand[demanded_pi].push_back(demanded_bit);
+  }
+  for (auto& bits : port_demand) {
+    std::sort(bits.begin(), bits.end(), std::greater<int>());
   }
   auto shared_input_splitter = [&](int width) -> Input_splitter& {
     if (auto it = input_splitters_.find(width); it != input_splitters_.end()) {
@@ -2675,31 +2688,36 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   auto input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
     auto&       cache = in_bit[port_idx];
     const auto& port  = rb.inputs[port_idx];
-    int         w     = port.bits == 0 ? 1 : port.bits;
-    if (static_cast<int>(cache.size()) < w) {
-      cache.resize(w);
+    const int   w     = port.bits == 0 ? 1 : port.bits;
+    // Sized by b, not by w: abc_bit only clamps a demanded bit against a
+    // NON-ZERO width (`if (w != 0 && i >= w)`), so an unstamped port -- w
+    // forced to 1 here -- can legitimately demand bit 5 and index past a
+    // w-sized cache.
+    if (static_cast<int>(cache.size()) <= std::max(b, w - 1)) {
+      cache.resize(std::max(b + 1, w));
     }
     if (!cache[b].is_invalid()) {
       return cache[b];
     }
     auto ipin = body_input_pin[port_idx];
-    if (w == 1) {
-      cache[b] = ipin;
+    if (w == 1 && b == 0) {
+      cache[b] = ipin;  // the pin IS its only bit
       return ipin;
     }
-    // A shared splitter DEF is an ALL-OR-NOTHING unpacker: its def declares one
-    // output per bit and the instance has to expose all of them (a reader may
-    // probe any declared output pin), so the first demanded bit materializes the
-    // whole width. It only pays when this region reads MOST of a wide bus --
-    // on a region that reads 20 bits of a 10k-bit port it would cost 500x the
-    // work the lazy PI path just avoided. It is not free otherwise either: it
-    // puts a non-cell module in the emitted netlist (a whole-design flatten is
-    // contracted to emit exactly ONE module, see lhd_abc_flat_test) and it has
-    // to be carried through the region cache. Below any of the three gates,
-    // extract the demanded bits in place -- the same shift-select the
-    // blackbox/latch read-back uses, at 2 nodes per DEMANDED bit.
+    // The shared splitter DEF is all-or-nothing (its body and its w output
+    // decls are minted together and carried through the region cache as one
+    // unit), so it only pays when this region reads MOST of a wide bus: on a
+    // region reading 20 bits of a 10k-bit port the def alone is ~2000x the work
+    // the lazy PI path just avoided, and one port can never repay it. It is not
+    // free otherwise either -- it puts a non-cell module in the emitted netlist
+    // (a whole-design flatten is contracted to emit exactly ONE module, see
+    // lhd_abc_flat_test) and it has to be carried through the region cache.
+    // Below any of the three gates, extract the demanded bits in place -- the
+    // same shift-select the blackbox/latch read-back uses, at 2 nodes per
+    // DEMANDED bit, with no def at all.
     constexpr int kSharedSplitterMinBits = 256;
-    if (flat_ || w < kSharedSplitterMinBits || port_demand[port_idx] < w - w / 2) {
+    const auto&   demand                 = port_demand[port_idx];
+    if (flat_ || w < kSharedSplitterMinBits || static_cast<int>(demand.size()) < w - w / 2) {
       cache[b] = extract_body_bit(ipin, b);
       return cache[b];
     }
@@ -2709,11 +2727,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       inst        = gu::create_typed_node(*body, Ntype_op::Sub);
       inst.set_subnode(split.io);
       ipin.connect_sink(inst.create_sink_pin(1));
-      // Retain every handle so the PI loop never searches the splitter node's
-      // long linked pin list. Descending creation itself is linear as well.
-      for (int bit = w - 1; bit >= 0; --bit) {
+      // Only the DEMANDED bits, and in the descending order `demand` is already
+      // sorted into, so each pin is a head insert. The INSTANCE may be partial
+      // even though the def is not: every consumer of a Sub resolves its ports
+      // from EDGES (cgen create_subs, cgen_sim, lec encode), and a pin for an
+      // unread bit would carry no edge in either case. Retaining every handle
+      // also keeps the PI loop from searching the node's long pin list.
+      for (int bit : demand) {
         cache[bit] = inst.create_driver_pin(split.bit_port[bit]);
       }
+    }
+    if (cache[b].is_invalid()) {  // a bit outside the precomputed demand
+      cache[b] = inst.create_driver_pin(shared_input_splitter(w).bit_port[b]);
     }
     return cache[b];
   };
@@ -3272,7 +3297,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   trace_stage("readback-fanins");
 
-  // pass 3: POs -> reassemble multi-bit outputs (Set_mask concat). Match by
+  // pass 3: POs -> reassemble multi-bit outputs (one Concat). Match by
   // creation order (po_order), consistent with the PI readback.
   std::vector<std::vector<hhds::Pin_class>> out_bits(rb.outputs.size());
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
@@ -3348,7 +3373,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   };
 
   // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
-  // captured PO drivers (multi-bit reassembled with a Set_mask concat).
+  // captured PO drivers (multi-bit reassembled with one Concat).
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> reassembled_bbox_input;
   for (size_t bx = 0; bx < bboxes.size(); ++bx) {
     auto& bb = bboxes[bx];

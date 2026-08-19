@@ -101,8 +101,20 @@ while true; do
       ;;
     esac
     ;;
+  --gate_reader | --implementation_reader)
+    # reader for the GATE side: verilog (default; read_verilog -sv) | slang.
+    # Generated cgen Verilog is legal input to either frontend, but read_slang
+    # scales much better on very large flattened expressions.
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GATE_READER=$2
+      shift 2
+      ;;
+    esac
+    ;;
   --slang_plugin)
-    # path to the yosys-slang plugin (slang.so) for --gold_reader slang
+    # path to the yosys-slang plugin (slang.so) for either slang reader
     case "$2" in
     "") shift 2 ;;
     *)
@@ -116,7 +128,7 @@ while true; do
     argument=$1
     if [ ${argument:0:1} == "-" ]; then
       echo "Option $1 not recognized!"
-      exit 1
+      exit 5  # setup failure, NOT a refutation (exit 1 is reserved for a real CEX)
     else
       if [ "${GOLD}" == "" ]; then
         GOLD=$1
@@ -130,14 +142,32 @@ while true; do
   esac
 done
 
+GOLD_READER=${GOLD_READER:-verilog}
+GATE_READER=${GATE_READER:-verilog}
+for reader in "$GOLD_READER" "$GATE_READER"; do
+  if [ "$reader" != "verilog" ] && [ "$reader" != "slang" ]; then
+    echo "lgcheck: reader must be verilog|slang (got '$reader')"
+    exit 5
+  fi
+done
+
+# Slang can parse compilation units in parallel. Keep this independently
+# tunable for constrained runners, while making large Minion/XiangShan inputs
+# finish in practical time by default. This affects parsing only, not RTLIL.
+LGCHECK_SLANG_THREADS=${LGCHECK_SLANG_THREADS:-8}
+if ! [[ "$LGCHECK_SLANG_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "lgcheck: LGCHECK_SLANG_THREADS must be a positive integer (got '$LGCHECK_SLANG_THREADS')"
+  exit 5
+fi
+
 if [ ! -f "${GATE}" ]; then
   echo "gate circuit ${GATE} not a valid file"
-  exit 1
+  exit 5
 fi
 
 if [ ! -f ${GOLD} ]; then
   echo "gold circuit ${GOLD} not a valid file"
-  exit 1
+  exit 5
 fi
 
 if [ ! -f "${YOSYS}" ]; then
@@ -232,7 +262,7 @@ echo "using yosys:"${YOSYS}
 
 if [ ! -f ${YOSYS} ]; then
   echo "Yosys binary not found"
-  exit 1
+  exit 5
 fi
 
 # Select each side's top independently so the reference and implementation may
@@ -252,16 +282,41 @@ fi
 # processes for the strategies' own `proc`.
 gold_read_cmds() {
   # $1 = extra read_verilog flags position is unused; kept single-form
-  if [ "${GOLD_READER}" == "slang" ]; then
+  if [ "${GOLD_RTLIL}" != "" ]; then
+    echo "read_rtlil ${GOLD_RTLIL}"
+  elif [ "${GOLD_READER}" == "slang" ]; then
     if [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gold_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
       exit 5
     fi
     GOLD_SLANG_TOP=""
     if [ "${GOLD_TOP}" != "" ]; then GOLD_SLANG_TOP="--top ${GOLD_TOP}"; fi
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    # Match the permissive source-language settings used by the large RTL
+    # generation flows. They affect whether legal project idioms elaborate,
+    # not the resulting hardware: Minion needs both for forward declarations
+    # and plain-bit assignments to enum fields.
+    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+  fi
+}
+
+# GATE-side counterpart.  The first call reads the generated Verilog; after
+# the one-time preparation below every proof strategy reloads the cached RTLIL
+# instead of reparsing a large hierarchy.
+gate_read_cmds() {
+  if [ "${GATE_RTLIL}" != "" ]; then
+    echo "read_rtlil ${GATE_RTLIL}"
+  elif [ "${GATE_READER}" == "slang" ]; then
+    if [ ! -f "${SLANG_PLUGIN}" ]; then
+      echo "lgcheck: --gate_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
+      exit 5
+    fi
+    GATE_SLANG_TOP=""
+    if [ "${GATE_TOP}" != "" ]; then GATE_SLANG_TOP="--top ${GATE_TOP}"; fi
+    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
+  else
+    echo "read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
   fi
 }
 
@@ -272,9 +327,11 @@ echo "checking GATE:$GATE (top:${GATE_TOP}) vs GOLD:$GOLD (top:${GOLD_TOP}) dire
 # repo checkout and inside bazel runfiles) with a cwd-relative fallback.
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 VLG_INC=""
+SLANG_INC=""
 for d in "${SELF_DIR}/../../ware/rtl" "ware/rtl"; do
   if [ -d "$d" ]; then
     VLG_INC="-I$d"
+    SLANG_INC="-I $d"
     break
   fi
 done
@@ -284,6 +341,7 @@ if [ "${VLG_INC}" = "" ]; then
     while [ "$d" != "/" ] && [ "$d" != "" ]; do
       if [ -d "$d/ware/rtl" ]; then
         VLG_INC="-I$d/ware/rtl"
+        SLANG_INC="-I $d/ware/rtl"
         break
       fi
       d="$(dirname "$d")"
@@ -297,7 +355,7 @@ fi
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then
     echo "cell library ${CELLLIB} not found"
-    exit 1
+    exit 5
   fi
   # lib="read_verilog -sv ${CELLLIB}"
   lib="read_liberty ${CELLLIB}"
@@ -305,8 +363,63 @@ fi
 
 #exit 2
 
+# Parse/elaborate each side exactly once, outside the equivalence budget.  This
+# is important for large designs (Minion/XiangShan): source reading can take a
+# long time and is not a solver timeout, while the historical flow reread both
+# hierarchies for every proof strategy.  RTLIL preserves processes, memories,
+# and hierarchy, so each strategy below can still run its own proc/memory/opt
+# sequence unchanged.
+GOLD_RTLIL=""
+GATE_RTLIL=""
+gold_rtlil="$PWD/lgcheck_gold.il"
+gate_rtlil="$PWD/lgcheck_gate.il"
+#
+# The cache is an OPTIMIZATION, so a failed pre-read is NOT a verdict: fall back
+# to the historical per-strategy source read and let the normal flow decide.
+# Hard-failing here would turn every frontend limitation (read_verilog cannot
+# parse a `'{…}` assignment pattern, for instance) into a `dependency` error on
+# designs whose only honest answer is INCONCLUSIVE — the source of truth for
+# "these two cannot be compared" stays the bounded miter's ERROR check below.
+echo "INFO: preparing reference RTLIL (source-read time is outside the equivalence budget)"
+if ${YOSYS} -p "$(gold_read_cmds); write_rtlil ${gold_rtlil}" >lgcheck_read_gold.log 2>lgcheck_read_gold.err; then
+  GOLD_RTLIL="$gold_rtlil"
+else
+  echo "WARN: could not pre-read the reference design; each strategy re-reads the source"
+  tail -20 lgcheck_read_gold.err
+fi
+echo "INFO: preparing implementation RTLIL (source-read time is outside the equivalence budget)"
+if ${YOSYS} -p "$(gate_read_cmds); write_rtlil ${gate_rtlil}" >lgcheck_read_gate.log 2>lgcheck_read_gate.err; then
+  GATE_RTLIL="$gate_rtlil"
+else
+  echo "WARN: could not pre-read the implementation design; each strategy re-reads the source"
+  tail -20 lgcheck_read_gate.err
+fi
+
+# One wall budget shared by all equivalence strategies, started only after both
+# Verilog sides have been read.  A killed strategy falls through to the normal
+# INCONCLUSIVE result (exit 2); a bounded-miter counterexample still exits 1.
+LGCHECK_EQUIV_TIMEOUT="${LGCHECK_EQUIV_TIMEOUT:-600}"
+if ! [[ "$LGCHECK_EQUIV_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "lgcheck: LGCHECK_EQUIV_TIMEOUT must be a non-negative integer (got '$LGCHECK_EQUIV_TIMEOUT')"
+  exit 5
+fi
+equiv_start=$SECONDS
+run_equiv_yosys() {
+  if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
+    "$YOSYS" "$@"
+    return
+  fi
+  local elapsed=$((SECONDS - equiv_start))
+  local remaining=$((LGCHECK_EQUIV_TIMEOUT - elapsed))
+  if [ "$remaining" -le 0 ]; then
+    return 124
+  fi
+  timeout --signal=TERM --kill-after=30s "$remaining" "$YOSYS" "$@"
+}
+echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s)"
+
 yosys_read="$(gold_read_cmds); proc; bmuxmap; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; flatten; rename -top gate; design -stash gate;
+            $(gate_read_cmds); proc; bmuxmap; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
 yosys_prep="proc; bmuxmap; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; bmuxmap; opt_clean;"
@@ -315,7 +428,7 @@ yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
+run_equiv_yosys -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
   2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
@@ -359,8 +472,8 @@ else
   RESET_STMT=""
 fi
 
-${YOSYS} -p " $(gold_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+run_equiv_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+              $(gate_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
@@ -385,7 +498,7 @@ fi
 #  exit 0
 #fi
 
-${YOSYS} -p "${yosys_read};
+run_equiv_yosys -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
@@ -426,8 +539,8 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
-  ${YOSYS} -p "$(gold_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-               read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+  run_equiv_yosys -p "$(gold_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+               $(gate_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
@@ -445,12 +558,12 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   fi
 
   # A hard yosys error here (port-list mismatch in `miter`, parse error, bad
-  # top) means the designs cannot even be compared: report non-equivalent,
-  # never a silent pass (same policy as hagent/tool/equiv_check.py).
+  # top) means the designs cannot even be compared. Keep that setup failure
+  # distinct from the bounded counterexample above.
   if grep -q "^ERROR" lgcheck_bmc.err; then
     echo "WARN: bounded miter check failed: $(grep -m1 '^ERROR' lgcheck_bmc.err)"
-    echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
-    exit 1
+    echo "FAIL: unable to compare ${GATE} vs ${GOLD} with top:${fm_top}"
+    exit 5
   fi
 
   # Sound pass requires the explicit SUCCESS marker from every bounded depth.

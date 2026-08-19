@@ -1141,7 +1141,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     }
     std::string name(ps.name);
     const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
-                        && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+                       && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
@@ -1683,9 +1683,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // correctness fix even at constant indices. A lane cap keeps the mux
       // sane: xiangshan has 512- and 4096-lane tables, and splitting one mints
       // that many leaf nets plus a same-sized Hotmux.
-      const bool runtime_element_use = stable_leaf_storage && in.elem_read && in.nonconst_access
-                                       && Array_bundle_collector::elem_count_of(sym->getType().getCanonicalType())
-                                              <= kSroaMaxLanes;
+      const bool runtime_element_use      = stable_leaf_storage && in.elem_read && in.nonconst_access
+                                       && Array_bundle_collector::elem_count_of(sym->getType().getCanonicalType()) <= kSroaMaxLanes;
       if (in.range_written) {
         array_range_written.insert(sym);
         continue;
@@ -2094,8 +2093,11 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
       // the element stores below replace only the bits they actually drive.
       // Declared width + the width-taking `0sb?` wildcard, not a flat_bits-long
       // run of `?` (these buses reach 1024 bits). Same value either way.
-      builder_.create_declare_stmts(name, "mut", int_max_str(static_cast<int>(flat_bits), false),
-                                    int_min_str(static_cast<int>(flat_bits), false), "0sb?");
+      builder_.create_declare_stmts(name,
+                                    "mut",
+                                    int_max_str(static_cast<int>(flat_bits), false),
+                                    int_min_str(static_cast<int>(flat_bits), false),
+                                    "0sb?");
     }
     clear_pending_loc();
     return true;
@@ -3888,12 +3890,16 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       if (!stem.empty() && stem.front() == '`') {
         stem = stem.substr(1, stem.size() - 2);
       }
-      std::string tmp = absl::StrCat(stem, "__wtmp");
-      for (int n = 0; used_names_.contains(tmp); ++n) {
-        tmp = absl::StrCat(stem, "__wtmp", n);
+      // Unique against the RAW spelling: `used_names_` holds pre-quote names
+      // (lname_of inserts before quote_if_needed), so uniquing on the quoted
+      // form would neither see a real collision nor be visible to a later
+      // lname_of. Quote only the name that actually goes out as an LNAST ref.
+      std::string raw = absl::StrCat(stem, "__wtmp");
+      for (int n = 0; used_names_.contains(raw); ++n) {
+        raw = absl::StrCat(stem, "__wtmp", n);
       }
-      used_names_.insert(tmp);
-      wire_split_tmp_[wsym] = std::move(tmp);
+      used_names_.insert(raw);
+      wire_split_tmp_[wsym] = ref_name_of_raw(raw);
     }
     // FLATTENED-AGGREGATE split: a wire-classified local whose representation
     // is a single flattened MUT bus (declare_unpacked's flatten branch:
@@ -3923,6 +3929,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       if (!stem.empty() && stem.front() == '`') {
         stem = stem.substr(1, stem.size() - 2);
       }
+      // Unique against the RAW spelling (see the __wtmp note above): quoting
+      // before the collision check hides real collisions from lname_of.
       std::string wnet = absl::StrCat(stem, "__wnet");
       for (int n = 0; used_names_.contains(wnet); ++n) {
         wnet = absl::StrCat(stem, "__wnet", n);
@@ -3930,7 +3938,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       used_names_.insert(wnet);
       wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
       wire_split_flat_.insert(wsym);
-      sym_lname_[wsym] = wnet;  // readers resolve through the wire
+      sym_lname_[wsym] = ref_name_of_raw(wnet);  // readers resolve through the wire
     }
   }
 
@@ -5304,7 +5312,11 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           auto        ti = flat_or_tinfo(port.getType());
           // unconnected input reads x
           std::string qmarks(static_cast<size_t>(ti.bits), '?');
-          in_args.emplace_back(std::string(port.name), absl::StrCat("0ub", qmarks));
+          // A Verilog escaped identifier may contain dots (`\\io_in.field `).
+          // Keep that as ONE literal named argument, matching the backticked
+          // formal emitted above; an unquoted dotted ref is parsed by upass as
+          // a bundle path and fails with fcall-unknown-arg on cgen's own output.
+          in_args.emplace_back(ref_name_of_raw(port.name), absl::StrCat("0ub", qmarks));
         }
       }
       continue;
@@ -5327,7 +5339,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       auto ei = flat_or_tinfo(*expr->type);
       v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed, value_width(*expr));
       clear_pending_loc();
-      in_args.emplace_back(std::string(port.name), v);
+      in_args.emplace_back(ref_name_of_raw(port.name), v);
     }
   }
 

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -929,16 +930,23 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 // collision reads x instead — Pyrope `ordering="none"`), and LATENCY_0 (==1
 // flops the output once, ==0 async). Uses $clog2 instead of the `log2 macro to
 // avoid depending on a macro that may not be in scope when emitted inline.
-std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock) {
+std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock,
+                                          bool no_collision_bypass) {
   std::string s;
-  s               += absl::StrCat("module ", mod_name, "\n");
+  const auto  guard  = absl::StrCat("LIVEHD_", absl::AsciiStrToUpper(mod_name), "_DEFINED");
+  s                 += absl::StrCat("`ifndef ", guard, "\n`define ", guard, "\nmodule ", mod_name, "\n");
   // FWD is the per-(read,write) matrix (bit k*n_wr+j) and can exceed a plain
   // integer parameter's 32 bits, so it is explicitly sized to THIS shape's
   // n_rd*n_wr (floored at 256 to match the shipped ware/rtl templates). A
   // reset-restore expansion mints one write port per entry, so the matrix
   // easily runs past 256 bits and a fixed width would silently drop the high
   // read-port rows.
-  const int fwd_w  = std::max(256, n_rd * n_wr);
+  // ... but the direct-read specialization reads NEITHER matrix, and its whole
+  // reason to exist is the shape (thousands of ports) whose n_rd*n_wr product
+  // runs into the millions. Declaring two multi-megabit parameters no logic
+  // touches re-creates the gigabyte-Verilog problem the specialization avoids,
+  // so keep them at the shipped-template floor there (every caller passes 0).
+  const int fwd_w    = no_collision_bypass ? 256 : std::max(256, n_rd * n_wr);
   s += absl::StrCat("  #(parameter BITS = 4, SIZE=128, parameter [", fwd_w - 1, ":0] FWD=1, parameter LATENCY_0=1, WENSIZE=1,\n");
   // UNDEF is the same shape as FWD and goes LAST so no existing positional
   // parameter moves; defaulting to 0 keeps every caller that omits it identical.
@@ -1000,70 +1008,75 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
   }
   // READ ports
   for (int k = 0; k < n_rd; ++k) {
-    s += absl::StrCat("reg [BITS-1:0] d", k, "_mem; reg [BITS-1:0] d", k, "_fwd;\n");
+    s += absl::StrCat("reg [BITS-1:0] d", k, "_mem;\n");
     s += absl::StrCat("always_comb d", k, "_mem = rd_enable_", k, " ? data[rd_addr_", k, "] : {BITS{1'bx}};\n");
-    s += absl::StrCat("genvar fwd_j", k, ";\n");
-    s += absl::StrCat("generate for(fwd_j",
-                      k,
-                      "=0;fwd_j",
-                      k,
-                      "<WENSIZE;fwd_j",
-                      k,
-                      "=fwd_j",
-                      k,
-                      "+1) begin:FWD_BLOCK_CALC_",
-                      k,
-                      "\n");
-    s += absl::StrCat("  always_comb d", k, "_fwd[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
-    // FWD is a per-(read,write) matrix: bit (k*n_wr + j) forwards write port j
-    // to read port k. Later write ports override earlier ones so a same-address
-    // multi-write forwards the LAST writer, matching the storage priority in
-    // the always block above (which is why this chain runs j high -> low).
-    // UNDEF is the same matrix for "the collision is undefined": its rung goes
-    // FIRST within a write port (the two bits are mutually exclusive, so the
-    // order only matters if a caller sets both) but stays INSIDE the per-port
-    // step, so a low port's UNDEF can never beat a high port's FWD.
-    for (int j = n_wr - 1; j >= 0; --j) {
-      s += absl::StrCat("    (((UNDEF >> ",
-                        k * n_wr + j,
-                        ") & 1) != 0 && wr_enable_",
-                        j,
-                        "[fwd_j",
+    std::string read_value = absl::StrCat("d", k, "_mem");
+    if (!no_collision_bypass) {
+      read_value  = absl::StrCat("d", k, "_fwd");
+      s          += absl::StrCat("reg [BITS-1:0] ", read_value, ";\n");
+      s          += absl::StrCat("genvar fwd_j", k, ";\n");
+      s          += absl::StrCat("generate for(fwd_j",
                         k,
-                        "] && (wr_addr_",
-                        j,
-                        " == rd_addr_",
+                        "=0;fwd_j",
                         k,
-                        ")) ? {MASKSIZE{1'bx}} :\n");
-      s += absl::StrCat("    (((FWD >> ",
-                        k * n_wr + j,
-                        ") & 1) != 0 && wr_enable_",
-                        j,
-                        "[fwd_j",
+                        "<WENSIZE;fwd_j",
                         k,
-                        "] && (wr_addr_",
-                        j,
-                        " == rd_addr_",
+                        "=fwd_j",
                         k,
-                        ")) ? wr_din_",
-                        j,
-                        "[fwd_j",
+                        "+1) begin:FWD_BLOCK_CALC_",
                         k,
-                        "*MASKSIZE +: MASKSIZE] :\n");
+                        "\n");
+      s          += absl::StrCat("  always_comb ", read_value, "[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
+      // FWD is a per-(read,write) matrix: bit (k*n_wr + j) forwards write port j
+      // to read port k. Later write ports override earlier ones so a same-address
+      // multi-write forwards the LAST writer, matching the storage priority in
+      // the always block above (which is why this chain runs j high -> low).
+      // UNDEF is the same matrix for "the collision is undefined": its rung goes
+      // FIRST within a write port (the two bits are mutually exclusive, so the
+      // order only matters if a caller sets both) but stays INSIDE the per-port
+      // step, so a low port's UNDEF can never beat a high port's FWD.
+      for (int j = n_wr - 1; j >= 0; --j) {
+        s += absl::StrCat("    (((UNDEF >> ",
+                          k * n_wr + j,
+                          ") & 1) != 0 && wr_enable_",
+                          j,
+                          "[fwd_j",
+                          k,
+                          "] && (wr_addr_",
+                          j,
+                          " == rd_addr_",
+                          k,
+                          ")) ? {MASKSIZE{1'bx}} :\n");
+        s += absl::StrCat("    (((FWD >> ",
+                          k * n_wr + j,
+                          ") & 1) != 0 && wr_enable_",
+                          j,
+                          "[fwd_j",
+                          k,
+                          "] && (wr_addr_",
+                          j,
+                          " == rd_addr_",
+                          k,
+                          ")) ? wr_din_",
+                          j,
+                          "[fwd_j",
+                          k,
+                          "*MASKSIZE +: MASKSIZE] :\n");
+      }
+      s += absl::StrCat("    d", k, "_mem[fwd_j", k, "*MASKSIZE +: MASKSIZE];\n");
+      s += "end endgenerate\n";
     }
-    s += absl::StrCat("    d", k, "_mem[fwd_j", k, "*MASKSIZE +: MASKSIZE];\n");
-    s += "end endgenerate\n";
     s += absl::StrCat("generate if (LATENCY_0==1) begin:BLOCK_RD_LAT_", k, "\n");
     s += absl::StrCat("  always @(posedge ",
                       single_clock ? std::string("clk") : absl::StrCat("rd_clock_", k),
                       ") rd_dout_",
                       k,
-                      " <= d",
-                      k,
-                      "_fwd;\n");
-    s += absl::StrCat("end else begin:BLOCK_RD_COMB_", k, "\n  assign rd_dout_", k, " = d", k, "_fwd;\nend endgenerate\n");
+                      " <= ",
+                      read_value,
+                      ";\n");
+    s += absl::StrCat("end else begin:BLOCK_RD_COMB_", k, "\n  assign rd_dout_", k, " = ", read_value, ";\nend endgenerate\n");
   }
-  s += "endmodule\n";
+  s += absl::StrCat("endmodule\n`endif // ", guard, "\n");
   return s;
 }
 
@@ -1366,13 +1379,24 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
     // big reset-restored reg array minting one restore port per entry) needs
     // a new cgen_memory_<R>rd_<W>wr.v variant.
-    const bool  have_wrapper = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
-                                               || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
-                                            : (eff_rd == 1 && eff_wr == 1);
+    const bool have_wrapper        = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
+                                              || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
+                                                  : (eff_rd == 1 && eff_wr == 1);
+    const bool no_collision_bypass = (mem_fwd_dpin.is_invalid() || hydrate_const(mem_fwd_dpin).is_known_zero())
+                                     && (mem_undef_dpin.is_invalid() || hydrate_const(mem_undef_dpin).is_known_zero());
+
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
     name = absl::StrCat(name, eff_rd, "rd_");
     name = absl::StrCat(name, eff_wr, "wr");
+    // A large restored array can have thousands of read and write ports. When
+    // both collision matrices are known zero (`ordering="old"`), emitting the
+    // generic O(reads*writes) forwarding ladder is dead code and can grow into
+    // gigabytes of Verilog. Give the direct-read specialization its own module
+    // name so it can coexist with a forwarding instance of the same shape.
+    if (!have_wrapper && no_collision_bypass) {
+      name += "_nofwd";
+    }
 
     // ware/rtl ships a fixed wrapper family; for any other (R,W,clock) shape
     // (e.g. a register file reading out all entries, or a multi-clock RF)
@@ -1382,7 +1406,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       if (have_wrapper) {
         fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
       } else {
-        fout->prepend(gen_mem_wrapper(name, eff_rd, eff_wr, single_clock));
+        fout->prepend(gen_mem_wrapper(name, eff_rd, eff_wr, single_clock, no_collision_bypass));
       }
     }
     fout->append(absl::StrCat(name));
@@ -1678,16 +1702,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // now carry their declared sign (they used to be a blanket `input signed`
     // compensated by a to_positive Get_mask), so read the unsigned ones as the
     // non-negative signed values they are.
-    const bool  mixed_signs = mixes_operand_signs(node);
-    const int   result_bits = bits_of(dpin);
-    const bool  result_uns  = is_unsign(dpin);
+    const bool  mixed_signs          = mixes_operand_signs(node);
+    const int   result_bits          = bits_of(dpin);
+    const bool  result_uns           = is_unsign(dpin);
     bool        saw_context_constant = false;
-    auto sum_expr = [&](const hhds::Pin_class& operand_pin) {
+    auto        sum_expr             = [&](const hhds::Pin_class& operand_pin) {
       if (!is_const_pin(operand_pin) || result_bits <= 0) {
         return get_expression(operand_pin);
       }
       saw_context_constant = true;
-      const auto c = hydrate_const(operand_pin);
+      const auto c         = hydrate_const(operand_pin);
       // A Sum is context-determined by its realized result width. Materialize
       // constants in that context instead of retaining Dlop's signed-magnitude
       // carrier width (1 became 2'sh1 and confused a later Verilog->LGraph

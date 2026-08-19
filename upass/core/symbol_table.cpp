@@ -165,7 +165,10 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   if (target == nullptr) {
     target = anchor_for(stack.back(), var);
   }
-  record_uncertain_modification(var);
+  // Preserve the written field path.  Invalidating only the root would make a
+  // conditional write to `packet.opcode` erase independently-known siblings
+  // such as `packet.data` and `packet.valid` when the arm exits.
+  record_uncertain_modification(key);
 
   std::shared_ptr<Bundle> var_bundle;
   const auto              it = target->varmap.find(var);
@@ -196,26 +199,23 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
         // s6-typed param bound to an s4 actual keeps its declared s6 — the
         // actual's envelope rode the value copy). Fill-if-unset only applies
         // when the NAME never declared the fact.
-        const bool need_decl = scalar_ok
-                               && ((!oe.decl_max.is_invalid()
-                                    && (ne.decl_max.is_invalid() || !oe.decl_max.is_known_eq(ne.decl_max)))
-                                   || (!oe.decl_min.is_invalid()
-                                       && (ne.decl_min.is_invalid() || !oe.decl_min.is_known_eq(ne.decl_min))));
+        const bool  need_decl
+            = scalar_ok
+              && ((!oe.decl_max.is_invalid() && (ne.decl_max.is_invalid() || !oe.decl_max.is_known_eq(ne.decl_max)))
+                  || (!oe.decl_min.is_invalid() && (ne.decl_min.is_invalid() || !oe.decl_min.is_known_eq(ne.decl_min))));
         // A CONDITIONAL (if-arm) write must not have its value's ridden decl
         // envelope BECOME the name's declared envelope: one arm's bit-select
         // force (`x = v#[0..=2]`) would type an undeclared `mut x` as u3 and a
         // sibling arm's wider legal write then fails the declared-fit check.
         // Under uncertainty, strip a ridden envelope the name never declared.
-        const bool drop_ridden_decl = scalar_ok && in_uncertain_scope() && oe.decl_max.is_invalid()
-                                      && oe.decl_min.is_invalid()
+        const bool drop_ridden_decl = scalar_ok && in_uncertain_scope() && oe.decl_max.is_invalid() && oe.decl_min.is_invalid()
                                       && (!ne.decl_max.is_invalid() || !ne.decl_min.is_invalid());
         // CONST-ness is likewise a NAME fact: `o = <const temp>` must not make
         // the (never-const-declared) target single-bind — a later legal write
         // (e.g. a partial `o#[lo..=hi] = v` on an output port) would trip the
         // const-rebind check on a const-ness the source never declared.
-        const bool drop_ridden_mode
-            = old->get_mode() == upass::Mode::unknown && bundle->get_mode() == upass::Mode::const_kind;
-        const bool need_kind = scalar_ok && oe.kind != upass::Kind::unknown && ne.kind != oe.kind;
+        const bool drop_ridden_mode = old->get_mode() == upass::Mode::unknown && bundle->get_mode() == upass::Mode::const_kind;
+        const bool need_kind        = scalar_ok && oe.kind != upass::Kind::unknown && ne.kind != oe.kind;
         // "vbound" is the bind-tracking residual attr (attributes' const
         // single-bind / first-write gate): a NAME fact like mode, so it
         // survives whole-bundle assignment.
@@ -229,8 +229,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
             need_attrs.emplace_back(k, fe.trivial);
           }
         }
-        if (need_mode || need_tn || need_decl || need_kind || drop_ridden_decl || drop_ridden_mode
-            || !need_attrs.empty()) {
+        if (need_mode || need_tn || need_decl || need_kind || drop_ridden_decl || drop_ridden_mode || !need_attrs.empty()) {
           if (bundle.use_count() > 1) {
             bundle = std::make_shared<Bundle>(*bundle);
           }
@@ -285,7 +284,7 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
   if (target == nullptr) {
     target = anchor_for(stack.back(), var);
   }
-  record_uncertain_modification(var);
+  record_uncertain_modification(key);
 
   std::shared_ptr<Bundle> bundle;
   const auto              it = target->varmap.find(var);
@@ -384,11 +383,33 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   // bookkeeping is reset on the next block_scope() entry.
   if (stack.back()->uncertain_cond) {
     auto* arm = stack.back();
-    for (const auto& var_name : arm->modified_under_uncertainty) {
+    // Group the arm's writes by ROOT var FIRST. The per-var work below is
+    // O(fields of that var), so doing it once per WRITTEN FIELD would be
+    // O(writes * fields) -- quadratic on the big always-blocks / SROA'd arrays
+    // this table has to stay linear on (see feedback_upass_must_be_linear).
+    // One entry per var: `whole` when any recorded name was a whole-var write,
+    // otherwise the set of written field paths.
+    struct Arm_writes {
+      bool                                  whole{false};
+      absl::flat_hash_set<std::string_view> fields;
+    };
+    absl::flat_hash_map<std::string_view, Arm_writes> by_var;
+    by_var.reserve(arm->modified_under_uncertainty.size());
+    for (const auto& written_name : arm->modified_under_uncertainty) {
+      const auto [var_name, field_name] = get_var_field(written_name);
+      auto& e                           = by_var[var_name];  // views into the SET's stable strings
+      if (written_name == var_name) {
+        e.whole = true;
+      } else {
+        e.fields.emplace(field_name);
+      }
+    }
+    for (const auto& [var_name, arm_writes] : by_var) {
+      const bool whole_write = arm_writes.whole;
       // Find the declaring scope by walking from this arm's parent outward
       // (skipping the arm itself, which we're about to pop). Stops at and
       // includes the nearest Function scope.
-      Scope* declaring = nullptr;
+      Scope*     declaring   = nullptr;
       for (auto* s = arm->parent; s != nullptr; s = s->parent) {
         if (s->varmap.find(var_name) != s->varmap.end()) {
           declaring = s;
@@ -401,7 +422,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       if (declaring == nullptr) {
         continue;
       }
-      auto it = declaring->varmap.find(var_name);
+      auto       it          = declaring->varmap.find(var_name);
       // The arm may or may not have run, so on exit the var is
       // runtime-divergent: a mux of the pre-if binding and the arm writes.
       // That is UNKNOWN (a real runtime value), NOT nil — nil is reserved for a
@@ -412,9 +433,19 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // wire; the bitwidth pass re-derives the width from the LGraph mux. A
       // cassert over such a var no longer discharges at compile time — it is left
       // to the runtime check, which is correct for a value the compiler cannot pin.
-      if (it->second->is_scalar()) {
+      //
+      // The scalar fast path must key off the pos-0 slot ACTUALLY being there,
+      // not off is_scalar(): that predicate is `has_scalar_ || fields_.size()
+      // <= 1`, so a one-FIELD tuple (`p = (mut a=1)`) also answers true and the
+      // invalidation then lands on an absent unnamed slot "0" while leaf `a`
+      // keeps the arm's constant -- a later `p.a` folds to it and the `if`
+      // disappears from the emitted hardware. An empty binding (`mut x` with no
+      // value yet) has no leaf to walk, so it keeps the slot-"0" path, which is
+      // what marks it runtime-divergent.
+      const bool scalar_slot = it->second->has_trivial(bundle_path::of_string("0")) || it->second->is_empty();
+      if (whole_write && scalar_slot) {
         it->second->set(bundle_path::of_string("0"), invalid_lconst);
-      } else {
+      } else if (whole_write) {
         // A WHOLE-tuple write under an uncertain arm (`q = if c { (a=1,b=2) }
         // else { (a=3,b=4) }`) leaves EVERY field runtime-divergent, not just
         // the (absent) scalar slot "0". Invalidate each data leaf's trivial —
@@ -430,6 +461,46 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
         }
         for (const auto& leaf : leaves) {
           it->second->set(bundle_path::of_string(leaf), invalid_lconst);
+        }
+      } else {
+        // A field write makes only that field runtime-divergent. Preserve
+        // sibling constants. If the selected field is itself a sub-bundle,
+        // invalidate all of its leaves while retaining their shape.
+        //
+        // ONE pass over the entries for the whole var: a leaf is written iff
+        // one of its dot-delimited PREFIXES is a written field path (`p.a`
+        // covers leaf `a` and every `a.<sub>`), so each leaf costs O(depth)
+        // hash lookups instead of a rescan per written field.
+        unshare_for_write(it->second);
+        std::vector<std::string>              leaves;
+        absl::flat_hash_set<std::string_view> covered;  // written fields that matched a real leaf
+        for (const auto& [leaf, entry] : it->second->non_attr_entries()) {
+          (void)entry;
+          const std::string_view lv{leaf};
+          for (size_t end = 0;;) {
+            const auto             dot  = bundle_key::find_top_dot(lv.substr(end));
+            const bool             last = dot == std::string_view::npos;
+            const std::string_view pre  = last ? lv : lv.substr(0, end + dot);
+            if (auto f = arm_writes.fields.find(pre); f != arm_writes.fields.end()) {
+              covered.insert(*f);
+              leaves.emplace_back(leaf);
+              break;
+            }
+            if (last) {
+              break;
+            }
+            end += dot + 1;
+          }
+        }
+        for (const auto& leaf : leaves) {
+          it->second->set(bundle_path::of_string(leaf), invalid_lconst);
+        }
+        // A field the arm minted but the declaring binding never had: create it
+        // as runtime-divergent so a later read cannot fold a stale sibling.
+        for (const auto& f : arm_writes.fields) {
+          if (!covered.contains(f)) {
+            it->second->set(bundle_path::of_string(f), invalid_lconst);
+          }
         }
       }
     }

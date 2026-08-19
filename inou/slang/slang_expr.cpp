@@ -1088,7 +1088,7 @@ std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const s
   const slang::ast::Expression* cur = &e;
   while (cur->kind == ExpressionKind::ElementSelect || cur->kind == ExpressionKind::RangeSelect) {
     const auto& base    = cur->kind == ExpressionKind::ElementSelect ? cur->as<slang::ast::ElementSelectExpression>().value()
-                                                                    : cur->as<slang::ast::RangeSelectExpression>().value();
+                                                                     : cur->as<slang::ast::RangeSelectExpression>().value();
     const auto& base_ty = base.type->getCanonicalType();
     if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
       return std::nullopt;  // unpacked / memory-ized base: a different read path
@@ -1101,14 +1101,14 @@ std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const s
     }
     // (width_down, width_up): elements the index is above / below, so one
     // formula covers `[i]`, `[hi:lo]`, `[i +: W]` and `[i -: W]`.
-    int64_t width_down = 1;
-    int64_t width_up   = 1;
-    const slang::ast::Expression* idx = nullptr;
+    int64_t                       width_down = 1;
+    int64_t                       width_up   = 1;
+    const slang::ast::Expression* idx        = nullptr;
     if (cur->kind == ExpressionKind::ElementSelect) {
       idx = &cur->as<slang::ast::ElementSelectExpression>().selector();
     } else {
-      const auto& rs   = cur->as<slang::ast::RangeSelectExpression>();
-      const auto  kind = rs.getSelectionKind();
+      const auto& rs    = cur->as<slang::ast::RangeSelectExpression>();
+      const auto  kind  = rs.getSelectionKind();
       // Element count of THIS slice — `tinfo(*cur->type)`, not the accumulated
       // `w.bits` (the outermost expression's width, which only coincides on the
       // first peel). SV forbids selecting after a range select, so today the
@@ -1122,8 +1122,8 @@ std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const s
         }
         elem_lo = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
       } else if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
-        idx        = &rs.left();
-        width_up   = elems;
+        idx      = &rs.left();
+        width_up = elems;
       } else {
         idx        = &rs.left();
         width_down = elems;
@@ -1140,7 +1140,7 @@ std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const s
       return std::nullopt;
     }
     w.lo += elem_lo * stride;
-    cur = &base;
+    cur   = &base;
   }
 
   const auto& root = *cur;
@@ -1439,14 +1439,14 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
           array_info = &it->second;
         }
       }
-      const auto                            leaf_base = bundle_port_of(bsym) != nullptr ? bundle_port_body_base(bsym) : lname_of(bsym);
+      const auto leaf_base = bundle_port_of(bsym) != nullptr ? bundle_port_body_base(bsym) : lname_of(bsym);
       static const std::vector<Struct_info::Field> no_fields;
       // A reference, not a copy: a dynamic select below asks for every lane, so
       // copying the field table per access is O(lanes * fields) of churn on the
       // arrays this path exists for.
-      const auto& fields    = array_info == nullptr ? no_fields : array_info->fields;
-      auto        read_lane = [&](int64_t idx) {
-        const auto  prefix     = absl::StrCat("e", idx);
+      const auto&                                  fields    = array_info == nullptr ? no_fields : array_info->fields;
+      auto                                         read_lane = [&](int64_t idx) {
+        const auto  prefix = absl::StrCat("e", idx);
         const auto  dot_prefix = absl::StrCat(prefix, ".");  // hoisted: the loop below asks per field
         std::string value;
         for (const auto& f : fields) {
@@ -1454,7 +1454,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
             continue;
           }
           auto       part = to_pattern(read_leaf(absl::StrCat(leaf_base, ".", f.name)), f.bits, f.is_signed);
-          const auto rel  = f.off - idx * stride;
+          const auto rel = f.off - idx * stride;
           if (rel != 0) {
             part = builder_.create_shl_stmts(part, std::to_string(rel));
           }
@@ -1621,7 +1621,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // because cgen's truncation cancelled it. Keeping `shamt` at its own
   // signedness lets `sext(b) + bias` stay signed and land in 0..bi.bits.
   auto      shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)),
-                                                builder_.create_plus_stmts(shamt, std::to_string(bias)));
+                                           builder_.create_plus_stmts(shamt, std::to_string(bias)));
   auto      r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
 }
@@ -1735,5 +1735,13 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   in_function_call_ = saved_in;
   func_ret_sym_     = saved_ret;
 
-  return read_symbol(rv, expr.sourceRange);
+  // The SubroutineSymbol (including its formal and return symbols) is shared by
+  // every call site.  Returning the mutable return variable by name aliases two
+  // calls in one expression: `f(a) < f(b)` lowers both operands to the second
+  // call's `f` variable and becomes `f < f`.  Snapshot the completed call into
+  // a fresh SSA temp before another call can rebind the formals / overwrite the
+  // return slot.
+  auto result = builder_.create_lnast_tmp();
+  builder_.create_assign_stmts(result, read_symbol(rv, expr.sourceRange));
+  return result;
 }

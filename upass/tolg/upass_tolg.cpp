@@ -502,7 +502,10 @@ private:
       // if/elif-heavy designs (e.g. firtool mux chains) -- a deep hang.
       if (auto [it, inserted] = branch_writes_.back().try_emplace(key, pin); inserted) {
         auto pit = pin_map_.find(key);
-        branch_restore_.back().emplace(key, pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt);
+        auto mit = mw_map_.find(key);
+        branch_restore_.back().emplace(key,
+                                       Branch_restore{pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt,
+                                                      mit != mw_map_.end() ? std::optional<int32_t>{mit->second} : std::nullopt});
       } else {
         it->second = pin;  // keep the branch's latest value for the merge
       }
@@ -3773,10 +3776,15 @@ private:
           }
           joined += comp;
         }
-        std::string_view      pname = joined;
+        // BOTH sides go through canon_io_name: the io entry may carry slang's
+        // `` `p.q` `` marker, and so may the READ (`inst.`p.q``, which arrives
+        // as a const index with the backticks still on). Canonicalizing only
+        // the declaration turned a legal quoted-port read into a hard
+        // "instance result has no output named" error.
+        std::string_view      pname = canon_io_name(joined);
         const Lnast_io_entry* oe    = nullptr;
         for (const auto& e : srt->second.outputs) {
-          if ((e.name == pname)) {
+          if (canon_io_name(e.name) == pname) {
             oe = &e;
             break;
           }
@@ -3785,8 +3793,9 @@ private:
           error_here("upass.tolg: instance result has no output named '{}'", pname);
           return;
         }
-        auto    out_dpin = srt->second.sub.create_driver_pin(oe->name);
-        int32_t mw       = io_mw(*oe);
+        const std::string output_name{canon_io_name(oe->name)};
+        auto              out_dpin = srt->second.sub.create_driver_pin(output_name);
+        int32_t           mw       = io_mw(*oe);
         if (oe->kind == Io_kind::boolean) {
           set_ubits(out_dpin, 1);
           record(lnast_->get_name(dst), out_dpin, 1);
@@ -4013,6 +4022,15 @@ private:
         // Same encoding for both: compact int64 while it fits (so the emitted
         // Verilog stays a plain decimal), exact `0ub…` text beyond that.
         auto pack = [&](const std::string& b) -> spool_ptr<Dlop> {
+          // Width is carried independently by the memory's read/write port
+          // counts; a zero mask therefore needs no leading-zero payload.  In
+          // particular, ordering="old" on a large restored memory can make
+          // this matrix several million zero bits wide.  Keeping those zeros
+          // in a Dlop is unnecessary and exceeds Dlop's current word-count
+          // representation even though the value itself is simply zero.
+          if (b.find('1') == std::string::npos) {
+            return Dlop::create_integer(0);
+          }
           if (n_bits <= 62) {
             int64_t v = 0;
             for (int i = 0; i < n_bits; ++i) {
@@ -4022,7 +4040,16 @@ private:
             }
             return Dlop::create_integer(v);
           }
-          return Dlop::from_pyrope("0ub" + b);
+          // `b` is already the payload of an unsigned binary literal.  Going
+          // through from_pyrope("0ub" + b) makes Dlop provision storage once
+          // for the generic parser and then again in init_from_binary().  For
+          // very large memories (XiangShan has forwarding matrices above
+          // 512K bits), that provisional word count overflows Dlop's int16_t
+          // size field before the binary parser releases it, corrupting the
+          // pool free.  Parse the known binary payload directly: this is both
+          // the exact intended representation and avoids the redundant wide
+          // allocation altogether.
+          return Dlop::from_binary(b, true);
         };
         auto redrive = [&](int pid, std::string_view pin_name, const spool_ptr<Dlop>& matrix) {
           if (!matrix) {
@@ -4846,7 +4873,7 @@ private:
               cio.inputs.size());
           return;
         }
-        pname = cio.inputs[pos].name;
+        pname = std::string(canon_io_name(cio.inputs[pos].name));
         ++pos;
         val = a;
       }
@@ -4908,14 +4935,15 @@ private:
     // is caught even when another was bound twice (a bare provided==declared
     // count would miss that).
     for (const auto& ie : cio.inputs) {
-      if (bound_ports.count(ie.name) == 0) {
+      const std::string pname{canon_io_name(ie.name)};
+      if (bound_ports.count(pname) == 0) {
         // A replicated instance's index input carries a different value per
         // ordinal, so realization (not the parent graph) drives it. That is the
         // ONLY input a call may leave unconnected.
-        if (!supplied_index_port.empty() && ie.name == supplied_index_port) {
+        if (!supplied_index_port.empty() && pname == supplied_index_port) {
           continue;
         }
-        error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, ie.name);
+        error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, pname);
         return;
       }
     }
@@ -5028,7 +5056,12 @@ private:
       // callee GraphIO and expect the pins to exist even when a port is
       // left unread (`.e()` unconnected-output style).
       for (const auto& oe2 : cio.outputs) {
-        (void)sub.create_driver_pin(oe2.name);
+        const std::string output_name{canon_io_name(oe2.name)};
+        if (!gio->has_output(output_name)) {
+          error_here("upass.tolg: callee '{}' has no output named '{}'", callee_full, output_name);
+          return;
+        }
+        (void)sub.create_driver_pin(output_name);
       }
       sub_results_[dst_name] = Sub_result{
           sub,
@@ -5038,9 +5071,14 @@ private:
     }
 
     // Single output: bind dst like a graph input (external value entering).
-    const auto& oe       = cio.outputs.front();
-    auto        out_dpin = sub.create_driver_pin(oe.name);
-    int32_t     mw       = io_mw(oe);
+    const auto&       oe          = cio.outputs.front();
+    const std::string output_name = std::string(canon_io_name(oe.name));
+    if (!gio->has_output(output_name)) {
+      error_here("upass.tolg: callee '{}' has no output named '{}'", callee_full, output_name);
+      return;
+    }
+    auto    out_dpin = sub.create_driver_pin(output_name);
+    int32_t mw       = io_mw(oe);
     if (oe.kind == Io_kind::boolean) {
       set_ubits(out_dpin, 1);
       record(dst_name, out_dpin, 1);
@@ -6832,11 +6870,16 @@ private:
     branch_writes_.pop_back();
     auto restore = std::move(branch_restore_.back());
     branch_restore_.pop_back();
-    for (const auto& [name, old_val] : restore) {
-      if (old_val.has_value()) {
-        pin_map_[name] = *old_val;
+    for (const auto& [name, old] : restore) {
+      if (old.pin.has_value()) {
+        pin_map_[name] = *old.pin;
       } else {
         pin_map_.erase(name);
+      }
+      if (old.mw.has_value()) {
+        mw_map_[name] = *old.mw;
+      } else {
+        mw_map_.erase(name);
       }
     }
     return writes;
@@ -7304,11 +7347,17 @@ private:
   // range_dyn_map_ with a const "nil" hi.)
   absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
   std::vector<WriteMap>                                             branch_writes_;
+  struct Branch_restore {
+    std::optional<Pin>     pin;
+    std::optional<int32_t> mw;
+  };
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
-  // name it wrote (nullopt = absent before the branch). lower_branch replays
-  // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
-  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
-  WriteMap                                                          empty_writes_;
+  // name it wrote (nullopt = absent before the branch). Both the driver and its
+  // width are transactional: restoring only pin_map_ lets a narrow then-arm
+  // poison the width used while lowering the else-arm. lower_branch replays
+  // this to roll both maps back, avoiding full per-branch copies.
+  std::vector<absl::flat_hash_map<std::string, Branch_restore>> branch_restore_;
+  WriteMap                                                      empty_writes_;
 
   // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
   // wires the buffer input to the single accumulated driver (din shadow) and
@@ -8683,9 +8732,9 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
   for (size_t i = 0; i < units.size(); ++i) {
     clock[i]        = tree_declares_reg(units[i]);
     reset[i]        = tree_declares_reset_reg(units[i]);
-    control_root[i] = std::any_of(units[i]->io_meta().outputs.begin(),
-                                  units[i]->io_meta().outputs.end(),
-                                  [](const auto& e) { return e.name == "__next_active"; });
+    control_root[i] = std::any_of(units[i]->io_meta().outputs.begin(), units[i]->io_meta().outputs.end(), [](const auto& e) {
+      return e.name == "__next_active";
+    });
     // Only a NON-template unit is a caller the activation flood may start
     // from (the pre-index scan skipped templates on the caller side); a
     // template's own `__next_active` output still makes it capable, but that
@@ -9188,6 +9237,43 @@ static void check_unlowered_casserts(const std::shared_ptr<Lnast>& lnast) {
 }
 
 void uPass_tolg::gate_activation_clocks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  // Calls may be lowered before their callee body. In that case HHDS can only
+  // classify the Sub from its boundary declarations, so a stateful callee with
+  // no loop-break port is provisionally stamped combinational. Refresh every
+  // instance bottom-up now that all bodies exist; otherwise a legal feedback
+  // path through a child flop remains a local combinational cycle and cgen's
+  // cycle tail emits blocking assignments in storage order (a consumer can
+  // appear before its producer).
+  absl::flat_hash_set<hhds::Graph*> refreshed;
+  absl::flat_hash_set<hhds::Graph*> refreshing;
+  std::function<void(hhds::Graph*)> refresh_subs = [&](hhds::Graph* graph) {
+    if (graph == nullptr || refreshed.contains(graph) || !refreshing.insert(graph).second) {
+      return;
+    }
+    for (auto node : graph->body().nodes()) {
+      if (!livehd::graph_util::is_type_sub(node)) {
+        continue;
+      }
+      auto gio = node.get_subnode_io();
+      if (gio == nullptr) {
+        continue;
+      }
+      if (gio->has_graph()) {
+        refresh_subs(gio->get_graph().get());
+      }
+      if (auto loop = node.subnode_loop()) {
+        node.set_subnode(gio, *loop);
+      } else {
+        node.set_subnode(gio);
+      }
+    }
+    refreshing.erase(graph);
+    refreshed.insert(graph);
+  };
+  for (const auto& graph : graphs) {
+    refresh_subs(graph.get());
+  }
+
   livehd::latch_contract::Clock_port_cache cache;
   for (const auto& graph : graphs) {
     if (graph) {

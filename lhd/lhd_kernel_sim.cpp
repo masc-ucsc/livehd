@@ -1906,9 +1906,9 @@ void sim_command(Options& opts, Result& res) {
   // where a relative `-Iw/sim` would resolve to nothing.
   const std::string simdir_abs = fs::absolute(simdir).string();
   std::string       cflags     = std::format("-std=c++23 -DNDEBUG -O2 -pthread -I{} -I{} -I{}",
-                                             shell_quote(simdir_abs),
-                                             shell_quote(hlop_inc),
-                                             shell_quote(iassert_inc));
+                                   shell_quote(simdir_abs),
+                                   shell_quote(hlop_inc),
+                                   shell_quote(iassert_inc));
   // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
@@ -2478,9 +2478,16 @@ std::string locate_lgcheck() {
   if (const char* env = std::getenv("LHD_LGCHECK"); env != nullptr && ::access(env, X_OK) == 0) {
     return fs::absolute(env).string();
   }
+  if (const auto dir = find_header_in_runfiles("inou/yosys/lgcheck"); !dir.empty()) {
+    const auto cand = dir + "/lgcheck";
+    if (::access(cand.c_str(), X_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
+  }
   auto exe_dir = file_utils::get_exe_path();
   for (const auto& cand : {std::string{"./inou/yosys/lgcheck"},
                            std::string{"inou/yosys/lgcheck"},
+                           exe_dir + "/../inou/yosys/lgcheck",
                            exe_dir + "/lhd.runfiles/_main/inou/yosys/lgcheck",
                            exe_dir + "/lhd.runfiles/livehd/inou/yosys/lgcheck"}) {
     if (::access(cand.c_str(), X_OK) == 0) {
@@ -2499,6 +2506,12 @@ std::string locate_lgcheck() {
 std::string locate_lgcheck_yosys() {
   if (const char* env = std::getenv("LHD_YOSYS"); env != nullptr && ::access(env, X_OK) == 0) {
     return fs::absolute(env).string();
+  }
+  if (const auto dir = find_header_in_runfiles("inou/yosys/yosys2"); !dir.empty()) {
+    const auto cand = dir + "/yosys2";
+    if (::access(cand.c_str(), X_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
   }
   auto exe_dir = file_utils::get_exe_path();
   for (const auto& cand : {std::string{"bazel-bin/inou/yosys/yosys2"},
@@ -2541,10 +2554,22 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   return out;
 }
 
-// The yosys-slang plugin (slang.so) for lgcheck's `--gold_reader slang`: lets
-// yosys read SystemVerilog packed-struct sources (CIRCT output) that
-// read_verilog cannot parse. Same candidates inou_yosys_api probes.
+// The yosys-slang plugin (slang.so) for lgcheck's per-side slang readers: lets
+// yosys read SystemVerilog packed-struct sources (CIRCT output), and scales much
+// better than read_verilog on very large generated cgen expressions. Same
+// candidates inou_yosys_api probes.
 std::string locate_yosys_slang_plugin() {
+  // Bazel tests stage external repositories as siblings below the target's
+  // runfiles root (for example `livehd++http_archive+yosys_slang/slang.so`).
+  // The resolved lhd executable itself lives back under bazel-out/external, so
+  // exe-relative probes cannot see that sibling layout. Reuse the bounded
+  // runfiles lookup used by lgcheck/yosys2 before trying the legacy paths.
+  if (const auto dir = find_header_in_runfiles("slang.so"); !dir.empty()) {
+    const auto cand = dir + "/slang.so";
+    if (::access(cand.c_str(), R_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
+  }
   auto exe_path = file_utils::get_exe_path();
   for (const auto& cand : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
                            absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
@@ -2565,24 +2590,32 @@ void lec_lgyosys(Options& opts, Result& res) {
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
 
-  // --set formal.lec.gold_reader=slang: read the REFERENCE side through yosys-slang
-  // (SystemVerilog packed structs / '{...} patterns exceed read_verilog).
+  // Per-side lgcheck readers. The reference often needs slang for packed
+  // structs / assignment patterns. The generated implementation is accepted
+  // by either frontend, but slang avoids read_verilog's multi-hour behavior on
+  // large flattened cgen expressions.
   std::string gold_reader = "verilog";
+  std::string gate_reader = "verilog";
   for (const auto& [k, v] : opts.sets) {
     if (k == "formal.lec.gold_reader" && !v.empty()) {
       gold_reader = v;
+    } else if (k == "formal.lec.gate_reader" && !v.empty()) {
+      gate_reader = v;
     }
   }
   if (gold_reader != "verilog" && gold_reader != "slang") {
     throw Lhd_error{"usage", std::format("--set formal.lec.gold_reader expects verilog|slang, got '{}'", gold_reader), ""};
   }
+  if (gate_reader != "verilog" && gate_reader != "slang") {
+    throw Lhd_error{"usage", std::format("--set formal.lec.gate_reader expects verilog|slang, got '{}'", gate_reader), ""};
+  }
   std::string slang_plugin;
-  if (gold_reader == "slang") {
+  if (gold_reader == "slang" || gate_reader == "slang") {
     slang_plugin = locate_yosys_slang_plugin();
     if (slang_plugin.empty()) {
       throw Lhd_error{"dependency",
-                      "formal.lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
-                      "build //inou/yosys (the @yosys_slang external) or use the default gold_reader"};
+                      "formal.lec.*_reader=slang: yosys-slang plugin (slang.so) not found",
+                      "build //inou/yosys (the @yosys_slang external) or use the default verilog readers"};
     }
   }
 
@@ -2590,15 +2623,21 @@ void lec_lgyosys(Options& opts, Result& res) {
   // lgcheck*.log) never land in the caller's directory (hermetic kernel).
   auto rundir = fs::absolute(workdir(opts)).string();
   auto cmd    = std::format("cd {} && {} --implementation {} --reference {}",
-                            shell_quote(rundir),
-                            shell_quote(lgcheck),
-                            shell_quote(impl_v),
-                            shell_quote(ref_v));
+                         shell_quote(rundir),
+                         shell_quote(lgcheck),
+                         shell_quote(impl_v),
+                         shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
   }
   if (gold_reader == "slang") {
-    cmd += std::format(" --gold_reader slang --slang_plugin {}", shell_quote(slang_plugin));
+    cmd += " --gold_reader slang";
+  }
+  if (gate_reader == "slang") {
+    cmd += " --gate_reader slang";
+  }
+  if (!slang_plugin.empty()) {
+    cmd += std::format(" --slang_plugin {}", shell_quote(slang_plugin));
   }
   if (!opts.impl_top.empty()) {
     cmd += std::format(" --implementation_top {}", shell_quote(opts.impl_top));
@@ -2619,16 +2658,20 @@ void lec_lgyosys(Options& opts, Result& res) {
     mirror_log_to_stderr(log);
   }
   std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
-  // lgcheck exit codes: 0 = proven equivalent, 2 = INCONCLUSIVE (could not prove
-  // AND found no counterexample — yosys' equiv flow often can't prove a
-  // cgen-restructured netlist equal to its source even when it is), anything else
-  // = a real refutation. Only a real refute is a hard failure.
+  // lgcheck exit codes: 0 = proven equivalent, 1 = a bounded counterexample,
+  // 2 = INCONCLUSIVE (could not prove AND found no counterexample), 5 = setup
+  // failure (reader/top/plugin/etc.). A setup failure must never be labelled a
+  // refutation: it carries no equivalence evidence in either direction.
   if (code == 2) {
     std::print("lec: '{}' INCONCLUSIVE (solver=lgyosys; could not prove, no counterexample)\n", name);
     return;
   }
+  if (code != 0 && code != 1) {
+    std::print("lec: '{}' SETUP FAILED (solver=lgyosys; no equivalence verdict)\n", name);
+    throw Lhd_error{"dependency", std::format("lgyosys could not compare the designs (exit {})", code), std::format("see {}", log)};
+  }
   std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
-  if (code != 0) {
+  if (code == 1) {
     throw Lhd_error{"equiv_fail",
                     std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),
                     std::format("see {}", log)};

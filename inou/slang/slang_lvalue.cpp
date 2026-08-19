@@ -198,6 +198,51 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
+      // Constant LOW BIT offset of `lhs` inside its packed `base`, shared by the
+      // two SROA fast paths below (an SROA array lane and a per-field bundle
+      // struct leaf). A packed-array element can be wider than one bit, so the
+      // selector yields an element ORDINAL that must be scaled by the element
+      // stride before it can mask a leaf — exactly what resolve_packed_lvalue
+      // does for the generic path, and what reads already do via lower_rvalue.
+      // Returns nullopt when the position is not compile-time constant.
+      const auto const_lane_lo = [&](int64_t sel_bits) -> std::optional<int64_t> {
+        if (!base.type->isIntegral() || !base.type->hasFixedRange()) {
+          return std::nullopt;
+        }
+        const int64_t stride
+            = base_ty.isPackedArray() ? static_cast<int64_t>(base_ty.getArrayElementType()->getBitWidth()) : int64_t{1};
+        if (stride <= 0) {
+          return std::nullopt;
+        }
+        const auto    rng  = base.type->getFixedRange();
+        const int64_t nsel = sel_bits / stride;  // selected ELEMENTS (1 for an element select)
+        if (lhs.kind == ExpressionKind::ElementSelect) {
+          auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector());
+          if (!ci) {
+            return std::nullopt;
+          }
+          return (rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci)) * stride;
+        }
+        const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+        const auto  kind = rs.getSelectionKind();
+        if (kind == slang::ast::RangeSelectionKind::Simple) {
+          auto l = try_eval_int(rs.left());
+          auto r = try_eval_int(rs.right());
+          if (!l || !r) {
+            return std::nullopt;
+          }
+          return (rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r))) * stride;
+        }
+        auto b = try_eval_int(rs.left());  // `[base+:W]` / `[base-:W]` with constant base
+        if (!b) {
+          return std::nullopt;
+        }
+        if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+          return (rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (nsel - 1))) * stride;
+        }
+        return (rng.isDescending() ? (*b - rng.lower() - (nsel - 1)) : (rng.upper() - *b)) * stride;
+      };
+
       // `arr[const_lane][bit/range] = v` on an SROA array whose element is a
       // packed vector. The outer aggregate has no flat net; apply the inner
       // mask directly to that lane leaf. This is the common unrolled matrix
@@ -218,30 +263,8 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
               if (sit != struct_var_info_.end()) {
                 const auto* f = find_struct_field(sit->second, absl::StrCat("e", lane));
                 if (f != nullptr && base.type->isIntegral() && base.type->hasFixedRange()) {
-                  const auto             rng = base.type->getFixedRange();
-                  auto                   ti  = tinfo(*lhs.type);
-                  std::optional<int64_t> lo;
-                  if (lhs.kind == ExpressionKind::ElementSelect) {
-                    if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
-                      lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-                    }
-                  } else {
-                    const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
-                    const auto  kind = rs.getSelectionKind();
-                    if (kind == slang::ast::RangeSelectionKind::Simple) {
-                      auto l = try_eval_int(rs.left());
-                      auto r = try_eval_int(rs.right());
-                      if (l && r) {
-                        lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
-                      }
-                    } else if (auto b = try_eval_int(rs.left())) {
-                      if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
-                        lo = rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (ti.bits - 1));
-                      } else {
-                        lo = rng.isDescending() ? (*b - rng.lower() - (ti.bits - 1)) : (rng.upper() - *b);
-                      }
-                    }
-                  }
+                  auto                   ti = tinfo(*lhs.type);
+                  std::optional<int64_t> lo = const_lane_lo(ti.bits);
                   if (lo && *lo >= 0 && *lo + ti.bits <= f->bits) {
                     auto        val = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
                     std::string sel_mask
@@ -274,30 +297,8 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
             if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
               const auto* f = find_struct_field(it->second, field.name);
               if (f != nullptr && !it->second.is_tuple && base.type->isIntegral() && base.type->hasFixedRange()) {
-                const auto             rng = base.type->getFixedRange();
-                auto                   ti  = tinfo(*lhs.type);
-                std::optional<int64_t> lo;
-                if (lhs.kind == ExpressionKind::ElementSelect) {
-                  if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
-                    lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-                  }
-                } else {
-                  const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
-                  auto        kind = rs.getSelectionKind();
-                  if (kind == slang::ast::RangeSelectionKind::Simple) {
-                    auto l = try_eval_int(rs.left());
-                    auto r = try_eval_int(rs.right());
-                    if (l && r) {
-                      lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
-                    }
-                  } else if (auto b = try_eval_int(rs.left())) {  // `[base+:W]` / `[base-:W]` with constant base
-                    if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
-                      lo = rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (ti.bits - 1));
-                    } else {  // IndexedDown
-                      lo = rng.isDescending() ? (*b - rng.lower() - (ti.bits - 1)) : (rng.upper() - *b);
-                    }
-                  }
-                }
+                auto                   ti = tinfo(*lhs.type);
+                std::optional<int64_t> lo = const_lane_lo(ti.bits);
                 if (lo && *lo >= 0 && *lo + ti.bits <= f->bits) {
                   auto        val = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
                   std::string sel_mask
@@ -325,31 +326,9 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
             declare_value_symbol(bsym, /*force_reg=*/false);
           }
           if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end() && !it->second.is_tuple) {
-            const auto             rng   = base.type->getFixedRange();
             auto                   ti    = tinfo(*lhs.type);
             const int64_t          width = ti.bits;
-            std::optional<int64_t> lo;
-            if (lhs.kind == ExpressionKind::ElementSelect) {
-              if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
-                lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-              }
-            } else {
-              const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
-              auto        kind = rs.getSelectionKind();
-              if (kind == slang::ast::RangeSelectionKind::Simple) {
-                auto l = try_eval_int(rs.left());
-                auto r = try_eval_int(rs.right());
-                if (l && r) {
-                  lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
-                }
-              } else if (auto b = try_eval_int(rs.left())) {
-                if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
-                  lo = rng.isDescending() ? (*b - rng.lower()) : (rng.upper() - *b - (width - 1));
-                } else {  // IndexedDown
-                  lo = rng.isDescending() ? (*b - rng.lower() - (width - 1)) : (rng.upper() - *b);
-                }
-              }
-            }
+            std::optional<int64_t> lo    = const_lane_lo(width);
             if (lo && *lo >= 0 && width > 0) {
               const int64_t hi = *lo + width - 1;
               note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
@@ -449,12 +428,12 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                   if (lane0_field.is_signed) {
                     part = builder_.create_sext_stmts(part, std::to_string(lane0_field.bits - 1));
                   }
-                  auto& ln = *builder_.lnast;
+                  auto& ln       = *builder_.lnast;
                   // Marked carrier: the runner decodes this store by the marker,
                   // not by the `.eN` spelling of the leaves (see
                   // Lnast::sroa_write_tuple_prefix).
-                  auto tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
-                  auto tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
+                  auto  tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
+                  auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
                   ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
                   for (const auto& target : targets) {
                     ln.add_child(tuple_op, Lnast_node::create_ref(target));
@@ -570,11 +549,11 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                   } else {
                     index = builder_.create_minus_stmts(std::to_string(rng.upper()), index);
                   }
-                  auto  value = fit_wrap(to_int_value(rhs), field_info->bits, field_info->is_signed);
-                  auto& ln    = *builder_.lnast;
+                  auto  value    = fit_wrap(to_int_value(rhs), field_info->bits, field_info->is_signed);
+                  auto& ln       = *builder_.lnast;
                   // Marked carrier -- see Lnast::sroa_write_tuple_prefix.
-                  auto tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
-                  auto tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
+                  auto  tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
+                  auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
                   ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
                   for (const auto& target : targets) {
                     ln.add_child(tuple_op, Lnast_node::create_ref(target));
@@ -1545,8 +1524,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       std::optional<int64_t> const_low;
       std::string            dyn_low;
       auto                   normalize = [&](const slang::ast::Expression& idx,
-                                             int64_t                       width_down,
-                                             int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
+                           int64_t                       width_down,
+                           int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
         if (auto ci = try_eval_int(idx)) {
           int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
           return {bottom, {}};

@@ -12,6 +12,7 @@
 #include <string>
 
 #include "cell.hpp"
+#include "encode.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
@@ -250,6 +251,11 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
 
 }  // namespace
 
+TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
+  EXPECT_EQ(lec::canon_flop_name("`msg_port_enabled.e0`"), lec::canon_flop_name("msg_port_enabled.e0"));
+  EXPECT_EQ(lec::canon_flop_name("top.`state.part`"), lec::canon_flop_name("top.state.part"));
+}
+
 TEST(CombEquiv, AndCommutativeProven) {
   hhds::GraphLibrary lib;
   auto               ref  = build_binop(lib, "ref", Ntype_op::And, 4, false);
@@ -341,8 +347,8 @@ TEST(CombEquiv, ProvenBodyAndMatchedDescriptorUseCompactLoopCertificate) {
   lec::Lec_options body_options;
   body_options.engine = "ind";
   auto body_result    = lec::prove_equal(ref_lib.find_io("active_body")->get_graph().get(),
-                                         impl_lib.find_io("active_body")->get_graph().get(),
-                                         body_options);
+                                      impl_lib.find_io("active_body")->get_graph().get(),
+                                      body_options);
   ASSERT_EQ(body_result.verdict, Verdict::Proven) << body_result.detail;
 
   lec::Lec_options top_options;

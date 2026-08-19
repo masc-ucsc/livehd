@@ -1334,8 +1334,8 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   rb.engine       = "bmc";
   rb.elapsed_ms   = now_ms(tb);
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail  = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
-    rb.cvc5   += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
+    rb.detail    = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
+    rb.cvc5     += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
     rb.solve_ms += ri.solve_ms;
     return rb;
   }
@@ -1576,7 +1576,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
     r.split_used   = pick.name;
     r.elapsed_ms   = now_ms(t0);
     r.detail       = "auto: case-split " + pick.name + "[" + std::to_string(pick.width) + "b] " + std::to_string(nvals)
-                     + " cubes (sequential fallback); " + r.detail;
+               + " cubes (sequential fallback); " + r.detail;
     return r;
   };
 
@@ -1721,11 +1721,11 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   // each one solved its own slice in its own process, and reporting only the
   // first-REFUTED cube's numbers would hide the whole sweep's cost. A worker
   // that was killed (or never deserialized) contributes an empty struct.
-  Cvc5_stats  cubes;
-  long long   cubes_solve_ms = 0;
+  Cvc5_stats cubes;
+  long long  cubes_solve_ms = 0;
   for (int i = 0; i < nworkers; ++i) {
     if (done[i]) {
-      cubes += got[i].cvc5;
+      cubes          += got[i].cvc5;
       cubes_solve_ms += got[i].solve_ms;
     }
   }
@@ -1770,7 +1770,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   } else {
     out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
     out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
-                  + std::to_string(unknown) + " not)";
+                 + std::to_string(unknown) + " not)";
   }
   return out;
 }
@@ -1806,12 +1806,12 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       }
     }
     if (trusted) {
-      hr.detail  = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
-      hr.cvc5   += carried;
+      hr.detail    = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
+      hr.cvc5     += carried;
       hr.solve_ms += carried_solve_ms;
       return hr;
     }
-    carried += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
+    carried          += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
     carried_solve_ms += hr.solve_ms;
   }
   if (opts._isolated_worker) {
@@ -1828,7 +1828,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     absl::flat_hash_set<hhds::Graph*> seen;
     const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
     if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
-      ri.cvc5 += carried;
+      ri.cvc5     += carried;
       ri.solve_ms += carried_solve_ms;
       return ri;
     }
@@ -1840,8 +1840,8 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     rb.engine      = "bmc";
     rb.elapsed_ms  = now_ms(tb);
     if (rb.verdict == Verdict::Refuted) {
-      rb.cvc5 += ri.cvc5;  // the ind leg of this ladder ran too
-      rb.cvc5 += carried;
+      rb.cvc5     += ri.cvc5;  // the ind leg of this ladder ran too
+      rb.cvc5     += carried;
       rb.solve_ms += ri.solve_ms;
       rb.solve_ms += carried_solve_ms;
       return rb;
@@ -1873,11 +1873,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       if (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
         Query_result cs = run_case_split(ref, impl, opts, sub_lib);
         if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
-          cs.cvc5 += carried;
+          cs.cvc5     += carried;
           cs.solve_ms += carried_solve_ms;
           return cs;
         }
-        carried += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
+        carried          += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
         carried_solve_ms += cs.solve_ms;
       }
       Lec_options o    = opts;
@@ -1933,12 +1933,12 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   // discloses to the reader that two solvers ran. Every return below is stamped
   // with it (assignment, not +=: the winner's own stats are already inside
   // `both`, so merging again would double-count them).
-  Cvc5_stats both  = race.results[0].cvc5;
-  both            += race.results[1].cvc5;
-  both            += carried;
-  const long long both_solve_ms = race.results[0].solve_ms + race.results[1].solve_ms + carried_solve_ms;
-  auto            with          = [&both, both_solve_ms](Query_result r) {
-    r.cvc5 = both;
+  Cvc5_stats both                = race.results[0].cvc5;
+  both                          += race.results[1].cvc5;
+  both                          += carried;
+  const long long both_solve_ms  = race.results[0].solve_ms + race.results[1].solve_ms + carried_solve_ms;
+  auto            with           = [&both, both_solve_ms](Query_result r) {
+    r.cvc5     = both;
     r.solve_ms = both_solve_ms;
     return r;
   };
@@ -1946,7 +1946,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     Query_result r = race.results[race.winner];
     r.engine       = engines[race.winner];
     r.detail       = "auto: " + std::string(engines[race.winner]) + " reached " + vname(r.verdict) + " first in "
-                     + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
+               + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return with(std::move(r));
   }
   Query_result bp;
@@ -2439,7 +2439,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // latched disclosure. Re-call this after any such assignment. (Inspection
   // also cannot rescue itself: the assignment wipes the substring it looks
   // for, which is exactly why each arm needs its own call.)
-  auto disclose_reconciled = [&]() {
+  auto                             disclose_reconciled = [&]() {
     if (reconciled_ports.empty() || res.detail.find("width/sign reconciled") != std::string::npos) {
       return;
     }
@@ -2588,13 +2588,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       r1.detail = "full / just_reset stage: " + r1.detail;
       return r1;
     }
-    Lec_options o2   = opts;
-    o2.phase         = "after_reset";
-    Query_result r2  = prove_equal(ref, impl, o2, sub_lib);
-    r2.detail        = (r2.verdict == Verdict::Proven ? "full: equivalent in BOTH just_reset and after_reset; after_reset stage: "
-                                                      : "full / after_reset stage (just_reset already PROVEN): ")
-                       + r2.detail;
-    r2.cvc5         += r1.cvc5;  // the just_reset stage's solver ran too; r2 keeps its own
+    Lec_options o2  = opts;
+    o2.phase        = "after_reset";
+    Query_result r2 = prove_equal(ref, impl, o2, sub_lib);
+    r2.detail       = (r2.verdict == Verdict::Proven ? "full: equivalent in BOTH just_reset and after_reset; after_reset stage: "
+                                                     : "full / after_reset stage (just_reset already PROVEN): ")
+                + r2.detail;
+    r2.cvc5 += r1.cvc5;  // the just_reset stage's solver ran too; r2 keeps its own
     return r2;
   }
 
@@ -2789,7 +2789,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // The cross-design def key: entity when side-unique (a Pyrope
       // "file.entity" and a slang flat "entity" must land on ONE key for
       // their boxes to correspond), else the full per-side name.
-      const std::string defkey         = canon_def(in_ref, defname);
+      const std::string defkey = canon_def(in_ref, defname);
       const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
       // Mirrors encode.cpp's Sub classification for every node THIS walk reaches:
       // a sub with a body is DESCENDED (not a box) unless force-collapsed; a
@@ -3210,13 +3210,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // instead of a 0 that would read as UNBOUNDED to cvc5.
   // OFF (byte-identical to the old per-phase behavior) for the deterministic
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
-  const bool      budget_on       = opts.timeout > 0 && opts.rlimit == 0;
-  const long long budget_ms       = static_cast<long long>(opts.timeout) * 1000;
+  const bool                          budget_on       = opts.timeout > 0 && opts.rlimit == 0;
+  const long long                     budget_ms       = static_cast<long long>(opts.timeout) * 1000;
   // formal.min_timeout: the floor this query never drops below once the shared
   // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
-  const long long budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
+  const long long                     budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
   std::chrono::steady_clock::duration solve_spent{};
-  auto            budget_left_ms  = [&]() -> long long {
+  auto                                budget_left_ms = [&]() -> long long {
     const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
     return std::max<long long>(budget_floor_ms, budget_ms - spent);
   };
@@ -3241,10 +3241,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (budget_on) {
       solver.setOption("tlimit-per", std::to_string(budget_left_ms()));
     }
-    const auto t0 = std::chrono::steady_clock::now();
-    auto       r  = solver.checkSat();
-    solve_spent += std::chrono::steady_clock::now() - t0;
-    res.solve_ms = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+    const auto t0  = std::chrono::steady_clock::now();
+    auto       r   = solver.checkSat();
+    solve_spent   += std::chrono::steady_clock::now() - t0;
+    res.solve_ms   = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
     return r;
   };
 
@@ -3711,7 +3711,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
       negreset  = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-                  || ends("nreset");
+                 || ends("nreset");
       return true;
     };
 
@@ -4232,8 +4232,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (int i = 0; i < sig.size; ++i) {
         auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
                           {static_cast<uint32_t>((i + 1) * sig.bits - 1), static_cast<uint32_t>(i * sig.bits)});
-        arr = tm.mkTerm(cvc5::Kind::STORE,
-                        {arr, tm.mkBitVector(static_cast<uint32_t>(sig.addr_w), static_cast<uint64_t>(i)), tm.mkTerm(op, {bus})});
+        arr     = tm.mkTerm(cvc5::Kind::STORE,
+                            {arr, tm.mkBitVector(static_cast<uint32_t>(sig.addr_w), static_cast<uint64_t>(i)), tm.mkTerm(op, {bus})});
       }
       return arr;
     };
@@ -4464,7 +4464,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             // whole solve vacuously unsat, which reads out as a silent PROVEN.
             // (It was already wrong without the sign slot: a 1-bit reset facing a
             // 2-bit declaration got pinned to 2'b11 rather than 1.)
-            cvc5::Term lvl = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
+            cvc5::Term lvl          = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
           }
           snap_ins[name] = Val{t, info.w, info.sgn};
@@ -4756,8 +4756,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // path cannot silently lose the qualifier.
     const bool has_state = !ref_state.empty() || !impl_state.empty() || !ref_mem.empty() || !impl_mem.empty() || !ref_reads.empty()
                            || !impl_reads.empty();
-    res.bounded          = has_state;
-    res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
+    res.bounded = has_state;
+    res.detail  = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
                  + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
                  + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
                                                            : "; synthetic ? initialization (no reset)")
@@ -5134,10 +5134,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const auto* ind_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
     ind_ref_plan           = plan_phases(ref, collapse_ptr, ind_forest);
     ind_impl_plan          = plan_phases(impl, collapse_ptr, ind_forest);
+    if (std::getenv("LEC_PHASE_LOG") != nullptr) {
+      std::fprintf(stderr, "[LEC_PHASE] ref plan:  %s\n", ind_ref_plan.describe().c_str());
+      std::fprintf(stderr, "[LEC_PHASE] impl plan: %s\n", ind_impl_plan.describe().c_str());
+    }
     // `multi` designs take the PHASE-COMPOSED inductive step further down (one
     // assumed-equal state, four chained microsteps); everything else uses the
     // plan only for its canonicalized gate chains at P == 1 (microstep < 0).
-    ind_use_plan           = ind_ref_plan.needs_plan() || ind_impl_plan.needs_plan();
+    ind_use_plan = ind_ref_plan.needs_plan() || ind_impl_plan.needs_plan();
     if (ind_use_plan && (!ind_ref_plan.ok || !ind_impl_plan.ok)) {
       res.verdict      = Verdict::Unknown;
       res.unsupported  = true;
@@ -5274,8 +5278,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   struct Bridge {
     std::string              mem_key;             // shared-array cut key
     int                      addr_w      = 1;     // index width
+    int                      size        = 0;     // number of array entries
     int                      bits        = 0;     // array element width
     bool                     mem_in_impl = true;  // which design owns the Memory
+    std::string              wide_flop_key;       // nonempty: one packed size*bits flop instead of a bank
     std::vector<std::string> flop_keys;           // canon flop key per index 0..N-1
     std::vector<int>         flop_w;              // real width per index
     std::vector<bool>        flop_sgn;
@@ -5305,12 +5311,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return out;
     };
     struct MemRec {
-      Mem_sig sig;
+      Mem_sig     sig;
+      std::string name;
     };
     auto collect_mems = [&](hhds::Graph* g) {
       Io_name_map<MemRec> out;
       Io_name_map<int>    occ;
-      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -5323,7 +5330,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                                                                                       // build_shared_mems / collect_mem_keys
                                                                                       // sites — port counts must NOT key occ)
         std::string key = mem_state_key(sig, occ[sg]++);
-        out[key]        = MemRec{sig};
+        out[key]        = MemRec{sig, eff(node.get_hier_name())};
       }
       return out;
     };
@@ -5331,6 +5338,51 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto impl_flops = collect_flops(impl);
     auto ref_mems   = collect_mems(ref);
     auto impl_mems  = collect_mems(impl);
+
+    // A packed SystemVerilog array may be one size*bits flop while the Pyrope
+    // spelling is a Memory. Pair those by their exact canonical state name and
+    // exact packed width. Width alone is not enough: a block commonly contains
+    // several unrelated fields with the same aggregate width.
+    absl::flat_hash_set<std::string> used_ref_mem, used_impl_mem;
+    auto                             pair_wide_side = [&](const Io_name_map<FlopRec>& flop_side,
+                              const Io_name_map<FlopRec>& mem_side_flops,
+                              const Io_name_map<MemRec>&  flop_side_mems,
+                              const Io_name_map<MemRec>&  mem_side_mems,
+                              bool                        mem_in_impl) {
+      absl::flat_hash_map<std::string, int> flop_mem_name_count;
+      for (const auto& [key, rec] : flop_side_mems) {
+        if (!rec.name.empty()) {
+          ++flop_mem_name_count[rec.name];
+        }
+      }
+      absl::flat_hash_map<std::string, int> mem_name_count;
+      for (const auto& [key, rec] : mem_side_mems) {
+        if (!rec.name.empty()) {
+          ++mem_name_count[rec.name];
+        }
+      }
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        if (mrec.name.empty() || mem_name_count[mrec.name] != 1 || flop_mem_name_count[mrec.name] != 0
+            || mem_side_flops.count(mrec.name) != 0) {
+          continue;
+        }
+        auto fit = flop_side.find(mrec.name);
+        if (fit == flop_side.end() || fit->second.w != mrec.sig.size * mrec.sig.bits || !shared_mems.count(mkey)) {
+          continue;
+        }
+        Bridge br;
+        br.mem_key       = mkey;
+        br.addr_w        = mrec.sig.addr_w;
+        br.size          = mrec.sig.size;
+        br.bits          = mrec.sig.bits;
+        br.mem_in_impl   = mem_in_impl;
+        br.wide_flop_key = mrec.name;
+        bridges.push_back(std::move(br));
+        (mem_in_impl ? used_impl_mem : used_ref_mem).insert(mkey);
+      }
+    };
+    pair_wide_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref wide flop <-> impl memory
+    pair_wide_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl wide flop <-> ref memory
 
     // Banks among the flops that have NO counterpart on the other side: group keys
     // by stripping a trailing "_<idx>"; a base with a contiguous 0..N-1 of uniform
@@ -5395,6 +5447,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                          bool                        mem_in_impl) {
       for (auto& b : detect_banks(bank_flops, other_flops)) {
         for (const auto& [mkey, mrec] : mem_mems) {
+          if ((mem_in_impl ? used_impl_mem : used_ref_mem).count(mkey)) {
+            continue;  // exact-name packed-flop bridge above owns this memory
+          }
           if (bank_mems.count(mkey)) {
             continue;  // memory matches a memory on the bank side -> not a bridge
           }
@@ -5407,6 +5462,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           Bridge br;
           br.mem_key     = mkey;
           br.addr_w      = mrec.sig.addr_w;
+          br.size        = mrec.sig.size;
           br.bits        = mrec.sig.bits;
           br.mem_in_impl = mem_in_impl;
           br.flop_keys   = b.keys;
@@ -5424,6 +5480,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // the step from the same register-file contents.
     for (auto& br : bridges) {
       cvc5::Term A = shared_mems.at(br.mem_key);
+      if (!br.wide_flop_key.empty()) {
+        auto fit = shared.find(br.wide_flop_key);
+        if (fit == shared.end() || fit->second.width != br.size * br.bits) {
+          continue;
+        }
+        cvc5::Term arr = A;
+        for (int i = 0; i < br.size; ++i) {
+          auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+                            {static_cast<uint32_t>((i + 1) * br.bits - 1), static_cast<uint32_t>(i * br.bits)});
+          arr     = tm.mkTerm(
+              cvc5::Kind::STORE,
+              {arr, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i)), tm.mkTerm(op, {fit->second.term})});
+        }
+        shared_mems[br.mem_key] = arr;
+        continue;
+      }
       for (size_t i = 0; i < br.flop_keys.size(); ++i) {
         cvc5::Term sel
             = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
@@ -5635,8 +5707,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         res.verdict = Verdict::Proven;
         res.engine  = "ind";
         res.detail  = "solver=cvc5 (phase-step induction: " + std::to_string(psteps.size()) + " microsteps, "
-                      + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
-                      + ind_ref_plan.describe() + "]";
+                     + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
+                     + ind_ref_plan.describe() + "]";
         disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
         return res;
       }
@@ -5963,6 +6035,30 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;  // memory had no next-state (shouldn't happen) -> leave unmatched
     }
     mem_set.insert(br.mem_key);
+    if (!br.wide_flop_key.empty()) {
+      std::string nxt_key = std::string("\x01nxt:") + br.wide_flop_key;
+      bank_out_set.insert(nxt_key);
+      auto fit_it = bank_enc.outputs.find(nxt_key);
+      if (fit_it == bank_enc.outputs.end()) {
+        continue;
+      }
+      std::vector<cvc5::Term> entries;
+      entries.reserve(static_cast<size_t>(br.size));
+      for (int i = br.size - 1; i >= 0; --i) {
+        entries.push_back(tm.mkTerm(cvc5::Kind::SELECT,
+                                    {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))}));
+      }
+      if (entries.empty()) {
+        continue;
+      }
+      cvc5::Term bus = entries.front();
+      for (size_t i = 1; i < entries.size(); ++i) {
+        bus = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {bus, entries[i]});
+      }
+      const int w = br.size * br.bits;
+      bridge_diffs.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, fit_it->second, w), fit_to(tm, Val{bus, w, false}, w)}));
+      continue;
+    }
     for (size_t i = 0; i < br.flop_keys.size(); ++i) {
       std::string nxt_key = std::string("\x01nxt:") + br.flop_keys[i];
       bank_out_set.insert(nxt_key);
@@ -7587,8 +7683,8 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // host problem and send the reader hunting for memory.
         why         = std::format(
             "exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
-            "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
-            "miter compiles to — raise either knob, or 0 disables the backstop",
+                    "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+                    "miter compiles to — raise either knob, or 0 disables the backstop",
             static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
             opts.timeout,
             opts.hard_timeout_mult);
@@ -7678,8 +7774,8 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
     rb.detail = "bmc retry worker also died: " + bmc_why;
   }
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail  = died_note + rb.detail;
-    rb.cvc5   += ri.cvc5;  // the ind retry worker ran too
+    rb.detail    = died_note + rb.detail;
+    rb.cvc5     += ri.cvc5;  // the ind retry worker ran too
     rb.solve_ms += ri.solve_ms;
     return rb;
   }
@@ -7720,8 +7816,8 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
     // Keep the BV result: its detail names the real bottleneck, and the retry's
     // Unknown adds nothing (int-blast lands in undecidable nonlinear arithmetic
     // on mask/extract/memory-heavy cones, so its give-up is the EXPECTED case).
-    first.detail += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
-    first.cvc5   += r2.cvc5;  // the retry really ran (formal.stats)
+    first.detail   += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
+    first.cvc5     += r2.cvc5;  // the retry really ran (formal.stats)
     first.solve_ms += r2.solve_ms;
     return first;
   }
@@ -7934,13 +8030,13 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // One strategy crashed, or the two disagree on the obligation count (an
       // encode/monitor error hit one at a different point): fall back to the
       // more complete single run rather than misalign obligations by index.
-      const bool    a_wins  = !b_ran || (a_ran && A.props.size() >= B.props.size());
-      Verify_result r       = a_wins ? A : B;
-      r.detail              = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
-                              + " (the other strategy crashed or produced a differing obligation count); " + r.detail;
-      r.elapsed_ms          = now_ms(t0);
-      r.cvc5                = A.cvc5;  // assign then merge: whichever side `r` is, this
-      r.cvc5               += B.cvc5;  // rebuilds the pair exactly once (a crashed side is empty)
+      const bool    a_wins = !b_ran || (a_ran && A.props.size() >= B.props.size());
+      Verify_result r      = a_wins ? A : B;
+      r.detail             = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
+                 + " (the other strategy crashed or produced a differing obligation count); " + r.detail;
+      r.elapsed_ms  = now_ms(t0);
+      r.cvc5        = A.cvc5;  // assign then merge: whichever side `r` is, this
+      r.cvc5       += B.cvc5;  // rebuilds the pair exactly once (a crashed side is empty)
       return r;
     }
     Verify_result m = A;  // carries checked_steps / reset_hold base; props recomputed below
@@ -8027,9 +8123,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     } else {
       m.verdict = Verdict::Proven;
     }
-    m.detail      = "auto verify: raced bmc-first(bound=" + std::to_string(A.checked_steps)
-                    + ") | ind-first(bound=" + std::to_string(B.checked_steps) + "), " + std::to_string(n_ind_unbounded)
-                    + " obligation(s) proven unbounded by induction-first; bmc-first: " + A.detail + " || ind-first: " + B.detail;
+    m.detail = "auto verify: raced bmc-first(bound=" + std::to_string(A.checked_steps)
+               + ") | ind-first(bound=" + std::to_string(B.checked_steps) + "), " + std::to_string(n_ind_unbounded)
+               + " obligation(s) proven unbounded by induction-first; bmc-first: " + A.detail + " || ind-first: " + B.detail;
     m.unsupported = A.unsupported || B.unsupported;  // shared encoder (2f-latch M0)
     m.elapsed_ms  = now_ms(t0);
     return m;
@@ -8322,8 +8418,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       return false;
     }
     auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
-    negreset  = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-                || ends("nreset");
+    negreset = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
+               || ends("nreset");
     return true;
   };
   const bool phase_reset = opts.phase == "just_reset";
@@ -8800,8 +8896,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         const bool assert_reset = phase_reset || (phase_run && cyc < reset_hold);
         const bool negreset     = rit->second;
         const bool drive_zero   = assert_reset ? negreset : !negreset;
-        cvc5::Term lvl = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
-                                    : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+        cvc5::Term lvl          = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
+                                             : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
       }
       sh[name] = Val{t, info.w, info.sgn};
@@ -9043,7 +9139,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!mon_hist_noted[mi]) {
           mon_hist_noted[mi]  = true;
           res.detail         += "; monitor '" + mon.block + "' needs " + std::to_string(max_delay)
-                                + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
+                        + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
         }
         continue;
       }
@@ -9325,7 +9421,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             v = std::strtoull(solver.getValue(st->second.term).getBitVectorValue(10).c_str(), nullptr, 10);
             for (int round = 0; round < 6 && mine_spent_ms < mine_budget_ms; ++round) {
               cvc5::Term gt = tm.mkTerm(cvc5::Kind::BITVECTOR_UGT,
-                                        {st->second.term, tm.mkBitVector(static_cast<uint32_t>(st->second.width), v)});
+                                                                                         {st->second.term, tm.mkBitVector(static_cast<uint32_t>(st->second.width), v)});
               if (!mine_check(gt).isSat()) {
                 model_live = false;
                 break;
@@ -9476,9 +9572,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (phase_run) {
             if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
               const bool drive_zero = !rit->second;  // deasserted: active-low -> all-1, active-high -> 0
-              cvc5::Term lvl = drive_zero
-                                   ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
-                                   : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+              cvc5::Term lvl        = drive_zero
+                                          ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
+                                          : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
               solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
             }
           }
@@ -9661,15 +9757,15 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             }
             std::vector<size_t> keep;
             for (size_t ix : alive) {
-              const int  w   = cond_f[1].at(occ_of(ix)).width > 0 ? cond_f[1].at(occ_of(ix)).width : 1;
-              cvc5::Term bad = tm.mkTerm(cvc5::Kind::EQUAL,
-                                         {fit_to(tm, cond_f[1].at(occ_of(ix)), w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
+              const int  w            = cond_f[1].at(occ_of(ix)).width > 0 ? cond_f[1].at(occ_of(ix)).width : 1;
+              cvc5::Term bad          = tm.mkTerm(cvc5::Kind::EQUAL,
+                                                  {fit_to(tm, cond_f[1].at(occ_of(ix)), w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
               // Under the total budget each rung check is floored, so a candidate
               // the solver cannot confirm within the remaining budget is simply
               // dropped (kept only on a definitive UNSAT) — a budget-out only ever
               // loses an unbounded upgrade, never manufactures one.
-              const auto trk = std::chrono::steady_clock::now();
-              const bool ok  = budget_check(bad, act_of(res.props[ix].scope)).isUnsat();
+              const auto trk          = std::chrono::steady_clock::now();
+              const bool ok           = budget_check(bad, act_of(res.props[ix].scope)).isUnsat();
               res.props[ix].solve_ms += now_ms(trk);
               if (ok) {
                 keep.push_back(ix);
@@ -10127,7 +10223,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               consumed[j]     = true;
               const auto& pr  = res.props[bad_ix[j]];
               names          += (names.empty() ? "" : ", ") + (pr.loc.empty() ? pr.kind : pr.kind + "@" + pr.loc)
-                                + (pr.msg.empty() ? "" : " \"" + pr.msg + "\"");
+                       + (pr.msg.empty() ? "" : " \"" + pr.msg + "\"");
               res.timeout_core.push_back(static_cast<int>(bad_ix[j]));  // structured core (P2 report)
               break;
             }
@@ -10140,7 +10236,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!names.empty()) {
           const char* why  = tc.first.isUnsat() ? "jointly UNSATISFIABLE (cannot all be violated)" : "jointly exhaust the solver";
           res.detail      += "; spec_mining_timeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
-                             + " obligation(s) " + why + "): " + names;
+                        + " obligation(s) " + why + "): " + names;
         }
       } catch (const std::exception& e) {
         res.detail += "; spec_mining_timeout diagnosis unavailable (" + std::string(e.what()) + ")";

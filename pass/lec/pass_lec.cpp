@@ -51,6 +51,11 @@ void Pass_lec::setup() {
                        "read_verilog -sv) | slang (load the yosys-slang plugin and read_slang; needed for "
                        "SystemVerilog packed-struct sources like CIRCT/firtool output)",
                        "verilog");
+  m.add_label_optional("gate_reader",
+                       "lgyosys backend only: reader for the IMPLEMENTATION side — verilog (default; yosys "
+                       "read_verilog -sv) | slang (load yosys-slang and parse in parallel; recommended for "
+                       "large generated cgen Verilog)",
+                       "verilog");
   m.add_label_optional("gold_x",
                        "reference-side X semantics (cvc5 engines; the analogue of yosys miter "
                        "-ignore_gold_x): ignore (default; a ref constant's ?/X bits are don't-care — "
@@ -276,10 +281,10 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine       = std::string{var.get("engine", "auto")};
-  o.solver       = std::string{var.get("solver", "cvc5")};
-  o.assume_check = parse_bool(var.get("assume_check", "true"));
-  o.gold_x       = std::string{var.get("gold_x", "ignore")};
+  o.engine         = std::string{var.get("engine", "auto")};
+  o.solver         = std::string{var.get("solver", "cvc5")};
+  o.assume_check   = parse_bool(var.get("assume_check", "true"));
+  o.gold_x         = std::string{var.get("gold_x", "ignore")};
   o.bound          = str_tools::to_i(var.get("bound", "6"));
   o.timeout        = str_tools::to_i(var.get("timeout", "120"));
   o.witness        = parse_bool(var.get("witness", "true"));

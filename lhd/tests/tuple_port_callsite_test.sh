@@ -191,4 +191,59 @@ else
   echo "PASS: instance connections escape dotted ports (iverilog not present, grep-checked)"
 fi
 
+# The native slang reader must also preserve each escaped dotted connection as
+# one literal port name.  Treating `\\req.a` as the bundle path `req.a` makes
+# the parent call fail with fcall-unknown-arg even though the emitted Verilog is
+# legal and external tools accept it.
+printf '%s\n' "$W/ev"/*.v | sort | while IFS= read -r file; do
+  sed -n '1,$p' "$file"
+done >"$W/emitted_all.v"
+"$LHD" compile "$W/emitted_all.v" --top parent --workdir "$W/wev_readback" -q \
+  || fail "native slang reader rejects cgen's escaped dotted instance ports"
+echo "PASS: emitted hierarchy reads back through native slang"
+
+# A generated helper name derived from an escaped scalar must stay escaped as
+# well.  The wire split below mints `<net>__wtmp`; dropping the quotes from that
+# name turns its literal dot into a tuple_get and breaks LNAST-to-LGraph.
+cat >"$W/escaped_split.v" <<'EOF'
+module escaped_split(input logic a, input logic b, output logic y);
+  wire \foo.bar ;
+  assign \foo.bar  = a;
+  assign \foo.bar  = b;
+  always_ff @(posedge \foo.bar )
+    y <= a;
+endmodule
+EOF
+"$LHD" compile "$W/escaped_split.v" --top escaped_split --emit-dir verilog:"$W/escaped_split_out" \
+  --workdir "$W/wescaped_split" -q \
+  || fail "derived helper for an escaped dotted scalar lost its literal-name quoting"
+echo "PASS: derived escaped-scalar helper names read through LNAST-to-LGraph"
+
+# A Verilog escape introducer is lexical syntax, not part of the identifier.
+# Keeping the leading '\\' in slang's internal name made a v2prp2v reread call
+# the same dotted register `\\state.lane` instead of `state.lane`; the logic was
+# equal but the inductive state cuts no longer paired.
+cat >"$W/escaped_state.v" <<'EOF'
+module escaped_state(input logic clk, input logic en, input logic [4:0] d, output logic [4:0] q);
+  logic [4:0] \state.lane ;
+  always_ff @(posedge clk) if (en) \state.lane  <= d;
+  assign q = \state.lane ;
+endmodule
+EOF
+"$LHD" compile "$W/escaped_state.v" --reader slang --top escaped_state \
+  --emit-dir pyrope:"$W/escaped_state_prp" --workdir "$W/wescaped_state_prp" -q \
+  || fail "escaped dotted state did not generate Pyrope"
+grep -q '`state\.lane`' "$W/escaped_state_prp/escaped_state.prp" \
+  || fail "Verilog escape introducer leaked into generated Pyrope state name"
+"$LHD" compile "$W/escaped_state_prp/escaped_state.prp" --top escaped_state \
+  --emit verilog:"$W/escaped_state_roundtrip.v" --workdir "$W/wescaped_state_v" -q \
+  || fail "escaped dotted state Pyrope did not regenerate Verilog"
+"$LHD" lec --impl verilog:"$W/escaped_state_roundtrip.v" --ref verilog:"$W/escaped_state.v" \
+  --top escaped_state --set formal.engine=ind --workdir "$W/lec_escaped_state" -q \
+  --result-json "$W/lec_escaped_state.json" \
+  || fail "escaped dotted state v2prp2v LEC failed: $(cat "$W/lec_escaped_state.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/lec_escaped_state.json" \
+  || fail "escaped dotted state v2prp2v is not inductively PROVEN"
+echo "PASS: escaped dotted state keeps one identity through Verilog -> Pyrope -> Verilog"
+
 echo "PASS: all tuple-port call-site regressions"
