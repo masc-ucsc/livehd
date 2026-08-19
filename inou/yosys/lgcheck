@@ -404,6 +404,19 @@ if ! [[ "$LGCHECK_EQUIV_TIMEOUT" =~ ^[0-9]+$ ]]; then
   exit 5
 fi
 equiv_start=$SECONDS
+# coreutils `timeout` is NOT guaranteed to exist: macOS ships none, and bazel's
+# test PATH (/bin:/usr/bin:/usr/local/bin) does not carry the homebrew prefix
+# where `timeout`/`gtimeout` live. Resolve it once; when it is absent fall back
+# to a pure-bash watchdog rather than letting every strategy die with 127
+# ("command not found"), which silently turned every equivalence check into an
+# INCONCLUSIVE verdict.
+TIMEOUT_BIN=""
+for _t in timeout gtimeout; do
+  if command -v "$_t" >/dev/null 2>&1; then
+    TIMEOUT_BIN="$_t"
+    break
+  fi
+done
 run_equiv_yosys() {
   if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
     "$YOSYS" "$@"
@@ -414,7 +427,44 @@ run_equiv_yosys() {
   if [ "$remaining" -le 0 ]; then
     return 124
   fi
-  timeout --signal=TERM --kill-after=30s "$remaining" "$YOSYS" "$@"
+  if [ "$TIMEOUT_BIN" != "" ]; then
+    "$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$remaining" "$YOSYS" "$@"
+    return
+  fi
+  # Portable watchdog: TERM the solver when the shared budget runs out, KILL it
+  # if it ignores that, and report 124 so the caller sees a timeout (not a
+  # refutation) exactly as coreutils `timeout` would. Both loops poll instead of
+  # sleeping the whole span so the watchdog retires right after the solver does.
+  local fired="$PWD/lgcheck_watchdog.$$"
+  rm -f "$fired"
+  "$YOSYS" "$@" &
+  local ypid=$!
+  (
+    left=$remaining
+    while [ "$left" -gt 0 ] && kill -0 "$ypid" 2>/dev/null; do
+      sleep 1
+      left=$((left - 1))
+    done
+    if kill -0 "$ypid" 2>/dev/null; then
+      : >"$fired"
+      kill -TERM "$ypid" 2>/dev/null
+      grace=30
+      while [ "$grace" -gt 0 ] && kill -0 "$ypid" 2>/dev/null; do
+        sleep 1
+        grace=$((grace - 1))
+      done
+      kill -KILL "$ypid" 2>/dev/null
+    fi
+  ) >/dev/null 2>&1 &
+  local wpid=$!
+  local rc=0
+  wait "$ypid" || rc=$?
+  wait "$wpid" 2>/dev/null
+  if [ -e "$fired" ]; then
+    rc=124
+    rm -f "$fired"
+  fi
+  return $rc
 }
 echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s)"
 
