@@ -279,6 +279,96 @@ close by either lemma.  This is latent, not introduced by the fast path; it is
 simply absent from DINO.  Measured absent from `cva6_tlb_gate` too: all **1802**
 GetMask sites have `mask_w ≤ out_w` and none truncate.
 
+#### What dominates a CVA6-scale run: the n-ary `Or` closer, monotone in arity (measured)
+
+**The single biggest per-node cost in the step-5 bridge is `Op_Or` at high arity**, and
+it is a *shape* problem in one lemma, not a scaling property of the proof method.
+
+`orn_bv_bridge` states its RHS as
+`bvenc (bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w)`.  The fast model emits
+`bv_zext a ||| bv_zext b ||| …` — no `0#w` seed, no `bv_to_bitvec` wrappers.  Bridging
+those two shapes forces **`BitVec.zero_or`** and **`bv_to_bitvec_bvenc_zext`** into the
+per-node closer, and the latter has *both* width arguments implicit, so its LHS head is
+`bv_to_bitvec ?w (bvenc ?v)` — `simp only` then matches it against every subterm of the
+goal.  Each extra operand adds another such subterm, so the search grows with arity.
+
+Localised to a single node (`cva6_ras_gate` nid 36, `Op_Or` width 130, four operands of
+widths 65/66/130/131), isolated with the full `phiTree`/`sourceEnv`/`graphCert` context
+but every other recurrence removed — floor 6.0 s:
+
+| proof prefix | wall | marginal |
+|---|---|---|
+| `show` only | 6.0 s | — |
+| `+ rw [orn_bv_bridge]` | 6.0 s | 0 |
+| `+ simp only [fv36]` | 6.0 s | 0 |
+| `+ List.foldl_cons, List.foldl_nil` | 6.0 s | **0 — the fold itself is innocent** |
+| `+ BitVec.zero_or` | 10.1 s | +4.1 s |
+| **`+ bv_to_bitvec_bvenc_zext`** | **32.2 s** | **+22.1 s (85 %)** |
+
+Per-node cost is **monotone in arity**, and arity dominates width:
+
+| arity | width | s/node | source |
+|---|---|---|---|
+| 3–4 | 130 | 11.6 | `ras`, 3 nodes |
+| 47 | 65 | 74 | `instr_scan`, 1 node |
+| 55 | 65 | 75 | `instr_scan`, 1 node |
+| 60 | 65 | 76 | `instr_scan`, 2 nodes |
+
+Attribution on `cva6_instr_scan_gate` (330 s full), stubbing one op group at a time —
+**four nodes are 301 s, i.e. 91 % of the run**, while 301 `GetMask` + 222 `SHL` nodes
+together cost 8 s:
+
+| stubbed group | wall | saving | nodes |
+|---|---|---|---|
+| `Or` arity 60 | 178 s | **152 s** | 2 |
+| `Or` arity 55 | 255 s | **75 s** | 1 |
+| `Or` arity 47 | 256 s | **74 s** | 1 |
+| `SHL` | 324 s | 6 s | 222 |
+| `GetMask` | 328 s | 2 s | 301 |
+| `And`/`EQ`/`MuxN`/`MuxBool`/`Not`/`Ror`/`Sext`/`SRA`/low-arity `Or` | 328–333 s | ~0 | 21–38 each |
+
+**Fix, and its measured effect.**  State the RHS in the fast model's own left-nested
+`|||` shape so neither metavariable lemma is needed and the closer stays on the default
+set — `or1_bridge`, `or3_bridge`, `or4_bridge`, following `or_bridge` (arity 2) and
+`and3_bridge`/`and4_bridge`.  All 7 swept modules still prove (`exit 0`, 0 errors,
+0 sorries):
+
+| module | before | after | remaining fold arities |
+|---|---|---|---|
+| `ras` | 48.3 s | **7.2 s (6.9x)** | none |
+| `instr_realign` | 17.0 s | 11 s | none |
+| `raw_checker` | 24.7 s | 16 s | 7, 8 |
+| `controller` | 45.2 s | 35 s | 6 |
+| `csr_buffer` | 84.7 s | 77 s | 5 |
+| `compressed_decoder` | 179.5 s | 162 s | 5x11, 6x5, 7, 8, 10, 11x3, 12, 18, 19 |
+| `instr_scan` | 339.0 s | 329 s | 47, 55, 60x2 |
+
+The speedup tracks *how much of a module's cost sat on the fold*, which is why `ras`
+(all fold nodes removed) gained 6.9x and `instr_scan` (its four expensive nodes still on
+the fold) gained 3 %.  Extending to arity 5–8 covers everything except `instr_scan`'s
+47–60 and `compressed_decoder`'s 10–19; those high arities likely need a recursive
+n-ary bridge or a closer without the metavariable search rather than one lemma per
+arity — **measure before choosing.**
+
+**Not yet attributed:** `cva6_pmp_gate` (6.2 h) and `cva6_alu_export` (4.3 h).  A
+sampled `Or` probe on `pmp` was killed mid-run, so its ">64 s/node" is a lower bound,
+not a measurement.  Both need the same per-group attribution before assuming they share
+this cause.
+
+**Method notes worth keeping** (each cost real time here):
+- **Size the probe so the signal exceeds the noise.**  A 10-node synthetic sweep gave
+  19.1 s for one point and 8.1 s for the *same file* re-run under low load; three
+  repeats then agreed within ±0.4 s.  The first number was concurrent-job contention
+  and it sent the fix at the wrong arity.
+- **Isolated op-bridge benchmarks cannot see this class of bug.**  The same node shape,
+  same mixed operand widths, same arity and same closer cost ~5 s for 8 nodes
+  standalone.  The cost is proportional to the *surrounding context* simp must search,
+  which is exactly what an isolated benchmark removes.
+- **Attribute by removal, not by correlation.**  Four cost models were fitted and
+  refuted here — machine contention, node width, total term size, and a threshold at
+  arity 3 — each of which merely correlated across a handful of large designs.  Only
+  stub-one-group-and-re-time survived.
+
 ### Lessons learned (step 5)
 
 Getting DINO from "emitted" to "typechecked" took eight bug fixes and two

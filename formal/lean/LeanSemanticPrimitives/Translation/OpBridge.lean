@@ -397,6 +397,101 @@ theorem or_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
   simp only [hz, bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi]
 
+/-- **Arity-1 `Or`.**  `nary_op_inline` with a single operand emits a bare
+`bv_zext a` -- no `|||` at all -- so the RHS here is exactly that.
+
+This exists to keep the closer on the DEFAULT simp set.  The n-ary
+`orn_bv_bridge` states its RHS as
+`bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, a shape the fast model never
+produces: it introduces both a `0#w |||` seed and `bv_to_bitvec`-wrapped operands.
+Reconciling that forces `BitVec.zero_or` and `bv_to_bitvec_bvenc_zext` into the
+per-node closer, and both match with a free metavariable (`0#?w ||| ?x`,
+`bv_to_bitvec ?w (bvenc ?v)`), so simp attempts them across the whole goal.  Measured
+on `cva6_ras_gate`'s 11 n-ary `Or` nodes: adding those two lemmas takes the file from
+9.2 s to 44.3 s (~1.2 s and ~2.0 s per node).  Matching the fast model's shape
+directly avoids the whole problem -- the same reason `or_bridge` (arity 2) is cheap. -/
+theorem or1_bridge {wa w : Nat} (a : BitVec wa) :
+    eval_op LGraphOp.Op_Or w [bvenc a] = bvenc (bv_zext a : BitVec w) := by
+  show bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a) = _
+  apply bv_bitwise_eq
+  intro i hi
+  simp only [bv_bit_mk_bv_zero, bv_bit_bvenc, Bool.false_or, getLsbD_zext_lt a hi]
+
+/-- Emitter-facing check at the shape real designs emit (width 1, one 1-bit operand);
+arity-1 `Or` is 319 of `cva6_pmp_gate`'s 423 n-ary `Or` nodes and 97 of the TLB's 112. -/
+example (a : BitVec 1) :
+    eval_op LGraphOp.Op_Or 1 [bvenc a] = bvenc ((bv_zext a) : BitVec 1) :=
+  or1_bridge a
+
+--------------------------------------------------------------------------------
+-- Fold-free n-ary `Or` at the small arities.
+--
+-- WHY these exist, measured on cva6_ras_gate nid 36 (Op_Or, width 130, four
+-- operands of widths 65/66/130/131), isolated with full file context (6.0 s floor):
+--
+--   show only .............................  6.0 s
+--   + rw [orn_bv_bridge] .................  6.0 s
+--   + simp only [fv36] ...................  6.0 s
+--   + List.foldl_cons, List.foldl_nil ....  6.0 s   <- the FOLD is innocent
+--   + BitVec.zero_or ..................... 10.1 s   (+4.1 s)
+--   + bv_to_bitvec_bvenc_zext ............ 32.2 s   (+22.1 s, 85 %)
+--
+-- `orn_bv_bridge`'s RHS is `bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, a
+-- shape the fast model never emits.  Reconciling it forces `BitVec.zero_or` and
+-- `bv_to_bitvec_bvenc_zext` into the per-node closer, and the latter has BOTH width
+-- arguments implicit -- LHS head `bv_to_bitvec ?w (bvenc ?v)` -- so `simp only`
+-- matches it against every subterm of a large generated goal.  Cost scales with the
+-- surrounding context, which is why an isolated probe (same arity, same mixed
+-- widths, same closer: ~5 s for 8 nodes) cannot see it.
+--
+-- Stating the RHS in the fast model's own left-nested `|||` shape needs NEITHER
+-- lemma, so the closer stays on the default set.  Same discipline as `or_bridge`
+-- (arity 2) and `and3_bridge`/`and4_bridge`.
+--------------------------------------------------------------------------------
+
+/-- Peel one level off a left-nested `bv_bitwise` Or chain. -/
+theorem bv_bit_or_step {w wx : Nat} (A : BV) (x : BitVec wx) {i : Nat} (hi : i < w) :
+    bv_bit (bv_bitwise w (fun p q => p || q) A (bvenc x)) i
+      = (bv_bit A i || x.getLsbD i) := by
+  unfold bv_bitwise
+  rw [bv_bit_bitsToInt _ hi]
+  simp [bv_bit_bvenc]
+
+theorem or3_bridge {wa wb wc w : Nat} (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) :
+    eval_op LGraphOp.Op_Or w [bvenc a, bvenc b, bvenc c]
+      = bvenc (((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w)) ||| (bv_zext c : BitVec w)) := by
+  show bv_bitwise w (fun x y => x || y)
+        (bv_bitwise w (fun x y => x || y)
+          (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) (bvenc b)) (bvenc c) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have h1 : bv_bit (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  have h2 := bv_bit_or_step (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) b hi
+  rw [h2, h1]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi,
+             getLsbD_zext_lt c hi]
+
+theorem or4_bridge {wa wb wc wd w : Nat}
+    (a : BitVec wa) (b : BitVec wb) (c : BitVec wc) (d : BitVec wd) :
+    eval_op LGraphOp.Op_Or w [bvenc a, bvenc b, bvenc c, bvenc d]
+      = bvenc ((((bv_zext a : BitVec w) ||| (bv_zext b : BitVec w))
+                 ||| (bv_zext c : BitVec w)) ||| (bv_zext d : BitVec w)) := by
+  show bv_bitwise w (fun x y => x || y)
+        (bv_bitwise w (fun x y => x || y)
+          (bv_bitwise w (fun x y => x || y)
+            (bv_bitwise w (fun x y => x || y) (mk_bv w 0) (bvenc a)) (bvenc b)) (bvenc c)) (bvenc d) = _
+  apply bv_bitwise_eq
+  intro i hi
+  have h1 : bv_bit (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) i = a.getLsbD i := by
+    unfold bv_bitwise; rw [bv_bit_bitsToInt _ hi]; simp [bv_bit_mk_bv_zero, bv_bit_bvenc]
+  have h2 := bv_bit_or_step (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) b hi
+  have h3 := bv_bit_or_step (bv_bitwise w (fun p q => p || q)
+                (bv_bitwise w (fun p q => p || q) (mk_bv w 0) (bvenc a)) (bvenc b)) c hi
+  rw [h3, h2, h1]
+  simp only [bv_bit_bvenc, BitVec.getLsbD_or, getLsbD_zext_lt a hi, getLsbD_zext_lt b hi,
+             getLsbD_zext_lt c hi, getLsbD_zext_lt d hi]
+
 theorem xor_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_Xor w [bvenc a, bvenc b]
       = bvenc ((bv_zext a : BitVec w) ^^^ (bv_zext b : BitVec w)) := by

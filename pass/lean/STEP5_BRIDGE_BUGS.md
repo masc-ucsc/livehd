@@ -7,7 +7,7 @@ combiner) and every run was killed unfinished (worst: **2 d 8 h / 94 GB**).  Eac
 time the check got fast enough to reach further into the file, it exposed more
 real proof bugs.  **"0 sorries" ≠ "typechecks".**
 
-This document records **11 bugs** found this way, the fix for each, and the
+This document records **11 bugs plus one follow-up** found this way, the fix for each, and the
 measured cost model.  Bugs 1–3 and 5 are constant-spelling / side-condition
 issues in the op bridges; 6–8 are structural (combiner shape, source-driven
 outputs, an asymmetric closer); 9 is an arity-dispatch gap that only bites at
@@ -501,3 +501,303 @@ what a probe assumes, every time.  (2) The same three numbers incidentally measu
 the combiner at **~65 s (0.3 %)**, refuting the standing assumption that it is the
 scaling risk at CVA6 sizes.  Stub-one-declaration is cheaper than cumulative-slice
 bisection and answers the same question.
+
+---
+
+## Bug 9 follow-up — the n-ary `Or` fold was only fixed at arity 2
+
+Bug 9 diagnosed `orn_bv_bridge`'s closer (which must unfold a `List.foldl`) as
+pathological and fixed **arity 2** by routing it to the fold-free `or_bridge`.
+**Every other arity still goes through the fold** — 1, 3, 4, … up to 96 in real
+CVA6 modules — and measurement shows that residue is the dominant cost of a
+step-5 run on several designs.
+
+### Measured, by stubbing one declaration group and re-timing
+
+`cva6_ras_gate`, 76 nodes, 48.3 s full.  A ~12 s floor is the Mathlib import, so
+the proof content is ~36 s:
+
+| variant | wall | conclusion |
+|---|---|---|
+| all 76 recurrences stubbed | 12.2 s | the floor |
+| combiner stubbed | 48.5 s | combiner ≈ **free** (as Bug 9's fix intended) |
+| only the 35 `GetMask` recurrences proven | 12.7 s | GetMask ≈ **0.5 s total**, ~14 ms/node |
+| only `Sext` stubbed | 60.5 s | free |
+| only `SRA` stubbed | 47.0 s | free |
+| **only n-ary `Or` stubbed (11 nodes)** | **11.3 s** | **Or is ~100 % of the cost** |
+
+Reproduced on two structurally different modules:
+
+| module | shape | full | n-ary `Or` stubbed |
+|---|---|---|---|
+| `cva6_ras_gate` | wide (130 b), low arity | 48 s | **11 s** |
+| `cva6_csr_buffer_gate` | 209 b | 85 s | **13 s** |
+| `cva6_instr_scan_gate` | narrow (65 b), arity up to **60** | 339 s | **33 s** |
+
+Every one collapses to the import floor.  A real emitted proof, `ras` nid 36 —
+note this is `Op_Or` at width 130 with **four** deps, so it takes the fold:
+
+```lean
+show bvenc (fv36 i s) = eval_op (LGraphOp.Op_Or) 130
+  [bvenc (fv412 i s), bvenc (fv416 i s), bvenc (fv424 i s), bvenc (fv432 i s)]
+rw [orn_bv_bridge]
+simp only [fv36, List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext,
+           BitVec.zero_or, bv_zext_id, ...]
+```
+
+The `List.foldl_cons`/`List.foldl_nil` pair in that closer is the Bug 9 machinery.
+Cost grows with **arity x width**, which is why `instr_scan` is slow while being
+narrow (its arity-47/55/60 nodes) and `compressed_decoder` is fast while being large
+(1946 nodes, all <= 33 bits).
+
+### Implied fix (not yet applied)
+
+Generalise Bug 9's fix: fold-free `orN_bridge` lemmas at the common small arities,
+exactly as `and3_bridge` / `and4_bridge` were done for `And`.  `bv_bit_and_step` is
+the pattern; note `bv_bitwise_eq` already peels the outermost level, so an arity-N
+bridge needs N-2 `have`s.  Genuinely huge arities (96) still need the fold or a
+different treatment.
+
+### Three hypotheses this measurement REFUTED
+
+All three merely *correlated*.  Recording them because each looked convincing:
+
+1. **Machine contention.** Blamed for the ALU's 4.3 h.  Refuted by thread
+   accounting: one thread with 4301 s CPU while 61 of 69 idle, and **CPU ~= wall**
+   (18764 s CPU / 18750 s wall on the TLB).  A starved job accumulates *less* CPU
+   than wall, not the same.
+2. **Node width.** `wall / sum(w^2)` fitted the ALU and TLB within 12 %, which was
+   convincing until an isolated-node sweep came back **flat**: 20 GetMask nodes cost
+   8.3 / 7.9 / 7.7 / 8.6 / 8.2 s at widths 32 / 64 / 128 / 256 / 512 against a 9.3 s
+   import-only baseline.  There is **no missing >128-bit support**.  `pmp` refutes it
+   independently: 6.2 h with only 33 nodes above 128 bits, *longer* than the ALU's
+   4.3 h with 72.
+3. **Total term size** (cost proportional to nodes x fast-model bytes).  Ratio spans
+   40x across the ten designs (0.000 for `compressed_decoder`, 0.043 for
+   `ras`/`csr_buffer`), so no constant exists.
+
+**Lesson.** The width and term-size models were fitted to the two *slowest* designs
+and then assumed to explain the rest; both then mispredicted the small modules by
+more than 10x (the width model predicted 609 s for `ras`, which takes 47 s).
+Correlation across a handful of large samples is not a mechanism.  The only claim
+that survived was the one obtained by *removing* a suspect and re-measuring.
+
+### Still open: `pmp`
+
+`cva6_pmp_gate` (5344 nodes, 6.2 h) is **not** explained by this.  Its `GetMask`
+nodes are 2044/2044 on the O(1) all-ones fast path with only 32 above 128 bits, and
+its n-ary `Or` population carries a small `sum(arity*w^2)` (0.66M vs the ALU's 6.3M).
+Its per-op counts are `GetMask` 2044, `MuxN` 751, `And` 727, `SRA` 682, `Sext` 424,
+n-ary `Or` 423.  Attribute it the same way — by sampling a subset of one op's
+recurrences and measuring the marginal rate, rather than paying a 6 h run per
+hypothesis.
+
+### Localised: it is the CLOSER's two extra simp lemmas, not the `List.foldl`
+
+Bug 9 attributed the cost to "unfolding a `List.foldl`".  Staged execution says the
+fold is innocent and names the actual culprits.  All on `cva6_ras_gate` (11 n-ary
+`Or` nodes, every other recurrence stubbed; floor 12.2 s):
+
+| stage | wall | verdict |
+|---|---|---|
+| `show` + `sorry` | 10.9 s | the defeq restatement is **free** |
+| `show` + `rw [orn_bv_bridge]` + `sorry` | 7.5 s | the bridge rewrite is **free** |
+
+So neither the `phi`/`graphCert` lookup machinery nor the bridge lemma costs
+anything.  Bisecting the `simp only` set instead:
+
+| closer | wall | marginal | per node |
+|---|---|---|---|
+| `[fv]` | 7.3 s | — | — |
+| `+ List.foldl_cons, List.foldl_nil` | 8.0 s | +0.7 s | 0.06 s |
+| `+ BitVec.zero_or` | 22.4 s | **+14.4 s** | **1.30 s** |
+| `+ bv_to_bitvec_bvenc_zext` | 42.2 s | **+19.8 s** | **1.80 s** |
+| `+ bv_zext_id` + cast lemmas (full) | 48.3 s | +6.1 s | 0.55 s |
+
+**`BitVec.zero_or` and `bv_to_bitvec_bvenc_zext` are ~85 % of the cost.**  Both match
+with a free metavariable (`0#?w ||| ?x` and `bv_to_bitvec ?w (bvenc ?v)`), so once in
+the simp set they are attempted everywhere in the goal.  **Neither is in the default
+closer** — they are required *only* because `orn_bv_bridge`'s RHS is a
+`List.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, i.e. it introduces both a
+`0#w |||` seed and `bv_to_bitvec`-wrapped operands that nothing else does.  That is
+why `Or` is the single expensive operator.
+
+Cross-check in isolation: 40 copies of the *identical* arity-1 `Or` proof with the
+*identical* full closer, in a standalone file, cost **7.2 s total** — baseline.  The
+lemmas are only expensive against a real generated goal, which is why an isolated
+op-bridge benchmark (the kind used for the width sweep) cannot see this.
+
+**Fix, now precisely motivated:** a fold-free `orN_bridge` per small arity whose RHS
+is already in the fast model's `bv_zext a ||| bv_zext b ||| …` shape, exactly as
+`or_bridge` is for arity 2.  Then the closer needs neither `BitVec.zero_or` nor
+`bv_to_bitvec_bvenc_zext` and drops to the default set.  Arity 1 alone is 319 of
+`pmp`'s 423 n-ary `Or` nodes and 97 of the TLB's 112, so `or1_bridge` is the single
+highest-value lemma.
+
+### `pmp` attributed (per-op marginal rates, 40-node samples)
+
+`cva6_pmp_gate`, 5344 nodes, 6.2 h total.  Floor (head, 3 BT trees, 4719 source
+facts, `native_decide` wf, combiner, tail; **all** recurrences stubbed) = **184 s**,
+so the head is ~3 min of the 6.2 h and the recurrences are the rest.
+
+| op sampled (40 nodes) | wall | marginal | per node | population | projected |
+|---|---|---|---|---|---|
+| `Sext` | 185 s | +1 s | 0.03 s | 424 | 12 s |
+| `MuxN` | 184 s | +0 s | ~0 | 751 | ~0 |
+| `And` | 190 s | +6 s | 0.15 s | 735 | 110 s |
+| `SRA` | 190 s | +6 s | 0.15 s | 682 | 102 s |
+| **n-ary `Or`** | **>2751 s (killed)** | **>2567 s** | **>64 s** | **423** | **>27,000 s** |
+
+Everything except `Or` is negligible; `Or` alone accounts for the entire 22,425 s.
+Note the sampled `Or` nodes were **29/40 arity-1 at width 1** — trivial arithmetic —
+so the cost is neither arity nor width, consistent with the closer diagnosis above.
+
+### Arity sweep: arity 1 is the WORST case, not the widest
+
+Isolated, 10 nodes per point, real `Or` closer, all `exit 0` / 0 errors (checked —
+a fast run that silently errored would look like a fast proof):
+
+| arity | 10 nodes | per node above baseline |
+|---|---|---|
+| **1** | **19.1 s** | **~1.2 s** |
+| 4 | 5.4 s | ~0 |
+| 8 | 5.4 s | ~0 |
+| 16 | 5.7 s | ~0 |
+| 32 | 6.2 s | ~0 |
+
+Counter-intuitive but consistent with the closer diagnosis: at arity 1 the fast side
+is a bare `bv_zext a` with **no `|||` at all**, so the fold's `0#w ||| bv_to_bitvec …`
+seed has to be rewritten away entirely by `BitVec.zero_or` +
+`bv_to_bitvec_bvenc_zext`; at higher arity the two sides already share the `|||`
+skeleton.  This is fortunate for the fix: arity 1 is both the worst case *and* the
+most common (319 of `pmp`'s 423 n-ary `Or`, 97 of the TLB's 112), so `or1_bridge`
+alone should recover most of the loss.
+
+### Open quantitative gap
+
+Isolated arity-1 `Or` costs ~1.2 s/node; the same shape inside `cva6_ras_gate` costs
+~3.1 s/node and inside `cva6_pmp_gate` **>64 s/node** (sample average, 29/40 of the
+sample being arity-1/width-1).  So the *mechanism* is settled by removal-and-remeasure,
+but a ~50x in-context amplification is **not** explained — something about the real
+goal or the surrounding environment makes those two metavariable-headed simp lemmas
+far more expensive than in a standalone file.  Do not claim a cost model until that is
+measured; the fix does not depend on it.
+
+### CORRECTED and pinned to a single lemma: `bv_to_bitvec_bvenc_zext`
+
+Two claims in the sections above were wrong and are corrected here.  Both came from
+synthetic benchmarks; the correction came from isolating **one real node**.
+
+**Correction 1 — the arity sweep was measurement noise.**  It reported arity 1 at
+19.1 s / 10 nodes and arity 4-32 at ~5 s, concluding "arity 1 is the worst case".
+Re-running the *same file* under low load gives 8.1 s, and three repeats agree within
++-0.4 s.  The 19.1 s was contention from a concurrent job.  **At 10 nodes the effect
+is below the noise floor** -- never size a synthetic probe so the signal is smaller
+than the variance.
+
+**Correction 2 — arity 1 was the wrong target.**  Acting on the noisy sweep I added
+`or1_bridge` (a genuine, correct, shape-matched lemma -- kept, since it removes the
+metavariable lemmas from 8 of `ras`'s 11 Or nodes and is the right shape) and wired
+it.  Measured effect on `cva6_ras_gate`: **48.3 s -> 45.1 s**.  Almost nothing.
+Stubbing the **three remaining fold nodes** (nids 36/304/356, arity 3-4, width 130)
+instead: **45.1 s -> 10.4 s**.  So ~35 s of a 45 s run was **three nodes**, ~11.6 s
+each, while the eight arity-1 nodes were nearly free.
+
+**Localisation, one node, full file context.**  `rec36` alone (all other recurrences
+and the tail removed, but `phiTree` / `sourceEnv` / `graphCert` / src facts / wf kept)
+costs **32.0 s** against a **6.0 s** floor.  Bisecting its own proof:
+
+| proof prefix | wall | marginal |
+|---|---|---|
+| `show` only | 6.0 s | — |
+| `+ rw [orn_bv_bridge]` | 6.0 s | 0 |
+| `+ simp only [fv36]` | 6.0 s | 0 |
+| `+ List.foldl_cons, List.foldl_nil` | 6.0 s | **0 — the fold is innocent** |
+| `+ BitVec.zero_or` | 10.1 s | +4.1 s |
+| **`+ bv_to_bitvec_bvenc_zext`** | **32.2 s** | **+22.1 s (85 %)** |
+| full closer | 32.2 s | 0 |
+
+**One lemma, one node, 22 seconds.**  `bv_to_bitvec_bvenc_zext : bv_to_bitvec w (bvenc v)
+= bv_zext v` has **both** width arguments implicit, so its LHS head is
+`bv_to_bitvec ?w (bvenc ?v)`.  Under `simp only` that is matched against every
+subterm, and the surrounding context supplies many candidates -- the generated
+`outputsFromCert` / `nextStateFromCert` bodies alone hold `bv_to_bitvec <w> (rho <id>)`
+applications, and `phiTree`/`sourceEnv` add more.  Removing the metavariable search
+removes the cost: a variant that tries a *pre-instantiated* `rw` at the four concrete
+widths fails to match (the applications are nested inside the fold at that point, so
+this is not the fix) but **fails at 6.05 s -- the floor**, confirming the search
+itself is the expense.
+
+Why every synthetic probe missed it: in isolation the same node shape, the same
+mixed operand widths (65/66/130/131 -> 130), the same arity, and the same full closer
+all cost ~5 s for 8 nodes.  **The lemma is only expensive against a real generated
+goal, because the cost is proportional to how much surrounding context simp must
+search.**  That is exactly what an isolated benchmark removes.
+
+**Direction for the fix (not yet implemented, do not guess again):** keep the closer's
+lemmas from carrying free metavariables in head position.  Options to measure, in
+order of expected value: (a) restate `orn_bv_bridge` so its RHS is the fast model's
+`bv_zext a ||| bv_zext b ||| ...` shape at each small arity -- `or3_bridge`/
+`or4_bridge` following `and3_bridge`/`and4_bridge`, which needs neither
+`BitVec.zero_or` nor `bv_to_bitvec_bvenc_zext`; (b) failing that, discharge the
+`bv_to_bitvec` occurrences with a targeted `conv`/`rw` at known widths rather than a
+global `simp only`.  Note (a) is the same fix Bug 9 applied at arity 2 and this
+document has now recommended twice on weaker evidence -- the difference is that the
+target is now identified by measurement (arity 3+, and the specific lemma) rather
+than by inference.
+
+### Per-op attribution on `cva6_instr_scan_gate`: 4 nodes = 91 % of the run
+
+The `or1/or3/or4` fix moved `ras` 48.3 s -> 7.2 s (6.9x) but `instr_scan` only
+339 s -> 329 s (1.03x), which **contradicted** the claim that arity 3+ was the
+general target.  Attribution by stubbing one op group at a time (full = 330 s):
+
+| stubbed group | wall | saving | nodes | s/node |
+|---|---|---|---|---|
+| **`Or` arity 60** | **178 s** | **152 s** | 2 | **76** |
+| **`Or` arity 55** | **255 s** | **75 s** | 1 | **75** |
+| **`Or` arity 47** | **256 s** | **74 s** | 1 | **74** |
+| `SHL` | 324 s | 6 s | 222 | 0.03 |
+| `GetMask` | 328 s | 2 s | 301 | 0.01 |
+| `And`, `EQ`, `MuxN`, `MuxBool`, `Not`, `Ror`, `Sext`, `SRA`, `Or` ar1-4 | 328-333 s | ~0 | 21-38 each | ~0 |
+
+**Four nodes are 301 of 330 s (91 %).**  301 `GetMask` and 222 `SHL` nodes together
+cost 8 s.  This is the same lemma as the `ras` finding — those four nodes are the ones
+still on `orn_bv_bridge` after the fix — so the *mechanism* holds, but the **dose
+does not**:
+
+| arity | width | s/node |
+|---|---|---|
+| 3-4 | 130 | 11.6 |
+| 47 | 65 | 74 |
+| 55 | 65 | 75 |
+| 60 | 65 | 76 |
+
+Cost is **monotone in arity**, not a threshold at 3, and the arity term dominates
+width (arity 47-60 at w=65 costs 6x more than arity 3-4 at w=130).  Consistent with
+the metavariable diagnosis: each additional operand adds another `bv_to_bitvec (bvenc _)`
+subterm for `simp only` to search over, so the search space grows with arity.
+
+**Correction to this document's own earlier claim.**  The section above says "the real
+target is arity 3+" on the strength of three experiments **all from `ras`** — a module
+whose fold nodes happen to be 3 of 76.  That was n=1 generalised to a rule.  The
+accurate statement: *the metavariable-headed closer is the mechanism; per-node cost
+grows with arity; which arities matter is per-module and must be read off the census.*
+
+**Remaining fold populations** (after or1/or3/or4), i.e. the exact remaining work:
+
+| module | arities still on the fold |
+|---|---|
+| `instr_scan` | 47, 55, 60x2 |
+| `compressed_decoder` | 5x11, 6x5, 7, 8, 10, 11x3, 12, 18, 19 |
+| `raw_checker` | 7, 8 |
+| `controller` | 6 |
+| `csr_buffer` | 5 |
+| `ras`, `instr_realign` | none |
+
+Extending `or3/or4` to arity 5-8 covers everything except `instr_scan`'s 47-60 and
+`compressed_decoder`'s 10-19.  Those high arities need a different treatment than one
+lemma per arity -- either a fold-free n-ary bridge stated by recursion on the operand
+list, or a closer that avoids the metavariable search (targeted `conv`/`rw` at known
+widths).  **Measure before choosing**; the cheap lemmas are not obviously the right
+answer at arity 60.

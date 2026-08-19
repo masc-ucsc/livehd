@@ -60,13 +60,24 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "and3_bridge (fold-free)")
     if op == "Op_And" and arity == 4:
         return ("ok", "and4_bridge (fold-free)")
+    if op == "Op_Or" and arity == 1:
+        # Arity-1 Or takes the shape-matched or1_bridge with the DEFAULT closer; the
+        # n-ary fold's closer needs two metavariable-headed simp lemmas that dominate
+        # runtime (Bug 9 follow-up).
+        return ("ok", "or1_bridge (fold-free)")
     if op == "Op_Or" and arity == 2:
         # Binary Or does NOT take the n-ary bridge: orn_bv_bridge is correct at
         # arity 2 but its closer unfolds a List.foldl, which sent the kernel into
         # unbounded recursion on deep operand chains (Bug 9).
         return ("ok", "or_bridge (binary fast path)")
+    if op == "Op_Or" and arity == 3:
+        return ("ok", "or3_bridge (fold-free)")
+    if op == "Op_Or" and arity == 4:
+        return ("ok", "or4_bridge (fold-free)")
     if op == "Op_Or":
-        return ("ok", "orn_bv_bridge (n-ary)")
+        # Falls back to the fold, whose closer needs the metavariable-headed
+        # bv_to_bitvec_bvenc_zext -- measured at ~22 s on a single width-130 node.
+        return ("ok", "orn_bv_bridge (n-ary, SLOW closer)")
     if op == "Op_Xor" and arity == 2:
         return ("ok", "xor_bridge")
     if op == "Op_Not" and arity == 1:

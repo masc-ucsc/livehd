@@ -2321,8 +2321,30 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         // fast def syntactically, so the default closer suffices and no fold is
         // ever introduced.
         bridge_call = "or_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 1) {
+        // Arity-1 Or takes the shape-matched or1_bridge, for the same reason binary
+        // Or takes or_bridge (Bug 9 and its follow-up).  `orn_bv_bridge`'s RHS is a
+        // `List.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w`, a shape the fast
+        // model never emits, so reconciling it drags `BitVec.zero_or` and
+        // `bv_to_bitvec_bvenc_zext` into the closer -- two metavariable-headed simp
+        // lemmas that simp then tries across the whole goal.  Measured on
+        // cva6_ras_gate's 11 n-ary Or nodes: those two take the file 9.2 s -> 44.3 s.
+        // At arity 1 the fast side is a bare `bv_zext a` with no `|||` at all, so the
+        // entire fold seed has to be rewritten away -- the worst case, and also the
+        // most common (319 of pmp's 423, 97 of the TLB's 112).
+        bridge_call = "or1_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 3) {
+        bridge_call = "or3_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_Or" && info.deps.size() == 4) {
+        bridge_call = "or4_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Or") {
         // n-ary Or over the certificate BV list (any arity, mixed widths).
+        //
+        // MEASURED HOT PATH -- prefer a fold-free arity-specific bridge whenever one
+        // exists.  This closer's `bv_to_bitvec_bvenc_zext` has both widths implicit,
+        // so simp searches the whole goal for `bv_to_bitvec ?w (bvenc ?v)`; on one
+        // real width-130 arity-4 node that single lemma cost 22 s of a 26 s proof.
+        // See OpBridge's "Fold-free n-ary Or" block for the bisection.
         bridge_call = "orn_bv_bridge";
         closer = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, BitVec.zero_or, "
                  "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
