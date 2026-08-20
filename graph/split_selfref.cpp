@@ -114,7 +114,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   stop_reasons_out = 0;
 
   I(scoped_cycle != nullptr);
-  auto                          in_cycle = *scoped_cycle;
+  // A REFERENCE, not a copy: this set is read-only here, it can hold every comb
+  // node of a large module, and split_packed_selfref_cycles re-enters this
+  // function once per fixpoint round.
+  const auto&                   in_cycle = *scoped_cycle;
   std::vector<hhds::Node_class> comb_nodes(in_cycle.begin(), in_cycle.end());
   std::sort(comb_nodes.begin(), comb_nodes.end(), [](const auto& a, const auto& b) {
     return a.get_debug_nid() < b.get_debug_nid();
@@ -844,10 +847,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
   int      unresolved_on_cycle = 0;  // on-cycle bit-field reads we could not dissolve (diagnostic)
   unsigned any_stop_reasons    = 0;  // ... and WHICH limit stopped them (kStop* bits)
-  for (auto& R : comb_nodes) {
-    if (!in_cycle.contains(R)) {
-      continue;
-    }
+  for (auto& R : comb_nodes) {  // == in_cycle, sorted for a deterministic visit order
     created      = 0;      // per-reader budget: this read pays only for its own subtree
     cap_hit      = false;  // per-reader cap-taint detection (the memoization guard in resolve)
     // Per-reader too, and for the same reason `cap_hit` is: a descent that was
@@ -1032,15 +1032,21 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
   return false;
 }
 
+// `max_rounds` is the caller's round budget. The per-wire entry point can afford
+// the full 16 because it hands over a scoped buffer/driver pair and stops the
+// moment `comb_pin_depends_on` goes false. A caller with NO such stop condition
+// (split_packed_selfref_cycles, which re-derives the cycle set itself) must ask
+// for ONE round: running the fixpoint blind keeps splitting long after the cycle
+// is gone and leaves a chain of identity Get_masks behind.
 static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth,
                                                     const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
-                                                    const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver) {
+                                                    const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver,
+                                                    int max_rounds = 16) {
   // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
   // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
-  constexpr int max_rounds = 16;
-  Split_result  r;
+  Split_result r;
   for (; r.rounds < max_rounds; ++r.rounds) {
     const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth, scoped_cycle);
     r.total     += n;
@@ -1378,6 +1384,7 @@ struct Split_job {
   const absl::flat_hash_set<hhds::Node_class>* scoped_cycle  = nullptr;
   const hhds::Node_class*                      scoped_buffer = nullptr;
   const hhds::Pin_class*                       scoped_driver = nullptr;
+  int                                          max_rounds    = 16;
   Split_result                                 result;
   std::exception_ptr                           error;  // rethrown on the CALLER's thread after the join
 };
@@ -1387,8 +1394,12 @@ void* split_worker(void* arg) {
   // An exception must never escape a pthread start routine: that would call
   // std::terminate instead of returning the lowering error on the caller.
   try {
-    job->result
-        = split_packed_selfref_wires_body(job->g, kSplitWorkerDepth, job->scoped_cycle, job->scoped_buffer, job->scoped_driver);
+    job->result = split_packed_selfref_wires_body(job->g,
+                                                 kSplitWorkerDepth,
+                                                 job->scoped_cycle,
+                                                 job->scoped_buffer,
+                                                 job->scoped_driver,
+                                                 job->max_rounds);
   } catch (...) {
     job->error = std::current_exception();
   }
@@ -1400,7 +1411,7 @@ void* split_worker(void* arg) {
 // shallow result rather than running the deep guard on a stack too small to hold
 // it.
 bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
-                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver) {
+                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver, int max_rounds = 16) {
   pthread_attr_t attr;
   if (pthread_attr_init(&attr) != 0) {
     return false;
@@ -1409,6 +1420,7 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
                 .scoped_cycle  = scoped_cycle,
                 .scoped_buffer = scoped_buffer,
                 .scoped_driver = scoped_driver,
+                .max_rounds    = max_rounds,
                 .result        = {},
                 .error         = {}};
   pthread_t tid{};
@@ -1467,7 +1479,10 @@ int split_packed_selfref_cycles(hhds::Graph* g) {
       // on the worker stack, then stop either way.
       if ((pass_stop & kStopDepth) != 0) {
         Split_result deep;
-        if (run_deep_on_big_stack(g, deep, &cyc, nullptr, nullptr) && deep.total > 0) {
+        // ONE round: the outer loop re-derives the cycle set and re-enters, so
+        // the deep walk must not run its own blind fixpoint (see the body's
+        // `max_rounds` note).
+        if (run_deep_on_big_stack(g, deep, &cyc, nullptr, nullptr, /*max_rounds=*/1) && deep.total > 0) {
           total += deep.total;
           continue;
         }
@@ -1478,6 +1493,44 @@ int split_packed_selfref_cycles(hhds::Graph* g) {
   }
   if (debug) {
     std::print("split[cycles]: rounds={} rewired={} unresolved={} stop={:#x}\n", round, total, unresolved, stop_reasons);
+  }
+  // NEVER fail silently. This entry point has no source-located owner the way
+  // the per-wire one does (upass/tolg raises the `combinational loop` error
+  // there), so a cycle that survives here is reported by the mutator that
+  // exposed it -- otherwise the only symptom is a downstream refusal with no
+  // link back to the instance that was dissolved ("operand has no encodable
+  // driver", verilator ALWCOMBORDER, or a sim schedule that rejects the graph).
+  if (!cyc.empty()) {
+    std::string why;
+    for (const auto& [bit, name] : {
+             std::pair{kStopBudget,     "node-budget"},
+             std::pair{ kStopDepth, "recursion-depth"},
+             std::pair{ kStopShape,   "operand-shape"}
+    }) {
+      if (stop_reasons & bit) {
+        why += why.empty() ? name : std::string(",") + name;
+      }
+    }
+    if (why.empty()) {
+      why = "no-rule";  // every descent was refused by an unhandled operator, not by a limit
+    }
+    livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
+        .msg(
+            "'{}': {} node(s) remain on a word-level combinational cycle after {} split pass(es) ({} read(s) rewired, {} "
+            "unresolved; stopped by {})",
+            g->get_name(),
+            cyc.size(),
+            round,
+            total,
+            unresolved,
+            why)
+        .hint(stop_reasons == kStopBudget
+                  ? "only the node-creation budget stopped it; the budget scales with the on-cycle node count"
+                  : (stop_reasons & (kStopDepth | kStopShape)) != 0
+                        ? "a descent hit the recursion guard or an operand shape this pass cannot split -- run with "
+                          "LIVEHD_SIM_SPLIT_DEBUG=1 to see the refusing slice"
+                        : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
+        .emit();
   }
   return total;
 }

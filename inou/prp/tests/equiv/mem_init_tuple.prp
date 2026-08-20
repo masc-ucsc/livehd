@@ -8,8 +8,11 @@
 
 // 1a-mem — a tuple-literal reg-array initializer packs per entry onto the
 // Memory `init` pin (entry 0 in the low bits): power-on contents, same
-// mechanism as a mut array's initializer; with no reset in the module it is
-// power-on-only. The async memory read lands @[0].
+// mechanism as a mut array's initializer, and the per-entry RESET value too
+// (`= <literal>` says the same thing on an array that it says on a scalar reg).
+// The module therefore mints the implicit reset it never names, and the restore
+// sweeps one entry per cycle — the per-entry values become a ROM lookup on the
+// sweep counter. The async memory read lands @[0].
 pub mod regi2(a:u8, i:u2, we:bool) -> (z:u8@[0]) {
   reg t:[4]u8 = (1,2,3,4)
   if we {

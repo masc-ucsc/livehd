@@ -1218,27 +1218,112 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     ++mem_addr_bits;
   }
 
-  // ── Whole-array memory (the `update` bus is driven) ─────────────────────────
-  // The entire array is (re)written from one `update` bus instead of N per-entry
-  // write ports: registered (clocked, reset to the runtime `init` bus) when a
-  // clock is present, else combinational. Per-port writes still apply and OVERRIDE
-  // the bulk update (emitted after it => last-write wins). An async `read_all`
-  // driver (reserved pid) exposes the whole array. Emitted inline as a reg-array;
-  // the cgen_memory_* wrappers cannot carry a runtime reset bus / update / read_all.
-  if (!mem_update_dpin.is_invalid()) {
+  // Does anything read the WHOLE array (the reserved read_all driver pid)?
+  // Computed here because it selects the emission style below, not just what
+  // that style emits.
+  bool wants_read_all = false;
+  for (const auto& e2 : node.out_edges()) {
+    if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
+      wants_read_all = true;
+      break;
+    }
+  }
+
+  // ── Inline reg-array memory ────────────────────────────────────────────────
+  // Taken when the `update` bus is driven (the entire array is (re)written from
+  // one bus instead of N per-entry write ports: registered when a clock is
+  // present, else combinational; per-port writes still apply and OVERRIDE the
+  // bulk update, emitted after it so last-write wins) -- OR when anything reads
+  // the array WHOLE.
+  //
+  // read_all is the second trigger because the cgen_memory_* wrappers below
+  // expose only their per-port douts: they have no whole-array output and no
+  // way to add one, so a memory with a read_all used to emit its `_dout_1048576`
+  // wire and then leave it UNDRIVEN -- valid-looking Verilog whose whole-array
+  // reader silently reads nothing (measured on a packed reg array that is both
+  // element-indexed and assigned whole; it LEC-refuted). The wrappers also
+  // cannot carry a runtime reset bus or an update bus, which is the original
+  // reason this path exists.
+  if (!mem_update_dpin.is_invalid() || wants_read_all) {
+    const bool has_update = !mem_update_dpin.is_invalid();
+    // The inline form has NO collision model: a registered read is a continuous
+    // `assign` off the array reg, so it always returns the COMMITTED value, and
+    // a combinational one is emitted after the writes, so it always forwards.
+    // The cgen_memory_* wrappers below carry the per-(read,write) FWD/UNDEF
+    // matrices instead. Diverting a `type` 0/1 memory here purely because
+    // something reads it WHOLE therefore silently downgrades `ordering="fwd"` /
+    // `ordering="none"` to `"old"` -- so refuse loudly rather than emit Verilog
+    // that disagrees with the graph. (A whole-array `update` cell never gets a
+    // real matrix: tolg leaves `fwd` at its provisional declare value there.)
+    if (!has_update && (mem_type == 0 || mem_type == 1)) {
+      const bool collides = (!mem_fwd_dpin.is_invalid() && !hydrate_const(mem_fwd_dpin).is_known_zero())
+                            || (!mem_undef_dpin.is_invalid() && !hydrate_const(mem_undef_dpin).is_known_zero());
+      if (collides) {
+        livehd::diag::err("inou.cgen", "mem-readall-collision", "unsupported")
+            .msg(
+                "memory {} is read WHOLE (read_all) and also carries a non-zero same-cycle collision matrix; the inline "
+                "reg-array emission the whole read forces has no forwarding model",
+                debug_name(node))
+            .hint("spell `ordering=\"old\"` on the array, or drop the whole-array read so the cgen_memory_* wrapper (which "
+                  "carries FWD/UNDEF) is used")
+            .fatal();
+        return;
+      }
+    }
     const auto aname      = get_scaped_name(absl::StrCat(iraw, "_data"));
-    const auto clock_dpin = port_vector.empty() ? hhds::Pin_class{} : port_vector[0].clock;
+    // The FIRST clock any port carries, not port zero's. tolg always wires the
+    // cell clock into port 0's block, but a graph from another front end (or a
+    // reloaded `lg:`) may put it on a later port -- and now that `read_all`
+    // alone diverts a cell here, guessing "no clock" would emit a clocked
+    // memory as a pure `always_comb` array, silently dropping all of its state.
+    hhds::Pin_class clock_dpin;
+    for (const auto& p : port_vector) {
+      if (!p.clock.is_invalid()) {
+        clock_dpin = p.clock;
+        break;
+      }
+    }
     const bool registered = !clock_dpin.is_invalid();
     const int  busw       = mem_size * mem_bits;
 
     fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
     // Bind the buses to nets so per-entry part-selects are always legal.
     const auto updbus = absl::StrCat(aname, "_upd");
-    fout->append(absl::StrCat("wire [", busw - 1, ":0] ", updbus, " = ", get_wire_or_const(mem_update_dpin, busw, true), ";\n"));
+    if (has_update) {
+      fout->append(absl::StrCat("wire [", busw - 1, ":0] ", updbus, " = ", get_wire_or_const(mem_update_dpin, busw, true), ";\n"));
+    }
+    // COMPTIME power-on contents: a constant `init` with NO runtime `reset`
+    // condition (with one, the same pin is the reset-value BUS instead — see
+    // below). The cgen_memory_* wrappers spell this as their INIT_EN/INIT
+    // parameters; inline it is either an `initial` block (registered) or the
+    // per-cycle default of the combinational always_comb. Sliced once here
+    // because both consumers want the same per-entry constants.
+    std::vector<std::string> init_entries;
+    if (!mem_init_dpin.is_invalid() && mem_reset_dpin.is_invalid() && is_const_pin(mem_init_dpin)) {
+      const auto init_value = hydrate_const(mem_init_dpin);
+      init_entries.reserve(static_cast<size_t>(mem_size));
+      for (int i = 0; i < mem_size; ++i) {
+        const auto lane = init_value.get_mask_op(*Dlop::get_mask_value((i + 1) * mem_bits - 1, i * mem_bits));
+        init_entries.emplace_back(const_to_verilog(*lane, mem_bits, true));
+      }
+    }
     std::string initbus;
-    if (!mem_init_dpin.is_invalid()) {
+    if (!mem_init_dpin.is_invalid() && !mem_reset_dpin.is_invalid()) {
+      // Runtime reset-value bus (whole-array cells only). With no `reset`
+      // condition the same pin is instead the COMPTIME power-on contents.
       initbus = absl::StrCat(aname, "_rst");
       fout->append(absl::StrCat("wire [", busw - 1, ":0] ", initbus, " = ", get_wire_or_const(mem_init_dpin, busw, true), ";\n"));
+    } else if (registered && !init_entries.empty()) {
+      // Without this a memory diverted here by read_all would silently lose its
+      // power-on state. ONLY for the registered form: the combinational form
+      // drives the array from an always_comb, and IEEE 1800 forbids a variable
+      // written by always_comb being written by any other process — the array
+      // takes its power-on contents as that block's per-cycle default instead.
+      fout->append("initial begin\n");
+      for (int i = 0; i < mem_size; ++i) {
+        fout->append(absl::StrCat("  ", aname, "[", i, "] = ", init_entries[i], ";\n"));
+      }
+      fout->append("end\n");
     }
     auto entry_sel
         = [&](const std::string& bus, int i) { return absl::StrCat(bus, "[", (i + 1) * mem_bits - 1, ":", i * mem_bits, "]"); };
@@ -1255,12 +1340,14 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fout->append("  end else begin\n");
         ind = "    ";
       }
-      const bool gated = !mem_update_enable_dpin.is_invalid();
+      const bool gated = has_update && !mem_update_enable_dpin.is_invalid();
       if (gated) {
         fout->append(absl::StrCat(ind, "if (", get_wire_or_const(mem_update_enable_dpin, 1, true), ") begin\n"));
       }
-      for (int i = 0; i < mem_size; ++i) {  // bulk update (default); per-port writes below override
-        fout->append(absl::StrCat(ind, gated ? "  " : "", aname, "[", i, "] <= ", entry_sel(updbus, i), ";\n"));
+      if (has_update) {
+        for (int i = 0; i < mem_size; ++i) {  // bulk update (default); per-port writes below override
+          fout->append(absl::StrCat(ind, gated ? "  " : "", aname, "[", i, "] <= ", entry_sel(updbus, i), ";\n"));
+        }
       }
       if (gated) {
         fout->append(absl::StrCat(ind, "end\n"));
@@ -1284,8 +1371,26 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       fout->append("end\n");
     } else {  // combinational whole-array (no clock); update_enable n/a (no hold state)
       fout->append("always_comb begin\n");
-      for (int i = 0; i < mem_size; ++i) {
-        fout->append(absl::StrCat("  ", aname, "[", i, "] = ", entry_sel(updbus, i), ";\n"));
+      if (has_update) {
+        for (int i = 0; i < mem_size; ++i) {
+          fout->append(absl::StrCat("  ", aname, "[", i, "] = ", entry_sel(updbus, i), ";\n"));
+        }
+      } else {
+        // A combinational array holds NO state, so every entry has to be
+        // assigned on every evaluation or the always_comb infers a latch and
+        // stale entries survive. Default = the comptime power-on contents (zero
+        // when there are none); the per-port writes below override it — the
+        // same forwarding semantics the non-inline `type==2` array path emits.
+        // Reachable since read_all (not just `update`) diverts a cell here.
+        for (int i = 0; i < mem_size; ++i) {
+          fout->append(absl::StrCat("  ",
+                                    aname,
+                                    "[",
+                                    i,
+                                    "] = ",
+                                    init_entries.empty() ? absl::StrCat(mem_bits, "'b0") : init_entries[i],
+                                    ";\n"));
+        }
       }
       for (auto& p : port_vector) {
         if (p.rdport || p.addr.is_invalid() || p.din.is_invalid()) {
@@ -1327,14 +1432,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]"));
       ++n_rd_pos;
     }
-    bool has_read_all = false;
-    for (const auto& e2 : node.out_edges()) {
-      if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
-        has_read_all = true;
-        break;
-      }
-    }
-    if (has_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
+    if (wants_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
       std::string cat = "{";
       for (int i = mem_size - 1; i >= 0; --i) {
         cat += absl::StrCat(aname, "[", std::to_string(i), "]", i ? "," : "");
@@ -1377,8 +1475,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     const int eff_wr = n_wr_ports > 0 ? n_wr_ports : 1;
 
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
-    // big reset-restored reg array minting one restore port per entry) needs
-    // a new cgen_memory_<R>rd_<W>wr.v variant.
+    // many-ported register file) needs a new cgen_memory_<R>rd_<W>wr.v
+    // variant.
     const bool have_wrapper        = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
                                               || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
                                                   : (eff_rd == 1 && eff_wr == 1);
@@ -3683,7 +3781,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     add_to_pin2var(fout, amt_dpin, get_scaped_name(pin_wire_name(amt_dpin)), is_unsign(amt_dpin));
   }
 
-  // Third pass — a CLOCK must never be an inlined expression either.
+  // Third pass — a CLOCK (and a flop RESET) must never be an inlined
+  // expression either.
   //
   // A clock lands in an EDGE EVENT CONTROL (`always @(posedge <x>)`) and in the
   // cgen_memory_* wrapper's `.clk()` port. Verilog accepts an expression there,
@@ -3698,36 +3797,47 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
   // name. Give the clock its own net; a hand-written golden spells it that way
   // too (`wire gclk; assign gclk = clk_b & gate;`).
   //
-  // Runs as its own pass so it sees the FINAL pin2var: a module-input clock, a
-  // flop-Q clock divider or a fanout>=2 clock is already declared above and is
-  // left alone.
+  // A flop RESET has the identical hazard, and the same two consumers: an
+  // async reset lands in the edge event (`or posedge <x>`), and the sync level
+  // test reads it through get_wire_or_const — which ignores pin2expr and emits
+  // a bare undeclared name. A DERIVED reset used once is now an ordinary shape:
+  // a reg array's reset-restore sweep counter parks on `!reset` (upass.tolg
+  // build_restore_sweep), and in a memory-only design that inverter's single
+  // reader is this pin. It emitted `if (eq_32)` against no such net.
+  // (A Memory's own whole-array `reset` needs nothing here: every Sub/Memory
+  // input driver is force-declared above.)
+  //
+  // Runs as its own pass so it sees the FINAL pin2var: a module-input clock or
+  // reset, a flop-Q clock divider or a fanout>=2 driver is already declared
+  // above and is left alone.
   for (auto node : graph->body().nodes()) {
     const auto op = type_op_of(node);
     if (!is_type_register(node) && op != Ntype_op::Memory) {
       continue;
     }
     for (const auto& e : node.inp_edges()) {
-      if (!str_tools::ends_with(Ntype::get_sink_name(op, e.sink.get_port_id()), "clock_pin")) {
+      const auto pin_name = Ntype::get_sink_name(op, e.sink.get_port_id());
+      if (!str_tools::ends_with(pin_name, "clock_pin") && pin_name != "reset_pin") {
         continue;
       }
-      auto clk_dpin = e.driver;
-      if (clk_dpin.is_invalid() || is_const_pin(clk_dpin) || pin2var.contains(clk_dpin.get_class_index())) {
+      auto ctl_dpin = e.driver;
+      if (ctl_dpin.is_invalid() || is_const_pin(ctl_dpin) || pin2var.contains(ctl_dpin.get_class_index())) {
         continue;  // tied off, or already a declared net / module input
       }
       // Same hazard the second pass argues above: a pin parked in pin2expr has
       // NO assignment emitter, so declaring it would mint a net nothing drives
       // -- and get_expression prefers pin2var, so the flop would then clock off
       // a dangling `x`. Leave those with their inline text.
-      if (pin2expr.contains(clk_dpin.get_class_index())) {
+      if (pin2expr.contains(ctl_dpin.get_class_index())) {
         continue;
       }
       // A Clock_cell has no Verilog lowering at all and create_registers raises
       // a LOUD fatal for it. Declaring one here would replace that fatal with a
       // silent undriven net -- the dropped-clock-gate miscompile class.
-      if (type_op_of(clk_dpin.get_master_node()) == Ntype_op::Clock_cell) {
+      if (type_op_of(ctl_dpin.get_master_node()) == Ntype_op::Clock_cell) {
         continue;
       }
-      add_to_pin2var(fout, clk_dpin, get_scaped_name(pin_wire_name(clk_dpin)), is_unsign(clk_dpin));
+      add_to_pin2var(fout, ctl_dpin, get_scaped_name(pin_wire_name(ctl_dpin)), is_unsign(ctl_dpin));
     }
   }
 

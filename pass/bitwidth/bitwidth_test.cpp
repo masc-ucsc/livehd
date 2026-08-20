@@ -3,6 +3,7 @@
 #include "bitwidth.hpp"
 
 #include <memory>
+#include <utility>
 
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -32,6 +33,19 @@ TEST(BitwidthRange, MinimalUnsignedWidths) {
   Bitwidth_range wide;
   wide.set_ubits_range(128);
   EXPECT_EQ(wide.get_ubits(), 128);
+}
+
+TEST(BitwidthRange, UnsignedUnknownKeepsPayloadWidthWhenMerged) {
+  for (const auto [literal, payload_bits] : {std::pair{"0ub?", 1}, std::pair{"0ub???????", 7}}) {
+    const auto unknown = Dlop::from_pyrope(literal);
+    Bitwidth_range range(*unknown);
+    EXPECT_EQ(range.get_ubits(), payload_bits);
+
+    Bitwidth_range declared;
+    declared.set_ubits_range(payload_bits);
+    range.set_wider_range(declared);
+    EXPECT_EQ(range.get_ubits(), payload_bits) << literal << " gained a data bit when merged with its declared range";
+  }
 }
 
 // A Sum fed by two graph inputs that carry NO declared width: bitwidth cannot

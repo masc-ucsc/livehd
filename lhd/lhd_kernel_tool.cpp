@@ -713,10 +713,7 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b) {
     auto bn = bnodes[i];
     if (!same_attr(an, bn, hhds::attrs::name) || !same_attr(an, bn, livehd::attrs::color)
         || !same_attr(an, bn, livehd::attrs::place) || !same_attr(an, bn, livehd::attrs::proven)
-        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::aggregate_origin)
-        || !same_attr(an, bn, livehd::attrs::aggregate_source_index) || !same_attr(an, bn, livehd::attrs::aggregate_lane_ordinal)
-        || !same_attr(an, bn, livehd::attrs::aggregate_bit_offset) || !same_attr(an, bn, livehd::attrs::aggregate_bit_width)
-        || !same_attr(an, bn, livehd::attrs::aggregate_extent) || !same_attr(an, bn, livehd::attrs::const_value)
+        || !same_attr(an, bn, livehd::attrs::runtime_check) || !same_attr(an, bn, livehd::attrs::const_value)
         || !same_attr(an, bn, livehd::attrs::lut) || !same_range_attr(an, bn, livehd::attrs::time_range)
         || !same_range_attr(an, bn, livehd::attrs::pending_time)) {
       return false;

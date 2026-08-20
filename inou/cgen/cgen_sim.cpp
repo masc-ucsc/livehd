@@ -1541,22 +1541,16 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // carries a declared u8 hint), but this mux can materialize the literal
         // directly at the result width. Compare against the literal's own
         // representation; non-constant arms still require their full carrier.
-        // Dlop::get_bits() is the SIGNED carrier width, so a NON-NEGATIVE
-        // literal reports magnitude+1 (`1` -> 2, `255` -> 9). Comparing that
-        // against the result carrier rejected every `u1` mux with a constant
-        // `1` arm. The literal is materialized at the result width, so the
-        // requirement is its magnitude alone; a negative / unknown-carrying
-        // literal still needs the full signed carrier.
+        // The literal is materialized at the result width, so the requirement
+        // is its PAYLOAD, which is what upass/tolg stamped the merge with --
+        // hence the shared literal_payload_bits rather than a private copy of
+        // the signed-carrier arithmetic (an unknown-carrying `0ub?` arm used to
+        // demand the carrier here and fatal on a graph tolg had sized right).
         const auto arm_width = [](const hhds::Pin_class& pin) {
           if (!is_const_pin(pin)) {
             return std::max(wbits_of(pin), 1);
           }
-          const auto value = hydrate_const(pin);
-          const int  bits  = static_cast<int>(value.get_bits());
-          if (value.is_numeric() && !value.has_unknowns() && !value.is_negative()) {
-            return std::max(1, bits - 1);
-          }
-          return std::max(1, bits);
+          return std::max(1, static_cast<int>(livehd::graph_util::literal_payload_bits(hydrate_const(pin))));
         };
         const int false_w = arm_width(e[1].driver);
         const int true_w  = arm_width(e[2].driver);

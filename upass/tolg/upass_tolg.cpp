@@ -101,7 +101,12 @@ struct Val {
     if (v.is_just_i64()) {
       return mw_of_val(v.to_just_i64());
     }
-    return std::max<int32_t>(1, static_cast<int32_t>(v.get_bits()));
+    // The literal PAYLOAD width, not Dlop's signed carrier: a non-negative
+    // constant (an unsigned unknown such as `0ub?` included) carries one
+    // leading zero beyond its payload, and that headroom must not widen a
+    // Mux/Hotmux arm or an enclosing Concat lane. Shared with pass/cprop's
+    // lossless-carrier rule and cgen_sim's mux-arm check.
+    return livehd::graph_util::literal_payload_bits(v);
   }
   return 0;
 }
@@ -1199,23 +1204,6 @@ private:
       // Runner-stamped instance-path prefix for a reg inside an inlined comb
       // (`pipeB_ex_mem`); finalize_regs prepends it (dotted) to the local name.
       info.hier_prefix = std::string(val);
-    } else if (key == "sroa_origin") {
-      std::string_view origin = val;
-      if (origin.size() >= 2
-          && ((origin.front() == '\'' && origin.back() == '\'') || (origin.front() == '"' && origin.back() == '"'))) {
-        origin = origin.substr(1, origin.size() - 2);
-      }
-      info.aggregate_origin = std::string(origin);
-    } else if (key == "sroa_source_index") {
-      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_source_index);
-    } else if (key == "sroa_lane_ordinal") {
-      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_lane_ordinal);
-    } else if (key == "sroa_bit_offset") {
-      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_bit_offset);
-    } else if (key == "sroa_bit_width") {
-      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_bit_width);
-    } else if (key == "sroa_extent") {
-      std::from_chars(val.data(), val.data() + val.size(), info.aggregate_extent);
     } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
     } else {
@@ -1409,17 +1397,6 @@ private:
           livehd::graph_util::set_pin_name(qn, final_name);
           flop.set_name(final_name);
         }
-      }
-
-      if (!info.aggregate_origin.empty()) {
-        const std::string aggregate_name
-            = info.hier_prefix.empty() ? info.aggregate_origin : (info.hier_prefix + "." + info.aggregate_origin);
-        flop.attr(livehd::attrs::aggregate_origin).set(aggregate_name);
-        flop.attr(livehd::attrs::aggregate_source_index).set(info.aggregate_source_index);
-        flop.attr(livehd::attrs::aggregate_lane_ordinal).set(info.aggregate_lane_ordinal);
-        flop.attr(livehd::attrs::aggregate_bit_offset).set(info.aggregate_bit_offset);
-        flop.attr(livehd::attrs::aggregate_bit_width).set(info.aggregate_bit_width);
-        flop.attr(livehd::attrs::aggregate_extent).set(info.aggregate_extent);
       }
 
       // Runs after the walk: anchor this reg's diagnostics at its declaration
@@ -1720,7 +1697,7 @@ private:
     // Comptime arrays have already been evaluated and every runtime use is
     // materialized by the runner (for example as a tuple-literal reg init).
     // Their original initializer stores remain in the marked LNAST for source
-    // fidelity, but they must not mint hardware or enter scalar-array SROA.
+    // fidelity, but they must not mint hardware.
     if (comptime_array_names_.contains(lhs_text)) {
       return;
     }
@@ -2256,12 +2233,6 @@ private:
     std::string      name_override;  // explicit `name=` — replaces the local flop name
     std::string      hier_prefix;    // runner-stamped `__hier` instance path (e.g.
                                      // "pipeB_ex_mem")
-    std::string      aggregate_origin;
-    int32_t          aggregate_source_index = 0;
-    int32_t          aggregate_lane_ordinal = 0;
-    int32_t          aggregate_bit_offset   = 0;
-    int32_t          aggregate_bit_width    = 0;
-    int32_t          aggregate_extent       = 0;
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
@@ -2359,7 +2330,7 @@ private:
     bool                 is_array    = false;  // type=2: mut/const array (no clock, no persistence)
     bool                 is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
     bool                 init_wired  = false;
-    int                  n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
+    int                  n_wr_total  = 0;  // user sites + the restore port (fixes dout pids)
     int                  n_user_wr   = 0;  // pre-scanned program write sites
     int                  wr_next     = 0;
     int                  rd_next     = 0;
@@ -2377,11 +2348,11 @@ private:
     int64_t                      legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
     bool                         has_legacy_fwd  = false;
     std::vector<int>             rd_wr_before;  // per read port: writes minted before it
-    // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
-    // array coexists with a bound reset, finalize_mems() adds one restore
-    // write port per entry (addr=k, din=init[k], enable=reset) and gates the
-    // user ports' enables with !reset. Restore ports stay OUT of the fwd
-    // mask: a read during reset returns the committed (old) contents.
+    // 1a-mem reset-restore — per-entry reset values: finalize_mems() turns
+    // these into ONE restore write port (addr = a sweep counter, din =
+    // init[addr], enable=reset) and gates the user ports' enables with !reset.
+    // The restore port stays OUT of the fwd mask: a read during reset returns
+    // the committed (old) contents.
     std::vector<spool_ptr<Dlop>> restore_vals;
     // Whole-array support: a runtime `mem = <bus>` store drives the cell's
     // `update` sink (size*elem_mw bus) instead of minting per-entry write
@@ -2742,8 +2713,8 @@ private:
   // A mut/const positional array is combinational aggregate storage, not a
   // persistent Memory. Preserve its declared shape while representing the live
   // value as one packed scalar bus; indexed reads/writes below recover lanes.
-  // This keeps the logical LNAST array intact and leaves physical leaf SROA to
-  // downstream transformations.
+  // This keeps the logical LNAST array intact and leaves any physical
+  // per-lane expansion to downstream transformations.
   //
   // ONE-DIMENSIONAL by construction: lower_declare sends a nested
   // `comp_type_array` element (and any inline initializer) to lower_mem_declare
@@ -2858,11 +2829,11 @@ private:
     // reg initializer — same treatment as a mut array (reg and not-reg
     // initialize alike): a concrete value becomes POWER-ON contents on the
     // `init` pin (a scalar broadcasts to every entry; a tuple literal packs
-    // per entry). nil / 0sb? = uninitialized. When the module also carries a
-    // bound reset, the per-entry values become restore write ports (a reset
-    // re-loads the init in one cycle — finalize_mems()); with no reset the
-    // init stays power-on-only. mut/const arrays get theirs via the
-    // whole-array store instead.
+    // per entry). nil / 0sb? = uninitialized. It is ALSO the RESET value of
+    // every entry (the same statement `= <const>` makes on a scalar reg), so
+    // the module has a reset by construction and finalize_mems() builds the
+    // one-entry-per-cycle restore SWEEP from these values. mut/const arrays get
+    // theirs via the whole-array store instead.
     spool_ptr<Dlop>                       reg_init;
     std::vector<spool_ptr<Dlop>>          init_entries;
     // Read an INLINE init child on the declare. The Pyrope frontend gives
@@ -2872,9 +2843,11 @@ private:
     // const or a tuple_add literal on the declare — for BOTH regs and arrays.
     // Reading it here for arrays too lands the contents on the type==2 `init`
     // pin with NO reset-restore (wants_restore is gated on !is_array below),
-    // i.e. pure power-on init — a memory carries no ASIC-unimplementable reset
-    // value. Flatten an inline tuple literal's constant leaves row-major into
-    // entries.
+    // i.e. pure power-on init: a `mut`/`const` array has no clock, so there is
+    // nothing for a reset to re-load. A reg array DOES restore its init — a
+    // memory still has no parallel reset port, so finalize_mems() realizes it
+    // as a one-entry-per-cycle sweep. Flatten an inline tuple literal's
+    // constant leaves row-major into entries.
     std::function<bool(const Lnast_nid&)> flatten_lit = [&](const Lnast_nid& tnid) -> bool {
       for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid(); ch = lnast_->get_sibling_next(ch)) {
         const auto cht = lnast_->get_type(ch);
@@ -2964,7 +2937,14 @@ private:
     }
 
     const int  user_sites      = count_mem_write_sites(name_nid);
-    const bool wants_restore   = !is_array && reg_init && !reset_name_.empty();
+    // `!init_entries.empty()` is not redundant with `reg_init`: it is the SAME
+    // predicate finalize_mems() mints the restore port with. A zero-entry array
+    // leaves `reg_init` set (the broadcast loop simply never runs) with no
+    // per-entry values, and budgeting a port here that finalize_mems then
+    // declines to mint would punch a hole in the write-port block -- every read
+    // dout is recovered by COUNTING write ports (`n_write + r`), so the reads
+    // would silently bind to the wrong driver pid.
+    const bool wants_restore   = !is_array && reg_init && !init_entries.empty() && !reset_name_.empty();
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -3038,7 +3018,10 @@ private:
     // to file scope), but the gate is mode-keyed so it activates with regref.
     info.is_pub          = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
     info.n_user_wr       = user_sites;
-    info.n_wr_total      = user_sites + (wants_restore ? static_cast<int>(size) : 0);
+    // One restore port, not `size` of them: the reset re-load is a
+    // one-write-per-cycle SWEEP (finalize_mems), so the port block grows by a
+    // single slot no matter how many entries the array has.
+    info.n_wr_total      = user_sites + (wants_restore ? 1 : 0);
     info.legacy_fwd_mask = legacy_fwd_mask;
     info.has_legacy_fwd  = has_legacy_fwd;
     if (wants_restore) {
@@ -4003,13 +3986,103 @@ private:
     }
   }
 
+  // 1a-mem reset-restore SWEEP: the (addr, din) pair that drives the single
+  // restore write port. Entry k is written on the k-th cycle of the reset
+  // window, so the array is fully restored only after `size` cycles of reset
+  // held high — the "memories have no reset port" cost of spelling a reset
+  // value on an array. The counter parks at 0 for as long as the module is OUT
+  // of reset (its reset_pin is the INVERTED module reset), so every reset
+  // pulse sweeps from entry 0, and it saturates at size-1 so a longer reset
+  // just rewrites the last entry. A 1-entry array needs no counter, and the
+  // `= <const>` broadcast (every entry equal) needs no data mux. `not_rst` is
+  // the caller's inverted reset, shared with the user-write gating so both read
+  // one net.
+  [[nodiscard]] std::pair<Pin, Pin> build_restore_sweep(std::string_view name, const Mem_info& mi, const Pin& not_rst) {
+    const auto& vals = mi.restore_vals;
+    const auto  n    = static_cast<int64_t>(vals.size());
+    I(n > 0);
+    if (n == 1) {
+      return {create_const(*g_, *Dlop::create_integer(0)), create_const(*g_, *vals[0])};
+    }
+    const bool uniform
+        = std::all_of(vals.begin() + 1, vals.end(), [&](const auto& v) { return v->eq_op(*vals[0])->is_known_true(); });
+    const int32_t addr_w = mw_of_val(n - 1);
+
+    auto cnt = make_node(Ntype_op::Flop);
+    if (!clock_name_.empty()) {
+      setup_sink_by_name(cnt, "clock_pin").connect_driver(clock_pin());
+    }
+    setup_sink_by_name(cnt, "reset_pin").connect_driver(not_rst);
+    setup_sink_by_name(cnt, "initial").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto q = cnt.create_driver_pin(0);
+    set_ubits(q, addr_w);
+    // Name it after the array: pass/lec pairs state BY NAME, and an anonymous
+    // `flop_<nid>` here would drop both designs into the speculative tier-2
+    // signature pass.
+    std::string cnt_name{name};
+    if (auto ssa = cnt_name.find("___ssa_"); ssa != std::string::npos) {
+      cnt_name.resize(ssa);
+    }
+    cnt_name = absl::StrCat(cnt_name.empty() ? std::string_view{"mem"} : canon_io_name(cnt_name), "_rstcnt");
+    cnt.set_name(cnt_name);
+    livehd::graph_util::set_pin_name(q, cnt_name);
+    // Real sequential state: register it so the Time_checker reads the q->din
+    // self-loop as a state cut instead of "register feedback through stage
+    // registers".
+    plain_reg_flops_[cnt.get_debug_nid()] = cnt_name;
+    // din = (q == size-1) ? q : q + 1
+    auto eq                               = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    eq.create_sink_pin(0).connect_driver(q);
+    eq.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(n - 1)));
+    auto at_last = eq.create_driver_pin(0);
+    set_ubits(at_last, 1);
+    auto inc = make_node(Ntype_op::Sum);
+    setup_sink_by_name(inc, "as").connect_driver(q);
+    setup_sink_by_name(inc, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto inc_d = inc.create_driver_pin(0);
+    set_ubits(inc_d, addr_w + 1);
+    // `q + 1` reaches `n`, which needs addr_w+1 bits, but the saturating mux
+    // never SELECTS that value. Truncate the advance arm back to the counter's
+    // own width so the mux — and therefore the flop's din — is exactly addr_w
+    // wide. Without the Get_mask the din carrier is one bit wider than Q, and
+    // pass/bitwidth's process_flop unions the din range into Q: the counter
+    // grows a bit, which widens the memory address and pushes the ROM mux
+    // selector past its last arm.
+    auto inc_trunc = make_node(Ntype_op::Get_mask);
+    setup_sink_by_name(inc_trunc, "a").connect_driver(inc_d);
+    setup_sink_by_name(inc_trunc, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(addr_w)));
+    auto inc_w = inc_trunc.create_driver_pin(0);
+    set_ubits(inc_w, addr_w);
+    auto sat = make_node(Ntype_op::Mux);
+    sat.create_sink_pin(0).connect_driver(at_last);
+    sat.create_sink_pin(1).connect_driver(inc_w);  // sel==0: advance
+    sat.create_sink_pin(2).connect_driver(q);      // sel==1: hold the last entry
+    auto sat_d = sat.create_driver_pin(0);
+    set_ubits(sat_d, addr_w);  // both arms are addr_w: the counter never leaves [0, n-1]
+    setup_sink_by_name(cnt, "din").connect_driver(sat_d);
+
+    if (uniform) {
+      return {q, create_const(*g_, *vals[0])};
+    }
+    // Per-entry reset values: a ROM lookup of the init contents, one Mux arm
+    // per entry (arm k sits at sink pid k+1, graph/cell.cpp).
+    auto sel = make_node(Ntype_op::Mux);
+    sel.create_sink_pin(0).connect_driver(q);
+    for (int64_t k = 0; k < n; ++k) {
+      sel.create_sink_pin(static_cast<hhds::Port_id>(k + 1)).connect_driver(create_const(*g_, *vals[static_cast<size_t>(k)]));
+    }
+    auto sel_d = sel.create_driver_pin(0);
+    set_ubits(sel_d, mi.elem_mw);
+    return {q, sel_d};
+  }
+
   void finalize_mems() {
     for (const auto& name : mem_order_) {
       auto it = mem_map_.find(name);
       if (it == mem_map_.end()) {
         continue;
       }
-      const auto& mi = it->second;
+      auto& mi = it->second;
       if (mi.wr_next != mi.n_user_wr) {
         error_here(
             "upass.tolg: internal — memory '{}' lowered {} write sites "
@@ -4019,12 +4092,32 @@ private:
             mi.n_user_wr);
       }
       // 1a-mem reset-restore — a concrete-init reg array with a bound reset
-      // restores its init on reset: one write port per entry (addr=k,
-      // din=init[k], enable=reset) on the slots after the user sites, and
-      // every USER port's enable gated with !reset (during reset the program
-      // writes are suppressed, exactly like a scalar reg's din). The restore
-      // ports are excluded from the fwd mask, so a same-cycle read during
-      // reset still returns the committed (old) contents.
+      // re-loads its init while reset is held. `reg arr:[N]T = <const>` is the
+      // same statement a scalar `reg r:uW = <const>` makes: that const is the
+      // reset value of every entry (user ruling 2026-08-20). A memory has no
+      // parallel reset port to realize it with, so the restore is a SWEEP: one
+      // write port (addr=<sweep counter>, din=init[addr], enable=reset) plus a
+      // small counter that advances one entry per cycle while reset is high.
+      // The array is therefore fully restored only after `size` cycles of
+      // reset. (A bounded LEC still proves it against a one-cycle scalar reset
+      // at the default 2, because it seeds a memory's cycle-0 state from the
+      // `init` pin — which the same `= <const>` set — and the sweep then only
+      // rewrites what is already there. Starting from an ARBITRARY array needs
+      // `--set formal.reset_cycles=<size>`.) Every USER port's enable, and the
+      // whole-array `update_enable`, is gated with !reset so program writes
+      // stay suppressed while the sweep runs (exactly like a scalar reg's
+      // din). The restore port is excluded from the fwd mask, so a same-cycle
+      // read during reset returns the committed (old) contents.
+      //
+      // The port is minted UNCONDITIONALLY when there are restore values, even
+      // for a whole-array cell that also takes the source-spelled one-cycle
+      // reset below (where the sweep is then dead logic: that reset is the
+      // top-priority arm, so this port's `reset` enable is only ever read
+      // inside its `else`). `n_wr_total` — and with it every read dout's driver
+      // pid — was budgeted at the DECLARE, and cgen_sim/lec recover a read's
+      // dout by COUNTING the write ports they find (`n_write + r`). Skipping
+      // the port here would leave a hole in that count and point every read at
+      // the wrong dout.
       if (!mi.restore_vals.empty()) {
         Pin rst = reset_pin();
         if (reset_neg_) {
@@ -4043,15 +4136,20 @@ private:
             }
           }
         }
-        for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
-          const auto base = (mi.n_user_wr + k) * kMemPortStride;
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(create_const(*g_, *Dlop::create_integer(k)));
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
-              .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-              .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
+        if (mi.has_update) {
+          // A bulk update would overwrite the entries the sweep has already
+          // restored, so it is suppressed for the whole reset window (an
+          // always-on bus becomes `!reset`).
+          mi.update_en = and2(mi.update_en, not_rst);
+          redrive_mem_sink(mi, 13, mi.update_en);
         }
+        const auto [sweep_addr, sweep_din] = build_restore_sweep(name, mi, not_rst);
+        const auto base                    = mi.n_user_wr * kMemPortStride;
+        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(sweep_addr);
+        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(sweep_din);
+        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
+        mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+            .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
       }
       // Same-cycle ordering: build the per-(read,write) `fwd` matrix now that
       // every port is minted. Bit (r*n_wr + w) => read port r forwards write
@@ -4267,9 +4365,10 @@ private:
       // reset value on reset via the cell's `reset` + runtime `init` pins (cgen
       // / cgen_sim / lec emit `if(reset) data[i] <= init[i]`). The slang reader
       // harvested the reset into `initial` (the reset-value bus const) +
-      // `reset_pin`
-      // (+ `negreset`) attrs; consume them here (the per-entry restore-port
-      // path is for non-whole-array regs only).
+      // `reset_pin` (+ `negreset`) attrs; consume them here. This is the
+      // one-cycle parallel reset the SOURCE spelled out and it stays exact —
+      // Pyrope's `= <const>` reset value, which no source hardware backs, is
+      // the one realized as the restore sweep above.
       if (mi.has_update) {
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
           auto&            attrs = pit->second;
@@ -8667,23 +8766,29 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
           auto       mode     = lnast->get_name(c2);
-          // 1a-mem — array regs are memories: no reset hardware in this
-          // slice (only nil/0sb? init is accepted), so they never need the
-          // implicit reset input.
+          // 1a-mem — an array reg is a memory, and `reg arr:[N]T = <const>`
+          // means exactly what it means on a scalar: that const is the RESET
+          // value of every entry (user ruling 2026-08-20), so an init'd array
+          // needs the implicit reset input just like a flop does. A memory has
+          // no parallel reset port, so finalize_mems() realizes the reset as a
+          // one-write-per-cycle SWEEP; that is a lowering detail, not a reason
+          // to withhold the port. `0sb?` is the array spelling of "no reset
+          // value" (lower_mem_declare stops on it exactly like `nil`).
           const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
           // "latch" counts too (2f-latch M7): a latch with a reset value needs
           // the module's reset input created just as a flop does. Keying this
           // on "reg" alone is why `reg l:u8:[latch=true] = 3` used to die with
           // "has a reset value but <mod> has no reset input (setup_io bug)" —
           // the reg was real, the PORT was never made.
-          if (!is_array && (mode == "reg" || mode.starts_with("reg ") || mode == "latch")) {
+          if (mode == "reg" || mode.starts_with("reg ") || (!is_array && mode == "latch")) {
             for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);
               if (Lnast_ntype::is_stages(ct)) {
                 break;  // stage reg — no init slot
               }
               if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
-                const bool nil_init = Lnast_ntype::is_const(ct) && lnast->get_name(c) == "nil";
+                const auto txt      = lnast->get_name(c);
+                const bool nil_init = Lnast_ntype::is_const(ct) && (txt == "nil" || (is_array && txt == "0sb?"));
                 if (!nil_init && !explicit_rp.contains(std::string(lnast->get_name(c0)))) {
                   return true;
                 }
@@ -8704,61 +8809,15 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
   return walk(lnast->get_root());
 }
 
-// 1a-mem reset-restore — true when any ARRAY-typed reg declare carries a
-// concrete (non-nil) initializer. Such an array never mints an implicit
-// reset, but if the module already has a reset-candidate input it binds it:
-// the memory lowering adds per-entry restore write ports (reset re-loads the
-// init contents in one cycle).
+// True when any reg (or latch) declare carries a reset value — including an
+// ARRAY-typed one, whose concrete (non-nil, non-`0sb?`) initializer is the
+// reset value of every entry. The module binds a reset-candidate input, or
+// mints the implicit `reset`; the memory lowering then builds a
+// one-entry-per-cycle restore sweep.
 [[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
   auto& slot = lnast->tolg_scan_cache().declares_reset_reg;
   if (!slot.has_value()) {
     slot = tree_declares_reset_reg_impl(lnast);
-  }
-  return *slot;
-}
-
-[[nodiscard]] bool tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast>& lnast) {
-  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
-    if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
-      auto c0 = lnast->get_first_child(nid);
-      if (!c0.is_invalid()) {
-        auto c1 = lnast->get_sibling_next(c0);
-        auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-        if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-          auto       mode     = lnast->get_name(c2);
-          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
-          if (is_array && (mode == "reg" || mode.starts_with("reg "))) {
-            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-              const auto ct = lnast->get_type(c);
-              if (Lnast_ntype::is_const(ct)) {
-                auto txt = lnast->get_name(c);
-                if (txt != "nil" && txt != "0sb?") {
-                  return true;
-                }
-                break;
-              }
-              if (Lnast_ntype::is_ref(ct)) {
-                return true;  // tuple-literal init
-              }
-            }
-          }
-        }
-      }
-    }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-      if (walk(c)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  return walk(lnast->get_root());
-}
-
-[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
-  auto& slot = lnast->tolg_scan_cache().declares_init_reg_array;
-  if (!slot.has_value()) {
-    slot = tree_declares_init_reg_array_impl(lnast);
   }
   return *slot;
 }
@@ -9196,12 +9255,6 @@ void reset_registry_abi(const uPass_tolg::Registry& registry) {
         gio->set_unsign(reset_name, true);
         reset_minted = true;
       }
-    } else if (tree_declares_init_reg_array(lnast)) {
-      // 1a-mem reset-restore — a reg ARRAY with a concrete initializer never
-      // MINTS a reset (memories stay power-on-only by default), but when the
-      // module already carries a reset-candidate input, bind it: tolg then
-      // adds per-entry restore write ports so a reset re-loads the init.
-      bind_reset_candidate();
     }
   }
 

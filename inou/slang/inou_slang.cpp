@@ -98,9 +98,8 @@ void Inou_slang::setup() {
   m1.add_label_optional("struct_port_bundles",
                         "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
   m1.add_label_optional("flat_top_io",
-                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, where the top interface must match)");
-  m1.add_label_optional("array_sroa",
-                        "both|comb|none (default both): which packed arrays are split into per-element leaves. `comb` drops the per-element REGISTER leaves and with them the six sroa_* attributes; `none` drops the split entirely. The Type-C self-reference split is a correctness fix and stays on in every mode");
+                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
+                        "where the top interface must match)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -119,9 +118,8 @@ void Inou_slang::setup() {
   m2.add_label_optional("struct_port_bundles",
                         "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
   m2.add_label_optional("flat_top_io",
-                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, where the top interface must match)");
-  m2.add_label_optional("array_sroa",
-                        "both|comb|none (default both): which packed arrays are split into per-element leaves. `comb` drops the per-element REGISTER leaves and with them the six sroa_* attributes; `none` drops the split entirely. The Type-C self-reference split is a correctness fix and stays on in every mode");
+                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
+                        "where the top interface must match)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -278,23 +276,7 @@ void Inou_slang::work(Eprp_var& var) {
   opts.struct_port_bundles = !var.has_label("struct_port_bundles") || var.get("struct_port_bundles") == "true";
   // flat_top_io: keep ONLY the top module's ports packed (Verilog-vs-Verilog
   // equivalence needs the emitted top interface to match the source module's).
-  opts.flat_top_io = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
-  // array_sroa: the runtime-indexed packed-array split. ON unless explicitly
-  // disabled; the Type-C self-reference split ignores this flag (correctness).
-  // array_sroa: which packed arrays declare_array_leaves may split.
-  // `comb` retires the per-element REGISTER leaves (and with them the six
-  // sroa_* attributes and every pass/semdiff aggregate_key path); `none`
-  // retires the optimization entirely. Type-C self-reference splits regardless.
-  if (var.has_label("array_sroa")) {
-    const auto mode = var.get("array_sroa");
-    if (mode == "comb") {
-      opts.array_sroa = Slang_context::Options::Array_sroa::comb;
-    } else if (mode == "none") {
-      opts.array_sroa = Slang_context::Options::Array_sroa::none;
-    } else if (mode != "both") {
-      throw std::runtime_error(absl::StrCat("inou.slang: array_sroa must be both|comb|none, got '", mode, "'"));
-    }
-  }
+  opts.flat_top_io         = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;

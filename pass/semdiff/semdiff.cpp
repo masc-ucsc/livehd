@@ -7,7 +7,6 @@
 #include <format>
 #include <functional>
 #include <iterator>
-#include <limits>
 #include <optional>
 #include <print>
 #include <string>
@@ -100,9 +99,6 @@ std::string normalize_reg_name(std::string_view raw) {
 }
 
 std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
-  if (auto origin = node.attr(livehd::attrs::aggregate_origin); origin.has() && !origin.get().empty()) {
-    return "n:" + normalize_reg_name(origin.get());
-  }
   auto pn = gu::pin_name_of(node.get_driver_pin(0));
   if (pn.empty()) {
     pn = gu::node_name_of(node);
@@ -286,7 +282,6 @@ struct State_cell {
   hhds::Node_class                           node;
   std::string                                key;            // state_key (tier-1 identity; mangled under name_noise)
   std::string                                truth;          // name_noise only: the original key (empty = key is original)
-  std::string                                aggregate_key;  // empty unless this is an SROA leaf
   bool                                       is_mem = false;
   uint64_t                                   kind   = 0;   // op + bits + init fold (local identity)
   std::vector<uint32_t>                      preds;        // state cells feeding a data pin through comb
@@ -323,10 +318,7 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     }
     State_cell c;
     c.node = node;
-    c.key  = state_key(g, node);
-    if (auto origin = node.attr(livehd::attrs::aggregate_origin); origin.has()) {
-      c.aggregate_key = normalize_reg_name(origin.get());
-    }
+    c.key    = state_key(g, node);
     c.is_mem = op == Ntype_op::Memory;
     c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
     // COMMIT CLASS folds into the identity for Flop AND Latch (2f-latch M2),
@@ -539,17 +531,9 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) 
 // pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
 // under dump_state.
 void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts, Match_result& res) {
-  State_stats& st            = res.state;
-  auto         logical_total = [](const State_side& ss) {
-    absl::flat_hash_set<std::string> groups;
-    for (const auto& c : ss.cells) {
-      groups.insert(c.aggregate_key.empty() ? std::format("physical:{}", c.node.get_debug_nid())
-                                            : std::format("aggregate:{}", c.aggregate_key));
-    }
-    return static_cast<uint32_t>(groups.size());
-  };
-  st.a_total = logical_total(sa);
-  st.b_total = logical_total(sb);
+  State_stats& st = res.state;
+  st.a_total      = static_cast<uint32_t>(sa.cells.size());
+  st.b_total      = static_cast<uint32_t>(sb.cells.size());
   for (const auto& c : sa.cells) {
     st.a_mems += c.is_mem ? 1 : 0;
   }
@@ -584,60 +568,6 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     bkeys[sb.cells[i].key].push_back(i);
   }
   if (opts.matching_names) {
-    auto valid_aggregate_group = [](const State_side& ss, const std::vector<uint32_t>& group) {
-      if (group.size() <= 1) {
-        return true;  // the opposite side may be the unexpanded aggregate
-      }
-      absl::flat_hash_set<int32_t>             ordinals;
-      absl::flat_hash_map<int32_t, int32_t>    ordinal_to_source;
-      std::vector<std::pair<int32_t, int32_t>> packed_ranges;
-      int32_t                                  declared_extent = 0;
-      for (uint32_t i : group) {
-        const auto& c = ss.cells[i];
-        if (c.aggregate_key.empty()) {
-          return false;
-        }
-        auto extent = c.node.attr(livehd::attrs::aggregate_extent);
-        auto lane   = c.node.attr(livehd::attrs::aggregate_lane_ordinal);
-        auto source = c.node.attr(livehd::attrs::aggregate_source_index);
-        auto offset = c.node.attr(livehd::attrs::aggregate_bit_offset);
-        auto width  = c.node.attr(livehd::attrs::aggregate_bit_width);
-        if (!extent.has() || !lane.has() || !source.has() || !offset.has() || !width.has() || extent.get() <= 0 || lane.get() < 0
-            || lane.get() >= extent.get() || offset.get() < 0 || width.get() <= 0
-            || offset.get() > std::numeric_limits<int32_t>::max() - width.get()) {
-          return false;
-        }
-        if (declared_extent == 0) {
-          declared_extent = extent.get();
-        } else if (declared_extent != extent.get()) {
-          return false;
-        }
-        ordinals.insert(lane.get());
-        auto [source_it, inserted] = ordinal_to_source.try_emplace(lane.get(), source.get());
-        if (!inserted && source_it->second != source.get()) {
-          return false;
-        }
-        packed_ranges.emplace_back(offset.get(), offset.get() + width.get());
-      }
-      // An array-of-struct has several physical field leaves per lane, so the
-      // group may be larger than its source array extent. The complete set of
-      // distinct lane ordinals must still cover exactly all declared entries.
-      // The absolute packed ranges must also reconstruct one gap-free,
-      // non-overlapping aggregate; otherwise name equality alone could bless
-      // incomplete or duplicated provenance.
-      if (ordinals.size() != static_cast<size_t>(declared_extent)) {
-        return false;
-      }
-      std::sort(packed_ranges.begin(), packed_ranges.end());
-      int32_t cursor = 0;
-      for (const auto& [lo, hi] : packed_ranges) {
-        if (lo != cursor) {
-          return false;
-        }
-        cursor = hi;
-      }
-      return cursor > 0;
-    };
     for (auto& [key, av] : akeys) {
       auto it = bkeys.find(key);
       if (it == bkeys.end()) {
@@ -649,18 +579,12 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         sb.label.try_emplace(tok, "st:" + key);
       }
       const bool one = av.size() == 1 && it->second.size() == 1;
-      const bool aggregate_pair
-          = !one && valid_aggregate_group(sa, av) && valid_aggregate_group(sb, it->second)
-            && (std::any_of(av.begin(), av.end(), [&](uint32_t i) { return !sa.cells[i].aggregate_key.empty(); })
-                || std::any_of(it->second.begin(), it->second.end(), [&](uint32_t i) {
-                     return !sb.cells[i].aggregate_key.empty();
-                   }));
-      if (!one && !aggregate_pair) {
-        // A name that collides within one side and is NOT a reaggregatable SROA
-        // group gets no tier-1 token at all now (tier-2 decides it). Keep the
-        // census `lhd pass semdiff` prints -- "key on both sides but colliding
-        // within one" is still exactly what happened -- instead of letting
-        // a_name_grouped/b_name_grouped read as zero for every collision.
+      if (!one) {
+        // A name that collides within one side gets no tier-1 token at all
+        // (tier-2 decides it). Keep the census `lhd pass semdiff` prints --
+        // "key on both sides but colliding within one" is still exactly what
+        // happened -- instead of letting a_name_grouped/b_name_grouped read as
+        // zero for every collision.
         st.a_name_grouped += static_cast<uint32_t>(av.size());
         st.b_name_grouped += static_cast<uint32_t>(it->second.size());
         continue;
@@ -977,15 +901,10 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                     std::vector<std::string>& names,
                     std::vector<std::string>& mem_diverged,
                     std::string_view          side) {
-    absl::flat_hash_set<std::string> unresolved_groups;
     for (auto& c : ss.cells) {
       if (c.token == 0) {
-        const auto group = c.aggregate_key.empty() ? std::format("physical:{}", c.node.get_debug_nid())
-                                                   : std::format("aggregate:{}", c.aggregate_key);
-        if (unresolved_groups.insert(group).second) {
-          ++unpaired;
-          ambiguous += c.ambiguous ? 1 : 0;
-        }
+        ++unpaired;
+        ambiguous += c.ambiguous ? 1 : 0;
         // A memory with a GENUINE mismatch (kind/init clash or no counterpart —
         // not mere symmetric ambiguity, which is occurrence-safe) must not be
         // force-collapsed by lec: its correspondence diverges. See 2f-lec guard.

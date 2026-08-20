@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# A packed register array written from an UNROLLED procedural loop (`for
+# (genvar/int i...) arr[i] <= ...`), where every index is static after the
+# reader unrolls. The claim is equivalence, not shape.
+#
+# This test used to assert the SROA shape: four `lanes_q.eN` flops, and NOT a
+# Memory. Packed-array SROA is gone (the split bought little, and its six
+# `sroa_*` provenance attributes had to be carried all the way to
+# pass/semdiff's state pairing to undo it), so the shape assertions went with
+# it. What must not change is the circuit, which is what the round-trip below
+# proves -- and it is the assertion that was doing the real work all along.
+
 set -eu
 
 LHD=./bazel-bin/lhd/lhd
@@ -8,7 +19,7 @@ if [ ! -x "$LHD" ]; then
 fi
 
 src=$1
-wd=tmp_slang/packed_array_loop_reg_sroa_structure
+wd=tmp_slang/packed_array_loop_reg_structure
 rm -rf "$wd"
 mkdir -p "$wd"
 
@@ -19,21 +30,15 @@ mkdir -p "$wd"
     exit 1
   }
 
-for lane in 0 1 2 3; do
-  "$LHD" tool grep "name==lanes_q.e${lane}" kind==flop lg:"$wd"/lg \
-    --target node --max 0 >"$wd"/lane_${lane}.jsonl
-  grep -q '"kind":"flop"' "$wd"/lane_${lane}.jsonl || {
-    echo "FAIL: procedural loop lane ${lane} was not SROA-lowered to a named flop"
-    exit 1
-  }
-done
-
-"$LHD" tool grep name==lanes_q kind==memory lg:"$wd"/lg \
-  --target node --max 0 >"$wd"/memory.jsonl
-if grep -q '"kind":"memory"' "$wd"/memory.jsonl; then
-  echo "FAIL: procedural loop register array was incorrectly lowered as Memory"
+# The state must still be there under SOME spelling (flat bus, per-lane flops,
+# or a Memory) -- an array that lowered to nothing at all would still LEC on a
+# design this small if the reads folded away with it.
+"$LHD" tool grep name==lanes_q lg:"$wd"/lg --target node --max 0 >"$wd"/state.jsonl
+grep -qE '"kind":"(flop|memory)"' "$wd"/state.jsonl || {
+  echo "FAIL: the procedural-loop register array lowered to no state at all"
+  cat "$wd"/state.jsonl
   exit 1
-fi
+}
 
 cat "$wd"/v/*.v >"$wd"/all.v
 "$LHD" lec --set formal.solver=lgyosys --impl verilog:"$wd"/all.v \
@@ -43,4 +48,4 @@ cat "$wd"/v/*.v >"$wd"/all.v
     exit 1
   }
 
-echo "PASS: procedural loop indices remain static SROA register lanes"
+echo "PASS: unrolled procedural-loop writes into a packed register array round-trip equivalent"

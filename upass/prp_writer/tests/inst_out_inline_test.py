@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Regression: the v->prp writer inlines a submodule's output-port reads.
 
-A multi-output instance's outputs are read AFTER the instance (backward-only),
+A multi-output instance's scalar and nested bundle outputs are read AFTER the
+instance (backward-only),
 so the writer must:
   * read each output inline as `u_sub.<port>` (dot field access),
   * NOT emit `u_sub["<port>"]` bracket-string reads, and
@@ -65,8 +66,9 @@ def main():
     # Both outputs read inline with dot notation.
     need("u_sub.s" in text, "expected inlined `u_sub.s`")
     need("u_sub.d" in text, "expected inlined `u_sub.d`")
+    need("u_sub.l2_req_data_o.id" in text, "expected inlined nested output `u_sub.l2_req_data_o.id`")
     # No bracket-string extraction reads of the instance outputs.
-    need('u_sub["s"]' not in text and 'u_sub["d"]' not in text,
+    need('u_sub["s"]' not in text and 'u_sub["d"]' not in text and 'u_sub["l2_req_data_o.id"]' not in text,
          "bracket-string extraction `u_sub[\"...\"]` should have been inlined")
     # No leftover per-output extraction temp / wire for the inlined ports.
     need("_u_sub_s" not in text and "_u_sub_d" not in text,

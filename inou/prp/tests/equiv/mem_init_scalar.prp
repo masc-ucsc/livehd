@@ -9,8 +9,11 @@
 // 1a-mem — a concrete reg-array initializer is treated exactly like a mut
 // array's (reg and not-reg initialize alike): the scalar broadcasts to every
 // entry as POWER-ON contents on the Memory `init` pin (the cgen wrapper's
-// INIT parameter → a Verilog initial block / $meminit). With no reset in the
-// module it is power-on-only. The async memory read lands @[0].
+// INIT parameter → a Verilog initial block / $meminit). It is ALSO the RESET
+// value — `= <const>` says the same thing on an array that it says on a scalar
+// reg — so the module mints the implicit reset it never names, and the restore
+// is a one-entry-per-cycle SWEEP (a memory has no parallel reset port), which
+// is what the golden spells out. The async memory read lands @[0].
 pub mod regi(a:u8, i:u2, we:bool) -> (z:u8@[0]) {
   reg t:[4]u8 = 3
   if we {

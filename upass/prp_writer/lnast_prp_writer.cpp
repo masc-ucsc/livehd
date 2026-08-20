@@ -489,7 +489,7 @@ static std::string_view unquote_callee(std::string_view s) {
 // predicate below keeps a normal name BYTE-IDENTICAL to before.
 static std::string escape_string(std::string_view s);  // defined with the string-literal writers below
 
-static bool is_plain_pyrope_ident(std::string_view s) {
+static bool is_pyrope_ident_spelling(std::string_view s) {
   if (s.empty() || (!std::isalpha(static_cast<unsigned char>(s[0])) && s[0] != '_')) {
     return false;  // empty, or starts with a digit / punctuation
   }
@@ -498,8 +498,10 @@ static bool is_plain_pyrope_ident(std::string_view s) {
       return false;
     }
   }
-  return !is_pyrope_reserved_ident(s);
+  return true;
 }
+
+static bool is_plain_pyrope_ident(std::string_view s) { return is_pyrope_ident_spelling(s) && !is_pyrope_reserved_ident(s); }
 
 // Index of the next `.` at or after `from` that is NOT inside a backtick-quoted
 // span, or npos.  A Pyrope-origin escaped identifier arrives ALREADY wrapped
@@ -578,6 +580,27 @@ static std::string quote_kw_path(std::string_view path) {
     start = dot + 1;
   }
   return out;
+}
+
+// A flattened nested output key (`rsp.header.id`) can be rendered as the
+// equivalent Pyrope field path instead of a string-key lookup.  Require every
+// component to be an identifier spelling: an escaped Verilog output name may
+// contain a literal dot, and preserving its bracket-string lookup is safer than
+// accidentally turning that dot into bundle traversal.  Keyword components are
+// individually escaped by quote_kw_path (a field named `reg` is backticked).
+static std::optional<std::string> quote_field_path(std::string_view path) {
+  size_t start = 0;
+  for (;;) {
+    const auto dot  = path.find('.', start);
+    const auto comp = path.substr(start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
+    if (!is_pyrope_ident_spelling(comp)) {
+      return std::nullopt;
+    }
+    if (dot == std::string_view::npos) {
+      return quote_kw_path(path);
+    }
+    start = dot + 1;
+  }
 }
 
 // `pkg.PARAM` where pkg is an imported package (provenance flow): a real
@@ -5907,7 +5930,8 @@ void Lnast_prp_writer::analyze_instance_inline() {
   }
 
   // The instance whose output a tuple_get reads, or invalid if the tuple_get is
-  // not a single-port read `___x = inst["port"]` of a known instance result.
+  // not a single-port read `___x = inst["port"]` (the port string may be a
+  // flattened nested path such as `rsp.header.id`) of a known instance result.
   auto instance_of_tuple_get = [&](Lnast_nid tg) -> Lnast_nid {
     auto c0 = lnast->get_child(tg);
     if (c0.is_invalid() || !N::is_ref(lnast->get_type(c0))) {
@@ -6292,15 +6316,18 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
     case N::Lnast_ntype_tuple_get: {
       auto base = lnast->get_sibling_next(c0);
       // A submodule output read `inst["port"]` prints as `inst.port` (dot field
-      // access) when `inst` is a module-instance result and `port` is a bare
-      // identifier.  This covers both the inlined uses and any remaining `wire`
-      // driver.  Non-instance tuple reads keep the bracket-string form.
+      // access) when `inst` is a module-instance result and `port` is an
+      // identifier path. This includes slang's flattened nested output names,
+      // e.g. `inst["rsp.header.id"]` -> `inst.rsp.header.id`, and covers both
+      // inlined uses and any remaining `wire` driver. Non-instance tuple reads
+      // keep the bracket-string form.
       if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
         std::string bn(strip_prefix(lnast->get_name(base)));
         auto        idx0     = lnast->get_sibling_next(base);
-        // A module-instance result OR an imported PACKAGE base with a bare
-        // constant field prints as `base.field` (dot access), not `base["field"]`
-        // — the provenance `pkg.PARAM` refs that arrive as a tuple_get.
+        // A module-instance result OR an imported PACKAGE base with a constant
+        // identifier path prints as `base.field` (dot access), not
+        // `base["field"]` — including provenance `pkg.PARAM` refs that arrive as
+        // a tuple_get.
         const bool  dot_base = instance_results_.count(bn) != 0u || is_imported_package_name(bn);
         if (dot_base && !idx0.is_invalid() && lnast->get_sibling_next(idx0).is_invalid()
             && lnast->get_type(idx0) == N::Lnast_ntype_const) {
@@ -6308,19 +6335,8 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
           if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
             field = field.substr(1, field.size() - 2);
           }
-          auto is_ident = [](const std::string& f) {
-            if (f.empty() || !((f[0] >= 'a' && f[0] <= 'z') || (f[0] >= 'A' && f[0] <= 'Z') || f[0] == '_')) {
-              return false;
-            }
-            for (char ch : f) {
-              if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')) {
-                return false;
-              }
-            }
-            return true;
-          };
-          if (is_ident(field)) {
-            return bn + "." + field;  // postfix dot access (binds tight, never wrapped)
+          if (auto field_path = quote_field_path(field)) {
+            return bn + "." + *field_path;  // postfix dot access (binds tight, never wrapped)
           }
         }
       }

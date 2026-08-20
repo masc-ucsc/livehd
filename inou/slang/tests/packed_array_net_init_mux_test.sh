@@ -1,20 +1,17 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Two halves of the packed-2-D-array eligibility gate, pinned together because
-# they trade against each other.
+# A write through a whole-array RANGE select (`x[2:1] <= v`) MUST keep the array
+# a FLAT BUS: a Memory has one write port per element store and no write port
+# for a multi-element store, so the assignment is silently dropped. Only the
+# flat bus composes it (set_mask). That refusal is what gates the packed-2-D
+# memory classifier -- see Array_range_write_collector.
 #
-#  * `wire [N-1:0][W-1:0] x = {lanes};` read at a runtime index MUST split into
-#    per-element leaves so the read becomes a lane mux. Two separate gate bugs
-#    used to block it: the collector never saw a NET INITIALIZER (slang binds it
-#    without an AssignmentExpression), and the eligibility predicate consulted
-#    `wire_syms_`, which is empty at that point in the module prologue.
-#
-#  * A write through a whole-array RANGE select (`x[2:1] <= v`) MUST keep the
-#    array flat. Neither split representation can express it: the leaf splitter
-#    is guarded on packed STRUCTS so the write lands on the bare undeclared name
-#    and DISAPPEARS, and a Memory has no write port for a multi-element store.
-#    The flat bus composes it with set_mask.
+# The fixture also carries the firtool lane-table shape (`wire [N-1:0][W-1:0] x
+# = {lanes};` read at a runtime index). It used to be asserted to SPLIT into
+# per-element leaves so the read became a lane mux; packed-array SROA was
+# removed in 2026-08, so that array now lowers through the packed bus and only
+# the range-written half still makes a claim here.
 
 set -u
 
@@ -36,14 +33,15 @@ fail() {
 prp="$W/prp/$TOP.prp"
 [ -s "$prp" ] || fail "Pyrope unit was not emitted"
 
-# ── the net-initialized lane table splits ───────────────────────────────────
-grep -q 'wire lanes:(e3:u16, e2:u16, e1:u16, e0:u16)' "$prp" \
-  || fail "net-initialized packed array did not split into per-element leaves"
-grep -q 'unique if sel_i == 0 { lanes.e0 }' "$prp" \
-  || fail "runtime element read did not become a lane mux"
-grep -q '(lanes << ' "$prp" && fail "lane table still lowers through a barrel shift"
-
-# ── and the range-written one does NOT ──────────────────────────────────────
+# ── the range-written array stays a FLAT BUS ────────────────────────────────
+# This is the surviving correctness claim of this fixture. Packed-array SROA is
+# gone, so the net-initialized lane table no longer splits into `lanes.eN` and
+# no longer becomes a lane mux -- it lowers through the packed bus, which is
+# what the removal traded the mux for. But the range-write refusal was never
+# part of SROA: a Memory has one write port per element store and nowhere to
+# put `arr[hi:lo] <= v`, so an array written that way must stay flat or the
+# whole assignment disappears. That refusal (Array_range_write_collector) is
+# what still gates the packed-2D memory classifier.
 grep -q 'reg rng:u64' "$prp" \
   || fail "range-written array did not stay a flat bus"
 # The write must SURVIVE. It used to vanish entirely (every lane assigned from
@@ -57,4 +55,4 @@ lec=$("$LHD" lec --impl verilog:"$W/out.v" --ref verilog:"$SRC" --top "$TOP" \
       --workdir "$W/lec" 2>&1)
 grep -qa "PROVEN equivalent" <<<"$lec" || fail "packed-array lowering was not PROVEN equivalent: $lec"
 
-echo "PASS: net-initialized lane table muxes, range-written array stays flat, LEC PROVEN"
+echo "PASS: range-written array stays a flat bus, its write survives, LEC PROVEN"

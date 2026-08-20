@@ -116,7 +116,7 @@ rg '^counts ' simopt_runs/minion/SW/sim/minion_top.color-plan.txt
 Important counts are `version-sites`, `colors`, `boundary-slots`,
 `boundary-bits`, `kernel-classes`, and `kernel-reuses`.
 
-### 3.2 HLOP range operations and SROA-related lowering
+### 3.2 HLOP range operations and packed-array lowering
 
 The simulator no longer lowers constant contiguous bit extraction to a large
 number of shifts. `inou/cgen/cgen_sim.cpp` calls HLOP's optimized
@@ -124,9 +124,15 @@ number of shifts. `inou/cgen/cgen_sim.cpp` calls HLOP's optimized
 `set_mask_op_opt(lo, hi, value)` or `clear_mask_op_opt(lo, hi)`; full-range
 replacement forwards the value directly. The ranges are half-open `[lo, hi)`.
 
-The packed-array/vector SROA work is already committed. It reduces array-like
-values before simulation where semantics allow it, but persistent memories
-remain memory cells and register names are preserved for LEC aggregation.
+Packed-array SROA (splitting an array into per-element leaves) was REMOVED in
+2026-08. It fired on very little -- 23 register arrays across all of minion,
+10 across all of XiangShan Backend, zero in dino/cva6/xs_alu/xs_renametable --
+and each split leaf had to carry six `sroa_*` provenance attributes from the
+slang reader through LNAST and upass into `pass/semdiff`, whose state pairing
+then undid the split to recover the original register name. That collapse also
+punched a hole in LEC: every leaf shared one compare-point key, so all but the
+first obligation was dropped. Packed arrays now lower as a flat bus or, when
+the storage classifier says so, as a memory cell.
 
 ### 3.3 Proven-unsigned storage
 

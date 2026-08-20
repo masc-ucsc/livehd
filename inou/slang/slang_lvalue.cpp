@@ -66,7 +66,7 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
     }
     if (l->kind == ExpressionKind::NamedValue || l->kind == ExpressionKind::HierarchicalValue) {
       const auto& lsym = l->as<slang::ast::ValueExpressionBase>().symbol;
-      if (is_scalar_struct_var(lsym) || is_packed_array_bundle_var(lsym)) {
+      if (is_scalar_struct_var(lsym)) {
         current_assign_nonblocking_ = expr.isNonBlocking();
         if (assign_struct_whole(lsym, expr.right())) {
           return;
@@ -198,11 +198,11 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
-      // Constant LOW BIT offset of `lhs` inside its packed `base`, shared by the
-      // two SROA fast paths below (an SROA array lane and a per-field bundle
-      // struct leaf). A packed-array element can be wider than one bit, so the
-      // selector yields an element ORDINAL that must be scaled by the element
-      // stride before it can mask a leaf — exactly what resolve_packed_lvalue
+      // Constant LOW BIT offset of `lhs` inside its packed `base`, used by the
+      // per-field bundle struct leaf path below. A packed-array element can be
+      // wider than one bit, so the selector yields an element ORDINAL that must
+      // be scaled by the element stride before it can mask a leaf — exactly
+      // what resolve_packed_lvalue
       // does for the generic path, and what reads already do via lower_rvalue.
       // Returns nullopt when the position is not compile-time constant.
       const auto const_lane_lo = [&](int64_t sel_bits) -> std::optional<int64_t> {
@@ -242,43 +242,6 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         }
         return (rng.isDescending() ? (*b - rng.lower() - (nsel - 1)) : (rng.upper() - *b)) * stride;
       };
-
-      // `arr[const_lane][bit/range] = v` on an SROA array whose element is a
-      // packed vector. The outer aggregate has no flat net; apply the inner
-      // mask directly to that lane leaf. This is the common unrolled matrix
-      // update shape (`prio_d[i][j]`, generated queue-valid matrices).
-      if (base.kind == ExpressionKind::ElementSelect) {
-        const auto& outer = base.as<slang::ast::ElementSelectExpression>();
-        if (outer.value().kind == ExpressionKind::NamedValue) {
-          const auto& bsym = outer.value().as<slang::ast::NamedValueExpression>().symbol;
-          if (is_packed_array_bundle_var(bsym)) {
-            auto outer_idx = try_eval_int(outer.selector());
-            if (outer_idx) {
-              if (!declared_.contains(&bsym)) {
-                declare_value_symbol(bsym, /*force_reg=*/false);
-              }
-              const auto&   outer_rng = bsym.getType().getCanonicalType().getFixedRange();
-              const int64_t lane = outer_rng.isDescending() ? (*outer_idx - outer_rng.lower()) : (outer_rng.upper() - *outer_idx);
-              auto          sit  = struct_var_info_.find(&bsym);
-              if (sit != struct_var_info_.end()) {
-                const auto* f = find_struct_field(sit->second, absl::StrCat("e", lane));
-                if (f != nullptr && base.type->isIntegral() && base.type->hasFixedRange()) {
-                  auto                   ti = tinfo(*lhs.type);
-                  std::optional<int64_t> lo = const_lane_lo(ti.bits);
-                  if (lo && *lo >= 0 && *lo + ti.bits <= f->bits) {
-                    auto        val = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
-                    std::string sel_mask
-                        = *lo == 0 ? mask_text(ti.bits) : std::string(Dlop::get_mask_value(*lo + ti.bits - 1, *lo)->to_pyrope());
-                    note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                    builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f->name), sel_mask, val);
-                    return;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
 
       // `struct.field[i] = v` / `struct.field[hi:lo] = v` on a PER-FIELD bundle
       // struct: a bit-write of the FIELD LEAF net. The flat whole-struct net
@@ -353,107 +316,6 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         }
       }
 
-      // A whole-element write `vec[const] = v` into a per-element bundle array
-      // routes to the element's own leaf net (a per-element bundle has no flat
-      // whole-array net for resolve_packed_lvalue to root the RMW on).
-      if (lhs.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
-        const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
-        if (is_packed_array_bundle_var(bsym)) {
-          const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
-          if (auto ci = try_eval_int(es.selector())) {
-            const auto& bt  = bsym.getType().getCanonicalType();
-            auto        rng = bt.getFixedRange();
-            int64_t     idx = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-            if (!declared_.contains(&bsym)) {
-              declare_value_symbol(bsym, /*force_reg=*/false);
-            }
-            if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
-              const auto prefix     = absl::StrCat("e", idx);
-              const auto dot_prefix = absl::StrCat(prefix, ".");  // hoisted out of the per-field loop
-              const auto value      = to_pattern(to_int_value(rhs), static_cast<int>(lhs.type->getBitWidth()), false);
-              bool       wrote      = false;
-              for (const auto& f : it->second.fields) {
-                if (f.name != prefix && !std::string_view(f.name).starts_with(dot_prefix)) {
-                  continue;
-                }
-                auto part = extract_field(value, f.off - idx * static_cast<int64_t>(lhs.type->getBitWidth()), f.bits);
-                if (f.is_signed) {
-                  part = builder_.create_sext_stmts(part, std::to_string(f.bits - 1));
-                }
-                emit_leaf_store(absl::StrCat(lname_of(bsym), ".", f.name), part);
-                wrote = true;
-              }
-              if (wrote) {
-                note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                return;
-              }
-            }
-          } else {
-            const auto& bt     = bsym.getType().getCanonicalType();
-            const auto  rng    = bt.getFixedRange();
-            const auto* elem   = bt.getArrayElementType();
-            const int   stride = elem == nullptr ? 0 : static_cast<int>(elem->getBitWidth());
-            if (stride > 1 && declared_.contains(&bsym)) {
-              auto it = struct_var_info_.find(&bsym);
-              if (it != struct_var_info_.end()) {
-                auto index = to_int_value(lower_rvalue(es.selector()));
-                if (rng.isDescending()) {
-                  if (rng.lower() != 0) {
-                    index = builder_.create_minus_stmts(index, std::to_string(rng.lower()));
-                  }
-                } else {
-                  index = builder_.create_minus_stmts(std::to_string(rng.upper()), index);
-                }
-                auto packed_rhs = to_pattern(to_int_value(rhs), stride, elem->isSigned());
-                bool wrote      = false;
-                for (const auto& lane0_field : it->second.fields) {
-                  if (lane0_field.name != "e0" && !std::string_view(lane0_field.name).starts_with("e0.")) {
-                    continue;
-                  }
-                  const auto               suffix = std::string_view(lane0_field.name).substr(2);
-                  std::vector<std::string> targets;
-                  targets.reserve(rng.width());
-                  for (int64_t lane = 0; lane < static_cast<int64_t>(rng.width()); ++lane) {
-                    const auto field_name = absl::StrCat("e", lane, suffix);
-                    if (find_struct_field(it->second, field_name) == nullptr) {
-                      targets.clear();
-                      break;
-                    }
-                    targets.push_back(absl::StrCat(lname_of(bsym), ".", field_name));
-                  }
-                  if (targets.empty()) {
-                    continue;
-                  }
-                  auto part = extract_field(packed_rhs, lane0_field.off, lane0_field.bits);
-                  if (lane0_field.is_signed) {
-                    part = builder_.create_sext_stmts(part, std::to_string(lane0_field.bits - 1));
-                  }
-                  auto& ln       = *builder_.lnast;
-                  // Marked carrier: the runner decodes this store by the marker,
-                  // not by the `.eN` spelling of the leaves (see
-                  // Lnast::sroa_write_tuple_prefix).
-                  auto  tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
-                  auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
-                  ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
-                  for (const auto& target : targets) {
-                    ln.add_child(tuple_op, Lnast_node::create_ref(target));
-                  }
-                  auto store = builder_.add_child(Lnast_ntype::create_store());
-                  ln.add_child(store, Lnast_node::create_ref(tuple));
-                  builder_.add_value_child_pub(store, index);
-                  builder_.add_value_child_pub(store, part);
-                  wrote = true;
-                }
-                if (wrote) {
-                  note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                  return;
-                }
-              }
-            }
-          }
-        }
-      }
-
       // Any chain of packed `.field` / `[idx]` / `[hi:lo]` collapses to one
       // contiguous bit-slice of a root variable (handles arbitrary nesting,
       // e.g. `bus[i].field`, `s.sub.arr[j]`).
@@ -494,78 +356,6 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
               note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
               emit_field_store(lname_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
               return;
-            }
-          }
-        }
-
-        // Named field of an SROA array-of-struct element. Keep the named inner
-        // identity in the leaf (`arr.eN.field`); a runtime outer selector is
-        // expressed as the same tuple-of-leaf-refs store that uPass lowers to
-        // mutually exclusive writes downstream.
-        const auto& es = ma.value().as<slang::ast::ElementSelectExpression>();
-        if (es.value().kind == ExpressionKind::NamedValue) {
-          const auto& bsym = es.value().as<slang::ast::NamedValueExpression>().symbol;
-          if (is_packed_array_bundle_var(bsym)) {
-            if (!declared_.contains(&bsym)) {
-              declare_value_symbol(bsym, /*force_reg=*/false);
-            }
-            auto sit = struct_var_info_.find(&bsym);
-            if (sit != struct_var_info_.end()) {
-              const auto& field    = ma.member.as<slang::ast::FieldSymbol>();
-              const auto  rng      = bsym.getType().getCanonicalType().getFixedRange();
-              auto        emit_one = [&](int64_t lane, const std::string& value) {
-                const auto name = absl::StrCat("e", lane, ".", field.name);
-                if (const auto* f = find_struct_field(sit->second, name)) {
-                  emit_leaf_store(absl::StrCat(lname_of(bsym), ".", name), fit_wrap(value, f->bits, f->is_signed));
-                  return true;
-                }
-                return false;
-              };
-              if (auto ci = try_eval_int(es.selector())) {
-                const int64_t lane = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-                if (emit_one(lane, to_int_value(rhs))) {
-                  note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                  return;
-                }
-              } else {
-                std::vector<std::string>  targets;
-                const Struct_info::Field* field_info = nullptr;
-                for (int64_t lane = 0; lane < static_cast<int64_t>(rng.width()); ++lane) {
-                  const auto  name = absl::StrCat("e", lane, ".", field.name);
-                  const auto* f    = find_struct_field(sit->second, name);
-                  if (f == nullptr) {
-                    targets.clear();
-                    break;
-                  }
-                  field_info = f;
-                  targets.push_back(absl::StrCat(lname_of(bsym), ".", name));
-                }
-                if (!targets.empty() && field_info != nullptr) {
-                  auto index = to_int_value(lower_rvalue(es.selector()));
-                  if (rng.isDescending()) {
-                    if (rng.lower() != 0) {
-                      index = builder_.create_minus_stmts(index, std::to_string(rng.lower()));
-                    }
-                  } else {
-                    index = builder_.create_minus_stmts(std::to_string(rng.upper()), index);
-                  }
-                  auto  value    = fit_wrap(to_int_value(rhs), field_info->bits, field_info->is_signed);
-                  auto& ln       = *builder_.lnast;
-                  // Marked carrier -- see Lnast::sroa_write_tuple_prefix.
-                  auto  tuple    = absl::StrCat(Lnast::sroa_write_tuple_prefix, builder_.create_lnast_tmp().substr(1));
-                  auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
-                  ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
-                  for (const auto& target : targets) {
-                    ln.add_child(tuple_op, Lnast_node::create_ref(target));
-                  }
-                  auto store = builder_.add_child(Lnast_ntype::create_store());
-                  ln.add_child(store, Lnast_node::create_ref(tuple));
-                  builder_.add_value_child_pub(store, index);
-                  builder_.add_value_child_pub(store, value);
-                  note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                  return;
-                }
-              }
             }
           }
         }
@@ -703,33 +493,6 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
       put(f.name, v);
     }
     return true;
-  }
-
-  // `arr = {e_hi, ..., e_lo}` per-element bit-concatenation driving an ARRAY
-  // bundle: operand[i] is element field[i] (both MSB-first — a concat's first
-  // operand is the high bits = highest element index = fields[0]). Only when every
-  // operand is exactly one element wide and the count matches (the CIRCT
-  // shift-network shape); otherwise fall through to the whole-value slice below.
-  if (r->kind == ExpressionKind::Concatenation && is_packed_array_bundle_var(sym)) {
-    const auto ops = r->as<slang::ast::ConcatenationExpression>().operands();
-    if (ops.size() == fields.size()) {
-      bool per_elem = true;
-      for (size_t i = 0; i < fields.size(); ++i) {
-        if (ops[i]->type == nullptr || static_cast<int>(ops[i]->type->getBitWidth()) != fields[i].bits) {
-          per_elem = false;
-          break;
-        }
-      }
-      if (per_elem) {
-        note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-        for (size_t i = 0; i < fields.size(); ++i) {
-          const auto& f = fields[i];
-          auto        v = fit_wrap(to_int_value(lower_rvalue(*ops[i])), f.bits, f.is_signed);
-          put(f.name, v);
-        }
-        return true;
-      }
-    }
   }
 
   // `io = io2` whole copy from a sibling bundle struct: copy matching leaves.

@@ -150,16 +150,10 @@ void enforce_lossless_carriers(hhds::Graph* g) {
           // loop in this pass.
           const auto value = hydrate_const(e.driver);
           non_negative     = !value.is_negative();
-          int literal_bits;
-          if (value.is_numeric() && !value.has_unknowns() && !value.is_negative()) {
-            // Dlop::get_bits() reports a signed carrier width for a positive
-            // constant. The graph hint is literal unsigned width, so the
-            // carrier's leading zero is not part of this requirement.
-            literal_bits = value.is_known_zero() ? 1 : std::max(1, static_cast<int>(value.get_bits()) - 1);
-          } else {
-            literal_bits = std::max(1, static_cast<int>(value.get_bits()));
-          }
-          input_bits = std::max(input_bits, literal_bits);
+          // The graph hint is the literal unsigned PAYLOAD width, not
+          // Dlop::get_bits()'s signed carrier -- shared with upass/tolg's merge
+          // sizing and cgen_sim's mux-arm check so the three cannot drift.
+          input_bits       = std::max(input_bits, static_cast<int>(livehd::graph_util::literal_payload_bits(value)));
         }
         // Literal uW needs W+1 bits when an unlimited-precision operation
         // lands in a signed carrier. This matters after copy propagation
@@ -1038,13 +1032,6 @@ bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
 // The Set_mask arm below never had that consumer and is on by measurement; it
 // is also the larger population (1,943 chain heads vs 1,052 Or trees).
 constexpr bool kOrPackEnabled = true;
-
-// Is `node` a candidate pack head/link? Collected during the fused sweep and
-// rewritten afterwards, CONSUMER-side first (see canonicalize_concat_pack).
-[[nodiscard]] bool is_concat_pack_candidate(const hhds::Node_class& node) {
-  const auto op = type_op_of(node);
-  return op == Ntype_op::Set_mask || (kOrPackEnabled && op == Ntype_op::Or);
-}
 
 // Rewrite ONE pack candidate. Callers must visit candidates in reverse
 // topological (consumer-side first) order: the outermost Set_mask of a write
@@ -3348,19 +3335,12 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   for (auto node : order) {
     canonicalize_latch_hold(node);
   }
-  std::vector<hhds::Node_class> pack_candidates;
   for (auto node : order) {
     if (node.is_invalid()) {
       continue;
     }
     canonicalize_and_mask(node);
     scalar_node(node);
-    if (node.is_invalid()) {
-      continue;
-    }
-    if (is_concat_pack_candidate(node)) {
-      pack_candidates.push_back(node);
-    }
   }
   // Fold the hand-spelled concat idioms into the cell that says it, AFTER the
   // sweep and CONSUMER-side first. Both orderings are load bearing:
@@ -3368,12 +3348,19 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // spelling and that fold is cycle-breaking, so it must see the original
   // shapes first; and the outermost link of a write chain is the one that must
   // become the Concat.
-  for (auto it = pack_candidates.rbegin(); it != pack_candidates.rend(); ++it) {
+  //
+  // Re-materialized rather than collected during the sweep above: that sweep
+  // both deletes and MINTS cells, and a pack head created by a scalar fold
+  // (or one whose consumer only became a pack after its own fold) would never
+  // appear in a vector captured before it existed -- the pre-fusion code took
+  // a fresh snapshot here for exactly that reason.
+  auto post_sweep = stable_nodes(current_graph);
+  for (auto it = post_sweep.rbegin(); it != post_sweep.rend(); ++it) {
     canonicalize_concat_pack(current_graph, *it);
   }
   // Merge duplicate nodes after the scalar/canonical folds (duplicated inlined
-  // cones merge wholesale). Re-materialize the order: the sweep above both
-  // deletes and MINTS cells, and a stale vector would hide every freshly
+  // cones merge wholesale). Re-materialize again: canonicalize_concat_pack
+  // mints the Concat cells, and a stale vector would hide every freshly
   // created twin from the hash-cons.
   cse_pass(stable_nodes(current_graph));
   enforce_lossless_carriers(current_graph);
@@ -3381,7 +3368,9 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // tautological enable cone (for example, a full case/default). The sweep
   // above reduces that cone to a constant; revisit the latches so the now
   // explicit always-open cell becomes ordinary combinational logic too.
-  for (auto node : order) {
+  // Re-materialized for the same reason cse_pass is: `order` predates every
+  // delete and mint above, and a recycled handle in it names a different cell.
+  for (auto node : stable_nodes(current_graph)) {
     canonicalize_latch_hold(node);
   }
   current_graph = nullptr;

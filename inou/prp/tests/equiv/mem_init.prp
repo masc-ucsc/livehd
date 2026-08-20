@@ -6,10 +6,11 @@
 */
 
 // 2f-mem_multidim — per-entry reset contents: a reg array with a tuple
-// initializer re-loads (1,2,3,4) while `reset` is held (one restore write
-// port per entry; reads during reset return the committed contents). The
-// declared `reset:bool` opts into the restore hardware — without it the
-// init stays power-on-only (see mem_init_tuple.prp).
+// initializer re-loads (1,2,3,4) while `reset` is held. A memory has no
+// parallel reset port, so the restore is a SWEEP — one entry per cycle, so a
+// full restore takes SIZE cycles of reset — and reads during reset return the
+// committed contents. The declared `reset:bool` is bound here; a module that
+// declares none has one minted for it (see mem_init_tuple.prp).
 pub mod mem_init(reset:bool, raddr:u2) -> (q:u8@[0]) {
   reg mem:[4]u8 = (1, 2, 3, 4)
   q = mem[raddr]

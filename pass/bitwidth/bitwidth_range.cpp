@@ -2,6 +2,7 @@
 
 #include "bitwidth_range.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <limits>
@@ -32,15 +33,19 @@ Bitwidth_range::Bitwidth_range(const Dlop& val) {
     min      = val.to_just_i64();
   } else {
     // val.dump();
-    overflow  = true;
     auto bits = val.get_bits();
 
     if (val.is_negative()) {
+      overflow = true;
       max = 0;
       min = -bits;
     } else {
-      max = bits;
-      min = 0;
+      // Dlop::get_bits() is a SIGNED carrier width: a finite non-negative
+      // value (including an unsigned unknown such as 0ub?) has one leading
+      // zero/sign bit beyond its payload. Preserve the payload width through
+      // set_wider_range(); storing the carrier width directly in overflow
+      // form made get_max() materialize an extra data bit on a later union.
+      set_ubits_range(std::max<int32_t>(1, bits - 1));
     }
     I(min == 0 || min <= max || max == 0);
   }

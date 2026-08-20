@@ -346,10 +346,10 @@ ${LHD} sim lg:"$W/dynamic_packed_write_lg/" "$W/dynamic_packed_write_tb.prp" \
   || fail "dynamic packed-lvalue generated simulation failed"
 echo "PASS: dynamic packed-lvalue update keeps its declared-width boundary explicit"
 
-# A runtime-read packed array is scalar-replaced by its outer dimension. Writes
-# to constant inner elements must therefore convert the inner element ordinal
-# to a BIT offset within the SROA lane. For five-bit elements, lane 1 is bits
-# 5..9 (not 1..5). This is intpipe_csr_msgs' queue-pointer shape.
+# A write to a CONSTANT inner element of a multi-dimensional packed array must
+# convert the element ordinal into a BIT offset. For five-bit elements, inner
+# element 1 is bits 5..9, not 1..5. This is intpipe_csr_msgs' queue-pointer
+# shape, and it was an off-by-a-stride bug once.
 cat >"$W/packed_sroa_stride.sv" <<'EOF'
 module packed_sroa_stride (
   input  logic             clk_i,
@@ -376,18 +376,22 @@ EOF
 ${LHD} compile "$W/packed_sroa_stride.sv" --reader slang --top packed_sroa_stride \
   --emit-dir pyrope:"$W/packed_sroa_stride_prp/" \
   --workdir "$W/packed_sroa_stride_w" -q \
-  || fail "packed SROA element-stride lowering failed"
-grep -q '`ptr.e0`#\[5\.\.=9\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
-  || fail "packed SROA element 1 did not use its five-bit stride"
-if grep -q '`ptr.e0`#\[1\.\.=5\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
-  fail "packed SROA element 1 used its ordinal as a bit offset"
+  || fail "packed element-stride lowering failed"
+# The stride claim survives the removal of packed-array SROA, it just moved
+# spelling: the constant inner element ordinal must still become a BIT offset
+# (five-bit elements => lane 1 is bits 5..9), whether the destination is an
+# `eN` leaf or the flat packed bus. Assert the bit range, not the carrier.
+grep -qE '#\[5\.\.=9\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
+  || fail "packed inner element 1 did not use its five-bit stride"
+if grep -qE '#\[1\.\.=5\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
+  fail "packed inner element 1 used its ordinal as a bit offset"
 fi
 ${LHD} lec --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
   --ref verilog:"$W/packed_sroa_stride.sv" --top packed_sroa_stride \
   --set formal.engine=bmc --set formal.strict=true \
   --workdir "$W/packed_sroa_stride_lec" -q \
-  || fail "packed SROA element-stride round trip is not equivalent"
-echo "PASS: packed SROA constant writes apply the inner element bit stride"
+  || fail "packed element-stride round trip is not equivalent"
+echo "PASS: packed constant writes apply the inner element bit stride"
 
 # Direct color fusion may materialize a child-internal packed expression wider
 # than the child's public output carrier. The parent must still observe the

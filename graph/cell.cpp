@@ -29,12 +29,6 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");
     hhds::register_attr_tag<livehd::attrs::proven_t>("livehd::attrs::proven");
     hhds::register_attr_tag<livehd::attrs::runtime_check_t>("livehd::attrs::runtime_check");
-    hhds::register_attr_tag<livehd::attrs::aggregate_origin_t>("livehd::attrs::aggregate_origin");
-    hhds::register_attr_tag<livehd::attrs::aggregate_source_index_t>("livehd::attrs::aggregate_source_index");
-    hhds::register_attr_tag<livehd::attrs::aggregate_lane_ordinal_t>("livehd::attrs::aggregate_lane_ordinal");
-    hhds::register_attr_tag<livehd::attrs::aggregate_bit_offset_t>("livehd::attrs::aggregate_bit_offset");
-    hhds::register_attr_tag<livehd::attrs::aggregate_bit_width_t>("livehd::attrs::aggregate_bit_width");
-    hhds::register_attr_tag<livehd::attrs::aggregate_extent_t>("livehd::attrs::aggregate_extent");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     // source provenance rides hhds::attrs::srcid (self-registering)
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
@@ -256,8 +250,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
         case 11:
           return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
-                          // restores it via per-entry write ports (tolg). For a WHOLE-ARRAY cell (the `update` pin is
-                          // driven) `init` is RUNTIME-capable and carries the reset-value bus (entry 0 in the low `bits`).
+                          // restores it through a one-entry-per-cycle sweep write port (tolg). For a WHOLE-ARRAY cell (the `update`
+                          // pin is driven) `init` is RUNTIME-capable and carries the reset-value bus (entry 0 in the low `bits`).
         // Whole-array pins (cell has these driven => one `update`/`read_all` bus instead of N per-entry ports).
         case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
         case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)

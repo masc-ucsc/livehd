@@ -73,30 +73,6 @@ public:
     // port list, and only the top's: submodule interfaces are internal to each
     // netlist. Off by default — LiveHD's own representation is the bundle.
     bool flat_top_io               = false;
-    // Which packed arrays declare_array_leaves is allowed to split into
-    // per-element leaves. The measurement lever for small_todo.md ("did SROA
-    // affect sim/lec/abc/compile times or QoR?").
-    //
-    // The axis is REGISTER vs COMBINATIONAL, because that is where the cost
-    // is: declare_array_leaves emits the six `sroa_*` attributes ONLY in its
-    // `is_reg` arm, and those attributes are the whole chain
-    //   slang -> LNAST -> upass_tolg.cpp:1174 (Reg_info::aggregate_*)
-    //         -> graph/attrs.hpp -> pass/semdiff aggregate_key.
-    // The wire arm declares leaves and nothing else. So `comb` retires every
-    // attribute and every semdiff SROA path while keeping the lane mux that
-    // the split is actually good at.
-    //
-    // Type-C self-reference ALWAYS splits, in every mode: an aggregate
-    // assignment that reads a sibling lane only lowers to an acyclic leaf
-    // graph once split, so that arm is a correctness fix rather than an
-    // optimization.
-    //
-    // TRAP when reading a measurement: an array this sweep declines is then
-    // eligible for the packed-2D memory-izer (packed_mem_regs_, :2006, which
-    // tests !struct_array_bundle_), i.e. it becomes an Ntype_op::Memory, NOT a
-    // flat flop bus. Measure the whole flow, and watch the array-memory count.
-    enum class Array_sroa { both, comb, none };
-    Array_sroa array_sroa          = Array_sroa::both;
   };
 
   Slang_context() = default;
@@ -362,13 +338,6 @@ private:
   // flat bus. Deep READS of a nested-struct field route through the leaf and are
   // safe to bundle (small_todo_working.md Type B).
   absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_deep_written_;
-  // Packed scalar-element arrays eligible for storage-aware SROA. Locals become
-  // per-element wire/mut leaves and clocked packed arrays become per-element reg
-  // leaves. True memories and ports use their dedicated representations. Reset
-  // per module.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>         struct_array_bundle_;
-  bool                                                        is_packed_array_bundle_var(const slang::ast::ValueSymbol& sym) const;
-  void                                                        declare_array_leaves(const slang::ast::ValueSymbol& sym);
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering).
   bool                                                        is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;

@@ -2338,6 +2338,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           undef_matrix = edge.driver;
         } else if (name == "update") {
           whole = true;
+        } else if (name == "update_enable" || name == "reset" || name == "init" || name == "bits" || name == "size"
+                   || name == "wensize" || name == "posclk") {
+          // Cell-global pins share the raw 0..15 block with port zero. Keep
+          // them out of the per-port table before suffix matching: notably,
+          // `update_enable` is not read-port zero's `enable`.
         } else if (name.ends_with("clock_pin")) {
           registered = true;
         } else {
@@ -2400,10 +2405,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           used = name == "update" || name == "update_enable" || name == "reset" || name == "init";
         }
         if (target != nullptr && type != 1 && port < ports.size()) {
-          const auto& shape  = ports[port];
-          used              |= (&shape == target && (name.ends_with("addr") || name.ends_with("enable")))
-                               || (!shape.rd && shape.wridx >= 0 && shape.wridx < prefix
-                                   && (name.ends_with("addr") || name.ends_with("enable") || name.ends_with("din")));
+          const auto& shape       = ports[port];
+          const bool  port_enable = name != "update_enable" && name.ends_with("enable");
+          used                   |= (&shape == target && (name.ends_with("addr") || port_enable))
+                                  || (!shape.rd && shape.wridx >= 0 && shape.wridx < prefix
+                                      && (name.ends_with("addr") || port_enable || name.ends_with("din")));
         }
         if (used) {
           add_value_use(edge, consumer_version, consumer_input, consumer_site.version);

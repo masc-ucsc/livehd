@@ -18,6 +18,10 @@
 #   o4 = mem[a4]     read AFTER  the write -> row 1
 #
 # Expected FWD (1 write port, so row r is bit r):
+# The array carries NO initializer on purpose: an array init is a reset value,
+# and its restore sweep adds a second WRITE PORT — which shifts every row of the
+# matrix by one column and would hide a transpose behind arithmetic.
+#
 #   program (default) -> 0b10 = 2   only the later read forwards
 #   fwd               -> 0b11 = 3   position-blind: both forward
 #   old               -> 0b00 = 0   nothing forwards; the read is defined OLD
@@ -51,7 +55,7 @@ rc=0
 gen() { # $1 = attribute text (may be empty)
   cat >"${TMP}/m.prp" <<EOF
 pub mod m$1(clk:u1, a1:u2, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
-  reg mem:[4]u2$2 = 0
+  reg mem:[4]u2$2
   o1 = mem[a1]
   mem[a2] = d2
   o4 = mem[a4]
@@ -132,7 +136,7 @@ LIB=inou/prp/tests/abc/test.lib
 if [ -f "${LIB}" ]; then
   cat >"${TMP}/w.prp" <<'EOF'
 pub mod w(clk:u1, a:u2, d2:u2, d3:u2, ra:u2) -> (o:u2@[]) {
-  reg mem:[4]u2:[ordering="fwd"] = 0
+  reg mem:[4]u2:[ordering="fwd"]
   mem[a] = d2
   mem[a] = d3
   o = mem[ra]

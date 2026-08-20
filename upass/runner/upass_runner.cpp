@@ -772,8 +772,6 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
     return;
   }
   const std::string dvar(lm->current_text());
-  auto&             raw_refs = tuple_raw_slot_ref_[dvar];
-  raw_refs.clear();
   auto consider = [&](const std::string& slot, std::string_view txt) {
     if (auto it = symbol_table_.tuple_slot_ref.find(dvar); it != symbol_table_.tuple_slot_ref.end() && it->second.count(slot)) {
       return;  // constprop already recorded this carrier
@@ -797,7 +795,6 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
       ++unnamed_pos;
     } else if (Lnast_ntype::is_ref(t)) {
       const auto slot = std::to_string(unnamed_pos);
-      raw_refs[slot]  = std::string(lm->current_text());
       consider(slot, lm->current_text());
       ++unnamed_pos;
     } else if (Lnast_ntype::is_store(t)) {
@@ -807,7 +804,6 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
       if (lm->move_to_child()) {
         const std::string key(lm->current_text());
         if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-          raw_refs[key] = std::string(lm->current_text());
           consider(key, lm->current_text());
         }
       }
@@ -5521,139 +5517,6 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
   return true;
 }
 
-bool uPass_runner::try_lower_dynamic_tuple_store() {
-  // Slang represents a runtime write to an SROA scalar-element array as
-  // store(tuple_of_leaf_refs, runtime_index, value). Lower that language-level
-  // operation here, downstream of the frontend, into mutually exclusive leaf
-  // writes. The empty else preserves SystemVerilog out-of-range write semantics
-  // (no element is modified).
-  if (!lm->get_lnast()->is_verilog_origin() || lm->current_num_children() != 3 || !lm->has_child()) {
-    return false;
-  }
-  const auto saved = lm->save_cursor();
-  lm->move_to_child();
-  if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-    lm->restore_cursor(saved);
-    return false;
-  }
-  const std::string tuple(lm->current_text());
-  // The MARKER on the carrier is the authority, not the `.eN` spelling of the
-  // leaves below: a genuine tuple whose members are named `.e0`, `.e1`, … is
-  // indistinguishable by name, and decoding one into mutually exclusive leaf
-  // writes plus an out-of-range no-op arm would silently change its meaning.
-  // Only Slang_lvalue's two SROA element-write sites mint this prefix.
-  if (!tuple.starts_with(Lnast::sroa_write_tuple_prefix)) {
-    lm->restore_cursor(saved);
-    return false;
-  }
-  if (!lm->move_to_sibling() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-    lm->restore_cursor(saved);
-    return false;
-  }
-  const std::string index(lm->current_text());
-  if (try_fold_ref(index)) {
-    lm->restore_cursor(saved);
-    return false;
-  }
-  if (!lm->move_to_sibling() || !lm->is_last_child()) {
-    lm->restore_cursor(saved);
-    return false;
-  }
-  const Lnast_node value = Lnast_ntype::is_ref(lm->get_raw_ntype()) ? Lnast_node::create_ref(lm->current_text())
-                                                                    : Lnast_node::create_const(lm->current_text());
-  lm->restore_cursor(saved);
-
-  auto shape = try_tuple_shape(tuple);
-  if (!shape || shape->empty()) {
-    return false;
-  }
-  std::vector<std::string> targets;
-  targets.reserve(shape->size());
-  auto is_sroa_leaf = [](std::string_view name) {
-    auto pos = name.find(".e");
-    while (pos != std::string_view::npos) {
-      size_t i = pos + 2;
-      if (i < name.size() && name[i] >= '0' && name[i] <= '9') {
-        while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
-          ++i;
-        }
-        if (i == name.size() || name[i] == '.' || name.substr(i).starts_with("___ssa_")) {
-          return true;
-        }
-      }
-      pos = name.find(".e", pos + 2);
-    }
-    return false;
-  };
-  const auto raw_it = tuple_raw_slot_ref_.find(tuple);
-  for (size_t lane = 0; lane < shape->size(); ++lane) {
-    const auto& [slot, positional] = (*shape)[lane];
-    if (!positional || slot != std::to_string(lane)) {
-      return false;
-    }
-    auto target = try_tuple_slot_ref(tuple, slot);
-    if (!target && raw_it != tuple_raw_slot_ref_.end()) {
-      if (auto it = raw_it->second.find(slot); it != raw_it->second.end()) {
-        target = it->second;
-      }
-    }
-    if (!target || !is_sroa_leaf(*target)) {
-      return false;
-    }
-    targets.push_back(std::move(*target));
-  }
-
-  std::vector<std::optional<Dlop>> prior_values;
-  prior_values.reserve(targets.size());
-  for (const auto& target : targets) {
-    prior_values.push_back(try_fold_ref(target));
-  }
-  flush_deferred_emits();
-  // A preceding comptime assignment may have been folded without staging a
-  // physical store. Once this runtime update appears, that folded value is the
-  // hold/default arm of the write and must be materialized before the decoded
-  // branch stores. Runtime-valued leaves already have their real producer.
-  for (size_t lane = 0; lane < targets.size(); ++lane) {
-    if (!prior_values[lane]) {
-      continue;
-    }
-    emit_push(Lnast_ntype::create_store());
-    emit_leaf(Lnast_node::create_ref(targets[lane]));
-    emit_leaf(Lnast_node::create_const(prior_values[lane]->to_pyrope()));
-    emit_pop();
-  }
-  const uint32_t           seq = ++inline_seq_;
-  std::vector<std::string> conds;
-  conds.reserve(targets.size());
-  for (size_t lane = 0; lane < targets.size(); ++lane) {
-    auto cmp = std::format("%dwrsel{}_{}", seq, lane);
-    emit_staging_op(Lnast_ntype::create_eq(), cmp, {Lnast_node::create_ref(index), Lnast_node::create_const(std::to_string(lane))});
-    conds.push_back(std::move(cmp));
-  }
-  emit_push(Lnast_ntype::create_unique_if());
-  for (size_t lane = 0; lane < targets.size(); ++lane) {
-    emit_leaf(Lnast_node::create_ref(conds[lane]));
-    emit_push(Lnast_ntype::create_stmts());
-    emit_push(Lnast_ntype::create_store());
-    emit_leaf(Lnast_node::create_ref(targets[lane]));
-    emit_leaf(value);
-    emit_pop();
-    emit_pop();
-  }
-  emit_push(Lnast_ntype::create_stmts());  // out of range: ignored write
-  emit_pop();
-  emit_pop();
-  // The synthesized branch stores were emitted directly into staging rather
-  // than recursively dispatched through constprop. Invalidate each leaf's
-  // stale comptime value explicitly so later whole-array or element reads use
-  // the runtime mux result instead of folding to the value from before this
-  // dynamic write.
-  for (const auto& target : targets) {
-    symbol_table_.set(target, Symbol_table::invalid_lconst);
-  }
-  return true;
-}
-
 // ── pipe/mod/fluid template specialization ──────────────────────────
 
 void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
@@ -9529,9 +9392,6 @@ void uPass_runner::process_lnast() {
     // (the bundle mutation is the point — never dropped, classify not
     // consulted, matching the old process_verbatim path).
     case Ntype::Lnast_ntype_store:
-      if (try_lower_dynamic_tuple_store()) {
-        break;
-      }
       // `c = concat(...)`: the destination's declared width must equal the lane
       // sum exactly. Checked at the bind, not at the concat, because the concat
       // node's own dst is always a compiler temp.

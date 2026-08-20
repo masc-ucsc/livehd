@@ -530,7 +530,7 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // A whole read of a per-field bundle struct OR a per-element bundle array:
   // reconstruct the packed value from its leaves (field/element accesses are
   // intercepted before reaching here).
-  if (is_scalar_struct_var(sym) || is_packed_array_bundle_var(sym)) {
+  if (is_scalar_struct_var(sym)) {
     return read_struct_whole(sym);
   }
 
@@ -1422,30 +1422,21 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     stride = static_cast<int>(base_ty.getArrayElementType()->getBitWidth());
   }
 
-  // A whole-element select `vec[const]` of a per-element bundle array routes to
-  // the element's independent leaf net (breaks the Type C false self-loop). A
-  // sub-element / dynamic / range select falls through to the generic path, which
-  // reconstructs the whole value from the leaves via lower_rvalue(base) below.
+  // A whole-element select `vec[const]` of a BUNDLE PORT array routes to the
+  // element's independent leaf net. A sub-element / dynamic / range select falls
+  // through to the generic path, which reconstructs the whole value from the
+  // leaves via lower_rvalue(base) below.
   if (expr.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
     const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
-    if ((is_packed_array_bundle_var(bsym) || bundle_port_of(bsym) != nullptr) && base_ty.isPackedArray() && ti.bits == stride) {
-      const auto& es = expr.as<slang::ast::ElementSelectExpression>();
-      if (!declared_.contains(&bsym) && bundle_port_of(bsym) == nullptr) {
-        declare_value_symbol(bsym, /*force_reg=*/false);
-      }
-      const Struct_info* array_info = bundle_port_of(bsym);
-      if (array_info == nullptr) {
-        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
-          array_info = &it->second;
-        }
-      }
-      const auto leaf_base = bundle_port_of(bsym) != nullptr ? bundle_port_body_base(bsym) : lname_of(bsym);
-      static const std::vector<Struct_info::Field> no_fields;
+    if (const Struct_info* array_info = bundle_port_of(bsym);
+        array_info != nullptr && base_ty.isPackedArray() && ti.bits == stride) {
+      const auto& es        = expr.as<slang::ast::ElementSelectExpression>();
+      const auto  leaf_base = bundle_port_body_base(bsym);
       // A reference, not a copy: a dynamic select below asks for every lane, so
       // copying the field table per access is O(lanes * fields) of churn on the
       // arrays this path exists for.
-      const auto&                                  fields    = array_info == nullptr ? no_fields : array_info->fields;
-      auto                                         read_lane = [&](int64_t idx) {
+      const auto& fields    = array_info->fields;
+      auto        read_lane = [&](int64_t idx) {
         const auto  prefix = absl::StrCat("e", idx);
         const auto  dot_prefix = absl::StrCat(prefix, ".");  // hoisted: the loop below asks per field
         std::string value;
@@ -1474,7 +1465,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         // an explicit unknown lane so the Hotmux's mandatory else arm matches
         // SystemVerilog out-of-range selection instead of aliasing the final
         // valid element.
-        if (array_info != nullptr) {
+        {
           // Build every lane value before the tuple node. read_lane can emit
           // masks/shifts/ors (and constant-folded temporaries); creating the
           // tuple first would make its children forward-reference those

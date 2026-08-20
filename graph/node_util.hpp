@@ -120,6 +120,30 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 [[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_pin& pin) { return hydrate_const(pin.base_pin()); }
 [[nodiscard]] inline Dlop hydrate_const(const hhds::Occurrence_node& node) { return hydrate_const(node.base_node()); }
 
+// LITERAL PAYLOAD WIDTH of a constant: the bits a graph pin has to carry to
+// hold it, which is NOT Dlop::get_bits().
+//
+// get_bits() is a SIGNED carrier width, so every NON-NEGATIVE value reports one
+// leading zero beyond its payload (`1` -> 2, `255` -> 9, `0ub?` -> 2). Graph
+// width hints are literal unsigned payloads, so that headroom must not widen a
+// Mux/Hotmux arm, an enclosing Concat lane, or a lossless-carrier requirement.
+// An UNKNOWN plane does not change this: `0ub?` occupies exactly its declared
+// payload bits. A negative (or non-numeric) value keeps the full carrier --
+// its top bit is the sign, not headroom.
+//
+// ONE definition on purpose: upass/tolg stamps a merge with it, pass/cprop
+// enforces carriers with it, and inou/cgen/cgen_sim rejects a narrow mux with
+// it. Three private copies drifted -- cgen_sim demanded the carrier for an
+// unknown literal that tolg had already stamped at the payload, and the
+// resulting `mux-width-loss` fatal fired on a graph that was correct.
+[[nodiscard]] inline int32_t literal_payload_bits(const Dlop& value) {
+  const auto carrier = static_cast<int32_t>(value.get_bits());
+  if (value.is_numeric() && !value.is_negative()) {
+    return std::max<int32_t>(1, carrier - 1);
+  }
+  return std::max<int32_t>(1, carrier);
+}
+
 // HHDS stores the user-supplied type in NodeEntry::type with the low bit
 // reserved for HHDS's own `is_loop_last` semantics. The Ntype_op encoding
 // is designed so that bit 0 of the underlying value already encodes

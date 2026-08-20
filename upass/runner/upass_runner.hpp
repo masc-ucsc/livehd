@@ -552,7 +552,6 @@ protected:
   // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
   // (nested access, dynamic index, comptime slot, or unknown ref).
   bool                                                                              try_resolve_tuple_get();
-  bool                                                                              try_lower_dynamic_tuple_store();
   // `dst = src[idx]` with a RUNTIME index into a comptime fixed-size tuple of
   // scalar wires (`const choices=[a,b,c,d]`) lowers to a balanced Hotmux —
   // `match idx { ==0 {dst=e0} … else {dst=e_{n-1}} }` — instead of erroring in
@@ -578,12 +577,6 @@ protected:
   // (the bundle trivial stays the authority) and genuine tuples are skipped
   // (their runtime leaves were re-homed by constprop's propagate_sub_slot_refs).
   void                                                     record_runtime_tuple_slot_refs();
-  // Raw REF children of the most recently seen tuple_add. This also remembers
-  // a ref whose current VALUE is comptime-known: a dynamic SROA store still
-  // needs the ref as an LVALUE after constprop has replaced its tuple slot with
-  // that current constant. Consumed only by try_lower_dynamic_tuple_store,
-  // which additionally requires the `.eN` SROA leaf naming contract.
-  absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_raw_slot_ref_;
 
   // ── pipe/mod/fluid template specialization ────────────────────
   // Called from try_inline_func_call at the pipe/mod decline point when the

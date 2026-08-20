@@ -21,11 +21,18 @@ module lane(
   // narrowed to the low nibble.
   reg [4:0] acc;
   reg [3:0] mem [0:1];
+  // A memory has no parallel reset port: `reg mem:[2]u4 = 0` restores its reset
+  // value one entry per cycle, swept by a counter that parks at 0 while reset is
+  // low. A full restore therefore takes SIZE cycles of reset held high, unlike
+  // the scalar `acc` beside it, which resets in one.
+  reg       mem_rstcnt;
   always @(posedge clock) begin
+    if (!reset) mem_rstcnt <= 1'b0;
+    else        mem_rstcnt <= (mem_rstcnt == 1'b1) ? mem_rstcnt : mem_rstcnt + 1'b1;
+
     if (reset) begin
       acc <= 5'b0;
-      mem[0] <= 4'b0;
-      mem[1] <= 4'b0;
+      mem[mem_rstcnt] <= 4'b0;
     end else begin
       acc <= {1'b0, (acc[3:0] + x)};
       if (we) mem[addr] <= x;

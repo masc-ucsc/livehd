@@ -274,7 +274,6 @@ private:
   struct Tolg_scan_cache {
     std::optional<bool>                     declares_reg;
     std::optional<bool>                     declares_reset_reg;
-    std::optional<bool>                     declares_init_reg_array;
     std::optional<std::vector<std::string>> callee_names;
   };
   mutable Tolg_scan_cache tolg_scan_cache_;
@@ -770,17 +769,6 @@ public:
   // path — no string resolve, no per-char scan. Equivalent to
   // is_tmp(get_name(nid)) but cheaper.
   static bool is_tmp(int32_t name_id) { return name_id < 0; }
-
-  // Reserved marked temp (same idea as prp2lnast's `%__region_<id>`): the
-  // carrier of a slang SROA runtime element write, `store(<carrier>, idx, v)`
-  // built by Slang_lvalue for `arr[runtime_idx] = v`.
-  // uPass_runner::try_lower_dynamic_tuple_store decodes exactly that shape into
-  // mutually exclusive leaf writes, and it is the MARKER — not the `.eN`
-  // spelling of the leaves — that says the store is one. A genuine user tuple
-  // whose members happen to be named `.e0`, `.e1`, … is otherwise
-  // indistinguishable by name, and decoding it would silently change its
-  // meaning. `%` is parser-impossible, so no source can mint this.
-  static constexpr std::string_view sroa_write_tuple_prefix = "%__sroa_wr_";
 
   // Stable id of the statement "shape" around a tmp ref: FNV-1a over the
   // parent's node type name plus every *other* child's leaf kind+text.

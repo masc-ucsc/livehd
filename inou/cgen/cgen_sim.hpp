@@ -173,7 +173,7 @@ private:
 
   // Per-graph liveness (backward reach from IO/state/Sub/Memory sinks): only
   // live comb nodes emit — dead trees stranded by graph passes (e.g.
-  // split_packed_selfref_wires) produce no code.
+  // split_packed_selfref_wire / split_packed_selfref_cycles) produce no code.
   absl::flat_hash_set<hhds::Class_index> live_;
 
   // Resolve a driver pin to a Slop<target_bits> C++ EXPRESSION: a constant ->
