@@ -31,6 +31,19 @@ PATCHES = {
         ["start_mul_2p", "start_div_2p"],
 }
 
+# Files whose ANSI `output` ports carry NO data type and are then driven from an
+# always block.  An untyped ANSI output defaults to a NET (wire), and a net may
+# not be assigned procedurally -- slang rejects it, Verilator does not.  Adding
+# `logic` is the lowRISC-standard spelling and is legal for BOTH continuous and
+# procedural drivers, so it is safe to apply to every untyped output in the file
+# rather than only the ones that happen to be procedurally driven today.
+UNTYPED_OUTPUT_FILES = [
+    "hw/ip/minion/vpu/rtl/txfmactl_top.sv",
+    "hw/ip/minion/vpu/rtl/txfmaexp_top.sv",
+]
+
+OUTPUT_RE = re.compile(r"^(\s*output\s+)(?!(?:logic|wire|reg|bit|var)\b)(\S.*)$")
+
 
 def decl_index(lines, ident):
     """Index of the line DECLARING `ident` (localparam/logic/wire/reg ... ident =|;)."""
@@ -132,11 +145,56 @@ def patch_file(rel, idents, coreet_root):
     return src, out
 
 
+def type_outputs(rel, coreet_root):
+    """Give every untyped ANSI `output` port an explicit `logic` type."""
+    src = os.path.join(coreet_root, rel)
+    if not os.path.isfile(src):
+        raise SystemExit(f"FATAL: missing source {src}")
+    with open(src) as f:
+        original = f.readlines()
+
+    lines, n = [], 0
+    for l in original:
+        m = OUTPUT_RE.match(l.rstrip("\n"))
+        if m and not l.lstrip().startswith("//"):
+            lines.append(f"{m.group(1)}logic {m.group(2)}\n")
+            n += 1
+        else:
+            lines.append(l)
+
+    if n == 0:
+        raise SystemExit(f"FATAL: {rel} has no untyped output to type -- upstream "
+                         f"changed; re-check scripts/coreet_patch_srcs.py")
+    # The ONLY difference may be an inserted `logic` token on `output` lines.
+    if len(lines) != len(original):
+        raise SystemExit(f"FATAL: {rel} line count changed -- refusing to emit")
+    for a, b in zip(original, lines):
+        if a != b and a.replace("output ", "output logic ", 1).split() != b.split():
+            raise SystemExit(f"FATAL: {rel} patch changed more than the type token:\n"
+                             f"  before: {a.rstrip()}\n  after : {b.rstrip()}")
+
+    out = os.path.join(OUTDIR, os.path.basename(rel))
+    os.makedirs(OUTDIR, exist_ok=True)
+    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+           f"// source: {rel}\n"
+           f"// sha256(source): {hashlib.sha256(''.join(original).encode()).hexdigest()[:16]}\n"
+           f"// change: added an explicit `logic` type to {n} untyped ANSI output port(s).\n"
+           "// reason: an untyped ANSI output defaults to a NET, and a net cannot be\n"
+           "//         assigned procedurally.  slang enforces this, Verilator does not.\n")
+    with open(out, "w") as f:
+        f.write(hdr + "".join(lines))
+    print(f"{rel}\n  -> {out}\n     typed {n} untyped output port(s)")
+    return src, out
+
+
 def main():
     coreet_root = os.environ.get("COREET_ROOT", "/soe/czeng14/projects/core-et")
     mapping = {}
     for rel, idents in PATCHES.items():
         src, out = patch_file(rel, idents, coreet_root)
+        mapping[os.path.realpath(src)] = out
+    for rel in UNTYPED_OUTPUT_FILES:
+        src, out = type_outputs(rel, coreet_root)
         mapping[os.path.realpath(src)] = out
     mf = os.path.join(OUTDIR, "map.tsv")
     with open(mf, "w") as f:
