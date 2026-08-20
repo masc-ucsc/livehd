@@ -767,11 +767,21 @@ std::string driver_expr(const LeanCtx& ctx, const Node_pin& dpin) {
     if (ctx.bridge_fv_mode) {
       const uint64_t key = (static_cast<uint64_t>(node_id(driver_node)) << 32) | dpin.get_port_id();
       auto           it  = ctx.mem_read_fv.find(key);
-      if (it == ctx.mem_read_fv.end()) {
-        throw Emit_error("internal: memory n_" + std::to_string(node_id(driver_node)) + " read pin "
-                         + std::to_string(dpin.get_port_id()) + " has no fv def (decomposition did not run?)");
+      if (it != ctx.mem_read_fv.end()) {
+        return "(" + ctx.base_name + "_fv" + std::to_string(it->second) + ctx.bridge_fv_args + ")";
       }
-      return "(" + ctx.base_name + "_fv" + std::to_string(it->second) + ctx.bridge_fv_args + ")";
+      // A SYNC read has no computed node to name: the value consumers see is the
+      // read-data REGISTER, a state field (and a certificate source).
+      auto mit = ctx.memory_info.find(node_id(driver_node));
+      if (mit != ctx.memory_info.end() && mit->second.sync) {
+        for (const auto& kv : mit->second.read_reg_field) {
+          if (mit->second.ports.at(kv.first).driver_pid == dpin.get_port_id()) {
+            return "s." + kv.second;
+          }
+        }
+      }
+      throw Emit_error("internal: memory n_" + std::to_string(node_id(driver_node)) + " read pin "
+                       + std::to_string(dpin.get_port_id()) + " has no fv def (decomposition did not run?)");
     }
     return "n_" + std::to_string(node_id(driver_node)) + "_p" + std::to_string(dpin.get_port_id());
   }
@@ -1195,6 +1205,7 @@ struct CertBuild {
   // consumer's cert_dep_id resolve a memory read-data pin, and let the bridge
   // codegen tell a `.mem`-valued id from a `.bv`-valued one.
   std::set<uint32_t>              mem_valued;   // cert ids whose CertVal is `.mem`
+  std::set<uint32_t>              mem_raw_reads; // Op_MemRead ids with a literal enable (sync raw read)
   std::map<uint64_t, uint32_t>    mem_read_id;  // (mem nid<<32 | driver_pid) -> cert id
   // Emitted-text side of the decomposition, keyed by cert id: the fast-model
   // expression each synthetic node's `fv` def must carry.
@@ -1610,21 +1621,55 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
     const std::string base_e = (base_id == ids.array_src) ? ("s." + mi.field) : fvref(base_id);
     const uint32_t a_id      = resize(rp.addr, mi.addr_width);
 
+    const uint64_t rkey = (static_cast<uint64_t>(nid) << 32) | rp.driver_pid;
+
     if (mi.sync) {
-      fatal(ctx,
-            memory_policy_summary(mi)
-                + ". the memory certificate does not yet cover SYNC read (type 1): the read-data register needs a source "
-                  "plus an Op_MuxBool next-state node over an ungated Op_MemRead. Async/array (type 0/2) is covered.");
+      // Sync read (type 1).  What consumers see is the read-data REGISTER, so that
+      // is a source, like a flop.  Its next value is
+      //   sram_sync_read_reg_next ren raw cur = if ren then raw else cur
+      // which is an Op_MuxBool over an UNGATED read -- an Op_MemRead with a literal
+      // enable, closed by mem_read_en_bridge.  No new certificate operator needed.
+      const auto     reg_field = mi.read_reg_field.at(pidx);
+      const uint32_t reg_src   = build.next_synth_id++;
+      build.source_ids.insert(reg_src);
+      build.source_exprs[reg_src] = "mk_bv " + std::to_string(mi.bits) + " (Int.ofNat (BitVec.toNat s." + reg_field + "))";
+      build.source_leaf[reg_src]  = "s." + reg_field;
+      build.source_kind[reg_src]  = 2;
+      build.source_width[reg_src] = mi.bits;
+
+      const uint32_t one_src = build.next_synth_id++;
+      build.source_ids.insert(one_src);
+      build.source_exprs[one_src] = "mk_bv 1 (Int.ofNat 1)";
+      build.source_leaf[one_src]  = "BitVec.ofInt 1 (Int.ofNat 1)";
+      build.source_kind[one_src]  = 1;
+      build.source_width[one_src] = 1;
+
+      const uint32_t raw_id = build.next_synth_id++;
+      emit(raw_id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, one_src}, bv_ty,
+           memory_raw_read_at(ctx, mi, pidx, base_e));
+      build.mem_raw_reads.insert(raw_id);
+
+      const uint32_t ren_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node));
+      const uint32_t nxt_id = build.next_synth_id++;
+      emit(nxt_id, "LGraphOp.Op_MuxBool", mi.bits, {ren_id, reg_src, raw_id}, bv_ty,
+           "sram_sync_read_reg_next " + memory_read_enable_port(ctx, mi, pidx) + " (" + fvref(raw_id) + ") s." + reg_field);
+
+      ids.rdreg_src[pidx]     = reg_src;
+      ids.rdreg_next[pidx]    = nxt_id;
+      ids.read_out[pidx]      = reg_src;
+      build.mem_read_id[rkey] = reg_src;
+      // No ctx.mem_read_fv entry: driver_expr resolves a sync read to `s.<field>`.
+      continue;
     }
+
     const uint32_t e_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node));
     const uint32_t id   = build.next_synth_id++;
     emit(id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, e_id}, bv_ty,
          "(if " + memory_read_enable_port(ctx, mi, pidx) + " then " + memory_raw_read_at(ctx, mi, pidx, base_e) + " else "
              + lit_zero(mi.bits) + ")");
-    ids.read_out[pidx]                                                   = id;
-    const uint64_t rkey                                                  = (static_cast<uint64_t>(nid) << 32) | rp.driver_pid;
-    build.mem_read_id[rkey]                                              = id;
-    ctx.mem_read_fv[rkey]                                                = id;
+    ids.read_out[pidx]      = id;
+    build.mem_read_id[rkey] = id;
+    ctx.mem_read_fv[rkey]   = id;
   }
 
   ids.next_chain = build_chain(all_ords);
@@ -2375,6 +2420,10 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       const auto& ids = mem_cert_ids.at(node_id(mn));
       ofs << "  let new_" << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits << ") := memdec "
           << mi.addr_width << " " << mi.bits << " (rho " << ids.next_chain << ").asMem\n";
+      for (const auto& kv : mi.read_reg_field) {
+        ofs << "  let new_" << kv.second << " : BitVec " << mi.bits << " := bv_to_bitvec " << mi.bits << " (rho "
+            << ids.rdreg_next.at(kv.first) << ").asBV\n";
+      }
     }
     ofs << "  { ";
     bool first_field = true;
@@ -2393,6 +2442,9 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       first_field = false;
       ofs << mi.field << " := new_" << mi.field;
+      for (const auto& kv : mi.read_reg_field) {
+        ofs << ", " << kv.second << " := new_" << kv.second;
+      }
     }
     ofs << " }\n\n";
 
@@ -2767,7 +2819,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       // bridge's RHS names them.
       bool mem_result = false;
       if (info.op_expr == "LGraphOp.Op_MemRead") {
-        bridge_call = "mem_read_bridge";
+        // A sync memory's raw read is ungated (literal enable), so its fast-model
+        // body has no `if` -- mem_read_en_bridge discharges the literal instead of
+        // leaving the closer to evaluate `bitvec_nonzero` on a constant.
+        bridge_call = cert_build.mem_raw_reads.count(info.nid) ? "mem_read_en_bridge _ _ _ (by decide)"
+                                                              : "mem_read_bridge";
         supported   = true;
       } else if (info.op_expr == "LGraphOp.Op_MemWrite") {
         bridge_call = "mem_write_bridge";
@@ -2785,14 +2841,36 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
           srcfacts += base_name + "_src" + std::to_string(d) + " " + A + ", ";
         }
       }
-      // Operand resize defs to unfold in the closer (memory ops only).
+      // Operand resize defs to unfold in the closer -- MEMORY OPS ONLY.
+      //
+      // Scoping this to memory nodes is load-bearing, not tidiness.  Unfolding an
+      // operand's `fv` def is exactly what the factoring exists to avoid: doing it
+      // on every node would put each operand's whole body into each goal, i.e. O(N)
+      // per node and O(N^2) over the design -- the trap this bridge was rebuilt to
+      // escape.  A memory op is the one case that needs it, because the node body
+      // inlines the `(bv_zext _ : BitVec w)` casts while the bridge's RHS names the
+      // resize nodes, and there are at most 4 such operands.
       std::string mem_closer;
-      if (mem_mode) {
+      const bool  is_mem_op = info.op_expr == "LGraphOp.Op_MemRead" || info.op_expr == "LGraphOp.Op_MemWrite"
+                              || info.op_expr.rfind("LGraphOp.Op_MemWriteBE", 0) == 0;
+      if (mem_mode && is_mem_op) {
         for (const auto d : info.deps) {
           if (topo_set.count(d) && !is_mem_val(d)) {
             mem_closer += ", " + base_name + "_fv" + std::to_string(d);
           }
         }
+      }
+      // A sync read-data register's next value is emitted as
+      // `sram_sync_read_reg_next ren raw cur` over an Op_MuxBool; muxbool_bridge
+      // produces the if-form, so that definition has to be unfolded to meet it --
+      // and only on those nodes.
+      if (mem_mode && info.op_expr == "LGraphOp.Op_MuxBool" && cert_build.synth_fv_expr.count(info.nid)) {
+        for (const auto d : info.deps) {
+          if (topo_set.count(d)) {
+            mem_closer += ", " + base_name + "_fv" + std::to_string(d);
+          }
+        }
+        mem_closer += ", sram_sync_read_reg_next";
       }
       const std::string eval_node_fn = mem_mode ? "evalNodeC" : "evalNode";
       ofs << "theorem " << base_name << "_rec" << info.nid << " " << P << " : " << base_name << "_phi " << A
@@ -2969,9 +3047,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       // all-writes chain tail of each memory alongside the flop ids.
       if (mem_mode) {
         for (const auto& mn : memory_nodes) {
-          const auto tail = mem_cert_ids.at(node_id(mn)).next_chain;
-          if (next_seen.insert(tail).second) {
-            next_ids.push_back(tail);
+          const auto& ids = mem_cert_ids.at(node_id(mn));
+          if (next_seen.insert(ids.next_chain).second) {
+            next_ids.push_back(ids.next_chain);
+          }
+          for (const auto& kv : ids.rdreg_next) {
+            if (next_seen.insert(kv.second).second) {
+              next_ids.push_back(kv.second);
+            }
           }
         }
       }

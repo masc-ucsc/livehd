@@ -1291,6 +1291,14 @@ theorem ofNat_toNat_ofInt {a : Nat} {x : Int} (h0 : 0 ≤ x) (h1 : x < 2 ^ a) :
   rw [Int.emod_eq_of_lt h0 h1]
   simp [Int.toNat_of_nonneg h0]
 
+/-- Ungated read, for the raw read a SYNC memory feeds into its read-data register.
+The emitter supplies a literal enable, so `h` is `by decide` at the call site. -/
+theorem mem_read_en_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (en : BitVec we) (h : bitvec_nonzero en = true) :
+    cert_mem_read d (memenc m) (bvenc addr) (bvenc en) = bvenc (mem_read m addr) := by
+  rw [mem_read_bridge]
+  simp [h]
+
 /-- `Op_MemWrite`: one enable-gated certificate write step equals the encoded
 fast-model write step.  This is one step of `memory_write_fold`. -/
 theorem mem_write_bridge {a d we : Nat} (m : BitVec a → BitVec d)
