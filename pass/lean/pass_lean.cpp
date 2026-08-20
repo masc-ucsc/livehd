@@ -2426,6 +2426,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       } else if (info.op_expr == "LGraphOp.Op_SLT" && info.deps.size() == 2
                  && width_of(info.deps[0]) == width_of(info.deps[1])) {
         bridge_call = "slt_bridge";
+      } else if (info.op_expr == "LGraphOp.Op_SGT" && info.deps.size() == 2
+                 && width_of(info.deps[0]) == width_of(info.deps[1])) {
+        // Same shape and same equal-width guard as Op_SLT: the fast model emits
+        // `bool_to_bv1 (BitVec.toInt a > BitVec.toInt b)` and `sgt_bridge` states
+        // exactly that (bv_zext_id normalizes the zext away at equal widths).
+        // The lemma was already proven in OpBridge.lean but never dispatched;
+        // CORE-ET's vpu_sh_sw / txfma_e2 are the first designs to reach it.
+        bridge_call = "sgt_bridge";
       } else if (info.op_expr == "LGraphOp.Op_Sum 1" && info.deps.size() == 2) {
         bridge_call = "sum1_bridge";
       } else {

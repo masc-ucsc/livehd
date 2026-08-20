@@ -103,15 +103,17 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "eq/ult/ugt_bridge")
     if op == "Op_Sext" and arity == 2:
         return ("ok", "sext_bridge | sext_bridge_low")
-    if op == "Op_SLT" and arity == 2:
-        # slt_bridge is stated at a SINGLE width (a b : BitVec cw), so the
-        # emitter only dispatches when both operand widths are equal.
+    if op in ("Op_SLT", "Op_SGT") and arity == 2:
+        # slt_bridge / sgt_bridge are stated at a SINGLE width (a b : BitVec cw),
+        # so the emitter only dispatches when both operand widths are equal.
+        name = "slt_bridge" if op == "Op_SLT" else "sgt_bridge"
+        short = op[3:]
         w0, w1 = dep_widths[0], dep_widths[1]
         if w0 is None or w1 is None:
-            return ("unhandled", "SLT with undetermined dep widths (check by hand)")
+            return ("unhandled", "%s with undetermined dep widths (check by hand)" % short)
         if w0 != w1:
-            return ("unhandled", "SLT at unequal widths %d/%d (needs slt_bridge_max)" % (w0, w1))
-        return ("ok", "slt_bridge")
+            return ("unhandled", "%s at unequal widths %d/%d (needs %s_max)" % (short, w0, w1, name))
+        return ("ok", name)
     return ("unhandled", "no dispatch arm")
 
 
