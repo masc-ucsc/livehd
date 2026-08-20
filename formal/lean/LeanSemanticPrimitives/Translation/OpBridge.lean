@@ -1255,6 +1255,18 @@ theorem memenc_at {a d : Nat} (m : BitVec a → BitVec d) (x : BitVec a) :
   unfold memenc
   rw [if_pos (bvenc_addr_in_range x), ofInt_ofNat_toNat]
 
+/-- Decode a certificate memory image back to a fast-model function.  Inverse of
+`memenc` on the guarded range; `<Top>_nextStateFromCert` uses it to rebuild the
+function-valued state field from the certificate's `.mem` value. -/
+def memdec (a d : Nat) (m : Int → BV) : BitVec a → BitVec d :=
+  fun x => bv_to_bitvec d (m (Int.ofNat x.toNat))
+
+/-- Round trip: this is what `<Top>_next_refines_fast` closes the memory field with. -/
+theorem memdec_memenc {a d : Nat} (m : BitVec a → BitVec d) : memdec a d (memenc m) = m := by
+  funext x
+  unfold memdec memenc
+  rw [if_pos (bvenc_addr_in_range x), ofInt_ofNat_toNat, bv_to_bitvec_bvenc]
+
 theorem bvenc_zero {d : Nat} : bvenc (0#d) = mk_bv d 0 := by
   unfold bvenc; simp
 

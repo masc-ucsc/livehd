@@ -634,26 +634,33 @@ bool memory_fwd_bit(const Memory_info& mi, size_t r_ord, size_t w_ord) {
 // Writes are applied in port order either way, so a later (higher port_id) write
 // WINS a same-cycle same-address collision.  Each write is enable-gated; a
 // byte-enable memory (wensize>1) uses mem_write_be.
+// ONE step of the write fold, applied to an explicit base image.  Factored out of
+// memory_write_fold so the certificate decomposition (cert_memory_expand) emits
+// byte-identical text per Op_MemWrite[BE] node while the fast model keeps folding
+// inline -- one source of truth for the step shape.
+std::string memory_write_step(const LeanCtx& ctx, const Memory_info& mi, size_t w_ord, const std::string& base) {
+  const auto  widx     = mi.write_ports[w_ord];
+  const auto& p        = mi.ports.at(widx);
+  const auto  addr     = ucast_pin_at(ctx, p.addr, mi.addr_width);
+  const auto  data     = ucast_pin_at(ctx, p.din, mi.bits);
+  const auto  enable_w = std::max<uint32_t>(1, mi.wensize);
+  const auto  enable   = ucast_pin_at(ctx, p.enable, enable_w);
+  const auto  we       = "(bitvec_nonzero " + enable + ")";
+  if (mi.wensize <= 1) {
+    return "(if " + we + " then mem_write " + base + " " + addr + " " + data + " else " + base + ")";
+  }
+  const auto byte_w = mi.bits / mi.wensize;
+  return "(if " + we + " then mem_write_be " + base + " " + addr + " " + data + " " + enable + " " + std::to_string(byte_w)
+         + " else " + base + ")";
+}
+
 std::string memory_write_fold(const LeanCtx& ctx, const Memory_info& mi, std::optional<size_t> r_ord = std::nullopt) {
   std::string acc = "s." + mi.field;
   for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
     if (r_ord.has_value() && !memory_fwd_bit(mi, *r_ord, w_ord)) {
       continue;  // this read does not forward from this write
     }
-    const auto  widx     = mi.write_ports[w_ord];
-    const auto& p        = mi.ports.at(widx);
-    const auto  addr     = ucast_pin_at(ctx, p.addr, mi.addr_width);
-    const auto  data     = ucast_pin_at(ctx, p.din, mi.bits);
-    const auto  enable_w = std::max<uint32_t>(1, mi.wensize);
-    const auto  enable   = ucast_pin_at(ctx, p.enable, enable_w);
-    const auto  we       = "(bitvec_nonzero " + enable + ")";
-    if (mi.wensize <= 1) {
-      acc = "(if " + we + " then mem_write " + acc + " " + addr + " " + data + " else " + acc + ")";
-    } else {
-      const auto byte_w = mi.bits / mi.wensize;
-      acc = "(if " + we + " then mem_write_be " + acc + " " + addr + " " + data + " " + enable + " " + std::to_string(byte_w)
-            + " else " + acc + ")";
-    }
+    acc = memory_write_step(ctx, mi, w_ord, acc);
   }
   return acc;
 }
@@ -673,18 +680,27 @@ std::string memory_read_enable_port(const LeanCtx& ctx, const Memory_info& mi, s
 // This used to test `mi.fwd == 1` -- correct only for 1R1W, since bit (r*n_wr+w)
 // means a 1R2W all-forwarding memory encodes as 3 and silently fell into the
 // read-first branch.  The hpdcache shape (1 read / 18 writes) is exactly that case.
-std::string memory_raw_read_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
-  const auto& rp    = mi.ports.at(port_idx);
-  const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
-  size_t      r_ord = 0;
+// Read ordinal of a read port (its index within mi.read_ports), which is what the
+// `fwd` matrix is indexed by.
+size_t memory_read_ordinal(const Memory_info& mi, size_t port_idx) {
   for (size_t k = 0; k < mi.read_ports.size(); ++k) {
     if (mi.read_ports[k] == port_idx) {
-      r_ord = k;
-      break;
+      return k;
     }
   }
-  const auto base = mi.write_ports.empty() ? ("s." + mi.field) : memory_write_fold(ctx, mi, r_ord);
+  return 0;
+}
+
+std::string memory_raw_read_at(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx, const std::string& base) {
+  const auto& rp    = mi.ports.at(port_idx);
+  const auto  raddr = ucast_pin_at(ctx, rp.addr, mi.addr_width);
   return "mem_read " + base + " " + raddr;
+}
+
+std::string memory_raw_read_port(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
+  const auto r_ord = memory_read_ordinal(mi, port_idx);
+  const auto base  = mi.write_ports.empty() ? ("s." + mi.field) : memory_write_fold(ctx, mi, r_ord);
+  return memory_raw_read_at(ctx, mi, port_idx, base);
 }
 
 // Read output of a specific read port.  Sync (type 1): the registered read-data
@@ -1155,6 +1171,28 @@ struct CertBuild {
   std::map<uint32_t, int>         source_kind;  // 0 = input, 1 = const, 2 = flop
   std::map<uint32_t, uint32_t>    source_width; // BitVec width of the source leaf
   uint32_t next_synth_id = 1000000000;
+
+  // ---- Memory decomposition (step 5 memory path) --------------------------
+  // A Memory node is multi-output (N read-data values plus the array next state)
+  // while NodeCert carries ONE width and ONE value, so a memory is decomposed
+  // into single-valued cert nodes -- see cert_memory_expand.  These maps let a
+  // consumer's cert_dep_id resolve a memory read-data pin, and let the bridge
+  // codegen tell a `.mem`-valued id from a `.bv`-valued one.
+  std::set<uint32_t>              mem_valued;   // cert ids whose CertVal is `.mem`
+  std::map<uint64_t, uint32_t>    mem_read_id;  // (mem nid<<32 | driver_pid) -> cert id
+  // Emitted-text side of the decomposition, keyed by cert id: the fast-model
+  // expression each synthetic node's `fv` def must carry.
+  std::map<uint32_t, std::string> synth_fv_expr;
+  std::map<uint32_t, std::string> synth_fv_type;
+};
+
+// Certificate ids of one memory node's decomposition.
+struct MemCertIds {
+  uint32_t                   array_src  = 0;  // source id: the committed array image
+  uint32_t                   next_chain = 0;  // all-writes chain tail (== array_src if write-less)
+  std::map<size_t, uint32_t> read_out;        // port_id -> id whose value is the port's read DATA
+  std::map<size_t, uint32_t> rdreg_src;       // port_id -> read-data register source id (sync only)
+  std::map<size_t, uint32_t> rdreg_next;      // port_id -> cert id of that register's next value
 };
 
 // Structured view of one emitted node certificate, captured for bridge codegen.
@@ -1200,6 +1238,20 @@ uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, 
     build.source_kind[sid]  = 2;
     build.source_width[sid] = ctx.flop_width.at(sid);
     return sid;
+  }
+  if (node_is_memory(n)) {
+    // A Memory node has one read-data output pin per read port, so `node_id` is
+    // NOT a usable cert id -- the pin selects which read the consumer wants.
+    // cert_memory_expand ran first (memories precede their consumers in topo
+    // order), so the id is already recorded.
+    const uint64_t key = (static_cast<uint64_t>(node_id(n)) << 32) | pin.get_port_id();
+    auto           it  = build.mem_read_id.find(key);
+    if (it == build.mem_read_id.end()) {
+      fatal(ctx,
+            "internal: memory n_" + std::to_string(node_id(n)) + " read pin " + std::to_string(pin.get_port_id())
+                + " has no certificate id (decomposition did not run, or this pin is not a read port).");
+    }
+    return it->second;
   }
   return node_id(n);
 }
@@ -1414,6 +1466,151 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
   std::ostringstream oss;
   oss << "{ nid := " << node_id(node) << ", op := " << op_expr << ", width := " << w << ", deps := " << nat_list(deps) << " }";
   return oss.str();
+}
+
+// ---------------------------------------------------------------------------
+// Expand one Memory node into single-valued certificate nodes.
+//
+// A Memory is multi-output (one read-data value per read port, plus the array
+// next state) while NodeCert carries ONE width and ONE value.  So the memory is
+// DECOMPOSED, exactly as LGraphModel.lean's CertVal comment prescribes:
+//
+//   * the committed array image becomes a SOURCE (like a flop);
+//   * each write port becomes one Op_MemWrite / Op_MemWriteBE node, CHAINED in
+//     memory_write_fold order so a later port wins a same-address collision;
+//   * each read port becomes one Op_MemRead over the image THAT PORT observes.
+//
+// The last point is the subtle one: the read-during-write policy is per
+// (read, write) PAIR (memory_fwd_bit), so two read ports generally observe
+// DIFFERENT prefixes of the write chain.  A single linear chain would be wrong.
+// Chains are therefore keyed by their forwarded-set signature and shared when
+// two reads happen to forward from the same set; the all-writes chain is the
+// array next state.
+//
+// Every port operand is funnelled through an arity-1 Op_Or resize node, which
+// mirrors the fast model's ucast_pin_at (`(bv_zext x : BitVec w)`) exactly, and
+// or1_bridge is the matching lemma.  This is not cosmetic: for a bitwise op the
+// cert op's width parameter truncates the operand implicitly, but an ADDRESS is
+// an index, not a bit vector -- cert_mem_read indexes at `bv_uint a`, the FULL
+// unsigned value, so a 5-bit address dep feeding a 4-bit-addressed array would
+// read entry 20 where the fast model reads entry 4.
+// ---------------------------------------------------------------------------
+void cert_memory_expand(const LeanCtx& ctx, CertBuild& build, const Node& node, std::vector<uint32_t>& topo_ids,
+                        std::vector<std::string>& cert_nodes, std::vector<CertNodeInfo>& cert_infos,
+                        std::map<uint32_t, MemCertIds>& mem_ids) {
+  const auto& mi  = memory_info_for(ctx, node);
+  const auto  nid = node_id(node);
+  MemCertIds  ids;
+
+  // A memory design is sequential by construction, so the fv defs always take
+  // (i, s).  Computed here rather than read from ctx because the certificate loop
+  // runs whether or not the fast-view bridge is enabled.
+  const std::string fv_args = " i s";
+  const std::string mem_ty  = "(BitVec " + std::to_string(mi.addr_width) + " -> BitVec " + std::to_string(mi.bits) + ")";
+  const std::string bv_ty   = "BitVec " + std::to_string(mi.bits);
+
+  auto emit = [&](uint32_t id, const std::string& op_expr, uint32_t w, const std::vector<uint32_t>& deps,
+                  const std::string& fv_ty, const std::string& fv_expr) {
+    topo_ids.push_back(id);
+    CertNodeInfo info;
+    info.nid     = id;
+    info.op_expr = op_expr;
+    info.width   = w;
+    info.deps    = deps;
+    cert_infos.push_back(info);
+    std::ostringstream oss;
+    oss << "{ nid := " << id << ", op := " << op_expr << ", width := " << w << ", deps := " << nat_list(deps) << " }";
+    cert_nodes.push_back(oss.str());
+    build.synth_fv_expr[id] = fv_expr;
+    build.synth_fv_type[id] = fv_ty;
+  };
+  auto fvref = [&](uint32_t id) { return "(" + ctx.base_name + "_fv" + std::to_string(id) + fv_args + ")"; };
+
+  auto resize = [&](const Node_pin& pin, uint32_t w) -> uint32_t {
+    const uint32_t src = cert_dep_id(ctx, build, pin, w);
+    const uint32_t id  = build.next_synth_id++;
+    emit(id, "LGraphOp.Op_Or", w, {src}, "BitVec " + std::to_string(w), ucast_pin_at(ctx, pin, w));
+    return id;
+  };
+
+  // The committed array image: a source, like a flop.  `source_exprs` holds the
+  // INNER expression; the emission site wraps it by kind (3 => CertVal.mem).
+  ids.array_src = build.next_synth_id++;
+  build.source_ids.insert(ids.array_src);
+  build.source_exprs[ids.array_src] = "memenc s." + mi.field;
+  build.source_leaf[ids.array_src]  = "s." + mi.field;
+  build.source_kind[ids.array_src]  = 3;
+  build.source_width[ids.array_src] = mi.bits;
+  build.mem_valued.insert(ids.array_src);
+
+  // Write chain for a given set of write ordinals, shared across reads that
+  // forward from the same set.  The empty set is the committed image itself.
+  std::map<std::string, uint32_t> chain_cache;
+  auto build_chain = [&](const std::vector<size_t>& ords) -> uint32_t {
+    std::string sig;
+    for (auto o : ords) {
+      sig += std::to_string(o) + ",";
+    }
+    if (auto it = chain_cache.find(sig); it != chain_cache.end()) {
+      return it->second;
+    }
+    uint32_t    cur      = ids.array_src;
+    std::string cur_expr = "s." + mi.field;
+    for (auto w_ord : ords) {
+      const auto     widx = mi.write_ports[w_ord];
+      const auto&    p    = mi.ports.at(widx);
+      const auto     en_w = std::max<uint32_t>(1, mi.wensize);
+      const uint32_t a_id = resize(p.addr, mi.addr_width);
+      const uint32_t d_id = resize(p.din, mi.bits);
+      const uint32_t e_id = resize(p.enable, en_w);
+      const std::string op_expr = (mi.wensize <= 1)
+                                      ? std::string("LGraphOp.Op_MemWrite")
+                                      : ("LGraphOp.Op_MemWriteBE " + std::to_string(mi.bits / mi.wensize));
+      const uint32_t id = build.next_synth_id++;
+      emit(id, op_expr, mi.bits, {cur, a_id, d_id, e_id}, mem_ty, memory_write_step(ctx, mi, w_ord, cur_expr));
+      build.mem_valued.insert(id);
+      cur      = id;
+      cur_expr = fvref(id);
+    }
+    chain_cache[sig] = cur;
+    return cur;
+  };
+
+  std::vector<size_t> all_ords;
+  for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
+    all_ords.push_back(w_ord);
+  }
+
+  for (auto pidx : mi.read_ports) {
+    const auto& rp    = mi.ports.at(pidx);
+    const auto  r_ord = memory_read_ordinal(mi, pidx);
+    std::vector<size_t> fwd_ords;
+    for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
+      if (memory_fwd_bit(mi, r_ord, w_ord)) {
+        fwd_ords.push_back(w_ord);
+      }
+    }
+    const uint32_t base_id   = build_chain(fwd_ords);
+    const std::string base_e = (base_id == ids.array_src) ? ("s." + mi.field) : fvref(base_id);
+    const uint32_t a_id      = resize(rp.addr, mi.addr_width);
+
+    if (mi.sync) {
+      fatal(ctx,
+            memory_policy_summary(mi)
+                + ". the memory certificate does not yet cover SYNC read (type 1): the read-data register needs a source "
+                  "plus an Op_MuxBool next-state node over an ungated Op_MemRead. Async/array (type 0/2) is covered.");
+    }
+    const uint32_t e_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node));
+    const uint32_t id   = build.next_synth_id++;
+    emit(id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, e_id}, bv_ty,
+         "(if " + memory_read_enable_port(ctx, mi, pidx) + " then " + memory_raw_read_at(ctx, mi, pidx, base_e) + " else "
+             + lit_zero(mi.bits) + ")");
+    ids.read_out[pidx]                                                                = id;
+    build.mem_read_id[(static_cast<uint64_t>(nid) << 32) | rp.driver_pid]              = id;
+  }
+
+  ids.next_chain = build_chain(all_ords);
+  mem_ids[nid]   = ids;
 }
 
 }  // namespace
@@ -1647,19 +1844,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
   }
 
-  // Fail LOUD, not quiet.  The four `emit_cert && emit_fast_bridge &&
-  // memory_nodes.empty()` conjunctions below silently degrade a memory design to
-  // "no bridge", so asking for a bridge and getting a file without one looked like
-  // the bridge had been emitted and passed.  pass.isabelle refuses outright
-  // (pass_isabelle.cpp:2645-2656); match that.  The underlying reason is the same
-  // in both passes: the certificate evaluator is bit-vector-only, so a bridge over
-  // a memory design would be unprovable rather than merely absent.
-  if (emit_fast_bridge && !memory_nodes.empty()) {
+  // Memory designs take the CertVal certificate path: the graph is evaluated at
+  // `Nat -> CertVal` (evalGraphC) rather than `Nat -> BV`, because a memory value
+  // is a function.  Non-memory designs keep the BV path byte-for-byte -- that is
+  // what every already-proven design elaborates against, so it is deliberately
+  // not disturbed.  See cert_memory_expand for the decomposition.
+  const bool mem_mode = !memory_nodes.empty();
+  if (mem_mode && !emit_cert) {
     fatal(ctx,
-          "formal.lean.emit_fast_bridge is not supported for designs with memory nodes ("
-              + std::to_string(memory_nodes.size())
-              + " found): the graph certificate has no memory operator, so memory designs get a counts-only stub and there "
-                "is nothing to bridge to. Emit with emit_fast_bridge=false, or wait for the memory-aware certificate.");
+          "a design with " + std::to_string(memory_nodes.size())
+              + " Memory node(s) needs formal.lean.emit_cert=true: the memory certificate is what gives the "
+                "function-valued state a meaning to bridge to.");
   }
 
   auto topo = reachable_topo_order(roots, flop_nids);
@@ -1686,9 +1881,18 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ofs << "/-\n";
   ofs << "  Generated by LiveHD pass.lean.\n";
   ofs << "  Fast executable model: emitted.\n";
-  ofs << "  Certificate model: emitted for the supported non-memory graph subset.\n";
+  if (mem_mode) {
+    ofs << "  Certificate model: emitted over CertVal (bv | mem); each Memory node is\n";
+    ofs << "  decomposed into a source array, an Op_MemWrite[BE] chain and one Op_MemRead\n";
+    ofs << "  per read port.\n";
+  } else {
+    ofs << "  Certificate model: emitted for the supported non-memory graph subset.\n";
+  }
   ofs << "-/\n\n";
-  if (emit_cert && emit_fast_bridge && memory_nodes.empty()) {
+  // OpBridge owns the encoding (bvenc / memenc / memdec) as well as the per-op
+  // bridge lemmas, so a memory design needs it even without the fast bridge.
+  const bool need_op_bridge = (emit_cert && emit_fast_bridge) || mem_mode;
+  if (need_op_bridge) {
     // Bridge-enabled output: OpBridge pulls in Mathlib + the per-op bridge lemmas,
     // GraphRefine, and the base support package transitively.
     ofs << "import LeanSemanticPrimitives.Translation.OpBridge\n\n";
@@ -1697,7 +1901,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "import LeanSemanticPrimitives\n\n";
   }
   ofs << "set_option linter.unusedVariables false\n";
-  if (emit_cert && emit_fast_bridge && memory_nodes.empty()) {
+  if (emit_cert && emit_fast_bridge) {
     // Generated bridge proofs share one normalizer simp-set across nodes; not
     // every lemma fires on every node, which is expected (not a defect).
     ofs << "set_option linter.unusedSimpArgs false\n";
@@ -1919,37 +2123,19 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     return;
   }
 
-  // Memory certificate stub (parity with pass.isabelle emit_memory_cert_stub):
-  // the BV bignum certificate evaluator is bit-vector-only and does not yet
-  // interpret function-valued memory, so for memory-bearing designs pass.lean
-  // emits counts + a note instead of a graph certificate + evalGraph bridge.
-  if (!memory_nodes.empty()) {
-    ofs << "-- Certificate: STUB. This design contains " << memory_nodes.size()
-        << " LGraph Memory node(s), modeled as function-valued state\n";
-    ofs << "-- (BitVec addr -> BitVec data) via SemanticPrimitives.mem_read/mem_write/mem_write_be.\n";
-    ofs << "-- The graph-certificate evaluator (BV bignum) is bit-vector-only and does not yet\n";
-    ofs << "-- interpret function-valued memory, so no graphCert / evalGraph bridge is emitted here\n";
-    ofs << "-- (parity with pass.isabelle's memory certificate stub).\n\n";
-    ofs << "def " << base_name << "_node_count : Nat := " << topo.size() << "\n";
-    ofs << "def " << base_name << "_flop_count : Nat := " << flop_nodes.size() << "\n";
-    ofs << "def " << base_name << "_memory_count : Nat := " << memory_nodes.size() << "\n\n";
-    ofs << "theorem " << base_name << "_certificate_counts :\n";
-    ofs << "    " << base_name << "_node_count = " << topo.size() << " ∧ " << base_name << "_flop_count = "
-        << flop_nodes.size() << " ∧ " << base_name << "_memory_count = " << memory_nodes.size() << " := by\n";
-    ofs << "  decide\n\n";
-    ofs << "end " << base_name << "_Lgraph\n";
-    ofs.close();
-    finalize_emitted_file(lean_tmp_path, lean_path);
-    std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (memory certificate stub: " << topo.size()
-              << " nodes, " << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
-    return;
-  }
-
   CertBuild cert_build;
   std::vector<std::string> cert_nodes;
   std::vector<uint32_t> topo_ids;
   std::vector<CertNodeInfo> cert_infos;
+  std::map<uint32_t, MemCertIds> mem_cert_ids;
   for (const auto& n : topo) {
+    if (node_is_memory(n)) {
+      // One Memory node becomes several cert nodes (write chain + one read per
+      // port), spliced in at the memory's topo position.  Its deps (addr/din/en)
+      // are already earlier in topo order, so dependency ordering is preserved.
+      cert_memory_expand(ctx, cert_build, n, topo_ids, cert_nodes, cert_infos, mem_cert_ids);
+      continue;
+    }
     topo_ids.push_back(node_id(n));
     CertNodeInfo info;
     cert_nodes.push_back(cert_node_expr(ctx, cert_build, n, &info));
@@ -1995,27 +2181,45 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   ofs << "]\n\n";
 
   // In bridge mode the lookups must be O(log N) (BT data + find), see bst_literal.
-  const bool bridge_lookups = emit_cert && emit_fast_bridge && memory_nodes.empty();
+  const bool bridge_lookups = emit_cert && emit_fast_bridge;
+  // The certificate value type.  `CertVal` (bv | mem) for a memory design, plain
+  // `BV` otherwise -- see the mem_mode comment above.
+  const std::string val_ty  = mem_mode ? "CertVal" : "BV";
+  // Wrap a source's inner expression into the value type.  Kind 3 is a memory
+  // array image (already a `memenc _`), everything else is a bit vector.
+  auto val_wrap = [&](const std::string& inner, int kind) {
+    if (!mem_mode) {
+      return inner;
+    }
+    return std::string(kind == 3 ? "CertVal.mem (" : "CertVal.bv (") + inner + ")";
+  };
   const std::string senv_params = sequential ? ("(i : " + base_name + "_in) (s : " + base_name + "_state)")
                                              : ("(i : " + base_name + "_in)");
   const std::string senv_args    = sequential ? "i s" : "i";
   const std::string senv_closure = sequential ? "fun i s => " : "fun i => ";
-  const std::string senv_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → BV)")
-                                              : ("(" + base_name + "_in → BV)");
+  const std::string senv_ty      = sequential ? ("(" + base_name + "_in → " + base_name + "_state → " + val_ty + ")")
+                                              : ("(" + base_name + "_in → " + val_ty + ")");
+  auto source_val = [&](uint32_t sid) {
+    const int kind = cert_build.source_kind.count(sid) ? cert_build.source_kind.at(sid) : 0;
+    return val_wrap(cert_build.source_exprs.at(sid), kind);
+  };
+  // Off-graph default.  A zero-width zero for the BV path; for CertVal it has to be
+  // a `.bv`, and `evalGraphC_not_mem` only ever hands it back unchanged.
+  const std::string senv_default = mem_mode ? "CertVal.bv (mk_bv 0 0)" : "mk_bv 0 0";
   if (bridge_lookups) {
     std::vector<std::pair<uint32_t, std::string>> src_pairs;
     for (const auto& sid : source_ids) {
-      src_pairs.emplace_back(sid, senv_closure + cert_build.source_exprs.at(sid));
+      src_pairs.emplace_back(sid, senv_closure + source_val(sid));
     }
     ofs << "def " << base_name << "_srcTree : BT " << senv_ty << " :=\n  " << bst_literal(src_pairs) << "\n\n";
-    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> BV := fun n =>\n"
-        << "  (BT.find " << base_name << "_srcTree n).elim (mk_bv 0 0) (fun f => f " << senv_args << ")\n\n";
+    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> " << val_ty << " := fun n =>\n"
+        << "  (BT.find " << base_name << "_srcTree n).elim (" << senv_default << ") (fun f => f " << senv_args << ")\n\n";
   } else {
-    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> BV := fun n =>\n";
+    ofs << "def " << base_name << "_sourceEnv " << senv_params << " : Nat -> " << val_ty << " := fun n =>\n";
     for (const auto& sid : source_ids) {
-      ofs << "  if n = " << sid << " then " << cert_build.source_exprs.at(sid) << " else\n";
+      ofs << "  if n = " << sid << " then " << source_val(sid) << " else\n";
     }
-    ofs << "  mk_bv 0 0\n\n";
+    ofs << "  " << senv_default << "\n\n";
   }
 
   if (bridge_lookups) {
@@ -2041,7 +2245,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "nodes_of_list " << base_name << "_nodeCerts }\n\n";
   }
 
-  ofs << "def " << base_name << "_outputsFromCert (rho : Nat -> BV) : " << base_name << "_out :=\n";
+  // Projecting a certificate value back to a bit vector.  On the CertVal path the
+  // `.asBV` is where the node's kind is asserted: every id reached here is a
+  // bit-vector-valued node, which cert_memory_expand guarantees (only the array
+  // source and the write-chain nodes are `.mem`).
+  auto rho_bv = [&](uint32_t id) {
+    const std::string r = "rho " + std::to_string(id);
+    return mem_mode ? ("(" + r + ").asBV") : ("(" + r + ")");
+  };
+  ofs << "def " << base_name << "_outputsFromCert (rho : Nat -> " << val_ty << ") : " << base_name << "_out :=\n";
   ofs << "  { ";
   bool first_cert_out = true;
   if (ctx.output_field.empty()) {
@@ -2058,21 +2270,22 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       if (oid == output_cert_ids.end()) {
         ofs << lit_zero(ctx.output_width.at(out_name));
       } else {
-        ofs << "(bv_to_bitvec " << ctx.output_width.at(out_name) << " (rho " << oid->second << "))";
+        ofs << "(bv_to_bitvec " << ctx.output_width.at(out_name) << " " << rho_bv(oid->second) << ")";
       }
     }
   }
   ofs << " }\n\n";
 
+  const std::string eval_fn = mem_mode ? "evalGraphC" : "evalGraph";
   auto eval_expr = [&]() {
     if (sequential) {
-      return "evalGraph " + base_name + "_graphCert.topo " + base_name + "_graphCert (" + base_name + "_sourceEnv i s)";
+      return eval_fn + " " + base_name + "_graphCert.topo " + base_name + "_graphCert (" + base_name + "_sourceEnv i s)";
     }
-    return "evalGraph " + base_name + "_graphCert.topo " + base_name + "_graphCert (" + base_name + "_sourceEnv i)";
+    return eval_fn + " " + base_name + "_graphCert.topo " + base_name + "_graphCert (" + base_name + "_sourceEnv i)";
   };
 
   if (sequential) {
-    ofs << "def " << base_name << "_nextStateFromCert (rho : Nat -> BV) (s : " << base_name << "_state) : "
+    ofs << "def " << base_name << "_nextStateFromCert (rho : Nat -> " << val_ty << ") (s : " << base_name << "_state) : "
         << base_name << "_state :=\n";
     for (auto& fn : flop_nodes) {
       const auto fid = node_id(fn);
@@ -2083,18 +2296,26 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       const auto eit = flop_enable_cert_ids.find(fid);
       std::string din_e = lit_zero(fw);
       if (dit != flop_din_cert_ids.end()) {
-        din_e = "(bv_to_bitvec " + std::to_string(fw) + " (rho " + std::to_string(dit->second) + "))";
+        din_e = "(bv_to_bitvec " + std::to_string(fw) + " " + rho_bv(dit->second) + ")";
       }
       std::string reset_e = "false";
       if (rit != flop_reset_cert_ids.end()) {
-        reset_e = "(bv_nonzero (rho " + std::to_string(rit->second) + "))";
+        reset_e = "(bv_nonzero " + rho_bv(rit->second) + ")";
       }
       std::string en_e = "true";
       if (eit != flop_enable_cert_ids.end()) {
-        en_e = "(bv_nonzero (rho " + std::to_string(eit->second) + "))";
+        en_e = "(bv_nonzero " + rho_bv(eit->second) + ")";
       }
       ofs << "  let new_" << fld << " : BitVec " << fw << " := flop_next " << reset_e << " "
           << lit_zero(fw) << " " << en_e << " " << din_e << " s." << fld << "\n";
+    }
+    // Memory next state: decode the all-writes chain tail's `.mem` value back to a
+    // function.  `memdec_memenc` is what closes this in _next_refines_fast.
+    for (auto& mn : memory_nodes) {
+      const auto& mi  = ctx.memory_info.at(node_id(mn));
+      const auto& ids = mem_cert_ids.at(node_id(mn));
+      ofs << "  let new_" << mi.field << " : (BitVec " << mi.addr_width << " -> BitVec " << mi.bits << ") := memdec "
+          << mi.addr_width << " " << mi.bits << " (rho " << ids.next_chain << ").asMem\n";
     }
     ofs << "  { ";
     bool first_field = true;
@@ -2105,6 +2326,14 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
       first_field = false;
       ofs << fld << " := new_" << fld;
+    }
+    for (auto& mn : memory_nodes) {
+      const auto& mi = ctx.memory_info.at(node_id(mn));
+      if (!first_field) {
+        ofs << ", ";
+      }
+      first_field = false;
+      ofs << mi.field << " := new_" << mi.field;
     }
     ofs << " }\n\n";
 
@@ -2141,18 +2370,23 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "  rfl\n\n";
   }
 
-  if (sequential) {
-    ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) (s : " << base_name << "_state) :\n";
-    ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
-    ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s))\n";
-    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)) := by\n";
-    ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)\n\n";
-  } else {
-    ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) :\n";
-    ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
-    ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i))\n";
-    ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i)) := by\n";
-    ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i)\n\n";
+  // evalGraphCorrectForCert relates evalGraph to graphDenotation, both of which
+  // are BV-only (denote_op has no memory case).  The CertVal path's correctness
+  // statement is evalGraphC_of_localAgree, discharged by the bridge below.
+  if (!mem_mode) {
+    if (sequential) {
+      ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) (s : " << base_name << "_state) :\n";
+      ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
+      ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s))\n";
+      ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)) := by\n";
+      ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i s)\n\n";
+    } else {
+      ofs << "theorem " << base_name << "_evalGraph_correct (i : " << base_name << "_in) :\n";
+      ofs << "    envCorrectOn " << base_name << "_graphCert.topo\n";
+      ofs << "      (evalGraph " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i))\n";
+      ofs << "      (graphDenotation " << base_name << "_graphCert.topo " << base_name << "_graphCert (" << base_name << "_sourceEnv i)) := by\n";
+      ofs << "  exact evalGraphCorrectForCert " << base_name << "_graphCert (" << base_name << "_sourceEnv i)\n\n";
+    }
   }
 
   if (cert_wf == LeanCertWFMode::Sorry) {
