@@ -2743,12 +2743,6 @@ int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
     node_count_memo_.erase(g);  // this body just grew
     ++inlined;
   }
-  if (inlined > 0) {
-    // sim.flatten just dissolved a scheduling boundary; repair any packed
-    // self-reference that became ordinary word-level logic, or the scheduler
-    // below sees a cycle the design does not have.
-    livehd::graph_util::split_packed_selfref_cycles(g);
-  }
   return inlined;
 }
 

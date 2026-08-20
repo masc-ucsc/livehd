@@ -254,19 +254,19 @@ private:
   // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
   // bit-slice at `(i-lower)*elem_bits`. Symbols here carry their dims in
   // mem_info_ but route through bit-slice get/set instead of store/tuple_get.
-  absl::flat_hash_set<const slang::ast::Symbol*> flat_port_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
   // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
   // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten
   // to a packed bus (constant element offsets, set_mask composition); a
   // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
   // — see the `tuplish` regression). Populated by a pre-pass in lower_module.
-  absl::flat_hash_set<const slang::ast::Symbol*> runtime_indexed_arrays_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           runtime_indexed_arrays_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
   // equivalent Pyrope memory. Populated by the runtime-index pre-pass; the
   // declare + element read/write consult it to route through the memory path.
-  absl::flat_hash_set<const slang::ast::Symbol*> packed_mem_regs_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           packed_mem_regs_;
   // Per-ENTRY async-reset values for a packed 2-D reg whose reset arm loads a
   // pattern rather than one repeated value (`spec_table <= '{33,…,1,0}` — how
   // firtool spells an index-initialized rename/free-list table). The reset
@@ -454,6 +454,11 @@ private:
   std::string case_item_match(const std::string& sel, const Tinfo& si, const slang::ast::Expression& item,
                               slang::ast::CaseStatementCondition cond_kind);
   void        lower_for_loop(const slang::ast::ForLoopStatement& stmt);
+  // When slang cannot yet prove the upper bound of a canonical increasing
+  // C-style loop, preserve it as an LNAST range loop. uPass then sees the
+  // function/config bindings and either unrolls the now-constant range or
+  // diagnoses the still-runtime domain. Returns false for every other shape.
+  bool        lower_deferred_for(const slang::ast::ForLoopStatement& stmt);
   void        lower_while_loop(const slang::ast::Statement& stmt);  // While/DoWhile/Repeat
   void        lower_foreach(const slang::ast::ForeachLoopStatement& stmt);
   bool        unroll_tick(const slang::ast::Statement& stmt);  // false = budget exhausted (diag emitted)
@@ -538,7 +543,7 @@ private:
   // extension. Recognize it as one and return the `sext` lowering, so the
   // replicated sign bit never becomes a mask/broadcast + shift + or tower.
   // Returns "" when `expr` is not that idiom.
-  std::string lower_concat_sext(const slang::ast::ConcatenationExpression& expr);
+  std::string               lower_concat_sext(const slang::ast::ConcatenationExpression& expr);
   // Packed `'{...}` assignment pattern (simple/structured/replicated): elements
   // are already resolved positionally MSB-first, so concatenate them like a
   // concat. `type` must be integral (packed struct/array); unpacked targets are
@@ -585,6 +590,15 @@ private:
   // ── lvalues (slang_lvalue.cpp) ─────────────────────────────────────────────
   void lower_assign(const slang::ast::AssignmentExpression& expr);
   void assign_to(const slang::ast::Expression& lhs, const std::string& rhs);
+  // An unpacked aggregate cannot travel through lower_rvalue's scalar string.
+  // Recognize the SV zero-fill assignment pattern and emit element/field stores
+  // directly (the LNAST/Pyrope `reg array:[N]T = 0` broadcast semantics).
+  bool is_zero_fill_pattern(const slang::ast::Expression& rhs);
+  bool lower_unpacked_zero_fill(const slang::ast::Expression& lhs);
+  // Whole assignment involving an unpacked struct array. Two tuple memories
+  // split into matching whole-field copies (`d.f = q.f`); a flat packed source
+  // assigned into a stateful tuple memory is decomposed into matching lanes.
+  bool lower_unpacked_whole_copy(const slang::ast::Expression& lhs, const slang::ast::Expression& rhs);
   void assign_to_pattern(const slang::ast::Expression& lhs, std::span<const slang::ast::Expression* const> elems,
                          const std::string& rhs);
   void note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc);

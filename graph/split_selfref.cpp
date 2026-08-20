@@ -15,7 +15,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"       // Ntype / Ntype_op
-#include "diag.hpp"       // livehd::diag::warn (non-silent cap diagnostic)
+#include "diag.hpp"       // livehd::diag::warn / err (cap diagnostic, retired-entry trip-wire)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
 
 namespace livehd::graph_util {
@@ -115,8 +115,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
 
   I(scoped_cycle != nullptr);
   // A REFERENCE, not a copy: this set is read-only here, it can hold every comb
-  // node of a large module, and split_packed_selfref_cycles re-enters this
-  // function once per fixpoint round.
+  // node of a large module, and the body's fixpoint re-enters this function
+  // once per round.
   const auto&                   in_cycle = *scoped_cycle;
   std::vector<hhds::Node_class> comb_nodes(in_cycle.begin(), in_cycle.end());
   std::sort(comb_nodes.begin(), comb_nodes.end(), [](const auto& a, const auto& b) {
@@ -1035,9 +1035,9 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
 // `max_rounds` is the caller's round budget. The per-wire entry point can afford
 // the full 16 because it hands over a scoped buffer/driver pair and stops the
 // moment `comb_pin_depends_on` goes false. A caller with NO such stop condition
-// (split_packed_selfref_cycles, which re-derives the cycle set itself) must ask
-// for ONE round: running the fixpoint blind keeps splitting long after the cycle
-// is gone and leaves a chain of identity Get_masks behind.
+// (the retired split_packed_selfref_cycles, which re-derived the cycle set
+// itself) must ask for ONE round: running the fixpoint blind keeps splitting
+// long after the cycle is gone and leaves a chain of identity Get_masks behind.
 static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth,
                                                     const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
                                                     const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver,
@@ -1349,14 +1349,6 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       }
     }
   }  // fixpoint rounds
-  if (flattened > 0) {
-    // Dissolving the instance removed a scheduling boundary the per-wire
-    // splitter relied on, so a packed self-reference that was invisible at
-    // bind time is now ordinary word-level logic. Repair what this mutation
-    // exposed -- otherwise cgen_verilog emits one always_comb of ordered
-    // BLOCKING assignments that reads a variable before the line assigning it.
-    split_packed_selfref_cycles(g);
-  }
   return flattened;
 }
 
@@ -1442,6 +1434,37 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
 }  // namespace
 
 int split_packed_selfref_cycles(hhds::Graph* g) {
+  // ── RETIRED 2026-08-20 — TRIP-WIRE, no callers ───────────────────────────
+  // This whole-graph entry point is retired and every call site was removed.
+  // The body is kept for a soak period only; if nothing trips this in a few
+  // days it goes away with the rest of the function.
+  //
+  // WHY it must never run: a graph leaving lnast.tolg cannot carry a packed
+  // self-reference -- resolve_wire_selfref splits each `wire` against its
+  // COMPLETE driver over the scoped buffer/driver cone, and a residual
+  // dependency is raised there as `combinational loop through wire`. The only
+  // way one appeared afterwards was a mutation dissolving a comb `Sub`, and
+  // the repair for that belongs to the mutator, over the region it actually
+  // changed -- not to a 16-round Kahn peel over every node in the design.
+  // Emitted Verilog re-enters through lnast.tolg on read-back, so even a
+  // false loop that escaped into a file is broken again on the way in.
+  //
+  // diag::err().fatal() rather than I(false, ...) deliberately: iassert's I()
+  // expands to nothing under NDEBUG, so an `-c opt` bench -- exactly where
+  // this would be exercised -- would call it in complete silence.
+  {
+    std::string gname{"<null>"};
+    if (g != nullptr) {
+      gname = std::string{g->get_name()};
+    }
+    livehd::diag::err("split-selfref", "retired-entry-point", "internal")
+        .msg("split_packed_selfref_cycles('{}') was called, but this whole-graph scan is RETIRED and has no callers",
+             gname)
+        .hint(
+            "whoever dissolved a comb Sub owns the repair over the region it changed; see split_packed_selfref_wire "
+            "(upass/tolg, cone-scoped) for the model")
+        .fatal();
+  }
   if (g == nullptr) {
     return 0;
   }

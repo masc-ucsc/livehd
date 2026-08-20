@@ -50,11 +50,12 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // Simulation-side tasks are no-ops for synthesis; keep quiet for the
           // common printers, diagnose the rest.
           if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
-              || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile"
-              || name == "$dumpvars" || name == "$finish" || name == "$stop") {
+              || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile" || name == "$dumpvars"
+              || name == "$finish" || name == "$stop" || name == "$fatal") {
             return;
           }
-          emit_unsupported(stmt.sourceRange, "unsupported-system-task",
+          emit_unsupported(stmt.sourceRange,
+                           "unsupported-system-task",
                            std::string("system task '") + std::string(name) + "' is not supported by --reader slang");
           return;
         }
@@ -93,26 +94,25 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       return;
     }
     case StatementKind::Conditional: lower_conditional(stmt.as<slang::ast::ConditionalStatement>()); return;
-    case StatementKind::Case: lower_case(stmt.as<slang::ast::CaseStatement>()); return;
-    case StatementKind::ForLoop: lower_for_loop(stmt.as<slang::ast::ForLoopStatement>()); return;
-    case StatementKind::WhileLoop:
+    case StatementKind::Case       : lower_case(stmt.as<slang::ast::CaseStatement>()); return;
+    case StatementKind::ForLoop    : lower_for_loop(stmt.as<slang::ast::ForLoopStatement>()); return;
+    case StatementKind::WhileLoop  :
     case StatementKind::DoWhileLoop:
-    case StatementKind::RepeatLoop: lower_while_loop(stmt); return;
+    case StatementKind::RepeatLoop : lower_while_loop(stmt); return;
     case StatementKind::ForeachLoop: lower_foreach(stmt.as<slang::ast::ForeachLoopStatement>()); return;
-    case StatementKind::Timed: {
+    case StatementKind::Timed      : {
       const auto& timed = stmt.as<slang::ast::TimedStatement>();
       if (timed.timing.kind == slang::ast::TimingControlKind::Delay) {
         emit_warning(stmt.sourceRange, "delay-ignored", "unsupported", "#delay is ignored (synthesis semantics)");
         lower_statement(timed.stmt);
         return;
       }
-      emit_unsupported(stmt.sourceRange, "unsupported-timing",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-timing",
                        "event controls inside a process body are not supported by --reader slang");
       return;
     }
-    case StatementKind::ImmediateAssertion:
-      lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>());
-      return;
+    case StatementKind::ImmediateAssertion: lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>()); return;
     case StatementKind::ConcurrentAssertion:
       emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "concurrent assertion ignored (synthesis semantics)");
       return;
@@ -126,13 +126,13 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // a distinct bool: coerce a boolean result (e.g. `return a == b;`) to
           // an integer so the result var is integer-kind. Otherwise a caller's
           // `f(x) != 0` later trips the bool-vs-int comparison type check.
-          auto v = to_int_value(lower_rvalue(*re));
+          auto       v                = to_int_value(lower_rvalue(*re));
           // A struct-typed return var is declared as a per-field bundle
           // (inline_call -> declare_value_symbol), so a flat whole store would
           // be dead: every read of the result routes through the leaves. Split
           // the value onto the leaves (same as assign_to's NamedValue path);
           // only a non-bundle result var takes the flat assign.
-          const bool saved_nb     = current_assign_nonblocking_;
+          const bool saved_nb         = current_assign_nonblocking_;
           current_assign_nonblocking_ = false;  // a function-body return is a blocking write
           if (!assign_struct_whole_value(*func_ret_sym_, v, stmt.sourceRange.start())) {
             note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
@@ -143,7 +143,8 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         }
         return;
       }
-      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     }
@@ -157,7 +158,8 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         builder_.create_assign_stmts(break_flags_.back(), "1");
         return;
       }
-      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     case StatementKind::Continue:
@@ -165,11 +167,13 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       // flag rather than the loop-wide one break uses. Not implemented yet —
       // refuse rather than lower it as a break, which would silently drop every
       // later iteration.
-      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     default:
-      emit_unsupported(stmt.sourceRange, "unsupported-statement",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-statement",
                        std::string("statement kind '") + std::string(slang::ast::toString(stmt.kind))
                            + "' is not supported by --reader slang yet");
   }
@@ -203,7 +207,9 @@ void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAsserti
   // semantics this static obligation cannot reproduce, so refuse it rather than
   // prove something subtly different.
   if (stmt.isDeferred) {
-    emit_warning(stmt.sourceRange, "deferred-assertion-ignored", "unsupported",
+    emit_warning(stmt.sourceRange,
+                 "deferred-assertion-ignored",
+                 "unsupported",
                  "deferred assertion (#0 / final) has simulation-region semantics — ignored");
     return;
   }
@@ -284,7 +290,8 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
   if (item.kind == slang::ast::ExpressionKind::ValueRange) {
     const auto& vr = item.as<slang::ast::ValueRangeExpression>();
     if (vr.rangeKind != slang::ast::ValueRangeKind::Simple) {
-      emit_unsupported(item.sourceRange, "unsupported-case-inside",
+      emit_unsupported(item.sourceRange,
+                       "unsupported-case-inside",
                        "tolerance ranges ([a +/- b]) in case-inside are not supported by --reader slang");
       return "0";
     }
@@ -355,7 +362,7 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   using slang::ast::CaseStatementCondition;
   using slang::ast::UniquePriorityCheck;
 
-  auto si = tinfo(*stmt.expr.type);
+  auto si  = tinfo(*stmt.expr.type);
   // to_int_value for the mirror shape `case (a || b) 1'b1:` — a boolean selector
   // against integer items. No-op when the selector is already an integer.
   auto sel = to_int_value(lower_rvalue(stmt.expr));
@@ -431,8 +438,8 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
     // behavior-preserving — and it stops an `always @*` from inferring a latch
     // (picorv32: `case (reg_op1[1]) 1'b0: … 1'b1: …` inside a full_case arm).
     // The width cap keeps 1ULL << bits well-defined and the count sane.
-    exhaustive = all_const && disjoint && all_exact && si.bits > 0 && si.bits < 20
-                 && n_items == (1ULL << static_cast<unsigned>(si.bits));
+    exhaustive
+        = all_const && disjoint && all_exact && si.bits > 0 && si.bits < 20 && n_items == (1ULL << static_cast<unsigned>(si.bits));
   }
 
   // Pre-compute every arm's match condition BEFORE the if node. A `uif`
@@ -582,14 +589,93 @@ bool subtree_has_break(const slang::ast::Statement& stmt) {
         found = true;
         (void)visitor;
       },
-      [&](auto&, const slang::ast::ForLoopStatement&) {},        // inner loop owns its breaks
+      [&](auto&, const slang::ast::ForLoopStatement&) {},  // inner loop owns its breaks
       [&](auto&, const slang::ast::WhileLoopStatement&) {},
       [&](auto&, const slang::ast::RepeatLoopStatement&) {},
       [&](auto&, const slang::ast::ForeachLoopStatement&) {});
   stmt.visit(v);
   return found;
 }
+
+const slang::ast::Expression* peel_loop_expr(const slang::ast::Expression& raw) {
+  const auto* e = &raw;
+  while (e->kind == slang::ast::ExpressionKind::Conversion) {
+    e = &e->as<slang::ast::ConversionExpression>().operand();
+  }
+  return e;
+}
 }  // namespace
+
+bool Slang_context::lower_deferred_for(const slang::ast::ForLoopStatement& stmt) {
+  using slang::ast::BinaryOperator;
+  using slang::ast::ExpressionKind;
+  using slang::ast::UnaryOperator;
+
+  if (stmt.loopVars.size() != 1 || stmt.stopExpr == nullptr || stmt.steps.size() != 1 || subtree_has_break(stmt.body)) {
+    return false;
+  }
+  const auto* ivar = stmt.loopVars[0];
+  const auto* init = ivar->getInitializer();
+  if (init == nullptr) {
+    return false;
+  }
+
+  const auto* stop = peel_loop_expr(*stmt.stopExpr);
+  if (stop->kind != ExpressionKind::BinaryOp) {
+    return false;
+  }
+  const auto& cmp = stop->as<slang::ast::BinaryExpression>();
+  if (cmp.op != BinaryOperator::LessThan && cmp.op != BinaryOperator::LessThanEqual) {
+    return false;
+  }
+  const auto* cmp_lhs = peel_loop_expr(cmp.left());
+  if (cmp_lhs->kind != ExpressionKind::NamedValue || &cmp_lhs->as<slang::ast::NamedValueExpression>().symbol != ivar) {
+    return false;
+  }
+
+  const auto* step = peel_loop_expr(*stmt.steps[0]);
+  if (step->kind != ExpressionKind::UnaryOp) {
+    return false;
+  }
+  const auto& inc = step->as<slang::ast::UnaryExpression>();
+  if (inc.op != UnaryOperator::Preincrement && inc.op != UnaryOperator::Postincrement) {
+    return false;
+  }
+  const auto* inc_arg = peel_loop_expr(inc.operand());
+  if (inc_arg->kind != ExpressionKind::NamedValue || &inc_arg->as<slang::ast::NamedValueExpression>().symbol != ivar) {
+    return false;
+  }
+
+  auto start = to_int_value(lower_rvalue(*init));
+  auto end   = to_int_value(lower_rvalue(cmp.right()));
+  if (cmp.op == BinaryOperator::LessThan) {
+    end = builder_.create_minus_stmts(end, "1");  // LNAST ranges are inclusive
+  }
+
+  auto& ln       = *builder_.lnast;
+  auto  range    = builder_.add_child(Lnast_ntype::create_range());
+  auto  range_id = builder_.create_lnast_tmp();
+  ln.add_child(range, Lnast_node::create_ref(range_id));
+  builder_.add_value_child_pub(range, start);
+  builder_.add_value_child_pub(range, end);
+
+  auto loop = builder_.add_child(Lnast_ntype::create_for());
+  auto name = lname_of(*ivar);
+  ln.add_child(loop, Lnast_node::create_ref(name));
+  ln.add_child(loop, Lnast_node::create_ref(range_id));
+  auto body = ln.add_child(loop, Lnast_ntype::create_stmts());
+
+  const bool was_declared = declared_.contains(ivar);
+  declared_.insert(ivar);  // the for node, rather than a declare, binds it
+  builder_.push_stmts(body);
+  lower_statement(stmt.body);
+  builder_.pop_stmts();
+  if (!was_declared) {
+    declared_.erase(ivar);
+  }
+  ln.add_child(loop, Lnast_node::create_const("val"));
+  return true;
+}
 
 void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
   if (!eval_ctx_) {
@@ -637,6 +723,24 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
         return;
       }
     }
+  }
+
+  // slang sometimes cannot evaluate a bound that is semantically constant
+  // only after function/config bindings reach uPass (CVA6's Cfg.Nr*Rules).
+  // Preserve the canonical loop instead of rejecting it at this frontend.
+  if (stmt.stopExpr != nullptr && !try_eval(*stmt.stopExpr)) {
+    for (const auto* lv : locals) {
+      eval_ctx_->deleteLocal(lv);
+    }
+    if (lower_deferred_for(stmt)) {
+      return;
+    }
+    emit_error(stmt.stopExpr->sourceRange,
+               "non-const-loop-bound",
+               "comptime",
+               "for-loop condition must be compile-time constant to unroll",
+               "only canonical increasing loops can defer their bound to uPass");
+    return;
   }
 
   // A `break` in the body (the priority-select idiom: `if (req[i]) break;`)
@@ -754,7 +858,8 @@ void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {
     if (!first || !at_least) {
       auto cv = try_eval(*cond);
       if (!cv) {
-        emit_unsupported(cond->sourceRange, "non-const-while",
+        emit_unsupported(cond->sourceRange,
+                         "non-const-while",
                          "while loops with non-constant conditions are not supported by --reader slang");
         return;
       }

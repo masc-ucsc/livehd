@@ -19,14 +19,17 @@ namespace livehd::graph_util {
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
                               const std::vector<hhds::Node_class>& early_readers);
 
-// Repair a packed self-reference EXPOSED by a structural mutation. The per-wire
-// splitter above treats a `Sub` call as a scheduling boundary, so a packed wire
-// whose feedback threads through a pure-comb instance is a no-op at bind time --
-// and then dissolving that instance (flatten_false_loop_subs, pass.color absorb,
-// sim.flatten) turns the boundary into ordinary word-level logic with nothing
-// left to break it. Whoever performs such a mutation owns the repair; a writer
-// still must not call this speculatively. Strictly a no-op when no word-level
-// cycle exists. Returns the number of slice reads rewired.
+// RETIRED 2026-08-20 -- DO NOT CALL. Every call site was removed and the
+// definition now trips a fatal diagnostic on entry; the body survives only for
+// a short soak period before it is deleted outright.
+//
+// It used to repair a packed self-reference exposed by dissolving a pure-comb
+// `Sub`, by re-deriving the word-level cycle set over the WHOLE graph. That is
+// the wrong shape: a graph leaving lnast.tolg cannot carry such a cycle (the
+// per-wire splitter above resolves each `wire` over its own buffer/driver cone
+// and tolg raises `combinational loop through wire` on a residual), so the only
+// producer was a mutation -- and a mutator already knows the region it changed.
+// A whole-design Kahn peel, up to 16 rounds, to rediscover that is pure waste.
 int split_packed_selfref_cycles(hhds::Graph* g);
 
 // Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State,

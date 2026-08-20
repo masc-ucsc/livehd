@@ -149,6 +149,41 @@ sh_test(
     ],
 )
 
+# CVA6 forms whose constants become visible only after function/config binding:
+# preserve `2 ** cfg.field` as a shift and a canonical cfg-bounded loop as an
+# LNAST range loop. Also pins zero-fill assignment patterns and whole-array
+# copies on unpacked arrays of packed structs, including a two-dimensional
+# split-memory next-state copy and a full unpacked-array slice.
+sh_test(
+    name = "slang_deferred_cva6_forms",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/deferred_cva6_forms.v)",
+    ],
+    data = [
+        "tests/sv/deferred_cva6_forms.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# A bound that remains runtime after uPass must fail at the comptime-loop
+# boundary, not in inou.slang and not by silently dropping the loop body.
+sh_test(
+    name = "slang_deferred_for_runtime",
+    size = "large",
+    srcs = ["tests/deferred_for_runtime_smoke.sh"],
+    args = ["$(location tests/sv/deferred_for_runtime.v)"],
+    data = [
+        "tests/sv/deferred_for_runtime.v",
+        "//lhd",
+    ],
+)
+
 # Storage-aware scalar replacement of a packed scalar-element array. Constant
 # element accesses route directly to leaves, a dynamic read preserves the
 # SystemVerilog selector semantics, and whole-value use reassembles only at the

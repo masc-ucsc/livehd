@@ -9,7 +9,6 @@
 #include "color_reduce.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
-#include "split_selfref.hpp"  // //graph — repair a self-ref exposed by absorbing an instance
 
 namespace livehd::color {
 
@@ -169,13 +168,6 @@ bool absorb_small_defs(hhds::Graph* top, const Gid2Graph& gid2graph, uint64_t mi
       }
       ++s.sites_inlined;
       ++sites[gid];
-    }
-    if (!victims.empty()) {
-      // Absorbing an instance removes a scheduling boundary, which can expose a
-      // packed self-reference lnast.tolg could not see at bind time. Repair it
-      // HERE: this result is saved to `lg:`, so a residual word-level cycle
-      // would be baked into the library and mis-emitted by every later reader.
-      gu::split_packed_selfref_cycles(g);
     }
   }
 

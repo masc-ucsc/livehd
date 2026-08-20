@@ -863,7 +863,19 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       return builder_.create_sra_stmts(lhs, amount);  // unsigned >>> == >>
     }
     case BinaryOperator::Power:
-      emit_unsupported(expr.sourceRange, "unsupported-power", "non-constant ** is not supported by --reader slang");
+      // CVA6 uses `2 ** cfg_field` inside functions whose config-struct
+      // argument is bound to a constant only after the function is inlined.
+      // Preserve that dependency for uPass instead of demanding that slang
+      // fold it locally. For a power-of-two base this is exactly a shift; the
+      // ordinary width/sign materialization below keeps SystemVerilog's result
+      // type. Other non-constant bases still need a real exponentiation op.
+      if (auto base = try_eval_int(le); base && *base == 2) {
+        auto amount = to_pattern(rhs, ri.bits, ri.is_signed);
+        return fit_wrap(builder_.create_shl_stmts("1", amount), ti.bits, ti.is_signed);
+      }
+      emit_unsupported(expr.sourceRange,
+                       "unsupported-power",
+                       "only constant powers or deferred `2 ** n` are supported by --reader slang");
       return "0";
     case BinaryOperator::WildcardEquality:
     case BinaryOperator::WildcardInequality: {
@@ -1437,7 +1449,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
       // arrays this path exists for.
       const auto& fields    = array_info->fields;
       auto        read_lane = [&](int64_t idx) {
-        const auto  prefix = absl::StrCat("e", idx);
+        const auto  prefix     = absl::StrCat("e", idx);
         const auto  dot_prefix = absl::StrCat(prefix, ".");  // hoisted: the loop below asks per field
         std::string value;
         for (const auto& f : fields) {
@@ -1445,7 +1457,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
             continue;
           }
           auto       part = to_pattern(read_leaf(absl::StrCat(leaf_base, ".", f.name)), f.bits, f.is_signed);
-          const auto rel = f.off - idx * stride;
+          const auto rel  = f.off - idx * stride;
           if (rel != 0) {
             part = builder_.create_shl_stmts(part, std::to_string(rel));
           }
@@ -1612,7 +1624,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // because cgen's truncation cancelled it. Keeping `shamt` at its own
   // signedness lets `sext(b) + bias` stay signed and land in 0..bi.bits.
   auto      shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)),
-                                           builder_.create_plus_stmts(shamt, std::to_string(bias)));
+                                                builder_.create_plus_stmts(shamt, std::to_string(bias)));
   auto      r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
 }

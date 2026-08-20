@@ -118,9 +118,6 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
       return false;
     }
   }
-  // Same rule as the lec flatten above: whoever dissolves the boundary owns the
-  // packed self-reference it exposes, before cprop walks the body.
-  livehd::graph_util::split_packed_selfref_cycles(top.get());
   Cprop cprop;
   cprop.do_trans(top);
   const bool identical = livehd::semdiff::structural_identical(top.get(), unrolled, options);
@@ -3434,14 +3431,6 @@ static size_t flatten_ref_to_match_flat_impl(const absl::flat_hash_map<hhds::Gid
       break;  // nothing inlinable left (a real blackbox): stop rather than spin
     }
     done += spliced;
-  }
-  if (done > 0) {
-    // Flattening removed the scheduling boundary that made a packed
-    // self-reference invisible to lnast.tolg's per-wire splitter. Repair it, or
-    // the encoder below refuses the whole def ("operand has no encodable
-    // driver (combinational cycle?)") on a design that is perfectly acyclic
-    // per bit -- an UNKNOWN verdict rather than a proof.
-    livehd::graph_util::split_packed_selfref_cycles(ref_g);
   }
   return done;
 }

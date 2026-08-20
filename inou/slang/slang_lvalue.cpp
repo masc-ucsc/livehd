@@ -75,6 +75,24 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
     }
   }
 
+  // `array <= '{default: 0}` has aggregate type, so it cannot be represented
+  // by lower_rvalue's scalar lname/literal return value. In Pyrope/LNAST this
+  // is the array broadcast spelling `array = 0`; lower it directly to the
+  // covered element stores (and per-field stores for struct-element arrays).
+  if (!expr.isCompound() && is_zero_fill_pattern(expr.right())) {
+    current_assign_nonblocking_ = expr.isNonBlocking();
+    if (lower_unpacked_zero_fill(lhs)) {
+      return;
+    }
+  }
+
+  if (!expr.isCompound()) {
+    current_assign_nonblocking_ = expr.isNonBlocking();
+    if (lower_unpacked_whole_copy(lhs, expr.right())) {
+      return;
+    }
+  }
+
   // Compound assigns (a += b): slang represents the RHS as op(LValueReference, b).
   // Lower the current target value first so LValueReference can read it.
   std::string saved_compound = compound_read_;
@@ -88,6 +106,236 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
 
   current_assign_nonblocking_ = expr.isNonBlocking();
   assign_to(lhs, rhs);
+}
+
+bool Slang_context::is_zero_fill_pattern(const slang::ast::Expression& raw) {
+  const slang::ast::Expression* expr = &raw;
+  while (expr->kind == ExpressionKind::Conversion) {
+    expr = &expr->as<slang::ast::ConversionExpression>().operand();
+  }
+
+  std::span<const slang::ast::Expression* const> elems;
+  switch (expr->kind) {
+    case ExpressionKind::SimpleAssignmentPattern:
+      elems = expr->as<slang::ast::SimpleAssignmentPatternExpression>().elements();
+      break;
+    case ExpressionKind::StructuredAssignmentPattern:
+      elems = expr->as<slang::ast::StructuredAssignmentPatternExpression>().elements();
+      break;
+    case ExpressionKind::ReplicatedAssignmentPattern:
+      elems = expr->as<slang::ast::ReplicatedAssignmentPatternExpression>().elements();
+      break;
+    default: return false;  // plain scalar zero already follows the normal path
+  }
+  if (elems.empty()) {
+    return false;
+  }
+  for (const auto* elem : elems) {
+    if (is_zero_fill_pattern(*elem)) {
+      continue;
+    }
+    auto cv = try_eval_const_net(*elem);
+    if (!cv || !cv->isInteger()) {
+      return false;
+    }
+    auto v = Dlop::from_pyrope(const_text(cv->integer()));
+    if (!v || !v->is_known_zero()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Slang_context::lower_unpacked_zero_fill(const slang::ast::Expression& raw_lhs) {
+  const slang::ast::Expression* lhs = &raw_lhs;
+  while (lhs->kind == ExpressionKind::Conversion) {
+    lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+  }
+
+  std::vector<const slang::ast::Expression*> sels;
+  const slang::ast::Expression*              base  = lhs;
+  bool                                       whole = false;
+  if (lhs->kind == ExpressionKind::ElementSelect) {
+    base = peel_unpacked_chain(*lhs, sels);
+  } else if (lhs->kind == ExpressionKind::NamedValue || lhs->kind == ExpressionKind::HierarchicalValue) {
+    whole = true;
+  } else if (lhs->kind == ExpressionKind::RangeSelect) {
+    // CVA6's `events[MHPMCounterNum:1] = '{default: 0}` selects the complete
+    // one-dimensional unpacked array. Accept only a full-range slice here;
+    // partial aggregate slices need their own index-order lowering.
+    const auto& rs = lhs->as<slang::ast::RangeSelectExpression>();
+    base           = &rs.value();
+    const auto* bs = resolve_base_symbol(*base);
+    auto        mi = bs == nullptr ? mem_info_.end() : mem_info_.find(bs);
+    auto        l  = try_eval_int(rs.left());
+    auto        r  = try_eval_int(rs.right());
+    if (mi == mem_info_.end() || mi->second.rank() != 1 || !l || !r) {
+      return false;
+    }
+    const int64_t lo = mi->second.lower;
+    const int64_t hi = lo + mi->second.size - 1;
+    if (std::min(*l, *r) != lo || std::max(*l, *r) != hi) {
+      return false;
+    }
+    whole = true;
+  } else {
+    return false;
+  }
+
+  const auto* base_sym = resolve_base_symbol(*base);
+  auto        mit      = base_sym == nullptr ? mem_info_.end() : mem_info_.find(base_sym);
+  if (mit == mem_info_.end()) {
+    return false;
+  }
+  const auto mi   = mit->second;  // builder calls below may rehash mem_info_
+  const auto rank = mi.rank();
+  if ((!whole && sels.empty()) || sels.size() > rank) {
+    return false;
+  }
+
+  note_write(*base_sym, current_assign_nonblocking_, lhs->sourceRange.start());
+
+  // A const-indexed single-dimensional array is represented as one packed bus.
+  // A full zero fill is therefore exactly one store, preserving the aggregate
+  // identity instead of manufacturing one set_mask per element.
+  if (flat_port_syms_.contains(base_sym) && whole) {
+    builder_.create_assign_stmts(lname_of(*base_sym), "0");
+    return true;
+  }
+  if (flat_port_syms_.contains(base_sym)) {
+    return false;
+  }
+
+  int64_t suffix_count = 1;
+  if (!whole) {
+    const auto& dims = mi.dims;
+    for (size_t k = sels.size(); k < rank; ++k) {
+      suffix_count *= dims.empty() ? mi.size : dims[k].width;
+    }
+  } else {
+    suffix_count = mi.size;
+  }
+  if (suffix_count <= 0 || suffix_count > options_.unroll_limit) {
+    emit_error(
+        lhs->sourceRange,
+        "unroll-limit",
+        "comptime",
+        std::format("zero-fill expansion needs {} element stores, exceeding the limit of {}", suffix_count, options_.unroll_limit));
+    return true;
+  }
+
+  std::string base_index = "0";
+  if (!whole) {
+    base_index = build_unpacked_index(mi, sels);
+    if (suffix_count != 1) {
+      base_index = builder_.create_mult_stmts(base_index, std::to_string(suffix_count));
+    }
+  }
+
+  const auto name = lname_of(*base_sym);
+  auto&      ln   = *builder_.lnast;
+  for (int64_t off = 0; off < suffix_count; ++off) {
+    std::string idx = base_index;
+    if (off != 0) {
+      idx = base_index == "0" ? std::to_string(off) : builder_.create_plus_stmts(base_index, std::to_string(off));
+    }
+    if (mi.is_tuple) {
+      for (const auto& field : mi.fields) {
+        emit_field_store(name, idx, field.name, "0");
+      }
+    } else {
+      auto st = builder_.add_child(Lnast_ntype::create_store());
+      ln.add_child(st, Lnast_node::create_ref(name));
+      builder_.add_value_child_pub(st, idx);
+      builder_.add_value_child_pub(st, "0");
+    }
+  }
+  return true;
+}
+
+bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_lhs, const slang::ast::Expression& raw_rhs) {
+  const slang::ast::Expression* lhs = &raw_lhs;
+  const slang::ast::Expression* rhs = &raw_rhs;
+  while (lhs->kind == ExpressionKind::Conversion) {
+    lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+  }
+  while (rhs->kind == ExpressionKind::Conversion) {
+    rhs = &rhs->as<slang::ast::ConversionExpression>().operand();
+  }
+  const bool lhs_named = lhs->kind == ExpressionKind::NamedValue || lhs->kind == ExpressionKind::HierarchicalValue;
+  const bool rhs_named = rhs->kind == ExpressionKind::NamedValue || rhs->kind == ExpressionKind::HierarchicalValue;
+  if (!lhs_named || !rhs_named) {
+    return false;
+  }
+  const auto& lsym = lhs->as<slang::ast::ValueExpressionBase>().symbol;
+  const auto& rsym = rhs->as<slang::ast::ValueExpressionBase>().symbol;
+  auto        lit  = mem_info_.find(&lsym);
+  auto        rit  = mem_info_.find(&rsym);
+  if (lit == mem_info_.end() || rit == mem_info_.end() || !lit->second.is_tuple) {
+    return false;
+  }
+  const auto lmi = lit->second;
+  const auto rmi = rit->second;
+  if (lmi.size != rmi.size || lmi.elem_bits != rmi.elem_bits) {
+    return false;
+  }
+  if (rmi.is_tuple) {
+    if (lmi.fields.size() != rmi.fields.size()) {
+      return false;
+    }
+    for (size_t k = 0; k < lmi.fields.size(); ++k) {
+      const auto& lf = lmi.fields[k];
+      const auto& rf = rmi.fields[k];
+      if (lf.name != rf.name || lf.off != rf.off || lf.bits != rf.bits || lf.is_signed != rf.is_signed) {
+        return false;
+      }
+    }
+  } else if (!flat_port_syms_.contains(&rsym)) {
+    return false;
+  }
+  if (&lsym == &rsym) {
+    return true;  // aggregate hold
+  }
+
+  note_write(lsym, current_assign_nonblocking_, lhs->sourceRange.start());
+  const auto  lname = lname_of(lsym);
+  const auto  rname = lname_of(rsym);
+
+  // A struct-element memory has no live aggregate backing value after
+  // detuple: its storage is the set of scalar field arrays (`mem.field`). A
+  // whole assignment between two such memories must therefore be split along
+  // the same boundary as their declarations. Keep each field assignment whole
+  // instead of expanding it to one store per entry: a mut field gets one
+  // packed combinational replacement, and a reg field gets one bulk memory
+  // update. Emit the dotted refs directly because detuple creates declarations
+  // with exactly these names and otherwise leaves already-split operations
+  // untouched.
+  if (rmi.is_tuple) {
+    auto& ln = *builder_.lnast;
+    for (const auto& field : lmi.fields) {
+      auto st = builder_.add_child(Lnast_ntype::create_store());
+      ln.add_child(st, Lnast_node::create_ref(absl::StrCat(lname, ".", field.name)));
+      ln.add_child(st, Lnast_node::create_ref(absl::StrCat(rname, ".", field.name)));
+    }
+    return true;
+  }
+
+  // A flat packed array has no per-field arrays to copy. Retain the existing
+  // lane extraction for a stateful tuple-memory destination; a combinational
+  // flat destination follows the ordinary packed assignment path.
+  if (!reg_syms_.contains(&lsym)) {
+    return false;
+  }
+  std::string packed_rhs;
+  packed_rhs = to_pattern(read_symbol(rsym, rhs->sourceRange), static_cast<int>(lmi.size * lmi.elem_bits), false);
+  for (int64_t idx = 0; idx < lmi.size; ++idx) {
+    const auto index = std::to_string(idx);
+    for (const auto& field : lmi.fields) {
+      auto value = extract_field(packed_rhs, idx * lmi.elem_bits + field.off, field.bits);
+      emit_field_store(lname, index, field.name, value);
+    }
+  }
+  return true;
 }
 
 void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::string& rhs) {
@@ -1292,8 +1540,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       std::optional<int64_t> const_low;
       std::string            dyn_low;
       auto                   normalize = [&](const slang::ast::Expression& idx,
-                           int64_t                       width_down,
-                           int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
+                                             int64_t                       width_down,
+                                             int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
         if (auto ci = try_eval_int(idx)) {
           int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
           return {bottom, {}};
