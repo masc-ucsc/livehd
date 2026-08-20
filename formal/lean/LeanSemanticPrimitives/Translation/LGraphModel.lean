@@ -469,6 +469,12 @@ def simpleOpCertWfBool (opc : LGraphOp) (w : Nat) (ds : List Nat) : Bool :=
   | LGraphOp.Op_SHL => ds.length = 2
   | LGraphOp.Op_SRA => ds.length = 2
   | LGraphOp.Op_Sext => ds.length = 2
+  -- Memory ops.  Shape only, exactly like every case above: the arity the
+  -- `eval_op_cert` match requires, so a mis-arity node is rejected by the
+  -- well-formedness gate rather than silently taking the fallback value.
+  | LGraphOp.Op_MemRead => ds.length = 3
+  | LGraphOp.Op_MemWrite => ds.length = 4
+  | LGraphOp.Op_MemWriteBE _ => ds.length = 4
   | _ => false
 
 def simpleNodeCertShapeWfBool (c : NodeCert) : Bool :=
@@ -544,3 +550,27 @@ theorem evalGraphCorrectForCert (G : GraphCert) (sourceEnv : Nat → BV) :
       (evalGraph G.topo G sourceEnv)
       (graphDenotation G.topo G sourceEnv) := by
   exact evalGraphCorrect G.topo G sourceEnv
+
+--------------------------------------------------------------------------------
+-- CertVal graph evaluator: the memory-aware twin of evalNode / envSet / evalGraph.
+--
+-- ADDITIVE BY DESIGN.  The `BV` versions above are what the already-proven
+-- designs elaborate against, so they stay byte-identical; a memory-bearing design
+-- takes this path instead.  Only two things differ: the value type, and
+-- `eval_op_cert` in place of `eval_op`.  The graph plumbing is otherwise the same,
+-- and `DepOrdered` / `DepOrderedB` / `Nodup` / `isSome` are value-FREE (`NodeCert`
+-- is nid/op/width/deps only), so those facts -- and the `native_decide` gates that
+-- discharge them -- are shared verbatim between the two paths.
+--------------------------------------------------------------------------------
+
+def evalNodeC (G : GraphCert) (rho : Nat → CertVal) (n : Nat) : CertVal :=
+  match G.nodes n with
+  | none => rho n
+  | some c => eval_op_cert c.op c.width (c.deps.map rho)
+
+def envSetC (rho : Nat → CertVal) (n : Nat) (v : CertVal) : Nat → CertVal :=
+  fun m => if m = n then v else rho m
+
+def evalGraphC : List Nat → GraphCert → (Nat → CertVal) → Nat → CertVal
+  | [], _G, rho => rho
+  | n :: ns, G, rho => evalGraphC ns G (envSetC rho n (evalNodeC G rho n))

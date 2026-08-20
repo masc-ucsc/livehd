@@ -1211,4 +1211,254 @@ theorem BT.find_eq_none {α : Type} : ∀ (t : BT α) (d : Nat), d ∉ BT.keys t
       · simp only [if_pos h1]; exact BT.find_eq_none lo d hlo
       · simp only [if_neg h1, if_neg hk]; exact BT.find_eq_none hi d hhi
 
+--------------------------------------------------------------------------------
+-- Memory operators (Op_MemRead / Op_MemWrite / Op_MemWriteBE).
+--
+-- The fast model carries a memory as a FUNCTION `BitVec addr -> BitVec data`
+-- (SemanticPrimitives.mem_read / mem_write / mem_write_be); the certificate
+-- carries it as `Int -> BV` inside `CertVal.mem`.  `memenc` is the encoding
+-- between them, and the three `*_bridge` lemmas below are what the emitted
+-- per-node proofs of a memory design rewrite with -- one per fold step of
+-- `memory_write_fold`, one per read port.
+--------------------------------------------------------------------------------
+
+/-- Encode a fast-model function-valued memory as a certificate memory image.
+
+The domain guard is LOAD-BEARING, not defensive.  `cert_mem_write` keys on
+`x = bv_uint addr`, an EXACT comparison on `Int`, while `BitVec.ofInt a x` WRAPS.
+Without the guard, `a = 6`, `addr = 0`, `x = 64` disagree: the certificate side
+sees `64 ≠ 0` and reads through to the old image, but the encoded side sees
+`BitVec.ofInt 6 64 = 0 = addr` and returns the freshly written data.  Guarding
+makes both sides constant off `[0, 2^a)`.  Every address the certificate actually
+produces is `bv_uint _`, i.e. `_ % 2^w`, hence always inside the guard. -/
+def memenc {a d : Nat} (m : BitVec a → BitVec d) : Int → BV :=
+  fun x => if 0 ≤ x ∧ x < 2 ^ a then bvenc (m (BitVec.ofInt a x)) else mk_bv d 0
+
+/-- `BitVec.ofInt` inverts `Int.ofNat ∘ BitVec.toNat`. -/
+theorem ofInt_ofNat_toNat {w : Nat} (x : BitVec w) :
+    BitVec.ofInt w (Int.ofNat x.toNat) = x := by
+  have h := bv_to_bitvec_bvenc x
+  unfold bv_to_bitvec at h
+  rwa [bv_uint_bvenc] at h
+
+/-- An encoded address is inside `memenc`'s guard. -/
+theorem bvenc_addr_in_range {w : Nat} (x : BitVec w) :
+    0 ≤ Int.ofNat x.toNat ∧ Int.ofNat x.toNat < 2 ^ w := by
+  refine ⟨Int.natCast_nonneg _, ?_⟩
+  have h : Int.ofNat x.toNat < ((2 ^ w : Nat) : Int) := Int.ofNat_lt.mpr x.isLt
+  simpa using h
+
+/-- Reading `memenc` at an encoded address gives the encoded stored word. -/
+theorem memenc_at {a d : Nat} (m : BitVec a → BitVec d) (x : BitVec a) :
+    memenc m (bv_uint (bvenc x)) = bvenc (m x) := by
+  rw [bv_uint_bvenc]
+  unfold memenc
+  rw [if_pos (bvenc_addr_in_range x), ofInt_ofNat_toNat]
+
+theorem bvenc_zero {d : Nat} : bvenc (0#d) = mk_bv d 0 := by
+  unfold bvenc; simp
+
+/-- `Op_MemRead`: the enable-gated certificate read equals the encoded fast read. -/
+theorem mem_read_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (en : BitVec we) :
+    cert_mem_read d (memenc m) (bvenc addr) (bvenc en)
+      = bvenc (if bitvec_nonzero en then mem_read m addr else 0#d) := by
+  unfold cert_mem_read
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero en
+  · rw [if_pos h, if_pos h, memenc_at, bv_resize_bvenc, bv_zext_id]
+    rfl
+  · rw [if_neg h, if_neg h, bvenc_zero]
+
+/-- On the guarded range `BitVec.ofInt` is a section of `Int.ofNat ∘ toNat`. -/
+theorem ofNat_toNat_ofInt {a : Nat} {x : Int} (h0 : 0 ≤ x) (h1 : x < 2 ^ a) :
+    Int.ofNat (BitVec.ofInt a x).toNat = x := by
+  rw [BitVec.toNat_ofInt]
+  have hc : (2:Int) ^ a = ((2 ^ a : Nat) : Int) := by simp
+  rw [hc] at h1
+  rw [Int.emod_eq_of_lt h0 h1]
+  simp [Int.toNat_of_nonneg h0]
+
+/-- `Op_MemWrite`: one enable-gated certificate write step equals the encoded
+fast-model write step.  This is one step of `memory_write_fold`. -/
+theorem mem_write_bridge {a d we : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (v : BitVec d) (en : BitVec we) :
+    cert_mem_write (memenc m) (bvenc addr) (bvenc v) (bvenc en)
+      = memenc (if bitvec_nonzero en then mem_write m addr v else m) := by
+  unfold cert_mem_write
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero en
+  · rw [if_pos h, if_pos h]
+    funext x
+    rw [bv_uint_bvenc]
+    unfold memenc mem_write
+    by_cases hr : 0 ≤ x ∧ x < 2 ^ a
+    · rw [if_pos hr, if_pos hr]
+      by_cases hx : x = Int.ofNat addr.toNat
+      · rw [if_pos hx, hx, ofInt_ofNat_toNat, if_pos rfl]
+      · rw [if_neg hx]
+        have hne : BitVec.ofInt a x ≠ addr := by
+          intro hc
+          exact hx (by rw [← ofNat_toNat_ofInt hr.1 hr.2, hc])
+        rw [if_neg hne]
+    · -- x outside the guard.  The certificate key `bv_uint _` is always inside it,
+      -- so no aliasing can occur and both sides are the constant `mk_bv d 0`.
+      have hx : x ≠ Int.ofNat addr.toNat := by
+        intro hc; exact hr (hc ▸ bvenc_addr_in_range addr)
+      rw [if_neg hx, if_neg hr, if_neg hr]
+  · rw [if_neg h, if_neg h]
+
+theorem shl_one {d : Nat} (byte_w : Nat) : (1#d <<< byte_w) = BitVec.ofNat d (2^byte_w) := by
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.toNat_shiftLeft, Nat.shiftLeft_eq, Nat.pow_mod]
+
+theorem borrow_mod (M k : Nat) (hM : 0 < M) : (M - 1 + (k + 1) % M) % M = k % M := by
+  rw [Nat.add_mod_mod]
+  have h : M - 1 + (k + 1) = M + k := by omega
+  rw [h, Nat.add_mod_left]
+
+theorem shl_sub_one {d : Nat} (byte_w : Nat) :
+    (1#d <<< byte_w) - 1#d = BitVec.ofNat d (2^byte_w - 1) := by
+  apply BitVec.eq_of_toNat_eq
+  rw [shl_one]
+  rcases Nat.eq_zero_or_pos d with hd | hd
+  · subst hd; simp [Nat.mod_one]
+  · have hM : 0 < 2^d := Nat.two_pow_pos d
+    have h1 : (1 : Nat) % 2^d = 1 := Nat.mod_eq_of_lt (Nat.one_lt_two_pow (by omega))
+    have hk : 2^byte_w - 1 + 1 = 2^byte_w := by
+      have : 1 ≤ 2^byte_w := Nat.one_le_two_pow
+      omega
+    simp only [BitVec.toNat_sub, BitVec.toNat_ofNat, h1]
+    rw [← hk, borrow_mod _ _ hM, Nat.add_sub_cancel]
+
+theorem ones_low_getLsbD {d : Nat} (byte_w j : Nat) :
+    ((1#d <<< byte_w) - 1#d).getLsbD j = (decide (j < d) && decide (j < byte_w)) := by
+  rw [shl_sub_one]
+  simp [BitVec.getLsbD_ofNat, Nat.testBit_two_pow_sub_one]
+
+/-- Bit `i` of one byte's mask word: set exactly on that byte's slice. -/
+theorem byte_mask_word_getLsbD {d : Nat} (byte_w bi i : Nat) :
+    (byte_mask_word byte_w bi (d := d)).getLsbD i
+      = (decide (i < d) && decide (bi * byte_w ≤ i) && decide (i - bi * byte_w < byte_w)) := by
+  unfold byte_mask_word
+  rw [BitVec.getLsbD_shiftLeft, ones_low_getLsbD]
+  by_cases h1 : i < d
+  · by_cases h2 : bi * byte_w ≤ i
+    · have : ¬ (i < bi * byte_w) := by omega
+      have hsub : i - bi * byte_w < d := by omega
+      simp [h1, h2, this, hsub]
+    · have : i < bi * byte_w := by omega
+      simp [h1, h2, this]
+  · simp [h1]
+
+/-- The accumulating fold turns into an `any` over the visited byte indices. -/
+theorem fold_mask_getLsbD {be d : Nat} (bev : BitVec be) (byte_w i : Nat) :
+    ∀ (l : List Nat) (acc : BitVec d),
+      ((l.foldl (fun (acc : BitVec d) (bi : Nat) =>
+          if bev.getLsbD bi then acc ||| byte_mask_word byte_w bi (d := d) else acc) acc).getLsbD i)
+      = (acc.getLsbD i
+          || l.any fun bi => bev.getLsbD bi && (byte_mask_word byte_w bi (d := d)).getLsbD i) := by
+  intro l
+  induction l with
+  | nil => intro acc; simp
+  | cons b t ih =>
+    intro acc
+    simp only [List.foldl_cons, List.any_cons]
+    by_cases hb : bev.getLsbD b
+    · rw [if_pos hb, ih]
+      simp only [hb, Bool.true_and, BitVec.getLsbD_or]
+      cases hacc : acc.getLsbD i <;>
+        cases hm : (byte_mask_word byte_w b (d := d)).getLsbD i <;>
+        cases ht : (t.any fun bi => bev.getLsbD bi && (byte_mask_word byte_w bi (d := d)).getLsbD i) <;>
+        simp
+    · rw [if_neg hb, ih]
+      simp [hb]
+
+/-- Unique enabled byte: bit `i` of the assembled mask is byte `i / byte_w`'s enable. -/
+theorem byte_enable_mask_getLsbD {be d : Nat} (bev : BitVec be) (byte_w i : Nat)
+    (hbw : 0 < byte_w) :
+    (byte_enable_mask bev byte_w (d := d)).getLsbD i
+      = (decide (i < d) && bev.getLsbD (i / byte_w)) := by
+  unfold byte_enable_mask
+  rw [fold_mask_getLsbD]
+  simp only [BitVec.getLsbD_zero, Bool.false_or, byte_mask_word_getLsbD]
+  rw [Bool.eq_iff_iff]
+  simp only [List.any_eq_true, List.mem_range, Bool.and_eq_true, decide_eq_true_eq]
+  constructor
+  · rintro ⟨bi, _hbi, hbev, ⟨hid, hle⟩, hlt⟩
+    have hdiv : i / byte_w = bi := by
+      apply Nat.div_eq_of_lt_le hle
+      have hs : (bi + 1) * byte_w = bi * byte_w + byte_w := by ring
+      omega
+    exact ⟨hid, by rw [hdiv]; exact hbev⟩
+  · rintro ⟨hid, hbev⟩
+    refine ⟨i / byte_w, BitVec.lt_of_getLsbD hbev, hbev, ⟨hid, Nat.div_mul_le_self i byte_w⟩, ?_⟩
+    have hdm := Nat.div_add_mod i byte_w
+    have hml := Nat.mod_lt i hbw
+    have : i - i / byte_w * byte_w = i % byte_w := by
+      rw [Nat.mul_comm]; omega
+    omega
+
+/-- Bit `i` of the fast-model masked update: `new` where the byte is enabled. -/
+theorem masked_word_update_getLsbD {d be : Nat} (old new : BitVec d) (bev : BitVec be)
+    (byte_w i : Nat) (hbw : 0 < byte_w) :
+    (masked_word_update old new bev byte_w).getLsbD i
+      = (if bev.getLsbD (i / byte_w) then new.getLsbD i else old.getLsbD i) := by
+  unfold masked_word_update
+  simp only [BitVec.getLsbD_or, BitVec.getLsbD_and, BitVec.getLsbD_not,
+             byte_enable_mask_getLsbD bev byte_w i hbw]
+  by_cases hi : i < d
+  · by_cases hb : bev.getLsbD (i / byte_w) <;> simp [hi, hb]
+  · have ho : old.getLsbD i = false := BitVec.getLsbD_of_ge old i (by omega)
+    have hn : new.getLsbD i = false := BitVec.getLsbD_of_ge new i (by omega)
+    simp [hi, ho, hn]
+
+/-- A `bits_to_int` word whose bits match a `BitVec` IS that `BitVec`, encoded. -/
+theorem mk_bv_bits_eq_bvenc {d : Nat} (f : Nat → Bool) (Y : BitVec d)
+    (h : ∀ i, f i = Y.getLsbD i) : mk_bv d (bits_to_int d f) = bvenc Y := by
+  have hf : f = (fun i => Y.getLsbD i) := funext h
+  rw [hf, bits_to_int_toNat]
+  rfl
+
+/-- The certificate byte-masked update equals the encoded fast-model one. -/
+theorem cert_masked_update_bridge {d be : Nat} (old new : BitVec d) (bev : BitVec be)
+    (byte_w : Nat) (hbw : 0 < byte_w) :
+    cert_masked_update d (bvenc old) (bvenc new) (bvenc bev) byte_w
+      = bvenc (masked_word_update old new bev byte_w) := by
+  unfold cert_masked_update
+  apply mk_bv_bits_eq_bvenc
+  intro i
+  rw [masked_word_update_getLsbD old new bev byte_w i hbw]
+  simp only [bv_bit_bvenc]
+
+/-- `Op_MemWriteBE`: one enable-gated byte-masked certificate write step equals the
+encoded fast-model step.  Note the fast model gates on `bitvec_nonzero bev` outside
+`mem_write_be`, exactly where `cert_mem_write_be` gates internally. -/
+theorem mem_write_be_bridge {a d be : Nat} (m : BitVec a → BitVec d)
+    (addr : BitVec a) (v : BitVec d) (bev : BitVec be) (byte_w : Nat) (hbw : 0 < byte_w) :
+    cert_mem_write_be d (memenc m) (bvenc addr) (bvenc v) (bvenc bev) byte_w
+      = memenc (if bitvec_nonzero bev then mem_write_be m addr v bev byte_w else m) := by
+  unfold cert_mem_write_be
+  rw [bv_nonzero_bvenc]
+  by_cases h : bitvec_nonzero bev
+  · rw [if_pos h, if_pos h]
+    funext x
+    rw [bv_uint_bvenc]
+    unfold memenc mem_write_be mem_write mem_read
+    by_cases hr : 0 ≤ x ∧ x < 2 ^ a
+    · rw [if_pos hr, if_pos hr]
+      by_cases hx : x = Int.ofNat addr.toNat
+      · rw [if_pos hx, hx, ofInt_ofNat_toNat, if_pos rfl,
+             if_pos (bvenc_addr_in_range addr),
+             cert_masked_update_bridge _ _ _ _ hbw]
+      · rw [if_neg hx]
+        have hne : BitVec.ofInt a x ≠ addr := by
+          intro hc
+          exact hx (by rw [← ofNat_toNat_ofInt hr.1 hr.2, hc])
+        rw [if_neg hne]
+    · have hx : x ≠ Int.ofNat addr.toNat := by
+        intro hc; exact hr (hc ▸ bvenc_addr_in_range addr)
+      rw [if_neg hx, if_neg hr, if_neg hr]
+  · rw [if_neg h, if_neg h]
+
 end OpBridge
