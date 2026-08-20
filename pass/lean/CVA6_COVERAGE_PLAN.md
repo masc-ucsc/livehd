@@ -226,14 +226,64 @@ elaborates away — the census will say so.
 `And`/`Or`/`Xor` arities. Six lemmas already exist unwired (`sgt`, `andn`, `xorn`,
 `rorn`, `muxn`, `sumn`).
 
-## Phase 3 — memory certificate (unblocks the remaining 43)
+## Phase 3 — memory certificate: **DONE for async/array, sync-read pending**
 
-Step 1 landed additively (`CertVal` + `Op_MemRead`/`Op_MemWrite`/`Op_MemWriteBE`).
-Remaining: generalise `GraphRefine`, decompose a memory node in the emitter (array as a
-source; one `Op_MemRead` per read port; the write fold as a *chain* of `Op_MemWrite`
-nodes), and the `memenc` bridge lemmas. Validate smallest-first:
-`hpdcache_fifo_reg_gate` (188) → `hpdcache_regbank_wmask_1rw_gate` (168) →
-`..._wbyteenable_1rw_gate` (244, byte-enable) → `tc_sram_gate` (236).
+All four pieces landed:
+
+- `GraphRefine` CertVal twin — `evalNodeC` / `envSetC` / `evalGraphC` +
+  `evalGraphC_char` / `evalGraphC_of_localAgree` / `evalGraphC_not_mem`. Additive,
+  so the BV path the other designs elaborate against is byte-identical and none of
+  them needed re-proving. `DepOrdered` / `DepOrderedB` are value-free and shared,
+  and with them the `native_decide` gates.
+- `simpleOpCertWfBool` gained the three memory arities.
+- `memenc` / `memdec` + `mem_read_bridge` / `mem_write_bridge` /
+  `mem_write_be_bridge` in `OpBridge`. 0 sorries.
+- `cert_memory_expand` in the emitter: array image as a source, one
+  `Op_MemWrite[BE]` per write port **chained**, one `Op_MemRead` per read port over
+  the image *that port* observes (the `fwd` matrix is per (read, write) pair, so
+  chains are keyed by forwarded-set signature and shared), every port operand
+  through an arity-1 `Op_Or` resize.
+
+Two traps found in the process, both written up in `STEP5_BRIDGE_BUGS.md`: `memenc`
+aliasing out-of-range indices onto a written address (Bug 12) and a wider address
+dep indexing past the array (Bug 13).
+
+**Proven** — `_comb`/`_next`/`_step`, exit 0, 0 errors, 0 `sorryAx`, 3/3
+`_refines_fast`:
+
+| fixture | shape |
+|---|---|
+| `ram1` | 1R/1W async, bit-level write mask (`wensize == bits`) |
+| `ram_be` | byte-enable write, `byte_w = 4` |
+| `ram_2w` | 2 write ports — write chain and `fwd` matrix |
+| `ram_sync` | memory + a real flop (mixed state record) |
+
+**Still refused, with an accurate message:** sync-read memories (`type == 1`, e.g.
+`tc_sram` at `Latency=1`). The read-data register needs a source plus an
+`Op_MuxBool` next-state node over an ungated `Op_MemRead` — no new certificate
+operator, just emitter work.
+
+### The "43" was not a measurement — here is one
+
+The heading above used to claim this unblocks 43 blocks. That number is not derived
+anywhere in this document, and the file's own rule is that blockage is decided by
+`emit` + `op_census.py`, never by pattern-matching. Measured on CORE-ET, whose
+worklist marks **31** modules `reason=memory`, those 31 are three unrelated
+blockers:
+
+| blocker | count | what it actually needs |
+|---|---|---|
+| `pass.single_edge` phase divider | 16 | a different pass; memory would commit on every sub-step under a phase divider |
+| `unsupported Memory pin \`init\`` | 13 | ROM initial contents in the **fast model** — nothing to do with the certificate |
+| certificate stub | **2** | this phase (`intpipe_csr_msgs`, `minion_dcache_reduce`) |
+
+So the memory certificate directly unblocks 2 CORE-ET modules; `init` support is the
+bigger lever there and is the natural next item. The CVA6 side still needs the same
+measurement: the four `*_gate` wrappers named in the old plan
+(`hpdcache_fifo_reg_gate`, the two `hpdcache_regbank_*_1rw_gate`s, `tc_sram_gate`)
+turn out to emit **no Memory node at all** under the current yosys settings — the
+arrays are flop-blasted — so they were never memory tests. `hpdcache_fifo_reg_gate`
+is genuinely a flop-based FIFO.
 
 ## Out of scope, stated so the list reads as complete
 

@@ -50,6 +50,21 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         if arity != 2:
             return ("trap", "getmask_bridge' takes exactly 2 deps")
         return ("ok", "")
+    # Memory operators.  cert_memory_expand is the only thing that emits these, and
+    # it emits them at exactly these arities, so a mismatch means a hand-edited or
+    # stale file rather than an emitter gap -- worth flagging as a trap either way.
+    if op == "Op_MemRead":
+        if arity != 3:
+            return ("trap", "mem_read_bridge takes [mem, addr, enable]")
+        return ("ok", "mem_read_bridge")
+    if op == "Op_MemWrite":
+        if arity != 4:
+            return ("trap", "mem_write_bridge takes [mem, addr, data, enable]")
+        return ("ok", "mem_write_bridge")
+    if op.startswith("Op_MemWriteBE"):
+        if arity != 4:
+            return ("trap", "mem_write_be_bridge takes [mem, addr, data, byte_enable]")
+        return ("ok", "mem_write_be_bridge")
     if op == "Op_Sum 2" and arity == 2:
         return ("ok", "sum2_bridge")
     if op == "Op_Sum 1" and arity == 2:
@@ -250,16 +265,15 @@ def main():
     print("state fields     : %d" % n_flops)
     print("bridge emitted   : %s%s" % (bridge_mode, (" (%d _rec theorems)" % n_rec) if bridge_mode else ""))
     if not nodes:
-        # Distinguish the two very different reasons for an empty certificate.
-        # A memory-bearing design gets a deliberate counts-only stub (the cert
-        # evaluator is bit-vector-only), which is expected today -- reporting it
-        # as "did you forget emit_cert?" sends you looking in the wrong place.
+        # The counts-only memory stub is gone -- a memory design now gets a real
+        # CertVal certificate -- so an empty certificate has only one meaning left.
+        # If a `_memory_count` def ever reappears here, the emitter regressed to the
+        # stub rather than emitting the decomposition, which is worth saying plainly.
         mem_stub = re.search(r"^def (\w+)_memory_count : Nat := (\d+)$", text, re.M)
         if mem_stub:
-            print("\nCERTIFICATE IS THE MEMORY STUB: this design has %s LGraph Memory node(s),"
-                  % mem_stub.group(2))
-            print("so pass.lean emitted counts only (no graphCert / evalGraph / bridge).")
-            print("Expected until the memory-aware certificate lands; not an emit_cert problem.")
+            print("\nSTALE MEMORY STUB: this file has a `_memory_count` def and no cert nodes,")
+            print("i.e. it was emitted by a pass.lean predating the memory certificate.")
+            print("Re-emit; memory designs now get a real graphCert over CertVal.")
             return 1
         print("\nNO certificate nodes found -- was this emitted with formal.lean.emit_cert=true?")
         return 1

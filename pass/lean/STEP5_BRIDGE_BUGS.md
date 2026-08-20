@@ -801,3 +801,73 @@ lemma per arity -- either a fold-free n-ary bridge stated by recursion on the op
 list, or a closer that avoids the metavariable search (targeted `conv`/`rw` at known
 widths).  **Measure before choosing**; the cheap lemmas are not obviously the right
 answer at arity 60.
+
+---
+
+## Bug 12 — `memenc` aliases out-of-range indices onto a written address
+
+Found while proving `mem_write_bridge`, before any design ran — the proof simply
+would not close, which is the good case.
+
+**The obvious encoding is wrong.** A fast-model memory is
+`BitVec addr → BitVec data`; the certificate carries `Int → BV`. The natural bridge is
+
+```lean
+def memenc (m : BitVec a → BitVec d) : Int → BV := fun x => bvenc (m (BitVec.ofInt a x))   -- BROKEN
+```
+
+`cert_mem_write` keys on `x = bv_uint addr`, an **exact** comparison on `Int`, while
+`BitVec.ofInt a x` **wraps**. Take `a = 6`, `addr = 0`, `x = 64`:
+
+| side | result |
+|---|---|
+| certificate | `64 ≠ 0`, so it reads through to the old image: `memenc m 64` |
+| encoded fast model | `BitVec.ofInt 6 64 = 0 = addr`, so it returns the written data |
+
+They disagree on every index congruent to a written address modulo `2^a`.
+
+**Fix** — guard the domain so both sides are constant outside it:
+
+```lean
+def memenc {a d : Nat} (m : BitVec a → BitVec d) : Int → BV :=
+  fun x => if 0 ≤ x ∧ x < 2 ^ a then bvenc (m (BitVec.ofInt a x)) else mk_bv d 0
+```
+
+Sound because `bv_uint` is `x.value % 2^w`, always in `[0, 2^w)`, so every address the
+certificate actually produces is inside the guard; out-of-range indices are
+`mk_bv d 0` on both sides and the write cannot alias onto them.
+
+**Generalisable lesson.** An encoding between a *total function on a finite domain*
+and a *total function on `Int`* has to say what happens off the finite domain, and
+"whatever `ofInt` does" is not an answer when the other side compares indices
+exactly. Any future `Op_Mem*`-style operator keyed on an index needs the same care.
+
+---
+
+## Bug 13 — a wider address dep indexes the array past its size
+
+The counterpart of Bug 12 on the emitter side, and the reason `cert_memory_expand`
+funnels **every** memory port operand through an arity-1 `Op_Or` resize node.
+
+For a bitwise operator the certificate op's width parameter truncates its operands
+implicitly — `bv_bitwise w f a b` only reads `bv_bit _ i` for `i < w` — which is
+exactly what the fast model's `(bv_zext x : BitVec w)` does, so a width mismatch
+between a dep and its consumer is harmless. **An address is not a bit vector, it is
+an index.** `cert_mem_read` indexes at `bv_uint a`, the full unsigned value, with no
+width parameter to truncate it.
+
+yosys hands us this shape routinely. `ram1`'s 4-bit write address arrives as a
+`BitVec 5` (a `GetMask` widening), and the fast model truncates it back with
+`(bv_zext n_48 : BitVec 4)`. Without a resize node the certificate would index entry
+20 where the fast model indexes entry 4 — and with the Bug 12 guard in place that
+reads as `mk_bv d 0`, i.e. a **silently wrong zero**, not an error.
+
+**Fix** — one `Op_Or` node of arity 1 per port operand, at the memory's width.
+`or1_bridge` already states exactly `eval_op Op_Or w [bvenc a] = bvenc (bv_zext a : BitVec w)`,
+so the correspondence to `ucast_pin_at` is one existing lemma and no new proof. Cost
+is 3 nodes per write port and 2 per read port — negligible against a design's N.
+
+Emitted unconditionally rather than only on a width mismatch: the fast model always
+wraps in `bv_zext` (a no-op at equal widths, `bv_zext_id`), so emitting the node
+always keeps the two sides textually parallel and removes a conditional that would
+otherwise need its own test.

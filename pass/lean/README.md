@@ -613,10 +613,10 @@ Same pipeline and same static gates as CVA6.  Work to scope first:
 
 3. Memory-node emission — **done** (fast model): function-valued memory state
    fields, read/write/byte-enable policy extraction, any number of read/write
-   ports, read-during-write (`fwd`) policy, sync-read.  **Remaining**: the memory
-   *certificate* is still a stub (counts only); a memory-aware certificate
-   evaluator (`Val = bv | mem`, `Op_MemRead`/`Op_MemWrite[BE]`) + collision /
-   read-first / write-first policy proofs are future work.
+   ports, read-during-write (`fwd`) policy, sync-read.  The memory **certificate**
+   is also done for async/array memories (`type` 0/2), including the step-5 bridge
+   — see "Memory certificate" below.  **Remaining**: sync-read (`type == 1`)
+   certificates, and the `init` pin (ROM contents), which is a *fast-model* gap.
 
 4. Harden operator semantics and tests.
    - `Get_mask` mask width and packing corner cases;
@@ -805,10 +805,58 @@ back-port there):
   updated via `sram_sync_read_reg_next`.
 - `bits % wensize == 0` (byte/bit write-enable) still required.
 
-The certificate for a memory-bearing design is still a **stub** (node/flop/memory
-counts + a `_certificate_counts` theorem) because the `BV` bignum certificate
-evaluator is bit-vector-only; the memory-aware evaluator + cert bridge is the
-next step.
+### Memory certificate
+
+A memory-bearing design gets a real graph certificate and proves the step-5 bridge
+(`_comb`/`_next`/`_step` = `_cert`).  It used to get a counts-only stub.
+
+The certificate evaluates the graph at **`CertVal` (`bv | mem`)** rather than `BV`,
+via `evalGraphC` — the additive twin of `evalGraph` in `GraphRefine.lean`.  Additive
+matters: the `BV` path is what every already-proven non-memory design elaborates
+against, so it is byte-identical and none of them needed re-proving.  `DepOrdered` /
+`DepOrderedB` are value-free and shared between the two paths, and with them the
+`native_decide` well-formedness gates.
+
+A Memory node is multi-output (one read-data value per read port plus the array next
+state) while `NodeCert` carries one width and one value, so `cert_memory_expand`
+**decomposes** it:
+
+| piece | becomes |
+|---|---|
+| committed array image | a **source**, like a flop (`CertVal.mem (memenc s.<field>)`) |
+| each write port | one `Op_MemWrite` / `Op_MemWriteBE`, **chained** in `memory_write_fold` order so a later port wins a same-address collision |
+| each read port | one `Op_MemRead` over the image *that port* observes |
+| every port operand | an arity-1 `Op_Or` resize, mirroring `ucast_pin_at` |
+
+The read-port image is the subtle part: read-during-write is per *(read, write)*
+**pair** (`memory_fwd_bit`), so two read ports generally observe different prefixes
+of the write chain.  A single linear chain would be wrong.  Chains are keyed by their
+forwarded-set signature and shared when two reads forward from the same set; the
+all-writes chain is the array next state, decoded back with `memdec`.
+
+The bridge reuses the existing per-op lemmas rather than duplicating them.
+`eval_op_cert` reduces on the operator constructor, so for a concrete operator the
+per-node goal is *defeq* to that constructor applied to the underlying equation:
+
+```lean
+show CertVal.bv (bvenc (fv_n i s)) = CertVal.bv (eval_op <op> w [..])
+refine congrArg CertVal.bv ?_
+-- the ordinary per-op bridge proof, unchanged
+```
+
+so all ~30 `OpBridge` lemmas keep applying verbatim.  Memory nodes take the same
+shape with `CertVal.mem` / `memenc` and the three memory bridges
+(`mem_read_bridge`, `mem_write_bridge`, `mem_write_be_bridge`).
+
+**Two traps, both in `STEP5_BRIDGE_BUGS.md`.**  `memenc` must guard its domain or
+out-of-range indices alias onto a written address (Bug 12), and every port operand
+needs a resize node or a wider address dep indexes past the array — silently
+returning zero rather than erroring (Bug 13).
+
+**Not yet covered:** sync-read memories (`type == 1`).  The read-data register needs
+a source plus an `Op_MuxBool` next-state node over an ungated `Op_MemRead` — emitter
+work only, no new certificate operator.  The emitter refuses them with that message
+rather than emitting something unproven.
 
 Minimal memory example (async-read / sync-write SRAM), verified to typecheck:
 
