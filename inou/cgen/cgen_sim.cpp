@@ -4907,12 +4907,40 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                               color_plan_->summary().runtime_random ? "true" : "false",
                               "\n"));
     if (!color_runtime_root) {
+      std::string plan_hint;
+      if (!color_plan_->errors().empty()) {
+        plan_hint = color_plan_->errors().front();
+        // Keep the terminal diagnostic actionable without dumping the full
+        // multi-line cycle witness. The complete ring remains in the generated
+        // color-plan report.
+        //
+        // Match "; cycle", not "; cycle-length=": when the residual DFS found
+        // no back edge the summary is "; cycle=NONE FOUND …", and anchoring on
+        // the length field left the whole blocked-witness list in the hint.
+        if (const auto witnesses = plan_hint.find(" witnesses="); witnesses != std::string::npos) {
+          if (const auto summary = plan_hint.find("; cycle", witnesses); summary != std::string::npos) {
+            plan_hint.erase(witnesses, summary - witnesses);
+          }
+        }
+        if (const auto witness = plan_hint.find(" cycle=\n"); witness != std::string::npos) {
+          plan_hint.resize(witness);
+        }
+        // cycle-boundaries= is one line per hierarchy crossing over the WHOLE
+        // ring and survives the cut above by design. On the designs this exists
+        // for that ring is millions of hops, so cap what reaches a terminal.
+        constexpr size_t kMaxHintBytes = 4096;
+        if (plan_hint.size() > kMaxHintBytes) {
+          plan_hint.resize(kMaxHintBytes);
+          plan_hint += " ... (truncated; see the generated .color-plan.txt report)";
+        }
+      } else if (!direct_color_supported) {
+        plan_hint = "the selected hierarchy contains a state or operation protocol without a direct color kernel";
+      } else {
+        plan_hint = "inspect the generated .color-plan.txt report";
+      }
       livehd::diag::err("inou.cgen.sim", "color-plan-not-lowerable", "unsupported")
           .msg("module `{}` cannot be lowered by the occurrence-wide color scheduler", gname)
-          .hint(!direct_color_supported
-                    ? "the selected hierarchy contains a state or operation protocol without a direct color kernel"
-                    : (color_plan_->errors().empty() ? "inspect the generated .color-plan.txt report"
-                                                     : color_plan_->errors().front()))
+          .hint(plan_hint)
           .emit();
       return;
     }

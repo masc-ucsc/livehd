@@ -1635,20 +1635,20 @@ void sim_command(Options& opts, Result& res) {
   if (opts.sim_vcd_from >= 0 && opts.sim_vcd_to >= 0 && opts.sim_vcd_from > opts.sim_vcd_to) {
     throw Lhd_error{"usage", std::format("--vcd-from {} is after --vcd-to {}", opts.sim_vcd_from, opts.sim_vcd_to), ""};
   }
-  if (ckpt_dir.empty() && opts.sim_restart_at >= 0) {
+  if (ckpt_dir.empty() && opts.sim_restart_cycle >= 0) {
     throw Lhd_error{"usage",
-                    "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
-                    "run once with checkpointing on to create them, then --restart-at"};
+                    "--restart-cycle needs checkpoints — do not combine it with --set sim.checkpoint=false",
+                    "run once with checkpointing on to create them, then --restart-cycle"};
   }
   // --query owns the replay: it plans ONE traversal over the union of the
-  // batch's time ranges and picks its own checkpoint. --restart-at and the VCD
+  // batch's time ranges and picks its own checkpoint. --restart-cycle and the VCD
   // window flags plan the same replay differently (--vcd-from silently doubles
   // as a restart target), so the two planners would fight over one run. v1 says
   // so instead of picking a winner; composition can come later.
   if (!opts.sim_query.empty()
-      && (opts.sim_restart_at >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
+      && (opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
     throw Lhd_error{"usage",
-                    "--query cannot be combined with --restart-at / --vcd-from / --vcd-to / --vcd-on-fail",
+                    "--query cannot be combined with --restart-cycle / --vcd-from / --vcd-to / --vcd-on-fail",
                     "run the query batch on its own; a VCD or a restart is a separate invocation"};
   }
 
@@ -2244,8 +2244,8 @@ void sim_command(Options& opts, Result& res) {
     run_args += " --no-checkpoint";
   }
   // Debug replay: jump to the failure region (loads the nearest checkpoint <= N).
-  if (opts.sim_restart_at >= 0) {
-    run_args += " --restart-at " + shell_quote(std::to_string(opts.sim_restart_at));
+  if (opts.sim_restart_cycle >= 0) {
+    run_args += " --restart-cycle " + shell_quote(std::to_string(opts.sim_restart_cycle));
   }
   // Windowed VCD: restart near Y, run silent to Y, trace [Y, Z].
   if (opts.sim_vcd_from >= 0) {

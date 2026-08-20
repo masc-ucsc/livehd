@@ -75,7 +75,6 @@ struct Options {
   // format Bazel's unused_inputs_list consumes for input pruning.
   std::string unused_inputs;
   std::string recipe;       // resolved per-command default in the kernel
-  std::string recipe_file;  // deferred (unsupported)
   std::string config;       // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
@@ -102,7 +101,6 @@ struct Options {
   std::string              tool_attr;
   int                      tool_max        = 200;
   int                      tool_hier       = -1;
-  int                      tool_hops       = 0;
   int                      tool_context    = 2;      // `tool diff -C n` text-line context
   bool                     tool_invert     = false;  // `tool grep -v`: keep records that do NOT match
   bool                     tool_match      = false;  // `tool diff --match`: visualize via the semdiff `match` attribute
@@ -146,7 +144,6 @@ struct Options {
 
   std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
 
-  int  jobs    = 0;
   bool quiet   = false;
   bool verbose = false;
 
@@ -164,7 +161,7 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> sim_args;
   // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
   // nearest checkpoint <= the target and resumes from there. -1 = not requested.
-  long                                             sim_restart_at = -1;  // --restart-at/--restart-cycle N: jump to cycle N
+  long                                             sim_restart_cycle = -1;  // --restart-cycle N: jump to cycle N
   long                                             sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
   long                                             sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
   bool        sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
@@ -411,7 +408,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "having neither an initializer nor a reset"                                                           },
     {             "checkpoint",
      "true",      Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"    },
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)"    },
     {    "checkpoint_min_secs",
      "10",  Sim_set_option::Kind::non_neg_num,
      "wall-clock floor in seconds between checkpoints (a short run writes none)"                           },

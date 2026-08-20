@@ -208,6 +208,16 @@ sh_test(
 )
 
 sh_test(
+    name = "slang_packed_array_reg_array_emit",
+    size = "large",
+    srcs = ["tests/packed_array_reg_array_emit_test.sh"],
+    data = [
+        "tests/sv/packed_array_reg_array_emit.v",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "slang_packed_array_wire_init_sroa",
     size = "large",
     srcs = ["tests/slang_compile.sh"],

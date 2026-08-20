@@ -23,6 +23,7 @@
 
 #include "ann_place.hpp"
 #include "hhds/attr.hpp"
+#include "hhds/attrs/const_payload.hpp"
 
 namespace livehd::attrs {
 
@@ -227,10 +228,7 @@ inline constexpr const_value_t const_value{};
 // beyond the small-int fast-path range (`Const_small_pid_count`). For pins in
 // the small-int range, the value is encoded directly in the port_id (scheme
 // A) and this attribute is absent.
-struct pin_const_value_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
+using pin_const_value_t = hhds::attrs::const_payload_t;
 inline constexpr pin_const_value_t pin_const_value{};
 
 // Per-node serialized LUT-table Dlop used by LUT cells.

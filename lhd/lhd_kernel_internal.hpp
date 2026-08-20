@@ -86,6 +86,9 @@ inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] =
 // instead of the generic unknown-flag guess. Keyed on the flag leaf, so it
 // applies whatever namespace it was spelled under.
 inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] = {
+    {"yosys",
+     "yosys is linked in-process now (Yosys::Pass::call), so there is no external binary to point at. The label was "
+     "registered but never read; drop the flag"},
     {"budget_mode",
      "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
      "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "

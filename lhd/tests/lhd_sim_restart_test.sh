@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
-#   * `--restart-at N` loads the nearest checkpoint <= N (DUT state + the testbench
+#   * `--restart-cycle N` loads the nearest checkpoint <= N (DUT state + the testbench
 #     frame) and resumes the tick loop there instead of cycle 0 — so an accumulating
 #     testbench local lands at EXACTLY the same final value as a full run
 #     (bit-exact replay), and only cycles >= the checkpoint are re-executed;
@@ -92,7 +92,7 @@ grep -q 'cyc 0 ' "$W/full.out"  || fail "full run did not start at cycle 0"
 grep -q 'PASS cnt.run' "$W/full.out" || fail "full run did not pass"
 
 # restart-at 13 -> loads ckp12, resumes; FINAL total must MATCH (bit-exact frame)
-"$LHD" sim "$W/cr.prp" --run-only --restart-at 13 --workdir "$W/run" --diag-fmt pretty > "$W/r13.out" 2>&1 \
+"$LHD" sim "$W/cr.prp" --run-only --restart-cycle 13 --workdir "$W/run" --diag-fmt pretty > "$W/r13.out" 2>&1 \
   || fail "restart run failed: $(cat "$W/r13.out")"
 grep -q 'restarted from checkpoint cycle 12 (target 13)' "$W/r13.out" \
   || fail "restart did not load ckp12: $(grep -i restart "$W/r13.out")"
@@ -104,7 +104,7 @@ R13="$(final_total "$W/r13.out")"
 grep -q 'PASS cnt.run' "$W/r13.out" || fail "restart run did not pass"
 
 # a target before the first checkpoint replays from 0 (still correct)
-"$LHD" sim "$W/cr.prp" --run-only --restart-at 1 --workdir "$W/run" --diag-fmt pretty > "$W/r1.out" 2>&1 \
+"$LHD" sim "$W/cr.prp" --run-only --restart-cycle 1 --workdir "$W/run" --diag-fmt pretty > "$W/r1.out" 2>&1 \
   || fail "restart-at-1 run failed"
 grep -q 'no checkpoint <= 1; replaying from cycle 0' "$W/r1.out" || fail "missing the no-checkpoint replay note: $(cat "$W/r1.out")"
 grep -q 'cyc 0 ' "$W/r1.out" || fail "restart-at-1 should replay from cycle 0"

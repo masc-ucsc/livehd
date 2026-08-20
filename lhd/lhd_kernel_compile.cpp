@@ -1263,13 +1263,14 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
         blocked[file.empty() ? unit : file].insert(text);
       }
       if (blocked == prev_blocked) {
-        std::string units_avail;
+        std::vector<std::string> available_units;
+        available_units.reserve(pristine.size());
         for (const auto& [pname, _] : pristine) {
-          if (!units_avail.empty()) {
-            units_avail += ", ";
-          }
-          units_avail += pname;
+          available_units.push_back(pname);
         }
+        std::sort(available_units.begin(), available_units.end());
+        const auto units_avail     = join_csv(available_units);
+        const auto available_count = available_units.size();
         for (const auto& [file, texts] : blocked) {
           std::string list;
           for (const auto& t : texts) {
@@ -1284,7 +1285,12 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
                                        .category = "name",
                                        .pass     = "lhd.elaborate",
                                        .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
-                                       .hint = std::format("an import cycle or a missing unit; available units: {}", units_avail)});
+                                       .hint = std::format("an import cycle or a missing unit; {} unit{} available (use --diag-fmt "
+                                                           "json for the full list)",
+                                                           available_count,
+                                                           available_count == 1 ? " is" : "s are"),
+                                       .attrs = {{"available_unit_count", std::to_string(available_count)},
+                                                 {"available_units", units_avail}}});
         }
         throw classify_engine_failure("import resolution made no progress");
       }

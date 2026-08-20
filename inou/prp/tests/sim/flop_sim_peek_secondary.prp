@@ -17,7 +17,7 @@
 // bit, the rollback left it advanced, and the real `step()` that followed saw no
 // edge. The second-domain flop then never committed, silently. The same gap hit
 // checkpointing: the bit is in neither `dump_state` nor `load_state`, so a
-// `--restart-at` / `--vcd-from` restore gained or lost commits.
+// `--restart-cycle` / `--vcd-from` restore gained or lost commits.
 //
 // It was nastier than the other trackers because the DESIGN is fine — it was
 // triggered purely by an innocuous testbench habit (looking at an output before

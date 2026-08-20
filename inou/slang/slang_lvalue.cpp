@@ -1076,6 +1076,11 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
   if (mi.elem_signed) {
     return builder_.create_sext_stmts(tmp, std::to_string(mi.elem_bits - 1));
   }
+  // An element read is exactly elem_bits wide and unsigned. Say so, or every
+  // whole-element use re-masks it to its own width — `tbl[0]#[0..=11]` on a
+  // `[4]u12` (10,089 such no-op masks across the xiangshan Backend once packed
+  // register banks started emitting as arrays).
+  builder_.note_unsigned_bits(tmp, mi.elem_bits);
   return tmp;
 }
 

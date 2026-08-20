@@ -86,9 +86,9 @@ inline constexpr uint32_t kFormalAssertAlways = 4;
 //   pid 0..15  -> values 0..15
 //   pid 16..31 -> values -16..-1
 // Constants outside that range get fresh port_ids starting at 32, with the
-// serialized payload attached as `livehd::attrs::pin_const_value`. A
-// per-Graph reverse map (LiveHD-side, in const_pin.cpp) provides write-side
-// deduplication so the same Dlop value resolves to the same pin.
+// serialized payload attached as `livehd::attrs::pin_const_value`. HHDS owns
+// the graph-local reverse index and append cursor, so the same Dlop value
+// resolves to the same pin without a parallel LiveHD registry.
 
 inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
@@ -106,9 +106,9 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 
 // Create-or-find the canonical const pin for `value`. Small ints in [-16, 15]
 // are pid-encoded directly on CONST_NODE (idempotent, no payload). Larger
-// values consult a per-Graph reverse map and reuse an existing pin if the
-// same serialized Dlop is already materialised; otherwise allocate a fresh
-// pid (>= 32) and attach the serialized payload.
+// values use HHDS Graph::intern_constant to reuse an existing pin if the same
+// serialized Dlop is already materialised; otherwise append a fresh pid
+// (>= 32) and attach the serialized payload.
 [[nodiscard]] hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value);
 
 // Decodes the Dlop a const pin represents. Handles both new CONST_NODE-pin

@@ -242,7 +242,7 @@ sh_test(
 )
 
 # `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
-# `--restart-at N` loads the nearest checkpoint <= N (DUT + testbench frame) and
+# `--restart-cycle N` loads the nearest checkpoint <= N (DUT + testbench frame) and
 # resumes there, so an accumulating tb local matches a full run bit-exactly and
 # only cycles >= the checkpoint re-run; a target before any checkpoint replays
 # from 0; `--vcd-from Y --vcd-to Z` traces a VCD over just [Y, Z]. Structural

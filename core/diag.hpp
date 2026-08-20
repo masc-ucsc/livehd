@@ -111,16 +111,19 @@ struct Diagnostic {
   // the design still compiles, with the failing check kept as a runtime check).
   bool                     deferred = false;
 
-  // Optional structured payload for machine-parseable progress/info records (a
-  // long-running pass emits one per resolved unit; pass.lec emits one per block).
-  // Each is omitted from to_jsonl when unset (empty string / -1 / empty vector),
-  // so an ordinary error/warning serializes exactly as before.
+  // Optional structured payload for machine-readable records. A long-running
+  // pass can emit progress fields here, and an error can keep verbose context
+  // (such as a large candidate list) out of the compact human hint while still
+  // exposing it under --diag-fmt json. Each field is omitted from to_jsonl when
+  // unset (empty string / -1 / empty vector), so an ordinary error/warning
+  // serializes exactly as before.
   //   verdict     - "pass" | "fail" | "inconclusive" (the block outcome)
   //   engine      - the engine that REACHED the verdict (the portfolio winner);
   //                 for an inconclusive block, the attempted engines
   //   duration_ms - elapsed wall-clock to reach the verdict (-1 = unset)
-  //   attrs       - any extra key/value (bound, witness path, node count, the
-  //                 per-engine times) so the struct need not grow per consumer
+  //   attrs       - any extra key/value (bound, witness path, candidate list,
+  //                 node count, per-engine times) so the struct need not grow
+  //                 per consumer
   std::string                                      verdict{};
   std::string                                      engine{};
   int64_t                                          duration_ms = -1;

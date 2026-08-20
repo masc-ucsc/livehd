@@ -501,7 +501,6 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
-  m1.add_label_optional("yosys", "path for yosys command", "");
   m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");
   m1.add_label_optional("elab_top", "define top module for elaboration (read_slang). If not provided, uses 'top' value");
   m1.add_label_optional("rename_top", "rename the top module to the given name after synthesis");
@@ -512,7 +511,6 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("path", "path to read the lgraph[s]", "");  // empty: avoids a stray lgdb/ from get_path
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys", "path for yosys command", "");
 
   register_inou("yosys", m2);
 }

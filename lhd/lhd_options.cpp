@@ -99,7 +99,7 @@ std::string_view need_value(std::string_view flag, int& i, int argc, char** argv
   return argv[i];
 }
 
-// A non-negative integer flag value (cycle counts: --restart-at/--vcd-from/-to).
+// A non-negative integer flag value (cycle counts: --restart-cycle/--vcd-from/-to).
 long parse_nonneg(std::string_view flag, std::string_view val) {
   size_t consumed = 0;
   long   n        = 0;
@@ -361,15 +361,6 @@ Options parse_args(int argc, char** argv) {
       opts.emit_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), true));
     } else if (a == "--in") {
       opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
-    } else if (a == "--in-dir") {
-      // Retired: an undocumented alias for a POSITIONAL `ln:DIR`/`lg:DIR` (both
-      // land in opts.in_dirs, so it never did anything the positional form does
-      // not). `lhd compile --help` has always documented inputs as positional.
-      // Kept registered — and rejected — so anyone still passing it is told the
-      // spelling rather than getting a bare "unknown option".
-      throw Lhd_error{"usage",
-                      "--in-dir is not needed — pass IR inputs positionally, as `ln:DIR` or `lg:DIR`",
-                      "e.g. `lhd compile dep.prp ln:pkg_lns/ --emit-dir lg:out` (see `lhd compile --help`)"};
     } else if (a == "--lib") {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--collapse") {  // lec: proven def(s) to force-blackbox (repeatable / comma-sep)
@@ -414,7 +405,7 @@ Options parse_args(int argc, char** argv) {
       opts.tool_match = true;
     } else if (a == "--structural") {  // `tool diff --structural`: strict compile-cache H5 comparison
       opts.tool_structural = true;
-    } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
+    } else if (a == "--max" || a == "-C" || a == "--context") {  // row cap / diff context
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;
       long   n        = 0;
@@ -428,8 +419,6 @@ Options parse_args(int argc, char** argv) {
       }
       if (a == "--max") {
         opts.tool_max = static_cast<int>(n);
-      } else if (a == "--hops") {
-        opts.tool_hops = static_cast<int>(n);
       } else {
         opts.tool_context = static_cast<int>(n);
       }
@@ -472,8 +461,6 @@ Options parse_args(int argc, char** argv) {
       opts.stats = true;
     } else if (a == "--recipe") {
       opts.recipe = need_value(a, i, argc, argv);
-    } else if (a == "--recipe-file") {
-      opts.recipe_file = need_value(a, i, argc, argv);
     } else if (a == "--set") {
       auto kv  = std::string{need_value(a, i, argc, argv)};
       auto pos = kv.find('=');
@@ -550,19 +537,6 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
-    } else if (a == "-j" || a == "--jobs") {
-      auto   v        = std::string{need_value(a, i, argc, argv)};
-      size_t consumed = 0;
-      long   n        = 0;
-      try {
-        n = std::stol(v, &consumed);
-      } catch (const std::exception&) {
-        consumed = 0;
-      }
-      if (v.empty() || consumed != v.size() || n < 0) {
-        throw Lhd_error{"usage", std::format("{} expects a non-negative integer, got '{}'", a, v), ""};
-      }
-      opts.jobs = static_cast<int>(n);
     } else if (a == "-q" || a == "--quiet") {
       opts.quiet = true;
     } else if (a == "--verbose") {
@@ -581,8 +555,8 @@ Options parse_args(int argc, char** argv) {
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
-    } else if (a == "--restart-at" || a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
-      opts.sim_restart_at = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
+      opts.sim_restart_cycle = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--vcd-from") {  // `sim`: trace VCD starting at cycle N (restart to N first)
       opts.sim_vcd_from = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--vcd-to") {  // `sim`: trace VCD up to cycle N (with --vcd-from)
@@ -752,12 +726,6 @@ Options parse_args(int argc, char** argv) {
   if (opts.command.empty()) {
     opts.command = "help";
     return opts;
-  }
-
-  if (!opts.recipe_file.empty()) {
-    throw Lhd_error{"unsupported",
-                    "--recipe-file is not implemented yet (built-in recipes ship first)",
-                    "use --recipe O0|O1|O2 and --set pass.flag=value (or --config lhd.toml)"};
   }
 
   // Fold --config file defaults into sets/recipe BEFORE anything hashes or

@@ -1156,6 +1156,66 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     return ensure_version(base, version, role, evaluation_slot(version), role == Version_role::data ? output_port : 0);
   };
 
+  // A Sub occurrence's identity path includes the call itself, while nodes in
+  // its parent body use the path before that final step.  Index ordinary nodes
+  // by Occurrence_index, and index nested calls by a hash of their full path so
+  // an output alias can descend through another Sub without scanning the
+  // occurrence-wide site table. Hash collisions are verified structurally.
+  const auto path_hash = [](const hhds::Occurrence_path& path, std::optional<hhds::Definition_index> appended) {
+    Refinement_hash_builder hash;
+    hash.append_u64(static_cast<uint64_t>(path.root_gid()));
+    for (const auto& step : path.steps()) {
+      hash.append_u64(static_cast<uint64_t>(step.subnode.gid));
+      hash.append_u64(static_cast<uint64_t>(step.subnode.value));
+      hash.append_u64(step.ordinal.has_value());
+      hash.append_u64(step.ordinal.value_or(0));
+    }
+    if (appended) {
+      hash.append_u64(static_cast<uint64_t>(appended->gid));
+      hash.append_u64(static_cast<uint64_t>(appended->value));
+      hash.append_u64(0);
+      hash.append_u64(0);
+    }
+    return hash.finish()[0];
+  };
+  absl::flat_hash_map<uint64_t, std::vector<size_t>> sub_by_path_hash;
+  for (size_t site_index = 0; site_index < plan.sites_.size(); ++site_index) {
+    const auto& site = plan.sites_[site_index];
+    if (gu::type_op_of(site.node) == Ntype_op::Sub && !site.node.is_loop_subnode()) {
+      sub_by_path_hash[path_hash(site.node.path(), std::nullopt)].push_back(site_index);
+    }
+  }
+  const auto find_body_site = [&](hhds::Graph* body, const hhds::Occurrence_path& body_path,
+                                  const hhds::Node_class& driver) -> std::optional<size_t> {
+    if (gu::type_op_of(driver) != Ntype_op::Sub) {
+      const hhds::Occurrence_index occurrence{body_path, driver.get_definition_index()};
+      if (const auto found = index.find(occurrence); found != index.end()) {
+        return found->second;
+      }
+      return std::nullopt;
+    }
+    const auto found = sub_by_path_hash.find(path_hash(body_path, driver.get_definition_index()));
+    if (found == sub_by_path_hash.end()) {
+      return std::nullopt;
+    }
+    for (const size_t candidate_index : found->second) {
+      const auto& candidate = plan.sites_[candidate_index].node;
+      const auto  steps     = candidate.path().steps();
+      if (candidate.get_graph() != body || candidate.get_definition_index() != driver.get_definition_index()
+          || steps.size() != body_path.steps().size() + 1 || steps.back().ordinal) {
+        continue;
+      }
+      bool prefix = true;
+      for (size_t i = 0; i < body_path.steps().size(); ++i) {
+        prefix &= steps[i] == body_path.steps()[i];
+      }
+      if (prefix) {
+        return candidate_index;
+      }
+    }
+    return std::nullopt;
+  };
+
   std::vector<std::optional<bool>> state_rising(plan.sites_.size());
   std::vector<size_t>              state_updates(plan.sites_.size(), std::numeric_limits<size_t>::max());
   std::set<std::tuple<size_t, size_t, hhds::Port_id, uint32_t, uint32_t, uint32_t, hhds::Port_id, uint32_t, State_version, bool>>
@@ -1547,31 +1607,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         bool                         have_child_path = false;
 
         if (gu::type_op_of(crossing_node) == Ntype_op::Sub) {
-          // A wrapper in the parent body unwraps to the Sub's output pin, whose
-          // occurrence path is still the PARENT path. Resolve its child body
-          // occurrence from the already discovered sites.
+          // HHDS gives the Sub occurrence itself the CALLEE path (its base
+          // node still belongs to the parent graph).  The nodes reached inside
+          // the callee carry that same path, so it is already the exact key for
+          // the leaf occurrence.  Treating it as the parent path and appending
+          // another step made every direct Sub-output slice lookup miss.
           const auto sub          = crossing_node.base_node();
           child                   = sub.get_subnode_graph();
           output_port             = crossing.get_port_id();
-          const auto parent_steps = producer_path.steps();
-          for (const auto& candidate : plan.sites_) {
-            if (candidate.node.get_graph() != child.get()) {
-              continue;
-            }
-            const auto steps = candidate.node.path().steps();
-            if (steps.size() != parent_steps.size() + 1 || steps.back().subnode != sub.get_definition_index()) {
-              continue;
-            }
-            bool prefix = true;
-            for (size_t i = 0; i < parent_steps.size(); ++i) {
-              prefix &= steps[i] == parent_steps[i];
-            }
-            if (prefix) {
-              producer_path   = candidate.node.path();
-              have_child_path = true;
-              break;
-            }
-          }
+          producer_path           = crossing_node.path();
+          have_child_path         = child != nullptr;
         } else if (!producer_path.steps().empty()) {
           const auto sub  = library->get_node(producer_path.steps().back().subnode);
           child           = sub.get_subnode_graph();
@@ -1614,9 +1659,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                     || gu::is_const_pin(slice.leaf)) {
                   continue;
                 }
-                const hhds::Occurrence_index leaf_occurrence{producer_path, slice.leaf.get_master_node().get_definition_index()};
-                if (const auto leaf = index.find(leaf_occurrence); leaf != index.end() && plan.sites_[leaf->second].live) {
-                  producer_base   = leaf->second;
+                if (const auto leaf = find_body_site(child.get(), producer_path, slice.leaf.get_master_node());
+                    leaf && plan.sites_[*leaf].live) {
+                  producer_base   = *leaf;
                   producer_port   = slice.leaf.get_port_id();
                   producer_shift  = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
                   // The selected producer is the LSB-aligned leaf, so retain
@@ -1644,6 +1689,78 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
             }
           }
         }
+      }
+    }
+
+    // An ordinary Sub output is a hierarchy alias, not an executable value
+    // operation.  Occurrence traversal usually erases that GraphIO boundary,
+    // but a direct instance-to-instance connection (including a module output
+    // fed back into another input of the same instance) can still surface the
+    // Sub pin here.  Leaving it as producer_base creates an atomic "call"
+    // version that depends on every instance input; on packed interfaces that
+    // manufactures a whole-word cycle even when the callee's real output cone
+    // is field-accurate and acyclic.  The direct color runtime cannot lower an
+    // ordinary Sub version anyway: its members must be the callee's occurrence
+    // nodes.  Resolve the alias to the exact GraphIO driver now.
+    //
+    // A LOOP subnode is the one Sub the direct runtime does lower (cgen_sim's
+    // direct_color_supported accepts exactly `kind == loop_control`), and its
+    // output is an iteration result, not a hierarchy alias: resolving it to a
+    // body driver — or, through the graph-input arm below, to the loop's own
+    // caller-side input — would erase the carry semantics.  Same exclusion the
+    // sub_by_path_hash index above applies.
+    for (int depth = 0; !top_input && producer_base != Color_plan::invalid_index && depth < 64
+                            && gu::type_op_of(plan.sites_[producer_base].node) == Ntype_op::Sub
+                            && !plan.sites_[producer_base].node.is_loop_subnode();
+         ++depth) {
+      const auto sub_occurrence = plan.sites_[producer_base].node;
+      const auto sub            = sub_occurrence.base_node();
+      const auto child          = sub.get_subnode_graph();
+      const auto sio            = sub.get_subnode_io();
+      if (child == nullptr || sio == nullptr) {
+        break;
+      }
+      bool resolved = false;
+      for (const auto& decl : sio->get_output_pin_decls()) {
+        if (decl.port_id != producer_port) {
+          continue;
+        }
+        if (output_boundary_width == 0) {
+          output_boundary_width  = static_cast<uint32_t>(std::max<int32_t>(1, decl.bits));
+          output_boundary_unsign = decl.unsign;
+        }
+        const auto output = child->get_output_pin(decl.name);
+        for (const auto& output_edge : output.inp_edges()) {
+          if (gu::is_graph_input_pin(output_edge.driver)) {
+            for (const auto& input_edge : sub_occurrence.inp_edges()) {
+              if (input_edge.sink.get_port_id() != output_edge.driver.get_port_id()) {
+                continue;
+              }
+              const auto bound = index.find(input_edge.driver.get_master_node().get_occurrence_index());
+              top_input = bound == index.end() && gu::is_graph_input_pin(input_edge.driver);
+              if (top_input || (bound != index.end() && plan.sites_[bound->second].live)) {
+                producer_base = top_input ? Color_plan::invalid_index : bound->second;
+                producer_port = input_edge.driver.get_port_id();
+                resolved      = true;
+              }
+              break;
+            }
+          } else if (!gu::is_const_pin(output_edge.driver)) {
+            const auto leaf = find_body_site(child.get(), sub_occurrence.path(), output_edge.driver.get_master_node());
+            if (leaf && plan.sites_[*leaf].live) {
+              producer_base = *leaf;
+              producer_port = output_edge.driver.get_port_id();
+              resolved      = true;
+            }
+          }
+          if (resolved) {
+            break;
+          }
+        }
+        break;
+      }
+      if (!resolved) {
+        break;
       }
     }
 
@@ -2164,8 +2281,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       }
       const std::string literal = constant ? gu::hydrate_const(*resolved).to_pyrope() : std::string{};
       for (const auto version : {State_version::pre_rise, State_version::post_fall}) {
-        const size_t producer = (top_input || constant) ? Color_plan::invalid_index
-                                                        : producer_version(producer_it->second, version, resolved->get_port_id());
+        const size_t producer = (top_input || constant)
+                                    ? Color_plan::invalid_index
+                                    : producer_version(producer_it->second, version, resolved->get_port_id());
         input_uses.push_back(Input_use{prefix + decl.name,
                                        body.anchor,
                                        producer,
@@ -2518,6 +2636,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           residual_to[--residual_at[it->producer]] = it->consumer;
         }
       }
+
       // Iterative DFS for a BACK EDGE, which is the only sound way to name a
       // cycle here. A greedy walk is not: the residual subgraph contains sites
       // that are merely DOWNSTREAM of the cycle, so following any out-edge can
@@ -2571,7 +2690,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         // are all the same op on the same module, connected through the same
         // port, is a granularity artifact; one that walks through unrelated
         // logic is a genuine combinational loop in the design.
-        constexpr size_t kMaxHops = 12;
+        constexpr size_t kMaxHops = 64;
         const size_t     shown    = std::min(back_edge.size(), kMaxHops);
         // The producer_port/consumer_port pair of the base dependency that
         // carries each printed hop, when there is one (a version edge may
@@ -2580,10 +2699,18 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         // millions of entries on exactly the designs this diagnostic exists for,
         // so a full scan per hop is a scan too many.
         absl::flat_hash_map<std::pair<size_t, size_t>, std::string> via_of;
-        for (size_t i = 0; i < shown; ++i) {
-          via_of.try_emplace({plan.version_sites_[back_edge[i]].base_site,
-                              plan.version_sites_[back_edge[(i + 1) % back_edge.size()]].base_site},
-                             std::string{});
+        for (size_t i = 0; i < back_edge.size(); ++i) {
+          const auto& site = plan.sites_[plan.version_sites_[back_edge[i]].base_site];
+          if (i < shown || gu::type_op_of(site.node) == Ntype_op::Sub) {
+            via_of.try_emplace({plan.version_sites_[back_edge[i]].base_site,
+                                plan.version_sites_[back_edge[(i + 1) % back_edge.size()]].base_site},
+                               std::string{});
+            if (gu::type_op_of(site.node) == Ntype_op::Sub) {
+              via_of.try_emplace({plan.version_sites_[back_edge[(i + back_edge.size() - 1) % back_edge.size()]].base_site,
+                                  plan.version_sites_[back_edge[i]].base_site},
+                                 std::string{});
+            }
+          }
         }
         for (const auto& dep : plan.dependencies_) {
           auto it = via_of.find(std::pair<size_t, size_t>{dep.producer, dep.consumer});
@@ -2591,20 +2718,53 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
             it->second = std::format(" via p{}->p{}/{}", dep.producer_port, dep.consumer_port, dependency_kind_name(dep.kind));
           }
         }
+        // Only the PRINTED hops read this one (the boundary lines below use
+        // via_of), so seed it for those alone: back_edge runs to the same
+        // millions the dependency vector does.
+        absl::flat_hash_map<std::pair<size_t, size_t>, std::string> value_via;
+        for (size_t i = 0; i < shown; ++i) {
+          value_via.try_emplace({back_edge[i], back_edge[(i + 1) % back_edge.size()]}, std::string{});
+        }
+        for (const auto& use : plan.value_uses_) {
+          auto it = value_via.find(std::pair<size_t, size_t>{use.producer_version, use.consumer_version});
+          if (it != value_via.end() && it->second.empty()) {
+            it->second = std::format(" value=p{} shift={} extract=[{},{}) -> p{}#{} width={}/{} pre={}",
+                                     use.producer_port,
+                                     use.producer_shift,
+                                     use.producer_extract_lo,
+                                     use.producer_extract_hi,
+                                     use.consumer_port,
+                                     use.consumer_input,
+                                     use.width,
+                                     use.consumer_width,
+                                     use.preextracted);
+          }
+        }
+        // An occurrence node may carry no owning Graph (the same nullable the
+        // driver-boundary walk above guards); this diagnostic must never be the
+        // thing that crashes the compile it is explaining.
+        const auto graph_name_of = [](const hhds::Occurrence_node& n) -> std::string_view {
+          const auto* owner = n.get_graph();
+          return owner == nullptr ? std::string_view{"?"} : owner->get_name();
+        };
         std::string hops;
         for (size_t i = 0; i < shown; ++i) {
           const size_t idx  = back_edge[i];
           const size_t next = back_edge[(i + 1) % back_edge.size()];
           const auto&  vs   = plan.version_sites_[idx];
           const auto&  site = plan.sites_[vs.base_site];
-          hops += std::format("\n    {:>2}. {} op={} name={} depth={} ge={}{}",
+          hops += std::format("\n    {:>2}. {} op={} name={} graph={} path={} nid={} depth={} ge={}{}{}",
                               i,
                               vs.structural_id.substr(0, 10),
                               Ntype::get_name(gu::type_op_of(site.node)),
                               gu::has_name(site.node.base_node()) ? gu::node_name_of(site.node) : std::string_view{"-"},
+                              graph_name_of(site.node),
+                              library == nullptr ? std::string{} : hhds::format_occurrence_path(*library, site.node.path()),
+                              static_cast<unsigned long long>(site.node.get_debug_nid() >> 2),
                               site.node.path().steps().size(),
                               site.gate_equivalents,
-                              via_of[std::pair<size_t, size_t>{vs.base_site, plan.version_sites_[next].base_site}]);
+                              via_of[std::pair<size_t, size_t>{vs.base_site, plan.version_sites_[next].base_site}],
+                              value_via[std::pair<size_t, size_t>{idx, next}]);
         }
         // Op histogram over the WHOLE ring, not just the printed prefix: the
         // single most diagnostic number here is "how many distinct ops", because
@@ -2626,8 +2786,52 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         for (const auto& [name, n] : ops) {
           hist += std::format("{}{}x{}", hist.empty() ? "" : ",", n, name);
         }
-        cycle_desc = std::format("; cycle-length={} cycle-ops={} cycle={}{}",
-                                 back_edge.size(), hist, hops,
+        // Keep every hierarchy boundary in the witness even when it falls
+        // beyond the truncated hop prefix.  A packed-word false cycle is
+        // actionable at the Sub port where field-grain reachability was lost;
+        // hiding that boundary behind "... (truncated)" leaves only anonymous
+        // bitwise plumbing in the user-facing report.
+        std::string boundaries;
+        for (size_t i = 0; i < back_edge.size(); ++i) {
+          const size_t idx  = back_edge[i];
+          const size_t next = back_edge[(i + 1) % back_edge.size()];
+          const size_t prev = back_edge[(i + back_edge.size() - 1) % back_edge.size()];
+          const auto&  site = plan.sites_[plan.version_sites_[idx].base_site];
+          if (gu::type_op_of(site.node) != Ntype_op::Sub) {
+            continue;
+          }
+          const auto out_via = via_of.find(
+              std::pair<size_t, size_t>{plan.version_sites_[idx].base_site, plan.version_sites_[next].base_site});
+          const auto in_via = via_of.find(
+              std::pair<size_t, size_t>{plan.version_sites_[prev].base_site, plan.version_sites_[idx].base_site});
+          const auto output_port = plan.version_sites_[idx].output_port;
+          const auto child       = site.node.base_node().get_subnode_graph();
+          const auto& reach      = port_reach.of(child);
+          const auto slices      = reach.out_slices.find(static_cast<uint32_t>(output_port));
+          const auto inputs      = reach.out2ins.find(static_cast<uint32_t>(output_port));
+          std::string output_name{"?"};
+          if (const auto sio = site.node.base_node().get_subnode_io()) {
+            for (const auto& decl : sio->get_output_pin_decls()) {
+              if (decl.port_id == output_port) {
+                output_name = decl.name;
+                break;
+              }
+            }
+          }
+          boundaries += std::format("\n      {} graph={} instance={} depth={} output=p{}:{} slices={} support={} in={} out={}",
+                                    plan.version_sites_[idx].structural_id.substr(0, 10),
+                                    graph_name_of(site.node),
+                                    gu::has_name(site.node.base_node()) ? gu::node_name_of(site.node) : std::string_view{"-"},
+                                    site.node.path().steps().size(),
+                                    output_port,
+                                    output_name,
+                                    slices == reach.out_slices.end() ? 0 : slices->second.size(),
+                                    inputs == reach.out2ins.end() ? 0 : inputs->second.size(),
+                                    in_via == via_of.end() ? std::string{} : in_via->second,
+                                    out_via == via_of.end() ? std::string{} : out_via->second);
+        }
+        cycle_desc = std::format("; cycle-length={} cycle-ops={} cycle-boundaries={} cycle={}{}",
+                                 back_edge.size(), hist, boundaries.empty() ? "none" : boundaries, hops,
                                  back_edge.size() > shown ? "\n    ... (truncated)" : "");
       } else {
         cycle_desc = "; cycle=NONE FOUND (blocked sites are downstream of one, or the residual graph is malformed)";

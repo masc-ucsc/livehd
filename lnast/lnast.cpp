@@ -214,9 +214,8 @@ Lnast_ntype::Lnast_ntype_int Lnast::get_type(const Lnast_nid& nid) const {
 void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) { nid.set_type(static_cast<hhds::Type>(t)); }
 
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
-  // One store+map lookup for the id, then a pool index. get_name is one of the
-  // hottest lnast calls; the int id keeps the hot probe a 4-byte fetch and the
-  // resolve a deque index (no per-node std::string).
+  // lnast_name uses HHDS dense_layout: the authoritative attribute is a direct
+  // vector lookup, while the interned id keeps each node payload to int32_t.
   const auto id = nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
   return id == 0 ? std::string_view{} : name_pool_->resolve(id);
 }

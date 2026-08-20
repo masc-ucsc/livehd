@@ -1055,7 +1055,7 @@ private:
   bool                                        runtime_support_on_    = true;   // checkpoint/probe/query generated control plane
   bool                                        unknown_zero_          = false;  // sim.unknown_zero: `?` literal bits are 0, not random
   bool                                        in_tick_               = false;  // inside a tick body (reject nested ticks)
-  bool                                        restart_block_emitted_ = false;  // --restart-at handled by the first tick
+  bool                                        restart_block_emitted_ = false;  // --restart-cycle handled by the first tick
   std::set<std::string>                       locals_;                         // scalar driver vars
   std::map<std::string, int>                  local_w_;                        // ...and the Slop width each is declared at
   std::map<std::string, int>                  local_decl_w_;                   // `mut x:u97 = …` annotation (0 = infer)
@@ -2693,7 +2693,7 @@ private:
     o << ind << "}\n";
   }
 
-  // Emit the restart prologue before the FIRST tick loop: if `--restart-at X`,
+  // Emit the restart prologue before the FIRST tick loop: if `--restart-cycle X`,
   // load the nearest checkpoint <= X (DUT state + this testbench frame), warn on a
   // design_hash mismatch (cross-version reload), and resume the loop at that cycle
   // instead of 0. Only the first tick restarts (the single-clock model has one
@@ -2703,7 +2703,7 @@ private:
       return;
     }
     restart_block_emitted_ = true;
-    // Effective restart target: --restart-at, else the --vcd-from window start.
+    // Effective restart target: --restart-cycle, else the --vcd-from window start.
     o << ind << "long _rt = _ckpt.restart_at >= 0 ? _ckpt.restart_at : _ckpt.vcd_from;\n";
     o << ind << "if (_rt >= 0 && !_ckpt_base.empty()) {\n";
     o << ind << "  long _nc = hlop::ckpt::nearest_checkpoint_cycle(_ckpt_base, _rt);\n";
@@ -2897,7 +2897,7 @@ private:
     // their own `clock` (it is declared outside the for now, for the restart jump).
     o << ind << "{\n";
     o << ind << "long " << clk_name << " = 0;\n";
-    emit_restart_block(o, ind, clk_name);  // --restart-at: load nearest ckpt, resume at its cycle
+    emit_restart_block(o, ind, clk_name);  // --restart-cycle: load nearest ckpt, resume at its cycle
     o << ind << "for (; " << clk_name << " < (long)(" << count << "); ++" << clk_name << ") {\n";
     o << ind << "  _clk = " << clk_name << ";\n";    // current cycle, for located asserts (survives the loop)
     emit_vcd_window_block(o, ind + "  ", clk_name);  // --vcd-from/--vcd-to: enable/disable trace
@@ -3773,6 +3773,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    else if (_key == \"--checkpoint-max\") { _ckpt.max = _to_i64(\"checkpoint-max\", _need()); }\n"
        "    else if (_key == \"--checkpoint-max-overhead\") { _ckpt.max_overhead = std::strtod(_need().c_str(), nullptr); }\n"
        "    else if (_key == \"--checkpoint-every\") { _ckpt.every = _to_i64(\"checkpoint-every\", _need()); }\n"
+       // The driver keeps BOTH spellings forever: `lhd sim --run-only` re-runs a
+       // driver built by an EARLIER lhd, and the user-facing flag is now
+       // --restart-cycle (--restart-at was retired from the lhd CLI).
        "    else if (_key == \"--restart-at\" || _key == \"--restart-cycle\") { _ckpt.restart_at = _to_i64(\"restart-at\", "
        "_need()); }\n"
        "    else if (_key == \"--vcd-from\") { _ckpt.vcd_from = _to_i64(\"vcd-from\", _need()); }\n"

@@ -267,6 +267,15 @@ private:
   // equivalent Pyrope memory. Populated by the runtime-index pre-pass; the
   // declare + element read/write consult it to route through the memory path.
   absl::flat_hash_set<const slang::ast::Symbol*> packed_mem_regs_;
+  // Per-ENTRY async-reset values for a packed 2-D reg whose reset arm loads a
+  // pattern rather than one repeated value (`spec_table <= '{33,…,1,0}` — how
+  // firtool spells an index-initialized rename/free-list table). The reset
+  // otherwise reaches the declare as ONE scalar `initial` attribute, which a
+  // memory BROADCASTS to every entry, silently losing the pattern. Filled by
+  // the reset-arm pre-pass in lower_members (BEFORE the declares emit, like
+  // mem_init_vals_); declare_reg emits them as the array's tuple initializer
+  // and the async-reset lowering then skips its scalar `initial` for these.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> array_reset_lanes_;
   // True iff `sym`'s canonical type is a packed 2-D array of an integral element
   // wider than 1 bit (a true `reg [N-1:0][W-1:0]`, W>1 — NOT a 1-D packed vector
   // whose element is a single bit). Fills N (size), W (elem_bits), the element

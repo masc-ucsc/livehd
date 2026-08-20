@@ -114,6 +114,25 @@ EOF
 [ $? -ne 0 ] || fail "import cycle must exit non-zero"
 grep -q 'blocked on unresolved import' "$W/r6.json" || fail "expected no-progress error: $(cat "$W/r6.json")"
 
+# The terminal-facing diagnostic stays compact even when a design has many
+# available units. The complete catalog is structured machine context and is
+# therefore present only in the JSON diagnostic rendering.
+"$LHD" compile "$W/cyc_a.prp" "$W/cyc_b.prp" --workdir "$W/w6p" --diag-fmt pretty \
+  >"$W/r6p.out" 2>"$W/r6p.err"
+[ $? -ne 0 ] || fail "pretty import cycle must exit non-zero"
+grep -q '2 units are available (use --diag-fmt json for the full list)' "$W/r6p.err" \
+  || fail "pretty import diagnostic lacks the compact unit summary: $(cat "$W/r6p.err")"
+grep -q 'available units: cyc_a, cyc_b' "$W/r6p.err" \
+  && fail "pretty import diagnostic leaked the full unit catalog: $(cat "$W/r6p.err")"
+
+"$LHD" compile "$W/cyc_a.prp" "$W/cyc_b.prp" --workdir "$W/w6j" --diag-fmt json \
+  >"$W/r6j.out" 2>"$W/r6j.err"
+[ $? -ne 0 ] || fail "JSON import cycle must exit non-zero"
+grep -q '"available_unit_count":"2"' "$W/r6j.err" \
+  || fail "JSON import diagnostic lacks its unit count: $(cat "$W/r6j.err")"
+grep -q '"available_units":"cyc_a,cyc_b"' "$W/r6j.err" \
+  || fail "JSON import diagnostic lacks the full unit catalog: $(cat "$W/r6j.err")"
+
 # Non-foldable pub value: rejected when the EXPORTING file elaborates.
 # (A register read is runtime-valued at file scope — never a comptime constant.)
 printf 'reg r:u4 = 0\npub const bad = r\n' > "$W/nf.prp"

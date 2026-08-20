@@ -1,60 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <memory>
-#include <mutex>
-#include <string>
-
-#include "absl/container/flat_hash_map.h"
 #include "attrs.hpp"
 #include "cell.hpp"
 #include "dlop.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
-
-namespace {
-
-// Per-Graph state for the big-const deduplication path. Lifetime tracks the
-// process, keyed by Graph*. The state is advisory only — both the dedup map
-// and the pid cursor are re-validated against the graph's own pin attrs in
-// create_const (a loaded graph already has const pins the registry never saw;
-// a destroyed graph reallocated at the same address leaves stale entries).
-// Correctness comes from the pin_const_value attr being the identity.
-struct Per_graph_const_state {
-  std::mutex                                      mutex;
-  absl::flat_hash_map<std::string, hhds::Port_id> serialized_to_pid;
-  hhds::Port_id                                   next_big_pid = livehd::graph_util::Const_small_pid_count;
-};
-
-absl::flat_hash_map<const hhds::Graph*, std::unique_ptr<Per_graph_const_state>>& registry() {
-  static absl::flat_hash_map<const hhds::Graph*, std::unique_ptr<Per_graph_const_state>> r;
-  return r;
-}
-
-std::mutex& registry_mutex() {
-  static std::mutex m;
-  return m;
-}
-
-Per_graph_const_state& state_for(const hhds::Graph* graph) {
-  // The registry owns stable heap objects, so the process-global map lock is
-  // needed only on a thread's first encounter with a graph.  Steady-state
-  // constant creation locks that graph's state, allowing independent module
-  // transformations to proceed concurrently.
-  thread_local absl::flat_hash_map<const hhds::Graph*, Per_graph_const_state*> local;
-  if (const auto it = local.find(graph); it != local.end()) {
-    return *it->second;
-  }
-
-  std::lock_guard<std::mutex> lock(registry_mutex());
-  auto&                       state = registry()[graph];
-  if (!state) {
-    state = std::make_unique<Per_graph_const_state>();
-  }
-  local.emplace(graph, state.get());
-  return *state;
-}
-
-}  // namespace
 
 namespace livehd::graph_util {
 
@@ -70,46 +20,10 @@ hhds::Pin_class create_const(hhds::Graph& g, const Dlop& value) {
     }
   }
 
-  // Slow path: serialize + dedup via the per-graph reverse map. Returns the
-  // existing pin if the same value is already materialised; otherwise
-  // allocates a fresh port_id >= Const_small_pid_count.
-  auto serialized = value.serialize();
-
-  auto&                       reg = state_for(&g);
-  std::lock_guard<std::mutex> lk(reg.mutex);
-
-  if (auto it = reg.serialized_to_pid.find(serialized); it != reg.serialized_to_pid.end()) {
-    // Verify against the graph itself: the entry may be stale (a previous
-    // Graph at this address). The attr is the source of truth.
-    auto pin = const_node.create_driver_pin(it->second);
-    if (auto a = pin.attr(livehd::attrs::pin_const_value); a.has() && a.get() == serialized) {
-      return pin;
-    }
-    reg.serialized_to_pid.erase(it);
-  }
-
-  // Probe for a free pid. A loaded graph carries const pins the registry has
-  // never seen — blindly taking next_big_pid would overwrite their
-  // pin_const_value payload (silently swapping one constant for another, e.g.
-  // cprop on a freshly loaded lgraph). A pid >= Const_small_pid_count is
-  // occupied iff it carries the payload attr; seed the dedup map as we skip.
-  auto pid = reg.next_big_pid;
-  for (;; ++pid) {
-    auto pin = const_node.create_driver_pin(pid);
-    auto a   = pin.attr(livehd::attrs::pin_const_value);
-    if (!a.has()) {
-      reg.next_big_pid = pid + 1;
-      pin.attr(livehd::attrs::pin_const_value).set(serialized);
-      reg.serialized_to_pid.emplace(std::move(serialized), pid);
-      return pin;
-    }
-    if (a.get() == serialized) {  // loaded graph already has this value
-      reg.next_big_pid = pid + 1;
-      reg.serialized_to_pid.emplace(std::move(serialized), pid);
-      return pin;
-    }
-    reg.serialized_to_pid.emplace(a.get(), pid);
-  }
+  // HHDS owns the payload index and the monotonic CONST_NODE pin tail. After
+  // the one-time rebuild needed for a loaded graph, lookups and appends are
+  // O(1) average and never probe or manufacture candidate pins.
+  return g.intern_constant(value.serialize(), Const_small_pid_count);
 }
 
 Dlop hydrate_const(const hhds::Pin_class& pin) {

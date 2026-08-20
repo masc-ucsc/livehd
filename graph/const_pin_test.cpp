@@ -39,6 +39,13 @@ TEST(ConstPin, HydrationCacheSurvivesGrowthWithWideValues) {
     for (size_t i = 0; i < pins.size(); ++i) {
       EXPECT_EQ(gu::hydrate_const(pins[i]).serialize(), serialized[i]);
     }
+    // Cache hits must recover the existing physical pin after the const node
+    // has grown large, without allocating a duplicate logical constant.
+    for (const auto i : {size_t{0}, pins.size() / 2, pins.size() - 1}) {
+      auto value = Dlop::unserialize(serialized[i]);
+      ASSERT_TRUE(value);
+      EXPECT_EQ(gu::create_const(*g, *value), pins[i]);
+    }
     // Hits after the final growth must still return the same owned values.
     for (size_t i = pins.size(); i-- > 0;) {
       EXPECT_EQ(gu::hydrate_const(pins[i]).serialize(), serialized[i]);

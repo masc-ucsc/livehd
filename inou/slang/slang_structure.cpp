@@ -413,6 +413,39 @@ struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collect
   }
 };
 
+// Every WHOLE-symbol assignment (`sym <= rhs`, the LHS is the bare name) with
+// its right-hand side. Used to spot a packed-array reg that is loaded with a
+// PER-ELEMENT constant pattern — the async-reset shape firtool emits for an
+// index-initialized pointer vector:
+//
+//   if (reset) deqPtrVec <= '{'{flag:0,value:7}, … '{flag:0,value:0}};
+//
+// A reset value rides a SCALAR `initial` attr, and on `reg x:[N]uW` a scalar
+// initial BROADCASTS to every entry, so such an array cannot be spelled as a
+// Pyrope array yet (see lower_members).
+struct Whole_store_collector : public slang::ast::ASTVisitor<Whole_store_collector, slang::ast::VisitFlags::AllGood> {
+  std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> stores;
+  // Every symbol written at all, whole or per element. A reset arm that loads
+  // an array one entry at a time (`if (rst) arr[k] <= k;`) still gives that
+  // array a reset, even though it never appears in `stores`.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> touched;
+
+  void handle(const slang::ast::AssignmentExpression& a) {
+    const slang::ast::Expression* l = &a.left();
+    while (l->kind == ExpressionKind::Conversion) {
+      l = &l->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (l->kind == ExpressionKind::NamedValue) {
+      const auto& sym = l->as<slang::ast::NamedValueExpression>().symbol;
+      stores.emplace_back(&sym, &a.right());
+      touched.insert(&sym);
+    } else if (const auto* base = lhs_base_symbol(*l)) {
+      touched.insert(base);
+    }
+    visitDefault(a);
+  }
+};
+
 // True iff every symbol the selector references is statically resolvable once
 // the reader unrolls loops: a for-loop induction var, a genvar, a parameter, or
 // an enum value. A reference to any genuine runtime signal (net / port /
@@ -1498,13 +1531,14 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // between a var's store and its later reads (Alu_3's `io_in = '{...}` stored
   // flat, but every read after the aluModule instance resolved through
   // never-written leaves -> io_out_valid stuck 0).
-  auto saved_pattern_assigned = std::move(struct_pattern_assigned_);
-  auto saved_field_read       = std::move(struct_field_read_);
-  auto saved_deep_accessed    = std::move(struct_deep_accessed_);
-  auto saved_whole_copied     = std::move(struct_whole_copied_);
-  auto saved_deep_written     = std::move(struct_deep_written_);
-  auto saved_array_bundle     = std::move(struct_array_bundle_);
-  auto saved_packed_mem_regs  = std::move(packed_mem_regs_);
+  auto saved_pattern_assigned  = std::move(struct_pattern_assigned_);
+  auto saved_field_read        = std::move(struct_field_read_);
+  auto saved_deep_accessed     = std::move(struct_deep_accessed_);
+  auto saved_whole_copied      = std::move(struct_whole_copied_);
+  auto saved_deep_written      = std::move(struct_deep_written_);
+  auto saved_array_bundle      = std::move(struct_array_bundle_);
+  auto saved_packed_mem_regs   = std::move(packed_mem_regs_);
+  auto saved_array_reset_lanes = std::move(array_reset_lanes_);
 
   builder_ = Lnast_builder();
   sym_lname_.clear();
@@ -1532,6 +1566,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   tuple_type_names_.clear();
   emitted_tuple_types_.clear();
   packed_mem_regs_.clear();
+  array_reset_lanes_.clear();
   local_cnt_ = 0;
 
   body_ = body;
@@ -1762,12 +1797,202 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         runtime_indexed_arrays_.insert(sym);
       }
     }
-    // A PACKED 2-D reg `[N][W]` (W>1) that is RUNTIME-indexed somewhere is a
-    // register file: memory-ize it (one __memory node) so it LECs against an
-    // equivalent Pyrope memory, instead of flattening to one wide N*W-bit flop.
-    // A const-indexed-only packed 2-D reg keeps the flat-bus path (yosys-slang
-    // compatibility); any runtime select anywhere marks the whole array.
-    for (const auto& [sym, sel] : array_indices.packed_selects) {
+    // A PACKED 2-D reg `[N][W]` (W>1) is an ARRAY: declare it as `reg x:[N]uW`
+    // (one __memory node) rather than flattening it into one N*W-bit flop that
+    // every element access then has to bit-slice back out.
+    //
+    // The selector being constant or not makes NO difference here: both spell
+    // the same LGraph memory, and turning a constant-addressed one back into
+    // per-element flops is a SYNTHESIS optimization, not a front-end choice.
+    // (This gate used to demand `is_runtime_sel(sel)` "for yosys-slang
+    // compatibility" — that kept `reg [15:0][56:0] data` as `reg data:u912`
+    // with 16 hand-computed `data#[57k..=57k+56]` slices, which is exactly the
+    // array-ness the Pyrope emission was losing.)
+    // …with ONE exception: an array whose reset (or any other whole-array
+    // constant load) is a PER-ELEMENT pattern. That value reaches the declare
+    // as one scalar `initial` attr, and a scalar initial on `reg x:[N]uW`
+    // BROADCASTS — so `deqPtrVec <= '{…7,6,5,4,3,2,1,0}` came out as every
+    // entry resetting to `'b0` and LEC-REFUTED NewRobDeqPtrWrapper. Until the
+    // reset can be spelled per entry, those stay a flat bus.
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> array_pattern_loaded;
+    {
+      // ONLY the async-reset arms. Those are the sole place a whole-array
+      // CONSTANT load turns into the declare's scalar `initial`, and
+      // try_eval_const_net (below) seeds and folds every net driver reachable
+      // from the expression — running it over the whole body walks the entire
+      // datapath instead. A block with a single edge trigger has no async rung
+      // and therefore no reset value to lose.
+      std::vector<const slang::ast::Statement*>            reset_arms;
+      std::function<void(const slang::ast::Scope&)>        harvest_reset_arms = [&](const slang::ast::Scope& scope) {
+        for (const auto& member : scope.members()) {
+          if (member.kind == SymbolKind::GenerateBlock) {
+            const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+            if (!gen.isUninstantiated) {
+              harvest_reset_arms(gen);
+            }
+            continue;
+          }
+          if (member.kind == SymbolKind::GenerateBlockArray) {
+            for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+              harvest_reset_arms(*entry);
+            }
+            continue;
+          }
+          if (member.kind != SymbolKind::ProceduralBlock) {
+            continue;
+          }
+          const auto& pbs = member.as<slang::ast::ProceduralBlockSymbol>();
+          if (pbs.procedureKind != slang::ast::ProceduralBlockKind::Always
+              && pbs.procedureKind != slang::ast::ProceduralBlockKind::AlwaysFF) {
+            continue;
+          }
+          const auto& stmt = pbs.getBody();
+          if (stmt.kind != StatementKind::Timed) {
+            continue;
+          }
+          const auto& timed  = stmt.as<slang::ast::TimedStatement>();
+          int         nedges = 0;
+          auto        count  = [&](const slang::ast::TimingControl& tc) {
+            if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
+              const auto edge = tc.as<slang::ast::SignalEventControl>().edge;
+              if (edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge) {
+                ++nedges;
+              }
+            }
+          };
+          if (timed.timing.kind == slang::ast::TimingControlKind::EventList) {
+            for (const auto* ev : timed.timing.as<slang::ast::EventListControl>().events) {
+              count(*ev);
+            }
+          } else {
+            count(timed.timing);
+          }
+          // Peel the same if/else rungs the reset extraction peels: one per
+          // extra edge trigger, each rung's THEN arm holding its reset values.
+          const slang::ast::Statement* b = &timed.stmt;
+          for (int rung = nedges - 1; rung > 0; --rung) {
+            while (b->kind == StatementKind::Block) {
+              b = &b->as<slang::ast::BlockStatement>().body;
+            }
+            if (b->kind == StatementKind::List) {
+              const slang::ast::Statement* only_cond = nullptr;
+              for (const auto* sub : b->as<slang::ast::StatementList>().list) {
+                if (sub->kind == StatementKind::Conditional) {
+                  only_cond = sub;
+                  break;
+                }
+              }
+              if (only_cond == nullptr) {
+                break;
+              }
+              b = only_cond;
+            }
+            if (b->kind != StatementKind::Conditional) {
+              break;
+            }
+            const auto& cs = b->as<slang::ast::ConditionalStatement>();
+            reset_arms.push_back(&cs.ifTrue);
+            if (cs.ifFalse == nullptr) {
+              break;
+            }
+            b = cs.ifFalse;
+          }
+        }
+      };
+      harvest_reset_arms(*body);
+
+      Whole_store_collector wsc;
+      for (const auto* arm : reset_arms) {
+        arm->visit(wsc);
+      }
+      // A memory carries its reset only when the DATAPATH also drives the whole
+      // array (`spec_table <= spec_table_next`): that whole-array write is what
+      // becomes the memory's `update` bus, and only the update-bus lowering has
+      // a reset/init bus to hang the reset on. With per-entry writes alone the
+      // reset is silently DROPPED — measured: PMAEntryHandleModule,
+      // RegCacheAgeTimer_1 and RobEnqPtrWrapper all LEC-REFUTED that way, and a
+      // 4-line `reg m:[4]u8:[init=0, reset_pin=ref rst, async=true]` loses its
+      // reset today with no diagnostic at all. Such arrays stay a flat flop bus,
+      // which does reset correctly, until the memory lowering grows a reset for
+      // the per-port shape.
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> datapath_whole_written;
+      if (!wsc.touched.empty()) {  // no reset arm wrote anything: the whole-body walk has no consumer
+        absl::flat_hash_set<const slang::ast::Expression*> reset_rhs;
+        for (const auto& [sym, rhs] : wsc.stores) {
+          reset_rhs.insert(rhs);
+        }
+        Whole_store_collector all;
+        body->visit(all);
+        for (const auto& [sym, rhs] : all.stores) {
+          if (!reset_rhs.contains(rhs)) {
+            datapath_whole_written.insert(sym);
+          }
+        }
+      }
+      // EVERY array a reset arm writes — whole or per entry — needs the update
+      // bus, not just the ones with a splittable constant pattern: a uniform
+      // `if (rst) arr <= '0` loses its reset the same way.
+      for (const auto* sym : wsc.touched) {
+        int64_t n = 0, lo = 0;
+        int     w  = 0;
+        bool    sg = false;
+        if (is_packed_2d_array(sym->getType(), n, w, sg, lo) && !datapath_whole_written.contains(sym)) {
+          array_pattern_loaded.insert(sym);
+        }
+      }
+      for (const auto& [sym, rhs] : wsc.stores) {
+        int64_t n = 0, lo = 0;
+        int     w  = 0;
+        bool    sg = false;
+        if (!is_packed_2d_array(sym->getType(), n, w, sg, lo) || n <= 1 || w <= 0) {
+          continue;
+        }
+        if (array_pattern_loaded.contains(sym)) {
+          continue;  // staying flat; no lanes needed
+        }
+        auto cv = try_eval_const_net(*rhs);
+        if (!cv || !cv->isInteger()) {
+          continue;  // a runtime whole-array load carries no `initial` to broadcast
+        }
+        auto packed = Dlop::from_pyrope(const_text(cv->integer()));
+        if (!packed || packed->is_invalid()) {
+          array_pattern_loaded.insert(sym);  // cannot split it -> stay a flat bus
+          continue;
+        }
+        // Lane k is memory ADDRESS k, i.e. declared index `lo + k`
+        // (build_unpacked_index addresses an element as `index - lower` in both
+        // range directions). Its home in the packed word is `k*w` only when the
+        // outer range DESCENDS; an ascending `[0:N-1]` puts index `lo + k` at
+        // `(upper - index)*w = (n-1-k)*w`, so the pattern would come out
+        // reversed. Every other index computation in this reader branches on
+        // isDescending() the same way.
+        const auto& outer      = sym->getType().getCanonicalType().as<slang::ast::PackedArrayType>();
+        const bool  descending = outer.range.isDescending();
+
+        std::vector<std::string> lanes;
+        lanes.reserve(static_cast<size_t>(n));
+        for (int64_t k = 0; k < n; ++k) {
+          const int64_t pos = descending ? k : (n - 1 - k);
+          const int     lsb = static_cast<int>(pos * w);
+          lanes.emplace_back(packed->get_mask_op(*Dlop::get_mask_value(lsb + w - 1, lsb))->to_pyrope());
+        }
+        if (std::all_of(lanes.begin(), lanes.end(), [&](const std::string& l) { return l == lanes.front(); })) {
+          continue;  // uniform: the scalar `initial` attr broadcasts correctly
+        }
+        // A pattern. Keep it per entry so the array survives as an array; the
+        // async-reset lowering skips its scalar `initial` for these symbols.
+        array_reset_lanes_[sym] = std::move(lanes);
+      }
+    }
+    // One decision per SYMBOL: the selector no longer participates (a constant
+    // and a runtime index spell the same LGraph memory), so a 16-entry bank
+    // must not re-run the whole gate once per element access.
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> packed_sel_seen;
+    for (const auto& entry : array_indices.packed_selects) {
+      const auto* sym = entry.first;
+      if (!packed_sel_seen.insert(sym).second) {
+        continue;
+      }
       int64_t n = 0, lo = 0;
       int     w  = 0;
       bool    sg = false;
@@ -1779,7 +2004,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // the write is silently dropped (the memory instantiates with
       // `wr_enable_0(1'b0)`).
       if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !struct_array_bundle_.contains(sym)
-          && !array_range_written.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
+          && !array_range_written.contains(sym) && !array_pattern_loaded.contains(sym)
+          && is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -1891,6 +2117,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   struct_deep_written_     = std::move(saved_deep_written);
   struct_array_bundle_     = std::move(saved_array_bundle);
   packed_mem_regs_         = std::move(saved_packed_mem_regs);
+  array_reset_lanes_       = std::move(saved_array_reset_lanes);
 
   return ok;
 }
@@ -2390,6 +2617,19 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
       emit_prim_type_int(tidx, w, sg);
       ln.add_child(tidx, Lnast_node::create_const(absl::StrCat("[", n, "]")));
       ln.add_child(didx, Lnast_node::create_const("reg"));
+      // An async reset that loads a per-entry PATTERN (`spec_table <= '{33,…,0}`)
+      // becomes the array's own tuple initializer. It cannot ride the scalar
+      // `initial` attribute the async-reset lowering normally emits — one scalar
+      // on `reg x:[N]uW` broadcasts, so the pattern would silently collapse to
+      // its bottom lane. That lowering skips `initial` for these symbols.
+      if (auto rit = array_reset_lanes_.find(&sym); rit != array_reset_lanes_.end()) {
+        auto vidx = ln.add_child(didx, Lnast_ntype::create_tuple_add());
+        for (const auto& lane : rit->second) {
+          ln.add_child(vidx, Lnast_node::create_const(lane));
+        }
+        clear_pending_loc();
+        return;
+      }
       // Power-on contents from an `initial` block (same shape as declare_unpacked):
       // uniform fill -> scalar broadcast, per-entry fill -> tuple literal, else nil.
       if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
@@ -4940,8 +5180,20 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           ln.add_child(idx, Lnast_node::create_const(val));
         }
       };
+      // A packed array whose reset is a per-entry PATTERN already carries it as
+      // the declare's tuple initializer (array_reset_lanes_): re-emitting it
+      // here as one scalar would broadcast the bottom lane over every entry.
+      // The reset WIRING (reset_pin/sync/negreset) still belongs on the array.
+      // Only the MEMORY declare emits those lanes, and array_reset_lanes_ is
+      // filled before the packed_mem_regs_ gate runs (an output reg, a bundle
+      // leaf, a range-written array or one with no element access at all stays
+      // a flat bus). On the flat path the scalar `initial` IS the whole packed
+      // reset value, so suppressing it there would drop the reset outright.
+      const bool lanes_carry_reset = array_reset_lanes_.contains(sym) && packed_mem_regs_.contains(sym);
       for (const auto& target : targets) {
-        emit_attr(target.name, "initial", target.initial, false);
+        if (!lanes_carry_reset) {
+          emit_attr(target.name, "initial", target.initial, false);
+        }
         emit_attr(target.name, "reset_pin", reset_ref_name, true);
         emit_attr(target.name, "sync", "false", false);
         if (!edge_pos) {

@@ -28,6 +28,7 @@ namespace lnast_attrs {
 struct lnast_name_t {
   using value_type = int32_t;
   using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
 };
 
 inline constexpr lnast_name_t lnast_name{};

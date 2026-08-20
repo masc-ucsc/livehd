@@ -1197,10 +1197,23 @@ not on a schedule.
 
 ### L8 — the frontend / elaboration tier *(was M7)* — **LANDED 2026-08-18**
 
-The concrete Pyrope implementation plan, settled boundary, two-tier design,
-and acceptance scenarios are tracked in
-[`todo/livehd/2f-incr.html`](../todo/livehd/2f-incr.html). This section remains
-the loop-level dependency and measurement contract.
+The Pyrope implementation plan that drove this lever (`todo/livehd/2f-incr`,
+milestones S1–S5) is **retired 2026-08-19**: every one of its milestones landed
+and its §10 acceptance set is now locked by `lhd/tests/lhd_compile_cache_test.sh`
+(gating and telemetry, exact comment-only Tier-B reuse, exporter-`pub` and
+leaf-statefulness invalidation, context-descriptor mismatch, Tier-A and graph
+damage as refused cold misses, `store_failed` as a hard fail, structural H5 over
+a mixed dirty cone, ghost-def pruning, shared-workdir coexistence, and the I-6
+warning replay). This section is now the only tracker for the lever.
+
+Four rulings from that page that the code still obeys and that are not restated
+in §5: incremental is active **only** under a user-named `--workdir` with a
+`compile.cache=false` off-switch; the `pyrope/` snapshot is a hermetic *sandbox
+input*, not a change detector; warm≡cold is **structural**
+(`semdiff::structural_identical` + IO/attr equality) with srcmap/loc explicitly
+exempt, because a comment-only edit restamps every srcid; and a Merkle digest
+only *proposes* a candidate — an exact compare against the preserved snapshot
+authorizes the reuse.
 
 **Landed shape**, measured in **I-5** and completed by **I-6**: boundary (1)
 *and* (4) — a Tier-A per-source-unit parse cache and a Tier-B whole-closure
