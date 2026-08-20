@@ -258,10 +258,12 @@ dep indexing past the array (Bug 13).
 | `ram_2w` | 2 write ports — write chain and `fwd` matrix |
 | `ram_sync` | memory + a real flop (mixed state record) |
 
-**Still refused, with an accurate message:** sync-read memories (`type == 1`, e.g.
-`tc_sram` at `Latency=1`). The read-data register needs a source plus an
-`Op_MuxBool` next-state node over an ungated `Op_MemRead` — no new certificate
-operator, just emitter work.
+Plus the first real memory-bearing design: **`intpipe_csr_msgs`** (CORE-ET), 7,447
+cert nodes, **25.0 min / 14.1 GB**, exit 0.
+
+**Sync-read (`type == 1`) is implemented but unvalidated** — no design available
+exercises it (yosys would not emit a type-1 memory from any fixture, and
+`tc_sram_gate` flop-blasts its array). Treat as unproven until one appears.
 
 ### The "43" was not a measurement — here is one
 

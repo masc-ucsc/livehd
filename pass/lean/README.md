@@ -853,10 +853,32 @@ out-of-range indices alias onto a written address (Bug 12), and every port opera
 needs a resize node or a wider address dep indexes past the array — silently
 returning zero rather than erroring (Bug 13).
 
-**Not yet covered:** sync-read memories (`type == 1`).  The read-data register needs
-a source plus an `Op_MuxBool` next-state node over an ungated `Op_MemRead` — emitter
-work only, no new certificate operator.  The emitter refuses them with that message
-rather than emitting something unproven.
+**Proven** (`exit 0`, 0 errors, 0 `sorryAx`, 3/3 `_refines_fast`):
+
+| design | cert nodes | wall | peak RSS | shape |
+|---|---|---|---|---|
+| `ram1` | 18 | 10 s | — | 1R/1W async, bit-level write mask (`wensize == bits`) |
+| `ram_be` | 66 | 18 s | — | byte-enable write, `byte_w = 4` |
+| `ram_2w` | 26 | 97 s | — | 2 write ports — write chain and `fwd` matrix |
+| `ram_sram` | 42 | 238 s | — | 3 read ports, both `Op_MemWrite` and `Op_MemWriteBE` |
+| **`intpipe_csr_msgs`** | **7,447** | **25.0 min** | **14.1 GB** | CORE-ET: 2×60-bit memory, 7 read / 2 write ports |
+| `SingleCycleCPU` | 4,772 | 22.7 min | 11.7 GB | **non-memory regression** |
+
+`intpipe_csr_msgs` is the first real memory-bearing design proven end-to-end: 7,422
+LGraph nodes plus 25 synthetic from the decomposition, and 4 `Op_MemWriteBE` chain
+nodes because its 7 read ports fall into two distinct forwarded sets.
+
+`SingleCycleCPU` is the regression that matters — 22.7 min / 11.7 GB against a
+23–25 min / 13.3 GB history, with zero `CertVal` / `memenc` / `evalNodeC` / `asBV`
+occurrences in its emitted text.  The `BV` path is untouched.
+
+**Sync-read (`type == 1`) is implemented but unvalidated.**  The mechanism needs no
+new certificate operator — `sram_sync_read_reg_next ren raw cur = if ren then raw
+else cur`, so the read-data register is a source and its next value an `Op_MuxBool`
+over an ungated `Op_MemRead` (a literal enable, closed by `mem_read_en_bridge`).  It
+compiles, but no design I could produce exercises it: yosys would not emit a type-1
+memory from any fixture, and the `tc_sram_gate` wrapper flop-blasts its array.  Treat
+it as unproven until a real type-1 memory appears.
 
 Minimal memory example (async-read / sync-write SRAM), verified to typecheck:
 
