@@ -1,0 +1,26 @@
+/*
+:name: wire_lane_written_later
+:type: equiv
+:verilog_top: wire_lane_written_later
+:pyrope_top: wire_lane_written_later
+*/
+//
+// A `wire` assembled from two disjoint partial writes, read BEFORE either lands
+// and on the lane that is written SECOND. A wire is a net, so the textual order
+// of two disjoint writes must not change its value: `hi` is `b` either way.
+//
+// The wire rebinds once per partial write. Resolving the packed self-reference
+// at the FIRST bind inspects an incomplete accumulator -- the [7:4] lane is
+// still the `0sb?` seed -- and freezes `hi` at don't-care, permanently, because
+// that split rewires the reader off the buffer so the second bind no longer
+// sees an early reader at all. The split must run once, against the COMPLETE
+// driver. Swapping the two write statements is the control: it was already
+// correct, and both orders must agree.
+pub comb wire_lane_written_later(a:u4, b:u4) -> (z:u8) {
+  wire w:u8
+  wire hi:u4
+  hi = w#[4..=7]
+  w#[0..=3] = a ^ hi
+  w#[4..=7] = b
+  z = w
+}

@@ -31,8 +31,8 @@
 //     `minion_dcache_top` where this pass says FALSE. Treat "FALSE" as "false at
 //     this level of hierarchy", and cross-check a design that matters.
 //  2. THE lg: LIBRARY, NOT THE EMITTER'S GRAPH. `inou.cgen.sim` mutates the
-//     graph before it schedules (inline_clock_gate_cells, flatten_false_loop_subs,
-//     split_packed_selfref_wires), so it can find a cycle this pass does not, and
+//     graph before it schedules (inline_clock_gate_cells, flatten_false_loop_subs),
+//     so it can find a cycle this pass does not, and
 //     vice versa. A disagreement is a finding about those transforms.
 
 #include <cstdint>

@@ -28,7 +28,7 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
 #include "sim_color_plan.hpp"
-#include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
+#include "split_selfref.hpp"  // //graph — word-level cycle analysis for scheduling
 #include "str_tools.hpp"      // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
@@ -1536,8 +1536,30 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // forestation each arm is a whole inlined tree, and the call form's
         // `vals` + result-width `sel` would be built and thrown away for every
         // one of the 2-arm muxes that dominate a real design.
-        const int false_w = std::max(wbits_of(e[1].driver), 1);
-        const int true_w  = std::max(wbits_of(e[2].driver), 1);
+        // A CONST_NODE pin is not a finite carrier. Its bits attribute may have
+        // been widened for another consumer (the singleton zero pin commonly
+        // carries a declared u8 hint), but this mux can materialize the literal
+        // directly at the result width. Compare against the literal's own
+        // representation; non-constant arms still require their full carrier.
+        // Dlop::get_bits() is the SIGNED carrier width, so a NON-NEGATIVE
+        // literal reports magnitude+1 (`1` -> 2, `255` -> 9). Comparing that
+        // against the result carrier rejected every `u1` mux with a constant
+        // `1` arm. The literal is materialized at the result width, so the
+        // requirement is its magnitude alone; a negative / unknown-carrying
+        // literal still needs the full signed carrier.
+        const auto arm_width = [](const hhds::Pin_class& pin) {
+          if (!is_const_pin(pin)) {
+            return std::max(wbits_of(pin), 1);
+          }
+          const auto value = hydrate_const(pin);
+          const int  bits  = static_cast<int>(value.get_bits());
+          if (value.is_numeric() && !value.has_unknowns() && !value.is_negative()) {
+            return std::max(1, bits - 1);
+          }
+          return std::max(1, bits);
+        };
+        const int false_w = arm_width(e[1].driver);
+        const int true_w  = arm_width(e[2].driver);
         if (wbits < false_w || wbits < true_w) {
           livehd::diag::err("inou.cgen.sim", "mux-width-loss", "internal")
               .msg("Mux '{}' result carrier {} is narrower than data arms {} and {}; code generation would lose precision",
@@ -2727,6 +2749,12 @@ int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
     node_count_memo_.erase(g);  // this body just grew
     ++inlined;
   }
+  if (inlined > 0) {
+    // sim.flatten just dissolved a scheduling boundary; repair any packed
+    // self-reference that became ordinary word-level logic, or the scheduler
+    // below sees a cycle the design does not have.
+    livehd::graph_util::split_packed_selfref_cycles(g);
+  }
   return inlined;
 }
 
@@ -2815,11 +2843,6 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
         .msg("`{}`: inlined {} clock-gate cell(s) so their gate folds into a flop enable", gname, inlined_gate_cells)
         .emit();
   }
-  // Break a false WORD-level combinational loop through a packed wire: redirect
-  // each constant Get_mask slice-read of an `Or`-of-disjoint-ranges net to the one
-  // operand that drives the read range. A no-op unless a genuine word-level cycle
-  // exists; a real bit-level loop is never split (still fails loudly below).
-  livehd::graph_util::split_packed_selfref_wires(g);
   prepared.at(g).second = true;  // re-looked-up: the steps above may have inserted
   return true;
 }
@@ -7288,8 +7311,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         continue;
       }
       if (!live_.contains(node.get_class_index())) {
-        // Nothing real consumes this value: split_packed_selfref_wires
-        // redirects packed-wire readers and routinely strands whole Or-trees
+        // Nothing real consumes this value: lnast.tolg's packed-wire rewrites
+        // can strand whole Or-trees
         // (ImmediateGenerator: 400 of 935 emitted values were dead). A skipped
         // dead ROOT (no out edges) would otherwise leave its entire operand
         // tree emitted-but-unused (-Wunused-variable noise, wasted compiles).

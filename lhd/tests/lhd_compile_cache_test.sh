@@ -1,6 +1,6 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-# todo/livehd/2f-incr S1-S5 focused acceptance: cache gating/telemetry,
+# docs/opt_loop_incr.md L8 focused acceptance: cache gating/telemetry,
 # exact comment-only Tier-B reuse, semantic invalidation, corruption recovery,
 # structural warm==cold, and ghost-definition elimination.
 

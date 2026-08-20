@@ -30,6 +30,7 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "split_selfref.hpp"
 
 namespace {
 
@@ -887,8 +888,8 @@ private:
   // ────────────────────────────── A `wire` declares a passthrough buffer (Or)
   // whose OUTPUT every read binds to (record() at declare →
   // position-independent: a read before the driver appears textually still sees
-  // the buffer), and whose INPUT finalize_wires() connects to the single
-  // accumulated driver (the din shadow the branch-mux machinery merges, exactly
+  // the buffer), and whose INPUT is connected as soon as the single accumulated
+  // driver is complete (the din shadow the branch-mux machinery merges, exactly
   // like a reg's din — but with no flop). The buffer is a transparent net, so
   // the time-checker's SCC sees through it: a real comb loop is an error; a
   // ring is legal only when a register breaks it.
@@ -942,41 +943,155 @@ private:
           mw = 1;
         }
       }
-      // A TYPED wire narrows its driver to the declared width/sign with a REAL
-      // Get_mask (Verilog continuous-assign net truncation). cprop collapses
-      // the single-input Or buffer, forwarding the driver UNCHANGED, so a
-      // width/sign stamp on the buffer output alone is dropped at O2 (an O0/O2
-      // LEC divergence + miscompile). Get_mask is a real width-changing node
-      // cprop preserves, so the declared constraint reaches every consumer.
-      if (driven && info.decl_mw > 0) {
-        auto gm = make_node(Ntype_op::Get_mask);
-        setup_sink_by_name(gm, "a").connect_driver(din);
-        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
-        auto gm_out = gm.create_driver_pin(0);
-        if (info.is_signed) {
-          set_sbits(gm_out, info.decl_mw);
-        } else {
-          set_ubits(gm_out, info.decl_mw);
-        }
-        din = gm_out;
+      // An UNDRIVEN net still has to be wired and sized: leaving the passthrough
+      // Or with no `as` input ships a dangling cell (a Verilog net legally
+      // defaults to X, so `verilog` above only suppresses the diagnostic, not
+      // the lowering). There is no driver to truncate in that case, so skip the
+      // typed Get_mask -- `nil` is already the declared width's don't-care.
+      if (!info.bound) {
+        bind_wire_driver(name, din, mw, /*narrow_typed=*/driven);
       }
-      setup_sink_by_name(info.buf, "as").connect_driver(din);
-      if (info.decl_mw <= 0) {
-        // Untyped wire: take the driver's width/sign so the passthrough is
-        // exact.
-        const int32_t dbits = livehd::graph_util::bits_of(din);
-        if (dbits > 0) {
-          set_bits(info.out, dbits);
-          if (livehd::graph_util::is_unsign(din)) {
-            set_unsign(info.out);
-          } else {
-            set_sign(info.out);
-          }
-          mw = dbits;
+      resolve_wire_selfref(name);
+    }
+  }
+
+  // Resolve a packed self-reference once the wire's driver is COMPLETE. Every
+  // write has landed by now (finalize_wires runs after finalize_regs/_mems and
+  // resolve_pending_tgets), so the splitter sees the whole accumulator instead
+  // of a partial one, and a residual dependency is a genuine loop.
+  void resolve_wire_selfref(std::string_view name) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& info = it->second;
+    if (info.bound_din.is_invalid() || info.early_readers.empty()) {
+      return;
+    }
+    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers);
+    if (!lnast_->is_verilog_origin() && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf)) {
+      // Lead with the established `combinational loop` vocabulary -- the same
+      // words the time-checker's SCC uses at the end of this file. This IS
+      // one; it is simply caught earlier and with a better source anchor.
+      // //inou/prp:prp-wire_comb_loop matches the diagnostic on that phrase,
+      // and the wire-only wording silently stopped matching it.
+      error_here(
+          "upass.tolg: combinational loop through wire '{}' in '{}' — its driver depends on itself and no disjoint "
+          "packed-slice split can break it",
+          name,
+          lnast_->get_top_module_name());
+    }
+  }
+
+  // Attach one wire's effective driver as soon as it is known. This must not
+  // wait for end-of-module finalization: a later wire write may read this net,
+  // and that later edge is the one that closes a multi-wire dependency.
+  //
+  // REBINDS. A wire assembled from several partial writes (`w#[3:0] = a;
+  // w#[7:4] = b`) reaches here once per write, and lower_set_mask chains each
+  // write onto the din accumulator -- so the LATEST driver is the complete one
+  // and every earlier bind must be undone. Keeping the first bind (an early
+  // `bound` return) silently dropped every write after the first.
+  void bind_wire_driver(std::string_view name, Pin din, int32_t mw, bool narrow_typed = true) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& info = it->second;
+
+    if (info.bound) {
+      // Drop the previous buffer input first: a second connect_driver on the
+      // same `as` sink would make the passthrough Or a two-input OR of the
+      // partial and the complete value.
+      auto as_sink = livehd::graph_util::find_sink_pin(info.buf, "as");
+      if (!as_sink.is_invalid()) {
+        as_sink.del_sink();
+      }
+      if (!info.narrow.is_invalid() && !info.narrow.has_out_edges()) {
+        info.narrow.del_node();  // the superseded typed-wire truncation cell
+      }
+      info.narrow = hhds::Node_class{};
+    }
+
+    // The consumers that exist NOW are the ones that can participate in this
+    // net's definition: a genuine position-independent read, or a read taken
+    // inside the branch bodies whose merge produced `din`. Captured here rather
+    // than at each store so EVERY bind path (plain store, set_mask chain,
+    // if/match merge, finalize) is covered by the self-reference resolution
+    // below -- a merge-bound wire used to skip it entirely.
+    capture_wire_readers(name);
+
+    // A TYPED wire narrows its driver with a real precision-changing cell.
+    if (narrow_typed && info.decl_mw > 0) {
+      auto gm = make_node(Ntype_op::Get_mask);
+      setup_sink_by_name(gm, "a").connect_driver(din);
+      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+      auto gm_out = gm.create_driver_pin(0);
+      if (info.is_signed) {
+        set_sbits(gm_out, info.decl_mw);
+      } else {
+        set_ubits(gm_out, info.decl_mw);
+      }
+      din         = gm_out;
+      info.narrow = gm;
+    }
+
+    setup_sink_by_name(info.buf, "as").connect_driver(din);
+    // Record the driver; do NOT split here. A wire assembled from several
+    // partial writes rebinds once per write, and splitting against a PARTIAL
+    // accumulator resolves an early slice read onto the `0sb?` seed instead of
+    // the lane's real driver -- permanently, because the split rewires the
+    // reader off the buffer and the next bind then sees no early reader at all
+    // (`w#[0..=3] = a ^ hi` before `w#[4..=7] = b` froze `hi` at don't-care,
+    // while the same two writes in the opposite order were correct -- a `wire`
+    // is a net, so write order must not change its value). resolve_wire_selfref
+    // runs the split once, from finalize_wires, against the COMPLETE driver.
+    info.bound_din = din;
+
+    if (info.decl_mw <= 0) {
+      const int32_t dbits = livehd::graph_util::bits_of(din);
+      if (dbits > 0) {
+        set_bits(info.out, dbits);
+        if (livehd::graph_util::is_unsign(din)) {
+          set_unsign(info.out);
         } else {
-          set_ubits(info.out, mw);
+          set_sign(info.out);
         }
-        mw_map_[name] = mw;
+        mw = dbits;
+      } else {
+        set_ubits(info.out, mw);
+      }
+      mw_map_[std::string{name}] = mw;
+    }
+    info.bound = true;
+  }
+
+  void maybe_bind_wire_shadow(std::string_view shadow, const Pin& driver, int32_t mw) {
+    if (!branch_writes_.empty() || !is_wire_din(shadow)) {
+      return;  // inside a branch the merge is not complete yet
+    }
+    bind_wire_driver(shadow.substr(kDinPrefix.size()), driver, mw);
+  }
+
+  // Accumulate the consumers that exist at this wire's binds. There is no
+  // reason to track reads taken after the LAST write: they are downstream of
+  // the completed net and cannot participate in its definition. Called from
+  // bind_wire_driver ONLY, right before the buffer input is attached, and it
+  // UNIONS rather than rebuilds -- a partial-write rebind must not forget a
+  // reader that the earlier write already saw.
+  void capture_wire_readers(std::string_view name) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& readers = it->second.early_readers;
+    for (const auto& e : it->second.out.out_edges()) {
+      auto reader = e.sink.get_master_node();
+      if (reader.is_invalid() || reader == it->second.buf) {
+        continue;
+      }
+      if (std::ranges::find(readers, reader) == readers.end()) {
+        readers.push_back(reader);
       }
     }
   }
@@ -1804,13 +1919,14 @@ private:
       // 2c-wire — a store to a wire is (part of) its single combinational
       // driver, recorded on the SHADOW din key (reads keep seeing the buffer
       // output, so they stay position-independent). The branch-mux machinery
-      // merges conditional writes; finalize_wires() wires the buffer input. A
+      // merges conditional writes before the buffer input is bound. A
       // `= nil` forward-declare is not a driver — skip it.
       if (Lnast_ntype::is_const(lnast_->get_type(rhs)) && lnast_->get_name(rhs) == "nil") {
         return;
       }
       auto v = leaf(rhs);
       record(din_key(lhs_name), v.pin, v.mw);
+      maybe_bind_wire_shadow(din_key(lhs_name), v.pin, v.mw);
       return;
     }
     // 1a-mem — a plain `name = <tuple-literal-ref>` / `name = <__memory
@@ -1872,8 +1988,8 @@ private:
   // (2c-wire). Create the passthrough buffer (Or) and bind the name to its
   // OUTPUT so every read — including one before the driver appears textually —
   // resolves to the net (position-independent). Stores record the din shadow;
-  // finalize_wires() wires the buffer input to the single accumulated driver
-  // and enforces the undriven rule (the single-driver rule is a frontend
+  // the completed write binds the buffer input; finalize_wires() only enforces
+  // the undriven rule (the single-driver rule is a frontend
   // check). No flop.
   void lower_wire_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& decl_nid) {
     auto name = lnast_->get_name(name_nid);
@@ -1964,7 +2080,7 @@ private:
     }
     // 2c-wire — a single-driver combinational net: declare its passthrough
     // buffer now so position-independent reads (a read before the driver) bind
-    // to it; finalize_wires() wires the buffer input to the single driver.
+    // to it; the completed write wires the buffer input to the single driver.
     if (mode == "wire" || mode.starts_with("wire ")) {
       lower_wire_declare(name_nid, type_nid, nid);
       return;
@@ -2150,12 +2266,10 @@ private:
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
   // \x01 prefix cannot collide with user identifiers or `___N` temps.
-  [[nodiscard]] static std::string din_key(std::string_view n) {
-    return std::string(
-               "\x01"
-               "din:")
-        .append(n);
-  }
+  static constexpr std::string_view kDinPrefix{
+      "\x01"
+      "din:"};
+  [[nodiscard]] static std::string din_key(std::string_view n) { return std::string(kDinPrefix).append(n); }
   [[nodiscard]] static std::string en_key(std::string_view n) {
     return std::string(
                "\x01"
@@ -2195,12 +2309,9 @@ private:
   // below fill the unwritten paths with a WRITTEN value instead of nil, so a
   // single writing arm needs no mux at all.
   [[nodiscard]] bool is_wire_din(std::string_view var) const {
-    constexpr std::string_view din_prefix{
-        "\x01"
-        "din:"};
     // Heterogeneous lookup: this runs per merge variable, so do not mint a
     // std::string just to probe the set.
-    return var.starts_with(din_prefix) && wire_names_.contains(var.substr(din_prefix.size()));
+    return var.starts_with(kDinPrefix) && wire_names_.contains(var.substr(kDinPrefix.size()));
   }
 
   // The same don't-care rule for a `const` still carrying no value at this
@@ -5778,7 +5889,7 @@ private:
   // fire for one: lower_wire_declare records the passthrough-Or OUTPUT under
   // the wire's name (so reads are position independent), so a wire is ALWAYS
   // in pin_map_. Taking leaf(val) there seeded the chain with the wire's own
-  // buffer output while finalize_wires() connects the chain's result back to
+  // buffer output while the completed write connects the chain's result back to
   // that buffer's INPUT — a manufactured combinational RING (`upass.tolg:
   // combinational loop`), the one class of self-referential set_mask chain the
   // frontends still produced. The uncovered bits of a wire assembled from
@@ -5809,6 +5920,7 @@ private:
       record(en_key(dst_name), en_const(true), 1);
     } else if (is_wire) {
       record(din_key(dst_name), drv, mw);
+      maybe_bind_wire_shadow(din_key(dst_name), drv, mw);
     } else {
       record(dst_name, drv, mw);
     }
@@ -7132,12 +7244,17 @@ private:
         // owned by the node that produced it. record() it (bind_result would
         // re-stamp a pin this merge did not mint).
         record(var, cur, mw);
+        maybe_bind_wire_shadow(var, cur, mw);
         continue;
       }
       bind_result(var, cur, mw);
       if (any_signed) {
         set_sbits(cur, mw);
       }
+      // AFTER the final stamp: bind_result stamps `cur` UNSIGNED, and a wire
+      // bind copies the driver's width/sign onto the passthrough output, so
+      // binding first left a signed driver behind an unsigned buffer.
+      maybe_bind_wire_shadow(var, cur, mw);
     }
   }
 
@@ -7314,6 +7431,7 @@ private:
       if (any_signed) {
         set_sbits(hot_out, mw);
       }
+      maybe_bind_wire_shadow(var, hot_out, mw);  // AFTER the final stamp (see lower_if_merge)
     }
   }
 
@@ -7359,16 +7477,20 @@ private:
   std::vector<absl::flat_hash_map<std::string, Branch_restore>> branch_restore_;
   WriteMap                                                      empty_writes_;
 
-  // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
-  // wires the buffer input to the single accumulated driver (din shadow) and
-  // restamps the buffer output from the driver width when untyped.
+  // 2c-wire — per-wire lowering state recorded at the declare. Binding connects
+  // the buffer input to the accumulated driver and restamps untyped outputs;
+  // finalize_wires() handles only still-unbound/undriven declarations.
   struct Wire_info {
-    hhds::Node_class buf;             // the passthrough Or (cgen `out = a`)
-    Pin              out;             // the buffer output (what reads bind to)
-    Lnast_nid        decl_nid;        // diag anchor (the `wire x` site)
-    int32_t          decl_color = 0;  // block region at the declare (2opt-freq B)
-    int32_t          decl_mw    = 0;  // declared width; 0 = untyped (restamp from driver)
-    bool             is_signed  = false;
+    hhds::Node_class              buf;             // the passthrough Or (cgen `out = a`)
+    hhds::Node_class              narrow;          // typed-wire Get_mask of the CURRENT bind (dropped on rebind)
+    Pin                           out;             // the buffer output (what reads bind to)
+    Lnast_nid                     decl_nid;        // diag anchor (the `wire x` site)
+    int32_t                       decl_color = 0;  // block region at the declare (2opt-freq B)
+    int32_t                       decl_mw    = 0;  // declared width; 0 = untyped (restamp from driver)
+    bool                          is_signed  = false;
+    bool                          bound      = false;
+    Pin                           bound_din;      // driver of the LATEST bind (what finalize splits against)
+    std::vector<hhds::Node_class> early_readers;  // consumers present at any bind
   };
   absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
   std::vector<std::string>                    wire_order_;  // declaration order

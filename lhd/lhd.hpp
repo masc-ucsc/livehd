@@ -220,7 +220,7 @@ struct Result {
   // Never part of run_id — a wall-clock value in a content hash breaks caching.
   std::vector<std::pair<std::string, double>> phase_ms;
 
-  // `lhd compile` incremental front-end accounting (todo/livehd/2f-incr S1).
+  // `lhd compile` incremental front-end accounting (docs/opt_loop_incr.md L8).
   // Present for a Pyrope source compile with a user-named --workdir, including
   // compile.cache=false (enabled=false + zero counters), so benchmark rows can
   // distinguish an honestly disabled cache from an old binary that reports no

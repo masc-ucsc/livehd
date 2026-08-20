@@ -93,8 +93,8 @@ validates:
    hierarchy first and can see such a loop — measured: it reports `UNOPTFLAT` on
    `minion_dcache_top` where this pass says FALSE.
 2. **The `lg:` library, not the emitter's graph.** `inou.cgen.sim` mutates the
-   graph before scheduling (`inline_clock_gate_cells`, `flatten_false_loop_subs`,
-   `split_packed_selfref_wires`). A disagreement between this pass and the
+   graph before scheduling (`inline_clock_gate_cells`, `flatten_false_loop_subs`).
+   A disagreement between this pass and the
    emitter is itself a finding about those transforms.
 
 ## Output

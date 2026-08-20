@@ -1744,6 +1744,23 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       if (memory_shaped_reg) {
         continue;
       }
+      // `compile.slang.array_sroa` (both|comb|none) retires the split by
+      // STORAGE CLASS, because that is where its cost is: declare_array_leaves
+      // emits the six `sroa_*` attributes only in its `is_reg` arm, so `comb`
+      // drops every attribute and every pass/semdiff aggregate_key path while
+      // keeping the lane mux. Type-C self-reference splits in every mode -- it
+      // is a correctness fix, not an optimization.
+      //
+      // The gate belongs HERE and not in is_packed_array_bundle_var: leaving
+      // struct_array_bundle_ populated would keep the array out of
+      // packed_mem_regs_ (:2006 tests exactly this set), so a measurement would
+      // report a flat-bus outcome that the real deletion never produces.
+      const bool split_wanted
+          = type_c_selfref || options_.array_sroa == Options::Array_sroa::both
+            || (options_.array_sroa == Options::Array_sroa::comb && !reg_syms_.contains(sym));
+      if (!split_wanted) {
+        continue;
+      }
       struct_array_bundle_.insert(sym);
     }
   }

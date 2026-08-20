@@ -2,10 +2,11 @@
 
 #include "split_selfref.hpp"
 
+#include <pthread.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
-#include <pthread.h>
 #include <print>
 #include <string>
 #include <tuple>
@@ -87,18 +88,16 @@ enum Stop_reason : unsigned {
 //
 // MEASURED on XiangShan `Rob`, 2026-08-17: the walk crashed at depth 1024 on an
 // 8 MB stack, i.e. ~8 KB per frame for this 470-line lambda.
-inline constexpr size_t kSplitFrameBytes = 8u * 1024;
-// The stack the ESCALATED walk gets (see split_packed_selfref_wires). Reserved
+inline constexpr size_t kSplitFrameBytes  = 8u * 1024;
+// The stack the ESCALATED local wire walk gets. Reserved
 // address space only: pages commit as deep as the walk actually goes.
-inline constexpr size_t kSplitStackBytes = 512UL * 1024 * 1024;
+inline constexpr size_t kSplitStackBytes  = 512UL * 1024 * 1024;
 // Depth guard for the escalated walk, backstopping a runaway well inside the
 // stack above.
-inline constexpr int kSplitWorkerDepth = 16384;
-// Depth guard when the walk runs on the CALLER's stack. It has to be safe on the
-// SMALLEST stack a caller can have, and pass/cprop fans this pass out over
-// `std::thread` workers whose default stack is 512 KB on macOS -- so this stays
-// the value that shipped before the escalation existed, not one scaled to 8 MB.
-inline constexpr int kSplitInlineDepth = 64;
+inline constexpr int    kSplitWorkerDepth = 16384;
+// Depth guard when the walk runs on the CALLER's stack. Keep the inline attempt
+// conservative; deep packed structures escalate to the private stack above.
+inline constexpr int    kSplitInlineDepth = 64;
 static_assert(static_cast<size_t>(kSplitWorkerDepth) * kSplitFrameBytes <= kSplitStackBytes,
               "the escalated depth guard must fit inside the escalated stack");
 static_assert(kSplitInlineDepth < kSplitWorkerDepth, "the inline guard is the conservative one");
@@ -107,96 +106,19 @@ static_assert(kSplitInlineDepth < kSplitWorkerDepth, "the inline guard is the co
 // `stop_reasons_out` is the OR of the `kStop*` bits saying which limit stopped
 // them, for the wrapper's final diagnostic. `max_depth` is the recursion guard,
 // a property of the STACK THIS CALL RUNS ON -- see the constants above.
-static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out, int max_depth) {
+static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out, int max_depth,
+                              const absl::flat_hash_set<hhds::Node_class>* scoped_cycle) {
   namespace gu = livehd::graph_util;
 
   unresolved_out   = 0;
   stop_reasons_out = 0;
 
-  auto is_comb = [](const hhds::Node_class& n) {
-    auto op = gu::type_op_of(n);
-    return !(op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory
-             || gu::is_type_register(n));
-  };
-
-  // --- gate: which comb nodes sit on a word-level cycle (Kahn peel of sources) ---
-  std::vector<hhds::Node_class>                                        comb_nodes;
-  absl::flat_hash_map<hhds::Node_class, int>                           indeg;
-  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
-  for (auto n : g->body().nodes()) {
-    if (is_comb(n)) {
-      comb_nodes.push_back(n);
-    }
-  }
-  indeg.reserve(comb_nodes.size());
-  succ.reserve(comb_nodes.size());
-  for (const auto& n : comb_nodes) {
-    indeg.emplace(n, 0);
-  }
-  for (auto& n : comb_nodes) {
-    for (auto e : n.inp_edges()) {
-      auto d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
-        continue;
-      }
-      auto m = d.get_master_node();
-      if (!is_comb(m) || !indeg.contains(m)) {
-        // state element / Sub / IO / const -> not a comb edge. The contains()
-        // guard also drops BOUNDARY masters fast_class never enumerates (a
-        // graph-input pin's master reports a non-IO "invalid" type): counting
-        // those left every input-fed node at indeg>0, so the peel removed
-        // NOTHING and the whole module looked on-cycle.
-        continue;
-      }
-      ++indeg[n];
-      succ[m].push_back(n);
-    }
-  }
-  std::vector<hhds::Node_class> q;
-  q.reserve(comb_nodes.size());
-  for (auto& [n, d] : indeg) {
-    if (d == 0) {
-      q.push_back(n);
-    }
-  }
-  if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-    std::print("split[dbg]: peel seeds={} of {}\n", q.size(), indeg.size());
-    int shown = 0;
-    for (auto& [n, d] : indeg) {
-      if (shown++ >= 200) {
-        break;
-      }
-      std::string drvs;
-      for (auto e : n.inp_edges()) {
-        drvs += e.driver.is_invalid()                  ? " inv"
-                : gu::is_const_pin(e.driver)           ? " const"
-                : !is_comb(e.driver.get_master_node()) ? " noncomb"
-                                                       : (" " + std::string(gu::debug_name(e.driver.get_master_node())));
-      }
-      std::print("split[dbg]:   indeg {} = {} <-{}\n", gu::debug_name(n), d, drvs);
-    }
-  }
-  while (!q.empty()) {
-    auto n = q.back();
-    q.pop_back();
-    indeg[n] = -1;
-    auto it  = succ.find(n);
-    if (it == succ.end()) {
-      continue;
-    }
-    for (auto& s : it->second) {
-      if (--indeg[s] == 0) {
-        q.push_back(s);
-      }
-    }
-  }
-  absl::flat_hash_set<hhds::Node_class> in_cycle;
-  in_cycle.reserve(comb_nodes.size());
-  for (auto& n : comb_nodes) {
-    if (indeg[n] >= 0) {
-      in_cycle.insert(n);
-    }
-  }
+  I(scoped_cycle != nullptr);
+  auto                          in_cycle = *scoped_cycle;
+  std::vector<hhds::Node_class> comb_nodes(in_cycle.begin(), in_cycle.end());
+  std::sort(comb_nodes.begin(), comb_nodes.end(), [](const auto& a, const auto& b) {
+    return a.get_debug_nid() < b.get_debug_nid();
+  });
   if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
     std::print("split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
     for (auto& n : in_cycle) {
@@ -1082,7 +1004,37 @@ struct Split_result {
   bool     fixpoint     = false;
 };
 
-static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth) {
+bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target) {
+  if (driver.is_invalid() || target.is_invalid() || is_const_pin(driver) || is_graph_input_pin(driver)) {
+    return false;
+  }
+  absl::flat_hash_set<hhds::Node_class> seen;
+  std::vector<hhds::Node_class>         work{driver.get_master_node()};
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    if (n.is_invalid() || !seen.insert(n).second) {
+      continue;
+    }
+    if (n == target) {
+      return true;
+    }
+    const auto op = type_op_of(n);
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory || is_type_register(n)) {
+      continue;
+    }
+    for (const auto& e : n.inp_edges()) {
+      if (!e.driver.is_invalid() && !is_const_pin(e.driver) && !is_graph_input_pin(e.driver)) {
+        work.push_back(e.driver.get_master_node());
+      }
+    }
+  }
+  return false;
+}
+
+static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth,
+                                                    const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
+                                                    const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver) {
   // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
@@ -1090,8 +1042,13 @@ static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_dept
   constexpr int max_rounds = 16;
   Split_result  r;
   for (; r.rounds < max_rounds; ++r.rounds) {
-    const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth);
+    const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth, scoped_cycle);
     r.total     += n;
+    if (scoped_buffer != nullptr && scoped_driver != nullptr && n > 0 && !comb_pin_depends_on(*scoped_driver, *scoped_buffer)) {
+      ++r.rounds;
+      r.fixpoint = true;
+      break;
+    }
     if (n == 0) {
       ++r.rounds;         // count the fixpoint round that proved there was nothing left
       r.fixpoint = true;  // ... and record WHY the loop ended
@@ -1099,63 +1056,6 @@ static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_dept
     }
   }
   return r;
-}
-
-// Never fail silently: a surviving word-level cycle makes downstream encode /
-// cgen / sim scheduling reject the graph, and the caller (cprop) discards the
-// rewire count. Raised by the WRAPPER, on the caller's own thread, exactly once
-// -- `livehd::diag`'s source locator is thread_local, so a warning emitted from
-// the escalation worker would lose its excerpt.
-static void report_split_stall(const Split_result& r) {
-  const int      total        = r.total;
-  const int      unresolved   = r.unresolved;
-  const int      rounds       = r.rounds;
-  const unsigned stop_reasons = r.stop_reasons;
-  if (unresolved > 0) {
-    // Report the rounds ACTUALLY run, not `max_rounds`. Printing the constant
-    // made the two failure modes indistinguishable in a log -- "stuck after 3
-    // rounds" and "still making progress when the round cap cut it off" both
-    // read as 16, and they call for opposite fixes.
-    // From the exit REASON, not the count: a fixpoint reached on the last
-    // allowed round also leaves `rounds == max_rounds`, and reporting that as
-    // "the cap cut it off" is the same class of misdiagnosis as the old
-    // one-bool `cap_hit` -- it points at a limit that was never the problem.
-    const bool  rounds_exhausted = !r.fixpoint;
-    std::string why;
-    for (const auto& [bit, name] : {
-             std::pair{kStopBudget,     "node-budget"},
-             std::pair{ kStopDepth, "recursion-depth"},
-             std::pair{ kStopShape,   "operand-shape"}
-    }) {
-      if (stop_reasons & bit) {
-        why += why.empty() ? name : std::string(",") + name;
-      }
-    }
-    if (why.empty()) {
-      why = "no-rule";  // every descent was refused by an unhandled operator, not by a limit
-    }
-    livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
-        .msg(
-            "{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es){}; stopped by {}); a "
-            "word-level combinational cycle may remain",
-            unresolved,
-            total,
-            rounds,
-            rounds_exhausted ? ", round cap reached" : "",
-            why)
-        // MEASURED on XiangShan `Rob` (2026-08-17): the budget hint used to be
-        // printed for every refusal, and acting on it -- 8x the allowance,
-        // three extra fixpoint rounds -- dissolved exactly zero additional
-        // reads at +5.5% wall and 10.4 GB peak RSS. Do not send the next reader
-        // down that path unless `node-budget` is the ONLY reason listed.
-        .hint(stop_reasons == kStopBudget ? "only the node-creation budget stopped it; raising the split budget may finish the job"
-              : rounds_exhausted          ? "the rewrite was still making progress when the round cap stopped it"
-              : (stop_reasons & (kStopDepth | kStopShape))
-                  ? "a descent hit the recursion guard or an operand shape this pass cannot split -- more budget will "
-                    "NOT help; run with LIVEHD_SIM_SPLIT_DEBUG=1 to see the refusing slice"
-                  : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
-        .emit();
-  }
 }
 
 void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
@@ -1443,6 +1343,14 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       }
     }
   }  // fixpoint rounds
+  if (flattened > 0) {
+    // Dissolving the instance removed a scheduling boundary the per-wire
+    // splitter relied on, so a packed self-reference that was invisible at
+    // bind time is now ordinary word-level logic. Repair what this mutation
+    // exposed -- otherwise cgen_verilog emits one always_comb of ordered
+    // BLOCKING assignments that reads a variable before the line assigning it.
+    split_packed_selfref_cycles(g);
+  }
   return flattened;
 }
 
@@ -1456,10 +1364,8 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 // the walk on the caller's own stack first under the conservative
 // kSplitInlineDepth guard, and only when a descent actually reports
 // `recursion-depth` re-run it on a private kSplitStackBytes worker under
-// kSplitWorkerDepth. The overwhelmingly common case -- this pass is a strict
-// no-op unless a genuine word-level comb cycle exists -- then costs neither a
-// thread nor a 512 MB mapping, which matters because pass/cprop calls it once
-// per module from up to 16 concurrent workers.
+// kSplitWorkerDepth. The common shallow wire bind then costs neither a thread
+// nor a 512 MB mapping.
 //
 // Running it twice is safe: the walk is a fixpoint over the graph it is handed,
 // so the deep run simply continues from what the shallow one left.
@@ -1468,18 +1374,21 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 // and std::thread cannot set it.
 namespace {
 struct Split_job {
-  hhds::Graph*       g = nullptr;
-  Split_result       result;
-  std::exception_ptr error;  // rethrown on the CALLER's thread after the join
+  hhds::Graph*                                 g             = nullptr;
+  const absl::flat_hash_set<hhds::Node_class>* scoped_cycle  = nullptr;
+  const hhds::Node_class*                      scoped_buffer = nullptr;
+  const hhds::Pin_class*                       scoped_driver = nullptr;
+  Split_result                                 result;
+  std::exception_ptr                           error;  // rethrown on the CALLER's thread after the join
 };
 
 void* split_worker(void* arg) {
   auto* job = static_cast<Split_job*>(arg);
-  // An exception must never escape a pthread start routine: that is
-  // std::terminate, and it would bypass pass/cprop's per-graph
-  // `catch (...) { errors[i] = std::current_exception(); }` recovery.
+  // An exception must never escape a pthread start routine: that would call
+  // std::terminate instead of returning the lowering error on the caller.
   try {
-    job->result = split_packed_selfref_wires_body(job->g, kSplitWorkerDepth);
+    job->result
+        = split_packed_selfref_wires_body(job->g, kSplitWorkerDepth, job->scoped_cycle, job->scoped_buffer, job->scoped_driver);
   } catch (...) {
     job->error = std::current_exception();
   }
@@ -1490,12 +1399,18 @@ void* split_worker(void* arg) {
 // could be had (an unusual rlimit, thread exhaustion); the caller then keeps the
 // shallow result rather than running the deep guard on a stack too small to hold
 // it.
-bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out) {
+bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
+                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver) {
   pthread_attr_t attr;
   if (pthread_attr_init(&attr) != 0) {
     return false;
   }
-  Split_job job{.g = g, .result = {}, .error = {}};
+  Split_job job{.g             = g,
+                .scoped_cycle  = scoped_cycle,
+                .scoped_buffer = scoped_buffer,
+                .scoped_driver = scoped_driver,
+                .result        = {},
+                .error         = {}};
   pthread_t tid{};
   int       rc = pthread_attr_setstacksize(&attr, kSplitStackBytes);
   if (rc == 0) {
@@ -1514,17 +1429,153 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out) {
 }
 }  // namespace
 
-int split_packed_selfref_wires(hhds::Graph* g) {
-  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth);
+int split_packed_selfref_cycles(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  // Re-derive the cycle every round and stop as soon as none is left. The
+  // per-wire entry point gets that stop condition for free -- it hands
+  // split_packed_selfref_wires_body a scoped buffer/driver pair, and the body
+  // breaks the moment `comb_pin_depends_on` goes false. There is no single
+  // buffer here, so drive the fixpoint from the cycle set itself; running the
+  // body's 16 rounds blind instead keeps splitting long after the cycle is
+  // gone and leaves a chain of identity Get_masks behind (measured: 13 on a
+  // 3-statement design, versus the 2 rounds it actually needs).
+  //
+  // `strict=false` is the splitter's own scheduling model, so this asks exactly
+  // the question the per-wire entry point asks -- but over the graph AS IT IS
+  // NOW, after the boundary was dissolved.
+  constexpr int max_rounds   = 16;
+  int           total        = 0;
+  int           unresolved   = 0;
+  unsigned      stop_reasons = 0;
+  const bool    debug        = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+
+  absl::flat_hash_set<hhds::Node_class> cyc;
+  int                                   round = 0;
+  for (; round < max_rounds; ++round) {
+    cyc.clear();
+    word_level_cycle_nodes(g, /*strict=*/false, cyc);
+    if (cyc.empty()) {
+      break;  // an acyclic word-level schedule exists; nothing left to do
+    }
+    unsigned  pass_stop = 0;
+    const int n         = split_selfref_pass(g, unresolved, pass_stop, kSplitInlineDepth, &cyc);
+    stop_reasons       |= pass_stop;
+    if (n == 0) {
+      // Nothing dissolved. A deep nest is the one recoverable reason; retry it
+      // on the worker stack, then stop either way.
+      if ((pass_stop & kStopDepth) != 0) {
+        Split_result deep;
+        if (run_deep_on_big_stack(g, deep, &cyc, nullptr, nullptr) && deep.total > 0) {
+          total += deep.total;
+          continue;
+        }
+      }
+      break;  // genuinely stuck: a real bit-level loop, or a shape with no rule
+    }
+    total += n;
+  }
+  if (debug) {
+    std::print("split[cycles]: rounds={} rewired={} unresolved={} stop={:#x}\n", round, total, unresolved, stop_reasons);
+  }
+  return total;
+}
+
+
+int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
+                              const std::vector<hhds::Node_class>& early_readers) {
+  // Guard BEFORE the trace: debug_name() dereferences the handle, so tracing an
+  // invalid buffer/driver would crash exactly the runs that turned tracing on.
+  if (g == nullptr || buffer.is_invalid() || driver.is_invalid() || early_readers.empty()) {
+    return 0;
+  }
+  const bool debug = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  if (debug) {
+    std::print("split[wire]: buffer={} driver={} early={}\n",
+               debug_name(buffer),
+               debug_name(driver.get_master_node()),
+               early_readers.size());
+  }
+
+  // The defining edge is already present. Find only nodes in the driver's
+  // backward cone, then retain the portion reachable from a read that existed
+  // before the wire write. Their intersection is precisely the local cycle
+  // candidate closed by this one edge. Later readers never enter the seed set.
+  absl::flat_hash_set<hhds::Node_class> ancestors;
+  std::vector<hhds::Node_class>         work;
+  const auto                            is_comb = [](const hhds::Node_class& n) {
+    const auto op = livehd::graph_util::type_op_of(n);
+    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::Memory
+           && !livehd::graph_util::is_type_register(n);
+  };
+  auto root = driver.get_master_node();
+  if (root.is_invalid() || !is_comb(root)) {
+    return 0;
+  }
+  work.push_back(root);
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    if (n.is_invalid() || !ancestors.insert(n).second) {
+      continue;
+    }
+    for (const auto& e : n.inp_edges()) {
+      if (e.driver.is_invalid() || livehd::graph_util::is_const_pin(e.driver) || livehd::graph_util::is_graph_input_pin(e.driver)) {
+        continue;
+      }
+      auto pred = e.driver.get_master_node();
+      if (!pred.is_invalid() && is_comb(pred)) {
+        work.push_back(pred);
+      }
+    }
+  }
+  if (!ancestors.contains(buffer)) {
+    if (debug) {
+      std::print("split[wire]: no dependency (ancestors={})\n", ancestors.size());
+    }
+    return 0;  // attaching the driver did not close a self dependency
+  }
+
+  absl::flat_hash_set<hhds::Node_class> scoped_cycle;
+  for (const auto& reader : early_readers) {
+    if (!reader.is_invalid() && ancestors.contains(reader)) {
+      work.push_back(reader);
+    }
+  }
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    if (n.is_invalid() || !ancestors.contains(n) || !scoped_cycle.insert(n).second) {
+      continue;
+    }
+    for (const auto& e : n.out_edges()) {
+      auto succ = e.sink.get_master_node();
+      if (!succ.is_invalid() && ancestors.contains(succ)) {
+        work.push_back(succ);
+      }
+    }
+  }
+  scoped_cycle.insert(buffer);
+  scoped_cycle.insert(root);
+  if (debug) {
+    std::print("split[wire]: ancestors={} scoped={}\n", ancestors.size(), scoped_cycle.size());
+  }
+
+  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth, &scoped_cycle, &buffer, &driver);
   if ((r.stop_reasons & kStopDepth) != 0) {
     Split_result deep;
-    if (run_deep_on_big_stack(g, deep)) {
-      deep.total  += r.total;  // the shallow run's rewires already landed in `g`
+    if (run_deep_on_big_stack(g, deep, &scoped_cycle, &buffer, &driver)) {
+      deep.total  += r.total;
       deep.rounds += r.rounds;
       r            = deep;
     }
   }
-  report_split_stall(r);
+  // The TolG caller owns the source-located diagnostic when a genuine cycle
+  // remains; do not emit the legacy global splitter warning here.
+  if (debug) {
+    std::print("split[wire]: rewired={} unresolved={} rounds={}\n", r.total, r.unresolved, r.rounds);
+  }
   return r.total;
 }
 

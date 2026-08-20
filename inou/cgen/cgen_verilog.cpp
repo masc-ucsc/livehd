@@ -19,7 +19,7 @@
 #include "iassert.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
-#include "split_selfref.hpp"  // //graph — word-level false-loop splitter (also run by pass/cprop)
+#include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
 #include "str_tools.hpp"
 // pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
 #include "pass.hpp"
@@ -3781,32 +3781,12 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   (void)verbose;
 
-  // Break a false WORD-level combinational loop through a packed wire, exactly
-  // as cgen_sim does before scheduling (inou/cgen/cgen_sim.cpp). A no-op unless
-  // a genuine word-level cycle exists; a real bit-level loop is never split.
-  //
-  // This writer emits the whole combinational cone as ONE always_comb of
-  // ordered BLOCKING assignments, sequenced by body().nodes(hhds::Node_order::forward). A packed word
-  // whose field is computed from a slice of ITSELF (`w[7:4]` from `w[3:0]`) is
-  // acyclic per BIT but cyclic per WORD, so no such order exists and the block
-  // reads a variable before the line that assigns it -- Verilog that is not
-  // combinational at all. Measured on tests/equiv/sim_loop_mux_arm: the emitted
-  // module differed from the golden on 512/512 input vectors, returning the
-  // PREVIOUS vector's value (verilator: ALWCOMBORDER, "not purely
-  // combinational").
-  //
-  // The dissolver already existed and already ran -- but only from pass.cprop
-  // and from cgen_sim, and the equiv harness compiles with `--recipe O0`, which
-  // skips cprop. So the same design emitted correctly at O1 and incorrectly at
-  // O0. Calling it here makes the Verilog writer self-sufficient rather than
-  // dependent on an optimization pass having run first.
-  // Break a false comb loop through a pure-comb sub-instance FIRST (a cycle
-  // crossing an instance boundary is invisible to the word-level splitter
-  // below), then the packed-wire one. Same pair, same order, as cgen_sim.
+  // Break a false comb loop through a pure-comb sub-instance. Packed-wire
+  // self-references are already resolved locally by lnast.tolg when the wire's
+  // defining edge is attached; writers must not mutate that graph afterward.
   // Native loop groups remain compact in the graph; create_subs realizes their
   // logical calls exclusively in private emission maps.
   livehd::graph_util::flatten_false_loop_subs(graph.get());
-  livehd::graph_util::split_packed_selfref_wires(graph.get());
 
   pin2var.clear();
   pin2var_unsigned_.clear();

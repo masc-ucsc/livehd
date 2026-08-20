@@ -59,14 +59,14 @@ protected:
   // A latch already carries its write condition on `enable`.  Remove the
   // redundant hold arm from `din = enable ? data : Q` before the ordinary
   // scalar sweep, so downstream passes see the canonical `din = data` form.
-  void canonicalize_latch_holds(hhds::Graph* g);
+  void canonicalize_latch_hold(const hhds::Node_class& latch);
 
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
   // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.
-  void canonicalize_and_masks(hhds::Graph* g);
+  void canonicalize_and_mask(hhds::Node_class& node);
   // Hash-cons identical pure combinational nodes (same op, same input pins).
-  void cse_pass(hhds::Graph* g);
-  void scalar_pass(hhds::Graph* g);
+  void cse_pass(const std::vector<hhds::Node_class>& order);
+  void scalar_node(hhds::Node_class& node);
 
 public:
   Cprop() = default;

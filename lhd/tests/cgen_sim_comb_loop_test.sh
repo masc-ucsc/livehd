@@ -136,9 +136,9 @@ expect_clean "$W/ok.v" top "no-feedback hierarchy"
 # The mem-operand prefetch walker (ensure_ready_impl, cgen_sim.cpp) used to
 # self-recurse with no visited guard: a word-level false cycle in the address
 # cone stack-overflowed (SIGSEGV rc=139, NO diagnostic) instead of any orderly
-# outcome (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch). Since the
-# generalized split_packed_selfref_wires the FALSE word-level cycle is also
-# RESOLVED, so the correct outcome today is a clean compile; the crash guard
+# outcome (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch). Since the local
+# wire-binding rewrite in lnast.tolg resolves the FALSE word-level cycle, the
+# correct outcome today is a clean compile; the crash guard
 # is the rc<128 check (a regression may legitimately re-error with the loud
 # comb-loop diagnostic, but must never die by signal).
 cat > "$W/memp.prp" <<'EOF'

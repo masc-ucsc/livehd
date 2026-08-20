@@ -1,0 +1,21 @@
+/*
+:name: array_vs_packed_reg_1
+*/
+// The same design as array_vs_packed_reg.prp with the array EXPANDED into one
+// packed bitvector register: entry k of the `[4]u4` array is bits [4k..4k+3]
+// of this `u16` (row-major, entry 0 in the low bits -- the layout the whole
+// array `update`/`read_all` buses use, graph/cell.cpp pid 12 and
+// Ntype::Memory_readall_pid).
+//
+// So this must PROVE. A refutation means the array lowering and the packed
+// lowering disagree on the state itself, not on some spelling detail.
+pub mod top(we:u1, v:u16) -> (e0:u4@[0], e1:u4@[0], e2:u4@[0], e3:u4@[0]) {
+  reg foo:u16 = 0
+  e0 = foo#[0..=3]
+  e1 = foo#[4..=7]
+  e2 = foo#[8..=11]
+  e3 = foo#[12..=15]
+  if we != 0 {
+    foo = v
+  }
+}

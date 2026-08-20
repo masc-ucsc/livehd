@@ -1,24 +1,40 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <vector>
+
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::graph_util {
 
-// Dissolve a WORD-level-false combinational cycle through a packed wire: a net
-// built as an Or/shift concat accumulator that is read back via constant
-// Get_mask slices or And(SRA(w,k),mask) readers looks cyclic at word level
-// while the bit-level DAG is acyclic (the Chisel arbiter grant-chain shape).
-// Each such slice-read is rebuilt from only the operands whose proven bit
-// footprints overlap it (including bounded EQ/Mux controls). Strictly
-// a NO-OP unless a genuine word-level comb cycle exists; a genuine bit-level
-// loop (e.g. w = w+1) is never split and still fails loudly downstream.
+// Resolve a packed self-reference exactly when a single-driver wire's defining
+// edge is attached. `driver` is already connected to `buffer`; `early_readers`
+// are the buffer consumers that existed before the defining write. Only the
+// dependency cone between those readers and `driver` is inspected -- there is
+// no whole-graph cycle scan. Returns the number of slice reads rewired.
 //
-// Runs in pass/cprop (every backend sees the acyclic DAG: lec encode, cgen,
-// sim scheduling) and again from inou/cgen/cgen_sim for O0 graphs that skip
-// cprop. Returns the number of rewired reads.
-int split_packed_selfref_wires(hhds::Graph* g);
+// This is a lowering operation, not an optimization or writer repair: after it
+// returns, every downstream pass sees the same valid LGraph.
+int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
+                              const std::vector<hhds::Node_class>& early_readers);
+
+// Repair a packed self-reference EXPOSED by a structural mutation. The per-wire
+// splitter above treats a `Sub` call as a scheduling boundary, so a packed wire
+// whose feedback threads through a pure-comb instance is a no-op at bind time --
+// and then dissolving that instance (flatten_false_loop_subs, pass.color absorb,
+// sim.flatten) turns the boundary into ordinary word-level logic with nothing
+// left to break it. Whoever performs such a mutation owns the repair; a writer
+// still must not call this speculatively. Strictly a no-op when no word-level
+// cycle exists. Returns the number of slice reads rewired.
+int split_packed_selfref_cycles(hhds::Graph* g);
+
+// Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State,
+// memories and Sub calls are scheduling boundaries, matching the model the
+// splitter above uses -- which is why the two share one implementation: the
+// caller that asks "did the split finish?" and the caller that asks "is a
+// genuine self dependency left?" must not disagree about what a cycle is.
+[[nodiscard]] bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target);
 
 // Break a false combinational loop that runs THROUGH a pure-comb sub-instance:
 // inline the offending instance into `g` so the cycle becomes ordinary logic
@@ -28,8 +44,7 @@ int split_packed_selfref_wires(hhds::Graph* g);
 // Flop/Latch/Memory would change state identity. A no-op unless a stateless
 // Sub's output actually feeds back into one of its own inputs.
 //
-// Same deal as split_packed_selfref_wires above, and it must run in the same
-// places: a WRITER cannot assume an optimization pass ran first. cgen_verilog
+// This separate legacy hierarchy repair is still writer-owned. cgen_verilog
 // emits one always_comb of ordered BLOCKING assignments, so a residual cycle
 // makes it emit a read before the line that assigns it -- Verilog that is not
 // combinational at all (measured on tests/equiv/sim_sub_nested_comb_feedback:

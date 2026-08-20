@@ -1244,6 +1244,30 @@ whole block is one unit. Per-source-unit still matches `lhd scan` and
 only grain with anything to offer Rob. Decide with the post-L1 profile, and use
 `xs_rob` as the deciding target rather than dino.
 
+**Residual levers on this tier, measurement-gated** (the retired page's S6, kept
+here because nothing else records them):
+
+- **Dependency-indexed Tier-A materialization.** A semantic edit today reparses
+  the one dirty file and then materializes the *whole* hermetic Tier-A forest
+  before mixing restored graphs with fresh lowering, because lexical import
+  edges alone are not a sound selector. **A dirty-roots-only materialization was
+  tried and rejected**: it passed the small H5 case, then lost package `pub`
+  namespaces and produced a structurally different Minion top. Partial Tier-A
+  loading stays closed until the source-level dependencies actually consumed
+  during elaboration — `pub` values, named types, inferred widths/signs,
+  templates, elaboration order — are recorded explicitly and exactly. Gate any
+  reduction in forest loads on dino + minion + XiangShan edit H5.
+- **Interface digest.** Tier-B keys a unit on its whole transitive import
+  closure, so a leaf *body* edit invalidates its entire reverse import cone even
+  when the boundary is untouched. Digest the interface instead (`pub` values,
+  `io_meta` widths/signs, statefulness, clock-input interface, declared stages)
+  and the cascade stops at the leaf.
+- **`compile.threads` knob** (0/1 = sequential) for the incremental machinery;
+  note `discover_imports` already parses with up to 16 threads today. Sequential
+  efficiency first.
+- Sub-file parse grain and snapshot cost are **open questions 1 and 2** below,
+  not separate levers.
+
 - **Moves:** `compile` `warm_ms`/`edit_ms` on every target; LEC cold time (it
   re-elaborates BOTH sides from source on every run).
 - **Depends on:** L1 (re-measure after it; L1 may absorb most of the compile

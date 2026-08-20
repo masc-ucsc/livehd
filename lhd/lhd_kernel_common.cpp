@@ -811,12 +811,23 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
     return {};
   }
   if (r == "O1") {
-    std::vector<std::pair<std::string, std::string>> steps{
-        {"compile.cprop", "pass.cprop"}
-    };
     // Under O1 there is no bitwidth step to recover the widths, so bitfuzz
     // brings its own (it runs the inference in-process) and the graph still
     // leaves the recipe fully sized.
+    //
+    // pass.bitwidth deliberately does NOT run here. It re-derives every width
+    // from RANGES, and a range-derived width contradicts the CELL CONTRACTS
+    // that tolg and cprop stamp: MEASURED on this tree, appending it to O1
+    // refuted //inou/prp:prp-equiv-rt_typecast and rt_bool_cast and
+    // //lhd/tests:lec_packed_struct_test (signed arm), aborted
+    // //inou/prp:prp-sim-packed_bus_bit_ring on a Concat lane-window
+    // violation, and drifted //lhd/tests:lhd_tool_test's Sum stamp from 8 to
+    // 9. cprop owns O1's widths (restamp_finite_get_mask +
+    // enforce_lossless_carriers); reinstate this only together with a
+    // reconciliation of those two width models.
+    std::vector<std::pair<std::string, std::string>> steps{
+        {"compile.cprop", "pass.cprop"}
+    };
     steps.insert(steps.end(), fuzz.begin(), fuzz.end());
     return steps;
   }

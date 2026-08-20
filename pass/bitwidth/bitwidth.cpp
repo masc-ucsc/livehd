@@ -209,11 +209,32 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
     // No declared width (the front end left the port unsized): inference is
     // allowed to size it, and the stamped value is all any reader has.
   }
-  if (bw.is_always_positive()) {
-    const auto b = bw.get_ubits();
+  const bool positive = bw.is_always_positive();
+  auto       b        = positive ? bw.get_ubits() : bw.get_sbits();
+  // CELL CONTRACT ceiling. A finite Get_mask CLEARS every unselected bit, so
+  // its result never needs more than popcount(mask) bits -- no matter what a
+  // CONSUMER's back-propagation suggests (process_flop stamps the flop's merged
+  // Q range onto every din driver, and a memory does the same for its dout
+  // drivers). Stamping past it mints a pin node_util's debug_check_pin_hint
+  // rejects on the next load ("selects 64 bits but is hinted at 75"), which
+  // aborts a dbg `lhd sim` on the saved lg:. Only the WIDTH is clamped: a typed
+  // signed wire's Get_mask is deliberately signed so its selected top bit is
+  // the sign bit, and re-signing it here would turn 8'hff from -1 into 255.
+  if (auto master = dpin.get_master_node(); !master.is_invalid() && type_op_of(master) == Ntype_op::Get_mask) {
+    auto mask = get_driver_of_sink_name(master, "mask");
+    if (!mask.is_invalid() && is_const_pin(mask)) {
+      const auto mv = hydrate_const(mask);
+      if (!mv.is_negative() && !mv.has_unknowns()) {
+        const auto capacity = static_cast<int32_t>(mv.popcount());
+        if (capacity > 0 && b > capacity) {
+          b = capacity;
+        }
+      }
+    }
+  }
+  if (positive) {
     set_ubits(dpin, b);
   } else {
-    const auto b = bw.get_sbits();
     set_sbits(dpin, b);
   }
 }
@@ -447,9 +468,24 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
     return;
   }
   if (unlikely(!n_it->second.is_always_positive())) {
-    livehd::diag::err("pass.bitwidth", "negative-shift", "bitwidth")
-        .msg("SHL B input can be negative (only positive allowed)")
-        .fatal();
+    // upass.bitwidth already reports the source-level warning. A range that
+    // includes negative counts has no sound SHL envelope, but that should not
+    // make this graph-wide sizing pass reject an otherwise sized graph. Keep
+    // TolG's conservative carrier for this node and continue.
+    auto out  = node.create_driver_pin(0);
+    auto bits = bits_of(out);
+    if (bits <= 0) {
+      not_finished = true;
+      return;
+    }
+    Bitwidth_range fallback;
+    if (livehd::graph_util::is_unsign(out)) {
+      fallback.set_ubits_range(bits);
+    } else {
+      fallback.set_sbits_range(bits);
+    }
+    bwmap.insert_or_assign(out.get_class_index(), fallback);
+    return;
   }
   Bitwidth_range n_bw = n_it->second;
 
@@ -670,25 +706,11 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   }
 
   if (mem_bits && mem_din_bits) {
-    if (mem_bits < mem_din_bits) {
-      for (auto& dpin : din_drivers) {
-        auto it = bwmap.find(dpin.get_class_index());
-        if (it == bwmap.end()) {
-          continue;
-        }
-        auto need = it->second.get_sbits();
-        if (it->second.is_always_positive()) {
-          --need;  // compare the unsigned magnitude against the unsigned memory width
-        }
-        if (need <= mem_bits) {
-          continue;
-        }
-        livehd::diag::err("pass.bitwidth", "mem-width-mismatch", "bitwidth")
-            .msg("memory {} input has more bits than memory width", debug_name(node))
-            .fatal();
-        return;
-      }
-    } else if (!mem_din_bits_missing && mem_bits != mem_din_bits) {
+    // A memory write is an explicit finite-width boundary. A WIDER din is legal
+    // and is truncated to the declared element width by every backend; it does
+    // not require widening the memory or repairing the producer. So only a
+    // strictly NARROWER din narrows the declared width below.
+    if (!mem_din_bits_missing && mem_bits > mem_din_bits) {
       Pass::info("memory {} requests {} bits, but only {} needed (optimizing)", debug_name(node), mem_bits, mem_din_bits);
       mem_bits = mem_din_bits;
 

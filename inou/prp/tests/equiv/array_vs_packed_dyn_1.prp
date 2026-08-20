@@ -1,0 +1,16 @@
+/*
+:name: array_vs_packed_dyn_1
+*/
+// The same design as array_vs_packed_dyn.prp with the array EXPANDED into one
+// packed bitvector register: entry k is bits [4k..4k+3] of this `u16`, so the
+// runtime-index read is a shift by 4*raddr followed by a 4-bit mask. That is
+// exactly the spelling the array form exists to REPLACE (the array keeps a
+// compact indexed store for simulation instead of shift/mask packing), so the
+// two must prove equal.
+pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
+  reg foo:u16 = nil
+  rd = (foo >> (raddr * 4)) & 0xf
+  if we != 0 {
+    foo = v
+  }
+}

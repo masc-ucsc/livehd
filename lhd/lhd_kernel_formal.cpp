@@ -28,6 +28,7 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "inline_sub.hpp"
+#include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
 #include "latch_contract.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
@@ -117,6 +118,9 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
       return false;
     }
   }
+  // Same rule as the lec flatten above: whoever dissolves the boundary owns the
+  // packed self-reference it exposes, before cprop walks the body.
+  livehd::graph_util::split_packed_selfref_cycles(top.get());
   Cprop cprop;
   cprop.do_trans(top);
   const bool identical = livehd::semdiff::structural_identical(top.get(), unrolled, options);
@@ -3431,6 +3435,14 @@ static size_t flatten_ref_to_match_flat_impl(const absl::flat_hash_map<hhds::Gid
     }
     done += spliced;
   }
+  if (done > 0) {
+    // Flattening removed the scheduling boundary that made a packed
+    // self-reference invisible to lnast.tolg's per-wire splitter. Repair it, or
+    // the encoder below refuses the whole def ("operand has no encodable
+    // driver (combinational cycle?)") on a design that is perfectly acyclic
+    // per bit -- an UNKNOWN verdict rather than a proof.
+    livehd::graph_util::split_packed_selfref_cycles(ref_g);
+  }
   return done;
 }
 
@@ -3851,6 +3863,27 @@ void lec_command(Options& opts, Result& res) {
       return std::find(o.collapse.begin(), o.collapse.end(), full) != o.collapse.end()
              || std::find(o.collapse.begin(), o.collapse.end(), ent) != o.collapse.end();
     };
+    // Give lec the same false-loop preparation inou.cgen.verilog runs. A packed
+    // self-reference whose feedback threads through a PURE-COMB instance is
+    // invisible to lnast.tolg's per-wire splitter (a Sub is a scheduling
+    // boundary there), but pass/lec/encode.cpp INLINES a combinational callee,
+    // so the encoder does see the cycle and refuses the whole def ("operand has
+    // no encodable driver (combinational cycle?)") -- UNKNOWN on a design that
+    // is acyclic per bit and perfectly provable once the instance is dissolved.
+    // flatten_false_loop_subs also repairs the word-level cycle it exposes.
+    //
+    // Only the two TOPS are prepared: a `--lib` cell model in sub_lib is SHARED
+    // by both sides, so inlining into one would be a cross-side edit. Both steps
+    // are no-ops unless a stateless Sub's output really feeds back into one of
+    // its own inputs, so this costs nothing on an ordinary design.
+    for (auto* prep : {ref_g.get(), impl_g.get()}) {
+      if (prep != nullptr) {
+        if (const int nf = livehd::graph_util::flatten_false_loop_subs(prep); nf > 0) {
+          std::print("lec: dissolved {} false comb-loop instance(s) in '{}' before encoding\n", nf, prep->get_name());
+        }
+      }
+    }
+
     std::vector<hhds::Graph*> ref_defs, impl_defs;
     for (const auto& sp : ref_var.graphs) {
       if (sp && sp.get() != ref_g.get() && !is_boxed(sp.get())) {
