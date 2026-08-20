@@ -1,0 +1,44 @@
+/*
+:name: split_vs_packed_state
+:type: lec
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope ↔ Pyrope variants"): this file is the
+// REFERENCE, and every `split_vs_packed_state_<N>.prp` beside it is LEC'd
+// against it.
+//
+// THE CLAIM: SPLIT state and PACKED state are the same design, and `lhd lec`
+// must prove it WITHOUT depending on being able to pair the two spellings by
+// name. This side declares one register per lane; the variant declares one
+// packed register and addresses lanes by bit range.
+//
+// Why this is its own fixture: pass/semdiff is a structural SHORTCUT that pairs
+// state elements before the solver runs. Two flops named `e0`/`e1` have no
+// counterpart in a single flop named `packed`, so semdiff cannot pair them and
+// must decline -- that is FINE, and it is the whole point. Declining means the
+// obligation goes to the solver, which must still return PROVEN.
+//
+// This used to be papered over: packed-array SROA stamped six `sroa_*`
+// provenance attributes on every split leaf so semdiff could re-aggregate them
+// back into one logical register. That collapse gave every leaf the SAME
+// compare-point key and `collect_cuts` kept only the first, so N-1 of N
+// obligations were silently DROPPED -- a lane-swap bug LEC'd as "PROVEN
+// (structurally identical, no solver call)". The attributes are gone; this
+// fixture is what says the honest path still works.
+//
+// MEASURED on this pair (2026-08-20), which is the invariant in one line:
+//   lhd pass semdiff --stats  ->  state ref/impl 2/1, name-paired 0,
+//                                 unpaired ref 2 impl 1, "DIFFERENCES present"
+//   lhd lec                   ->  PROVEN equivalent
+// semdiff declining is not a failure. Only lec returning anything other than
+// PROVEN is.
+//
+// Deliberately tiny (2 lanes x 2 bits) so the solver call is cheap.
+pub mod top(we:u1, d0:u2, d1:u2, sel:u1) -> (q:u2@[0]) {
+  reg e0:u2 = 0
+  reg e1:u2 = 0
+  q = if sel != 0 { e1 } else { e0 }
+  if we != 0 {
+    e0 = d0
+    e1 = d1
+  }
+}

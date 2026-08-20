@@ -1,0 +1,69 @@
+/*
+:name: mem_reset_sweep
+:type: simulation
+*/
+// A `reg` ARRAY's initializer is its RESET value, exactly like a scalar reg's
+// (`reg m:[4]u4 = 7` ≡ every entry resets to 7). A memory has no parallel reset
+// port, so the restore is a SWEEP: one entry per cycle while reset is held, so
+// the array needs `size` cycles of reset to settle. These two tests pin that
+// timing — the design is identical, only the length of the reset pulse differs.
+//
+// (`= nil` would mean NO reset value at all: no reset is bound and no sweep is
+// built. See ../equiv/mem_ordering_old.prp.)
+mod arr(we:bool, waddr:u2, din:u4, raddr:u2) -> (o:u4@[0]) {
+  reg m:[4]u4:[ordering="old"] = 7
+  o = m[raddr]
+  if we { m[waddr] = din }
+}
+
+// ONE reset cycle restores exactly ONE entry. Fill every entry with 0xA out of
+// reset, pulse reset for a single cycle, then read all four back.
+test arr.one_reset_cycle {
+  mut d  = arr
+  mut e0 = nil
+  mut e1 = nil
+  mut e2 = nil
+  mut e3 = nil
+  tick 20 {
+    d.reset = clock == 6  // a single reset cycle, well after the fill
+    d.we    = clock < 4
+    d.waddr = clock
+    d.din   = 0xA
+    d.raddr = clock - 10
+    step
+    if clock == 10 { e0 = d.o }
+    if clock == 11 { e1 = d.o }
+    if clock == 12 { e2 = d.o }
+    if clock == 13 { e3 = d.o }
+  }
+  assert(e0 == 7, "entry 0 is restored by the first reset cycle")
+  assert(e1 == 0xA, "entry 1 is NOT restored yet")
+  assert(e2 == 0xA, "entry 2 is NOT restored yet")
+  assert(e3 == 0xA, "entry 3 is NOT restored yet")
+}
+
+// SIZE reset cycles restore the whole array. Same fill, same reads, a 4-cycle
+// pulse instead of a 1-cycle one.
+test arr.full_reset_window {
+  mut d  = arr
+  mut e0 = nil
+  mut e1 = nil
+  mut e2 = nil
+  mut e3 = nil
+  tick 20 {
+    d.reset = clock >= 6 and clock < 10  // 4 cycles = the array size
+    d.we    = clock < 4
+    d.waddr = clock
+    d.din   = 0xA
+    d.raddr = clock - 10
+    step
+    if clock == 10 { e0 = d.o }
+    if clock == 11 { e1 = d.o }
+    if clock == 12 { e2 = d.o }
+    if clock == 13 { e3 = d.o }
+  }
+  assert(e0 == 7, "entry 0 restored")
+  assert(e1 == 7, "entry 1 restored")
+  assert(e2 == 7, "entry 2 restored")
+  assert(e3 == 7, "entry 3 restored")
+}

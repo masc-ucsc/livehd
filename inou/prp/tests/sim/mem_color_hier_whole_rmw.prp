@@ -1,0 +1,34 @@
+/*
+:name: mem_color_hier_whole_rmw
+:type: simulation
+*/
+
+// Memory's cell-global `update_enable` pin shares the raw low-pid block with
+// port zero, but it is not port zero's per-read `enable`. The post-rise read
+// must observe committed storage without depending combinationally on the
+// whole-array update cone. That cone deliberately reads the same array, so
+// confusing the two enable pins manufactures a read -> update -> read cycle.
+mod hier_mem_leaf(en:u1) -> (q:u4@[0]) {
+  reg words:[4]u4:[ordering="old"] = 0
+  const old = words[0]
+  mut next:u16 = words
+  wrap next#[0..=3] = old + 1
+  if en {
+    words = next
+  }
+  q = words[0]
+}
+
+pub mod hier_mem_top(en:u1) -> (q:u4@[0]) {
+  mut leaf = hier_mem_leaf(en=en)
+  q = leaf.q
+}
+
+test hier_mem_top.registered_whole_array_is_a_state_cut {
+  mut acc = hier_mem_top
+  tick 6 {
+    acc.en = 1
+    step
+  }
+  assert(acc.q == 6, "nested whole-array read-modify-write commits once per edge")
+}

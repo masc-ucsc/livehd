@@ -1,0 +1,21 @@
+/*
+:name: split_vs_packed_state_1
+:lec_grep_not: structurally identical
+*/
+// split_vs_packed_state.prp with the two per-lane registers PACKED into one:
+// lane k is bits [2k..2k+1] of a single `u4` register. Same circuit, different
+// state spelling.
+//
+// `:lec_grep_not: structurally identical` is the load-bearing half of this
+// fixture. The two sides genuinely are NOT structurally identical -- two flops
+// versus one -- so a run that claims they are has short-circuited an obligation
+// it never discharged. That is exactly the failure mode the retired `sroa_*`
+// aggregate collapse introduced. PROVEN here has to come from the solver.
+pub mod top(we:u1, d0:u2, d1:u2, sel:u1) -> (q:u2@[0]) {
+  reg lanes:u4 = 0
+  q = if sel != 0 { lanes#[2..=3] } else { lanes#[0..=1] }
+  if we != 0 {
+    lanes#[0..=1] = d0
+    lanes#[2..=3] = d1
+  }
+}

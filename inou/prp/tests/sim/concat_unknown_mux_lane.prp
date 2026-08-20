@@ -1,0 +1,36 @@
+/*
+:name: concat_unknown_mux_lane
+:type: simulation
+:set: sim.unknown_zero=true
+*/
+
+// The match lowers `hi` to a Hotmux with an unsigned-unknown default arm.
+// Dlop's width for that constant includes a signed-carrier headroom bit, but
+// the Hotmux and Concat lane both carry the declared one-bit payload. cprop
+// must not turn that headroom into a second data bit and violate the Concat
+// lane-width contract.
+pub comb concat_unknown_mux_lane(sel:u2) -> (z:u2) {
+  mut hi:u1 = 0ub?
+  match sel {
+    == 0 {
+      hi = 0
+    }
+    == 1 {
+      hi = 1
+    }
+    else {
+    }
+  }
+  const lo:u1 = 1
+  z = concat(hi, lo)
+}
+
+test concat_unknown_mux_lane.payload_width {
+  mut acc = concat_unknown_mux_lane
+  acc.sel = 0
+  step
+  assert(acc.z == 1, "known zero high lane keeps the low lane in bit zero")
+  acc.sel = 1
+  step
+  assert(acc.z == 3, "one-bit high lane occupies exactly bit one")
+}

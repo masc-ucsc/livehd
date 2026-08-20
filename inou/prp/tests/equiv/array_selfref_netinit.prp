@@ -1,0 +1,13 @@
+/*
+:name: array_selfref_netinit
+:type: equiv_slang
+:verilog_top: array_selfref_netinit.top
+:pyrope_top: top
+*/
+
+// Pyrope reference for array_selfref_netinit.v: `z = a_0 ^ a_1` (substituting
+// vec[0]=a_0 into vec[1]'s expression -- see the .v header for why the literal
+// Verilog shape is NOT actually cyclic).
+pub comb top(a_0:u2, a_1:u2) -> (z:u2) {
+  z = a_0 ^ a_1
+}
