@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -531,6 +532,24 @@ std::string lit_zero(uint32_t w) { return "(0#" + std::to_string(w) + ")"; }
 std::string lit_one(uint32_t w) { return "(1#" + std::to_string(w) + ")"; }
 
 std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v);
+
+// Promote a fully-written temp emission to its final path.
+//
+// Paired with the `<path>.tmp` stream opened in emit_for_graph: rename(2) is atomic
+// within a filesystem, so a reader either sees the complete file or no file at all --
+// never a truncated one that still parses as valid Lean.  On failure the temp file is
+// removed rather than left behind, so a stale `.tmp` can never be mistaken for output.
+void finalize_emitted_file(const std::string& tmp_path, const std::string& final_path) {
+  std::error_code ec;
+  std::filesystem::rename(tmp_path, final_path, ec);
+  if (ec) {
+    livehd::diag::warn("pass.lean", "write-failed", "io")
+        .msg("could not move {} into place at {}: {}", tmp_path, final_path, ec.message())
+        .emit();
+    std::error_code rm_ec;
+    std::filesystem::remove(tmp_path, rm_ec);
+  }
+}
 
 std::string lit_const_at(const LeanCtx& ctx, const Node& node, const Dlop& v, uint32_t w) {
   if (w == 0 || static_cast<size_t>(w) > ctx.max_width) {
@@ -1645,9 +1664,22 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
 
   auto topo = reachable_topo_order(roots, flop_nids);
 
-  std::ofstream ofs(lean_path);
+  // Emit ATOMICALLY: stream into `<path>.tmp` and rename() only on success.
+  //
+  // `fatal()` throws from inside emit_node_expr / cert_node_expr, which run *while*
+  // the file is being streamed (the fv defs and the cert nodes are written from those
+  // loops).  Writing in place therefore leaves a TRUNCATED file at the final path on
+  // an unsupported op, OOM, ENOSPC or SIGKILL.  If the cut lands between
+  // declarations the result is still valid Lean -- every present declaration
+  // elaborates and `<Top>_comb_refines_fast` merely does not exist -- so a checker
+  // that only looks for `error:` scores it exit 0 / PROVEN.  Worse, the truncated
+  // text is deterministic, so a hash-based "unchanged" check would freeze that false
+  // verdict forever.  rename(2) is atomic within a filesystem: either the complete
+  // file appears or no file does.
+  const std::string lean_tmp_path = lean_path + ".tmp";
+  std::ofstream ofs(lean_tmp_path);
   if (!ofs) {
-    livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", lean_path).emit();
+    livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", lean_tmp_path).emit();
     return;
   }
 
@@ -1866,6 +1898,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
   } catch (const Emit_error& err) {
     ofs.close();
+    finalize_emitted_file(lean_tmp_path, lean_path);
     std::cerr << err.what() << "\n";
     if (strict) {
       std::remove(lean_path.c_str());
@@ -1878,6 +1911,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "-- Certificate emission disabled by lean.emit_cert=false.\n";
     ofs << "end " << base_name << "_Lgraph\n";
     ofs.close();
+    finalize_emitted_file(lean_tmp_path, lean_path);
 
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, "
               << flop_nodes.size() << " flops, sequential=" << (sequential ? "yes" : "no")
@@ -1905,6 +1939,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     ofs << "  decide\n\n";
     ofs << "end " << base_name << "_Lgraph\n";
     ofs.close();
+    finalize_emitted_file(lean_tmp_path, lean_path);
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (memory certificate stub: " << topo.size()
               << " nodes, " << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
     return;
@@ -2563,8 +2598,31 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
   }
 
+
+  // Self-verifying artifact: print the axiom dependencies of the top-level refinement
+  // theorems so a checker can gate on them.
+  //
+  // Exit code 0 is NOT sufficient evidence that a block is proven:
+  //   * a `sorry` in an IMPORTED module is a warning at the library's own build and
+  //     does not resurface in the importer, so the generated file still exits 0;
+  //   * a truncated emission whose `_refines_fast` theorem is simply absent also
+  //     exits 0 with no `error:` line.
+  // `#print axioms` closes both: it fails loudly if the name does not exist, and it
+  // names `sorryAx` if anything in the transitive closure is unproven.  It also makes
+  // the `native_decide` compiler trust explicit -- those facts contribute a named
+  // `..._native.native_decide.ax_*` axiom, where a kernel `decide` contributes none.
+  if (emit_fast_bridge) {
+    ofs << "\n-- Axiom audit (gate on these lines; `sorryAx` or a missing name is a failure).\n";
+    ofs << "#print axioms " << base_name << "_comb_refines_fast\n";
+    if (sequential) {
+      ofs << "#print axioms " << base_name << "_next_refines_fast\n";
+      ofs << "#print axioms " << base_name << "_step_refines_fast\n";
+    }
+  }
+
   ofs << "end " << base_name << "_Lgraph\n";
   ofs.close();
+  finalize_emitted_file(lean_tmp_path, lean_path);
 
   std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (" << topo.size() << " nodes, "
             << flop_nodes.size() << " flops, sequential=" << (sequential ? "yes" : "no")

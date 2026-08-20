@@ -21,6 +21,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUMMARY="${QUEUE_SUMMARY:-$ROOT/generated/lean_queue_summary.tsv}"
 JOBS="${LEAN_JOBS:-8}"
+LAKE="${LAKE:-lake}"
 CPUSET="${LEAN_CPUSET:-0-7}"
 
 export PATH="/mada/users/czeng14/.elan/bin:$PATH"
@@ -46,7 +47,19 @@ wait_for_free_slot() {
   done
 }
 
-[[ -s "$SUMMARY" ]] || printf 'module\tnodes\tflops\tmax_w\twall_s\tpeak_rss_kb\texit\tverdict\n' > "$SUMMARY"
+# D1: `lake env` does NOT build.  It only sets LEAN_PATH and spawns the process, so
+# `lake env lean <file>` elaborates against whatever .olean happens to be on disk --
+# there is no guarantee the library sources were ever compiled.  Build explicitly
+# first, once, before any block is checked.  Cheap (~12 s warm) and it converts
+# "the environment appears consistent" into "the environment is consistent".
+echo "[queue] building the Lean support library before any check..."
+if ! ( cd "$ROOT/formal/lean" && "$LAKE" build LeanSemanticPrimitives \
+                                        LeanSemanticPrimitives.Translation.OpBridge ); then
+  echo "[queue] FATAL: the Lean support library does not build; refusing to check anything" >&2
+  exit 4
+fi
+
+[[ -s "$SUMMARY" ]] || printf 'module\tnodes\tflops\tmax_w\twall_s\tpeak_rss_kb\texit\taxioms\tverdict\n' > "$SUMMARY"
 
 overall=0
 for f in "$@"; do
@@ -92,8 +105,32 @@ for f in "$@"; do
   flops="$(grep -oP 'state fields\s+:\s+\K[0-9]+' "$gl" 2>/dev/null || true)"
   maxw="$(grep -oP 'node output widths : max=\K[0-9]+' "$gl" 2>/dev/null || true)"
 
-  if [[ "$rc" -eq 0 && "$errs" -eq 0 ]]; then
+  # D2: exit 0 is not proof.  Require the emitted `#print axioms` audit to have run
+  # for every expected theorem and to be free of `sorryAx`.  This catches a `sorry` in
+  # an IMPORTED module (a warning at the library build, invisible to the importer) and
+  # a truncated file whose `_refines_fast` theorem never existed.
+  ax_lines="$(grep -c "depends on axioms\|does not depend on any axioms" "$log" || true)"
+  ax_sorry="$(grep -c "sorryAx" "$log" || true)"
+  # Expected audit count comes from the FILE, not from a scraped external log: the
+  # emitter writes exactly one `#print axioms` per top-level theorem it produced, so
+  # this cannot drift.  (Deriving it from static_gates.log would fail lenient -- a
+  # missing log would set the expectation to 1 and let a sequential design pass on
+  # its `_comb` line alone.)
+  ax_want="$(grep -c '^#print axioms ' "$f" || true)"
+  if [[ "$ax_want" == "0" ]]; then
+    echo "[queue] WARNING $name: no '#print axioms' lines in the file -- emitted by an" >&2
+    echo "        older emitter?  Re-emit to get the axiom gate." >&2
+  fi
+  ax_note="${ax_lines}/${ax_want}"
+  [[ "$ax_sorry" != "0" ]] && ax_note="${ax_note},sorryAx"
+
+  if [[ "$rc" -eq 0 && "$errs" -eq 0 && "$ax_sorry" == "0" \
+        && "$ax_want" -gt 0 && "$ax_lines" -ge "$ax_want" ]]; then
     verdict=PROVEN
+  elif [[ "$rc" -eq 0 && "$errs" -eq 0 ]]; then
+    # typechecked but the audit is missing or dirty -- do NOT call this proven
+    verdict="AXIOM-GATE-FAIL(${ax_note})"
+    overall=1
   elif [[ "$errs" -gt 0 ]]; then
     verdict="FAIL(${errs} errors)"
     overall=1
@@ -104,9 +141,9 @@ for f in "$@"; do
     verdict="DID-NOT-RUN(exit $rc)"
     overall=1
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$name" "$nodes" "$flops" "$maxw" "$wall" "$rss" "$rc" "$verdict" >> "$SUMMARY"
-  echo "[queue] DONE  $name  exit=$rc errors=$errs wall=${wall}s rss=${rss}KB -> $verdict"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$name" "$nodes" "$flops" "$maxw" "$wall" "$rss" "$rc" "$ax_note" "$verdict" >> "$SUMMARY"
+  echo "[queue] DONE  $name  exit=$rc errors=$errs axioms=$ax_note wall=${wall}s rss=${rss}KB -> $verdict"
 done
 
 echo "[queue] summary: $SUMMARY"
