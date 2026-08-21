@@ -5,8 +5,8 @@
 #
 # An empty module, a module with no output/state, or a top that does not exist on
 # both sides gives the miter zero compare points. Such a run establishes nothing,
-# so it must exit non-zero (class equiv_fail) regardless of formal.strict --
-# exactly like the encoder-refusal case. Before this contract it surfaced as
+# so it must exit non-zero as an explicit setup refusal (class unsupported,
+# exit 7) regardless of formal.strict. Before this contract it surfaced as
 # `PROVEN equivalent`, "status":"pass", exit 0, with ZERO warnings (the vacuous
 # no-solver semdiff skip: is_structural_identity was all `== 0` clauses, so two
 # EMPTY graphs satisfied every one of them and the match was cached as definitive),
@@ -82,9 +82,9 @@ ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1 (rc=$RC)"; echo "$O
 # --- 1. empty on both sides: no output, no state ----------------------------
 run empty_ref.v empty_impl.v
 ck "empty module (no output/state) exits non-zero"      '[ "$RC" -ne 0 ]'
-ck "empty module reports equiv_fail"                    'echo "$OUT" | grep -q "\"class\":\"equiv_fail\""'
+ck "empty module reports setup refusal"                 '[ "$RC" -eq 7 ] && echo "$OUT" | grep -q "\"class\":\"unsupported\""'
 ck "empty module never claims PROVEN"                   '! echo "$OUT" | grep -q "PROVEN equivalent"'
-ck "empty module says nothing was compared"             'echo "$OUT" | grep -qi "compared NOTHING"'
+ck "empty module says nothing was compared"             'echo "$OUT" | grep -qi "nothing was compared"'
 
 # 1b. and it must fail WITHOUT formal.strict -- strict is for a solver give-up,
 #     not for a run that had nothing to give up on.

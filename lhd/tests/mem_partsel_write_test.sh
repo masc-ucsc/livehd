@@ -141,5 +141,76 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "ok: the generated Pyrope is LEC-equivalent to the Verilog it came from"
 
+# ---------------------------------------------------------------------------
+# 3. A whole-array memory read whose address folds to unknown must still emit
+#    Verilog that our slang reader accepts. A constant array select such as
+#    `arr_data[3'b???]` denotes an unknown read in Verilog, but slang diagnoses
+#    that constant selector as an invalid element before lowering. Cgen must
+#    spell the unknown DATA result directly instead.
+# ---------------------------------------------------------------------------
+cat > "$W/unknown_addr.prp" <<'EOF'
+pub mod unknown_addr(inp:u80) -> (r:u10@[0]) {
+  reg arr:[8]u10 = nil
+  arr = inp
+  // This read is intentionally dead. After cprop removes its consumer, cgen
+  // must not emit an assignment to an undeclared implicit arr_dout_N net.
+  mut dead:u10 = arr[1]
+  mut idx:u3 = 0ub???
+  r = arr[idx]
+}
+EOF
+
+"$LHD" compile "$W/unknown_addr.prp" --top unknown_addr --recipe O0 \
+  --emit verilog:"$W/unknown_addr.v" --workdir "$W/w_unknown_gen" >"$W/unknown_gen.log" 2>&1 \
+  || { tail -5 "$W/unknown_gen.log"; fail "case 3: unknown-address memory emission failed"; }
+grep -Eq "assign arr_dout_[0-9]+ = 10'b\?{10};" "$W/unknown_addr.v" \
+  || { cat "$W/unknown_addr.v"; fail "case 3: unknown memory read was not emitted as unknown data"; }
+grep -q "arr_data\[3'b???\]" "$W/unknown_addr.v" \
+  && { cat "$W/unknown_addr.v"; fail "case 3: emitted an invalid constant unknown array selector"; }
+grep -Eq '^assign arr(_dout)?_[0-9]+ = arr_data\[' "$W/unknown_addr.v" \
+  && { cat "$W/unknown_addr.v"; fail "case 3: emitted an assignment for a dead memory read pin"; }
+"$LHD" compile "$W/unknown_addr.v" --reader slang --top unknown_addr \
+  --emit-dir "lg:$W/unknown_lg" --workdir "$W/w_unknown_read" >"$W/unknown_read.log" 2>&1 \
+  || { tail -5 "$W/unknown_read.log"; fail "case 3: slang could not re-read unknown-address memory emission"; }
+echo "ok: an unknown-address whole-array read emits unknown data and survives slang re-read"
+
+# ---------------------------------------------------------------------------
+# 4. A source memory can have an escaped dotted aggregate name. The generated
+#    cgen_memory_* wrapper INSTANCE must use a simple identifier: yosys-slang's
+#    hierarchy-preserving import embeds instance names in specialized RTLIL
+#    module names, and an embedded escaped-id terminator is illegal there. The
+#    memory net itself may remain escaped; only the semantically irrelevant
+#    instance identifier is sanitized.
+# ---------------------------------------------------------------------------
+cat > "$W/dotted_mem.sv" <<'EOF'
+module dotted_mem(
+  input  logic       clock,
+  input  logic       we,
+  input  logic [1:0] addr,
+  input  logic [7:0] din,
+  output logic [7:0] dout
+);
+  logic [7:0] \bank.data [0:3];
+  always_ff @(posedge clock) begin
+    if (we) \bank.data [addr] <= din;
+  end
+  assign dout = \bank.data [addr];
+endmodule
+EOF
+"$LHD" compile "$W/dotted_mem.sv" --reader slang --top dotted_mem \
+  --emit-dir "pyrope:$W/dotted_prp" --workdir "$W/w_dotted_gen" >"$W/dotted_gen.log" 2>&1 \
+  || { tail -5 "$W/dotted_gen.log"; fail "case 4: dotted memory did not generate Pyrope"; }
+"$LHD" compile "$W/dotted_prp/dotted_mem.prp" --top dotted_mem --recipe O0 \
+  --emit verilog:"$W/dotted_impl.v" --workdir "$W/w_dotted_impl" >"$W/dotted_impl.log" 2>&1 \
+  || { tail -5 "$W/dotted_impl.log"; fail "case 4: dotted memory Pyrope did not emit Verilog"; }
+if grep -Eq '^cgen_memory_[^[:space:]]+[[:space:]]+\\[^[:space:]]+ ' "$W/dotted_impl.v"; then
+  grep -En '^cgen_memory_[^[:space:]]+[[:space:]]+\\[^[:space:]]+ ' "$W/dotted_impl.v"
+  fail "case 4: memory wrapper kept an escaped instance identifier"
+fi
+"$LHD" compile "$W/dotted_impl.v" --reader yosys-slang --top dotted_mem \
+  --emit-dir "lg:$W/dotted_lg" --workdir "$W/w_dotted_read" -- -I ware/rtl >"$W/dotted_read.log" 2>&1 \
+  || { tail -5 "$W/dotted_read.log"; fail "case 4: yosys-slang could not read dotted-memory cgen output"; }
+echo "ok: dotted memory paths use simple wrapper instance identifiers"
+
 echo "PASS: mem_partsel_write_test"
 exit 0

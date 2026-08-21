@@ -71,6 +71,11 @@ private:
   // (no `name` attr -- e.g. a re-partition wrapper left transparent so hier names
   // are preserved) is named `u_<module>`; a named Sub keeps its name.
   absl::flat_hash_map<node_key_t, std::string>          sub_instance_names_;
+  // Memory-wrapper instance identifiers are emission-only and need not expose
+  // the source aggregate path. Keep them simple (no escaped `foo.bar` token):
+  // yosys-slang's hierarchy specialization embeds instance names into RTLIL
+  // module identifiers, where an embedded escaped-id terminator is illegal.
+  absl::flat_hash_map<node_key_t, std::string>          memory_instance_names_;
   // Private realization state for native compact Sub loops. These maps are
   // emission-only: the source graph retains one Subnode_group and its literal
   // carry self-edges throughout code generation.
@@ -185,6 +190,7 @@ private:
   // Named Sub keeps its name; an anonymous Sub becomes `u_<module>`, de-collided
   // against every already-chosen name.
   std::string sub_instance_name(const hhds::Node_class& node);
+  std::string memory_instance_name(const hhds::Node_class& node);
   std::string loop_instance_name(const hhds::Node_class& node, const hhds::Subnode_occurrence& occurrence);
 
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);

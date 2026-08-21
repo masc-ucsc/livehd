@@ -28,7 +28,6 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "inline_sub.hpp"
-#include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
 #include "latch_contract.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
@@ -39,6 +38,7 @@
 #include "query.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
+#include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
 #include "taskflow/taskflow.hpp"
 
 namespace lhd {
@@ -283,10 +283,10 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
   const std::string eng = r.engine.empty() ? o.engine : r.engine;
   const long long   ms  = r.elapsed_ms >= 0 ? r.elapsed_ms : elapsed_ms;
   auto              b   = livehd::diag::info("pass.lec", code, "progress")
-                              .msg("lec block '{}' {}", block, verdict)
-                              .verdict(verdict)
-                              .engine(eng)
-                              .duration_ms(ms);
+               .msg("lec block '{}' {}", block, verdict)
+               .verdict(verdict)
+               .engine(eng)
+               .duration_ms(ms);
   if (!r.detail.empty()) {
     b.attr("detail", r.detail);
   }
@@ -631,6 +631,24 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   ref_by_name[top_key]      = ref_top_g;
   impl_by_name[top_key]     = impl_top_g;
 
+  // Unlike an outputless CHILD (which is structurally unobservable to its
+  // parent), an outputless SELECTED TOP gives the user no comparison points at
+  // all. Refuse that claim explicitly. Letting the generic query reach its
+  // `nothing_compared` path historically mislabeled this setup refusal as an
+  // exit-10 refutation; neither PASS nor REFUTED is justified without an
+  // observable contract.
+  const auto ref_top_io  = ref_top_g == nullptr ? nullptr : ref_top_g->get_io();
+  const auto impl_top_io = impl_top_g == nullptr ? nullptr : impl_top_g->get_io();
+  if (ref_top_io != nullptr && impl_top_io != nullptr && ref_top_io->get_output_pin_decls().empty()
+      && impl_top_io->get_output_pin_decls().empty()) {
+    livehd::lec::Query_result r;
+    r.verdict     = Verdict::Unknown;
+    r.engine      = base.engine;
+    r.unsupported = true;
+    r.detail      = "selected top has no observable output ports; no equivalence claim can be compared";
+    return r;
+  }
+
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
   // def keys it instantiates (taken from the ref-side Subs, canonicalized).
   absl::flat_hash_map<std::string, std::vector<std::string>> children;
@@ -660,17 +678,19 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<std::string>                order;
   absl::flat_hash_map<std::string, int>   mark;  // 0 unvisited, 1 in-progress, 2 done
   std::function<void(const std::string&)> dfs = [&](const std::string& n) {
-    int& m = mark[n];
-    if (m != 0) {
+    if (auto it = mark.find(n); it != mark.end() && it->second != 0) {
       return;  // done, or a cycle back-edge (modules form a DAG)
     }
-    m = 1;
+    mark[n] = 1;
     if (auto it = children.find(n); it != children.end()) {
       for (const auto& c : it->second) {
         dfs(c);
       }
     }
-    m = 2;
+    // Do not retain a reference to mark[n] across the recursive calls above:
+    // inserting a descendant can rehash flat_hash_map and invalidate every
+    // slot reference. Reacquire the parent slot after the subtree is complete.
+    mark[n] = 2;
     order.push_back(n);
   };
   dfs(top_key);
@@ -1241,10 +1261,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   //   assumed[i]   the child keys def i boxed WITHOUT a proof in hand. Empty in
   //                bottom-up (a box there is always a discharged premise).
   //   force_flat[i] children this def must DESCEND rather than box. Seeded by
-  //                the escalation rounds: when child C is definitively refuted,
-  //                its parent re-proves with C inlined — which is the ONLY step
-  //                needed, because the parent's conditional proof already
-  //                established that everything else about it matches.
+  //                the escalation rounds: when child C is refuted OR
+  //                inconclusive, its parent re-proves with C inlined. This is
+  //                the ONLY step needed when the parent proves, because the
+  //                parent's conditional proof already established that
+  //                everything else about it matches.
+  //   force_flat_refuted[i] the subset of force_flat caused by a concrete child
+  //                refutation. A parent PROVEN while absorbing one of these
+  //                still gets the mandatory flat confirmation; expanding an
+  //                Unknown child has no counterexample to confirm.
   // A def whose Proven verdict is only BOUNDED. It may NOT discharge a parent's
   // box premise: the sequence-transducer contract a box stands for is
   // explicitly unbounded ("from reset, identical input sequences produce
@@ -1254,6 +1279,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<uint8_t>                                       bounded_proof(order.size(), 0);
   std::vector<std::vector<std::string>>                      assumed(order.size());
   std::vector<absl::flat_hash_set<std::string>>              force_flat(order.size());
+  std::vector<absl::flat_hash_set<std::string>>              force_flat_refuted(order.size());
   // `refuted` for OTHER defs, snapshotted between rounds. run_def reads a
   // grandchild's status when deciding what to keep boxed during an escalation,
   // and two parents in the same retry round can run concurrently — reading the
@@ -1272,6 +1298,33 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       return;  // definitively decided in an earlier round — do not re-solve
     }
     const auto& name = order[def_ix];
+
+    // A non-top definition with no output ports has no hardware observation at
+    // its instance boundary. Its inputs may feed simulation-only DPI calls or
+    // dead internal logic, but no value can flow back into the parent, so the
+    // two definitions are relationally equivalent regardless of their bodies.
+    // Treat that as a structural proof and discharge the parent's box premise.
+    // Keep the selected top excluded: `lhd lec --top empty` has no observable
+    // contract and must retain the normal "nothing compared" refusal instead
+    // of becoming a vacuous whole-design PASS.
+    const auto ref_io  = ref_by_name[name]->get_io();
+    const auto impl_io = impl_by_name[name]->get_io();
+    if (name != top_key && ref_io != nullptr && impl_io != nullptr && ref_io->get_output_pin_decls().empty()
+        && impl_io->get_output_pin_decls().empty()) {
+      livehd::lec::Query_result r;
+      r.verdict          = Verdict::Proven;
+      r.engine           = "structural";
+      r.elapsed_ms       = 0;
+      r.detail           = "no observable output ports; the definition cannot affect its parent";
+      proven[def_ix]     = 1;
+      settled[def_ix]    = 1;
+      by_semdiff[def_ix] = 1;
+      semdiff_count.fetch_add(1, std::memory_order_relaxed);
+      std::lock_guard report_lock(report_mutex);
+      emit_lec_block_progress(name, r, base, 0);
+      std::print("lec[hier]: '{}' PROVEN (no observable output ports)\n", name);
+      return;
+    }
 
     // formal.lec.trust: a def ASSUMED equal WITHOUT a proof — the escape hatch for
     // a cell the encoder cannot model yet (a Latch). Skip solving it entirely and
@@ -1379,7 +1432,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // composition is an induction, not circular reasoning. Bottom-up boxes
         // only what it has already discharged.
         //   `force_flat` overrides: an escalation round descends the ONE child
-        // whose refutation this def has to absorb.
+        // whose refutation this def has to absorb or whose inconclusive proof it
+        // has to discharge in context.
         const bool want_box  = (top_down || is_proven) && force_flat[def_ix].count(c) == 0 && !assume_cones.contains(c);
         if (want_box) {
           // A child must NOT collapse when its ref/impl port sets diverge the
@@ -1408,12 +1462,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         } else {
           kids_proven = false;
           // ESCALATION: `c` is being INLINED into this def to absorb its
-          // refutation. Only `c` itself has to be expanded — its own children
-          // stay BOXED, so the miter grows by one def's logic and not by a whole
-          // subtree. (The encoder matches a collapse name hierarchically, so a
-          // grandchild named here is boxed even though it is reached through the
-          // flattened `c`.) They are premises like any other box, so they join
-          // `assumed` and the closure has to discharge them too.
+          // refutation or discharge its Unknown boundary in context. Only `c`
+          // itself has to be expanded — its own children stay BOXED, so the
+          // miter grows by one def's logic and not by a whole subtree. (The
+          // encoder matches a collapse name hierarchically, so a grandchild
+          // named here is boxed even though it is reached through the flattened
+          // `c`.) They are premises like any other box, so they join `assumed`
+          // and the closure has to discharge them too.
           if (top_down && force_flat[def_ix].count(c) > 0) {
             if (auto gk = children.find(c); gk != children.end()) {
               for (const auto& g : gk->second) {
@@ -1774,10 +1829,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     //    than the whole rest of the run. Fire it only when it is WORTH it, on
     //    either of two independent grounds:
     //
-    //    (a) CHASING A CEX (`force_flat` non-empty = an escalation round absorbing
-    //        a child's known refutation). Here the flat miter is how the
-    //        counterexample is found at all: dino PipelinedDualIssueCPU stays
-    //        UNKNOWN collapsed and REFUTES flat.
+    //    (a) CHASING A CEX (`force_flat_refuted` non-empty = an escalation round
+    //        absorbing a child's known refutation). Here the flat miter is how
+    //        the counterexample is found at all: dino PipelinedDualIssueCPU
+    //        stays UNKNOWN collapsed and REFUTES flat. force_flat may also be
+    //        non-empty for an Unknown child; that still earns the modelling
+    //        retry below, but there is no child CEX to flat-confirm.
     //
     //    (b) The collapsed attempt BARELY SPENT ITS BUDGET, so it did not fail for
     //        want of solver time and the retry is cheap. That is the modelling
@@ -1810,7 +1867,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     //        while the flat run refutes with a concrete CEX). Accepting it skips
     //        the very retry (a) exists for. A collapsed PROVEN with nothing
     //        refuted anywhere is untouched — the common case pays nothing.
-    const bool proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat[def_ix].empty();
+    const bool proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat_refuted[def_ix].empty();
     bool       absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
     if (refuted_under_collapse || unknown_under_collapse || proven_absorbing) {
       {
@@ -1835,8 +1892,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
       if (refuted_under_collapse) {
-        rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                         + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                    + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;  // the progress record carries the combined wall-clock below
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
@@ -1852,15 +1909,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           rf.cvc5       += r.cvc5;
           r              = std::move(rf);
         } else {
-          r.verdict       = Verdict::Unknown;
-          r.detail        = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                            + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+          r.verdict = Verdict::Unknown;
+          r.detail  = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
+                     + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
           r.cvc5         += rf.cvc5;
           absorb_demoted  = true;  // see the int_blast_retry guard below
         }
       } else if (rf.verdict != Verdict::Unknown) {
-        rf.detail      = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                         + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
+        rf.detail = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                    + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
         rf.elapsed_ms  = -1;
         rf.cvc5       += r.cvc5;
         r              = std::move(rf);
@@ -1892,8 +1949,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         r.verdict = Verdict::Unknown;
         r.detail  = std::format(
             "INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — a trust box asserts every leaf input "
-            "equal incl. functional don't-cares, and the trusted leaf cannot be flattened to tell them apart, so "
-            "this is not a disproof; {}",
+             "equal incl. functional don't-cares, and the trusted leaf cannot be flattened to tell them apart, so "
+             "this is not a disproof; {}",
             tb,
             r.detail);
       }
@@ -2067,14 +2124,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // as bottom-up already does.
   //
   // A child that did NOT discharge leaves its ancestors conditional. That is a
-  // strictly better answer than bottom-up's, which flattens the failing child
-  // into every ancestor and grows the miter on the way up. Here the ONE def
-  // that has to absorb the failure is the refuting child's immediate PARENT:
-  // re-prove the parent with that child INLINED and everything else still
-  // boxed. If the parent proves, its own boundary behaviour is intact, and
-  // since every ancestor already proved with the parent BOXED, the whole chain
-  // closes — there is nothing to check higher up (user ruling 2026-08-02).
-  // Only if the parent itself refutes does the escalation move up a level.
+  // strictly better first pass than bottom-up's, which flattens the unresolved
+  // child into every ancestor and grows the miter on the way up. Here the ONE
+  // def that has to absorb or contextualize the failure is the unresolved
+  // child's immediate PARENT: re-prove the parent with that child INLINED and
+  // everything else still boxed. If the parent proves, its own boundary
+  // behaviour is intact, and since every ancestor already proved with the
+  // parent BOXED, the whole chain closes — there is nothing to check higher up
+  // (user ruling 2026-08-02). Only if the parent is still unresolved does the
+  // escalation move up a level.
   std::vector<uint8_t> unconditional(order.size(), 0);
   // True when def `i` has NO undischarged premise -- i.e. it is non-unconditional
   // only because its OWN proof is bounded. The conditional-degradation message
@@ -2121,16 +2179,19 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   if (top_down) {
     compute_closure();
     const size_t top_ix = order_ix.at(top_key);
-    // Escalation rounds. Each round picks the refuted defs whose parent boxed
-    // them, inlines exactly those into their parents, and re-proves ONLY those
-    // parents. Bounded by the hierarchy depth: a round that changes nothing
+    // Escalation rounds. Each round picks defs whose OWN proof is unresolved
+    // (Refuted or Unknown), inlines exactly those into their parents, and
+    // re-proves ONLY those parents. Picking only own-proof failures avoids
+    // flattening their already-conditional ancestors in the same round: once
+    // the immediate parent proves, the existing boxed theorem closes the whole
+    // chain. Bounded by the hierarchy depth: a round that changes nothing
     // stops. The top itself has no parent to escalate into — its own flat
     // confirm (inside run_def) is already the last word.
     for (size_t round = 0; round < order.size() && unconditional[top_ix] == 0; ++round) {
       std::vector<size_t>         retry;
       absl::flat_hash_set<size_t> retry_set;
       for (size_t i = 0; i < order.size(); ++i) {
-        if (refuted[i] == 0 || order[i] == top_key) {
+        if (proven[i] != 0 || order[i] == top_key) {
           continue;
         }
         for (const auto& p : parents[order[i]]) {
@@ -2143,6 +2204,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             continue;
           }
           force_flat[pi->second].insert(order[i]);
+          if (refuted[i] != 0) {
+            force_flat_refuted[pi->second].insert(order[i]);
+          }
           if (retry_set.insert(pi->second).second) {
             retry.push_back(pi->second);
           }
@@ -2153,9 +2217,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       refuted_snapshot = refuted;  // no task in flight: safe, and fixes the round
       for (size_t i : retry) {
-        std::print("lec[hier]: ESCALATE '{}' — re-proving with {} refuted child(ren) INLINED, every other child still boxed\n",
-                   order[i],
-                   force_flat[i].size());
+        std::print(
+            "lec[hier]: ESCALATE '{}' — re-proving with {} unresolved child(ren) INLINED "
+            "({} refuted, {} inconclusive), every other child still boxed\n",
+            order[i],
+            force_flat[i].size(),
+            force_flat_refuted[i].size(),
+            force_flat[i].size() - force_flat_refuted[i].size());
         settled[i] = 0;  // re-solve this one def
         proven[i]  = 0;
         refuted[i] = 0;
@@ -2184,7 +2252,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       bool is_absorbed = false;
       for (const auto& p : parents[order[i]]) {
         auto pi = order_ix.find(p);
-        if (pi != order_ix.end() && force_flat[pi->second].count(order[i]) > 0 && proven[pi->second] != 0) {
+        if (pi != order_ix.end() && force_flat_refuted[pi->second].count(order[i]) > 0 && proven[pi->second] != 0) {
           is_absorbed = true;  // the parent re-proved with this block inlined
           break;
         }
@@ -2225,7 +2293,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       top_result.verdict = Verdict::Unknown;
       top_result.detail  = std::format(
           "INCONCLUSIVE: '{}' proved with every child BOXED, but {} premise(s) never discharged ({}) — the top's own "
-          "logic matches, so the difference is inside those block(s); {}",
+           "logic matches, so the difference is inside those block(s); {}",
           top_key,
           n,
           open_premises,
@@ -2326,9 +2394,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     const bool skipped = !have_top;
     top_result         = refuted_result;
     top_result.detail  = std::format("hierarchical: block '{}' REFUTED{}; {}",
-                                     refuted_def,
-                                     skipped ? "" : " (top itself inconclusive)",
-                                     top_result.detail);
+                                    refuted_def,
+                                    skipped ? "" : " (top itself inconclusive)",
+                                    top_result.detail);
     have_top           = true;
   }
   if (have_top && top_result.verdict == Verdict::Proven && top_down) {
@@ -2755,7 +2823,7 @@ bool lecfail_emit_side(const std::string& lhd_bin, const Options& opts, const st
   ensure_dir(scratch);
   std::string sidearg = kind == "lg" ? "lg:" + path : (kind == "ln" ? "ln:" + path : path);
   std::string cmd     = shell_quote(lhd_bin) + " compile " + shell_quote(sidearg) + " --emit-dir " + shell_quote("pyrope:" + outdir)
-                        + " --workdir " + shell_quote(scratch);
+                    + " --workdir " + shell_quote(scratch);
   if (kind == "verilog") {
     cmd += " --reader " + shell_quote(opts.reader);
   }
@@ -2849,10 +2917,10 @@ static void emit_witness_json(const std::string& path, std::string_view kind, st
     for (size_t i = 0; i < cy.inputs.size(); ++i) {
       const auto& in  = cy.inputs[i];
       j              += std::format("{}{{\"name\": \"{}\", \"value\": \"{}\", \"width\": {}}}",
-                                    i ? ", " : "",
-                                    esc(in.name),
-                                    esc(in.value),
-                                    in.width);
+                       i ? ", " : "",
+                       esc(in.name),
+                       esc(in.value),
+                       in.width);
     }
     j += std::format("]}}{}\n", c + 1 < t.cycles.size() ? "," : "");
   }
@@ -4339,9 +4407,9 @@ void lec_command(Options& opts, Result& res) {
         // boxes being confirmed. Clearing trust would re-flatten a latch and turn
         // this real counterexample into an encoder refusal (exit 7).
         oflat.collapse.assign(o.trust.begin(), o.trust.end());
-        auto rf        = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
-        rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                         + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        auto rf   = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
+        rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                    + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;      // the progress record carries the combined wall-clock below
         rf.cvc5       += r.cvc5;  // the collapsed run's cvc5 effort was still spent (formal.stats)
         r              = std::move(rf);
@@ -4359,7 +4427,7 @@ void lec_command(Options& opts, Result& res) {
           r.verdict = livehd::lec::Verdict::Unknown;
           r.detail  = std::format(
               "INCONCLUSIVE: refuted only at trusted-box input (bbin:{}) — trust asserts all leaf "
-              "inputs equal incl. don't-cares, not flattenable, so not a disproof; {}",
+               "inputs equal incl. don't-cares, not flattenable, so not a disproof; {}",
               tb,
               r.detail);
         }
@@ -4613,10 +4681,10 @@ void lec_command(Options& opts, Result& res) {
   auto yosys   = locate_lgcheck_yosys();
   auto rundir  = fs::absolute(workdir(opts)).string();
   auto cmd     = std::format("cd {} && {} --implementation {} --reference {}",
-                             shell_quote(rundir),
-                             shell_quote(lgcheck),
-                             shell_quote(impl_v),
-                             shell_quote(ref_v));
+                         shell_quote(rundir),
+                         shell_quote(lgcheck),
+                         shell_quote(impl_v),
+                         shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
   }
@@ -4775,12 +4843,12 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // counterexample was spurious".
   std::string       out   = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
-      "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
-      "// design='{}'  violated: {}\n"
-      "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
-      "// the violation lands at cycle {}.\n"
-      "{}"
-      "// Re-run:  {}   (dumps {}.vcd)\n\n",
+              "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
+              "// design='{}'  violated: {}\n"
+              "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
+              "// the violation lands at cycle {}.\n"
+              "{}"
+              "// Re-run:  {}   (dumps {}.vcd)\n\n",
       test_name,
       design_path,
       what,
@@ -4788,10 +4856,10 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       tr.reset_cycles,
       tr.diverge_cycle,
       embed_assert.empty() ? "// NO runtime check is embedded (a design-body assert is not executed by sim, and a\n"
-                             "// formal-block obligation could not be pinned to one statement) — read the violation\n"
-                             "// off the VCD against the sibling simfail JSON.\n"
-                           : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
-                             "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
+                                     "// formal-block obligation could not be pinned to one statement) — read the violation\n"
+                                     "// off the VCD against the sibling simfail JSON.\n"
+                                   : "// The formal-block obligation is re-checked in the test body below, so the replay\n"
+                                     "// FAILS on it; a design-body assert is not yet executed by sim — read those off the VCD.\n",
       rerun,
       test_name);
   if (can_import) {
@@ -5020,12 +5088,12 @@ static void emit_formal_report(const std::string& path, const std::string& desig
   j               += "  \"run\": {\n";
   j               += std::format("    \"verdict\": \"{}\",\n    \"detail\": \"{}\",\n", agg, json_esc(r.detail));
   j               += std::format("    \"elapsed_ms\": {},\n    \"checked_steps\": {},\n    \"reset_hold\": {},\n",
-                                 r.elapsed_ms,
-                                 r.checked_steps,
-                                 r.reset_hold);
+                   r.elapsed_ms,
+                   r.checked_steps,
+                   r.reset_hold);
   j               += std::format("    \"reset_detected\": {},\n    \"vacuous\": {},\n",
-                                 r.reset_detected ? "true" : "false",
-                                 r.vacuous ? "true" : "false");
+                   r.reset_detected ? "true" : "false",
+                   r.vacuous ? "true" : "false");
   {  // which assume scopes were contradictory ("" = the design tier)
     std::string vs;
     for (const auto& s : r.vacuous_scopes) {
@@ -5081,11 +5149,11 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     std::string why;
     if (!env_assume && p.verdict != livehd::lec::Verdict::Proven && p.verdict != livehd::lec::Verdict::Refuted) {
       const bool scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
-      why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
-            : p.unknown_at >= 0 ? std::format("solver gave up at cycle {}", p.unknown_at)
-            : scope_vacuous     ? (p.scope.empty() ? std::string{"design assume set contradictory"}
-                                                   : std::format("assume set of block '{}' contradictory", p.scope))
-                                : std::string{"not checked"};
+      why                      = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+                                 : p.unknown_at >= 0 ? std::format("solver gave up at cycle {}", p.unknown_at)
+                                 : scope_vacuous     ? (p.scope.empty() ? std::string{"design assume set contradictory"}
+                                                                        : std::format("assume set of block '{}' contradictory", p.scope))
+                                                     : std::string{"not checked"};
       if (p.kind == "assume") {
         why += "; unproven assume — NOT used";
       }
@@ -6180,9 +6248,9 @@ void formal_verify_command(Options& opts, Result& res) {
         const bool  scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
         std::string why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
                           : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
-                          : scope_vacuous ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
-                                                             : std::format("assume set of block '{}' is contradictory", p.scope))
-                                          : std::string{"not checked"};
+                          : scope_vacuous     ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
+                                                                 : std::format("assume set of block '{}' is contradictory", p.scope))
+                                              : std::string{"not checked"};
         if (p.kind == "assume") {
           why += "; unproven assume — NOT used (make it provable, or spell assume_nocheck to impose it UNCHECKED)";
         }

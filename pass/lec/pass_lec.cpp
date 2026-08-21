@@ -56,6 +56,16 @@ void Pass_lec::setup() {
                        "read_verilog -sv) | slang (load yosys-slang and parse in parallel; recommended for "
                        "large generated cgen Verilog)",
                        "verilog");
+  m.add_label_optional("normalize_split_ports",
+                       "lgyosys backend only: true packs/unpacks cgen's escaped dotted aggregate-port leaves "
+                       "to the reference's packed-vector top interface, using the cached RTLIL port lists; "
+                       "interface preparation is outside the equivalence timeout",
+                       "false");
+  m.add_label_optional("descend_on_inconclusive",
+                       "lgyosys backend only: true recursively checks direct child definitions when a top is "
+                       "inconclusive, reusing the already-read RTLIL; every child gets its own equivalence "
+                       "timeout, and any child counterexample refutes the run",
+                       "false");
   m.add_label_optional("gold_x",
                        "reference-side X semantics (cvc5 engines; the analogue of yosys miter "
                        "-ignore_gold_x): ignore (default; a ref constant's ?/X bits are don't-care — "
@@ -75,6 +85,12 @@ void Pass_lec::setup() {
                        "Accounting is on iff timeout>0 and formal.rlimit==0. NB engine=auto races ind+bmc as two "
                        "processes, each self-bounded to timeout",
                        "120");
+  m.add_label_optional("hard_timeout_mult",
+                       "hard wall backstop multiplier for an isolated proof worker: formal.timeout * this value "
+                       "(default 3). cvc5's soft limit cannot preempt every underlying SAT call; 0 disables the "
+                       "backstop. This bounds diagnostics only — a killed worker reports UNKNOWN, never PROVEN or "
+                       "REFUTED",
+                       "3");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate simfail/simfail_run)", "true");
   m.add_label_optional("simfail",
                        "true|false — with --workdir, write Pyrope simulation tests for REFUTED formal results. "
@@ -130,8 +146,9 @@ void Pass_lec::setup() {
                        "BOXED, then discharge each premise from the same pass's other entries (the module DAG is "
                        "well-founded, so this is an induction). No def waits on another def's verdict, so the "
                        "hierarchy runs fully in parallel and every miter is at its minimum size; a refuting block is "
-                       "absorbed by re-proving its immediate PARENT with that block inlined, and if the parent "
-                       "proves nothing higher is re-solved | bottom_up = legacy leaves-first, boxing only a child "
+                       "absorbed, and an inconclusive block is discharged in context, by re-proving its immediate "
+                       "PARENT with that block inlined; if the parent proves, nothing higher is re-solved | "
+                       "bottom_up = legacy leaves-first, boxing only a child "
                        "already proven and FLATTENING one that is not",
                        "top_down");
   m.add_label_optional("hier_refute",
@@ -281,29 +298,30 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine         = std::string{var.get("engine", "auto")};
-  o.solver         = std::string{var.get("solver", "cvc5")};
-  o.assume_check   = parse_bool(var.get("assume_check", "true"));
-  o.gold_x         = std::string{var.get("gold_x", "ignore")};
-  o.bound          = str_tools::to_i(var.get("bound", "6"));
-  o.timeout        = str_tools::to_i(var.get("timeout", "120"));
-  o.witness        = parse_bool(var.get("witness", "true"));
-  o.phase          = std::string{var.get("phase", "after_reset")};
-  o.reset_cycles   = str_tools::to_i(var.get("reset_cycles", "2"));
-  o.reset          = std::string{var.get("reset", "")};
-  o.match          = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
-  o.decompose      = std::string{var.get("decompose", "auto")};
-  o.cones          = std::string{var.get("cones", "auto")};
-  o.conelimit      = str_tools::to_i(var.get("conelimit", "10000"));
-  o.phase_sched    = parse_bool(var.get("phase_sched", "true"));
-  o.int_blast      = std::string{var.get("int_blast", "auto")};
-  o.box_seq        = std::string_view{var.get("box_model", "seq")} != "uf";
-  o.strict         = parse_bool(var.get("strict", "true"));
-  o.semdiff        = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
-  o.partitions     = str_tools::to_i(var.get("partitions", "4"));
-  o.split          = std::string{var.get("split", "auto")};
-  o.allow_oversize = parse_bool(var.get("allow_oversize", "false"));
-  o.stats          = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
+  o.engine            = std::string{var.get("engine", "auto")};
+  o.solver            = std::string{var.get("solver", "cvc5")};
+  o.assume_check      = parse_bool(var.get("assume_check", "true"));
+  o.gold_x            = std::string{var.get("gold_x", "ignore")};
+  o.bound             = str_tools::to_i(var.get("bound", "6"));
+  o.timeout           = str_tools::to_i(var.get("timeout", "120"));
+  o.hard_timeout_mult = str_tools::to_i(var.get("hard_timeout_mult", "3"));
+  o.witness           = parse_bool(var.get("witness", "true"));
+  o.phase             = std::string{var.get("phase", "after_reset")};
+  o.reset_cycles      = str_tools::to_i(var.get("reset_cycles", "2"));
+  o.reset             = std::string{var.get("reset", "")};
+  o.match             = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
+  o.decompose         = std::string{var.get("decompose", "auto")};
+  o.cones             = std::string{var.get("cones", "auto")};
+  o.conelimit         = str_tools::to_i(var.get("conelimit", "10000"));
+  o.phase_sched       = parse_bool(var.get("phase_sched", "true"));
+  o.int_blast         = std::string{var.get("int_blast", "auto")};
+  o.box_seq           = std::string_view{var.get("box_model", "seq")} != "uf";
+  o.strict            = parse_bool(var.get("strict", "true"));
+  o.semdiff           = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
+  o.partitions        = str_tools::to_i(var.get("partitions", "4"));
+  o.split             = std::string{var.get("split", "auto")};
+  o.allow_oversize    = parse_bool(var.get("allow_oversize", "false"));
+  o.stats             = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
   // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;

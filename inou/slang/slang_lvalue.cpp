@@ -7,6 +7,7 @@
 // write - instead of a fixed three-case switch.
 
 #include "absl/strings/str_cat.h"
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/types/AllTypes.h"
@@ -24,6 +25,37 @@ const slang::ast::Expression& pattern_lvalue_target(const slang::ast::Expression
   }
   return e;
 }
+
+// Collect top-level fields read from one aggregate (`target.field`, including
+// deeper paths such as `target.field.sub`).  A continuous assignment-pattern
+// is one simultaneous packed assignment in SystemVerilog, but the bundle
+// lowering below emits one leaf store at a time.  Therefore a field whose RHS
+// reads a sibling must be emitted after that sibling's driver; otherwise the
+// early read of a `mut` leaf resolves to nil before the later store exists.
+struct Self_field_read_collector : public slang::ast::ASTVisitor<Self_field_read_collector, slang::ast::VisitFlags::AllGood> {
+  const slang::ast::ValueSymbol*    target = nullptr;
+  absl::flat_hash_set<std::string>* reads  = nullptr;
+
+  void handle(const slang::ast::MemberAccessExpression& ma) {
+    const slang::ast::Expression* cur = &ma;
+    std::vector<std::string_view> path;
+    while (cur->kind == ExpressionKind::MemberAccess) {
+      const auto& m = cur->as<slang::ast::MemberAccessExpression>();
+      path.push_back(m.member.name);
+      cur = &m.value();
+    }
+    while (cur->kind == ExpressionKind::Conversion) {
+      cur = &cur->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (!path.empty() && (cur->kind == ExpressionKind::NamedValue || cur->kind == ExpressionKind::HierarchicalValue)
+        && &cur->as<slang::ast::ValueExpressionBase>().symbol == target) {
+      // The member chain is collected outside-in, so the last item is the
+      // top-level field represented by Struct_info::fields.
+      reads->insert(std::string(path.back()));
+    }
+    visitDefault(ma);
+  }
+};
 }  // namespace
 
 void Slang_context::note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc) {
@@ -295,7 +327,7 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   ensure_aggregate_decl(rsym);
   auto lit = mem_info_.find(&lsym);
   auto rit = mem_info_.find(&rsym);
-  if (lit == mem_info_.end() || rit == mem_info_.end() || !lit->second.is_tuple) {
+  if (lit == mem_info_.end() || rit == mem_info_.end()) {
     return false;
   }
   const auto lmi = lit->second;
@@ -303,7 +335,7 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   if (lmi.size != rmi.size || lmi.elem_bits != rmi.elem_bits) {
     return false;
   }
-  if (rmi.is_tuple) {
+  if (lmi.is_tuple && rmi.is_tuple) {
     if (lmi.fields.size() != rmi.fields.size()) {
       return false;
     }
@@ -314,7 +346,11 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
         return false;
       }
     }
-  } else if (!flat_port_syms_.contains(&rsym)) {
+  } else if (lmi.is_tuple) {
+    if (!flat_port_syms_.contains(&rsym)) {
+      return false;
+    }
+  } else if (rmi.is_tuple || lmi.rank() != 1 || rmi.rank() != 1) {
     return false;
   }
   if (&lsym == &rsym) {
@@ -324,6 +360,38 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   note_write(lsym, current_assign_nonblocking_, lhs->sourceRange.start());
   const auto lname = lname_of(lsym);
   const auto rname = lname_of(rsym);
+
+  // A plain array may be represented either as a Memory (entry zero in the
+  // packed read_all/update bus LSB) or as a flat packed bus (the declaration's
+  // rightmost element in the LSB, matching SystemVerilog port/aggregate
+  // layout). Those orders differ for an ascending range. Whole-array copies
+  // are positional (leftmost-to-leftmost), so reverse element lanes exactly
+  // when the two internal representations disagree. Without this bridge,
+  // `logic [W-1:0] d [N]; d = q; d[i] = x; q <= d;` updates N-1-i after a
+  // Slang -> Pyrope round trip.
+  if (!lmi.is_tuple) {
+    const int  total_bits   = static_cast<int>(lmi.size * lmi.elem_bits);
+    const bool lhs_flat     = flat_port_syms_.contains(&lsym);
+    const bool rhs_flat     = flat_port_syms_.contains(&rsym);
+    const bool lhs_reversed = !lhs_flat && !lmi.descending;
+    const bool rhs_reversed = !rhs_flat && !rmi.descending;
+    auto       packed_rhs   = to_pattern(read_symbol(rsym, rhs->sourceRange), total_bits, false);
+
+    if (lhs_reversed != rhs_reversed) {
+      std::string reordered;
+      for (int64_t dst = 0; dst < lmi.size; ++dst) {
+        const int64_t src  = lmi.size - 1 - dst;
+        auto          lane = extract_field(packed_rhs, src * lmi.elem_bits, lmi.elem_bits);
+        if (dst != 0) {
+          lane = builder_.create_shl_stmts(lane, std::to_string(dst * lmi.elem_bits));
+        }
+        reordered = reordered.empty() ? lane : builder_.create_bit_or_stmts({reordered, lane});
+      }
+      packed_rhs = std::move(reordered);
+    }
+    builder_.create_assign_stmts(lname, packed_rhs);
+    return true;
+  }
 
   // A struct-element memory has no live aggregate backing value after
   // detuple: its storage is the set of scalar field arrays (`mem.field`). A
@@ -687,9 +755,8 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
 // output>`, so `rhs` is the child's flattened output bus. Decompose it per
 // element and recurse:
 //   - unpacked array target: source element k maps to array index left+k*step
-//     (LRM: first listed element -> leftmost index); its bit offset in the flat
-//     bus is (idx-lower)*elem_bits, exactly matching flat_port_read/write
-//     (Verilator/yosys flatten unpacked ports identically, so LEC lines up).
+//     (LRM: first listed element -> leftmost index); Yosys places the rightmost
+//     element in the flat bus LSB, exactly matching flat_port_read/write.
 //   - packed (integral) target: slang resolves elements MSB-first, like a
 //     `{...}` concatenation (element 0 occupies the high bits).
 // Whole-struct write to a per-field bundle var. Each field's leaf net gets its
@@ -757,7 +824,65 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   }
   if (is_pattern && elems.size() == fields.size()) {
     note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-    for (size_t i = 0; i < fields.size(); ++i) {
+    std::vector<size_t> emit_order;
+    emit_order.reserve(fields.size());
+
+    // A continuous whole-aggregate assignment evaluates as a set of
+    // position-independent net equations.  Our leaf stores are textual, so
+    // topologically order the acyclic sibling dependencies.  Do not apply
+    // this to procedural blocking assignments: there, turning an old-value
+    // read into a newly-written sibling read would change the language
+    // semantics.  Cyclic remnants retain source order and are handled by the
+    // existing wire/cycle machinery rather than being silently broken here.
+    if (proc_kind_ == Proc_kind::none) {
+      std::vector<std::vector<size_t>> users(fields.size());
+      std::vector<size_t>              indegree(fields.size(), 0);
+      for (size_t i = 0; i < fields.size(); ++i) {
+        absl::flat_hash_set<std::string> reads;
+        Self_field_read_collector        collector;
+        collector.target = &sym;
+        collector.reads  = &reads;
+        elems[i]->visit(collector);
+        for (const auto& name : reads) {
+          for (size_t j = 0; j < fields.size(); ++j) {
+            if (i != j && fields[j].name == name) {
+              users[j].push_back(i);
+              ++indegree[i];
+              break;
+            }
+          }
+        }
+      }
+      std::vector<bool> emitted(fields.size(), false);
+      for (size_t n = 0; n < fields.size(); ++n) {
+        size_t ready = fields.size();
+        for (size_t i = 0; i < fields.size(); ++i) {
+          if (!emitted[i] && indegree[i] == 0) {
+            ready = i;  // stable among independent fields
+            break;
+          }
+        }
+        if (ready == fields.size()) {
+          break;  // a genuine dependency cycle remains
+        }
+        emitted[ready] = true;
+        emit_order.push_back(ready);
+        for (size_t user : users[ready]) {
+          --indegree[user];
+        }
+      }
+      for (size_t i = 0; i < fields.size(); ++i) {
+        if (!emitted[i]) {
+          emit_order.push_back(i);
+        }
+      }
+    } else {
+      for (size_t i = 0; i < fields.size(); ++i) {
+        emit_order.push_back(i);
+      }
+    }
+
+    for (size_t i : emit_order) {
       const auto& f = fields[i];
       // fit_wrap (not to_pattern): land each value in the leaf's declared
       // width/sign — a signed field must stay in its signed range.
@@ -931,17 +1056,16 @@ void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs, std::sp
   const auto& ct = lhs.type->getCanonicalType();
 
   if (!ct.isIntegral() && ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-    const auto&   arr   = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-    const int     eb    = flat_or_tinfo(arr.elementType).bits;
-    const int     flat  = eb * static_cast<int>(arr.range.width());
-    const int64_t left  = arr.range.left;
-    const int64_t lower = arr.range.lower();
-    const int64_t step  = arr.range.right >= arr.range.left ? 1 : -1;
-    auto          p     = to_pattern(to_int_value(rhs), flat, false);
-    int64_t       k     = 0;
+    const auto&   arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+    const int     eb   = flat_or_tinfo(arr.elementType).bits;
+    const int     flat = eb * static_cast<int>(arr.range.width());
+    const int64_t left = arr.range.left;
+    const int64_t step = arr.range.right >= arr.range.left ? 1 : -1;
+    auto          p    = to_pattern(to_int_value(rhs), flat, false);
+    int64_t       k    = 0;
     for (const auto* e : elems) {
       const int64_t idx    = left + k * step;
-      const int64_t lo_bit = (idx - lower) * eb;
+      const int64_t lo_bit = (arr.range.isDescending() ? idx - arr.range.lower() : arr.range.upper() - idx) * eb;
       assign_to(pattern_lvalue_target(*e), extract_field(p, lo_bit, eb));
       ++k;
     }
@@ -1378,15 +1502,17 @@ bool Slang_context::lower_mem_element_dynamic_write(const slang::ast::Expression
 }
 
 // Unpacked-array PORT element access: the port is a FLAT packed bus, so
-// element `arr[idx]` is the slice at bit `(idx-lower)*elem_bits` (reusing the
-// packed-select shift/mask machinery), NOT a memory store/tuple_get.
+// element `arr[idx]` is a declaration-order slice: the rightmost element is in
+// the packed bus LSB. This is `(idx-lower)*elem_bits` for descending ranges and
+// `(upper-idx)*elem_bits` for ascending ranges. It is NOT a memory
+// store/tuple_get.
 std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi) {
   const auto* base_sym  = resolve_base_symbol(es.value());
   const int   flat_bits = mi.elem_bits * static_cast<int>(mi.size);
   auto        p         = to_pattern(to_int_value(read_symbol(*base_sym, es.value().sourceRange)), flat_bits, false);
 
   if (auto ci = try_eval_int(es.selector())) {
-    int64_t lo_bit = (*ci - mi.lower) * mi.elem_bits;
+    int64_t lo_bit = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
     if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
       emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
       lo_bit = std::max<int64_t>(lo_bit, 0);
@@ -1396,8 +1522,12 @@ std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpress
   }
 
   auto idx = to_int_value(lower_rvalue(es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  if (mi.descending) {
+    if (mi.lower != 0) {
+      idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+    }
+  } else {
+    idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
   }
   std::string shamt    = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
   const int   bias     = mi.elem_bits;
@@ -1424,7 +1554,7 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
   auto        val       = to_pattern(to_int_value(rhs), mi.elem_bits, mi.elem_signed);
 
   if (auto ci = try_eval_int(es.selector())) {
-    int64_t lo_bit = (*ci - mi.lower) * mi.elem_bits;
+    int64_t lo_bit = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
     if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
       emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
       lo_bit = std::max<int64_t>(lo_bit, 0);
@@ -1439,8 +1569,12 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
   // dynamic element index: read-modify-write with shifts (const set_mask only).
   auto cur_p = to_pattern(to_int_value(read_symbol(*base_sym, es.value().sourceRange)), flat_bits, false);
   auto idx   = to_int_value(lower_rvalue(es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  if (mi.descending) {
+    if (mi.lower != 0) {
+      idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+    }
+  } else {
+    idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
   }
   std::string shamt    = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
   auto        sel_mask = builder_.create_shl_stmts(mask_text(mi.elem_bits), shamt);
@@ -1537,11 +1671,15 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
           out.is_signed   = mi.elem_signed;
           const auto& sel = lhs.as<slang::ast::ElementSelectExpression>().selector();
           if (auto ci = try_eval_int(sel)) {
-            out.const_off = (*ci - mi.lower) * mi.elem_bits;
+            out.const_off = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
           } else {
             auto idx = to_int_value(lower_rvalue(sel));
-            if (mi.lower != 0) {
-              idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+            if (mi.descending) {
+              if (mi.lower != 0) {
+                idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+              }
+            } else {
+              idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
             }
             out.dyn_off = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
           }
@@ -1564,8 +1702,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       std::optional<int64_t> const_low;
       std::string            dyn_low;
       auto                   normalize = [&](const slang::ast::Expression& idx,
-                                             int64_t                       width_down,
-                                             int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
+                           int64_t                       width_down,
+                           int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
         if (auto ci = try_eval_int(idx)) {
           int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
           return {bottom, {}};

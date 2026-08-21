@@ -37,6 +37,8 @@ sh_library(
         ":yosys2",
     ],
     data = [
+        "rtlil_children.py",
+        "rtlil_split_port_adapter.py",
         "//ware:cgen_memory_rtl",
     ],
     visibility = ["//visibility:public"],

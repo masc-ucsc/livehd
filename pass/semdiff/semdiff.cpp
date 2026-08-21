@@ -7,6 +7,7 @@
 #include <format>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <print>
 #include <string>
@@ -99,6 +100,9 @@ std::string normalize_reg_name(std::string_view raw) {
 }
 
 std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
+  if (auto origin = node.attr(livehd::attrs::aggregate_origin); origin.has() && !origin.get().empty()) {
+    return "n:" + normalize_reg_name(origin.get());
+  }
   auto pn = gu::pin_name_of(node.get_driver_pin(0));
   if (pn.empty()) {
     pn = gu::node_name_of(node);
@@ -281,7 +285,9 @@ bool data_sink_port(Ntype_op op, int pid) {
 struct State_cell {
   hhds::Node_class                           node;
   std::string                                key;            // state_key (tier-1 identity; mangled under name_noise)
+  std::string                                physical_key;   // canonical node hier name, independent of aggregate provenance
   std::string                                truth;          // name_noise only: the original key (empty = key is original)
+  std::string                                aggregate_key;  // empty unless this is an SROA leaf
   bool                                       is_mem = false;
   uint64_t                                   kind   = 0;   // op + bits + init fold (local identity)
   std::vector<uint32_t>                      preds;        // state cells feeding a data pin through comb
@@ -295,11 +301,11 @@ struct State_cell {
   // Annotation only refines buckets, and lec re-verifies every pair anyway.
   std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
   std::vector<std::pair<uint32_t, uint32_t>> reach_f;
-  uint64_t                                   token   = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
-  bool                                       t1_pair = false, t1_group = false, t2_pair = false, ambiguous = false;
-  uint64_t                                   kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
-  bool                                       kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
-                                                                  // kind fold (op/init — the pair precondition)
+  uint64_t                                   token = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
+  bool     t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
+  uint64_t kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
+  bool     kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
+                                // kind fold (op/init — the pair precondition)
 };
 
 struct State_side {
@@ -318,7 +324,13 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     }
     State_cell c;
     c.node = node;
-    c.key    = state_key(g, node);
+    c.key  = state_key(g, node);
+    if (auto physical = normalize_reg_name(node.get_hier_name()); !physical.empty()) {
+      c.physical_key = "n:" + physical;
+    }
+    if (auto origin = node.attr(livehd::attrs::aggregate_origin); origin.has()) {
+      c.aggregate_key = normalize_reg_name(origin.get());
+    }
     c.is_mem = op == Ntype_op::Memory;
     c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
     // COMMIT CLASS folds into the identity for Flop AND Latch (2f-latch M2),
@@ -531,9 +543,17 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) 
 // pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
 // under dump_state.
 void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts, Match_result& res) {
-  State_stats& st = res.state;
-  st.a_total      = static_cast<uint32_t>(sa.cells.size());
-  st.b_total      = static_cast<uint32_t>(sb.cells.size());
+  State_stats& st            = res.state;
+  auto         logical_total = [](const State_side& ss) {
+    absl::flat_hash_set<std::string> groups;
+    for (const auto& c : ss.cells) {
+      groups.insert(c.aggregate_key.empty() ? std::format("physical:{}", c.node.get_debug_nid())
+                                            : std::format("aggregate:{}", c.aggregate_key));
+    }
+    return static_cast<uint32_t>(groups.size());
+  };
+  st.a_total = logical_total(sa);
+  st.b_total = logical_total(sb);
   for (const auto& c : sa.cells) {
     st.a_mems += c.is_mem ? 1 : 0;
   }
@@ -557,6 +577,55 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     }
   }
 
+  // An aggregate attribute is source provenance, not part of a physical
+  // register's identity. It commonly survives the direct Pyrope graph but is
+  // (correctly) absent after that graph is emitted as Verilog and read back.
+  // Bridge that asymmetric representation before aggregate-name matching:
+  // exact, unique canonical physical names remain a certain tier-1 match.
+  //
+  // Keep this deliberately narrower than ordinary name matching. When both
+  // sides retain aggregate provenance the existing aggregate path below owns
+  // monolithic-vs-SROA correspondence; when neither does, their state_key is
+  // already the physical name. The name-noise experiment must also be allowed
+  // to destroy matches, so it bypasses this representation-only bridge.
+  absl::flat_hash_set<std::string> bridged_aggregate_groups;
+  if (opts.matching_names && opts.name_noise == 0.0) {
+    absl::flat_hash_map<std::string, std::vector<uint32_t>> aphysical, bphysical;
+    for (uint32_t i = 0; i < sa.cells.size(); ++i) {
+      if (!sa.cells[i].physical_key.empty()) {
+        aphysical[sa.cells[i].physical_key].push_back(i);
+      }
+    }
+    for (uint32_t i = 0; i < sb.cells.size(); ++i) {
+      if (!sb.cells[i].physical_key.empty()) {
+        bphysical[sb.cells[i].physical_key].push_back(i);
+      }
+    }
+    for (const auto& [key, av] : aphysical) {
+      auto it = bphysical.find(key);
+      if (it == bphysical.end() || av.size() != 1 || it->second.size() != 1) {
+        continue;
+      }
+      auto& ca = sa.cells[av.front()];
+      auto& cb = sb.cells[it->second.front()];
+      if (ca.aggregate_key.empty() == cb.aggregate_key.empty()) {
+        continue;
+      }
+      const uint64_t tok = hcombine(hstr("\x01physical-state"), hstr(key));
+      ca.token           = tok;
+      ca.t1_pair         = true;
+      ca.physical_bridge = true;
+      cb.token           = tok;
+      cb.t1_pair         = true;
+      cb.physical_bridge = true;
+      if (!ca.aggregate_key.empty()) {
+        bridged_aggregate_groups.insert("a:" + ca.aggregate_key);
+      } else {
+        bridged_aggregate_groups.insert("b:" + cb.aggregate_key);
+      }
+    }
+  }
+
   // Tier-1: state_key across the sides. 1:1 => a certain pair; a colliding key
   // present on both sides => one symmetric group (seeded alike, exactly the
   // matching_names contract); a one-sided key stays unresolved.
@@ -568,6 +637,57 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     bkeys[sb.cells[i].key].push_back(i);
   }
   if (opts.matching_names) {
+    auto valid_aggregate_group = [](const State_side& ss, const std::vector<uint32_t>& group) {
+      if (group.size() <= 1) {
+        return true;  // the opposite side may be the unexpanded aggregate
+      }
+      absl::flat_hash_set<int32_t>             ordinals;
+      absl::flat_hash_map<int32_t, int32_t>    ordinal_to_source;
+      std::vector<std::pair<int32_t, int32_t>> packed_ranges;
+      int32_t                                  declared_extent = 0;
+      for (uint32_t i : group) {
+        const auto& c = ss.cells[i];
+        if (c.aggregate_key.empty()) {
+          return false;
+        }
+        auto extent = c.node.attr(livehd::attrs::aggregate_extent);
+        auto lane   = c.node.attr(livehd::attrs::aggregate_lane_ordinal);
+        auto source = c.node.attr(livehd::attrs::aggregate_source_index);
+        auto offset = c.node.attr(livehd::attrs::aggregate_bit_offset);
+        auto width  = c.node.attr(livehd::attrs::aggregate_bit_width);
+        if (!extent.has() || !lane.has() || !source.has() || !offset.has() || !width.has() || extent.get() <= 0 || lane.get() < 0
+            || lane.get() >= extent.get() || offset.get() < 0 || width.get() <= 0
+            || offset.get() > std::numeric_limits<int32_t>::max() - width.get()) {
+          return false;
+        }
+        if (declared_extent == 0) {
+          declared_extent = extent.get();
+        } else if (declared_extent != extent.get()) {
+          return false;
+        }
+        ordinals.insert(lane.get());
+        auto [source_it, inserted] = ordinal_to_source.try_emplace(lane.get(), source.get());
+        if (!inserted && source_it->second != source.get()) {
+          return false;
+        }
+        packed_ranges.emplace_back(offset.get(), offset.get() + width.get());
+      }
+      // Struct arrays can have several field leaves per lane. The distinct lane
+      // ordinals must cover the declared extent and the absolute bit ranges
+      // must reassemble one gap-free, non-overlapping packed value.
+      if (ordinals.size() != static_cast<size_t>(declared_extent)) {
+        return false;
+      }
+      std::sort(packed_ranges.begin(), packed_ranges.end());
+      int32_t cursor = 0;
+      for (const auto& [lo, hi] : packed_ranges) {
+        if (lo != cursor) {
+          return false;
+        }
+        cursor = hi;
+      }
+      return cursor > 0;
+    };
     for (auto& [key, av] : akeys) {
       auto it = bkeys.find(key);
       if (it == bkeys.end()) {
@@ -579,28 +699,56 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         sb.label.try_emplace(tok, "st:" + key);
       }
       const bool one = av.size() == 1 && it->second.size() == 1;
-      if (!one) {
-        // A name that collides within one side gets no tier-1 token at all
-        // (tier-2 decides it). Keep the census `lhd pass semdiff` prints --
-        // "key on both sides but colliding within one" is still exactly what
-        // happened -- instead of letting a_name_grouped/b_name_grouped read as
-        // zero for every collision.
+      const bool aggregate_pair
+          = !one && valid_aggregate_group(sa, av) && valid_aggregate_group(sb, it->second)
+            && (std::any_of(av.begin(), av.end(), [&](uint32_t i) { return !sa.cells[i].aggregate_key.empty(); })
+                || std::any_of(it->second.begin(), it->second.end(), [&](uint32_t i) {
+                     return !sb.cells[i].aggregate_key.empty();
+                   }));
+      if (!one && !aggregate_pair) {
+        // A colliding name that is not a complete reconstructed aggregate gets
+        // no tier-1 token; tier-2 can still decide it conservatively.
         st.a_name_grouped += static_cast<uint32_t>(av.size());
         st.b_name_grouped += static_cast<uint32_t>(it->second.size());
         continue;
       }
       for (uint32_t i : av) {
-        sa.cells[i].token    = tok;
-        sa.cells[i].t1_pair  = true;
-        sa.cells[i].t1_group = false;
+        sa.cells[i].token           = tok;
+        sa.cells[i].t1_pair         = true;
+        sa.cells[i].t1_group        = false;
+        sa.cells[i].physical_bridge = false;
       }
       for (uint32_t i : it->second) {
-        sb.cells[i].token    = tok;
-        sb.cells[i].t1_pair  = true;
-        sb.cells[i].t1_group = false;
+        sb.cells[i].token           = tok;
+        sb.cells[i].t1_pair         = true;
+        sb.cells[i].t1_group        = false;
+        sb.cells[i].physical_bridge = false;
       }
       ++st.name_pairs;
       st.name_pairs_mem += sa.cells[av.front()].is_mem ? 1 : 0;
+    }
+
+    // State statistics count a reconstructed aggregate as one logical state.
+    // Count a physical bridge only when every leaf in that aggregate found its
+    // exact counterpart and the regular aggregate matcher above did not take
+    // ownership of the group. A partial bridge still seeds its certain leaf
+    // pairs but does not claim the logical aggregate was fully paired.
+    for (const auto& group : bridged_aggregate_groups) {
+      const bool        on_a     = group.starts_with("a:");
+      const std::string key      = group.substr(2);
+      const auto&       side     = on_a ? sa : sb;
+      bool              complete = true;
+      bool              is_mem   = false;
+      for (const auto& c : side.cells) {
+        if (c.aggregate_key == key) {
+          complete &= c.physical_bridge;
+          is_mem   |= c.is_mem;
+        }
+      }
+      if (complete) {
+        ++st.name_pairs;
+        st.name_pairs_mem += is_mem ? 1 : 0;
+      }
     }
   }
 

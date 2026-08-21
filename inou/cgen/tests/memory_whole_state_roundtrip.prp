@@ -1,0 +1,14 @@
+/*
+:name: memory_whole_state_roundtrip
+:type: compile
+*/
+
+// A registered whole-array update takes cgen's inline packed-array path, not
+// the cgen_memory_* wrapper path. Its emitted storage name must retain the
+// original Memory-node provenance for native endpoint correspondence.
+pub mod memory_whole_state_roundtrip(inp:u80, idx:u3) -> (r:u10@[0], allout:u80@[0]) {
+  reg arr:[8]u10 = nil
+  arr = inp
+  r = arr[idx]
+  allout = arr
+}

@@ -4328,7 +4328,8 @@ void Lnast_prp_writer::write_func_call() {
     return;
   }
   // LHS (the result/instance variable)
-  auto lhs = std::string(strip_prefix(current_text()));
+  const std::string raw_lhs(current_text());
+  auto              lhs = std::string(strip_prefix(raw_lhs));
   // function name (next sibling)
   move_to_sibling();
   std::string call_name(unquote_callee(current_text()));
@@ -4361,15 +4362,32 @@ void Lnast_prp_writer::write_func_call() {
                              && ((instantiated_modules_ != nullptr && instantiated_modules_->count(call_tail) != 0u)
                                  || lnast->has_external_module(call_tail));
 
+  // A zero-output module is a sink instance (DPI/verification observers are
+  // the common RTL shape).  Writing `mut inst = Sink(...)` makes the Pyrope
+  // reader create a value-result temp plus `inst = temp`; tolg correctly emits
+  // no result pin for the sink call, then that synthetic copy resolves the temp
+  // to nil.  Emit the language's call-as-statement form instead.  The explicit
+  // name attribute still preserves the RTL hierarchy name.
+  const bool sink_call = sink_modules_ != nullptr && sink_modules_->count(call_tail) != 0u;
+  if (sink_call) {
+    if (auto fit = fold_info_.find(raw_lhs); fit != fold_info_.end() && fit->second.use_count != 0) {
+      emit_unimplemented(std::format("result '{}' of zero-output module '{}' is read", lhs, call_name));
+      move_to_parent();
+      return;
+    }
+  }
+
   // A multi-output callee (comb or mod) whole-binds like any other instance —
   // `mut r = C(args)` — and its outputs are read as `r.port`.  (The old
   // destructure form `mut (r__o = C.o, …) = C(args)` targeted the runner-inline
   // era; today slang-origin units carry `hdl` and stay Sub instances, where the
   // destructure silently dropped every output binding — the INT2FP fracRounded
   // miscompile.)
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
+  if (!sink_call) {
+    print(decl_prefix(lhs));
+    print(lhs);
+    print(" = ");
+  }
   print(quote_module_path(callee_ref));  // a Verilog escaped-id callee needs backticks
   if (name_instance) {
     print("::[name=");

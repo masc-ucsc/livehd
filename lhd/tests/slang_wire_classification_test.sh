@@ -21,6 +21,10 @@
 #      as a loop break so Verilog cgen orders a forward wire's producer before
 #      its blocking consumer instead of emitting the whole feedback SCC in
 #      storage order.
+#  (4) GENERATED OUTPUT ALIAS: a child output written into cgen's temporary
+#      wire, then copied through an always_comb alias, must survive a coarse
+#      cross-instance SCC.  In particular a constant-ready child cannot lose
+#      that output merely because a dispatcher feeds one of its inputs.
 #
 # Both are verified the strong way: the emitted Pyrope must recompile AND cvc5-
 # prove equivalent to the original Verilog.
@@ -121,5 +125,88 @@ consumer_line=$(grep -nE 'mux_[0-9]+ = q;' "$TOP_V" | head -1 | cut -d: -f1)
 $LHD compile "$W/hrv/State.State.v" "$TOP_V" --top Top --workdir "$W/hrr" -q \
   || fail "stateful hierarchy's generated Verilog did not read back"
 echo "PASS: late stateful callee is refreshed as a loop break before Verilog emission"
+
+# ── (4) child output -> generated temporary -> procedural alias in SCC ───
+cat >"$W/output_alias.sv" <<'EOF'
+module ready_child(input logic valid_i, output logic ready_o, output logic seen_o);
+  assign ready_o = 1'b1;       // independent of valid_i: hierarchy SCC is false
+  assign seen_o = valid_i;
+endmodule
+
+module ready_dispatch(input logic ready_i, output logic valid_o, output logic ready_o);
+  assign valid_o = ready_i;
+  assign ready_o = ready_i;
+endmodule
+
+module output_alias(output logic ready_o, output logic seen_o);
+  wire child_ready;
+  wire dispatch_valid;
+  logic ready_alias;
+  ready_child child(.valid_i(dispatch_valid), .ready_o(child_ready), .seen_o(seen_o));
+  ready_dispatch dispatch(.ready_i(ready_alias), .valid_o(dispatch_valid), .ready_o(ready_o));
+  always_comb begin
+    ready_alias = child_ready;
+  end
+endmodule
+EOF
+$LHD compile "$W/output_alias.sv" --top output_alias --emit-dir pyrope:"$W/av" --workdir "$W/aw" -q \
+  || fail "generated child-output alias fixture did not emit Pyrope"
+$LHD lec --impl pyrope:"$W/av"/ --impl-top output_alias.output_alias \
+  --ref verilog:"$W/output_alias.sv" --ref-top output_alias \
+  --set formal.solver=cvc5 --workdir "$W/alec" -q --result-json "$W/alec.json" \
+  || fail "generated child-output alias was not preserved: $(cat "$W/alec.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/alec.json" || fail "output-alias lec not pass: $(cat "$W/alec.json")"
+# Recompile that correct Pyrope through cgen. Its stable node order deliberately
+# emits the two generated temporaries after their consumers inside one
+# always_comb. Reading that RTL with slang must recover the simultaneous
+# combinational equations, not freeze the first-pass X values.
+$LHD compile "$W/av"/*.prp --top output_alias.output_alias --recipe O0 \
+  --emit verilog:"$W/output_alias_all.v" --workdir "$W/acgen" -q \
+  || fail "output-alias Pyrope did not regenerate Verilog"
+$LHD lec --impl verilog:"$W/output_alias_all.v" --impl-top output_alias \
+  --ref pyrope:"$W/av"/ --ref-top output_alias.output_alias \
+  --set formal.solver=cvc5 --workdir "$W/artlec" -q --result-json "$W/artlec.json" \
+  || fail "generated always_comb temporary order was not recovered: $(cat "$W/artlec.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/artlec.json" || fail "output-alias round-trip lec not pass: $(cat "$W/artlec.json")"
+echo "PASS: generated child-output alias survives a false cross-instance SCC and Verilog re-read"
+
+# ── (5) module variable first assigned in a compile-time-dead branch ─────────
+# A module-scope variable exists outside every procedural arm.  Declaring it
+# lazily at its first textual assignment put the declaration inside `if (0)`;
+# uPass then removed the dead arm and left the ELSE value's later consumer as an
+# unresolved reference (Minion generated Verilog: mux_49628).
+cat >"$W/const_cond_tmp.sv" <<'EOF'
+module const_cond_tmp(
+  input logic clk,
+  input logic rst_ni,
+  input logic [7:0] d,
+  output logic [7:0] q
+);
+  logic tmp;
+  logic en;
+  always_comb begin
+    if (1'b0) tmp = 1'b1;
+    else      tmp = 1'b0;
+    if (!rst_ni) en = 1'b1;
+    else         en = tmp;
+  end
+  always_ff @(posedge clk) if (en) q <= d;
+endmodule
+EOF
+$LHD compile "$W/const_cond_tmp.sv" --top const_cond_tmp --recipe O0 \
+  --emit-dir pyrope:"$W/cpv" --workdir "$W/cpw" >"$W/cp.log" 2>&1 \
+  || { tail -20 "$W/cp.log"; fail "constant-conditional temporary did not emit Pyrope"; }
+$LHD compile "$W/cpv"/*.prp --top const_cond_tmp.const_cond_tmp --recipe O0 \
+  --emit-dir lg:"$W/cplg" --workdir "$W/cpr" >"$W/cpr.log" 2>&1 \
+  || { tail -20 "$W/cpr.log"; fail "constant-conditional temporary became unresolved on Pyrope re-read"; }
+if grep -q 'unresolved ref' "$W/cp.log" "$W/cpr.log"; then
+  fail "constant-conditional temporary lost its module-scope driver: $(grep 'unresolved ref' "$W/cp.log" "$W/cpr.log")"
+fi
+$LHD lec --impl lg:"$W/cplg" --impl-top const_cond_tmp.const_cond_tmp \
+  --ref verilog:"$W/const_cond_tmp.sv" --ref-top const_cond_tmp \
+  --set formal.solver=cvc5 --workdir "$W/cplec" -q --result-json "$W/cplec.json" \
+  || fail "constant-conditional temporary changed behavior: $(cat "$W/cplec.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/cplec.json" || fail "constant-conditional temporary LEC not pass: $(cat "$W/cplec.json")"
+echo "PASS: module variable first assigned in if (0) stays declared, recompiles, and LECs"
 
 echo "PASS: all slang wire-classification regressions"

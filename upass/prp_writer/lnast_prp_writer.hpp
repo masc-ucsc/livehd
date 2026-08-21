@@ -72,6 +72,10 @@ public:
   // instances, and the annotation is inert when a comb is inlined.  Owned by the
   // pass; must outlive write_all().
   void set_instantiated_modules(const std::unordered_set<std::string>* m) { instantiated_modules_ = m; }
+  // Tail names of emitted modules whose explicit output list is empty. Calls
+  // to these are sink-instance statements, not value-producing assignments.
+  // Owned by the pass; must outlive write_all().
+  void set_sink_modules(const std::unordered_set<std::string>* m) { sink_modules_ = m; }
 
 private:
   std::ostream&             os;
@@ -377,6 +381,7 @@ private:
   // instantiation and the writer emits a `::[name=<lhs>]` call-site
   // instance-name annotation.
   const std::unordered_set<std::string>*        instantiated_modules_{nullptr};
+  const std::unordered_set<std::string>*        sink_modules_{nullptr};
   // Distinct func_call callee names seen in this unit (populated in scan_node).
   absl::flat_hash_set<std::string>              func_call_callees_;
   // Import-const alias per callee module name, used when the natural import name
@@ -629,34 +634,34 @@ private:
   // unary) sub-expression so precedence is preserved when it nests inside
   // another operator; tight postfix forms (`x#[..]`, `x[i]`, `x.[a]`) never get
   // wrapped.
-  std::string                      render_value(Lnast_nid node, bool operand_ctx);
+  std::string        render_value(Lnast_nid node, bool operand_ctx);
   // Render the RHS expression (everything after `lhs = `) of a value-producing
   // "defining" node, inlining folded operands recursively.
-  std::string                      render_def_rhs(Lnast_nid def_node, bool operand_ctx);
+  std::string        render_def_rhs(Lnast_nid def_node, bool operand_ctx);
   // The heavyweight render_def_rhs cases, each its own function so the COMMON
   // recursive spine (render_def_rhs -> render_value -> render_def_rhs, one level
   // per folded temp) carries a small frame: at -O0 every local of every case of
   // a single big function is live for the whole call, and the merged 13.8 KiB
   // frame is what overflowed a 512 KiB worker stack on CVA6 (2026-08-21).
-  std::string render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
-  std::string render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
-  std::string render_concat_rhs(Lnast_nid c0, bool operand_ctx);
-  std::string render_tuple_get_rhs(Lnast_nid c0);
+  std::string        render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
+  std::string        render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
+  std::string        render_concat_rhs(Lnast_nid c0, bool operand_ctx);
+  std::string        render_tuple_get_rhs(Lnast_nid c0);
   // `(s)` when a loose (infix / unary) spelling sits as an operand of another
   // operator, else `s` unchanged -- parens only where precedence needs them.
   static std::string wrap_operand(std::string s, bool operand_ctx, bool loose);
   // A const leaf -> its Pyrope spelling (number / true|false|nil / quoted string).
-  std::string                      const_text(Lnast_nid node) const;
+  std::string        const_text(Lnast_nid node) const;
   // The canonical (Dlop::to_pyrope) spelling of a numeric literal's text; any
   // non-numeric / unparseable text passes through unchanged.
-  static std::string               canonical_const_text(std::string_view txt);
+  static std::string canonical_const_text(std::string_view txt);
   // `0sb?` when this store's value is an all-`?` literal exactly as wide as the
   // target's DECLARED width, else "" (print the literal). See the definition.
-  std::string                      x_poison_shorthand(Lnast_nid val_nid, std::string_view lhs) const;
+  std::string        x_poison_shorthand(Lnast_nid val_nid, std::string_view lhs) const;
   // True when `val_nid` is an all-`?` literal exactly `bits` wide.
-  bool                             is_x_poison_of_width(Lnast_nid val_nid, int bits) const;
+  bool               is_x_poison_of_width(Lnast_nid val_nid, int bits) const;
   // Width of an all-`?` literal (0 when it is not one, or is a single bit).
-  int                              x_poison_width(Lnast_nid val_nid) const;
+  int                x_poison_width(Lnast_nid val_nid) const;
   // Names whose EMITTED declaration (port signature or `:T` suffix) states the
   // width, so a width-taking `0sb?` re-parses to the same value.
   absl::flat_hash_set<std::string> typed_emitted_;

@@ -28,6 +28,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "//pass/cprop:pass_cprop",
         "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
         "@abc",  # vendored berkeley-abc -- the AIG/CEC engine behind lec.cones
         "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
@@ -333,9 +334,10 @@ sh_test(
 # same pass's other entries. Case 2 is the whole point -- functionality moved
 # ACROSS the inner/mid boundary, so both defs refute standalone while the design
 # does not, and the refutation must be ABSORBED by the parent without re-solving
-# anything above it. Case 3 (a genuine difference still refutes) and case 4 (the
-# two orders agree on every fixture) are what keep "absorb" from becoming
-# "swallow".
+# anything above it. Case 8 makes the same targeted parent expansion discharge
+# an UNKNOWN child in context. Case 3 (a genuine difference still refutes) and
+# case 4 (the two orders agree on every fixture) are what keep "absorb" from
+# becoming "swallow".
 sh_test(
     name = "lec_hier_topdown_test",
     size = "large",

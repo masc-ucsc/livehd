@@ -54,6 +54,277 @@ grep -q '"status":"pass"' "$W/r2_gate_slang.json" \
   || fail "lec lgyosys gate slang reader not pass: $(cat "$W/r2_gate_slang.json")"
 echo "PASS: lgyosys gate-side yosys-slang reader"
 
+# Hierarchical lgyosys fallback must detect reset per selected module, not by
+# grepping the whole concatenated source. A parent may have reset while a child
+# does not (as in Dino's DualIssueRegisterFile); constraining that child's
+# nonexistent `in_reset` turns an inconclusive/proven result into a setup error.
+cat >"$W/reset_ports.il" <<'IL'
+module \parent
+  wire input 1 \reset
+  cell \child \u
+  end
+end
+module \child
+  wire input 1 \clock
+  wire input 2 \rst_ni
+end
+IL
+PORT_TOOL=inou/yosys/rtlil_children.py
+[ "$(python3 "$PORT_TOOL" --rtlil "$W/reset_ports.il" --top parent --has-input reset)" = yes ] \
+  || fail "RTLIL reset inspection missed the parent's reset input"
+[ "$(python3 "$PORT_TOOL" --rtlil "$W/reset_ports.il" --top child --has-input reset)" = no ] \
+  || fail "RTLIL reset inspection inherited an unrelated parent's reset"
+[ "$(python3 "$PORT_TOOL" --rtlil "$W/reset_ports.il" --top child --has-input rst_ni)" = yes ] \
+  || fail "RTLIL reset inspection missed an active-low child reset"
+echo "PASS: lgyosys reset constraints are selected-module local"
+
+# Reset spelling and polarity are semantic. With zero-initialized SAT flops,
+# these two encodings disagree before reset (q=0 versus qn=0 => ~qn=1) but are
+# identical after an active-low rst_ni pulse. Treating rst_ni as absent creates
+# a false bounded counterexample in Minion descendants.
+cat >"$W/reset_low_ref.v" <<'V'
+module reset_low(input clock, input rst_ni, input d, output o);
+  reg q;
+  always @(posedge clock or negedge rst_ni)
+    if (!rst_ni) q <= 1'b0;
+    else q <= d;
+  assign o = q;
+endmodule
+V
+cat >"$W/reset_low_impl.v" <<'V'
+module reset_low(input clock, input rst_ni, input d, output o);
+  reg qn;
+  always @(posedge clock or negedge rst_ni)
+    if (!rst_ni) qn <= 1'b1;
+    else qn <= ~d;
+  assign o = ~qn;
+endmodule
+V
+"$LHD" lec --impl "$W/reset_low_impl.v" --ref "$W/reset_low_ref.v" --top reset_low \
+  --set formal.solver=lgyosys --workdir "$W/c2_reset_low" -q \
+  --result-json "$W/r2_reset_low.json" \
+  || fail "lgyosys did not honor active-low reset: $(cat "$W/r2_reset_low.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r2_reset_low.json" \
+  || fail "lgyosys active-low reset result not pass: $(cat "$W/r2_reset_low.json")"
+echo "PASS: lgyosys applies active-low selected-module reset polarity"
+
+# Descending a parameterized hierarchy must compare the two occurrence-
+# specialized definitions when both RTLIL caches retain them. Falling back to
+# the source module's base name restores its default parameters and can create
+# a false interface mismatch (Minion prim_eco_ports: 10-bit occurrence, 4-bit
+# default). The helper falls back to the base only when GOLD lacks the exact
+# occurrence.
+cat >"$W/param_gate.il" <<'IL'
+module \parent
+  cell \child$parent.u \u
+  end
+end
+module \child$parent.u
+  wire width 10 output 1 \eco_o
+end
+IL
+cat >"$W/param_gold.il" <<'IL'
+module \parent
+  cell \child$parent.u \u
+  end
+end
+module \child$parent.u
+  wire width 10 output 1 \eco_o
+end
+module \child
+  wire width 4 output 1 \eco_o
+end
+IL
+mapped=$(python3 "$PORT_TOOL" --rtlil "$W/param_gate.il" --top parent \
+  --with-base --map-against "$W/param_gold.il") \
+  || fail "RTLIL child specialization mapping failed"
+[ "$mapped" = $'child$parent.u\tchild$parent.u' ] \
+  || fail "RTLIL child descent discarded the parameterized occurrence: $mapped"
+echo "PASS: lgyosys descent preserves parameter-specialized child definitions"
+
+# cgen can merge two equal generated occurrences under a different hierarchy
+# spelling than yosys-slang (Minion's u_tb/u_tb_cgen1 versus
+# gen_thread_buf[0/1].u_tb). Exact-name mapping is then impossible, but falling
+# back to the 4-bit source default is still wrong. Select the occurrence whose
+# elaborated interface matches the 10-bit gate child; dotted aggregate leaves
+# are compared by their packed root width.
+cat >"$W/param_renamed_gate.il" <<'IL'
+module \parent
+  cell \child$parent.renamed \u
+  end
+end
+module \child$parent.renamed
+  wire width 6 output 1 \eco.hi
+  wire width 4 output 2 \eco.lo
+end
+IL
+cat >"$W/param_renamed_gold.il" <<'IL'
+module \child$parent.original_w4
+  wire width 4 output 1 \eco
+end
+module \child$parent.original_w10
+  wire width 10 output 1 \eco
+end
+module \child
+  wire width 4 output 1 \eco
+end
+IL
+mapped=$(python3 "$PORT_TOOL" --rtlil "$W/param_renamed_gate.il" --top parent \
+  --with-base --map-against "$W/param_renamed_gold.il") \
+  || fail "RTLIL renamed-specialization mapping failed"
+[ "$mapped" = $'child$parent.renamed\tchild$parent.original_w10' ] \
+  || fail "RTLIL child descent restored a default after hierarchy renaming: $mapped"
+echo "PASS: lgyosys descent maps renamed occurrences by elaborated interface"
+
+# An implementation-only helper generated during the Pyrope/cgen round trip
+# has no reference definition to select.  Report an explicit skip marker rather
+# than inventing its stripped base name and failing the entire recursive descent
+# at source elaboration (Minion's thread-buffer `_p1` clone).
+cat >"$W/impl_only_gate.il" <<'IL'
+module \parent
+  cell \helper_p1$parent.u \u
+  end
+end
+module \helper_p1$parent.u
+  wire output 1 \o
+end
+IL
+cat >"$W/impl_only_gold.il" <<'IL'
+module \parent
+  wire output 1 \o
+end
+IL
+mapped=$(python3 "$PORT_TOOL" --rtlil "$W/impl_only_gate.il" --top parent \
+  --with-base --map-against "$W/impl_only_gold.il") \
+  || fail "RTLIL implementation-only child mapping failed"
+[ "$mapped" = $'helper_p1$parent.u\t-' ] \
+  || fail "RTLIL implementation-only child invented a reference top: $mapped"
+echo "PASS: lgyosys descent marks implementation-only generated children as skips"
+
+# The cached proof itself must select that occurrence too. Give the two cache
+# PARENTS opposite behavior while keeping the specialized children identical:
+# reusing the parent's active top refutes, selecting the requested child proves.
+cat >"$W/cache_gold.il" <<'IL'
+module \parent
+  wire output 1 \o
+  connect \o 1'0
+  cell \child$parent.u \u
+  end
+end
+module \child$parent.u
+  wire output 1 \o
+  connect \o 1'0
+end
+IL
+cat >"$W/cache_gate.il" <<'IL'
+module \parent
+  wire output 1 \o
+  connect \o 1'1
+  cell \child$parent.u \u
+  end
+end
+module \child$parent.u
+  wire output 1 \o
+  connect \o 1'0
+end
+IL
+LG=inou/yosys/lgcheck
+YOSYS=inou/yosys/yosys2
+LGCHECK_EQUIV_TIMEOUT=10 "$LG" --reference "$INV" --implementation "$INV" \
+  --yosys "$YOSYS" --reference_top 'child$parent.u' --implementation_top 'child$parent.u' \
+  --gold_rtlil "$W/cache_gold.il" --gate_rtlil "$W/cache_gate.il" \
+  >"$W/cache_child.log" 2>&1 \
+  || { cat "$W/cache_child.log"; fail "cached descendant proof did not select the requested child top"; }
+grep -q 'Equivalence successfully proven' "$W/cache_child.log" \
+  || { cat "$W/cache_child.log"; fail "cached descendant proof lacked a proof verdict"; }
+echo "PASS: cached descendant proofs reload the selected child rather than the parent"
+
+# A cached occurrence name can end in the base module's own spelling, e.g.
+# ClockGate$ExuBlock.ClockGate. Source-side compatibility resolution must not
+# replace that authoritative cached name with the standalone source base merely
+# because the last dotted component exists in the source.
+cat >"$W/cache_source_base.v" <<'V'
+module u(output o);
+  assign o = 1'b1;
+endmodule
+V
+LGCHECK_EQUIV_TIMEOUT=10 "$LG" --reference "$W/cache_source_base.v" \
+  --implementation "$W/cache_source_base.v" --yosys "$YOSYS" \
+  --reference_top 'child$parent.u' --implementation_top 'child$parent.u' \
+  --gold_rtlil "$W/cache_gold.il" --gate_rtlil "$W/cache_gate.il" \
+  >"$W/cache_occurrence_name.log" 2>&1 \
+  || { cat "$W/cache_occurrence_name.log"; fail "source fallback replaced an authoritative cached occurrence top"; }
+grep -q 'Equivalence successfully proven' "$W/cache_occurrence_name.log" \
+  || { cat "$W/cache_occurrence_name.log"; fail "cached dotted occurrence lacked a proof verdict"; }
+echo "PASS: cached occurrence tops are not rewritten to a source base name"
+
+# cgen exposes tuple leaves as escaped dotted top ports, while an original
+# packed-struct SystemVerilog top reaches Yosys as one vector port. Exercise the
+# opt-in ABI adapter that packs/unpacks those leaves from the two cached RTLIL
+# interfaces before the equivalence timer starts. The deliberately asymmetric
+# bit arithmetic also checks field ordering; reversing the packing refutes.
+cat >"$W/split_ref.sv" <<'SV'
+module split_ports(
+  input  struct packed { logic [1:0] hi; logic lo; } req,
+  output struct packed { logic top; logic [1:0] low; } resp
+);
+  assign resp.top = req.hi[1] ^ req.lo;
+  assign resp.low = req.hi + {1'b0, req.lo};
+endmodule
+SV
+cat >"$W/split_impl.v" <<'V'
+module split_ports(
+  input [1:0] \req.hi ,
+  input       \req.lo ,
+  output      \resp.top ,
+  output [1:0] \resp.low
+);
+  assign \resp.top = \req.hi [1] ^ \req.lo ;
+  assign \resp.low = \req.hi + {1'b0, \req.lo };
+endmodule
+V
+"$LHD" lec --impl "$W/split_impl.v" --ref "$W/split_ref.sv" --top split_ports \
+  --set formal.solver=lgyosys --set formal.lec.gold_reader=slang \
+  --set formal.lec.gate_reader=slang --set formal.lec.normalize_split_ports=true \
+  --set formal.lec.descend_on_inconclusive=true \
+  --workdir "$W/c2_split_ports" -q --result-json "$W/r2_split_ports.json" \
+  || fail "lec lgyosys split-port adapter not pass: $(cat "$W/r2_split_ports.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r2_split_ports.json" \
+  || fail "lec lgyosys split-port adapter not pass: $(cat "$W/r2_split_ports.json")"
+echo "PASS: lgyosys normalizes packed reference ports against cgen leaf ports"
+
+# A hierarchy-selected module may retain non-monotonic port IDs even though
+# write_rtlil keeps the source declaration order.  Aggregate packing follows
+# declaration order, not those bookkeeping IDs (XiangShan Mstateen0Module has
+# its final C field numbered before the preceding fields).
+cat >"$W/split_order_gold.il" <<'IL'
+module \ordered
+  wire width 3 output 1 \result
+end
+IL
+cat >"$W/split_order_gate.il" <<'IL'
+module \ordered
+  attribute \src "generated.v:30.1"
+  wire output 2 \result.low
+  attribute \src "generated.v:20.1"
+  wire output 4 \result.middle
+  attribute \src "generated.v:10.1"
+  wire output 3 \result.high
+end
+IL
+python3 inou/yosys/rtlil_split_port_adapter.py \
+  --gold "$W/split_order_gold.il" --gate "$W/split_order_gate.il" \
+  --gold-top ordered --gate-top ordered --impl-top ordered_impl \
+  --adapter-top ordered_adapter --output "$W/split_order_adapter.v" \
+  || fail "split-port adapter rejected non-monotonic port IDs"
+grep -Fq '.\result.high (\result [2])' "$W/split_order_adapter.v" \
+  || fail "split-port adapter did not preserve the first aggregate field as MSB"
+grep -Fq '.\result.middle (\result [1])' "$W/split_order_adapter.v" \
+  || fail "split-port adapter permuted the middle aggregate field by port ID"
+grep -Fq '.\result.low (\result [0])' "$W/split_order_adapter.v" \
+  || fail "split-port adapter did not preserve the final aggregate field as LSB"
+echo "PASS: split-port packing ignores non-monotonic hierarchy port IDs"
+
 cat >"$W/relaxed_ref.sv" <<'SV'
 module relaxed_ref(input logic a, output logic y);
   typedef enum logic { E0, E1 } mode_t;
@@ -86,6 +357,38 @@ grep -q '"class":"dependency"' "$W/r2_setup_fail.json" \
 grep -q 'REFUTED' "$W/r2_setup_fail.json" \
   && fail "lgyosys setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
 echo "PASS: lgyosys setup failures stay distinct from refutations"
+
+# A bounded BMC window is a counterexample search, not an equivalence proof.
+# This pair first diverges after more than five clocks: the short window must be
+# INCONCLUSIVE (never PROVEN), while a deeper window must find the real CEX.
+cat >"$W/deep_ref.v" <<'V'
+module deep(input clock, output o);
+  reg [3:0] count;
+  always @(posedge clock) count <= count + 1'b1;
+  assign o = count == 4'd7;
+endmodule
+V
+cat >"$W/deep_impl.v" <<'V'
+module deep(input clock, output o);
+  reg [3:0] count;
+  always @(posedge clock) count <= count + 1'b1;
+  assign o = 1'b0;
+endmodule
+V
+out=$(LGCHECK_BMC_STEPS=5 "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+  --set formal.solver=lgyosys --workdir "$W/c2_bounded_short" 2>&1) \
+  || fail "short bounded lgyosys run should be inconclusive, not an error: $out"
+echo "$out" | grep -q 'INCONCLUSIVE' \
+  || fail "short bounded lgyosys run did not report INCONCLUSIVE: $out"
+echo "$out" | grep -q 'PROVEN equivalent' \
+  && fail "five counterexample-free steps were mislabeled an equivalence proof: $out"
+if out=$(LGCHECK_BMC_STEPS=10 "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+  --set formal.solver=lgyosys --workdir "$W/c2_bounded_deep" 2>&1); then
+  fail "deeper lgyosys BMC missed the delayed mismatch: $out"
+fi
+echo "$out" | grep -q 'REFUTED' \
+  || fail "deeper lgyosys BMC did not classify the delayed mismatch as REFUTED: $out"
+echo "PASS: bounded no-CEX stays inconclusive; a deeper BMC counterexample refutes"
 
 # 3. Bare .v paths on BOTH sides: the verilog kind is inferred from the
 #    extension; an identical netlist is trivially PROVEN (in-process cvc5).

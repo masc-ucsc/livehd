@@ -1,0 +1,40 @@
+/*
+:name: bitset_mut_branch_mem
+:type: equiv
+:verilog_top: bitset_mut_branch_mem_top
+:pyrope_top: foo
+:gold_reader: slang
+*/
+
+// Whole-array `q` is copied into a packed mut before the conditional partial
+// writes. The read_all pin and its reported width must both be 16*4 bits;
+// otherwise the first set_mask truncates the retained high lanes.
+pub mod foo(a:u64, load:bool, clear_low:bool, rst_n:u1) -> (o:u64@[0]) {
+  reg q:[16]u4
+  mut d:u64 = 0
+  d = q
+  if clear_low {
+    d#[0..=3]   = 0
+    d#[4..=7]   = 0
+    d#[8..=11]  = 0
+    d#[12..=15] = 0
+    d#[16..=19] = 0
+    d#[20..=23] = 0
+    d#[24..=27] = 0
+    d#[28..=31] = 0
+    d#[32..=35] = 0
+    d#[36..=39] = 0
+    d#[40..=43] = 0
+    d#[44..=47] = 0
+    d#[48..=51] = 0
+    d#[52..=55] = 0
+  } elif load {
+    d = a
+  }
+  if rst_n == 0 {
+    q = 0
+  } elif clear_low or load {
+    q = d
+  }
+  o = d
+}

@@ -98,6 +98,30 @@ module foo(input clk, input rst, input [7:0] a, input [7:0] b, output reg [7:0] 
 endmodule
 EOF
 
+# The reference has one dead state bit that the implementation legitimately
+# removes. Equivalence is about observable traces: once every common output and
+# next-state obligation proves for ARBITRARY `dead`, the one-sided register is
+# proven unobservable and must not turn a real proof into incomplete
+# correspondence. A missing primary output remains incomplete; this exception
+# applies only to nxt:/mem: internal-state cuts.
+cat > "$WORK/dead_ref.v" <<'EOF'
+module foo(input clk, input rst, input a, output reg y);
+  reg dead;
+  always @(posedge clk) begin
+    if (rst) begin dead <= 1'b0; y <= 1'b0; end
+    else begin dead <= a; y <= a; end
+  end
+endmodule
+EOF
+cat > "$WORK/dead_impl.v" <<'EOF'
+module foo(input clk, input rst, input a, output reg y);
+  always @(posedge clk) begin
+    if (rst) y <= 1'b0;
+    else y <= a;
+  end
+endmodule
+EOF
+
 run() {  # $1=label $2..=lhd args ; sets RC/OUT
   # The default timeout is only supplied when the CALLER did not pass one.
   # It used to be appended unconditionally, so a caller's explicit
@@ -198,6 +222,29 @@ if [ "$RC" -ne 0 ]; then
 elif echo "$OUT" | grep -q "REFUTED"; then
   echo "FAIL: a spurious single-step ind CEX was reported as REFUTED"; fail=1
 else echo "ok: ind-Refuted from an unreachable state -> bmc overrules -> exit 0"; fi
+
+# 8) Dead one-sided internal state is harmless after all common obligations
+# prove for arbitrary values of it. This is an unbounded inductive proof.
+run dead --ref "$WORK/dead_ref.v" --impl "$WORK/dead_impl.v" --set formal.engine=ind \
+  --set formal.lec.cones=true --set formal.lec.decompose=true
+if [ "$RC" -ne 0 ]; then
+  echo "FAIL: dead one-sided state rc=$RC (want 0): $OUT"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  echo "FAIL: dead one-sided state did not report PROVEN: $OUT"; fail=1
+elif ! echo "$OUT" | grep -q "one-sided internal state is unobservable"; then
+  echo "FAIL: dead one-sided state proof did not disclose why the unmatched cut is safe: $OUT"; fail=1
+else echo "ok: dead one-sided internal state -> unbounded PROVEN"; fi
+
+# 9) The hard worker backstop is a real registered option, and invalid negative
+# multipliers fail during option validation instead of wrapping into a huge
+# alarm duration.
+run bad_hard_mult --ref "$WORK/eq_impl.v" --impl "$WORK/eq_impl.v" \
+  --set formal.hard_timeout_mult=-1
+if [ "$RC" -eq 0 ]; then
+  echo "FAIL: negative formal.hard_timeout_mult unexpectedly succeeded: $OUT"; fail=1
+elif ! echo "$OUT" | grep -q "formal.hard_timeout_mult must be >= 0"; then
+  echo "FAIL: negative hard-timeout multiplier lacked the validation diagnostic: $OUT"; fail=1
+else echo "ok: formal.hard_timeout_mult is registered and range-checked"; fi
 
 if [ $fail -ne 0 ]; then echo "lec_verdict_policy_test: FAILED"; exit 1; fi
 echo "lec_verdict_policy_test: PASSED"; exit 0

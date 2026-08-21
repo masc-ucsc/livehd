@@ -1089,7 +1089,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // (two tokens). Memory nodes now carry their RTL name (tolg set_name), which
   // can be a Verilog keyword or a dotted bundle-field path.
   const auto iraw  = std::string(default_instance_name(node));
-  auto       iname = get_scaped_name(iraw);
+  auto       iname = memory_instance_name(node);
 
   int n_rd_ports = 0;
   int n_wr_ports = 0;
@@ -1269,13 +1269,16 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
                 "memory {} is read WHOLE (read_all) and also carries a non-zero same-cycle collision matrix; the inline "
                 "reg-array emission the whole read forces has no forwarding model",
                 debug_name(node))
-            .hint("spell `ordering=\"old\"` on the array, or drop the whole-array read so the cgen_memory_* wrapper (which "
-                  "carries FWD/UNDEF) is used")
+            .hint(
+                "spell `ordering=\"old\"` on the array, or drop the whole-array read so the cgen_memory_* wrapper (which "
+                "carries FWD/UNDEF) is used")
             .fatal();
         return;
       }
     }
-    const auto aname      = get_scaped_name(absl::StrCat(iraw, "_data"));
+    // Inline storage uses the same reversible base name as a wrapper instance,
+    // so an emit/read round trip can recover the original Memory identity.
+    const auto      aname = absl::StrCat(iname, "_data");
     // The FIRST clock any port carries, not port zero's. tolg always wires the
     // cell clock into port 0's block, but a graph from another front end (or a
     // reloaded `lg:`) may put it on a later port -- and now that `read_all`
@@ -1288,11 +1291,19 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         break;
       }
     }
-    const bool registered = !clock_dpin.is_invalid();
-    const int  busw       = mem_size * mem_bits;
-
-    fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
-    // Bind the buses to nets so per-entry part-selects are always legal.
+    const bool registered         = !clock_dpin.is_invalid();
+    const int  busw               = mem_size * mem_bits;
+    const auto invalid_const_addr = [&](const hhds::Pin_class& addr) {
+      if (!is_const_pin(addr)) {
+        return false;
+      }
+      const auto value = hydrate_const(addr);
+      return value.has_unknowns() || value.is_negative() || !value.is_just_i64() || value.to_just_i64() >= mem_size;
+    };
+    const auto unknown_entry = [&]() { return absl::StrCat(mem_bits, "'b", std::string(static_cast<size_t>(mem_bits), '?')); };
+    fout->append(absl::StrCat("reg [", mem_size - 1, ":0][", mem_bits - 1, ":0] ", aname, ";\n"));
+    // Bind the buses to nets so whole-array and per-entry uses share the exact
+    // same packed bit order (entry 0 in the low bits).
     const auto updbus = absl::StrCat(aname, "_upd");
     if (has_update) {
       fout->append(absl::StrCat("wire [", busw - 1, ":0] ", updbus, " = ", get_wire_or_const(mem_update_dpin, busw, true), ";\n"));
@@ -1330,18 +1341,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       fout->append("end\n");
     }
-    auto entry_sel
-        = [&](const std::string& bus, int i) { return absl::StrCat(bus, "[", (i + 1) * mem_bits - 1, ":", i * mem_bits, "]"); };
-
     if (registered) {
-      fout->append(absl::StrCat("always @(posedge ", get_wire_or_const(clock_dpin, 1, true), ") begin\n"));
-      std::string ind = "  ";
-      if (!mem_reset_dpin.is_invalid()) {  // sync reset to the runtime init/reset bus (highest priority)
-        fout->append(absl::StrCat("  if (", get_wire_or_const(mem_reset_dpin, 1, true), ") begin\n"));
-        for (int i = 0; i < mem_size; ++i) {
-          fout->append(
-              absl::StrCat("    ", aname, "[", i, "] <= ", initbus.empty() ? std::string("'b0") : entry_sel(initbus, i), ";\n"));
+      std::string reset_event;
+      if (!mem_reset_dpin.is_invalid()) {
+        if (auto a = node.attr(livehd::attrs::memory_async_reset); a.has() && a.get() != 0) {
+          reset_event = absl::StrCat(" or posedge ", get_wire_or_const(mem_reset_dpin, 1, true));
         }
+      }
+      fout->append(absl::StrCat("always @(posedge ", get_wire_or_const(clock_dpin, 1, true), reset_event, ") begin\n"));
+      std::string ind = "  ";
+      if (!mem_reset_dpin.is_invalid()) {  // reset to the runtime init/reset bus (highest priority)
+        fout->append(absl::StrCat("  if (", get_wire_or_const(mem_reset_dpin, 1, true), ") begin\n"));
+        fout->append(absl::StrCat("    ", aname, " <= ", initbus.empty() ? std::string("'b0") : initbus, ";\n"));
         fout->append("  end else begin\n");
         ind = "    ";
       }
@@ -1350,15 +1361,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fout->append(absl::StrCat(ind, "if (", get_wire_or_const(mem_update_enable_dpin, 1, true), ") begin\n"));
       }
       if (has_update) {
-        for (int i = 0; i < mem_size; ++i) {  // bulk update (default); per-port writes below override
-          fout->append(absl::StrCat(ind, gated ? "  " : "", aname, "[", i, "] <= ", entry_sel(updbus, i), ";\n"));
-        }
+        // Preserve the update as one packed-array assignment. The per-port
+        // nonblocking writes below occur later and therefore still override it.
+        fout->append(absl::StrCat(ind, gated ? "  " : "", aname, " <= ", updbus, ";\n"));
       }
       if (gated) {
         fout->append(absl::StrCat(ind, "end\n"));
       }
       for (auto& p : port_vector) {  // per-port writes OVERRIDE the bulk update (later <= wins)
-        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid()) {
+        // An unknown or out-of-range array write selects no element.
+        // Emitting the literal selector makes slang reject otherwise valid
+        // generated Verilog during a round trip (for example `a[3'b???]`).
+        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid() || invalid_const_addr(p.addr)) {
           continue;
         }
         auto w = absl::StrCat(aname,
@@ -1377,9 +1391,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     } else {  // combinational whole-array (no clock); update_enable n/a (no hold state)
       fout->append("always_comb begin\n");
       if (has_update) {
-        for (int i = 0; i < mem_size; ++i) {
-          fout->append(absl::StrCat("  ", aname, "[", i, "] = ", entry_sel(updbus, i), ";\n"));
-        }
+        fout->append(absl::StrCat("  ", aname, " = ", updbus, ";\n"));
       } else {
         // A combinational array holds NO state, so every entry has to be
         // assigned on every evaluation or the always_comb infers a latch and
@@ -1398,7 +1410,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         }
       }
       for (auto& p : port_vector) {
-        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid()) {
+        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid() || invalid_const_addr(p.addr)) {
           continue;
         }
         auto w = absl::StrCat(aname,
@@ -1441,17 +1453,17 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       if (!live_dout_pids.contains(dout_pid)) {
         continue;
       }
-      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));
-      drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]"));
+      auto       dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));
+      // IEEE array semantics make a read through an unknown/out-of-range
+      // index unknown. Spell that result directly: a constant unknown
+      // selector is diagnosed as an invalid element by slang before lowering.
+      const auto rhs       = invalid_const_addr(p.addr) ? unknown_entry()
+                                                        : absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]");
+      drive(get_wire_or_const(dout_dpin), rhs);
     }
-    if (wants_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
-      std::string cat = "{";
-      for (int i = mem_size - 1; i >= 0; --i) {
-        cat += absl::StrCat(aname, "[", std::to_string(i), "]", i ? "," : "");
-      }
-      cat     += "}";
-      auto ra  = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
-      drive(get_wire_or_const(ra), cat);  // wants_read_all IS "this pid has readers"
+    if (wants_read_all) {  // packed data is already {data[size-1], ..., data[0]}
+      auto ra = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+      drive(get_wire_or_const(ra), aname);
     }
     if (reads_in_comb) {
       fout->append("end\n");
@@ -2509,6 +2521,52 @@ std::string Cgen_verilog::sub_instance_name(const hhds::Node_class& node) {
   return name;
 }
 
+std::string Cgen_verilog::memory_instance_name(const hhds::Node_class& node) {
+  if (auto it = memory_instance_names_.find(node.get_class_index()); it != memory_instance_names_.end()) {
+    return it->second;
+  }
+
+  const std::string raw_storage = default_instance_name(node);
+  std::string_view  raw         = raw_storage;
+  // LNAST backtick names and Verilog escaped identifiers carry source syntax
+  // that is useful for nets but unnecessary for an instance identifier.
+  if (raw.size() >= 2 && raw.front() == '`' && raw.back() == '`') {
+    raw.remove_prefix(1);
+    raw.remove_suffix(1);
+  }
+  if (!raw.empty() && raw.front() == '\\') {
+    raw.remove_prefix(1);
+    while (!raw.empty() && std::isspace(static_cast<unsigned char>(raw.back()))) {
+      raw.remove_suffix(1);
+    }
+  }
+
+  // Preserve the storage name reversibly across the cgen_memory_* wrapper.
+  // The slang round trip sees the wrapper's internal array as
+  //   <instance>.data
+  // and native LEC needs to relate that state to the original Memory node. A
+  // lossy `.` -> `_` sanitization made distinct dotted tuple fields impossible
+  // to recover and left ambiguous same-shape memories unpaired.
+  //
+  // Encode every byte as hex instead of using an escaped Verilog identifier.
+  // Although `\foo.bar ` is legal Verilog, Yosys embeds instance spellings in
+  // parameterized hierarchy identifiers where the escape's terminating space
+  // becomes an illegal RTLIL character. The `h..._e` envelope is reversible
+  // while remaining a plain identifier in both Verilog and RTLIL.
+  constexpr char hex[] = "0123456789abcdef";
+  std::string    encoded;
+  const auto     source = raw.empty() ? std::string_view{"mem"} : raw;
+  encoded.reserve(source.size() * 2);
+  for (unsigned char ch : source) {
+    encoded.push_back(hex[ch >> 4]);
+    encoded.push_back(hex[ch & 0xf]);
+  }
+  std::string base = absl::StrCat("__lhdmem_h", encoded, "_e");
+  auto        name = get_unique_decl_name(get_scaped_name(base));
+  memory_instance_names_.emplace(node.get_class_index(), name);
+  return name;
+}
+
 std::string Cgen_verilog::loop_instance_name(const hhds::Node_class& node, const hhds::Subnode_occurrence& occurrence) {
   const Loop_occurrence_key key{node.get_class_index(), occurrence.ordinal()};
   if (auto it = loop_instance_names_.find(key); it != loop_instance_names_.end()) {
@@ -2538,7 +2596,7 @@ void Cgen_verilog::reserve_instance_names(hhds::Graph* graph) {
         sub_instance_name(node);  // choose + reserve the (possibly anonymous) name
       }
     } else if (op == Ntype_op::Memory) {
-      declared_name_counts.insert({get_scaped_name(default_instance_name(node)), 1});
+      memory_instance_name(node);  // choose + reserve a simple identifier
     }
   }
 }
@@ -3038,13 +3096,15 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     livehd::graph_util::comb_emit_order(graph, order, &cut_subs, &residual);
     if (!residual.empty()) {
       livehd::diag::warn("inou.cgen.verilog", "combinational-loop", "internal")
-          .msg("'{}': {} node(s) on a combinational cycle with no instance to break it -- they are emitted in raw "
-               "storage order at the tail of the always_comb, so one of them reads a variable before the line that "
-               "assigns it",
-               graph->get_name(),
-               residual.size())
-          .hint("a genuine per-bit self dependency (e.g. `w = w + 1`), or a packed self-reference lnast.tolg could "
-                "not split -- run with LIVEHD_SIM_SPLIT_DEBUG=1")
+          .msg(
+              "'{}': {} node(s) on a combinational cycle with no instance to break it -- they are emitted in raw "
+              "storage order at the tail of the always_comb, so one of them reads a variable before the line that "
+              "assigns it",
+              graph->get_name(),
+              residual.size())
+          .hint(
+              "a genuine per-bit self dependency (e.g. `w = w + 1`), or a packed self-reference lnast.tolg could "
+              "not split -- run with LIVEHD_SIM_SPLIT_DEBUG=1")
           .emit();
     }
   }
@@ -3989,6 +4049,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   mux2vector.clear();
   declared_name_counts.clear();
   sub_instance_names_.clear();
+  memory_instance_names_.clear();
   loop_instance_names_.clear();
   loop_output_vars_.clear();
   loop_output_unsigned_.clear();  // written and read as a pair with loop_output_vars_

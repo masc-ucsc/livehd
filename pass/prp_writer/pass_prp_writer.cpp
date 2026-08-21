@@ -73,10 +73,15 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // correspondence).  Stateless `comb`s are included: with `upass.inline=false`
   // they stay Sub instances, and the annotation is inert when a comb is inlined.
   std::unordered_set<std::string> instantiated_modules;
+  std::unordered_set<std::string> sink_modules;
   for (const auto& ln : var.lnasts) {
     std::string_view full = ln->get_top_module_name();
     auto             dot  = full.rfind('.');
-    instantiated_modules.emplace(std::string(dot == std::string_view::npos ? full : full.substr(dot + 1)));
+    auto             tail = std::string(dot == std::string_view::npos ? full : full.substr(dot + 1));
+    instantiated_modules.emplace(tail);
+    if (ln->io_meta().outputs.empty()) {
+      sink_modules.emplace(std::move(tail));
+    }
   }
 
   // One .prp per SOURCE FILE, not per unit. A Pyrope file contributes a
@@ -144,6 +149,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
         w->set_debug(debug_on);
         w->set_known_modules(&emitted_modules);
         w->set_instantiated_modules(&instantiated_modules);
+        w->set_sink_modules(&sink_modules);
         w->set_header_sink(&header);
         w->collect_header();
         writers.emplace_back(std::move(w));

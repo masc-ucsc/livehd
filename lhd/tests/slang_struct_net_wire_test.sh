@@ -206,4 +206,207 @@ grep -Eq "\.r *\(\s*[0-9]+'sb1\?" "$W/sn_out.v" \
 $(sed -n '/a11 ua/,/);/p' "$W/sn_out.v")"
 echo "PASS: a wire-classified scalar output port binds its buffer"
 
+# ── (5) member reads create a dependency on the aggregate root ───────────────
+# A MemberAccessExpression names the FIELD symbol in Slang, but the child
+# output connection records a write to the ROOT `child_o` symbol. If the
+# dependency collector compares those spellings directly, this always_ff is
+# incorrectly considered ready before u_child: Pyrope snapshots child_o's
+# poison initializer into q's next-state mux and the real child result is lost.
+cat >"$W/member_dep.sv" <<'EOF'
+typedef struct packed {
+  logic [7:0] data;
+  logic       flag;
+} member_dep_payload_t;
+
+typedef struct packed {
+  member_dep_payload_t to_s1;
+} member_dep_t;
+
+module member_dep_child(
+  input  logic [7:0] d_i,
+  output member_dep_t o
+);
+  always_comb begin
+    o.to_s1.data = d_i + 8'd3;
+    o.to_s1.flag = ^d_i;
+  end
+endmodule
+
+module member_dep(
+  input  logic        clk,
+  input  logic        en,
+  input  logic [7:0]  d_i,
+  output member_dep_t q_o
+);
+  member_dep_t child_o;
+  member_dep_t q;
+
+  // Deliberately source-before the producer instance: dataflow ordering must
+  // move u_child ahead of this consumer. The automatic locals mirror the
+  // FIRRTL-generated shape: their initializer cone is part of this process
+  // even though the local VariableSymbol is not a module-level driver.
+  always_ff @(posedge clk) begin
+    automatic logic [7:0] next_data = child_o.to_s1.data;
+    automatic logic       next_flag = child_o.to_s1.flag;
+    if (en) begin
+      q.to_s1.data <= next_data;
+      q.to_s1.flag <= next_flag;
+    end
+  end
+
+  member_dep_child u_child (.d_i(d_i), .o(child_o));
+  assign q_o = q;
+endmodule
+EOF
+"$LHD" compile "$W/member_dep.sv" --top member_dep \
+  --emit-dir "pyrope:$W/member_dep_prp" --workdir "$W/w_member_dep" >"$W/member_dep.log" 2>&1 \
+  || fail "compile of member_dep failed: $(cat "$W/member_dep.log")"
+"$LHD" lec --impl "pyrope:$W/member_dep_prp/member_dep.prp" \
+  --ref "verilog:$W/member_dep.sv" --top member_dep \
+  --set formal.strict=true --workdir "$W/lec_member_dep" >"$W/member_dep_lec.log" 2>&1 \
+  || fail "aggregate member dependency was lost on the Pyrope round trip: $(cat "$W/member_dep_lec.log")"
+echo "PASS: aggregate member reads order their producer before the consumer"
+
+# ── (6) a nonuniform packed-array reset survives the Pyrope round trip ──────
+# Slang emits this state as one array reg with an exact packed `init=` value and
+# a whole-array next-state update. The Pyrope reader used to recognize only the
+# importer's `initial=` spelling in that whole-array path, so it kept the reset
+# condition but silently dropped the value: cgen reset all eight entries to 0.
+# The reset-edge marker also has to survive; making an asynchronous source reset
+# synchronous is a separate semantic loss even when edge-stepped LEC cannot see
+# it.
+cat >"$W/nonuniform_array_reset.sv" <<'EOF'
+module nonuniform_array_reset(
+  input  logic       clock,
+  input  logic       reset,
+  input  logic [2:0] index,
+  input  logic [2:0] step,
+  output logic [6:0] data
+);
+  logic [7:0][6:0] ptr;
+  wire [7:0][6:0] ptr_next = {
+    ptr[7] + {4'b0, step}, ptr[6] + {4'b0, step},
+    ptr[5] + {4'b0, step}, ptr[4] + {4'b0, step},
+    ptr[3] + {4'b0, step}, ptr[2] + {4'b0, step},
+    ptr[1] + {4'b0, step}, ptr[0] + {4'b0, step}
+  };
+  always_ff @(posedge clock or posedge reset) begin
+    if (reset)
+      ptr <= {7'd7, 7'd6, 7'd5, 7'd4, 7'd3, 7'd2, 7'd1, 7'd0};
+    else
+      ptr <= ptr_next;
+  end
+  assign data = ptr[index];
+endmodule
+EOF
+"$LHD" compile "$W/nonuniform_array_reset.sv" --top nonuniform_array_reset \
+  --emit-dir "pyrope:$W/nonuniform_array_reset_prp" \
+  --workdir "$W/w_nonuniform_array_reset" >"$W/nonuniform_array_reset.log" 2>&1 \
+  || fail "compile of nonuniform_array_reset failed: $(cat "$W/nonuniform_array_reset.log")"
+grep -Fq 'reg ptr:[8]u7:[ordering="old", reset_pin=ref reset, async=true] = (0, 1, 2, 3, 4, 5, 6, 7)' \
+  "$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
+  || fail "Slang did not preserve the nonuniform reset value in Pyrope"
+"$LHD" compile "$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
+  --top nonuniform_array_reset --emit-dir "lg:$W/nonuniform_array_reset_lg" \
+  --workdir "$W/w_nonuniform_array_reset_prp" >"$W/nonuniform_array_reset_prp.log" 2>&1 \
+  || fail "Pyrope recompile of nonuniform_array_reset failed: $(cat "$W/nonuniform_array_reset_prp.log")"
+"$LHD" compile "lg:$W/nonuniform_array_reset_lg" --top nonuniform_array_reset \
+  --emit "verilog:$W/nonuniform_array_reset.v" \
+  --workdir "$W/w_nonuniform_array_reset_lg" >"$W/nonuniform_array_reset_lg.log" 2>&1 \
+  || fail "LGraph reload of nonuniform_array_reset failed: $(cat "$W/nonuniform_array_reset_lg.log")"
+grep -Fq "wire [55:0] __lhdmem_h707472_e_data_rst = 56'he182840608080;" "$W/nonuniform_array_reset.v" \
+  || fail "Pyrope whole-array init was dropped or changed in generated Verilog"
+grep -Fq 'always @(posedge clock or posedge reset)' "$W/nonuniform_array_reset.v" \
+  || fail "Pyrope whole-array async reset became synchronous in generated Verilog"
+# cgen must keep this as a packed two-dimensional reg with one whole-array
+# assignment. Its former unpacked, per-lane spelling reread as independent
+# memory write ports and lost both the bulk-update identity and async reset
+# (the shape generated for XiangShan ROB's enqPtrVec_data).
+grep -Fq 'reg [7:0][6:0] __lhdmem_h707472_e_data;' "$W/nonuniform_array_reset.v" \
+  || fail "whole-array cgen did not preserve a packed two-dimensional reg"
+grep -Fq '__lhdmem_h707472_e_data <= __lhdmem_h707472_e_data_rst;' "$W/nonuniform_array_reset.v" \
+  || fail "whole-array cgen expanded the reset into per-lane writes"
+"$LHD" compile "$W/nonuniform_array_reset.v" --top nonuniform_array_reset \
+  --emit "verilog:$W/nonuniform_array_reset_reread.v" \
+  --workdir "$W/w_nonuniform_array_reset_reread" >"$W/nonuniform_array_reset_reread.log" 2>&1 \
+  || fail "cgen packed-array async reset did not reread: $(cat "$W/nonuniform_array_reset_reread.log")"
+if grep -Fq 'async-reset-as-sync' "$W/nonuniform_array_reset_reread.log"; then
+  fail "cgen packed-array reset was demoted to synchronous on reread"
+fi
+grep -Fq 'always @(posedge clock or posedge reset)' "$W/nonuniform_array_reset_reread.v" \
+  || fail "cgen packed-array async reset edge was lost on reread: $(grep -n 'always @' "$W/nonuniform_array_reset_reread.v")"
+"$LHD" lec --impl "pyrope:$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
+  --ref "verilog:$W/nonuniform_array_reset.sv" --top nonuniform_array_reset \
+  --set formal.strict=true --workdir "$W/lec_nonuniform_array_reset" \
+  >"$W/nonuniform_array_reset_lec.log" 2>&1 \
+  || fail "nonuniform array reset failed LEC: $(cat "$W/nonuniform_array_reset_lec.log")"
+echo "PASS: nonuniform whole-array reset value and async edge survive Pyrope"
+
+# ── (7) sibling fields in one continuous struct pattern are dependency-ordered ──
+# This is the reduced XiangShan ROB shape.  The packed assignment is a set of
+# simultaneous net equations: `valid` reads the independently-computed `bits`
+# field.  Bundle lowering used to emit fields in declaration order, resolving
+# `vxsat.bits` before its later leaf driver and silently wiring nil.
+cat >"$W/struct_sibling_dep.sv" <<'EOF'
+module struct_sibling_dep(
+  input  logic       commit,
+  input  logic [7:0] lanes,
+  output logic       valid_o,
+  output logic       bits_o
+);
+  wire struct packed { logic valid; logic bits; } vxsat;
+  assign vxsat = '{valid: commit & vxsat.bits, bits: |lanes};
+  assign valid_o = vxsat.valid;
+  assign bits_o  = vxsat.bits;
+endmodule
+EOF
+"$LHD" compile "$W/struct_sibling_dep.sv" --top struct_sibling_dep \
+  --emit-dir "pyrope:$W/struct_sibling_dep_prp" \
+  --emit "verilog:$W/struct_sibling_dep.v" \
+  --workdir "$W/w_struct_sibling_dep" >"$W/struct_sibling_dep.log" 2>&1 \
+  || fail "compile of struct_sibling_dep failed: $(cat "$W/struct_sibling_dep.log")"
+grep -q '"code":"unresolved-ref"' "$W/struct_sibling_dep.log" \
+  && fail "sibling field read resolved before its driver: $(cat "$W/struct_sibling_dep.log")"
+"$LHD" lec --impl "pyrope:$W/struct_sibling_dep_prp/struct_sibling_dep.prp" \
+  --ref "verilog:$W/struct_sibling_dep.sv" --top struct_sibling_dep \
+  --set formal.strict=true --workdir "$W/lec_struct_sibling_dep" \
+  >"$W/struct_sibling_dep_lec.log" 2>&1 \
+  || fail "sibling-dependent struct pattern failed LEC: $(cat "$W/struct_sibling_dep_lec.log")"
+echo "PASS: sibling-dependent struct pattern emits its leaf drivers in dependency order"
+
+# ── (8) zero-output submodules round-trip as sink-call statements ────────────
+# A sink instance has no value result.  Emitting `mut u = Sink(...)` caused the
+# Pyrope reader to synthesize `u = %call_result`; tolg intentionally creates no
+# result pin for Sink, so that copy resolved `%call_result` to nil.  Preserve the
+# instance and its name with a standalone call instead.
+cat >"$W/sink_roundtrip.sv" <<'EOF'
+module sink_observer(input logic [3:0] data);
+endmodule
+module sink_roundtrip(input logic [3:0] data, output logic parity);
+  sink_observer u_observer(.data(data));
+  assign parity = ^data;
+endmodule
+EOF
+"$LHD" compile "$W/sink_roundtrip.sv" --top sink_roundtrip \
+  --emit-dir "pyrope:$W/sink_roundtrip_prp" \
+  --workdir "$W/w_sink_roundtrip" >"$W/sink_roundtrip.log" 2>&1 \
+  || fail "compile of sink_roundtrip failed: $(cat "$W/sink_roundtrip.log")"
+grep -Fq 'sink_observer::[name=u_observer](' "$W/sink_roundtrip_prp/sink_roundtrip.prp" \
+  || fail "zero-output instance was not emitted with its hierarchy name"
+grep -Fq 'u_observer = sink_observer' "$W/sink_roundtrip_prp/sink_roundtrip.prp" \
+  && fail "zero-output instance was incorrectly emitted as a value assignment"
+"$LHD" compile "$W/sink_roundtrip_prp/sink_roundtrip.prp" --top sink_roundtrip \
+  --emit "verilog:$W/sink_roundtrip.v" --workdir "$W/w_sink_roundtrip_prp" \
+  >"$W/sink_roundtrip_prp.log" 2>&1 \
+  || fail "Pyrope reread of zero-output sink failed: $(cat "$W/sink_roundtrip_prp.log")"
+grep -q '"code":"unresolved-ref"' "$W/sink_roundtrip_prp.log" \
+  && fail "zero-output sink reread synthesized an unresolved call-result copy: $(cat "$W/sink_roundtrip_prp.log")"
+# The default compile recipe may remove an empty sink instance as dead after it
+# has been lowered (the real DPI wrapper is non-empty outside SYNTHESIS), so the
+# source-level call spelling above pins the hierarchy name; here only require
+# that the imported module survived and the reread stayed diagnostic-free.
+grep -Fq 'module sink_observer' "$W/sink_roundtrip.v" \
+  || fail "zero-output sink module was lost on round trip"
+echo "PASS: zero-output module call round-trips as a named sink instance"
+
 echo "ALL PASS"

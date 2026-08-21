@@ -629,4 +629,38 @@ ${LHD} lec --impl pyrope:"$W/bundle_field_uncertainty_prp/bundle_field_uncertain
   || fail "field-precise uncertainty lowering is not equivalent to the Verilog source"
 echo "PASS: uncertain packed-field writes preserve definite siblings"
 
+# A stateful child with a public `clk` input consumes that ordinary named
+# actual at the call site.  Its statefulness must not propagate a second,
+# compiler-minted `clock` input onto an otherwise explicitly-clocked parent.
+# This was observed after Verilog -> Pyrope -> LGraph round-trip as an
+# implementation-only hierarchical box input in Minion's preview register
+# files.
+cat >"$W/clocked_child.prp" <<'EOF'
+pub mod clocked_child(clk:u1, d_i:u1) -> (q_o:u1@[]) {
+  reg q:u1
+  q = d_i
+  q_o = q
+}
+EOF
+cat >"$W/clocked_parent.prp" <<'EOF'
+const clocked_child = import("clocked_child.clocked_child")
+
+pub mod clocked_parent(rf_clk_i:u1, d_i:u1) -> (q_o:u1@[]) {
+  mut u_child = clocked_child::[name=u_child](clk=rf_clk_i, d_i=d_i)
+  q_o = u_child.q_o
+}
+EOF
+${LHD} compile "$W/clocked_child.prp" "$W/clocked_parent.prp" \
+  --top clocked_parent --emit-dir lg:"$W/clocked_hier_lg/" \
+  --workdir "$W/clocked_hier_w" -q \
+  || fail "explicit-clock child hierarchy did not compile"
+if awk '
+  /^graph_io / { in_parent = ($3 == "clocked_parent"); next }
+  in_parent && $1 == "input" && $3 == "clock" { found = 1 }
+  END { exit(found ? 0 : 1) }
+' "$W/clocked_hier_lg/library.txt"; then
+  fail "stateful child leaked a hidden clock input onto its parent"
+fi
+echo "PASS: a child public clk does not mint a second parent clock input"
+
 echo "PASS: all slang minion-feature regressions"

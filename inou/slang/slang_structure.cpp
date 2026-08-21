@@ -410,7 +410,7 @@ struct Whole_store_collector : public slang::ast::ASTVisitor<Whole_store_collect
   // Every symbol written at all, whole or per element. A reset arm that loads
   // an array one entry at a time (`if (rst) arr[k] <= k;`) still gives that
   // array a reset, even though it never appears in `stores`.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> touched;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                                   touched;
 
   void handle(const slang::ast::AssignmentExpression& a) {
     const slang::ast::Expression* l = &a.left();
@@ -580,7 +580,7 @@ struct Array_range_write_collector : public slang::ast::ASTVisitor<Array_range_w
   // ALL THREE outputs are required. None is null-checked on purpose: a missing
   // `range_written` would silently drop a CORRECTNESS bail (the write vanishes),
   // which is strictly worse than crashing at the one call site that sets them.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* range_written  = nullptr;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>*      range_written  = nullptr;
   // Packed arrays assigned as a WHOLE (`arr = <expr>` / `assign arr = '{...}`),
   // COUNTED. The Type-C self-reference check below needs the candidate list, and
   // it needs the count too: `whole_net_driver` returns the FIRST driver it
@@ -593,7 +593,7 @@ struct Array_range_write_collector : public slang::ast::ASTVisitor<Array_range_w
   // contract, so the Type-C repair below must refuse an array that carries such
   // a write ALONGSIDE its whole-array driver -- the old SROA gate spelled the
   // same refusal as `!elem_written`.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>* part_written   = nullptr;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>*      part_written   = nullptr;
 
   // A packed array of genuine MULTI-BIT elements (a real 2-D array like
   // `[6:0][53:0]`), not a plain bus: `logic [1:0]` is a packed array of 1-bit
@@ -888,9 +888,10 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       const auto& type   = port.getType();
       const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
 
-      // Unpacked-array port `T arr[N-1:0]` -> flat packed [N*elem_bits-1:0] IO
-      // (Verilator/yosys flatten unpacked ports identically, so LEC lines up);
-      // element access lowers to a bit-slice (see flat_port_read/write).
+      // Unpacked-array port `T arr[N-1:0]` -> flat packed [N*elem_bits-1:0] IO.
+      // Yosys places the declaration's rightmost element in the packed bus LSB,
+      // so element access must preserve the declared range direction (see
+      // flat_port_read/write).
       bool     is_flat_array = false;
       int      io_bits       = 0;
       bool     io_signed     = false;
@@ -903,6 +904,8 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
           if (elem.isIntegral() && !elem.isUnpackedArray()) {
             auto ei             = tinfo(elem);
             flat_mi.lower       = arr.range.lower();
+            flat_mi.upper       = arr.range.upper();
+            flat_mi.descending  = arr.range.isDescending();
             flat_mi.elem_bits   = ei.bits;
             flat_mi.elem_signed = ei.is_signed;
             flat_mi.size        = arr.range.width();
@@ -1376,35 +1379,35 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   // Save in-flight per-module state (a submodule definition lowers
   // recursively from its instantiation site).
-  auto saved_builder          = std::move(builder_);
-  auto saved_body             = body_;
-  auto saved_eval             = std::move(eval_ctx_);
-  auto saved_sym_lname        = std::move(sym_lname_);
-  auto saved_local_params     = std::move(local_param_lname_);
-  auto saved_used             = std::move(used_names_);
-  auto saved_inputs           = std::move(input_syms_);
-  auto saved_outputs          = std::move(output_syms_);
-  auto saved_output_info      = std::move(output_info_);
-  auto saved_bundle_ports     = std::move(bundle_port_info_);
-  auto saved_bundle_shadow    = std::move(bundle_out_shadow_);
-  auto saved_regs             = std::move(reg_syms_);
-  auto saved_wires            = std::move(wire_syms_);
-  auto saved_wire_split       = std::move(wire_split_tmp_);
-  auto saved_wire_flat        = std::move(wire_split_flat_);
-  auto saved_latches          = std::move(latch_syms_);
-  auto saved_mems             = std::move(mem_syms_);
-  auto saved_declared         = std::move(declared_);
-  auto saved_prefix           = std::move(genblk_prefix_);
-  auto saved_failed           = module_failed_;
-  auto saved_proc_kind        = proc_kind_;
-  auto saved_style            = std::move(proc_assign_style_);
-  auto saved_blocking         = std::move(proc_blocking_written_);
-  auto saved_bools            = std::move(bool_values_);
-  auto saved_mem_info         = std::move(mem_info_);
-  auto saved_reg_declared     = std::move(reg_declared_);
-  auto saved_tuple_names      = std::move(tuple_type_names_);
-  auto saved_emitted_types    = std::move(emitted_tuple_types_);
-  auto saved_local_cnt        = local_cnt_;
+  auto saved_builder           = std::move(builder_);
+  auto saved_body              = body_;
+  auto saved_eval              = std::move(eval_ctx_);
+  auto saved_sym_lname         = std::move(sym_lname_);
+  auto saved_local_params      = std::move(local_param_lname_);
+  auto saved_used              = std::move(used_names_);
+  auto saved_inputs            = std::move(input_syms_);
+  auto saved_outputs           = std::move(output_syms_);
+  auto saved_output_info       = std::move(output_info_);
+  auto saved_bundle_ports      = std::move(bundle_port_info_);
+  auto saved_bundle_shadow     = std::move(bundle_out_shadow_);
+  auto saved_regs              = std::move(reg_syms_);
+  auto saved_wires             = std::move(wire_syms_);
+  auto saved_wire_split        = std::move(wire_split_tmp_);
+  auto saved_wire_flat         = std::move(wire_split_flat_);
+  auto saved_latches           = std::move(latch_syms_);
+  auto saved_mems              = std::move(mem_syms_);
+  auto saved_declared          = std::move(declared_);
+  auto saved_prefix            = std::move(genblk_prefix_);
+  auto saved_failed            = module_failed_;
+  auto saved_proc_kind         = proc_kind_;
+  auto saved_style             = std::move(proc_assign_style_);
+  auto saved_blocking          = std::move(proc_blocking_written_);
+  auto saved_bools             = std::move(bool_values_);
+  auto saved_mem_info          = std::move(mem_info_);
+  auto saved_reg_declared      = std::move(reg_declared_);
+  auto saved_tuple_names       = std::move(tuple_type_names_);
+  auto saved_emitted_types     = std::move(emitted_tuple_types_);
+  auto saved_local_cnt         = local_cnt_;
   // The struct-classification collector sets are rebuilt per module below —
   // save them too, or the parent module resumes with the CHILD's sets after a
   // mid-emission recursive instance lowering, flipping is_scalar_struct_var
@@ -1418,6 +1421,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_deep_written      = std::move(struct_deep_written_);
   auto saved_packed_mem_regs   = std::move(packed_mem_regs_);
   auto saved_array_reset_lanes = std::move(array_reset_lanes_);
+  auto saved_pending_resets    = std::move(pending_async_resets_);
 
   builder_ = Lnast_builder();
   sym_lname_.clear();
@@ -1446,6 +1450,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   emitted_tuple_types_.clear();
   packed_mem_regs_.clear();
   array_reset_lanes_.clear();
+  pending_async_resets_.clear();
   local_cnt_ = 0;
 
   body_ = body;
@@ -1535,8 +1540,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   absl::flat_hash_set<const slang::ast::ValueSymbol*> array_range_written;
   {
     absl::flat_hash_map<const slang::ast::ValueSymbol*, int> array_whole_assigned;
-    absl::flat_hash_set<const slang::ast::ValueSymbol*> array_part_written;
-    Array_range_write_collector                         rwc;
+    absl::flat_hash_set<const slang::ast::ValueSymbol*>      array_part_written;
+    Array_range_write_collector                              rwc;
     rwc.range_written  = &array_range_written;
     rwc.whole_assigned = &array_whole_assigned;
     rwc.part_written   = &array_part_written;
@@ -1645,13 +1650,10 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     }
   };
   harvest_mem_inits(*body);
-  // Classify each unpacked array as constant- or runtime-indexed (a non-const
-  // selector anywhere makes it runtime-indexed) BEFORE any declare runs:
-  // declare_unpacked (reg hoisting below, and the comb loop) consults
-  // runtime_indexed_arrays_ to choose flatten (const-indexed -> packed bus,
-  // matching yosys-slang) vs memory (runtime-indexed). A comb plain-vector
-  // array that is never runtime-indexed is safe to flatten; a runtime-indexed
-  // one stays a memory.
+  // Classify array selectors before declarations. Packed 2-D register handling
+  // below uses runtime indexing to choose a Memory. For unpacked arrays, state
+  // always remains a Memory; selector constness only controls whether a plain
+  // combinational array can be predeclared as its packed accumulator.
   {
     auto is_runtime_sel = [&](const slang::ast::Expression* sel) {
       if (try_eval_int(*sel)) {
@@ -1694,8 +1696,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // from the expression — running it over the whole body walks the entire
       // datapath instead. A block with a single edge trigger has no async rung
       // and therefore no reset value to lose.
-      std::vector<const slang::ast::Statement*>            reset_arms;
-      std::function<void(const slang::ast::Scope&)>        harvest_reset_arms = [&](const slang::ast::Scope& scope) {
+      std::vector<const slang::ast::Statement*>     reset_arms;
+      std::function<void(const slang::ast::Scope&)> harvest_reset_arms = [&](const slang::ast::Scope& scope) {
         for (const auto& member : scope.members()) {
           if (member.kind == SymbolKind::GenerateBlock) {
             const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
@@ -1944,6 +1946,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // accumulator carries the poison as its declare init instead).
 
   lower_members(*body);
+  finalize_pending_async_resets();
 
   bool ok = !module_failed_;
   if (ok) {
@@ -1988,6 +1991,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   struct_deep_written_     = std::move(saved_deep_written);
   packed_mem_regs_         = std::move(saved_packed_mem_regs);
   array_reset_lanes_       = std::move(saved_array_reset_lanes);
+  pending_async_resets_    = std::move(saved_pending_resets);
 
   return ok;
 }
@@ -2152,24 +2156,23 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // Flatten a combinational array to a packed bus. This preserves X in each
   // undriven Verilog-net element, aggregate sub-writes compose through set_mask,
   // and flat_port_read/write implement dynamic element access with shifts.
-  const bool    const_indexed = !runtime_indexed_arrays_.contains(&sym);
-  const int64_t flat_bits     = static_cast<int64_t>(ei.bits) * total;
-  const bool    has_init      = [&] {
+  const int64_t flat_bits = static_cast<int64_t>(ei.bits) * total;
+  const bool    has_init  = [&] {
     auto it = mem_init_vals_.find(&sym);
     return it != mem_init_vals_.end() && !it->second.empty();
   }();
-  // FLATTEN to a single packed bus when the array is CONST-indexed (reg OR comb)
-  // — yosys-slang packs a const-indexed array into one wide word (SIZE=1), so a
-  // multi-entry memory would not LEC against it. Element/field/bit access then
-  // becomes a bit-slice on ONE variable (set_mask, the flat-port path). A
-  // runtime-indexed REG array stays a memory (the FIFO/regfile/store path). A
-  // reg array with power-on contents also keeps the memory path (the init
-  // becomes the memory initializer; flattening it needs a concatenated reset).
-  // Multi-dim arrays always take the linearized MEMORY path (the flat-port
-  // bit-slice machinery is single-dim).
-  if (dims.size() == 1 && (!is_reg || const_indexed) && !has_init && flat_bits > 0 && flat_bits <= 65536) {
+  // Flatten combinational arrays to one packed accumulator so partial writes
+  // compose without inferring state. Stateful unpacked arrays stay native
+  // memories regardless of whether their selectors happen to be constant:
+  // selector constness is a synthesis optimization, while preserving the
+  // aggregate identity is required by whole-array read_all/update semantics and
+  // by Verilog -> Pyrope state correspondence. Multi-dimensional arrays always
+  // take the linearized memory path.
+  if (dims.size() == 1 && !is_reg && !has_init && flat_bits > 0 && flat_bits <= 65536) {
     Mem_info fmi;
     fmi.lower       = arr.range.lower();
+    fmi.upper       = arr.range.upper();
+    fmi.descending  = arr.range.isDescending();
     fmi.elem_bits   = ei.bits;
     fmi.elem_signed = ei.is_signed;
     fmi.size        = arr.range.width();
@@ -2209,6 +2212,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     const auto& st = elem.as<slang::ast::PackedStructType>();
     Mem_info    mi;
     mi.lower       = arr.range.lower();
+    mi.upper       = arr.range.upper();
+    mi.descending  = arr.range.isDescending();
     mi.elem_bits   = ei.bits;
     mi.elem_signed = false;
     mi.size        = total;
@@ -2258,6 +2263,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
 
   Mem_info mi;
   mi.lower       = arr.range.lower();
+  mi.upper       = arr.range.upper();
+  mi.descending  = arr.range.isDescending();
   mi.elem_bits   = ei.bits;
   mi.elem_signed = ei.is_signed;
   mi.size        = total;
@@ -3199,23 +3206,51 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
     }
   }
 
+  void handle(const slang::ast::VariableDeclStatement& stmt) {
+    // Automatic locals inside a process are not separate module drivers, but
+    // their initializer cones still belong to THIS process driver. Slang's
+    // generic statement visitor does not descend through the declaration's
+    // VariableSymbol initializer. Without doing so, a FIRRTL-style
+    // `automatic t tmp = child_out.field; q <= tmp;` records only a read of
+    // `tmp`; the producer instance is absent from the dependency graph and the
+    // process may snapshot the aggregate before its driver is emitted.
+    if (const auto* init = stmt.symbol.getInitializer()) {
+      init->visit(*this);
+    }
+  }
+
+  void handle(const slang::ast::MemberAccessExpression& expr) {
+    // A member expression's ValueExpressionBase::symbol is the FIELD symbol,
+    // while an instance output connection is recorded against the ROOT net.
+    // Using the field here therefore loses the writer->reader dependency for
+    // `child_out.bundle.field`: a sequential consumer can emit before the
+    // child instance, snapshot the aggregate's poison initializer, and fold
+    // the real child-output arm away on the Pyrope round trip.  Dependency
+    // ordering is per storage object, so canonicalize member reads to the same
+    // root symbol note_lhs() uses for writes.
+    if (const auto* sym = lhs_base_symbol(expr)) {
+      reads.insert(sym);
+    }
+  }
+
   void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&expr.symbol); }
 };
 
 }  // namespace
 
-// External nets connected to an instance's PURELY-REGISTERED output ports — an
-// output whose internal driver is a submodule register q (so it is
-// combinationally independent of every input, exactly like a flop q at this
-// level). A read of such a net is order-free: it must NOT make the reader depend
-// on the instance. Otherwise a pipeline-register feedback — a forward path reads
+// External nets connected to an instance's PURELY-STATE output ports — an
+// output whose internal driver is a submodule flop/latch q (so it is
+// combinationally independent of every input at the module boundary, exactly
+// like a state q at this level). A read of such a net is order-free: it must
+// NOT make the reader depend on the instance. Otherwise a pipeline-register
+// feedback — a forward path reads
 // `stage_reg.out`, whose `stage_reg.in = f(forwarded)` — is mistaken for a comb
 // loop, and the cyclic-net `wire` fallback then routes the (now position-
 // independent) read through the wrong driver (the forwarding mux), miscompiling
 // every consumer of that stage register's output (e.g. io_dmem_address reading a
 // don't-care instead of the ex/mem result).
-static void collect_registered_outputs(const slang::ast::InstanceSymbol&               inst,
-                                       absl::flat_hash_set<const slang::ast::Symbol*>& ext_nets) {
+static void collect_state_outputs(const slang::ast::InstanceSymbol&               inst,
+                                  absl::flat_hash_set<const slang::ast::Symbol*>& ext_nets) {
   // The INSTANCE's own body (NOT getCanonicalBody) so the reg set computed below
   // and this instance's port.internalSymbol reference the same per-instance
   // symbols. With the canonical (first-instance) body, every non-first instance
@@ -3223,14 +3258,17 @@ static void collect_registered_outputs(const slang::ast::InstanceSymbol&        
   // false comb-loop back-edges.
   const auto* body = &inst.body;
 
-  // (1) submodule reg set: vars written nonblocking in an edge-sensitive always.
+  // (1) Submodule state set: vars written nonblocking in an edge-sensitive
+  // always or an always_latch. A latch q is just as much a state cut here as a
+  // flop q; omitting it made legal instance-output feedback bind the parent's
+  // poison initializer instead (minion intpipe_mul_div_ctl/mdctl_dw_2q).
   absl::flat_hash_set<const slang::ast::Symbol*> regs;
   for (const auto& member : body->members()) {
     if (member.kind != SymbolKind::ProceduralBlock) {
       continue;
     }
-    const auto& pbs     = member.as<slang::ast::ProceduralBlockSymbol>();
-    bool        is_edge = false;
+    const auto& pbs           = member.as<slang::ast::ProceduralBlockSymbol>();
+    bool        is_state_proc = pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysLatch;
     if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always
         || pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysFF) {
       const auto& stmt = pbs.getBody();
@@ -3238,8 +3276,8 @@ static void collect_registered_outputs(const slang::ast::InstanceSymbol&        
         const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
         auto        scan   = [&](const slang::ast::TimingControl& tc) {
           if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
-            auto edge  = tc.as<slang::ast::SignalEventControl>().edge;
-            is_edge   |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
+            auto edge      = tc.as<slang::ast::SignalEventControl>().edge;
+            is_state_proc |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
           }
         };
         if (timing.kind == slang::ast::TimingControlKind::EventList) {
@@ -3251,7 +3289,7 @@ static void collect_registered_outputs(const slang::ast::InstanceSymbol&        
         }
       }
     }
-    if (!is_edge) {
+    if (!is_state_proc) {
       continue;
     }
     Write_collector wc;
@@ -3325,8 +3363,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   };
   std::vector<Driver>                            drivers;
   std::vector<size_t>                            unknown_idx;  // drivers[] entries that are blackbox instances
-  // External nets driven by purely-registered instance outputs; reads of them are
-  // order-free (see collect_registered_outputs) so pass 2 skips their back-edges.
+  // External nets driven by pure flop/latch state outputs; reads of them are
+  // order-free (see collect_state_outputs) so pass 2 skips their back-edges.
   absl::flat_hash_set<const slang::ast::Symbol*> seq_out_nets;
 
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
@@ -3395,7 +3433,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::Instance: {
-          collect_registered_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
+          collect_state_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
           Driver d{&member, genblk_prefix_, {}, {}, {}};
           for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
             const auto* expr = conn->getExpression();
@@ -3671,7 +3709,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // into one big false SCC; the old rule then promoted the WHOLE SCC to `wire`
   // (txfma_e2: 16 nets, incl. `e_1_tk_f2a_h` which is single-writer and written
   // before its only reader). The back-edge test keeps `wire` for exactly the
-  // true feedback nets and drops the rest to `mut`. Registered instance outputs
+  // true feedback nets and drops the rest to `mut`. State instance outputs
   // (seq_out_nets) fold in: their deps back-edges were dropped so the topo order
   // may place a reader first — the same position check catches precisely those,
   // instead of blanket-wiring every registered output.
@@ -3711,9 +3749,23 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         continue;  // never read → no read-before-write
       }
       for (size_t r : rit->second) {
-        // A driver that also writes `net` reads its own prior/poison value
-        // intra-block (RMW) — that is not a cross-driver early read.
+        // A driver that also writes `net` normally reads its own prior/poison
+        // value intra-block (RMW), which is not a cross-driver early read.
+        // There is one important exception: an INSTANCE may feed one of its
+        // pure flop/latch outputs back into one of its inputs. The output
+        // is a state-q cut, so this is not a combinational loop, and the input
+        // must read the resolved instance-output net.  Leaving it as a `mut`
+        // snapshots the poison initializer while lower_instance is building
+        // the input arguments; the later output binding cannot repair that
+        // already-created SSA value (minion intpipe_mul_div_ctl's
+        // mdctl_dw_2q feedback became a permanent `0ub?`).  A `wire` buffer is
+        // exactly the position-independent representation for this legal
+        // state feedback.
         if (drivers[r].writes.contains(net)) {
+          if (seq_out_nets.contains(net)) {
+            wire_syms_.insert(net);
+            break;
+          }
           continue;
         }
         if (pos[r] < wpos) {
@@ -3863,6 +3915,41 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
       }
     }
+    // A synthesis-style always_comb is a simultaneous combinational equation
+    // system, even when cgen's stable node order prints a temporary's consumer
+    // before its producer in the block.  Model a scalar that is both read and
+    // written by one procedure as a resolved wire when the procedure proves one
+    // unconditional whole write.  Otherwise the early read binds to the mut's
+    // poison initializer and stays X forever on the Verilog -> Pyrope round
+    // trip (ExeUnitImp_4: `_Alu_io_in_ready = get_mask; get_mask = Alu.ready`).
+    //
+    // The strict definite-write and single-store guards preserve procedural
+    // accumulator semantics: conditional, partial, and multiply-written values
+    // still use the split mut below.  A true `x = x + 1` becomes an honest
+    // combinational wire loop and is refused downstream instead of silently
+    // reading an invented previous activation.
+    for (const auto& d : drivers) {
+      if (d.member->kind != SymbolKind::ProceduralBlock) {
+        continue;
+      }
+      for (const auto* sym : d.reads) {
+        if (sym == nullptr || !d.writes.contains(sym) || !definite_proc_written.contains(sym) || partial_writes.contains(sym)) {
+          continue;
+        }
+        auto scit = store_counts.find(sym);
+        if (scit == store_counts.end() || scit->second != 1 || reg_syms_.contains(sym) || input_syms_.contains(sym)) {
+          continue;
+        }
+        const auto* psc = sym->getParentScope();
+        const bool  module_level
+            = psc != nullptr && (&psc->asSymbol() == body_ || psc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+        const auto& ct = sym->getType().getCanonicalType();
+        if (module_level && ct.isIntegral() && !ct.isStruct() && !ct.isPackedUnion() && !is_scalar_struct_var(*sym)
+            && !flat_port_syms_.contains(sym) && !mem_syms_.contains(sym)) {
+          wire_syms_.insert(sym);
+        }
+      }
+    }
     // wire_syms_ is pointer-keyed: linearize before this loop mints `__wtmp`
     // names — the order decides `lname_of`'s `_sN` numbering.
     for (const auto* wsym : emit_ordered(wire_syms_)) {
@@ -3889,7 +3976,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       const int driver_count = wit != writers_of.end() ? static_cast<int>(wit->second.size()) : 0;
       auto      scit         = store_counts.find(vs);
       const int store_count  = scit != store_counts.end() ? scit->second : 0;
-      if (driver_count <= 1 && store_count <= 1 && !partial_writes.contains(vs) && !proc_written.contains(vs)) {
+      if (driver_count <= 1 && store_count <= 1 && !partial_writes.contains(vs)
+          && (!proc_written.contains(vs) || definite_proc_written.contains(vs))) {
         continue;  // one non-procedural driver, one WHOLE store: a plain wire is fine
       }
       // Readable, unique accumulator name derived from the wire's lname.
@@ -4092,6 +4180,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     };
     hoist_muts(scope);
   }
+  // ── hoist plain module-level combinational variables ──────────────────────
 
   // ── a WIRE-classified OUTPUT port needs its buffer too ─────────────────────
   // An output port is declared from io_meta, so `declared_` already holds it
@@ -4563,6 +4652,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   std::vector<const slang::ast::Statement*> prologue;
   const slang::ast::Statement*              body       = &timed.stmt;
   bool                                      peeled_any = false;  // a rung already extracted?
+  std::vector<std::string>                  inactive_async_guards;
 
   // A constant bit-select is a plain one-bit event signal too. cgen uses this
   // form when a boolean reset cone retains harmless width headroom, emitting
@@ -4910,54 +5000,34 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
             reset_stores.emplace_back(sym, const_text(cv->integer()));
             return true;
           }
-          // A constant SLICE of the reg: translate the select to 0-based bit
-          // positions the same way the partial-write lowering does, then merge
-          // it into this reg's accumulating reset value.
+          // A constant SLICE of the reg: use the normal packed-lvalue resolver
+          // so multi-dimensional packed arrays get the same flattened offset
+          // as their ordinary writes (`q[1]` in `[1:0][3:0] q` starts at bit
+          // four, not bit one).
           const auto& lhs_e = as.left();
           if (lhs_e.kind != ExpressionKind::ElementSelect && lhs_e.kind != ExpressionKind::RangeSelect) {
             return false;
           }
-          const slang::ast::Expression* base_e = lhs_e.kind == ExpressionKind::ElementSelect
-                                                     ? &lhs_e.as<slang::ast::ElementSelectExpression>().value()
-                                                     : &lhs_e.as<slang::ast::RangeSelectExpression>().value();
-          if (base_e->kind != ExpressionKind::NamedValue || !base_e->type->isIntegral() || !base_e->type->hasFixedRange()) {
-            return false;  // only a plain packed vector has a stable bit numbering here
-          }
-          const auto     rng      = base_e->type->getFixedRange();
-          const uint64_t reg_bits = base_e->type->getBitWidth();
-          const int64_t  slice_w  = static_cast<int64_t>(lhs_e.type->getBitWidth());
-          if (reg_bits == 0 || reg_bits > 63 || slice_w <= 0) {
-            return false;  // >63 bits does not fit the uint64 accumulator
-          }
-          std::optional<int64_t> lo;
-          if (lhs_e.kind == ExpressionKind::ElementSelect) {
-            if (auto ci = try_eval_int(lhs_e.as<slang::ast::ElementSelectExpression>().selector())) {
-              lo = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
-            }
-          } else {
-            const auto& rs = lhs_e.as<slang::ast::RangeSelectExpression>();
-            if (rs.getSelectionKind() != slang::ast::RangeSelectionKind::Simple) {
-              return false;  // an indexed part-select's base may be non-constant
-            }
-            auto l = try_eval_int(rs.left());
-            auto r = try_eval_int(rs.right());
-            if (l && r) {
-              lo = rng.isDescending() ? (std::min(*l, *r) - rng.lower()) : (rng.upper() - std::max(*l, *r));
-            }
-          }
-          if (!lo || *lo < 0 || static_cast<uint64_t>(*lo + slice_w) > reg_bits) {
+          Packed_lv lv;
+          if (!resolve_packed_lvalue(lhs_e, lv) || lv.base != sym || !lv.dyn_off.empty()) {
             return false;
+          }
+          const uint64_t reg_bits = sym->getType().getBitWidth();
+          const int64_t  slice_w  = lv.width;
+          const int64_t  lo       = lv.const_off;
+          if (reg_bits == 0 || reg_bits > 63 || slice_w <= 0 || lo < 0 || static_cast<uint64_t>(lo + slice_w) > reg_bits) {
+            return false;  // >63 bits does not fit the uint64 accumulator
           }
           const uint64_t slice_mask = slice_w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << slice_w) - 1);
           const uint64_t slice_val  = cv->integer().as<uint64_t>().value_or(0) & slice_mask;
           auto*          p          = partial_of(sym);
           p->full                   = (uint64_t{1} << reg_bits) - 1;
-          const uint64_t placed     = slice_mask << static_cast<uint64_t>(*lo);
+          const uint64_t placed     = slice_mask << static_cast<uint64_t>(lo);
           if ((p->mask & placed) != 0) {
             return false;  // overlapping writes: last-wins ordering is not modelled here
           }
           p->mask  |= placed;
-          p->value |= slice_val << static_cast<uint64_t>(*lo);
+          p->value |= slice_val << static_cast<uint64_t>(lo);
           return true;
         }
         default: return false;
@@ -4965,14 +5035,30 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     };
     bool harvested = harvest(cond_stmt.ifTrue);
     if (harvested) {
-      // Every slice-written reg must be FULLY covered — a reset that leaves
-      // bits holding is not an `initial=` value.
+      // A single process may cover the whole register, or generated sibling
+      // processes may cover disjoint slices. Queue the latter until the entire
+      // module has lowered; finalize_pending_async_resets requires exact whole-
+      // register coverage under one reset control.
       for (const auto& [sym, p] : partials) {
-        if (p.mask != p.full) {
-          harvested = false;
-          break;
+        if (p.mask == p.full) {
+          reset_stores.emplace_back(sym, std::to_string(p.value));
+          continue;
         }
-        reset_stores.emplace_back(sym, std::to_string(p.value));
+        auto [it, inserted] = pending_async_resets_.try_emplace(sym);
+        auto& pending       = it->second;
+        if (inserted) {
+          pending.full      = p.full;
+          pending.reset_ref = reset_ref_name;
+          pending.edge_pos  = edge_pos;
+          pending.loc       = cond_stmt.ifTrue.sourceRange.start();
+        }
+        if (pending.full != p.full || pending.reset_ref != reset_ref_name || pending.edge_pos != edge_pos
+            || (pending.mask & p.mask) != 0) {
+          pending.invalid = true;
+        } else {
+          pending.mask  |= p.mask;
+          pending.value |= p.value;
+        }
       }
     }
     if (!harvested) {
@@ -4986,69 +5072,100 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       return;
     }
     for (const auto& [sym, init_text] : reset_stores) {
-      declare_reg(*sym);  // ensure declared (hoisting normally did)
-      auto name = lname_of(*sym);
-      struct Reset_target {
-        std::string name;
-        std::string initial;
-      };
-      std::vector<Reset_target> targets;
-      if (auto sit = struct_var_info_.find(sym); sit != struct_var_info_.end() && reg_syms_.contains(sym)) {
-        // The source reset value is the packed aggregate. Slice it by each
-        // leaf's recorded packed offset so every split flop gets exactly the
-        // reset bits belonging to its original field.
-        auto packed = Dlop::from_pyrope(init_text);
-        if (!packed || packed->is_invalid()) {
-          emit_unsupported(sym->location, "unsupported-aggregate-reset", "could not split the packed-aggregate reset value");
-          continue;
-        }
-        for (const auto& f : sit->second.fields) {
-          auto mask = Dlop::get_mask_value(static_cast<int>(f.off) + f.bits - 1, static_cast<int>(f.off));
-          auto lane = packed->get_mask_op(*mask);
-          targets.push_back({absl::StrCat(name, ".", f.name), std::string(lane->to_pyrope())});
-        }
-      } else {
-        targets.push_back({name, init_text});
-      }
-      auto& ln        = *builder_.lnast;
-      auto  emit_attr = [&](std::string_view target, std::string_view key, const std::string& val, bool val_is_ref) {
-        auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-        ln.add_child(idx, Lnast_node::create_ref(target));
-        ln.add_child(idx, Lnast_node::create_const(key));
-        if (val_is_ref) {
-          ln.add_child(idx, Lnast_node::create_ref(val));
-        } else {
-          ln.add_child(idx, Lnast_node::create_const(val));
-        }
-      };
-      // A packed array whose reset is a per-entry PATTERN already carries it as
-      // the declare's tuple initializer (array_reset_lanes_): re-emitting it
-      // here as one scalar would broadcast the bottom lane over every entry.
-      // The reset WIRING (reset_pin/sync/negreset) still belongs on the array.
-      // Only the MEMORY declare emits those lanes, and array_reset_lanes_ is
-      // filled before the packed_mem_regs_ gate runs (an output reg, a bundle
-      // leaf, a range-written array or one with no element access at all stays
-      // a flat bus). On the flat path the scalar `initial` IS the whole packed
-      // reset value, so suppressing it there would drop the reset outright.
-      const bool lanes_carry_reset = array_reset_lanes_.contains(sym) && packed_mem_regs_.contains(sym);
-      for (const auto& target : targets) {
-        if (!lanes_carry_reset) {
-          emit_attr(target.name, "initial", target.initial, false);
-        }
-        emit_attr(target.name, "reset_pin", reset_ref_name, true);
-        emit_attr(target.name, "sync", "false", false);
-        if (!edge_pos) {
-          emit_attr(target.name, "negreset", "true", false);
-        }
-      }
+      emit_reg_reset_attrs(*sym, init_text, reset_ref_name, edge_pos);
     }
+
+    // Peeling the reset arm into per-register attributes must not discard the
+    // process-level hold semantics for state that is intentionally NOT reset:
+    //
+    //   always_ff @(posedge clk or negedge rst_n)
+    //     if (!rst_n) ptr <= 0; else if (push) mem[ptr] <= data;
+    //
+    // `mem` has no reset value, but it still cannot write while reset is held.
+    // Keep every peeled reset's inactive condition around the residual body.
+    // Reset-bearing flops also receive this redundant data-path gate; their
+    // async reset attribute remains authoritative while reset is active.
+    auto inactive_guard = booleanize(reset_ref_name);
+    if (polarity) {
+      inactive_guard = mark_bool(builder_.create_log_not_stmts(inactive_guard));
+    }
+    inactive_async_guards.push_back(std::move(inactive_guard));
 
     edges.erase(edges.begin() + static_cast<std::ptrdiff_t>(match));
     body       = cond_stmt.ifFalse;
     peeled_any = true;  // a demote after this point would drop this reset — gate (1)
   }
 
-  lower_ff_process(*edges[0], *body, prologue);
+  lower_ff_process(*edges[0], *body, prologue, inactive_async_guards);
+}
+
+void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
+                                         bool edge_pos) {
+  declare_reg(sym);  // ensure declared (hoisting normally did)
+  auto name = lname_of(sym);
+  struct Reset_target {
+    std::string name;
+    std::string initial;
+  };
+  std::vector<Reset_target> targets;
+  if (auto sit = struct_var_info_.find(&sym); sit != struct_var_info_.end() && reg_syms_.contains(&sym)) {
+    // The source reset value is the packed aggregate. Slice it by each leaf's
+    // recorded packed offset so every expanded flop gets exactly its bits.
+    auto packed = Dlop::from_pyrope(initial);
+    if (!packed || packed->is_invalid()) {
+      emit_unsupported(sym.location, "unsupported-aggregate-reset", "could not split the packed-aggregate reset value");
+      return;
+    }
+    for (const auto& f : sit->second.fields) {
+      auto mask = Dlop::get_mask_value(static_cast<int>(f.off) + f.bits - 1, static_cast<int>(f.off));
+      auto lane = packed->get_mask_op(*mask);
+      targets.push_back({absl::StrCat(name, ".", f.name), std::string(lane->to_pyrope())});
+    }
+  } else {
+    targets.push_back({name, std::string(initial)});
+  }
+
+  auto& ln        = *builder_.lnast;
+  auto  emit_attr = [&](std::string_view target, std::string_view key, std::string_view val, bool val_is_ref) {
+    auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(idx, Lnast_node::create_ref(target));
+    ln.add_child(idx, Lnast_node::create_const(key));
+    if (val_is_ref) {
+      ln.add_child(idx, Lnast_node::create_ref(val));
+    } else {
+      ln.add_child(idx, Lnast_node::create_const(val));
+    }
+  };
+  // Native packed-memory initialization can already carry a per-entry reset
+  // pattern. Do not overwrite it with the scalar packed reset value, which a
+  // memory declaration would broadcast to every entry; the reset wiring still
+  // belongs on the aggregate.
+  const bool lanes_carry_reset = array_reset_lanes_.contains(&sym) && packed_mem_regs_.contains(&sym);
+  for (const auto& target : targets) {
+    if (!lanes_carry_reset) {
+      emit_attr(target.name, "initial", target.initial, false);
+    }
+    emit_attr(target.name, "reset_pin", reset_ref, true);
+    emit_attr(target.name, "sync", "false", false);
+    if (!edge_pos) {
+      emit_attr(target.name, "negreset", "true", false);
+    }
+  }
+}
+
+void Slang_context::finalize_pending_async_resets() {
+  for (const auto* sym : emit_ordered(pending_async_resets_)) {
+    const auto& pending = pending_async_resets_.at(sym);
+    if (pending.invalid || pending.mask != pending.full) {
+      emit_unsupported(pending.loc,
+                       "unsupported-partial-async-reset",
+                       std::string("asynchronous reset slices of '") + std::string(sym->name)
+                           + "' must cover the whole packed register exactly once and use one reset control",
+                       "combine the slices under one reset, or use --reader yosys-slang");
+      continue;
+    }
+    emit_reg_reset_attrs(*sym, std::to_string(pending.value), pending.reset_ref, pending.edge_pos);
+  }
 }
 
 void Slang_context::lower_comb_process(const slang::ast::Statement& body) {
@@ -5058,12 +5175,16 @@ void Slang_context::lower_comb_process(const slang::ast::Statement& body) {
 }
 
 void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
-                                     std::vector<const slang::ast::Statement*>& prologue) {
+                                     std::vector<const slang::ast::Statement*>& prologue,
+                                     const std::vector<std::string>&            inactive_async_guards) {
   proc_kind_ = Proc_kind::seq;
 
-  // Identify the clock signal; tolg reuses a declared 1-bit `clk`/`clock`
-  // input implicitly. Other names/edges ride per-reg attrs after the body
-  // (clock_pin / posclk), keyed on the regs this process writes.
+  // Identify the clock signal; tolg reuses a declared 1-bit INPUT named
+  // `clk`/`clock` implicitly. A LOCAL net with either spelling is still an
+  // explicit clock: omitting its clock_pin attr makes tolg mint a new module
+  // input named `clock` and silently disconnects the local driver.
+  // Other signals/edges ride per-reg attrs after the body (clock_pin / posclk),
+  // keyed on the regs this process writes.
   const slang::ast::ValueSymbol* clk_sym = nullptr;
   if (clock.expr.kind == ExpressionKind::NamedValue) {
     clk_sym = &clock.expr.as<slang::ast::NamedValueExpression>().symbol;
@@ -5074,7 +5195,7 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     return;
   }
   const bool negedge      = clock.edge == slang::ast::EdgeKind::NegEdge;
-  const bool implicit_clk = !negedge && (clk_sym->name == "clk" || clk_sym->name == "clock");
+  const bool implicit_clk = !negedge && input_syms_.contains(clk_sym) && (clk_sym->name == "clk" || clk_sym->name == "clock");
 
   Write_collector wc;
   body.visit(wc);
@@ -5127,7 +5248,19 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   for (const auto* stmt : prologue) {
     lower_statement(*stmt);
   }
+
+  // Preserve the enclosing async-reset process arm for registers which do not
+  // themselves carry a reset value. Each nested condition is one peeled rung;
+  // the clocked body runs only when all asynchronous resets are inactive.
+  for (const auto& guard : inactive_async_guards) {
+    auto if_nid = builder_.create_if_stmt(false);
+    builder_.add_if_cond(if_nid, guard);
+    builder_.push_stmts(builder_.add_if_stmts(if_nid));
+  }
   lower_statement(body);
+  for (size_t i = 0; i < inactive_async_guards.size(); ++i) {
+    builder_.pop_stmts();
+  }
 
   if (!implicit_clk) {
     auto& ln = *builder_.lnast;
@@ -5158,12 +5291,10 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
         targets.push_back(name);
       }
       for (const auto& tgt : targets) {
-        if (!(clk_sym->name == "clk" || clk_sym->name == "clock")) {
-          auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-          ln.add_child(idx, Lnast_node::create_ref(tgt));
-          ln.add_child(idx, Lnast_node::create_const("clock_pin"));
-          ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
-        }
+        auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+        ln.add_child(idx, Lnast_node::create_ref(tgt));
+        ln.add_child(idx, Lnast_node::create_const("clock_pin"));
+        ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
         if (negedge) {
           auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
           ln.add_child(idx, Lnast_node::create_ref(tgt));

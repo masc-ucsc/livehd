@@ -3,6 +3,7 @@
 #include "bitwidth.hpp"
 
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include "diag.hpp"
@@ -23,6 +24,15 @@ namespace {
   return false;
 }
 
+[[nodiscard]] bool has_diag_code(const livehd::diag::Sink& sink, std::string_view code) {
+  for (const auto& d : sink.records()) {
+    if (d.code == code) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TEST(BitwidthRange, MinimalUnsignedWidths) {
   EXPECT_EQ(Bitwidth_range(0, 0).get_ubits(), 1);
   EXPECT_EQ(Bitwidth_range(0, 1).get_ubits(), 1);
@@ -36,8 +46,11 @@ TEST(BitwidthRange, MinimalUnsignedWidths) {
 }
 
 TEST(BitwidthRange, UnsignedUnknownKeepsPayloadWidthWhenMerged) {
-  for (const auto [literal, payload_bits] : {std::pair{"0ub?", 1}, std::pair{"0ub???????", 7}}) {
-    const auto unknown = Dlop::from_pyrope(literal);
+  for (const auto& [literal, payload_bits] : {
+           std::pair{      "0ub?", 1},
+           std::pair{"0ub???????", 7}
+  }) {
+    const auto     unknown = Dlop::from_pyrope(literal);
     Bitwidth_range range(*unknown);
     EXPECT_EQ(range.get_ubits(), payload_bits);
 
@@ -104,6 +117,79 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
 
   EXPECT_FALSE(has_unbounded_warning(sink)) << "a fully-typed design must not warn about unbounded pins";
   sink.clear();
+}
+
+TEST(BitwidthMemory, ExplicitSizeAcceptsWideDynamicAddress) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_mem_explicit_size");
+  gio->add_input("addr", 1);
+  gio->set_bits("addr", 128);
+  gio->set_unsign("addr", true);
+  gio->add_output("q", 2);
+  gio->set_bits("q", 7);
+  auto g = gio->create_graph();
+
+  auto mem = livehd::graph_util::create_typed_node(*g, Ntype_op::Memory);
+  g->get_input_pin("addr").connect_sink(livehd::graph_util::setup_sink_by_name(mem, "addr"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(7)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "bits"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(8)).connect_sink(livehd::graph_util::setup_sink_by_name(mem, "size"));
+  auto q = mem.create_driver_pin(0);
+  livehd::graph_util::set_bits(q, 7);
+  q.connect_sink(g->get_output_pin("q"));
+
+  auto& sink = livehd::diag::sink();
+  sink.clear();
+  sink.set_jsonl_path("off");
+  sink.set_human_stderr(false);
+
+  Bitwidth bw(/*max_iterations=*/10);
+  bw.do_trans(g);
+
+  EXPECT_FALSE(has_diag_code(sink, "mem-size-limit"));
+  sink.clear();
+}
+
+// State is a finite-width assignment boundary.  Its D expression may need an
+// extra carry bit, but rerunning bitwidth (as O2 does) must retain the already
+// materialized Q width instead of silently widening the register.
+TEST(BitwidthState, PrestampedFlopKeepsDeclaredWidth) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_flop_declared_width");
+  gio->add_input("d", 1);
+  gio->set_bits("d", 4);
+  gio->set_unsign("d", true);
+  gio->add_output("q", 2);
+  gio->set_bits("q", 3);
+  auto g = gio->create_graph();
+
+  auto flop = livehd::graph_util::create_typed_node(*g, Ntype_op::Flop);
+  g->get_input_pin("d").connect_sink(livehd::graph_util::setup_sink_by_name(flop, "din"));
+  auto q = flop.create_driver_pin(0);
+  livehd::graph_util::set_ubits(q, 3);
+  q.connect_sink(g->get_output_pin("q"));
+
+  Bitwidth bw(/*max_iterations=*/10);
+  bw.do_trans(g);
+  EXPECT_EQ(livehd::graph_util::bits_of(flop.create_driver_pin(0)), 3) << "a pre-sized flop is a three-bit truncation boundary";
+}
+
+// Preserve the existing inference path for genuinely unsized state.
+TEST(BitwidthState, UnsizedFlopInfersFromDin) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio = lib.create_io("bw_flop_inferred_width");
+  gio->add_input("d", 1);
+  gio->set_bits("d", 4);
+  gio->set_unsign("d", true);
+  gio->add_output("q", 2);
+  auto g = gio->create_graph();
+
+  auto flop = livehd::graph_util::create_typed_node(*g, Ntype_op::Flop);
+  g->get_input_pin("d").connect_sink(livehd::graph_util::setup_sink_by_name(flop, "din"));
+  flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+
+  Bitwidth bw(/*max_iterations=*/10);
+  bw.do_trans(g);
+  EXPECT_EQ(livehd::graph_util::bits_of(flop.create_driver_pin(0)), 4) << "an unsized flop still inherits its D width";
 }
 
 // Exercise the per-op value-range processors directly. Frontends may stamp

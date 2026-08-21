@@ -327,6 +327,85 @@ sh_test(
     ],
 )
 
+# Disjoint generated always_ff blocks over one flattened packed register must
+# combine their slice resets into one asynchronous reset. Losing that metadata
+# turns reset assertion without a clock edge into a stale-state mismatch.
+sh_test(
+    name = "slang_async_reset_slices",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/async_reset_slices.v)",
+    ],
+    data = [
+        "tests/sv/async_reset_slices.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# State omitted from an async reset arm still holds while reset is asserted.
+# Peeling the reset into attributes must retain that process-level write gate.
+sh_test(
+    name = "slang_async_reset_unreset_state",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/async_reset_unreset_state.v)",
+    ],
+    data = [
+        "tests/sv/async_reset_unreset_state.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# A submodule may feed a pure flop/latch output back into one of its own
+# inputs. The input must bind the resolved output net, not the output port's
+# temporary X initializer created before the instance output is assigned.
+sh_test(
+    name = "slang_registered_instance_output_feedback",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    args = [
+        "lec",
+        "$(location tests/sv/registered_instance_output_feedback.v)",
+    ],
+    data = [
+        "tests/sv/registered_instance_output_feedback.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+# Unpacked module ports flatten in declaration order: the rightmost array
+# element occupies the packed boundary bus LSB. Pin both range directions and
+# both reads and writes, including a dynamic element select.
+sh_test(
+    name = "slang_unpacked_array_port_order",
+    size = "large",
+    srcs = ["tests/unpacked_array_port_order_test.sh"],
+    args = [
+        "$(location //lhd)",
+        "$(location tests/sv/unpacked_array_port_order.v)",
+    ],
+    data = [
+        "tests/sv/unpacked_array_port_order.v",
+        "//lhd",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
 sh_test(
     name = "slang_packed_array_loop_reg_sroa",
     size = "large",

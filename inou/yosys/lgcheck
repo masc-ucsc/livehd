@@ -21,6 +21,10 @@ GOLD_TOP=""
 GATE_TOP=""
 GOLD=""
 GATE=""
+NORMALIZE_SPLIT_PORTS=0
+DESCEND_ON_INCONCLUSIVE=0
+GOLD_RTLIL_INPUT=""
+GATE_RTLIL_INPUT=""
 while true; do
   case "$1" in
   -r | --reference)
@@ -123,6 +127,28 @@ while true; do
       ;;
     esac
     ;;
+  --normalize_split_ports)
+    # The reference has packed aggregate ports while cgen exposes their leaves
+    # as escaped dotted ports. Build a wrapper from the two cached RTLIL port
+    # lists before starting the equivalence budget.
+    NORMALIZE_SPLIT_PORTS=1
+    shift 1
+    ;;
+  --descend_on_inconclusive)
+    # If this top exhausts the equivalence budget without a counterexample,
+    # retry its direct module children from the already-read RTLIL. A child
+    # that is also inconclusive recursively descends again.
+    DESCEND_ON_INCONCLUSIVE=1
+    shift 1
+    ;;
+  --gold_rtlil)
+    GOLD_RTLIL_INPUT=$2
+    shift 2
+    ;;
+  --gate_rtlil)
+    GATE_RTLIL_INPUT=$2
+    shift 2
+    ;;
   "") break ;;
   *)
     argument=$1
@@ -150,6 +176,16 @@ for reader in "$GOLD_READER" "$GATE_READER"; do
     exit 5
   fi
 done
+
+# yosys-slang normally flattens during import. Keep occurrence-specialized
+# module boundaries only when recursive fallback may need them; every proof
+# strategy still explicitly flattens its selected top before comparison.
+GOLD_HIER_FLAG=""
+GATE_HIER_FLAG=""
+if [ "$DESCEND_ON_INCONCLUSIVE" -eq 1 ]; then
+  GOLD_HIER_FLAG="--best-effort-hierarchy"
+  GATE_HIER_FLAG="--best-effort-hierarchy"
+fi
 
 # Slang can parse compilation units in parallel. Keep this independently
 # tunable for constrained runners, while making large Minion/XiangShan inputs
@@ -207,8 +243,19 @@ resolve_top() {
   fi
   echo "${want}"
 }
-GOLD_TOP=$(resolve_top "${GOLD}" "${GOLD_TOP}")
-GATE_TOP=$(resolve_top "${GATE}" "${GATE_TOP}")
+# A descendant cache contains occurrence-specialized names such as
+# `ClockGate$ExuBlock.ClockGate` which deliberately do NOT exist in the source
+# text. Resolving that request against the source used to fall back to the last
+# dotted component (`ClockGate`) when it happened to be a real base module,
+# then fail because the selected parent cache had pruned that base. The cache is
+# authoritative on that side; source-name compatibility applies only when the
+# source will actually be read.
+if [ "$GOLD_RTLIL_INPUT" = "" ]; then
+  GOLD_TOP=$(resolve_top "${GOLD}" "${GOLD_TOP}")
+fi
+if [ "$GATE_RTLIL_INPUT" = "" ]; then
+  GATE_TOP=$(resolve_top "${GATE}" "${GATE_TOP}")
+fi
 
 fm_top=$OPT_TOP
 if [ "${fm_top}" == "" ]; then
@@ -283,7 +330,10 @@ fi
 gold_read_cmds() {
   # $1 = extra read_verilog flags position is unused; kept single-form
   if [ "${GOLD_RTLIL}" != "" ]; then
-    echo "read_rtlil ${GOLD_RTLIL}"
+    # A descendant may reuse its parent's hierarchy cache. Reassert THIS
+    # invocation's selected top before rename/flatten; otherwise Yosys keeps
+    # the parent's top attribute and the child proof compares the wrong module.
+    echo "read_rtlil ${GOLD_RTLIL}; hierarchy ${GOLD_TOP_STR}"
   elif [ "${GOLD_READER}" == "slang" ]; then
     if [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gold_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
@@ -295,7 +345,7 @@ gold_read_cmds() {
     # generation flows. They affect whether legal project idioms elaborate,
     # not the resulting hardware: Minion needs both for forward declarations
     # and plain-bit assignments to enum fields.
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   fi
@@ -306,7 +356,7 @@ gold_read_cmds() {
 # instead of reparsing a large hierarchy.
 gate_read_cmds() {
   if [ "${GATE_RTLIL}" != "" ]; then
-    echo "read_rtlil ${GATE_RTLIL}"
+    echo "read_rtlil ${GATE_RTLIL}; hierarchy ${GATE_TOP_STR}"
   elif [ "${GATE_READER}" == "slang" ]; then
     if [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gate_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
@@ -314,7 +364,7 @@ gate_read_cmds() {
     fi
     GATE_SLANG_TOP=""
     if [ "${GATE_TOP}" != "" ]; then GATE_SLANG_TOP="--top ${GATE_TOP}"; fi
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
+    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
   fi
@@ -381,18 +431,98 @@ gate_rtlil="$PWD/lgcheck_gate.il"
 # designs whose only honest answer is INCONCLUSIVE — the source of truth for
 # "these two cannot be compared" stays the bounded miter's ERROR check below.
 echo "INFO: preparing reference RTLIL (source-read time is outside the equivalence budget)"
-if ${YOSYS} -p "$(gold_read_cmds); write_rtlil ${gold_rtlil}" >lgcheck_read_gold.log 2>lgcheck_read_gold.err; then
+if [ "$GOLD_RTLIL_INPUT" != "" ]; then
+  if [ ! -f "$GOLD_RTLIL_INPUT" ]; then
+    echo "lgcheck: cached reference RTLIL not found: $GOLD_RTLIL_INPUT"
+    exit 5
+  fi
+  gold_rtlil_input=$(cd "$(dirname "$GOLD_RTLIL_INPUT")" && pwd)/$(basename "$GOLD_RTLIL_INPUT")
+  # Select/prune the requested occurrence OUTSIDE the equivalence budget. The
+  # parent cache retains every occurrence-specialized module, but also retains
+  # the parent's top attribute; passing it through unchanged made a descendant
+  # proof rename/flatten the parent again. A small selected cache is both the
+  # correct design and dramatically cheaper for every proof strategy to load.
+  gold_selected_rtlil="$PWD/lgcheck_gold_selected.il"
+  if ! ${YOSYS} -p "read_rtlil ${gold_rtlil_input}; hierarchy ${GOLD_TOP_STR}; write_rtlil ${gold_selected_rtlil}" \
+      >lgcheck_select_gold.log 2>lgcheck_select_gold.err; then
+    echo "lgcheck: cached reference RTLIL does not contain/select top $GOLD_TOP"
+    tail -20 lgcheck_select_gold.err
+    exit 5
+  fi
+  GOLD_RTLIL="$gold_selected_rtlil"
+  echo "INFO: reused cached reference RTLIL and selected $GOLD_TOP"
+elif ${YOSYS} -p "$(gold_read_cmds); write_rtlil ${gold_rtlil}" >lgcheck_read_gold.log 2>lgcheck_read_gold.err; then
   GOLD_RTLIL="$gold_rtlil"
 else
   echo "WARN: could not pre-read the reference design; each strategy re-reads the source"
   tail -20 lgcheck_read_gold.err
 fi
 echo "INFO: preparing implementation RTLIL (source-read time is outside the equivalence budget)"
-if ${YOSYS} -p "$(gate_read_cmds); write_rtlil ${gate_rtlil}" >lgcheck_read_gate.log 2>lgcheck_read_gate.err; then
+if [ "$GATE_RTLIL_INPUT" != "" ]; then
+  if [ ! -f "$GATE_RTLIL_INPUT" ]; then
+    echo "lgcheck: cached implementation RTLIL not found: $GATE_RTLIL_INPUT"
+    exit 5
+  fi
+  gate_rtlil_input=$(cd "$(dirname "$GATE_RTLIL_INPUT")" && pwd)/$(basename "$GATE_RTLIL_INPUT")
+  gate_selected_rtlil="$PWD/lgcheck_gate_selected.il"
+  if ! ${YOSYS} -p "read_rtlil ${gate_rtlil_input}; hierarchy ${GATE_TOP_STR}; write_rtlil ${gate_selected_rtlil}" \
+      >lgcheck_select_gate.log 2>lgcheck_select_gate.err; then
+    echo "lgcheck: cached implementation RTLIL does not contain/select top $GATE_TOP"
+    tail -20 lgcheck_select_gate.err
+    exit 5
+  fi
+  GATE_RTLIL="$gate_selected_rtlil"
+  echo "INFO: reused cached implementation RTLIL and selected $GATE_TOP"
+elif ${YOSYS} -p "$(gate_read_cmds); write_rtlil ${gate_rtlil}" >lgcheck_read_gate.log 2>lgcheck_read_gate.err; then
   GATE_RTLIL="$gate_rtlil"
 else
   echo "WARN: could not pre-read the implementation design; each strategy re-reads the source"
   tail -20 lgcheck_read_gate.err
+fi
+BASE_GOLD_RTLIL="$GOLD_RTLIL"
+BASE_GATE_RTLIL="$GATE_RTLIL"
+BASE_GOLD_TOP="$GOLD_TOP"
+BASE_GATE_TOP="$GATE_TOP"
+
+# cgen deliberately makes aggregate ABI leaves explicit (for example
+# \io_req.bits.op), while yosys-slang represents the original packed SV top as
+# one vector port (io_req). Yosys' miter requires identical port lists. When
+# requested, construct a gold-shaped gate wrapper from the cached RTLIL port
+# declarations, then cache that combined hierarchy as the gate side. This work
+# is elaboration/interface preparation, so it remains outside the 600-second
+# equivalence budget below.
+if [ "$NORMALIZE_SPLIT_PORTS" -eq 1 ]; then
+  if [ "$GOLD_RTLIL" = "" ] || [ "$GATE_RTLIL" = "" ]; then
+    echo "lgcheck: split-port normalization requires successful RTLIL preparation on both sides"
+    exit 5
+  fi
+  adapter_tool="${SELF_DIR}/rtlil_split_port_adapter.py"
+  if [ ! -f "$adapter_tool" ]; then
+    echo "lgcheck: split-port adapter helper not found: $adapter_tool"
+    exit 5
+  fi
+  gate_impl_top="__lgcheck_gate_impl"
+  gate_adapter_top="__lgcheck_gate_adapter"
+  gate_adapter_v="$PWD/lgcheck_gate_adapter.v"
+  gate_adapted_rtlil="$PWD/lgcheck_gate_adapted.il"
+  if ! python3 "$adapter_tool" \
+      --gold "$GOLD_RTLIL" --gate "$GATE_RTLIL" \
+      --gold-top "$GOLD_TOP" --gate-top "$GATE_TOP" \
+      --impl-top "$gate_impl_top" --adapter-top "$gate_adapter_top" \
+      --output "$gate_adapter_v"; then
+    echo "lgcheck: unable to normalize split implementation ports"
+    exit 5
+  fi
+  if ! ${YOSYS} -p "read_rtlil ${GATE_RTLIL}; hierarchy -top ${GATE_TOP}; rename -top ${gate_impl_top}; read_verilog -sv ${gate_adapter_v}; hierarchy -top ${gate_adapter_top}; write_rtlil ${gate_adapted_rtlil}" \
+      >lgcheck_adapt_gate.log 2>lgcheck_adapt_gate.err; then
+    echo "lgcheck: unable to elaborate the split-port adapter"
+    tail -20 lgcheck_adapt_gate.err
+    exit 5
+  fi
+  GATE_RTLIL="$gate_adapted_rtlil"
+  GATE_TOP="$gate_adapter_top"
+  GATE_TOP_STR="-top $GATE_TOP"
+  echo "INFO: normalized split implementation ports through $gate_adapter_top"
 fi
 
 # One wall budget shared by all equivalence strategies, started only after both
@@ -500,15 +630,50 @@ fi
 #  exit 0
 #fi
 
-# Word-match `reset` OUTSIDE comments: the miter's shared reset input is
-# `in_reset` only when a side has a port literally named `reset` — a design
-# whose reset is named differently (rst_ni, active-low) must NOT arm the
-# constraint (`sat -set-at ... in_reset` on a miter without that signal is a
-# hard yosys error → a false FAIL; the async_localdecl regression).
-if sed 's|//.*||' ${GOLD} | grep -qw reset; then
-  # Assert the miter's reset (the `in_`-prefixed gold/gate shared input) for
-  # the first two cycles, then release it from cycle 2 — a deterministic LEC
-  # start that brings both sides through their reset path to a known state.
+# Find a conventional reset input on the SELECTED gold module. This must be
+# derived from that module's prepared RTLIL, not from the concatenated source:
+# hierarchy descent checks one child at a time, and an unrelated parent/sibling
+# can have a reset even when the child does not (Dino's
+# DualIssueRegisterFile). Preserve the spelling because miter prefixes the
+# shared input with `in_`, and preserve polarity so active-low designs actually
+# traverse their reset path (Minion uses rst_ni).
+reset_name=""
+if [ "$GOLD_RTLIL" != "" ]; then
+  rtlil_tool="${SELF_DIR}/rtlil_children.py"
+  for candidate in reset reset_i rst rst_i reset_n reset_ni rst_n rst_ni resetn rstn; do
+    if ! has_candidate=$(python3 "$rtlil_tool" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --has-input "$candidate"); then
+      echo "lgcheck: could not inspect reset port of $GOLD_TOP"
+      exit 5
+    fi
+    if [ "$has_candidate" = yes ]; then
+      reset_name=$candidate
+      break
+    fi
+  done
+else
+  # Cache preparation is best-effort. Retain the conservative historical
+  # fallback only when no RTLIL is available to inspect.
+  for candidate in reset reset_i rst rst_i reset_n reset_ni rst_n rst_ni resetn rstn; do
+    if sed 's|//.*||' "${GOLD}" | grep -qw "$candidate"; then
+      reset_name=$candidate
+      break
+    fi
+  done
+fi
+if [ "$reset_name" != "" ]; then
+  reset_assert=1
+  reset_release=0
+  case "$reset_name" in
+  *_n | *_ni | resetn | rstn)
+    reset_assert=0
+    reset_release=1
+    ;;
+  esac
+  reset_signal="in_${reset_name}"
+
+  # Assert the miter's shared reset for the first two cycles, then release it
+  # from cycle 2 — a deterministic LEC start that brings both sides through
+  # their reset path to a known state.
   #
   # 2d-reg fix: the prior `-set in_reset 1` applied the constraint to EVERY
   # temporal-induction timestep (not just cycle 0/1), pinning reset high
@@ -517,7 +682,7 @@ if sed 's|//.*||' ${GOLD} | grep -qw reset; then
   # add-vs-sub "matched"). Use per-cycle `-set-at` so reset is high only at
   # cycles 0 and 1 and the induction step runs with reset free (normal
   # operation), where a real difference is actually observable.
-  RESET_STMT="-set-at 0 in_reset 1 -set-at 1 in_reset 1 -set-at 2 in_reset 0"
+  RESET_STMT="-set-at 0 ${reset_signal} ${reset_assert} -set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_release}"
 else
   RESET_STMT=""
 fi
@@ -579,7 +744,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   bmc_start=1
   BMC_RESET_STMT=""
   if [ "${RESET_STMT}" != "" ]; then
-    BMC_RESET_STMT="-set-at 1 in_reset 1 -set-at 2 in_reset 1 -set-at 3 in_reset 0"
+    BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert} -set-at 3 ${reset_signal} ${reset_release}"
     bmc_start=4
   fi
   bmc_sat_cmds=""
@@ -616,13 +781,15 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
     exit 5
   fi
 
-  # Sound pass requires the explicit SUCCESS marker from every bounded depth.
+  # Explicit SUCCESS at every depth means only "no counterexample within this
+  # bounded window". It is useful evidence, but it is NOT an equivalence proof:
+  # a divergence can first appear at N+1. Keep going to the common
+  # INCONCLUSIVE result; only the structural/inductive engines above may exit 0.
   if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
-    echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${fm_top}"
-    exit 0
+    echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:${fm_top}; this bounded result is not a proof."
+  else
+    echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
   fi
-
-  echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
 fi
 
 # Reached only when NO bounded-miter counterexample was found (the real-CEX
@@ -633,4 +800,102 @@ fi
 # distinct code so the caller reports Unknown, never a false REFUTE.
 echo "WARN: Yosys could not prove equivalency and found NO counterexample."
 echo "INCONCLUSIVE: equivalence undetermined ${GATE} vs ${GOLD} with top:${fm_top}"
+
+if [ "$DESCEND_ON_INCONCLUSIVE" -eq 1 ]; then
+  children_tool="${SELF_DIR}/rtlil_children.py"
+  if [ ! -f "$children_tool" ]; then
+    echo "lgcheck: RTLIL hierarchy helper not found: $children_tool"
+    exit 5
+  fi
+  visited_file=${LGCHECK_DESCEND_VISITED_FILE:-$PWD/lgcheck_descend_visited.txt}
+  visited_file=$(cd "$(dirname "$visited_file")" && pwd)/$(basename "$visited_file")
+  touch "$visited_file"
+  if ! grep -Fxq "$BASE_GOLD_TOP" "$visited_file"; then
+    printf '%s\n' "$BASE_GOLD_TOP" >>"$visited_file"
+  fi
+  children_file="$PWD/lgcheck_direct_children.txt"
+  children_args=(--rtlil "$BASE_GATE_RTLIL" --top "$BASE_GATE_TOP" --with-base)
+  # yosys-slang's best-effort hierarchy gives both sides the same
+  # occurrence-specialized module name (`child$parent.instance`). Prefer that
+  # exact GOLD definition when present: rereading the unspecialized source base
+  # silently restores default parameters and can manufacture a port-width
+  # mismatch (Minion's prim_eco_ports is 4 bits by default, 10 bits in-top).
+  if [ "$BASE_GOLD_RTLIL" != "" ]; then
+    children_args+=(--map-against "$BASE_GOLD_RTLIL")
+  fi
+  if ! python3 "$children_tool" "${children_args[@]}" >"$children_file"; then
+    echo "lgcheck: could not inspect implementation children of $BASE_GATE_TOP"
+    exit 5
+  fi
+  mapfile -t direct_children <"$children_file"
+  if [ "${#direct_children[@]}" -eq 0 ]; then
+    echo "INFO: $GOLD_TOP is an inconclusive leaf; no lower module remains to check"
+  else
+    echo "INFO: descending from inconclusive $GOLD_TOP into ${#direct_children[@]} direct child definition(s)"
+  fi
+  for child_pair in "${direct_children[@]}"; do
+    child_gate=${child_pair%%$'\t'*}
+    child_gold=${child_pair#*$'\t'}
+    case "$child_gold" in
+    -)
+      echo "INFO: skip implementation-only generated child $child_gate (no compatible reference module counterpart)"
+      continue
+      ;;
+    cgen_memory_*)
+      echo "INFO: skip generated support module $child_gold (no original-Verilog module counterpart)"
+      continue
+      ;;
+    esac
+    if grep -Fxq "$child_gold" "$visited_file"; then
+      echo "INFO: skip already checked descendant $child_gold"
+      continue
+    fi
+    printf '%s\n' "$child_gold" >>"$visited_file"
+    safe_child=${child_gate//[^A-Za-z0-9_.-]/_}
+    child_dir="$PWD/lgcheck_descend/$safe_child"
+    mkdir -p "$child_dir"
+    echo "INFO: checking descendant $child_gold (gate occurrence $child_gate; separate ${LGCHECK_EQUIV_TIMEOUT}s equivalence budget)"
+    child_args=(
+      --reference "$GOLD" --implementation "$GATE" --yosys "$YOSYS"
+      --reference_top "$child_gold" --implementation_top "$child_gate"
+      --gold_reader "$GOLD_READER" --gate_reader "$GATE_READER"
+      --gate_rtlil "$BASE_GATE_RTLIL"
+      --descend_on_inconclusive
+    )
+    # Reuse the gold cache when it retained this exact definition. A
+    # parameter-specialized gate child may map to an unspecialized base name
+    # that the top-scoped gold import did not keep; in that case fall back to
+    # rereading the source for this child rather than turning an optimization
+    # miss into a setup failure.
+    if [ "$BASE_GOLD_RTLIL" != "" ] && grep -Fqx "module \\$child_gold" "$BASE_GOLD_RTLIL"; then
+      child_args+=(--gold_rtlil "$BASE_GOLD_RTLIL")
+    fi
+    if [ "$NORMALIZE_SPLIT_PORTS" -eq 1 ]; then
+      child_args+=(--normalize_split_ports)
+    fi
+    if [ "$SLANG_PLUGIN" != "" ]; then
+      child_args+=(--slang_plugin "$SLANG_PLUGIN")
+    fi
+    if [ "$CELLLIB" != "" ]; then
+      child_args+=(--cell_library "$CELLLIB")
+    fi
+    set +e
+    (cd "$child_dir" && LGCHECK_DESCEND_VISITED_FILE="$visited_file" \
+      LGCHECK_EQUIV_TIMEOUT="$LGCHECK_EQUIV_TIMEOUT" "$SELF_DIR/lgcheck" "${child_args[@]}")
+    child_rc=$?
+    set -e
+    case "$child_rc" in
+    0) echo "DESCEND PROVEN: $child_gold" ;;
+    2) echo "DESCEND INCONCLUSIVE: $child_gold (no counterexample; its unresolved children were checked)" ;;
+    1)
+      echo "DESCEND REFUTED: $child_gold"
+      exit 1
+      ;;
+    *)
+      echo "DESCEND SETUP FAILED: $child_gold (rc=$child_rc)"
+      exit 5
+      ;;
+    esac
+  done
+fi
 exit 2

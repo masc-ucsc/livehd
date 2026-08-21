@@ -137,4 +137,39 @@ EOF
 grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-footprint lec not pass: $(cat "$W/lec_local.json")"
 echo "PASS: overlapping OR fields do not block an unrelated packed input-slice split"
 
+# (5) A width-preserving Get_mask around a shifted Sub output must retain the
+# shifted lane's footprint.  This is the hierarchy-boundary form emitted by
+# cgen for XiangShan CSR: the child output occupies a high aggregate bit while
+# an unrelated low-bit slice feeds a child input.  Treating the Get_mask as
+# possibly nonzero across its whole result invents a word-level feedback edge.
+cat >"$W/packed_sub_boundary.sv" <<'EOF'
+module packed_leaf(input logic fb, input logic a, output logic o);
+  always_comb o = fb | a;
+endmodule
+
+module packed_sub_boundary(input logic a, output logic z);
+  logic child_o;
+  logic [15:0] lane;
+  logic [15:0] bus;
+  logic fb;
+  always_comb begin
+    lane = ({15'b0, child_o} << 8) & 16'hffff;
+    bus = 16'b0 | lane;
+    fb = bus[0];
+    z = child_o;
+  end
+  packed_leaf u_leaf(.fb(fb), .a(a), .o(child_o));
+endmodule
+EOF
+"$LHD" compile "$W/packed_sub_boundary.sv" --reader slang --top packed_sub_boundary --recipe O1 \
+  --emit "verilog:$W/packed_sub_boundary.gen.v" --workdir "$W/packed_sub_boundary_cw" -q \
+  || fail "hierarchical packed-slice design did not compile"
+grep -Fq ".fb(1'h0)" "$W/packed_sub_boundary.gen.v" \
+  || fail "disjoint low slice retained a false dependency on the high child-output lane: $(cat "$W/packed_sub_boundary.gen.v")"
+"$LHD" lec --set formal.strict=true --set formal.engine=ind --top packed_sub_boundary \
+  --ref "$W/packed_sub_boundary.sv" --impl "$W/packed_sub_boundary.gen.v" \
+  --workdir "$W/packed_sub_boundary_lec" -q --result-json "$W/packed_sub_boundary_lec.json" \
+  || fail "hierarchical packed-slice fold did not solver-prove: $(cat "$W/packed_sub_boundary_lec.json" 2>/dev/null)"
+echo "PASS: Get_mask preserves a shifted child lane footprint across a Sub boundary"
+
 echo "PASS: scalar packed struct → bundle (no false self-loop)"

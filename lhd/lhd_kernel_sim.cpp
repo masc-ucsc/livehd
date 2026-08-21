@@ -10,6 +10,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <regex>
@@ -2579,8 +2580,40 @@ std::string locate_yosys_slang_plugin() {
 // Verilog and discharge with inou/yosys/lgcheck (the former `lhd check`).
 // Verilog sides pass straight through; pyrope:/ln:/lg: are compiled first.
 void lec_lgyosys(Options& opts, Result& res) {
-  auto impl_v  = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
-  auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
+  auto impl_v = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
+  auto ref_v  = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
+
+  // Byte-identical materializations are already a complete proof: the same
+  // selected Verilog design under the same top cannot have different traces.
+  // This strict fast path matters for constructs that lgcheck can simulate but
+  // cannot inductively discharge (notably a pair of identical latches). Keep
+  // it ahead of lgcheck, whose bounded fallback is intentionally evidence only
+  // and therefore returns INCONCLUSIVE rather than a false proof.
+  const auto impl_top = opts.impl_top.empty() ? opts.top : opts.impl_top;
+  const auto ref_top  = opts.ref_top.empty() ? opts.top : opts.ref_top;
+  // Raw Verilog must still go through lgcheck: besides proving behavior, that
+  // validates requested tops and reader/plugin setup. The fast path applies
+  // only after both graph-backed inputs were successfully loaded and emitted.
+  if (opts.impl_kind != "verilog" && opts.ref_kind != "verilog" && impl_top == ref_top) {
+    std::error_code ec_impl;
+    std::error_code ec_ref;
+    const auto      impl_size = fs::file_size(impl_v, ec_impl);
+    const auto      ref_size  = fs::file_size(ref_v, ec_ref);
+    if (!ec_impl && !ec_ref && impl_size == ref_size) {
+      std::ifstream impl_stream(impl_v, std::ios::binary);
+      std::ifstream ref_stream(ref_v, std::ios::binary);
+      if (impl_stream && ref_stream
+          && std::equal(std::istreambuf_iterator<char>(impl_stream),
+                        std::istreambuf_iterator<char>(),
+                        std::istreambuf_iterator<char>(ref_stream))) {
+        res.recipe_steps.emplace_back("pass.lec solver:lgyosys (byte-identical materialization)");
+        const std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
+        std::print("lec: '{}' PROVEN equivalent (solver=lgyosys; byte-identical materialization)\n", name);
+        return;
+      }
+    }
+  }
+
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
 
@@ -2588,13 +2621,19 @@ void lec_lgyosys(Options& opts, Result& res) {
   // structs / assignment patterns. The generated implementation is accepted
   // by either frontend, but slang avoids read_verilog's multi-hour behavior on
   // large flattened cgen expressions.
-  std::string gold_reader = "verilog";
-  std::string gate_reader = "verilog";
+  std::string gold_reader             = "verilog";
+  std::string gate_reader             = "verilog";
+  bool        normalize_split_ports   = false;
+  bool        descend_on_inconclusive = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "formal.lec.gold_reader" && !v.empty()) {
       gold_reader = v;
     } else if (k == "formal.lec.gate_reader" && !v.empty()) {
       gate_reader = v;
+    } else if (k == "formal.lec.normalize_split_ports") {
+      normalize_split_ports = (v == "true" || v == "1" || v == "on");
+    } else if (k == "formal.lec.descend_on_inconclusive") {
+      descend_on_inconclusive = (v == "true" || v == "1" || v == "on");
     }
   }
   if (gold_reader != "verilog" && gold_reader != "slang") {
@@ -2632,6 +2671,12 @@ void lec_lgyosys(Options& opts, Result& res) {
   }
   if (!slang_plugin.empty()) {
     cmd += std::format(" --slang_plugin {}", shell_quote(slang_plugin));
+  }
+  if (normalize_split_ports) {
+    cmd += " --normalize_split_ports";
+  }
+  if (descend_on_inconclusive) {
+    cmd += " --descend_on_inconclusive";
   }
   if (!opts.impl_top.empty()) {
     cmd += std::format(" --implementation_top {}", shell_quote(opts.impl_top));

@@ -254,6 +254,7 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
 TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
   EXPECT_EQ(lec::canon_flop_name("`msg_port_enabled.e0`"), lec::canon_flop_name("msg_port_enabled.e0"));
   EXPECT_EQ(lec::canon_flop_name("top.`state.part`"), lec::canon_flop_name("top.state.part"));
+  EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
 }
 
 TEST(CombEquiv, AndCommutativeProven) {

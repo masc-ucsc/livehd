@@ -95,9 +95,6 @@ constexpr bool infer_internal_range(Ntype_op op) {
     case Ntype_op::Mux:
     case Ntype_op::Hotmux:
     case Ntype_op::Memory:
-    case Ntype_op::Flop:
-    case Ntype_op::Latch:
-    case Ntype_op::Fflop:
     case Ntype_op::Sub:
     case Ntype_op::AttrSet : return true;
     default                : return false;
@@ -734,6 +731,13 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
           continue;
         }
         if (!it->second.get_range().is_just_i64()) {
+          // A dynamic or very wide address prevents deriving a tighter memory
+          // size from its value range, but it does not invalidate an explicit
+          // size already carried by the Memory cell. Keep that declared bound;
+          // the memory implementation owns out-of-range-address semantics.
+          if (mem_size > 0) {
+            continue;
+          }
           livehd::diag::err("pass.bitwidth", "mem-size-limit", "bitwidth")
               .msg("memory {} size exceeds limit", debug_name(node))
               .fatal();
@@ -1794,6 +1798,15 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       } else if (!infer_internal_range(op) && !Ntype::has_multiple_driver_pins(op)) {
         // Unsupported/finite-width cells have no value-range rule in this
         // pass, so their existing annotation is the only available contract.
+        //
+        // A pre-sized Flop/Fflop/Latch deliberately lands here.  State is a
+        // finite-width truncation boundary: once a front end (or a previous
+        // bitwidth pass) materializes Q as uN/sN, a later optimization pass
+        // must not widen Q from the range of D.  Doing so changed a Pyrope
+        // `reg p:u3` into a four-bit register after O2; the spare bit then
+        // leaked across an adjacent three-bit field in an aggregate pack.
+        // An UNSIZED register has bits==0, falls through, and is still inferred
+        // by process_flop below.
         auto dpin = node.create_driver_pin(0);
         auto bits = bits_of(dpin);
         if (bits) {

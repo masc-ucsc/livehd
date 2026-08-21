@@ -156,6 +156,23 @@ private:
   // loop-unroll budget shared across the nested loops of one process/ctx
   int                                                          unroll_budget_ = 0;
 
+  // An elaborated generate commonly spells one packed register as several
+  // always_ff processes, each asynchronously resetting a disjoint constant
+  // slice. LGraph has one Flop for the flattened packed value, so collect those
+  // slices across processes and attach one whole-register reset after every
+  // process has lowered. Incomplete/overlapping/mixed-control collections are
+  // rejected rather than silently demoted to synchronous data-path muxes.
+  struct Pending_async_reset {
+    uint64_t              value = 0;
+    uint64_t              mask  = 0;
+    uint64_t              full  = 0;
+    std::string           reset_ref;
+    bool                  edge_pos = true;
+    bool                  invalid  = false;
+    slang::SourceLocation loc;
+  };
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Pending_async_reset> pending_async_resets_;
+
   // ── structure (slang_structure.cpp) ───────────────────────────────────────
   bool        lower_module(const slang::ast::InstanceSymbol& symbol);
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
@@ -170,7 +187,10 @@ private:
   void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
   void        lower_comb_process(const slang::ast::Statement& body);
   void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
-                               std::vector<const slang::ast::Statement*>& prologue);
+                               std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
+  void        emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref,
+                                   bool edge_pos);
+  void        finalize_pending_async_resets();
   void        lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
   // no definition, so port directions come from the collect-pass inference
@@ -188,7 +208,9 @@ private:
 
   // Unpacked-array (memory) info per declared array symbol (2s-D).
   struct Mem_info {
-    int64_t lower       = 0;  // declared range lower bound (index bias)
+    int64_t lower       = 0;  // declared numeric lower bound (memory index bias)
+    int64_t upper       = 0;  // flat-array numeric upper bound
+    bool    descending  = true;
     int     elem_bits   = 1;
     bool    elem_signed = false;
     int64_t size        = 0;
@@ -252,8 +274,10 @@ private:
   // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers
   // to a FLAT packed [N*elem_bits-1:0] IO bus (Verilator/yosys flatten unpacked
   // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
-  // bit-slice at `(i-lower)*elem_bits`. Symbols here carry their dims in
-  // mem_info_ but route through bit-slice get/set instead of store/tuple_get.
+  // bit-slice in declaration order: `(i-lower)*elem_bits` for `[left:right]`
+  // descending ranges and `(upper-i)*elem_bits` for ascending ranges. Symbols
+  // here carry their range in mem_info_ but route through bit-slice get/set
+  // instead of store/tuple_get.
   absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
   // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
   // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten

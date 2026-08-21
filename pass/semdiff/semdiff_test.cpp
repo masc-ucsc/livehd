@@ -630,6 +630,131 @@ TEST(Semdiff, EscapedVerilogStateNameUsesCanonicalIdentity) {
   EXPECT_EQ(0U, r.state.b_unpaired);
 }
 
+TEST(Semdiff, AggregateProvenanceLossKeepsPhysicalLeafIdentity) {
+  auto make = [](const std::string& dir, bool keep_provenance) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    auto  g   = gio->create_graph();
+    for (int lane = 0; lane < 4; ++lane) {
+      const auto canonical = std::format("bank.e{}", lane);
+      auto       flop      = create_typed_node(*g, Ntype_op::Flop);
+      flop.set_name(keep_provenance ? canonical : std::format("`{}`", canonical));
+      auto q = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 8);
+      livehd::graph_util::set_pin_name(q, keep_provenance ? canonical : std::format("`{}`", canonical));
+      if (keep_provenance) {
+        flop.attr(livehd::attrs::aggregate_origin).set("bank");
+        flop.attr(livehd::attrs::aggregate_source_index).set(lane);
+        flop.attr(livehd::attrs::aggregate_lane_ordinal).set(lane);
+        flop.attr(livehd::attrs::aggregate_bit_offset).set(lane * 8);
+        flop.attr(livehd::attrs::aggregate_bit_width).set(8);
+        flop.attr(livehd::attrs::aggregate_extent).set(4);
+      }
+    }
+    return g;
+  };
+
+  auto ref  = make("lgdb_semdiff_aggregate_provenance_ref", true);
+  auto impl = make("lgdb_semdiff_aggregate_provenance_impl", false);
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto r                 = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
+  EXPECT_EQ(1U, r.state.a_total);
+  EXPECT_EQ(4U, r.state.b_total);
+  EXPECT_EQ(1U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.full_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+  EXPECT_EQ(0U, r.a_unmatched);
+  EXPECT_EQ(0U, r.b_unmatched);
+}
+
+TEST(Semdiff, SroaRegisterLeavesReaggregateForNamePairing) {
+  auto make = [](const std::string& dir, bool split) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    auto  g   = gio->create_graph();
+    if (!split) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      auto q    = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 32);
+      livehd::graph_util::set_pin_name(q, "bank");
+      return g;
+    }
+    for (int lane = 0; lane < 4; ++lane) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      auto q    = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 8);
+      livehd::graph_util::set_pin_name(q, std::format("bank.e{}", lane));
+      flop.attr(livehd::attrs::aggregate_origin).set("bank");
+      flop.attr(livehd::attrs::aggregate_source_index).set(lane);
+      flop.attr(livehd::attrs::aggregate_lane_ordinal).set(lane);
+      flop.attr(livehd::attrs::aggregate_bit_offset).set(lane * 8);
+      flop.attr(livehd::attrs::aggregate_bit_width).set(8);
+      flop.attr(livehd::attrs::aggregate_extent).set(4);
+    }
+    return g;
+  };
+
+  auto ref  = make("lgdb_semdiff_sroa_ref", false);
+  auto impl = make("lgdb_semdiff_sroa_impl", true);
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto r                 = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
+  EXPECT_EQ(1U, r.state.a_total);
+  EXPECT_EQ(1U, r.state.b_total);
+  EXPECT_EQ(1U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+}
+
+TEST(Semdiff, SroaStructArrayLeavesReaggregateForNamePairing) {
+  auto make = [](const std::string& dir, bool split) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    auto  g   = gio->create_graph();
+    if (!split) {
+      auto flop = create_typed_node(*g, Ntype_op::Flop);
+      auto q    = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 36);
+      livehd::graph_util::set_pin_name(q, "entries");
+      return g;
+    }
+    for (int lane = 0; lane < 4; ++lane) {
+      for (const auto& [field, field_offset, field_width] : std::initializer_list<std::tuple<std::string_view, int, int>>{
+               { "data", 0, 8},
+               {"valid", 8, 1}
+      }) {
+        auto flop = create_typed_node(*g, Ntype_op::Flop);
+        auto q    = flop.create_driver_pin(0);
+        livehd::graph_util::set_bits(q, field_width);
+        livehd::graph_util::set_pin_name(q, std::format("entries.e{}.{}", lane, field));
+        flop.attr(livehd::attrs::aggregate_origin).set("entries");
+        flop.attr(livehd::attrs::aggregate_source_index).set(lane);
+        flop.attr(livehd::attrs::aggregate_lane_ordinal).set(lane);
+        flop.attr(livehd::attrs::aggregate_bit_offset).set(lane * 9 + field_offset);
+        flop.attr(livehd::attrs::aggregate_bit_width).set(field_width);
+        flop.attr(livehd::attrs::aggregate_extent).set(4);
+      }
+    }
+    return g;
+  };
+
+  auto ref  = make("lgdb_semdiff_sroa_struct_ref", false);
+  auto impl = make("lgdb_semdiff_sroa_struct_impl", true);
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto r                 = livehd::semdiff::structural_match(ref.get(), impl.get(), options);
+  EXPECT_EQ(1U, r.state.a_total);
+  EXPECT_EQ(1U, r.state.b_total);
+  EXPECT_EQ(1U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+}
+
 // Without state_pairing the renamed flops stay unmatched frontiers (the
 // pre-tier-2 behavior — this is the gap the pass exists to close).
 TEST(Semdiff, RenamedFlopsUnpairedWithoutStatePairing) {

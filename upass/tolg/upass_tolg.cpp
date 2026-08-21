@@ -574,9 +574,16 @@ private:
       return it->second;
     }
     // Whole-array read (`x = mem`): materialize the cell's async read_all
-    // output.
+    // output. Publish its packed width under the memory name as well: leaf()
+    // resolves the pin first and then asks mw_lookup(name), so omitting this
+    // left every whole-array read with the default width 1 even though the pin
+    // itself carries size*elem_mw bits. A following partial write then sized
+    // its first set_mask only to the mask reach and discarded the untouched
+    // high lanes.
     if (auto mit = mem_map_.find(key); mit != mem_map_.end()) {
-      return get_or_make_read_all(mit->second);
+      auto pin     = get_or_make_read_all(mit->second);
+      mw_map_[key] = static_cast<int32_t>(mit->second.size * mit->second.elem_mw);
+      return pin;
     }
     // A name that resolves to neither a driver nor a memory would be wired to
     // nil (0sb?). For Pyrope that drops whatever the reference carried — a
@@ -4383,7 +4390,16 @@ private:
           if (!rpn.empty() && rpn != "false") {
             // Reset value bus -> init sink (overrides any declare-time const
             // init).
-            if (auto iit = attrs.find("initial"); iit != attrs.end() && iit->second != "false") {
+            // `initial` is the importer spelling; `init` is the canonical
+            // Pyrope declaration attribute emitted by prp_writer.  A
+            // Slang->Pyrope->LGraph round trip therefore reaches this path
+            // with `init=...`, even though a direct Slang->LGraph compile uses
+            // `initial=...`.  Accept both, exactly like finalize_regs().
+            auto iit = attrs.find("initial");
+            if (iit == attrs.end()) {
+              iit = attrs.find("init");
+            }
+            if (iit != attrs.end() && iit->second != "false") {
               if (auto iv = Dlop::from_pyrope(iit->second)) {
                 for (const auto& e : mi.node.inp_edges()) {
                   if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
@@ -4402,6 +4418,19 @@ private:
                 rp = not1(rp);
               }
               setup_sink_by_name(mi.node, "reset").connect_driver(rp);
+
+              // Preserve reset EDGE semantics as well as its value. The
+              // whole-array Memory pin block is full, so cgen consumes this
+              // node marker when it builds the event control.
+              bool async = reset_async_default_;
+              if (auto ait = attrs.find("async"); ait != attrs.end()) {
+                async = ait->second != "false" && ait->second != "0";
+              } else if (auto sit = attrs.find("sync"); sit != attrs.end()) {
+                async = sit->second == "false" || sit->second == "0";
+              }
+              if (async) {
+                mi.node.attr(livehd::attrs::memory_async_reset).set(1);
+              }
             }
           }
         }
@@ -4422,7 +4451,7 @@ private:
       // A read-less (or access-less) memory is a WARNING at most — its state
       // can be observed by a scan chain, and a future remote regref may
       // attach reads/writes. `pub` (regref potential) silences it entirely.
-      if (!mi.is_pub && mi.rd_next == 0) {
+      if (!mi.is_pub && mi.rd_next == 0 && mi.read_all_pin.is_invalid()) {
         warn_at(Lnast_nid{},
                 {"memory-never-read", "type"},
                 "memory '{}' is never read — contents are only observable via "
@@ -8720,7 +8749,23 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
       if (kind != "pipe" && kind != "mod") {
         continue;
       }
-      if (needs_transitive(callee, registry, memo, visiting, declares)) {
+      // A clocked callee whose public ABI already carries `clk`/`clock` is
+      // wired by the ordinary named actual at the call site.  It does NOT need
+      // the caller's compiler-minted implicit clock forwarded as a second,
+      // hidden input.  Propagating the raw "contains state" fact through such
+      // a boundary gave parents like prim_rf_1r1w_preview an unused `clock`
+      // GraphIO pin in addition to their explicit `rf_clk_i`; hierarchical LEC
+      // then quite correctly reported an implementation-only box input.
+      //
+      // Keep the leaf result true: setup_io_impl still needs it to select the
+      // callee's own declared clk/clock as clock_name.  Suppress only the
+      // TRANSITIVE request seen by its caller.
+      const bool callee_has_public_clock
+          = declares == &tree_declares_reg
+            && std::any_of(callee->io_meta().inputs.begin(), callee->io_meta().inputs.end(), [](const auto& e) {
+                 return is_clock_port_name(e.name) && (e.kind == Io_kind::boolean || e.bits <= 1);
+               });
+      if (!callee_has_public_clock && needs_transitive(callee, registry, memo, visiting, declares)) {
         needs = true;
         break;
       }
@@ -8908,7 +8953,8 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
   };
 
   std::vector<std::vector<size_t>> edges(units.size());
-  std::vector<std::vector<size_t>> state_reverse(units.size());
+  std::vector<std::vector<size_t>> clock_reverse(units.size());
+  std::vector<std::vector<size_t>> reset_reverse(units.size());
   std::vector<uint8_t>             activation(units.size(), 0);
   std::vector<uint8_t>             clock(units.size(), 0);
   std::vector<uint8_t>             reset(units.size(), 0);
@@ -8940,7 +8986,18 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
       edges[i].push_back(*child);
       const auto kind = units[*child]->get_lambda_kind();
       if (kind == "pipe" || kind == "mod") {
-        state_reverse[*child].push_back(i);
+        // A child's declared clk/clock is an ordinary actual at this call site;
+        // only a compiler-MINTED clock must be transported through the caller's
+        // hidden ABI. Keep reset's existing propagation independent -- clock
+        // and reset need not share the same public boundary.
+        const bool child_has_public_clock
+            = std::any_of(units[*child]->io_meta().inputs.begin(), units[*child]->io_meta().inputs.end(), [](const auto& e) {
+                return is_clock_port_name(e.name) && (e.kind == Io_kind::boolean || e.bits <= 1);
+              });
+        if (!child_has_public_clock) {
+          clock_reverse[*child].push_back(i);
+        }
+        reset_reverse[*child].push_back(i);
       }
     }
     if (units[i]->is_template()) {
@@ -8971,8 +9028,8 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
     }
   };
   flood(activation, edges);
-  flood(clock, state_reverse);
-  flood(reset, state_reverse);
+  flood(clock, clock_reverse);
+  flood(reset, reset_reverse);
   // A unit that itself publishes `__next_active` is activation capable no
   // matter who reaches it — including a template, which is never a flood root.
   for (size_t i = 0; i < units.size(); ++i) {

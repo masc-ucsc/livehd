@@ -28,6 +28,29 @@ using cvc5::Sort;
 using cvc5::Term;
 namespace gu = livehd::graph_util;
 
+// Keep structural-refusal diagnostics actionable on large generated designs.
+// The numeric debug id is useful for one graph instance, but changes after a
+// contextual inline.  A surviving signal name and source location let the
+// caller map the same cycle back to the emitted RTL in either context.
+static std::string diagnostic_node_name(hhds::Graph* g, const hhds::Occurrence_node& node) {
+  std::string out  = gu::debug_name(node);
+  auto        name = gu::node_name_of(node);
+  if (!name.empty()) {
+    out += "[name=" + std::string{name} + "]";
+  }
+  auto src = node.base_node().attr(hhds::attrs::srcid);
+  if (src.has()) {
+    auto span = g->source_locator().resolve_span(src.get());
+    if (!span.file.empty() || span.start_line) {
+      out += "@" + (span.file.empty() ? std::string{"?"} : span.file);
+      if (span.start_line) {
+        out += ":" + std::to_string(*span.start_line);
+      }
+    }
+  }
+  return out;
+}
+
 // Walk a clock_pin driver back to the graph INPUT it comes from, hopping only
 // the width-mask Get_mask a typed port read picks up. Returns invalid for a
 // DERIVED clock (a divider Q, an inverter, a mux, an ICG cone) -- which is the
@@ -51,26 +74,28 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
   while (!p.is_invalid() && depth < 16) {
     ++depth;
     const auto op = gu::type_op_of(p.get_master_node());
-    // A MASK-SHAPED And is a width adjustment too, not a gate: narrowing a
-    // value to N bits is spelled `v & MASK`, and that is how the LSB of the
-    // 2-bit `and_28` is taken before it reaches the clock_pin. Exactly ONE
-    // non-constant operand distinguishes it from a real clock gate (`clk &
-    // enable`, two data operands), which must NOT be peeled -- that one folds
-    // into a commit guard below and dropping it would model a gated flop as
-    // committing every step.
-    if (op == Ntype_op::And) {
+    // MASK-SHAPED And and ZERO-PAD Or are width adjustments, not gates. cgen
+    // spells a narrowing as `v & MASK` and a signed/width-preserving pad as
+    // `$signed(0) | $signed(v)`. Exactly ONE non-constant operand distinguishes
+    // these identities from a real clock gate (`clk & enable`) or derived clock
+    // logic. Constants must preserve bit 0: 1 for And, 0 for Or.
+    if (op == Ntype_op::And || op == Ntype_op::Or) {
       Pin  data;
       int  data_ins = 0;
-      bool keeps_b0 = true;
+      bool identity = true;
       for (const auto& e : p.get_master_node().inp_edges()) {
         if (gu::is_const_pin(e.driver)) {
-          keeps_b0 &= !gu::hydrate_const(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
+          if (op == Ntype_op::And) {
+            identity &= !gu::hydrate_const(e.driver).and_op(*Dlop::create_integer(1))->is_known_false();
+          } else {
+            identity &= gu::hydrate_const(e.driver).is_known_zero();
+          }
           continue;
         }
         ++data_ins;
         data = e.driver;
       }
-      if (data_ins != 1 || !keeps_b0 || data.is_invalid()) {
+      if (data_ins != 1 || !identity || data.is_invalid()) {
         break;
       }
       p = data;
@@ -144,6 +169,7 @@ template <typename Pin>
 static Clock_cell_use<Pin> clock_cell_on(Pin p) {
   Clock_cell_use<Pin> r;
   for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+    p = peel_clock_width(p);
     if (gu::is_graph_input_pin(p) || gu::is_const_pin(p)) {
       return r;
     }
@@ -305,10 +331,12 @@ std::string canon_flop_name(std::string_view hier_name) {
     sv = sv.substr(0, p);
   }
   std::string s(sv);
-  // Pyrope backticks quote an identifier but are not part of its RTL name.
-  // A Verilog -> Pyrope -> Verilog reread can therefore expose
-  // `state.field` while the direct reference graph carries state.field.
+  // Pyrope backticks and Verilog's leading backslash quote identifiers but are
+  // not part of their RTL names. After an instance prefix is attached, the
+  // latter can appear in the middle of a hierarchical name
+  // (`csrMod\_Mhpmevent10_0` versus `csrMod_Mhpmevent10_0`).
   s.erase(std::remove(s.begin(), s.end(), '`'), s.end());
+  s.erase(std::remove(s.begin(), s.end(), '\\'), s.end());
   // ".reg_" (the CIRCT single-field stage-register flop name) -> "_" first, so the
   // collapse survives the generic "." -> "_" flatten that follows. (A register file
   // bank "registers.regs_7" has ".regs_", not ".reg_", so it is left for the dot
@@ -767,6 +795,59 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
   // 1-bit BV from a Bool predicate.
   auto pred_to_bv = [&](const Term& b) -> Term { return tm_.mkTerm(Kind::ITE, {b, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}); };
+
+  // A Clock_cell deliberately has no ordinary DATA value at P==1: one encoder
+  // step is an edge, not a sampled clock level, and making its output globally
+  // readable would silently accept clock-monitor logic we cannot model.  There
+  // is one narrower place where its Boolean waveform is required, however: a
+  // PROVEN child collapsed as a sequence transducer still has a structural
+  // CLOCK input, and the parent's proof must establish that the two child
+  // instances receive the same clock sequence.  Treating that port like an
+  // ordinary box input currently stalls forever because driver_val() correctly
+  // finds no value for the cell (XiangShan ExuBlock -> CSR was the measured
+  // refusal).
+  //
+  // Build the waveform only for that boundary obligation.  It is the actual
+  // gate function -- ordinary `clk & held_en`, active-low `clk | !held_en` --
+  // so a gated-vs-ungated child clock still REFUTES.  The value is returned
+  // locally and is never installed in pin2val: any non-clock Sub port, or any
+  // ordinary data consumer of the same net, keeps the fail-closed behavior.
+  std::function<Val(const hhds::Occurrence_pin&, bool&, int)> clock_box_input;
+  livehd::latch_contract::Clock_port_cache                    clock_port_cache;
+  clock_box_input = [&](const hhds::Occurrence_pin& pin, bool& ok, int depth) -> Val {
+    ok = false;
+    if (pin.is_invalid() || depth > 16) {
+      return {};
+    }
+    const auto cc = clock_cell_on(pin);
+    if (cc.cell.is_invalid()) {
+      return driver_val(pin, ok);
+    }
+    if (cc.div != 1 || cc.clk_ref.is_invalid()) {
+      return {};
+    }
+
+    bool rok = true;
+    Val  rv  = clock_box_input(cc.clk_ref, rok, depth + 1);
+    if (!rok || rv.term.isNull()) {
+      return {};
+    }
+    Term ref_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+
+    Term en_hot = tm_.mkBoolean(true);
+    if (!cc.en.is_invalid()) {
+      bool eok = true;
+      Val  ev  = driver_val(cc.en, eok);
+      if (!eok || ev.term.isNull()) {
+        return {};  // enable cone is not encoded yet; the fixpoint retries
+      }
+      en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+    }
+    Term wave
+        = cc.invert ? tm_.mkTerm(Kind::OR, {ref_hot, tm_.mkTerm(Kind::NOT, {en_hot})}) : tm_.mkTerm(Kind::AND, {ref_hot, en_hot});
+    ok = true;
+    return Val{pred_to_bv(wave), 1, false};
+  };
 
   // ---- Inputs: shared symbol or a fresh one, mapped onto the input driver pin.
   for (const auto& d : gio->get_input_pin_decls()) {
@@ -1377,9 +1458,108 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // deferred to a later pass; an acyclic graph converges, and a node still stuck
   // after no-progress is a genuine error (a real comb cycle / missing driver).
   absl::flat_hash_set<std::string> done;
-  auto                             nodekey     = [](const auto& n) -> std::string { return box_node_key(n); };
-  bool                             progress    = true;
-  unsigned int                     budget_tick = 0;  // throttles the per-node deadline check (avoids a now() per node)
+  auto                             nodekey = [](const auto& n) -> std::string { return box_node_key(n); };
+  // Resolve a named state-cell sink through the occurrence, so drivers across
+  // an instance boundary are threaded into this hierarchy position. Latch pin
+  // ids intentionally match Flop pin ids (graph/cell.cpp).
+  auto hier_sink_driver = [](const hhds::Occurrence_node& n, std::string_view sink_name) -> hhds::Occurrence_pin {
+    auto pid = Ntype::get_sink_pid(Ntype_op::Flop, sink_name);
+    for (const auto& e : n.inp_edges()) {
+      if (e.sink.get_port_id() == pid) {
+        return e.driver;
+      }
+    }
+    return {};
+  };
+
+  // Timing-only portion of every scheduled state control cone. A nested ICG has
+  // `always_latch if (!gclk) held_en <= en`; after gclk becomes a Clock_cell,
+  // tolg's Boolean Eq/Xor/Mux chain for `!gclk` must not be encoded as sampled
+  // DATA. Cgen can also put that polarity-normalization chain on a flop's
+  // `clock_pin`, so use the same control selection as phase_sched: a latch's
+  // `enable`, every other state element's `clock_pin`. The phase schedule
+  // already absorbs the clock waveform and, when a latch also has a live data
+  // guard, records that guard separately.
+  //
+  // Discover from scheduled clock controls only, and mark only nodes whose own
+  // sub-cone reaches a Clock_cell. A data-only branch of `!gclk && en` therefore
+  // remains ordinary data and is still available to guard_term(). If a marked
+  // node also drives an ordinary data consumer, it deliberately carries no Val
+  // and that consumer fails closed below.
+  absl::flat_hash_set<std::string> clock_control_timing;
+  if (phased) {
+    absl::flat_hash_map<std::string, bool> clock_dep_memo;
+    absl::flat_hash_set<std::string>       clock_dep_visiting;
+    auto                                   clock_dependent = [&](auto&& self, const hhds::Occurrence_pin& p) -> bool {
+      if (p.is_invalid() || gu::is_const_pin(p) || gu::is_graph_input_pin(p)) {
+        return false;
+      }
+      auto              n = p.get_master_node();
+      const std::string k = nodekey(n);
+      if (auto it = clock_dep_memo.find(k); it != clock_dep_memo.end()) {
+        return it->second;
+      }
+      if (gu::type_op_of(n) == Ntype_op::Clock_cell) {
+        clock_dep_memo[k] = true;
+        return true;
+      }
+      // A state output is a DATA boundary.  Walking through all of its sink
+      // pins reaches the cell's clock input and would therefore label every
+      // ordinary read of that state as clock-derived.  On Minion this marked
+      // `reg_sepc_pre[48]` timing-only merely because its Flop is clocked,
+      // then refused the unrelated sepc output cone.  Sub/Memory boundaries
+      // are likewise not combinational pieces of this latch-enable cone.
+      const auto op = gu::type_op_of(n);
+      if (gu::is_type_register(n) || op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO) {
+        clock_dep_memo[k] = false;
+        return false;
+      }
+      if (!clock_dep_visiting.insert(k).second) {
+        return false;
+      }
+      bool dep = false;
+      for (const auto& e : n.inp_edges()) {
+        dep |= self(self, e.driver);
+      }
+      clock_dep_visiting.erase(k);
+      clock_dep_memo[k] = dep;
+      return dep;
+    };
+    auto collect_clock_timing = [&](auto&& self, const hhds::Occurrence_pin& p) -> void {
+      if (!clock_dependent(clock_dependent, p)) {
+        return;
+      }
+      auto              n = p.get_master_node();
+      const std::string k = nodekey(n);
+      if (!clock_control_timing.insert(k).second) {
+        return;
+      }
+      for (const auto& e : n.inp_edges()) {
+        self(self, e.driver);
+      }
+    };
+    for (auto n : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+      const auto op = gu::type_op_of(n);
+      if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
+        continue;
+      }
+      auto pit = phase_plan_->ep.find(box_node_key(n));
+      if (pit == phase_plan_->ep.end()) {
+        continue;
+      }
+      if (op == Ntype_op::Latch) {
+        if (!pit->second.clock_role_latch) {
+          continue;
+        }
+        collect_clock_timing(collect_clock_timing, livehd::latch_contract::sink_driver_hier(n, "enable"));
+      } else {
+        collect_clock_timing(collect_clock_timing, livehd::latch_contract::sink_driver_hier(n, "clock_pin"));
+      }
+    }
+  }
+
+  bool         progress    = true;
+  unsigned int budget_tick = 0;  // throttles the per-node deadline check (avoids a now() per node)
   while (progress) {
     // Budget-aware encode: bail before another full fixpoint pass over the
     // virtually-flattened design — this loop, not cvc5, is the deep-parent time sink.
@@ -1498,6 +1678,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         for (const auto& d : sub_io->get_output_pin_decls()) {
           out_name[sub_io->get_output_port_id(d.name)] = d.name;
         }
+        const auto sub_def = node.get_subnode_graph();
 
         // Resolve to a *combinational* def for inline flattening (M5): only when a
         // resolution library is supplied AND the def has no state. Otherwise the
@@ -1713,6 +1894,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         for (const auto& e : node.inp_edges()) {
           bool sok = true;
           Val  v   = driver_val(e.driver, sok);
+          if (!sok && sub_def != nullptr) {
+            // Resolve the callee's clock interface only on the exceptional
+            // timing-only path. Most boxes have ordinary encoded inputs; doing
+            // a recursive interface scan for every one of them made large
+            // hierarchy encodes needlessly quadratic. The shared cache keeps
+            // the remaining probes one-per-definition.
+            const auto& clock_input_pids = livehd::latch_contract::clock_input_ports(sub_def, clock_port_cache);
+            if (clock_input_pids.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
+              // A collapsed child's CLOCK is a sequence-boundary obligation,
+              // not an ordinary read of the clock as data. See
+              // clock_box_input above.
+              v = clock_box_input(e.driver, sok, 0);
+            }
+          }
           if (!sok) {
             all_in = false;
             break;
@@ -1864,23 +2059,85 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         continue;
       }
 
-      // A width-mask wrapper sitting ON a clock carries no data value either. A
+      // A four-microstep schedule knows the root clock's value at every point:
+      // low at Close_low/Fall, high at Rise/Close_high. That makes a Clock_cell
+      // an exactly encodable Boolean when RTL deliberately reads its output as
+      // data inside a latch-control cone. Minion's prim_write_commit_rst_en is
+      // the measured shape: `reset || (gated_clock && held_enable)`. The latch
+      // is DATA-role because reset can open it asynchronously, so absorbing the
+      // whole control as timing would drop reset. Giving the cell its scheduled
+      // waveform preserves both terms instead.
+      //
+      // This is deliberately unavailable in P==1 (`microstep_ < 0`): one step
+      // there is an edge, not a level, so a clock monitor has no defined DATA
+      // value and must still fail closed.
+      if (op == Ntype_op::Clock_cell && phased && !single_step()) {
+        auto cell_sink = [&](std::string_view name) -> hhds::Occurrence_pin {
+          const auto pid = Ntype::get_sink_pid(Ntype_op::Clock_cell, name);
+          for (const auto& e : node.inp_edges()) {
+            if (e.sink.get_port_id() == pid) {
+              return e.driver;
+            }
+          }
+          return {};
+        };
+
+        Term ref_hot;
+        auto ref = cell_sink("clk_ref");
+        if (ref.is_invalid()) {
+          return fail_unsupported("Clock_cell '" + gu::debug_name(node) + "' has no clk_ref");
+        }
+        auto ref_root = livehd::latch_contract::control_root(ref, /*stop_at_clock_cell=*/true);
+        if (!ref_root.net.is_invalid() && gu::is_graph_input_pin(ref_root.net)) {
+          bool high = microstep_ == static_cast<int>(Phase::Rise) || microstep_ == static_cast<int>(Phase::Close_high);
+          high      = high != ref_root.inverted;
+          ref_hot   = tm_.mkBoolean(high);
+        } else {
+          bool ref_ok = true;
+          Val  rv     = driver_val(ref, ref_ok);
+          if (!ref_ok || rv.term.isNull()) {
+            continue;  // an inner Clock_cell or wrapper is not encoded yet
+          }
+          ref_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+        }
+
+        Term en_hot = tm_.mkBoolean(true);
+        if (auto en = cell_sink("en"); !en.is_invalid()) {
+          bool en_ok = true;
+          Val  ev    = driver_val(en, en_ok);
+          if (!en_ok || ev.term.isNull()) {
+            continue;
+          }
+          en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+        }
+
+        bool active_low = false;
+        if (auto inv = cell_sink("invert"); !inv.is_invalid() && gu::is_const_pin(inv)) {
+          active_low = !gu::hydrate_const(inv).is_known_false();
+        }
+        Term level            = active_low ? tm_.mkTerm(Kind::OR, {ref_hot, tm_.mkTerm(Kind::NOT, {en_hot})})
+                                           : tm_.mkTerm(Kind::AND, {ref_hot, en_hot});
+        auto dpin             = node.get_driver_pin(0);
+        pin2val[pinkey(dpin)] = Val{tm_.mkTerm(Kind::ITE, {level, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+        done.insert(nodekey(node));
+        progress = true;
+        continue;
+      }
+
+      // In P==1 a width-mask wrapper sitting ON a clock carries no data value
+      // either. A
       // typed 1-bit port read picks up `Get_mask(clk, 1)`, so a gated clock
       // usually reaches its flop THROUGH one of these rather than directly --
       // measured on minion, where every such wrapper became "operand has no
       // encodable driver". Clockness propagates through the identity wrappers,
       // exactly the ones clock_cell_on already walks.
       bool clock_wrapper = false;
-      if (op == Ntype_op::Get_mask || op == Ntype_op::Sext) {
-        int non_const = 0;
-        for (const auto& e : node.inp_edges()) {
-          if (!gu::is_const_pin(e.driver)) {
-            ++non_const;
-          }
-        }
-        clock_wrapper = non_const == 1 && !clock_cell_on(node.get_driver_pin(0)).cell.is_invalid();
+      if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask || op == Ntype_op::Sext || op == Ntype_op::And
+          || op == Ntype_op::Or) {
+        clock_wrapper = !clock_cell_on(node.get_driver_pin(0)).cell.is_invalid();
       }
-      if (op == Ntype_op::Clock_cell || clock_wrapper) {
+      const bool step_granular_timing = single_step() && (clock_wrapper || clock_control_timing.contains(nodekey(node)));
+      if (op == Ntype_op::Clock_cell || step_granular_timing) {
         // 2f-latch M9: a Clock_cell has NO DATA VALUE. Its output is a CLOCK, and
         // the binding rule is that it may only reach a clock sink -- the flop and
         // memory paths below resolve THROUGH it to a commit condition rather than
@@ -2677,11 +2934,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           for (const auto& c : chain) {
             diag += c + " -> ";
           }
-          diag      += gu::debug_name(cur);
+          diag      += diagnostic_node_name(g, cur);
           diagnosed  = true;
           break;
         }
-        chain.push_back(gu::debug_name(cur));
+        chain.push_back(diagnostic_node_name(g, cur));
         bool hopped = false;
         for (const auto& e : cur.inp_edges()) {
           const auto& drv = e.driver;
@@ -2701,6 +2958,45 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             cur    = mn;
             hopped = true;
             break;  // follow the first undone operand
+          }
+          // A producer can be structurally "done" without carrying a DATA
+          // value: Clock_cell and the identity wrappers on its output are
+          // deliberately timing-only.  If such a pin reaches an ordinary
+          // data operator, driver_val() is still unresolved even though the
+          // producer node is in `done`.  Calling that "all operands resolved"
+          // hides the exact edge which crossed from the clock domain into the
+          // data cone (and made Minion's intpipe_csr_file look like an
+          // inexplicable deferred Mux/Or). Diagnose the missing pin directly.
+          bool drv_ok = true;
+          (void)driver_val(drv, drv_ok);
+          if (!drv_ok) {
+            diag = "data input of '" + gu::debug_name(cur) + "' is driven by timing-only or unencoded pin '" + gu::debug_name(mn)
+                   + "' (op " + std::string(Ntype::get_name(gu::type_op_of(mn))) + ", key " + missing_driver_key + ")";
+            diag       += "; consumer inputs{";
+            bool first  = true;
+            for (const auto& ie : cur.inp_edges()) {
+              if (!first) {
+                diag += ", ";
+              }
+              first  = false;
+              diag  += "p" + std::to_string(static_cast<int>(ie.sink.get_port_id())) + "="
+                      + gu::debug_name(ie.driver.get_master_node()) + ":"
+                      + std::string(Ntype::get_name(gu::type_op_of(ie.driver.get_master_node())));
+            }
+            diag  += "}; consumer outputs{";
+            first  = true;
+            for (const auto& oe : cur.out_edges()) {
+              if (!first) {
+                diag += ", ";
+              }
+              first  = false;
+              diag  += gu::debug_name(oe.sink.get_master_node()) + ":"
+                      + std::string(Ntype::get_name(gu::type_op_of(oe.sink.get_master_node()))) + ".p"
+                      + std::to_string(static_cast<int>(oe.sink.get_port_id()));
+            }
+            diag      += "}";
+            diagnosed  = true;
+            break;
           }
         }
         if (diagnosed) {
@@ -2944,19 +3240,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // outputs). N = reset_active ? initial : (enable ? din : Q). reset_pin is a
   // shared primary input, so the same query covers the reset/base case.
   //
-  // A flop deep in a sub-instance has its din/enable/reset driven across the
-  // instance boundary, so resolve the named sink via the flop's HIER inp_edges()
-  // (which inp_edges() threads through the hierarchy) rather than the class-local
-  // get_driver_of_sink_name (which would stop at the sub's GraphIO pin).
-  auto hier_sink_driver = [](const hhds::Occurrence_node& n, std::string_view sink_name) -> hhds::Occurrence_pin {
-    auto pid = Ntype::get_sink_pid(Ntype_op::Flop, sink_name);
-    for (const auto& e : n.inp_edges()) {
-      if (e.sink.get_port_id() == pid) {
-        return e.driver;
-      }
-    }
-    return {};
-  };
+  // hier_sink_driver above uses occurrence edges rather than class-local pins,
+  // which is required for a state endpoint inside an instance.
   // ---- CLOCK AWARENESS (todo/livehd/2f-latch M4) ----------------------------
   // This encoder never read `clock_pin` or `posclk`: the sink classifier
   // DISCARDED them, so the transition function was

@@ -253,5 +253,50 @@ fi
 
 echo "ok: case 2 (reg-driven divided clock) keeps its clock_pin and recompiles"
 
-echo "PASS: pin nets stay position-independent for BOTH classes (wire and reg)"
+# ---------------------------------------------------------------------------
+# Case 3 — a LOCAL net named exactly `clock` is not the implicit clock input.
+# ---------------------------------------------------------------------------
+# Minion's intpipe_top aliases clk_i through a local `logic clock`. The slang
+# reader used to classify clocks by spelling alone, omit clock_pin on every
+# state declaration, and thereby make tolg mint an unrelated top-level input
+# named `clock`. The local `clock = clk_i` driver then disappeared on reread.
+cat >"$W/local_clock_alias.sv" <<'EOF'
+module local_clock_alias (
+  input  logic clk_i,
+  input  logic d,
+  output logic q
+);
+  logic clock;
+  assign clock = clk_i;
+  always_ff @(posedge clock) q <= d;
+endmodule
+EOF
+
+"$LHD" compile verilog --top local_clock_alias --emit-dir "pyrope:$W/atree" --workdir "$W/awp" \
+  -- "$W/local_clock_alias.sv" >"$W/aemit.log" 2>&1 \
+  || { tail -20 "$W/aemit.log"; fail "case 3: Verilog -> Pyrope emission failed"; }
+
+AP="$W/atree/local_clock_alias.prp"
+[ -f "$AP" ] || fail "case 3: no local_clock_alias.prp emitted"
+grep -q 'clock_pin=ref clock' "$AP" || {
+  cat "$AP"
+  fail "case 3: a local net named clock was mistaken for the implicit clock input"
+}
+
+"$LHD" compile "$AP" --top local_clock_alias --emit "verilog:$W/local_clock_alias.v" --workdir "$W/awi" \
+  >"$W/aimpl.log" 2>&1 \
+  || { tail -20 "$W/aimpl.log"; cat "$AP"; fail "case 3: emitted Pyrope did not recompile"; }
+
+if grep -Eq '(^|,)[[:space:]]*input[[:space:]]+clock([[:space:],)]|$)' "$W/local_clock_alias.v"; then
+  cat "$W/local_clock_alias.v"
+  fail "case 3: reread promoted the local clock alias to an unrelated module input"
+fi
+grep -q 'posedge clk_i' "$W/local_clock_alias.v" || {
+  cat "$W/local_clock_alias.v"
+  fail "case 3: reread state is not driven by clk_i through the local alias"
+}
+
+echo "ok: case 3 (local net named clock) remains bound to clk_i"
+
+echo "PASS: pin nets stay position-independent and local clock aliases remain explicit"
 exit 0

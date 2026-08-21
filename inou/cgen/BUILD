@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Simulator-codegen content salt (opt_loop_incr L2). `kSimGenVersion` is a
@@ -90,5 +91,20 @@ cc_test(
         "//graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+# A cgen Memory becomes `<wrapper instance>.data` when its Verilog is read
+# back. Two same-shaped uninitialized memories pin the reversible instance
+# provenance used by native LEC to retain exact state correspondence.
+sh_test(
+    name = "cgen_memory_state_roundtrip",
+    size = "large",
+    srcs = ["tests/memory_state_roundtrip_test.sh"],
+    data = [
+        "tests/memory_state_roundtrip.sv",
+        "tests/memory_whole_state_roundtrip.prp",
+        "tests/memory_whole_state_roundtrip.sv",
+        "//lhd",
     ],
 )

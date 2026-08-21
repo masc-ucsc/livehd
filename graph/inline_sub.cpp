@@ -32,12 +32,12 @@ private:
   // Explicit body, for an instance whose def is NOT in the parent's own graph
   // library (a `lec --lib` cell model lives in a side library, so
   // get_subnode_graph() is null for it). nullptr = resolve the ordinary way.
-  hhds::Graph*     def_   = nullptr;
+  hhds::Graph*     def_        = nullptr;
   // Name an UNNAMED spliced state node after the instance (see the header): a
   // cell model's internal flop carries no name attr, so the cut would otherwise
   // be keyed on a synthesized net name that corresponds to nothing.
   bool             name_state_ = false;
-  hhds::Graph*     child_ = nullptr;
+  hhds::Graph*     child_      = nullptr;
   std::string      prefix_;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map_;   // child node -> parent clone
@@ -88,6 +88,9 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
   }
+  if (auto a = orig.attr(livehd::attrs::memory_async_reset); a.has()) {
+    neo.attr(livehd::attrs::memory_async_reset).set(a.get());
+  }
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
@@ -124,6 +127,20 @@ void Sub_inliner::create_nodes() {
           neo.set_subnode(io, *loop);
         } else {
           neo.set_subnode(io);
+        }
+
+        // Preserve the complete call boundary, including declared ports with
+        // no parent-side edge.  HHDS hierarchy resolution crosses a child's
+        // output node through the corresponding instance driver pin even when
+        // that output is otherwise dead.  Edge-driven cloning alone therefore
+        // leaves a nested Sub structurally incomplete: walking an internally
+        // driven but unused output asks for a pin that was never created.  The
+        // same applies to an internally read, unconnected input.
+        for (const auto& d : io->get_input_pin_decls()) {
+          (void)neo.create_sink_pin(d.port_id);
+        }
+        for (const auto& d : io->get_output_pin_decls()) {
+          (void)neo.create_driver_pin(d.port_id);
         }
       }
     }

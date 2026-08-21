@@ -24,8 +24,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cone_abc.hpp"
+#include "cprop.hpp"
 #include "encode.hpp"
 #include "host_mem.hpp"
+#include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 
@@ -88,6 +90,70 @@ std::string display_name(std::string_view name) {
   return std::string(name);
 }
 
+// cgen emits a stateful Memory through a `cgen_memory_*` wrapper whose internal
+// storage is named `data`. Its plain-identifier-safe instance name carries the
+// original Memory name as hex in `__lhdmem_h<hex>_e`, so the round trip's
+// wrapper state is an exact, reversible correspondence claim rather than a
+// structural guess. A uniqueness suffix may follow `_e`; it does not alter the
+// encoded storage provenance.
+constexpr std::string_view cgen_memory_state_marker = "__lhdmem_h";
+constexpr std::string_view cgen_memory_state_end    = "_e";
+
+std::optional<std::string> decode_cgen_memory_correspondence(std::string_view name) {
+  const auto canon = canon_flop_name(name);
+  const auto pos   = canon.find(cgen_memory_state_marker);
+  if (pos == std::string::npos || !canon.ends_with("_data")) {
+    return std::nullopt;
+  }
+  const size_t hex_begin = pos + cgen_memory_state_marker.size();
+  const size_t hex_end   = canon.find(cgen_memory_state_end, hex_begin);
+  if (hex_end == std::string::npos || hex_end == hex_begin || ((hex_end - hex_begin) & 1U) != 0
+      || hex_end + cgen_memory_state_end.size() > canon.size() - 5) {
+    return std::nullopt;
+  }
+  const auto suffix = std::string_view(canon).substr(hex_end + cgen_memory_state_end.size(),
+                                                     canon.size() - 5 - hex_end - cgen_memory_state_end.size());
+  if (!suffix.empty()) {
+    if (suffix.front() != '_' || suffix.size() == 1
+        || !std::all_of(suffix.begin() + 1, suffix.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+      return std::nullopt;
+    }
+  }
+
+  auto nibble = [](unsigned char ch) -> int {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+    return -1;
+  };
+  std::string decoded;
+  decoded.reserve((hex_end - hex_begin) / 2);
+  for (size_t i = hex_begin; i < hex_end; i += 2) {
+    const int hi = nibble(static_cast<unsigned char>(canon[i]));
+    const int lo = nibble(static_cast<unsigned char>(canon[i + 1]));
+    if (hi < 0 || lo < 0) {
+      return std::nullopt;
+    }
+    decoded.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  return canon.substr(0, pos) + canon_flop_name(decoded);
+}
+
+bool is_cgen_memory_storage_name(std::string_view name) { return decode_cgen_memory_correspondence(name).has_value(); }
+
+std::string memory_correspondence_name(std::string_view name) {
+  if (auto decoded = decode_cgen_memory_correspondence(name)) {
+    return *decoded;
+  }
+  return canon_flop_name(name);
+}
+
 // Join a (sorted) token list, capping the count so a 1000-flop bank doesn't bury
 // the message; appends "(+N more)" when truncated.
 std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
@@ -104,6 +170,22 @@ std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
     out += ", (+" + std::to_string(toks.size() - cap) + " more)";
   }
   return out;
+}
+
+// A register/memory that exists on only one side is not itself part of the
+// module's observable interface. It is safe to omit that cut only when every
+// COMMON output/state obligation is nevertheless proved for arbitrary values
+// of the one-sided state: then the state is unobservable by construction. This
+// must stay narrower than generic incomplete correspondence; a missing primary
+// output or black-box obligation is never excused by this rule.
+template <typename Ref_range, typename Impl_range>
+bool internal_state_only(const Ref_range& unmatched_ref, const Impl_range& unmatched_impl) {
+  if (unmatched_ref.empty() && unmatched_impl.empty()) {
+    return false;
+  }
+  auto is_state = [](const std::string& name) { return name.starts_with("nxt:") || name.starts_with("mem:"); };
+  return std::all_of(unmatched_ref.begin(), unmatched_ref.end(), is_state)
+         && std::all_of(unmatched_impl.begin(), unmatched_impl.end(), is_state);
 }
 
 // When blackbox-input cut points (bbin:) dominate the impl-only set, the impl
@@ -3313,8 +3395,26 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     return by;
   };
-  const auto                       ref_mem_shapes  = mem_names_by_shape(ref);
-  const auto                       impl_mem_shapes = mem_names_by_shape(impl);
+  const auto ref_mem_shapes  = mem_names_by_shape(ref);
+  const auto impl_mem_shapes = mem_names_by_shape(impl);
+  if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+    auto dump = [](const auto& shapes, const char* side) {
+      for (const auto& [shape, names] : shapes) {
+        for (size_t i = 0; i < names.size(); ++i) {
+          std::fprintf(stderr,
+                       "[LEC_MEM %s] %s#%zu %s => %s%s\n",
+                       side,
+                       shape.c_str(),
+                       i,
+                       names[i].c_str(),
+                       memory_correspondence_name(names[i]).c_str(),
+                       is_cgen_memory_storage_name(names[i]) ? " [cgen]" : "");
+        }
+      }
+    };
+    dump(ref_mem_shapes, "REF");
+    dump(impl_mem_shapes, "IMPL");
+  }
   absl::flat_hash_set<std::string> mem_confirmed;  // canon(ref)\x01canon(impl) confident semdiff mem pairs
   absl::flat_hash_set<std::string> mem_opined;     // canon name of any memory semdiff paired (either side)
   for (const auto& [rn, in] : opts.mem_match) {
@@ -3372,8 +3472,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const size_t common  = std::min(rn, in);
       bool         aligned = common > 0;
       for (size_t i = 0; i < common && aligned; ++i) {
-        const std::string rcn = canon_flop_name(ri->second[i]);
-        aligned               = !rcn.empty() && rcn == canon_flop_name(ii->second[i]) && mem_diverged.count(rcn) == 0;
+        const std::string rcn        = memory_correspondence_name(ri->second[i]);
+        const std::string icn        = memory_correspondence_name(ii->second[i]);
+        const bool        cgen_exact = is_cgen_memory_storage_name(ri->second[i]) != is_cgen_memory_storage_name(ii->second[i]);
+        aligned                      = !rcn.empty() && rcn == icn && (cgen_exact || mem_diverged.count(rcn) == 0);
       }
       if (aligned) {
         return true;
@@ -4774,7 +4876,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // unjustified shared-box assumption — only Unknown, with the sets surfaced.
     res.unmatched_ref.assign(bmc_unmatched_ref.begin(), bmc_unmatched_ref.end());
     res.unmatched_impl.assign(bmc_unmatched_impl.begin(), bmc_unmatched_impl.end());
-    const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    const bool incomplete          = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    const bool dead_state_only     = internal_state_only(res.unmatched_ref, res.unmatched_impl);
+    const bool blocking_incomplete = incomplete && !dead_state_only;
     if (!res.unmatched_ref.empty()) {
       res.detail
           += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
@@ -4823,11 +4927,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
       if (all_unsat) {
-        if (incomplete) {
+        if (blocking_incomplete) {
           res.verdict  = Verdict::Unknown;
           res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
         } else {
           res.verdict = Verdict::Proven;
+          if (dead_state_only) {
+            res.detail += "; one-sided internal state is unobservable from every common obligation";
+          }
         }
         return res;
       }
@@ -4843,11 +4950,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     solver.assertFormula(bad);
     cvc5::Result r = solve_check();
     if (r.isUnsat()) {
-      if (incomplete) {
+      if (blocking_incomplete) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
       } else {
         res.verdict = Verdict::Proven;
+        if (dead_state_only) {
+          res.detail += "; one-sided internal state is unobservable from every common obligation";
+        }
       }
     } else if (r.isSat()) {
       // A concrete reachable divergence is a genuine refutation only when the
@@ -5929,7 +6039,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail           += "; no compare points";
       return res;
     }
-    if (!only_ref.empty() || !only_impl.empty()) {
+    const bool phase_dead_state_only = internal_state_only(only_ref, only_impl);
+    if ((!only_ref.empty() || !only_impl.empty()) && !phase_dead_state_only) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; incomplete correspondence";
       return res;
@@ -5959,6 +6070,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const auto pr = solve_check();
     if (pr.isUnsat()) {
       res.verdict = Verdict::Proven;
+      if (phase_dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
       return res;
     }
     // SAT here is NOT a disproof: the assumed-equal current state may be
@@ -6827,7 +6941,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.detail += cones_note;
   }
 
-  const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+  const bool incomplete          = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+  const bool dead_state_only     = internal_state_only(res.unmatched_ref, res.unmatched_impl);
+  const bool blocking_incomplete = incomplete && !dead_state_only;
   if (!res.unmatched_ref.empty()) {
     res.detail
         += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
@@ -6856,9 +6972,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     //     established nothing. That is not equivalence, and reporting it as
     //     Proven made `lhd lec` on an empty module print "PROVEN equivalent" and
     //     exit 0 with no warning. Flag it so the driver hard-fails instead.
-    if (!incomplete && cones_proven > 0) {
+    if (!blocking_incomplete && cones_proven > 0) {
       res.verdict  = Verdict::Proven;
       res.detail  += "; every cut discharged by the cone pass";
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
       return res;
     }
     res.nothing_compared  = true;
@@ -6956,7 +7075,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         res.verdict = Verdict::Unknown;
         return res;
       }
-      res.verdict = incomplete ? Verdict::Unknown : Verdict::Proven;
+      res.verdict = blocking_incomplete ? Verdict::Unknown : Verdict::Proven;
+      if (res.verdict == Verdict::Proven && dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
       return res;
     }
     // sel symbol absent (should not happen): fall through to the monolithic solve.
@@ -6998,9 +7120,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                      static_cast<long long>(cut_ms));
       }
     }
-    if (hard.empty() && !incomplete) {
+    if (hard.empty() && !blocking_incomplete) {
       res.verdict  = Verdict::Proven;
       res.detail  += "; decomposed (" + std::to_string(proven) + " cuts each UNSAT)";
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
       return res;
     }
     res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size()) + " cuts PROVEN"
@@ -7028,11 +7153,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
 
   if (r.isUnsat()) {
     // COMMON outputs agree. Proven only if the correspondence is also complete.
-    if (incomplete) {
+    if (blocking_incomplete) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
     } else {
       res.verdict = Verdict::Proven;
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
     }
   } else if (r.isSat()) {
     res.witness        = build_witness();
@@ -7158,6 +7286,89 @@ bool has_activation_loops(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid
     const auto loop = node.subnode_loop();
     return loop && loop->activation_input;
   });
+}
+
+// A module may legally feed one of its outputs back into one of its inputs when
+// the callee cuts that path with state.  HHDS's occurrence resolver must stop a
+// direct Sub-output -> Sub-input self edge to avoid recursing forever when the
+// callee is combinational; consequently it leaves the boundary pin unresolved
+// even when a flop immediately breaks the path inside the callee.  During a
+// hierarchy escalation that looks like a combinational encoder stall at the
+// Sub, although the flattened RTL is acyclic between state cuts.
+//
+// Detect only the direct call-boundary shape: walk backwards from every Sub
+// input, through ordinary combinational nodes, and stop at all state or OTHER
+// Sub boundaries.  Reaching the same Sub's output means one private inline is
+// needed so the encoder can see the internal state cut.
+bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
+  if (gu::type_op_of(sub) != Ntype_op::Sub || sub.get_subnode_graph() == nullptr || sub.is_loop_subnode()) {
+    return false;
+  }
+  absl::flat_hash_set<hhds::Node_class> seen;
+  std::vector<hhds::Pin_class>          pending;
+  for (const auto& e : sub.inp_edges()) {
+    pending.push_back(e.driver);
+  }
+  while (!pending.empty()) {
+    auto driver = pending.back();
+    pending.pop_back();
+    if (driver.is_invalid() || gu::is_const_pin(driver) || gu::is_graph_input_pin(driver)) {
+      continue;
+    }
+    auto node = driver.get_master_node();
+    if (node == sub) {
+      return true;
+    }
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::IO || gu::is_type_register(node)
+        || !seen.insert(node).second) {
+      continue;
+    }
+    for (const auto& e : node.inp_edges()) {
+      pending.push_back(e.driver);
+    }
+  }
+  return false;
+}
+
+bool has_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
+  if (root == nullptr) {
+    return false;
+  }
+  const absl::flat_hash_set<std::string> collapsed(opts.collapse.begin(), opts.collapse.end());
+  for (const auto node : root->body().nodes()) {
+    auto io = node.get_subnode_io();
+    if (io != nullptr && !collapsed.contains(std::string{io->get_name()}) && has_direct_boundary_feedback(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Inline only the direct feedback-boundary instances identified above.  This is
+// deliberately not a whole-design flatten: proven siblings remain Sub boxes and
+// the hierarchy decomposition still bounds the query.  A fixpoint is needed
+// because one inline can expose a nested instance as a new direct child.
+bool inline_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
+  const absl::flat_hash_set<std::string> collapsed(opts.collapse.begin(), opts.collapse.end());
+  for (int round = 0; round < 16; ++round) {
+    std::vector<hhds::Node_class> targets;
+    for (const auto node : root->body().nodes()) {
+      auto io = node.get_subnode_io();
+      if (io != nullptr && !collapsed.contains(std::string{io->get_name()}) && has_direct_boundary_feedback(node)) {
+        targets.push_back(node);
+      }
+    }
+    if (targets.empty()) {
+      return true;
+    }
+    for (const auto& target : targets) {
+      if (!gu::inline_sub_instance(root, target, "pass.lec")) {
+        return false;
+      }
+    }
+  }
+  return !has_boundary_feedback(root, opts);
 }
 
 bool copy_loop_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
@@ -7523,6 +7734,49 @@ std::vector<std::string> summarize_loop_pairs(hhds::Graph* ref, hhds::Graph* imp
 
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // A direct Sub-output -> same-Sub-input feedback can be sequential inside the
+  // callee even though the hierarchy boundary alone looks cyclic.  Work on a
+  // private closure copy and inline only those boundary instances, exposing the
+  // real flop/memory cut without mutating the shared design or flattening its
+  // proven siblings.
+  if (!opts._boundary_feedback_prepared && (has_boundary_feedback(ref, opts) || has_boundary_feedback(impl, opts))) {
+    hhds::GraphLibrary                        ref_scratch;
+    hhds::GraphLibrary                        impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top;
+    std::shared_ptr<hhds::Graph>              impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs;
+    std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+    if (!copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        || !copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not copy feedback-boundary definitions into private LEC scratch state";
+      return failure;
+    }
+    if (!inline_boundary_feedback(ref_top.get(), opts) || !inline_boundary_feedback(impl_top.get(), opts)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not inline a sequential feedback-boundary instance in private LEC scratch state";
+      return failure;
+    }
+
+    // The source graphs were cprop-clean before the contextual inline, but the
+    // splice reconnects a callee's word-wide output directly to its former
+    // parent-side packed reads.  Re-run the semantics-preserving normalization
+    // on the two private roots so constant slices recover their bit-precise
+    // producer.  Without this, unrelated lanes of a packed feedback word form
+    // a false word-level cycle even though the internal flop already cuts the
+    // real dependency (XiangShan CSR is the large instance of this shape).
+    Cprop ref_cprop;
+    Cprop impl_cprop;
+    ref_cprop.do_trans(ref_top);
+    impl_cprop.do_trans(impl_top);
+
+    Lec_options prepared                 = opts;
+    prepared._boundary_feedback_prepared = true;
+    return prove_equal(ref_top.get(), impl_top.get(), prepared, sub_lib);
+  }
+
   // M6 compact-loop certificate. A matched descriptor whose body def is in the
   // hierarchical collapse set becomes one sequence-box summary; all unmatched
   // or unproved-body loops retain the correctness fallback and are materialized

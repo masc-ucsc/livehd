@@ -593,7 +593,22 @@ constexpr int                 kConcatPackFanInLimit  = 4096;
   if (op == Ntype_op::Get_mask) {
     auto r = const_mask_range(m);
     if (r.first >= 0) {
-      int w = r.second - r.first;  // extracted bits are packed down to [0,w)
+      // A contiguous Get_mask packs source [r.first,r.second) down to bit 0.
+      // Preserve a tighter source footprint through that width wrapper instead
+      // of pessimistically claiming the entire result window.  Cgen routinely
+      // inserts Get_mask(SHL(field,k), low_ones(W)) around a packed lane; losing
+      // `k` here makes an unrelated low-bit read appear to depend on the lane
+      // and can close a false word-level cycle across a Sub boundary.
+      auto fx = footprint(drv_at(m, 0), depth + 1);
+      if (fx.first >= 0) {
+        const int clipped_lo = std::max(fx.first, r.first);
+        const int clipped_hi = std::min(fx.second, r.second);
+        if (clipped_hi <= clipped_lo) {
+          return {0, 0};
+        }
+        return {clipped_lo - r.first, clipped_hi - r.first};
+      }
+      int w = r.second - r.first;  // conservative fallback: packed into [0,w)
       return w <= 1 ? std::pair<int, int>{0, 1} : std::pair<int, int>{0, w};
     }
     // else fall through to the generic bound
@@ -3322,7 +3337,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // normalization and scalar propagation fuse into a single pass. CSE is the
   // only additional graph traversal; one forward round is sufficient because
   // every key sees already-folded producer pins.
-  auto order = stable_nodes(current_graph);
+  auto order    = stable_nodes(current_graph);
   // Latch hold removal is NOT foldable into the sweep below. It matches a
   // `din = enable ? data : Q` shape, and hhds forward order only guarantees
   // that a loop_break node precedes ITS OWN dependents: Pass 1 emits sources
