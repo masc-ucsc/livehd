@@ -168,8 +168,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     return;
   }
   // Simulator lowering still performs backend-specific structural rewrites
-  // (clock-gate folding, optional small-instance flattening, and compact-loop
-  // realization). Build those into a private output library: the EPRP input
+  // (the clock-gate-cell fold and compact-loop realization -- `sim.flatten` is
+  // gone). Build those into a private output library: the EPRP input
   // graphs remain native and read-only, and every pre-scan/emission handle
   // below belongs to the same scratch bodies it measures.
   hhds::GraphLibrary                        sim_library;

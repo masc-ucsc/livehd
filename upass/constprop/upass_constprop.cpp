@@ -834,7 +834,7 @@ void uPass_constprop::process_assign() {
     // here we handle the nil/default case. First write only (no value yet), bare
     // var, never over an enum-type base (an enum value is one entry, not the
     // table of entries).
-    if (v.is_nil() && lhs_text.find('.') == std::string_view::npos && st().get_trivial(lhs_text).is_invalid()) {
+    if (v.is_nil() && bundle_key::is_single_level(lhs_text) && st().get_trivial(lhs_text).is_invalid()) {
       if (const auto nt = decl_type_name_of(lhs_text); !nt.empty()) {
         auto existing = st().get_bundle(lhs_text);
         if (!existing || existing->non_attr_entries().empty()) {
@@ -896,7 +896,7 @@ void uPass_constprop::process_assign() {
     // `t` keeps reading as a tuple. Replace the bundle wholesale (st().set with a
     // bare-var key swaps the whole bundle) so `t == nil` sees nil. Bare-var LHS
     // only (no '.') — a field write like `t.0 = …` must keep the surrounding shape.
-    if (lhs_text.find('.') == std::string_view::npos) {
+    if (bundle_key::is_single_level(lhs_text)) {  // backtick-aware: `` `a.b` `` is a bare var
       if (auto b = st().get_bundle(lhs_text); b && !b->is_empty() && !b->is_scalar()) {
         auto fresh = std::make_shared<Bundle>(std::string(lhs_text));
         fresh->set(v);
@@ -944,7 +944,7 @@ void uPass_constprop::process_declare() {
   // binding ever answers for the field. Record those here — they are the
   // declared-field enumeration for the unset-unused-field warning (a leaf
   // never read or written has no other trace in the symbol table).
-  if (const auto var = current_text(); var.find('.') != std::string_view::npos && var[0] != '%') {
+  if (const auto var = current_text(); !bundle_key::is_single_level(var) && var[0] != '%') {
     std::string path(var);
     if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const) && current_text() == "wire") {
       declared_wire_fields_.insert(std::move(path));
@@ -4538,7 +4538,7 @@ void uPass_constprop::process_tuple_set() {
   // enum-aware `in` / `string()` / interpolation read it back. All OTHER
   // `__attr` writes stay skipped below (they belong to the attributes pass).
   if (path_and_val.size() == 2 && path_and_val[0].text == "__enumentry" && !path_and_val[1].is_ref) {
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -4553,7 +4553,7 @@ void uPass_constprop::process_tuple_set() {
   // be ambiguous). Land it as an attr so enum_scalar_of reads it for
   // int()/==/in (03-bundle.md "Hierarchical enumerates").
   if (path_and_val.size() == 2 && path_and_val[0].text == "__enumval" && !path_and_val[1].is_ref) {
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -4650,7 +4650,7 @@ void uPass_constprop::process_tuple_set() {
     // refactor — no position prefix to compute or reuse. Mutated in place
     // below, so take the COW (un-shared) slot — a plain get_bundle would
     // leak the write into whole-bundle-assignment aliases (`p2 = p1`).
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -5063,7 +5063,7 @@ bool uPass_constprop::scatter_positional_array(std::string_view name, const Dlop
   // a scalar subobject; asking get_bundle_for_write for it violates that API's
   // bare-variable contract and, more importantly, cannot be an array-shaped
   // destination itself.
-  if (name.find('.') != std::string_view::npos) {
+  if (!bundle_key::is_single_level(name)) {  // backtick-aware: `` `a.b` `` is a bare var
     return false;
   }
   auto       b     = st().get_bundle_for_write(name);

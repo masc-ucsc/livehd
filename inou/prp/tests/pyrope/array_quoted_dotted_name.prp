@@ -1,0 +1,30 @@
+/*
+:name: array_quoted_dotted_name
+:type: lgraph compile
+*/
+
+// A backtick-quoted identifier is ONE name even when it carries a dot.
+// inou/slang flattens a struct-typed unpacked array into per-field arrays and
+// spells each `` `base.field` ``; the Pyrope writer re-emits that spelling, so
+// every CVA6 round trip re-reads names like `` `gen_asic_bht_bht_d.valid` ``.
+//
+// The uPass runner used a raw find('.') to classify a declare as "dotted", so
+// this `mut` array was baked as a FIELD of a root tuple that does not exist.
+// Its `mut` mode never reached the binding, the runner's dst-drop rule then
+// deleted the comptime whole-array seed store (`= 0`), and lnast.tolg refused
+// the first element write:
+//
+//   upass.tolg: array '`d.valid`' is written before it has an initializer
+//
+// `timecheck=false` (the spelling the writer emits for a Verilog-origin unit)
+// is load-bearing: it turns the coalescer off, and the coalescer's park/flush
+// happened to re-emit the seed store and mask the drop on a plain Pyrope unit.
+pub mod array_quoted_dotted_name::[timecheck=false](idx:u7, v:u1, en:u1) -> (o:u1@[], p:u1@[]) {
+  mut `d.valid`:[128]u1 = 0
+  `d.valid`[3] = v
+  if en {
+    `d.valid`[idx] = v
+  }
+  o = `d.valid`[idx]
+  p = `d.valid`[3]
+}

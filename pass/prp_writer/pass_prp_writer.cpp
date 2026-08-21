@@ -19,6 +19,7 @@
 
 #include "lnast_prp_writer.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "worker_pool.hpp"   // livehd::run_workers (big-stack workers)
 
 static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
 
@@ -200,25 +201,23 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // Source-file groups share no writer state and target different output
   // paths. Render a bounded batch concurrently; the cap avoids excessive
   // transient analysis maps on machines with very high core counts.
-  std::atomic<size_t>      next{0};
-  const size_t             hw = std::max<size_t>(1, std::thread::hardware_concurrency());
-  const size_t             nw = std::min({jobs.size(), hw, size_t{16}});
-  std::vector<std::thread> workers;
-  workers.reserve(nw);
-  for (size_t w = 0; w < nw; ++w) {
-    workers.emplace_back([&] {
-      while (true) {
-        const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-        if (i >= jobs.size()) {
-          break;
-        }
-        emit_file(i);
+  //
+  // livehd::run_workers, not std::thread: render_def_rhs recurses once per
+  // folded single-use temp, and a default secondary-thread stack (512 KiB on
+  // macOS) held only ~34 such levels at -O0 -- CVA6's unrolled packed-array
+  // write chains died there with `Bus error: 10` (2026-08-21).
+  std::atomic<size_t> next{0};
+  const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const size_t        nw = std::min({jobs.size(), hw, size_t{16}});
+  livehd::run_workers(nw, [&](size_t) {
+    while (true) {
+      const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+      if (i >= jobs.size()) {
+        break;
       }
-    });
-  }
-  for (auto& worker : workers) {
-    worker.join();
-  }
+      emit_file(i);
+    }
+  });
 
   // Publish failures in stable file order even though rendering was parallel.
   for (const auto& result : results) {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cprop.hpp"
+#include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
@@ -40,33 +41,30 @@ void Pass_cprop::optimize(Eprp_var& var) {
     return;
   }
 
-  std::vector<std::thread>        workers;
   std::vector<std::exception_ptr> errors(var.graphs.size());
   // Serially, a throwing do_trans aborted the pass on the spot. Keep that: once
   // any worker records a failure the others stop claiming new graphs instead of
   // piling cascading diagnostics on a design that is already going to fail.
-  std::atomic<bool> failed{false};
-  workers.reserve(nw);
-  for (size_t w = 0; w < nw; ++w) {
-    workers.emplace_back([&] {
-      Cprop cp;
-      while (!failed.load(std::memory_order_relaxed)) {
-        const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-        if (i >= var.graphs.size()) {
-          break;
-        }
-        try {
-          cp.do_trans(var.graphs[i]);
-        } catch (...) {
-          errors[i] = std::current_exception();
-          failed.store(true, std::memory_order_relaxed);
-        }
+  //
+  // Big-stack workers (livehd::run_workers), not std::thread: a worker's
+  // default stack is 512 KiB on macOS, and cprop's recursive cone walks are as
+  // deep as the design makes them.
+  std::atomic<bool>               failed{false};
+  livehd::run_workers(nw, [&](size_t) {
+    Cprop cp;
+    while (!failed.load(std::memory_order_relaxed)) {
+      const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+      if (i >= var.graphs.size()) {
+        break;
       }
-    });
-  }
-  for (auto& worker : workers) {
-    worker.join();
-  }
+      try {
+        cp.do_trans(var.graphs[i]);
+      } catch (...) {
+        errors[i] = std::current_exception();
+        failed.store(true, std::memory_order_relaxed);
+      }
+    }
+  });
   for (const auto& error : errors) {
     if (error) {
       std::rethrow_exception(error);

@@ -312,7 +312,7 @@ void collect_import_bindings(const std::shared_ptr<Lnast>& ln, std::vector<Impor
     }
     return s;
   };
-  for (const auto& nid : ln->tree().pre_order()) {
+  for (const auto& nid : ln->tree().body().nodes(hhds::Tree_order::preorder)) {
     const auto t = ln->get_type(nid);
     if (Lnast_ntype::is_func_call(t)) {
       const auto target = ln->get_first_child(nid);
@@ -384,7 +384,7 @@ void collect_semantic_state(const std::vector<std::shared_ptr<Lnast>>& lnasts, S
 // 2i-import S1 — raw `import("…")` strings of a parsed unit (quotes stripped).
 std::vector<std::string> import_strings(const std::shared_ptr<Lnast>& ln) {
   std::vector<std::string> out;
-  for (const auto& nid : ln->tree().pre_order()) {
+  for (const auto& nid : ln->tree().body().nodes(hhds::Tree_order::preorder)) {
     if (!Lnast_ntype::is_func_call(ln->get_type(nid))) {
       continue;
     }

@@ -26,6 +26,7 @@
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
 #include "upass_tolg.hpp"
+#include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
 
@@ -449,32 +450,29 @@ void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::v
     // and keeps the transient parser/source-buffer footprint small beside the
     // retained LNAST closure.  Diagnostics serialize through diag::Sink while
     // their staged record and source locator remain thread-local.
+    // Big-stack workers (livehd::run_workers): Prp2lnast descends the AST
+    // recursively, one frame per expression nesting level, and a default
+    // secondary-thread stack is 512 KiB on macOS -- a tiny fraction of what
+    // the same parse gets on the main thread.
     if (!jobs.empty()) {
-      std::atomic<size_t>      next{0};
-      const size_t             hw = std::max<size_t>(1, std::thread::hardware_concurrency());
-      const size_t             nw = std::min({jobs.size(), hw, size_t{16}});
-      std::vector<std::thread> workers;
-      workers.reserve(nw);
-      for (size_t w = 0; w < nw; ++w) {
-        workers.emplace_back([&] {
-          while (true) {
-            const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-            if (i >= jobs.size()) {
-              break;
-            }
-            try {
-              Prp2lnast converter(jobs[i].path, jobs[i].name);
-              jobs[i].lnast   = converter.get_lnast();
-              jobs[i].imports = collect_imports(jobs[i].lnast);
-            } catch (...) {
-              jobs[i].error = std::current_exception();
-            }
+      std::atomic<size_t> next{0};
+      const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+      const size_t        nw = std::min({jobs.size(), hw, size_t{16}});
+      livehd::run_workers(nw, [&](size_t) {
+        while (true) {
+          const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+          if (i >= jobs.size()) {
+            break;
           }
-        });
-      }
-      for (auto& worker : workers) {
-        worker.join();
-      }
+          try {
+            Prp2lnast converter(jobs[i].path, jobs[i].name);
+            jobs[i].lnast   = converter.get_lnast();
+            jobs[i].imports = collect_imports(jobs[i].lnast);
+          } catch (...) {
+            jobs[i].error = std::current_exception();
+          }
+        }
+      });
       for (const auto& job : jobs) {
         if (job.error) {
           std::rethrow_exception(job.error);
@@ -740,7 +738,7 @@ bool force_diag_graphs(const Options& opts) {
 // constprop-dead, which only elaboration can tell.
 std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
   std::vector<std::string> out;
-  for (const auto& nid : ln->tree().pre_order()) {
+  for (const auto& nid : ln->tree().body().nodes(hhds::Tree_order::preorder)) {
     if (!Lnast_ntype::is_func_call(ln->get_type(nid))) {
       continue;
     }

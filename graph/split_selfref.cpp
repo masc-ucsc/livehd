@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
+#include <functional>  // std::greater<> (comb_emit_order's stable min-heap)
 #include <print>
 #include <queue>
 #include <string>
@@ -1197,7 +1198,7 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
       return true;
     }
     const auto op = type_op_of(n);
-    if (op == Ntype_op::Memory || is_type_register(n)) {
+    if (is_type_register(n)) {  // Flop/Latch/Fflop/Memory all cut the cone
       continue;
     }
     if (op == Ntype_op::Sub) {
@@ -1336,9 +1337,8 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
   // emitted schedule, and state/Memory/Clock_cell are sources because something
   // else drives their outputs.
   const auto placeable = [](const hhds::Node_class& n) {
-    const auto op = type_op_of(n);
-    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Memory && op != Ntype_op::Clock_cell
-           && !is_type_register(n);
+    const auto op = type_op_of(n);  // is_type_register covers Memory too
+    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Clock_cell && !is_type_register(n);
   };
 
   std::vector<hhds::Node_class>              nodes;
@@ -1415,10 +1415,20 @@ void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl:
       }
     }
   }
-  if (done < total && residual != nullptr) {
+  if (done < total) {
+    // A genuine comb loop with no instance on it. The nodes still have to be
+    // EMITTED -- dropping them turns a mis-ordered always_comb into one that
+    // never assigns those variables at all (an inferred latch / a constant X),
+    // which is strictly worse than what `Node_order::forward` used to do: its
+    // raw-index tail emitted the whole SCC, just without a dependency check.
+    // Append them in ascending storage order, exactly that tail, and report
+    // them through `residual` so the caller can still diagnose.
     for (int i = 0; i < total; ++i) {
       if (!emitted[i]) {
-        residual->push_back(nodes[i]);
+        order.push_back(nodes[i]);
+        if (residual != nullptr) {
+          residual->push_back(nodes[i]);
+        }
       }
     }
   }
@@ -1862,9 +1872,14 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
   absl::flat_hash_set<hhds::Node_class> ancestors;
   std::vector<hhds::Node_class>         work;
   Sub_comb_cache                        sub_cache;
-  // A pure-comb Sub is TRANSPARENT: letting the node into the walk is all the
-  // transparency needed, since the generic inp_edges()/out_edges() traversal
-  // then crosses the boundary in whichever direction it is walking.
+  // A pure-comb Sub joins the walk. Note WHICH model that is: `inp_edges()` /
+  // `out_edges()` on an instance are the PARENT-level connections and never
+  // enter the callee, so admitting the node models it as a CROSSBAR (every
+  // output depends on every input), not per output cone. That is deliberate and
+  // safe HERE, where the answer only decides whether to ATTEMPT a split -- an
+  // over-approximation just widens the candidate set the splitter is handed. It
+  // would NOT be safe in comb_pin_depends_on, which backs an ERROR and therefore
+  // pays for the pin-accurate `sub_output_deps` walk instead.
   const auto is_comb = [&sub_cache](const hhds::Node_class& n) {
     const auto op = livehd::graph_util::type_op_of(n);
     if (op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Memory

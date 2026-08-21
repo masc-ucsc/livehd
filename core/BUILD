@@ -96,6 +96,17 @@ cc_test(
 )
 
 cc_test(
+    name = "worker_pool_test",
+    srcs = [
+        "tests/worker_pool_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "diag_test",
     srcs = [
         "tests/diag_test.cpp",

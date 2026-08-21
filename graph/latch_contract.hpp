@@ -202,12 +202,23 @@ struct Icg_cone {
 
 // THE shared recognizer. Resolves `clock_pin`'s driver to a clock operation via
 // whichever entry point applies:
-//   1. a materialized `Clock_cell` node                (clock_cell_cone)
-//   2. an inline `<clock> & <enables>` cone in the body (resolve_icg)
-// A `Sub`-boundary instance is NOT resolved here -- it cannot be, because its
-// enable is a cone of the DEF's ports and has no meaning as a parent pin until
-// `materialize_clock_cells` re-roots it. That is the whole reason materializing
-// is a separate step rather than a pure query.
+//   1. a materialized `Clock_cell` node                 (clock_cell_cone)
+//   2. an INSTANTIATED gate cell, re-rooted read-only   (sub_icg_cone)
+//   3. an inline `<clock> & <enables>` cone in the body (resolve_icg)
+//
+// Entry 2 is a QUERY, never a rewrite: it only succeeds when the def's enable
+// reduces to one of the def's own INPUT PORTS, because only then does it name a
+// pin the PARENT already drives. A deeper in-def enable cone stays refused here
+// and remains `materialize_clock_cells`' job -- that one CLONES the cone into
+// the caller, manufacturing a parent pin that does not otherwise exist, which is
+// why materializing is still a separate mutating step.
+//
+// WHAT THE CONE DOES NOT CARRY: the enable's SAMPLE POINT. A real ICG holds its
+// enable in a latch transparent on the opposite phase, and the returned cone
+// abstracts that latch away -- a consumer that commits `enables` AT the
+// reference edge reads a value the cell sampled half a period earlier. Consumers
+// that need the sample point (inou.cgen.sim) still fold the cell structurally
+// first; the rest treat the enable as an edge-sampled qualifier.
 [[nodiscard]] std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Design_clocks& clocks);
 
 // Is `def` an ICG cell -- i.e. does its body match `clk_o = clk_port & <enable

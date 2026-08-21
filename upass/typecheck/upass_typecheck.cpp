@@ -307,7 +307,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   // changes the kind. Field-path stores — selector children (src.size() > 1)
   // or a dotted dst ref (`store(CFG.gain, v)`) — pass through: `dst` is the
   // whole destination bundle there, and per-field checks are follow-up work.
-  if (dst_name.empty() || src.size() != 1 || dst_name.find('.') != std::string_view::npos) {
+  if (dst_name.empty() || src.size() != 1 || !bundle_key::is_single_level(dst_name)) {  // backtick-aware
     return Vote::keep;
   }
   const Kind rhs = kind_of_operand(src.front());

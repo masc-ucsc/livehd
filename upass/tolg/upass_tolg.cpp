@@ -1761,7 +1761,11 @@ private:
         error_here("upass.tolg: scalar-replaced array '{}' currently supports one element index", lhs_text);
         return;
       }
-      auto base_it = pin_map_.find(lhs_text);
+      // CANONICAL key: record() strips the backtick quoting, so a flattened
+      // struct-field array (`` `bht_d.valid` `` out of inou/slang) is keyed
+      // `bht_d.valid` -- the raw spelling missed here and every such array
+      // read "written before it has an initializer" at its first element store.
+      auto base_it = pin_map_.find(std::string(canon_io_name(lhs_text)));
       if (base_it == pin_map_.end()) {
         error_here("upass.tolg: array '{}' is written before it has an initializer", lhs_text);
         return;

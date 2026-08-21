@@ -115,7 +115,7 @@ void Lnast::export_into(hhds::Forest& forest) const {
   // what LGraph consumers expect) and drop the int ids. The live tree keeps the
   // ints. Attr-store mutation does not move tree nodes, so the pre-order walk is
   // safe to mutate during.
-  for (auto nid : body->pre_order()) {
+  for (auto nid : body->body().nodes(hhds::Tree_order::preorder)) {
     auto       ref = nid.attr(lnast_attrs::lnast_name);
     const auto id  = ref.get_or(int32_t{0});
     if (id == 0) {
@@ -163,7 +163,7 @@ std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::s
   // drop the strings, so the in-memory representation matches a freshly-built
   // Lnast (int ids, lean per-node storage).
   if (lnast->tree_) {
-    for (auto nid : lnast->tree_->pre_order()) {
+    for (auto nid : lnast->tree_->body().nodes(hhds::Tree_order::preorder)) {
       auto        ref = nid.attr(hhds::attrs::name);
       const auto* p   = ref.try_get();
       if (p == nullptr || p->empty()) {
@@ -260,7 +260,7 @@ void Lnast::rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool) {
   }
 
   absl::flat_hash_map<int32_t, int32_t> remap;
-  for (auto nid : tree_->pre_order()) {
+  for (auto nid : tree_->body().nodes(hhds::Tree_order::preorder)) {
     auto       ref = nid.attr(lnast_attrs::lnast_name);
     const auto old = ref.get_or(int32_t{0});
     if (old == 0) {

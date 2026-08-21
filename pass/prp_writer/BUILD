@@ -12,6 +12,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//pass/common:pass",
         "//upass/prp_writer:upass_prp_writer",
     ],

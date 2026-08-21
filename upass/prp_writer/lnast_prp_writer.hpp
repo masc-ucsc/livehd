@@ -633,6 +633,18 @@ private:
   // Render the RHS expression (everything after `lhs = `) of a value-producing
   // "defining" node, inlining folded operands recursively.
   std::string                      render_def_rhs(Lnast_nid def_node, bool operand_ctx);
+  // The heavyweight render_def_rhs cases, each its own function so the COMMON
+  // recursive spine (render_def_rhs -> render_value -> render_def_rhs, one level
+  // per folded temp) carries a small frame: at -O0 every local of every case of
+  // a single big function is live for the whole call, and the merged 13.8 KiB
+  // frame is what overflowed a 512 KiB worker stack on CVA6 (2026-08-21).
+  std::string render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
+  std::string render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
+  std::string render_concat_rhs(Lnast_nid c0, bool operand_ctx);
+  std::string render_tuple_get_rhs(Lnast_nid c0);
+  // `(s)` when a loose (infix / unary) spelling sits as an operand of another
+  // operator, else `s` unchanged -- parens only where precedence needs them.
+  static std::string wrap_operand(std::string s, bool operand_ctx, bool loose);
   // A const leaf -> its Pyrope spelling (number / true|false|nil / quoted string).
   std::string                      const_text(Lnast_nid node) const;
   // The canonical (Dlop::to_pyrope) spelling of a numeric literal's text; any

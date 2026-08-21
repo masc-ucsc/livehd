@@ -1951,7 +1951,7 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       out.src.push_back(upass::Operand{std::string_view{}, Bundle::make_const(pc.value, pc.kind), pc.pattern});
     } else if (Lnast_ntype::is_ref(t)) {
       const auto name = lm->current_text();
-      if (name.find('.') != std::string_view::npos) {
+      if (!bundle_key::is_single_level(name)) {  // backtick-aware: `` `a.b` `` is one name
         // A dotted ref operand is an explicit field READ. Detupled wire/reg
         // leaves are read through plain refs (never tuple_get), so this is
         // the only place those reads are visible — constprop's
@@ -2014,7 +2014,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
   // which CLONES the slot (the resolved rn.dst still holds a reference) and
   // orphans rn.dst — facts a later pass wrote land on the
   // orphan and must be folded onto the new slot bundle.
-  if (!rn.dst_name.empty() && rn.dst_name.find('.') == std::string_view::npos) {
+  if (!rn.dst_name.empty() && bundle_key::is_single_level(rn.dst_name)) {
     const auto root = std::string(Bundle::get_first_level(rn.dst_name));
     if (auto now = symbol_table_.get_bundle_for_write(root); now) {
       if (now.get() != rn.dst.get()) {
@@ -8133,7 +8133,7 @@ bool uPass_runner::try_init_construction() {
   if (constructing_vars_.contains(x)) {
     return false;  // the synthesized defaults-bind / write-back of this very construction
   }
-  if (x.find('.') != std::string::npos || prp_is_tmp_name(x)) {
+  if (!bundle_key::is_single_level(x) || prp_is_tmp_name(x)) {
     return false;
   }
   // An inline anonymous tuple type (`mut x:(field:u32, comb init...) = 0`) lowers
@@ -9835,7 +9835,13 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     return;
   }
   const std::string var{lm->current_text()};
-  const bool        dotted = var.find('.') != std::string::npos;
+  // TOP-level dot only (bundle_key is backtick-aware): a quoted identifier
+  // such as `` `bht_d.valid` `` -- inou/slang's flattened struct-field array,
+  // re-read from emitted Pyrope -- is ONE name. A raw find('.') baked it as a
+  // field of a root that does not exist, so its `mut` mode never landed on the
+  // binding and the runner's dst-drop rule below then deleted its comptime
+  // whole-array seed store (tolg: "written before it has an initializer").
+  const bool        dotted = !bundle_key::is_single_level(var);
 
   upass::Kind kind = upass::Kind::unknown;
   Dlop        decl_max;  // invalid = unbounded/unset
@@ -10314,10 +10320,7 @@ void uPass_runner::register_tick_body_writes() {
       if (Lnast_ntype::is_ref(lm->current_type())) {
         // A field write (`acc.en = …`) stores to the dotted path; the ROOT name
         // is what has to be invalidated, so cut at the first dot.
-        std::string_view nm = lm->current_text();
-        if (const auto dot = nm.find('.'); dot != std::string_view::npos) {
-          nm = nm.substr(0, dot);
-        }
+        std::string_view nm = Bundle::get_first_level(lm->current_text());  // backtick-aware root
         if (!nm.empty()) {
           symbol_table_.note_uncertain_write(nm);
         }

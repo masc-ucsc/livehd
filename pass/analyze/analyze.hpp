@@ -30,10 +30,12 @@
 //     looks, can see such a loop — measured: it reports UNOPTFLAT on minion's
 //     `minion_dcache_top` where this pass says FALSE. Treat "FALSE" as "false at
 //     this level of hierarchy", and cross-check a design that matters.
-//  2. THE lg: LIBRARY, NOT THE EMITTER'S GRAPH. `inou.cgen.sim` mutates the
-//     graph before it schedules (inline_clock_gate_cells, flatten_false_loop_subs),
-//     so it can find a cycle this pass does not, and
+//  2. THE lg: LIBRARY, NOT THE EMITTER'S GRAPH. `inou.cgen.sim` still mutates a
+//     PRIVATE copy of the graph before it schedules (inline_clock_gate_cells,
+//     compact-loop realization), so it can find a cycle this pass does not, and
 //     vice versa. A disagreement is a finding about those transforms.
+//     `inou.cgen.verilog` no longer mutates at all: it orders read-only through
+//     `graph_util::comb_emit_order`.
 
 #include <cstdint>
 #include <string>

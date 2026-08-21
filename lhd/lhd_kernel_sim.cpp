@@ -26,6 +26,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
 
@@ -2153,14 +2154,7 @@ void sim_command(Options& opts, Result& res) {
           outs[i] = capture(cmds[i], rcs[i]);
         }
       };
-      std::vector<std::thread> pool;
-      pool.reserve(static_cast<size_t>(jobs));
-      for (int t = 0; t < jobs; ++t) {
-        pool.emplace_back(worker);
-      }
-      for (auto& t : pool) {
-        t.join();
-      }
+      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
     }
 
     // Every TU's command + output reaches build.log in TU order, so the log is

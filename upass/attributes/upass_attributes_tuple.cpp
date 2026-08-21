@@ -210,7 +210,7 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_size(std::string_view bas
   // Size = the binding's top-level cardinality (aliases share the
   // slot; constprop materializes closed integer ranges as tuple bundles, so
   // ranges resolve here too).
-  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b) {
       const size_t n = b->named_top_count() + b->unnamed_top_count();
       if (n > 0 && !(n == 1 && b->is_scalar())) {
@@ -269,7 +269,7 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_typename(std::string_view
     }
   }
   if (parent.empty()) {
-    if (auto dot = base.rfind('.'); dot != std::string_view::npos) {
+    if (auto dot = bundle_key::find_last_top_dot(base); dot != std::string_view::npos) {  // backtick-aware
       parent = std::string{base.substr(0, dot)};
       field  = std::string{base.substr(dot + 1)};
     } else {

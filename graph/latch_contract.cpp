@@ -1133,6 +1133,62 @@ std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Desi
 
 namespace {
 
+// Peel the WIDTH MASK the Pyrope round trip puts on a one-bit output: it spells
+// the width as `(value & 1)`. That outer And is a mask, not the clock gate
+// itself; left in place it has one real operand and every strict two-arm gate
+// test below rejects the cell (Minion's prim_clk_gate included). Peel only a
+// known-one mask with exactly one non-constant operand -- the real gate has two
+// and therefore remains the anchor. Shared by `match_icg_def` (the def-body
+// matcher) and `state_free_gate_cone` (the latch-less wrapper), which must not
+// disagree about what the anchor is.
+hhds::Pin_class peel_width_mask(hhds::Pin_class inner) {
+  for (int hops = 0; hops < 4 && !inner.is_invalid() && !gu::is_const_pin(inner) && !gu::is_graph_input_pin(inner); ++hops) {
+    auto node = inner.get_master_node();
+    if (gu::type_op_of(node) != Ntype_op::And) {
+      break;
+    }
+    hhds::Pin_class value;
+    int             values = 0;
+    bool            mask   = true;
+    for (const auto& e : node.inp_edges()) {
+      if (gu::is_const_pin(e.driver)) {
+        mask = mask && const_is(e.driver, 1);
+      } else if (!e.driver.is_invalid()) {
+        value = e.driver;
+        ++values;
+      }
+    }
+    if (!mask || values != 1) {
+      break;
+    }
+    inner = value;
+  }
+  return inner;
+}
+
+// A def INPUT pin -> the parent pin driving that instance sink. Invalid when
+// `def_in` is not a graph input of the def, or when the parent left that port
+// dangling: only a port the PARENT already drives can be re-rooted read-only.
+hhds::Pin_class parent_driver_of(const hhds::Node_class& inst, const std::shared_ptr<hhds::GraphIO>& gio,
+                                 const hhds::Pin_class& def_in) {
+  if (def_in.is_invalid() || !gio || !gu::is_graph_input_pin(def_in)) {
+    return {};
+  }
+  const auto nm = gu::pin_name_of(def_in);
+  for (const auto& d : gio->get_input_pin_decls()) {
+    if (d.name != nm) {
+      continue;
+    }
+    for (const auto& e : inst.inp_edges()) {
+      if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
+        return e.driver;
+      }
+    }
+    break;
+  }
+  return {};
+}
+
 // An INSTANTIATED gate cell, re-rooted onto the parent READ-ONLY.
 //
 // The flop's `clock_pin` is a `Sub` output, so the local cone walk necessarily
@@ -1203,39 +1259,19 @@ std::optional<Icg_cone> sub_icg_cone(const hhds::Pin_class& clock_pin, const Des
     }
   }
 
-  // A def INPUT pin -> the parent pin driving that instance sink.
-  const auto parent_of = [&](const hhds::Pin_class& def_in) -> hhds::Pin_class {
-    if (def_in.is_invalid() || !gu::is_graph_input_pin(def_in)) {
-      return {};
-    }
-    const auto nm = gu::pin_name_of(def_in);
-    for (const auto& d : gio->get_input_pin_decls()) {
-      if (d.name != nm) {
-        continue;
-      }
-      for (const auto& e : inst.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
-          return e.driver;
-        }
-      }
-      break;
-    }
-    return {};
-  };
-
-  auto clk_src = parent_of(gate->clk_in);
-  auto en_src  = parent_of(gate->enable_cone);
+  auto clk_src = parent_driver_of(inst, gio, gate->clk_in);
+  auto en_src  = parent_driver_of(inst, gio, gate->enable_cone);
   if (clk_src.is_invalid() || en_src.is_invalid()) {
     return std::nullopt;  // in-def enable cone: the caller refuses by name
   }
 
   Icg_cone cone;
-  cone.clock = clk_src;
-  cone.div   = 1;
+  cone.div = 1;
   cone.enables.push_back(en_src);
 
   // The parent clock may itself be gated: one guard per cell down to the root,
-  // exactly as the materialized-cell branch below does.
+  // exactly as the materialized-cell branch below does. That path resolves
+  // clk_src's own phase internally, so it must NOT be pre-folded here.
   if (depth < kMaxGateChain) {
     if (auto inner = clock_op_depth(clk_src, clocks, depth + 1)) {
       Icg_cone chained = cone;
@@ -1243,6 +1279,17 @@ std::optional<Icg_cone> sub_icg_cone(const hhds::Pin_class& clock_pin, const Des
       return chained;
     }
   }
+  // `Icg_cone::clock` is contracted to be the clock operand RESOLVED TO ITS
+  // ROOT, with any inversion picked up on the way recorded in `clock_inverted`
+  // -- exactly what `resolve_icg_depth` and `clock_cell_cone` do for the two
+  // other entry points. Handing back the raw instance driver instead would ship
+  // a `~clk`-fed gate cell as an un-inverted cone: `Cgen_sim::icg_guards` gates
+  // rise-vs-fall commit on `clock_inverted` alone, so the guards would fold into
+  // the RISE pass and every flop behind that cell would commit half a period
+  // early -- the same silent negedge-vs-posedge loss resolve_icg_depth calls out.
+  const Phase cph     = resolve_phase(clk_src);
+  cone.clock          = cph.net.is_invalid() ? clk_src : cph.net;
+  cone.clock_inverted = cph.inverted;
   return cone;
 }
 
@@ -1280,29 +1327,7 @@ std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, c
     inner = e.driver;
     break;
   }
-  // Peel a known-one width mask, exactly as match_icg_def does: the Pyrope round
-  // trip makes a one-bit output explicit as `(value & 1)`.
-  for (int hops = 0; hops < 4 && !inner.is_invalid() && !gu::is_const_pin(inner) && !gu::is_graph_input_pin(inner); ++hops) {
-    auto nd = inner.get_master_node();
-    if (gu::type_op_of(nd) != Ntype_op::And) {
-      break;
-    }
-    hhds::Pin_class value;
-    int             values = 0;
-    bool            mask   = true;
-    for (const auto& e : nd.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        mask = mask && const_is(e.driver, 1);
-      } else if (!e.driver.is_invalid()) {
-        value = e.driver;
-        ++values;
-      }
-    }
-    if (!mask || values != 1) {
-      break;
-    }
-    inner = value;
-  }
+  inner = peel_width_mask(inner);
   if (inner.is_invalid() || gu::is_const_pin(inner) || gu::is_graph_input_pin(inner)) {
     return std::nullopt;
   }
@@ -1311,10 +1336,16 @@ std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, c
     return std::nullopt;
   }
   // Exactly two non-constant operands, and BOTH must be def input ports: only
-  // then does each name a pin the parent already drives.
+  // then does each name a pin the parent already drives. Every CONSTANT operand
+  // must be an all-ones width mask -- `clk & en & 0` is a tied-off cell whose
+  // output never moves, and reporting it as a live gate on `clk` would hand a
+  // consumer a commit class the netlist does not have.
   std::vector<hhds::Pin_class> operands;
   for (const auto& e : gate_node.inp_edges()) {
     if (gu::is_const_pin(e.driver)) {
+      if (!const_is(e.driver, 1) && !const_is(e.driver, -1)) {
+        return std::nullopt;
+      }
       continue;
     }
     if (e.driver.is_invalid() || !gu::is_graph_input_pin(e.driver)) {
@@ -1325,23 +1356,8 @@ std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, c
   if (operands.size() != 2) {
     return std::nullopt;
   }
-  const auto parent_of = [&](const hhds::Pin_class& def_in) -> hhds::Pin_class {
-    const auto nm = gu::pin_name_of(def_in);
-    for (const auto& d : gio->get_input_pin_decls()) {
-      if (d.name != nm) {
-        continue;
-      }
-      for (const auto& e : inst.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
-          return e.driver;
-        }
-      }
-      break;
-    }
-    return {};
-  };
-  auto p0 = parent_of(operands[0]);
-  auto p1 = parent_of(operands[1]);
+  auto p0 = parent_driver_of(inst, gio, operands[0]);
+  auto p1 = parent_driver_of(inst, gio, operands[1]);
   if (p0.is_invalid() || p1.is_invalid()) {
     return std::nullopt;
   }
@@ -1423,33 +1439,7 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
       inner = e.driver;
       break;
     }
-    // The Pyrope round trip makes a one-bit output width explicit as
-    // `(value & 1)`.  That outer And is a mask, not the clock gate itself; if
-    // left in place it has one real operand and the strict two-arm gate test
-    // below rejects every generated prim_clk_gate (including Minion's). Peel
-    // only a known-one mask with exactly one non-constant operand. The real
-    // gate has two such operands and therefore remains the anchor.
-    for (int hops = 0; hops < 4 && !inner.is_invalid() && !gu::is_const_pin(inner) && !gu::is_graph_input_pin(inner); ++hops) {
-      auto node = inner.get_master_node();
-      if (gu::type_op_of(node) != Ntype_op::And) {
-        break;
-      }
-      hhds::Pin_class value;
-      int             values = 0;
-      bool            mask   = true;
-      for (const auto& e : node.inp_edges()) {
-        if (gu::is_const_pin(e.driver)) {
-          mask = mask && const_is(e.driver, 1);
-        } else if (!e.driver.is_invalid()) {
-          value = e.driver;
-          ++values;
-        }
-      }
-      if (!mask || values != 1) {
-        break;
-      }
-      inner = value;
-    }
+    inner = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
     if (inner.is_invalid() || gu::is_const_pin(inner) || gu::is_graph_input_pin(inner)) {
       continue;
     }

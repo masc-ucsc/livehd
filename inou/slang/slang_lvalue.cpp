@@ -275,12 +275,24 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   // split-memory metadata visible before deciding whether this first access is
   // an aggregate copy; assign_to/lower_rvalue would otherwise declare them
   // only after this special case has already fallen through.
-  if (!declared_.contains(&lsym) && !input_syms_.contains(&lsym)) {
-    declare_value_symbol(lsym, /*force_reg=*/false);
-  }
-  if (!declared_.contains(&rsym) && !input_syms_.contains(&rsym)) {
-    declare_value_symbol(rsym, /*force_reg=*/false);
-  }
+  //
+  // AGGREGATES ONLY. This function is a PREDICATE for the caller: it returns
+  // false for every plain scalar `a = b`, and a declare forced here would then
+  // fire on the false path too -- minting a `mut` + `0sb?` poison driver for a
+  // scalar the caller has not decided anything about yet, at a position that may
+  // be inside an if/case arm. `mem_info_` is only ever populated for a symbol
+  // that already carries the array/flat-bus machinery, so gate on exactly that.
+  const auto ensure_aggregate_decl = [&](const slang::ast::ValueSymbol& sym) {
+    if (declared_.contains(&sym) || input_syms_.contains(&sym)) {
+      return;
+    }
+    if (!mem_syms_.contains(&sym) && !sym.getType().getCanonicalType().isUnpackedArray()) {
+      return;
+    }
+    declare_value_symbol(sym, /*force_reg=*/false);
+  };
+  ensure_aggregate_decl(lsym);
+  ensure_aggregate_decl(rsym);
   auto lit = mem_info_.find(&lsym);
   auto rit = mem_info_.find(&rsym);
   if (lit == mem_info_.end() || rit == mem_info_.end() || !lit->second.is_tuple) {

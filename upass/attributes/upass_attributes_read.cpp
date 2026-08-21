@@ -146,7 +146,7 @@ std::optional<Dlop> uPass_attributes::derive_bw(std::string_view base, bool want
   // stamps ride the binding's "0" entry (upass/bitwidth write_bw, replace-on-
   // stamp, SSA-versioned names verbatim) and are scalar-only: a dotted base
   // has no per-field range and reads nil.
-  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b) {
       const auto& e = b->get_entry(bundle_path::of_string("0"));
       const auto& v = want_max ? e.bw_max : e.bw_min;
@@ -284,7 +284,7 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
   // `cassert(t.[comptime])` resolve when `t` itself has no scalar, but each
   // field does. The field set comes from the live BUNDLE (the
   // legacy tuple_shapes/shape_source side-maps are gone).
-  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b && (b->has_named_top() || b->unnamed_top_count() > 0)) {
       bool any          = false;
       bool all_comptime = true;
@@ -441,7 +441,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // The derived value is the attr_get dst's VALUE: write it to the
   // binding too, so push-form operand resolution (table-only) sees it
   // directly off the table (tmp_fold stays attributes-internal).
-  if (runner_st != nullptr && dst.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(dst)) {
     (void)runner_st->set(std::string(dst), *result);
   }
 }

@@ -32,11 +32,18 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
 // A whole-design Kahn peel, up to 16 rounds, to rediscover that is pure waste.
 int split_packed_selfref_cycles(hhds::Graph* g);
 
-// Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State,
-// memories and Sub calls are scheduling boundaries, matching the model the
-// splitter above uses -- which is why the two share one implementation: the
-// caller that asks "did the split finish?" and the caller that asks "is a
-// genuine self dependency left?" must not disagree about what a cycle is.
+// Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State and
+// memories are scheduling boundaries. A `Sub` is NOT: a pure-comb call is seen
+// THROUGH, per OUTPUT CONE -- the walk follows only the instance inputs that
+// output actually depends on. Cone precision is load-bearing, not an
+// optimization: this predicate backs lnast.tolg's `combinational loop through
+// wire` ERROR, and modelling the instance as a crossbar reports a cycle for the
+// tests/equiv/sim_sub_nested_comb_feedback shape, which has none.
+//
+// NOTE this is STRICTER than the crossbar model `split_packed_selfref_wire`
+// uses to decide whether to ATTEMPT a split (there an over-approximation only
+// widens the cone it hands the splitter). A wire can therefore be split and then
+// correctly report no residual self dependency here.
 [[nodiscard]] bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target);
 
 // Break a false combinational loop that runs THROUGH a pure-comb sub-instance:
@@ -83,7 +90,10 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
 // caller must close one `always_comb` and open the next, so the surviving
 // dependency crosses a process boundary the simulator schedules. `residual`
 // receives the nodes that could not be ordered at all, i.e. a genuine
-// combinational loop with no instance on it, in ascending storage order.
+// combinational loop with no instance on it, in ascending storage order --
+// those nodes are ALSO appended to `order` (that same ascending tail), because
+// a writer must still emit them: omitting a statement is worse than emitting it
+// out of order. A caller that wants to refuse instead inspects `residual`.
 void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order,
                      absl::flat_hash_set<hhds::Node_class>* cut_subs = nullptr,
                      std::vector<hhds::Node_class>*         residual = nullptr);

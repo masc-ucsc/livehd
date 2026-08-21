@@ -1397,7 +1397,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
 
       // Skip nodes with no consumers (cgen does the same). A memory with no read
       // ports is unobservable (its contents are never sampled) -> sound to skip.
-      if (!node.has_out_edges()) {
+      // Use stored connectivity for this early dead-node elimination. The
+      // occurrence view resolves edges to hierarchy leaves; a parent producer
+      // feeding a callee input can therefore have no occurrence-level out edge
+      // even though the callee consumer resolves that producer through
+      // inp_edges(). Encoding an extra unreachable node is harmless; skipping a
+      // live producer is not.
+      if (!node.base_node().has_out_edges()) {
         continue;
       }
       // Constants are resolved on demand at use sites.
@@ -2645,7 +2651,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // build) — surface it instead of silently dropping logic.
   for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
     auto op = gu::type_op_of(node);
-    if (!node.has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
+    if (!node.base_node().has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
       continue;
     }
     if (phased && op == Ntype_op::Latch) {

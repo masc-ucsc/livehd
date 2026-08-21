@@ -6574,6 +6574,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             rd_order.push_back(&p);
           }
         }
+        // `dout_pid` comes from the SINK-side port descriptors (addr/din/enable),
+        // so a read port nothing consumes has no dout driver pin at all. Ask the
+        // out edges rather than probing with get_driver_pin: hhds `find_pin`
+        // ASSERTS on a port that was never created (only an NDEBUG build hands
+        // back an invalid pin), and binding pin2var off an invalid handle would
+        // key every such port on the same bogus class index.
+        absl::flat_hash_set<uint32_t> live_dout_pids;
+        for (const auto& e2 : node.out_edges()) {
+          live_dout_pids.insert(static_cast<uint32_t>(e2.driver.get_port_id()));
+        }
         // Only when every read port stages the SAME write prefix. `stage_through`
         // walks a monotonic counter, so under ordering="program" — the one mode
         // whose prefix varies per port — program order IS the contract and must
@@ -6581,10 +6591,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (m.order != Mem::Order::program && rd_order.size() > 1) {
           absl::flat_hash_map<hhds::Class_index, int> dout2idx;
           for (size_t i = 0; i < rd_order.size(); ++i) {
-            auto dp = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
-            if (!dp.is_invalid()) {
-              dout2idx[dp.get_class_index()] = static_cast<int>(i);
+            if (!live_dout_pids.contains(static_cast<uint32_t>(rd_order[i]->dout_pid))) {
+              continue;
             }
+            auto dp                        = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
+            dout2idx[dp.get_class_index()] = static_cast<int>(i);
           }
           // deps[i] = read ports whose dout appears in port i's address cone
           std::vector<std::vector<int>> deps(rd_order.size());
@@ -6646,10 +6657,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         for (const auto* pp_ : rd_order) {
-          const auto& p    = *pp_;
-          auto        dout = node.get_driver_pin(static_cast<hhds::Port_id>(p.dout_pid));
-          I(!dout.is_invalid());
+          const auto&     p        = *pp_;
+          // No readers -> no dout pin to bind (see live_dout_pids above). The
+          // read itself is still emitted: `stage_through` is what orders the
+          // OTHER ports' writes, so skipping the port would move them.
+          const bool      has_dout = live_dout_pids.contains(static_cast<uint32_t>(p.dout_pid));
+          hhds::Pin_class dout;
+          if (has_dout) {
+            dout = node.get_driver_pin(static_cast<hhds::Port_id>(p.dout_pid));
+          }
           if (m.type == 1) {
+            if (!has_dout) {
+              continue;  // registered read with no reader: nothing but the binding
+            }
             pin2var[dout.get_class_index()] = absl::StrCat(m.member, "_q", std::to_string(p.rdidx));
             seq_volatile_.insert(dout.get_class_index());  // slop_update'd mid-sequential-section
             if (m.unsign) {
@@ -6675,6 +6695,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                       ">(",
                                       operand(p.addr, ab),
                                       ");  // mem read\n"));
+            if (!has_dout) {
+              continue;  // value computed for its staging side effect only
+            }
             pin2var[dout.get_class_index()] = var;
             if (m.unsign) {
               mark_slop_u_binding(dout);
@@ -6682,9 +6705,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         // Async whole-array read: pack the current `member` into one bus.
+        // `has_read_all` IS "this reserved pid has out edges", so the pin exists.
         if (m.has_read_all) {
           auto ra  = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
-          I(!ra.is_invalid());
           auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
           fout->append(absl::StrCat("    auto ", var, " = ", m.member, ".read_all();  // read_all\n"));
           pin2var[ra.get_class_index()] = var;

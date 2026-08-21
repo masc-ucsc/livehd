@@ -468,10 +468,8 @@ public:
   // children(parent): visit each direct child of parent.
   auto children(const Lnast_nid& parent) const { return tree_->sibling_order(parent.first_child()); }
   // depth_preorder(start): walk subtree in pre-order. Yields Node_class.
-  auto depth_preorder(const Lnast_nid& start) const { return tree_->pre_order(start); }
-  auto depth_preorder() const { return tree_->pre_order(); }
-  // depth_postorder uses HHDS's non-const post_order range; callers needing
-  // post-order traversal should reach into the Node_class API directly.
+  auto depth_preorder(const Lnast_nid& start) const { return start.body().nodes(hhds::Tree_order::preorder); }
+  auto depth_preorder() const { return tree_->body().nodes(hhds::Tree_order::preorder); }
 
   // ── mutation ────────────────────────────────────────────────────────────
   // Structural nodes are inserted with an explicit type. Detached

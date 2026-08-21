@@ -12,16 +12,15 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
+#include "diag.hpp"  // //core — combinational-loop diagnostic
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "iassert.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
-#include "diag.hpp"          // //core — combinational-loop diagnostic
 #include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
 #include "str_tools.hpp"
 // pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
@@ -1221,16 +1220,19 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     ++mem_addr_bits;
   }
 
+  // Which DRIVER pids does anything actually read? A read port nothing consumes
+  // has no dout pin at all, and `get_driver_pin` is not a safe probe for that:
+  // hhds `Graph::find_pin` ASSERTS on a port that was never created (only an
+  // NDEBUG build silently hands back an invalid pin). Ask the out edges, which
+  // is also the exact question -- "is there a net to drive?".
+  absl::flat_hash_set<uint32_t> live_dout_pids;
+  for (const auto& e2 : node.out_edges()) {
+    live_dout_pids.insert(static_cast<uint32_t>(e2.driver.get_port_id()));
+  }
   // Does anything read the WHOLE array (the reserved read_all driver pid)?
   // Computed here because it selects the emission style below, not just what
   // that style emits.
-  bool wants_read_all = false;
-  for (const auto& e2 : node.out_edges()) {
-    if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
-      wants_read_all = true;
-      break;
-    }
-  }
+  const bool wants_read_all = live_dout_pids.contains(static_cast<uint32_t>(Ntype::Memory_readall_pid));
 
   // ── Inline reg-array memory ────────────────────────────────────────────────
   // Taken when the `update` bus is driven (the entire array is (re)written from
@@ -1431,15 +1433,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .msg("array {} read port is not correctly configured", debug_name(node))
             .fatal();
       }
-      // A read port nothing consumes simply has no dout pin. This used to say
-      // create_driver_pin, which is find-or-CREATE: a writer quietly growing the
-      // caller's graph to name a net no one reads.
-      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));
+      // A read port nothing consumes simply has no dout pin, and nothing to
+      // drive. This used to say create_driver_pin, which is find-or-CREATE: a
+      // writer quietly growing the caller's graph to name a net no one reads.
+      const auto dout_pid = static_cast<uint32_t>(n_wr_ports + n_rd_pos);
       ++n_rd_pos;
-      I(!dout_dpin.is_invalid());
-      if (dout_dpin.is_invalid()) {
+      if (!live_dout_pids.contains(dout_pid)) {
         continue;
       }
+      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));
       drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]"));
     }
     if (wants_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
@@ -1449,10 +1451,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       cat     += "}";
       auto ra  = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
-      I(!ra.is_invalid());
-      if (!ra.is_invalid()) {
-        drive(get_wire_or_const(ra), cat);
-      }
+      drive(get_wire_or_const(ra), cat);  // wants_read_all IS "this pid has readers"
     }
     if (reads_in_comb) {
       fout->append("end\n");
@@ -1598,8 +1597,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         // The dout driver pin for read port N is pid (n_wr_ports + N) — the
         // convention resolve_memory uses in lgyosys_tolg (`wrports + rdport`).
         // Enumerating all out pins here would wire every dout to every port.
-        auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find only
-        if (!dout_dpin.is_invalid() && !dout_dpin.out_edges().empty()) {
+        if (live_dout_pids.contains(static_cast<uint32_t>(n_wr_ports + n_rd_pos))) {
+          auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find only
           fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", get_wire_or_const(dout_dpin), ")\n");
         }
         ++n_rd_pos;
@@ -1709,12 +1708,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
       }
       // Same dout convention as type 0/1: read port N drives pid (n_wr_ports + N).
-      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find only
+      const auto dout_pid = static_cast<uint32_t>(n_wr_ports + n_rd_pos);
       ++n_rd_pos;
-      I(!dout_dpin.is_invalid());
-      if (dout_dpin.is_invalid()) {
+      if (!live_dout_pids.contains(dout_pid)) {
         continue;  // read port nothing consumes: no net to drive
       }
+      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(dout_pid));  // find only
       auto dest_name = get_wire_or_const(dout_dpin);
 
       auto read_stmt = absl::StrCat(dest_name, " = ", aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "];\n");
@@ -3039,8 +3038,9 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     livehd::graph_util::comb_emit_order(graph, order, &cut_subs, &residual);
     if (!residual.empty()) {
       livehd::diag::warn("inou.cgen.verilog", "combinational-loop", "internal")
-          .msg("'{}': {} node(s) on a combinational cycle with no instance to break it -- the emitted always_comb "
-               "cannot be ordered and will read a variable before the line that assigns it",
+          .msg("'{}': {} node(s) on a combinational cycle with no instance to break it -- they are emitted in raw "
+               "storage order at the tail of the always_comb, so one of them reads a variable before the line that "
+               "assigns it",
                graph->get_name(),
                residual.size())
           .hint("a genuine per-bit self dependency (e.g. `w = w + 1`), or a packed self-reference lnast.tolg could "

@@ -48,6 +48,7 @@
 #include "rapidjson/writer.h"
 #include "semdiff.hpp"
 #include "woothash.hpp"
+#include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
 
@@ -1854,15 +1855,8 @@ void store_cache(Options& opts, Result& res, const std::string& scope, const std
       }
     }
   };
-  const auto               worker_count = std::min<size_t>(8, std::max<size_t>(1, std::thread::hardware_concurrency()));
-  std::vector<std::thread> workers;
-  workers.reserve(worker_count);
-  for (size_t i = 0; i < worker_count; ++i) {
-    workers.emplace_back(store_one);
-  }
-  for (auto& worker : workers) {
-    worker.join();
-  }
+  const auto worker_count = std::min<size_t>(8, std::max<size_t>(1, std::thread::hardware_concurrency()));
+  livehd::run_workers(worker_count, [&](size_t) { store_one(); });
   if (error) {
     // Do not strand multi-gigabyte temp trees in the persistent scope: later
     // runs carry a different pid suffix and would never collect these.
