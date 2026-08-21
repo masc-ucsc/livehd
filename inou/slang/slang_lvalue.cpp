@@ -269,8 +269,20 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   }
   const auto& lsym = lhs->as<slang::ast::ValueExpressionBase>().symbol;
   const auto& rsym = rhs->as<slang::ast::ValueExpressionBase>().symbol;
-  auto        lit  = mem_info_.find(&lsym);
-  auto        rit  = mem_info_.find(&rsym);
+
+  // Combinational locals are declared lazily at their first access, while
+  // state arrays are hoisted into the module prologue. Make both operands'
+  // split-memory metadata visible before deciding whether this first access is
+  // an aggregate copy; assign_to/lower_rvalue would otherwise declare them
+  // only after this special case has already fallen through.
+  if (!declared_.contains(&lsym) && !input_syms_.contains(&lsym)) {
+    declare_value_symbol(lsym, /*force_reg=*/false);
+  }
+  if (!declared_.contains(&rsym) && !input_syms_.contains(&rsym)) {
+    declare_value_symbol(rsym, /*force_reg=*/false);
+  }
+  auto lit = mem_info_.find(&lsym);
+  auto rit = mem_info_.find(&rsym);
   if (lit == mem_info_.end() || rit == mem_info_.end() || !lit->second.is_tuple) {
     return false;
   }
@@ -298,8 +310,8 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   }
 
   note_write(lsym, current_assign_nonblocking_, lhs->sourceRange.start());
-  const auto  lname = lname_of(lsym);
-  const auto  rname = lname_of(rsym);
+  const auto lname = lname_of(lsym);
+  const auto rname = lname_of(rsym);
 
   // A struct-element memory has no live aggregate backing value after
   // detuple: its storage is the set of scalar field arrays (`mem.field`). A

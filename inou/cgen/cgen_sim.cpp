@@ -23,8 +23,7 @@
 #include "cgen_llvm.hpp"
 #include "cgen_salt.hpp"       // livehd::kCgenSrcSalt — emitter content hash (L2)
 #include "diag.hpp"            // livehd::diag::err — Stage 0 comb-loop safety net
-#include "inline_sub.hpp"      // //graph — sim.flatten structural inline of a small sub-instance
-#include "latch_contract.hpp"  // //graph — inline_clock_gate_cells (ICG gate -> local AND cone)
+#include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
 #include "sim_color_plan.hpp"
@@ -1290,7 +1289,6 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
             // (a plain "keep the low 64 bits"). Every one of those failed
             // `me <= wbits` -- 64 <= 4 -- and fell into a 64-iteration bit loop
             // that measured 47% of total simulation time, before AND after
-            // sim.flatten (flattening moves the call, it does not remove it).
             const bool in_width = me <= wbits_of(e[0].driver);
             if (mb >= 0 && me > mb && (in_width || is_unsign(e[0].driver))) {
               // get_mask packs the selected bits LSB-FIRST. Keep the contiguous
@@ -2680,72 +2678,6 @@ int Cgen_sim::graph_node_count(hhds::Graph* g) {
   return n;
 }
 
-// sim.flatten=N: structurally inline every sub-instance whose callee body is
-// small enough, BOTTOM-UP.
-//
-// Children first, which is exactly what inline_sub_instance's single-level
-// contract asks for: by the time a def is inlined anywhere, its own small
-// children are already part of its body, so one pass absorbs a whole chain of
-// small leaves with no instantiation-context bookkeeping.
-//
-// The size test is on the callee body AFTER its own children were absorbed, so
-// the count that decides is the code actually about to be spliced in rather than
-// the pre-inline stub. That is what makes the budget mean "how much C++ am I
-// willing to duplicate per instantiation site".
-//
-// COST MODEL, because this knob is easy to misread: inlining removes a call, the
-// In/Out structs copied across it, and the port-boundary width adjusts — all
-// per-CYCLE savings — but it emits the body once per instantiation SITE, so
-// generated code and host C++ time grow with the instance COUNT. That is why the
-// default is 0, and why a blanket "flatten everything" is the wrong trade on a
-// large design even though it is the fastest per cycle.
-int Cgen_sim::flatten_small_subs(hhds::Graph* g) {
-  if (g == nullptr || flatten_budget <= 0 || !flatten_walked_.insert(g).second) {
-    return 0;
-  }
-  int                                       inlined = 0;
-  // Recurse first. Held as shared_ptrs so a child def stays alive while we walk
-  // it, independent of what happens to the instance node in this body.
-  std::vector<std::shared_ptr<hhds::Graph>> children;
-  for (auto n : g->body().nodes()) {
-    if (type_op_of(n) != Ntype_op::Sub) {
-      continue;
-    }
-    if (auto cg = n.get_subnode_graph()) {
-      children.push_back(cg);
-    }
-  }
-  for (const auto& cg : children) {
-    inlined += flatten_small_subs(cg.get());
-  }
-
-  // Snapshot the victims: inline_sub_instance deletes nodes and body().nodes() is
-  // a live view over the node table.
-  std::vector<hhds::Node_class> victims;
-  for (auto n : g->body().nodes()) {
-    if (type_op_of(n) != Ntype_op::Sub) {
-      continue;
-    }
-    auto cg = n.get_subnode_graph();
-    if (!cg) {
-      continue;  // body-less black box (liberty cell / external IP): nothing to inline
-    }
-    if (!n.is_loop_subnode() && graph_node_count(cg.get()) <= flatten_budget) {
-      victims.emplace_back(n);
-    }
-  }
-  for (const auto& v : victims) {
-    if (!livehd::graph_util::inline_sub_instance(g, v, "inou.cgen.sim")) {
-      // A partially inlined body is fatal, exactly as flatten treats it; the
-      // located diagnostic already came from inline_sub_instance.
-      return inlined;
-    }
-    node_count_memo_.erase(g);  // this body just grew
-    ++inlined;
-  }
-  return inlined;
-}
-
 // Every STRUCTURAL rewrite the emitter makes to a body, factored out of
 // do_from_graph so the caller can run it over the WHOLE library first.
 //
@@ -2757,10 +2689,10 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (!entity.empty() && entity.front() == '%') {
     return true;  // a `test` block: never emitted, so never rewritten (see do_from_graph)
   }
-  // EXACTLY ONCE per body. `flatten_small_subs` is not idempotent — inlining a
-  // callee exposes ITS children as direct instances, and a second pass would
-  // absorb those too — so re-running it after the partition pre-scan would
-  // re-open the staleness this split exists to close. Process-wide (one `lhd`
+  // EXACTLY ONCE per body. The rewrites below are not idempotent — realizing an
+  // occurrence or folding a gate cell exposes new nodes a second pass would act
+  // on again — so re-running after the partition pre-scan would re-open the
+  // staleness this split exists to close. Process-wide (one `lhd`
   // invocation): the emitter builds a fresh Cgen_sim per graph. The map holds
   // a STRONG reference so a freed graph's address can never be reused by a
   // later one and read back as "already prepared".
@@ -2801,20 +2733,26 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
       return false;
     }
   }
-  // sim.flatten=N: absorb small sub-instances into this body first, so
-  // everything below — the digest, the schedule, the emission — sees the
-  // flattened graph. A no-op at the default N=0.
-  if (const int nin = flatten_small_subs(g); nin > 0) {
-    livehd::diag::info("inou.cgen.sim", "sim-flatten", "progress")
-        .msg("`{}`: inlined {} sub-instance(s) with <= {} nodes (sim.flatten)", gname, nin, flatten_budget)
-        .emit();
-  }
   // No false-loop inlining: the occurrence-wide color plan resolves hierarchy
   // crossings without cloning. The old inliners multiplied cloned subtrees up
-  // the hierarchy (77 MB minion_top.cpp, hour-plus host-clang). The only
-  // structural inlining left is the CLOCK-GATE CELL fold, whose
-  // bodies are a latch and an AND, and the sim.flatten budget the user opts
-  // into. Gate cells can sit behind gate cells, so iterate until quiet.
+  // the hierarchy (77 MB minion_top.cpp, hour-plus host-clang). RULING: a cgen
+  // pass never flattens -- `sim.flatten` was deleted outright, not defaulted
+  // off. The only structural inlining left is the CLOCK-GATE CELL fold.
+  //
+  // WHY THE FOLD IS STILL A REWRITE, and what it will take to retire it.
+  // `clock_op_of` now decodes an INSTANTIATED gate read-only and re-roots its
+  // enable onto the parent (graph/latch_contract.cpp `sub_icg_cone`), which is
+  // enough for a STATE-FREE gate wrapper -- tests/sim/hier_gate_port folds from
+  // that path alone, a case inlining never fixed. It is NOT enough for a real
+  // ICG, because the cone abstracts the enable LATCH away and with it the
+  // SAMPLE POINT: inlined, the emitter sees a Latch and reads the enable
+  // pre-edge; from a bare cone it reads `en` at the edge, one cycle late.
+  // MEASURED on tests/sim/gate_exposed_by_false_loop_inline: silently wrong
+  // values (bad_cnt=4 at clock=5), not a refusal. Retiring this rewrite needs
+  // the cone to CARRY the sample point to the flop emitter -- the same contract
+  // a materialized `Clock_cell` asserts ("en is sampled at clk_ref's active
+  // edge") -- not just the enable pin. Gate cells can sit behind gate cells, so
+  // iterate until quiet.
   int inlined_gate_cells = 0;
   for (int round = 0; round < 8; ++round) {
     const int ncg = livehd::latch_contract::inline_clock_gate_cells(g, "inou.cgen.sim");
@@ -6643,7 +6581,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (m.order != Mem::Order::program && rd_order.size() > 1) {
           absl::flat_hash_map<hhds::Class_index, int> dout2idx;
           for (size_t i = 0; i < rd_order.size(); ++i) {
-            auto dp = node.create_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
+            auto dp = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
             if (!dp.is_invalid()) {
               dout2idx[dp.get_class_index()] = static_cast<int>(i);
             }
@@ -6709,7 +6647,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         for (const auto* pp_ : rd_order) {
           const auto& p    = *pp_;
-          auto        dout = node.create_driver_pin(static_cast<hhds::Port_id>(p.dout_pid));
+          auto        dout = node.get_driver_pin(static_cast<hhds::Port_id>(p.dout_pid));
+          I(!dout.is_invalid());
           if (m.type == 1) {
             pin2var[dout.get_class_index()] = absl::StrCat(m.member, "_q", std::to_string(p.rdidx));
             seq_volatile_.insert(dout.get_class_index());  // slop_update'd mid-sequential-section
@@ -6744,7 +6683,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         // Async whole-array read: pack the current `member` into one bus.
         if (m.has_read_all) {
-          auto ra  = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+          auto ra  = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+          I(!ra.is_invalid());
           auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
           fout->append(absl::StrCat("    auto ", var, " = ", m.member, ".read_all();  // read_all\n"));
           pin2var[ra.get_class_index()] = var;
@@ -12419,7 +12359,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 member_value = temp_name;
               }
               if (memory->has_read_all && version.output_port == Ntype::Memory_readall_pid) {
-                const auto output = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+                const auto output = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
                 I(!output.is_invalid());
                 const auto temp_name = absl::StrCat("__color_tmp_", temporary++);
                 fout->append("  auto ", temp_name, " = ", state, ".read_all();\n");

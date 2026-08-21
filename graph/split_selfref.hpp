@@ -66,4 +66,26 @@ int flatten_false_loop_subs(hhds::Graph* g);
 void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
                             const absl::flat_hash_set<hhds::Class_index>* allowed = nullptr);
 
+// A deterministic topological EMISSION order for the comb nodes of `g`, under
+// the BACKEND's placement model rather than the splitter's: a `Sub` is an
+// ordinary node (an instance is one indivisible item in the emitted schedule),
+// while state, `Memory` and `Clock_cell` are sources.
+//
+// Strictly READ-ONLY. This exists so a writer never has to mutate the graph to
+// obtain an order -- `hhds::Node_order::forward` cannot supply one here, because
+// `Graph::set_subnode` re-stamps a pure-comb instance to a non-`loop_break`
+// type, so a false loop through it is a live cycle for that walk and its whole
+// SCC drops into the raw-index tail with no dependency check.
+//
+// `order` receives every placeable node, `Sub`s included, at their dataflow
+// position. `cut_subs` receives the instances the walk had to force through to
+// break a residual word-level cycle -- those are exactly the points where the
+// caller must close one `always_comb` and open the next, so the surviving
+// dependency crosses a process boundary the simulator schedules. `residual`
+// receives the nodes that could not be ordered at all, i.e. a genuine
+// combinational loop with no instance on it, in ascending storage order.
+void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order,
+                     absl::flat_hash_set<hhds::Node_class>* cut_subs = nullptr,
+                     std::vector<hhds::Node_class>*         residual = nullptr);
+
 }  // namespace livehd::graph_util

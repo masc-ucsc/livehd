@@ -1346,8 +1346,6 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["backend"] = v;
     } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
       labels["vcd_fake_delay"] = v;
-    } else if (k == "sim.flatten") {
-      labels["flatten"] = v;
     } else if (k == "sim.slop_u") {
       labels["slop_u"] = v;
     } else if (k == "sim.color_dirty") {

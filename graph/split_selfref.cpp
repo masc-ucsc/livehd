@@ -8,8 +8,10 @@
 #include <cstdlib>
 #include <exception>
 #include <print>
+#include <queue>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -1004,29 +1006,214 @@ struct Split_result {
   bool     fixpoint     = false;
 };
 
+// Is this `Sub` instance a PURE-COMB call -- is its whole callee CLOSURE
+// state-free? Such an instance is NOT a scheduling boundary: it is ordinary
+// combinational logic that merely happens to be spelled as a hierarchy edge,
+// and a cycle running through it is a cycle NOW, not one that appears later
+// when somebody dissolves the instance.
+//
+// Cutting a pure-comb Sub is what used to make lnast.tolg's per-wire splitter
+// report NO self-dependency for a packed wire whose feedback threads through an
+// instance (tests/equiv/selfref_thru_comb_sub): the backward cone stopped at the
+// callee and never reached the wire's own buffer. The cycle then surfaced only
+// once a writer flattened the instance, which is why the repair used to be
+// re-derived over the whole graph. Seeing through the instance here resolves it
+// at bind time instead, where the wire's driver is in hand.
+//
+// Both cycle questions in this file share this predicate on purpose -- the
+// caller asking "did the split finish?" and the one asking "is a genuine self
+// dependency left?" must not disagree about what a cycle is (see the header).
+//
+// A LOOP sub is never transparent: its body is a rolled occurrence standing for
+// `count` replicas, not ordinary comb logic in the caller's schedule. A
+// body-less black box (liberty cell, external IP) is likewise opaque.
+using Sub_comb_cache = absl::flat_hash_map<hhds::Gid, bool>;
+
+static bool sub_closure_is_comb(const std::shared_ptr<hhds::Graph>& cg, Sub_comb_cache& cache);
+
+static bool sub_is_pure_comb(const hhds::Node_class& n, Sub_comb_cache& cache) {
+  if (n.is_invalid() || n.is_loop_subnode()) {
+    return false;
+  }
+  const auto gid = n.get_subnode_gid();
+  if (auto it = cache.find(gid); it != cache.end()) {
+    return it->second;
+  }
+  // Seed FALSE before recursing: a hierarchy that reaches itself is not a
+  // transparent comb call, and the seed doubles as the recursion guard.
+  cache.emplace(gid, false);
+  const bool ok = sub_closure_is_comb(n.get_subnode_graph(), cache);
+  cache[gid]    = ok;
+  return ok;
+}
+
+static bool sub_closure_is_comb(const std::shared_ptr<hhds::Graph>& cg, Sub_comb_cache& cache) {
+  if (!cg) {
+    return false;  // body-less black box: nothing to see through
+  }
+  for (auto n : cg->body().nodes()) {
+    const auto op = type_op_of(n);
+    if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
+      return false;
+    }
+    if (op == Ntype_op::Sub && !sub_is_pure_comb(n, cache)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Which INPUT port ids of this `Sub` instance does its OUTPUT port `out_pid`
+// depend on COMBINATIONALLY? Answered by walking backward inside the callee
+// from that output's IO pin, cutting at state and recursing pin-accurately
+// through nested instances.
+//
+// This is the PRECISE version of "see through a comb Sub". Modelling the
+// instance as a crossbar (every output depends on every input) is safe when the
+// answer only decides whether to ATTEMPT a split -- an over-approximation just
+// widens the cone. It is NOT safe for comb_pin_depends_on below, which backs
+// lnast.tolg's `combinational loop through wire` ERROR: the
+// tests/equiv/sim_sub_nested_comb_feedback shape (`x = leaf(a,b)` independent of
+// input `c`, parent feeds `x` back into `c`) has no bit-level cycle at all, and
+// a crossbar reports one. Per-output-cone precision reports it correctly as
+// acyclic.
+//
+// A LOOP sub stays opaque: its body is a rolled occurrence standing for `count`
+// replicas, so its internal cones do not describe the caller's schedule. A
+// body-less black box yields an empty set, i.e. a boundary -- which is exactly
+// how every Sub used to be treated.
+using Sub_dep_key   = std::pair<hhds::Gid, uint32_t>;
+using Sub_dep_cache = absl::flat_hash_map<Sub_dep_key, absl::flat_hash_set<uint32_t>>;
+
+static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& inst, uint32_t out_pid, Sub_dep_cache& cache) {
+  absl::flat_hash_set<uint32_t> res;
+  if (inst.is_invalid() || inst.is_loop_subnode()) {
+    return res;
+  }
+  const Sub_dep_key key{inst.get_subnode_gid(), out_pid};
+  if (auto it = cache.find(key); it != cache.end()) {
+    return it->second;
+  }
+  // Seed EMPTY before recursing: a hierarchy that reaches itself contributes no
+  // new comb dependency, and the seed doubles as the recursion guard.
+  cache.emplace(key, absl::flat_hash_set<uint32_t>{});
+
+  auto cg = inst.get_subnode_graph();
+  if (!cg) {
+    return res;  // body-less black box: opaque, exactly as before
+  }
+  auto gio = cg->get_io();
+  if (!gio) {
+    return res;
+  }
+  absl::flat_hash_map<std::string, uint32_t> in_name2pid;
+  for (const auto& d : gio->get_input_pin_decls()) {
+    in_name2pid[d.name] = static_cast<uint32_t>(d.port_id);
+  }
+  std::string oname;
+  for (const auto& d : gio->get_output_pin_decls()) {
+    if (static_cast<uint32_t>(d.port_id) == out_pid) {
+      oname = d.name;
+      break;
+    }
+  }
+  if (oname.empty()) {
+    // An output the callee does not declare: fall back to the conservative
+    // crossbar rather than silently reporting independence.
+    for (const auto& [nm, pid] : in_name2pid) {
+      res.insert(pid);
+    }
+    cache[key] = res;
+    return res;
+  }
+  auto opin = cg->get_output_pin(oname);
+  if (opin.is_invalid()) {
+    cache[key] = res;
+    return res;
+  }
+
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  std::vector<hhds::Pin_class>         work;
+  for (const auto& e : opin.inp_edges()) {
+    work.push_back(e.driver);
+  }
+  while (!work.empty()) {
+    auto d = work.back();
+    work.pop_back();
+    if (d.is_invalid() || is_const_pin(d) || !seen.insert(d).second) {
+      continue;
+    }
+    if (is_graph_input_pin(d)) {
+      if (auto it = in_name2pid.find(std::string{pin_name_of(d)}); it != in_name2pid.end()) {
+        res.insert(it->second);
+      }
+      continue;
+    }
+    auto dn = d.get_master_node();
+    if (dn.is_invalid()) {
+      continue;
+    }
+    const auto op = type_op_of(dn);
+    if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
+      continue;  // state cuts the cone, so it contributes no comb dependency
+    }
+    if (op == Ntype_op::Sub) {
+      const auto inner = sub_output_deps(dn, static_cast<uint32_t>(d.get_port_id()), cache);
+      for (const auto& e : dn.inp_edges()) {
+        if (inner.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
+          work.push_back(e.driver);
+        }
+      }
+      continue;
+    }
+    for (const auto& e : dn.inp_edges()) {
+      work.push_back(e.driver);
+    }
+  }
+  cache[key] = res;
+  return res;
+}
+
 bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target) {
   if (driver.is_invalid() || target.is_invalid() || is_const_pin(driver) || is_graph_input_pin(driver)) {
     return false;
   }
-  absl::flat_hash_set<hhds::Node_class> seen;
-  std::vector<hhds::Node_class>         work{driver.get_master_node()};
+  // A PIN worklist, not a node one: crossing a Sub depends on WHICH output pin
+  // the walk arrived through, and dedup must therefore be per pin.
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  Sub_dep_cache                        dep_cache;
+  std::vector<hhds::Pin_class>         work{driver};
   while (!work.empty()) {
-    auto n = work.back();
+    auto d = work.back();
     work.pop_back();
-    if (n.is_invalid() || !seen.insert(n).second) {
+    if (d.is_invalid() || is_const_pin(d) || is_graph_input_pin(d) || !seen.insert(d).second) {
+      continue;
+    }
+    auto n = d.get_master_node();
+    if (n.is_invalid()) {
       continue;
     }
     if (n == target) {
       return true;
     }
     const auto op = type_op_of(n);
-    if (op == Ntype_op::Sub || op == Ntype_op::Memory || is_type_register(n)) {
+    if (op == Ntype_op::Memory || is_type_register(n)) {
+      continue;
+    }
+    if (op == Ntype_op::Sub) {
+      // Follow only the inputs this particular output actually depends on. An
+      // empty set (loop sub, black box, state-fed output) leaves the instance a
+      // boundary, which is how every Sub used to be treated.
+      const auto deps = sub_output_deps(n, static_cast<uint32_t>(d.get_port_id()), dep_cache);
+      for (const auto& e : n.inp_edges()) {
+        if (deps.contains(static_cast<uint32_t>(e.sink.get_port_id()))) {
+          work.push_back(e.driver);
+        }
+      }
       continue;
     }
     for (const auto& e : n.inp_edges()) {
-      if (!e.driver.is_invalid() && !is_const_pin(e.driver) && !is_graph_input_pin(e.driver)) {
-        work.push_back(e.driver.get_master_node());
-      }
+      work.push_back(e.driver);
     }
   }
   return false;
@@ -1131,6 +1318,112 @@ void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhd
   }
 }
 
+void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl::flat_hash_set<hhds::Node_class>* cut_subs,
+                     std::vector<hhds::Node_class>* residual) {
+  order.clear();
+  if (cut_subs != nullptr) {
+    cut_subs->clear();
+  }
+  if (residual != nullptr) {
+    residual->clear();
+  }
+  if (g == nullptr) {
+    return;
+  }
+
+  // The BACKEND's placement model, which is not the splitter's: a `Sub` is an
+  // ordinary node here because an instance is one indivisible item in the
+  // emitted schedule, and state/Memory/Clock_cell are sources because something
+  // else drives their outputs.
+  const auto placeable = [](const hhds::Node_class& n) {
+    const auto op = type_op_of(n);
+    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Memory && op != Ntype_op::Clock_cell
+           && !is_type_register(n);
+  };
+
+  std::vector<hhds::Node_class>              nodes;
+  absl::flat_hash_map<hhds::Node_class, int> idx;
+  for (auto n : g->body().nodes()) {
+    if (placeable(n)) {
+      idx.emplace(n, static_cast<int>(nodes.size()));
+      nodes.push_back(n);
+    }
+  }
+  const int total = static_cast<int>(nodes.size());
+  if (total == 0) {
+    return;
+  }
+
+  std::vector<int>              indeg(total, 0);
+  std::vector<std::vector<int>> succ(total);
+  for (int i = 0; i < total; ++i) {
+    for (const auto& e : nodes[i].inp_edges()) {
+      if (e.driver.is_invalid() || is_const_pin(e.driver)) {
+        continue;
+      }
+      auto d = e.driver.get_master_node();
+      if (auto it = idx.find(d); it != idx.end() && it->second != i) {
+        ++indeg[i];
+        succ[it->second].push_back(i);
+      }
+    }
+  }
+
+  // STABLE Kahn with a min-heap keyed by storage index, the same tie-break hhds
+  // uses, so an already-topological input comes back verbatim.
+  std::priority_queue<int, std::vector<int>, std::greater<>> ready;
+  for (int i = 0; i < total; ++i) {
+    if (indeg[i] == 0) {
+      ready.push(i);
+    }
+  }
+  std::vector<char> emitted(total, 0);
+  int               done = 0;
+  while (done < total) {
+    if (ready.empty()) {
+      // Stalled on a word-level cycle. Force the lowest-index unemitted `Sub`
+      // through: an instance boundary is where the emitter can legally break
+      // the block, because the module item is a concurrent construct that the
+      // simulator schedules for us. Nothing else in the cycle can be cut
+      // without changing what the emitted RTL means.
+      int cut = -1;
+      for (int i = 0; i < total; ++i) {
+        if (!emitted[i] && type_op_of(nodes[i]) == Ntype_op::Sub) {
+          cut = i;
+          break;
+        }
+      }
+      if (cut < 0) {
+        break;  // a genuine comb loop with no instance on it: report below
+      }
+      if (cut_subs != nullptr) {
+        cut_subs->insert(nodes[cut]);
+      }
+      ready.push(cut);
+    }
+    const int i = ready.top();
+    ready.pop();
+    if (emitted[i]) {
+      continue;
+    }
+    emitted[i] = 1;
+    ++done;
+    order.push_back(nodes[i]);
+    for (const int sx : succ[i]) {
+      if (--indeg[sx] == 0 && emitted[sx] == 0) {
+        ready.push(sx);
+      }
+    }
+  }
+  if (done < total && residual != nullptr) {
+    for (int i = 0; i < total; ++i) {
+      if (!emitted[i]) {
+        residual->push_back(nodes[i]);
+      }
+    }
+  }
+}
+
 int flatten_false_loop_subs(hhds::Graph* g) {
   // A replicated Sub is never a false-loop target: dissolving one keeps a
   // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
@@ -1141,21 +1434,9 @@ int flatten_false_loop_subs(hhds::Graph* g) {
   // below re-instantiates them in `g` as ordinary pure-comb leaf instances --
   // the ExeUnitImp_4/Alu/AluDataModule shape), but any Flop/Latch/Fflop/Memory
   // anywhere makes inlining change state identity, so those are never touched.
-  auto callee_closure_is_comb = [](auto&& self, const std::shared_ptr<hhds::Graph>& cg) -> bool {
-    if (!cg) {
-      return false;
-    }
-    for (auto n : cg->body().nodes()) {
-      auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
-        return false;
-      }
-      if (op == Ntype_op::Sub && !self(self, n.get_subnode_graph())) {
-        return false;
-      }
-    }
-    return true;
-  };
+  // Same predicate the cycle walks above use, so "can I dissolve this?" and
+  // "should I have seen through this?" cannot drift apart.
+  Sub_comb_cache sub_cache;
 
   auto driver_of = [](const hhds::Pin_class& sink) -> hhds::Pin_class {
     if (sink.is_invalid()) {
@@ -1226,7 +1507,7 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       if (node.is_loop_subnode()) {
         continue;  // count occurrences, not one — inlining here drops count-1 replicas
       }
-      if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
+      if (!sub_closure_is_comb(node.get_subnode_graph(), sub_cache) || !on_false_loop(node)) {
         continue;
       }
       targets.push_back(node);
@@ -1580,10 +1861,20 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
   // candidate closed by this one edge. Later readers never enter the seed set.
   absl::flat_hash_set<hhds::Node_class> ancestors;
   std::vector<hhds::Node_class>         work;
-  const auto                            is_comb = [](const hhds::Node_class& n) {
+  Sub_comb_cache                        sub_cache;
+  // A pure-comb Sub is TRANSPARENT: letting the node into the walk is all the
+  // transparency needed, since the generic inp_edges()/out_edges() traversal
+  // then crosses the boundary in whichever direction it is walking.
+  const auto is_comb = [&sub_cache](const hhds::Node_class& n) {
     const auto op = livehd::graph_util::type_op_of(n);
-    return op != Ntype_op::IO && op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::Memory
-           && !livehd::graph_util::is_type_register(n);
+    if (op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Memory
+        || livehd::graph_util::is_type_register(n)) {
+      return false;
+    }
+    if (op == Ntype_op::Sub) {
+      return sub_is_pure_comb(n, sub_cache);
+    }
+    return true;
   };
   auto root = driver.get_master_node();
   if (root.is_invalid() || !is_comb(root)) {

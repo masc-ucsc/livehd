@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "hhds/attrs/name.hpp"
@@ -19,6 +21,7 @@
 #include "iassert.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
+#include "diag.hpp"          // //core — combinational-loop diagnostic
 #include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
 #include "str_tools.hpp"
 // pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
@@ -1428,9 +1431,16 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .msg("array {} read port is not correctly configured", debug_name(node))
             .fatal();
       }
-      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));
-      drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]"));
+      // A read port nothing consumes simply has no dout pin. This used to say
+      // create_driver_pin, which is find-or-CREATE: a writer quietly growing the
+      // caller's graph to name a net no one reads.
+      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));
       ++n_rd_pos;
+      I(!dout_dpin.is_invalid());
+      if (dout_dpin.is_invalid()) {
+        continue;
+      }
+      drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "]"));
     }
     if (wants_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
       std::string cat = "{";
@@ -1438,8 +1448,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         cat += absl::StrCat(aname, "[", std::to_string(i), "]", i ? "," : "");
       }
       cat     += "}";
-      auto ra  = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
-      drive(get_wire_or_const(ra), cat);
+      auto ra  = node.get_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+      I(!ra.is_invalid());
+      if (!ra.is_invalid()) {
+        drive(get_wire_or_const(ra), cat);
+      }
     }
     if (reads_in_comb) {
       fout->append("end\n");
@@ -1585,8 +1598,8 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         // The dout driver pin for read port N is pid (n_wr_ports + N) — the
         // convention resolve_memory uses in lgyosys_tolg (`wrports + rdport`).
         // Enumerating all out pins here would wire every dout to every port.
-        auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find-or-create
-        if (!dout_dpin.out_edges().empty()) {
+        auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find only
+        if (!dout_dpin.is_invalid() && !dout_dpin.out_edges().empty()) {
           fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", get_wire_or_const(dout_dpin), ")\n");
         }
         ++n_rd_pos;
@@ -1696,7 +1709,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
       }
       // Same dout convention as type 0/1: read port N drives pid (n_wr_ports + N).
-      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find-or-create
+      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find only
+      ++n_rd_pos;
+      I(!dout_dpin.is_invalid());
+      if (dout_dpin.is_invalid()) {
+        continue;  // read port nothing consumes: no net to drive
+      }
       auto dest_name = get_wire_or_const(dout_dpin);
 
       auto read_stmt = absl::StrCat(dest_name, " = ", aname, "[", get_wire_or_const(p.addr, mem_addr_bits, true), "];\n");
@@ -1707,7 +1725,6 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         fout->append("    ", read_stmt);
         fout->append("end\n");
       }
-      ++n_rd_pos;
     }
 
     fout->append("end\n");
@@ -2975,7 +2992,7 @@ void Cgen_verilog::create_clock_cells(std::shared_ptr<File_output> fout, hhds::G
       invert = !hydrate_const(d).is_known_false();
     }
 
-    const auto dpin = node.create_driver_pin(0);
+    const auto dpin = node.get_driver_pin(0);
     auto       oit  = pin2var.find(dpin.get_class_index());
     auto       lit  = clock_latch_vars_.find(node.get_class_index());
     I(oit != pin2var.end() && lit != clock_latch_vars_.end());
@@ -2996,28 +3013,78 @@ void Cgen_verilog::create_clock_cells(std::shared_ptr<File_output> fout, hhds::G
 }
 
 void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
-  note_module(fout);
-  fout->append("always_comb begin\n");
+  // The block below is a SEQUENCE of blocking assignments, so its statement
+  // order has to be topological. `hhds::Node_order::forward` supplies that only
+  // while the graph is acyclic under the BACKEND's model, and a false comb loop
+  // through a pure-comb instance is a LIVE cycle for it: `Graph::set_subnode`
+  // re-stamps such an instance to a non-`loop_break` type, so the whole SCC ends
+  // up in that iterator's raw-index tail, emitted with no dependency check.
+  //
+  // cgen must NOT repair the graph to make its own schedule work (it used to
+  // dissolve the instance here). Instead: when a cycle exists, take a read-only
+  // order of our own and CLOSE the block at each instance that order had to cut,
+  // so the surviving dependency crosses a process boundary -- an ordinary
+  // inter-process edge the simulator schedules -- rather than sitting
+  // mis-ordered inside one block, which is the form that ships wrong values.
+  //
+  // The acyclic path is left EXACTLY as it was, one block in `forward` order, so
+  // an ordinary design re-emits byte for byte.
+  absl::flat_hash_set<hhds::Node_class> cyc;
+  livehd::graph_util::word_level_cycle_nodes(graph, /*strict=*/true, cyc);
 
-  for (auto node : graph->body().nodes(hhds::Node_order::forward)) {
+  std::vector<hhds::Node_class>         order;
+  absl::flat_hash_set<hhds::Node_class> cut_subs;
+  if (!cyc.empty()) {
+    std::vector<hhds::Node_class> residual;
+    livehd::graph_util::comb_emit_order(graph, order, &cut_subs, &residual);
+    if (!residual.empty()) {
+      livehd::diag::warn("inou.cgen.verilog", "combinational-loop", "internal")
+          .msg("'{}': {} node(s) on a combinational cycle with no instance to break it -- the emitted always_comb "
+               "cannot be ordered and will read a variable before the line that assigns it",
+               graph->get_name(),
+               residual.size())
+          .hint("a genuine per-bit self dependency (e.g. `w = w + 1`), or a packed self-reference lnast.tolg could "
+                "not split -- run with LIVEHD_SIM_SPLIT_DEBUG=1")
+          .emit();
+    }
+  }
+
+  bool       block_open = false;
+  const auto open_block = [&]() {
+    if (!block_open) {
+      note_module(fout);
+      fout->append("always_comb begin\n");
+      block_open = true;
+    }
+  };
+  const auto close_block = [&]() {
+    if (block_open) {
+      note_module(fout);
+      fout->append("end\n");
+      block_open = false;
+    }
+  };
+
+  const auto emit_one = [&](const hhds::Node_class& node) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Clock_cell) {
-      continue;  // emitted as a latch + continuous assignment below
+      return;  // emitted as a latch + continuous assignment below
     }
     if (Ntype::has_multiple_driver_pins(op)) {
-      continue;
+      return;
     }
     // is_type_register excludes Flop/Fflop/Latch/Memory from combinational
     // expression emission (Memory is already handled by has_multiple_driver_pins above);
     // a Latch is emitted as a level-sensitive block in create_registers.
     if (!node.has_out_edges() || is_type_register(node)) {
-      continue;
+      return;
     }
     if (bits_of(node.get_driver_pin(0)) == 0) {
       if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
         // missing bits; was a hard error in the original — skip silent.
       }
     }
+    open_block();
     if (op == Ntype_op::Mux) {
       process_mux(fout, node);
     } else if (op == Ntype_op::Hotmux) {
@@ -3025,10 +3092,28 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     } else {
       process_simple_node(fout, node);
     }
+  };
+
+  if (cyc.empty()) {
+    open_block();  // an empty always_comb is still emitted, exactly as before
+    for (auto node : graph->body().nodes(hhds::Node_order::forward)) {
+      emit_one(node);
+    }
+  } else {
+    for (const auto& node : order) {
+      if (type_op_of(node) == Ntype_op::Sub) {
+        if (cut_subs.contains(node)) {
+          close_block();  // the instance is a concurrent module item: emitting
+                          // it stays create_subs' job, but the dependency that
+                          // runs THROUGH it must not stay inside one block
+        }
+        continue;
+      }
+      emit_one(node);
+    }
   }
 
-  note_module(fout);
-  fout->append("end\n");
+  close_block();
 }
 
 void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
@@ -3349,7 +3434,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     if (type_op_of(node) != Ntype_op::Clock_cell || !node.has_out_edges()) {
       continue;
     }
-    auto       dpin     = node.create_driver_pin(0);
+    auto       dpin     = node.get_driver_pin(0);
     const auto out_name = get_unique_decl_name(get_scaped_name(pin_wire_name(dpin)));
     const auto lat_name = get_unique_decl_name(get_scaped_name(absl::StrCat(out_name, "__en_latched")));
     pin2var.insert_or_assign(dpin.get_class_index(), out_name);
@@ -3474,7 +3559,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // Iterate out_edges (not out_pins): out_pins misses driver pid 0
           // (a zero-write-port ROM's dout) and its handles encode pins
           // WITHOUT the driver bit, so their class_index never matches
-          // edge.driver / create_driver_pin handles. Re-fetch the canonical
+          // edge.driver / get_driver_pin handles. Re-fetch the canonical
           // driver handle for keying; pin2var insert dedups repeat pids.
           //
           // type==2 (array) douts are procedurally assigned in process_memory's
@@ -3488,7 +3573,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
           }
           for (const auto& e2 : node.out_edges()) {
-            auto dout = node.create_driver_pin(e2.driver.get_port_id());
+            auto dout = node.get_driver_pin(e2.driver.get_port_id());
             // Claim the slot FIRST (like the Sub branch below): get_unique_decl_name
             // permanently reserves the name it returns, so computing it for a pin
             // already bound would burn a `_cgenN` counter on a name never declared.
@@ -3568,7 +3653,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // a multi-driver node's pid-0 driver, leaving the instance connection
           // to create an implicit one-bit Verilog wire and silently truncate the
           // whole Sub output.
-          auto cdpin = node.create_driver_pin(pid);
+          auto cdpin = node.get_driver_pin(pid);
           // Use a DEDICATED net name (like the Memory dout above), never the wire
           // name: a Sub output that drives a module output directly is otherwise
           // named after that port, and declaring it here re-declares the port
@@ -3603,7 +3688,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     I(op != Ntype_op::Sub && op != Ntype_op::Memory);
 
     if (op == Ntype_op::Clock_cell) {
-      auto dpin = node.create_driver_pin(0);
+      auto dpin = node.get_driver_pin(0);
       if (!pin2var.contains(dpin.get_class_index())) {
         const auto out_name = get_unique_decl_name(get_scaped_name(pin_wire_name(dpin)));
         const auto lat_name = get_unique_decl_name(get_scaped_name(absl::StrCat(out_name, "__en_latched")));
@@ -3891,12 +3976,12 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   (void)verbose;
 
-  // Break a false comb loop through a pure-comb sub-instance. Packed-wire
-  // self-references are already resolved locally by lnast.tolg when the wire's
-  // defining edge is attached; writers must not mutate that graph afterward.
-  // Native loop groups remain compact in the graph; create_subs realizes their
-  // logical calls exclusively in private emission maps.
-  livehd::graph_util::flatten_false_loop_subs(graph.get());
+  // NOTHING here mutates `graph`. A false comb loop through a pure-comb instance
+  // used to be repaired by dissolving the instance, purely so this emitter could
+  // get a whole-graph topological order for its single always_comb; that order
+  // is now computed read-only in create_combinational, which closes the block at
+  // the instance instead. Native loop groups remain compact in the graph;
+  // create_subs realizes their logical calls exclusively in private emission maps.
 
   pin2var.clear();
   pin2var_unsigned_.clear();

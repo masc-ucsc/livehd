@@ -228,6 +228,19 @@ sh_test(
     ],
 )
 
+# A plain packed local whose first lowered write sits inside a comptime-decided
+# `if` arm used to lose its declaration entirely (the arm, and the declare with
+# it, is dead-code-eliminated), so the emitted Pyrope did not recompile. Round
+# trip, because the first leg emits fine.
+sh_test(
+    name = "slang_comptime_arm_declare_hoist",
+    srcs = ["tests/comptime_arm_declare_hoist_test.sh"],
+    data = [
+        "tests/sv/comptime_arm_declare_hoist.v",
+        "//lhd",
+    ],
+)
+
 # Packed 2-D array eligibility, both directions: a net-initialized lane table
 # read at a runtime index must SPLIT (barrel shift -> lane mux), and an array
 # written through a whole-array range select must stay FLAT (the split

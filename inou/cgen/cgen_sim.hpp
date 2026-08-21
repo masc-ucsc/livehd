@@ -213,19 +213,11 @@ private:
                                    // false = plain edge-aligned updates (no X, no delay)
   bool        observation_on;      // compile-time hierarchical value instrumentation (VCD/probe/query)
   bool        runtime_support_on;  // checkpoint/probe/query state-walk methods; false for lean performance builds
-  // --set sim.flatten=N: structurally inline a Sub whose callee body has <= N
-  // nodes into its parent before emitting. 0 = off. See flatten_small_subs().
-  int         flatten_budget = 0;
-
-  // Bottom-up structural inline of every sub-instance that fits the budget.
-  // Returns the number of instances inlined out of `g`.
-  int flatten_small_subs(hhds::Graph* g);
   // Node count of a def's body. Memoized: the same def is reached once per
   // instantiation site and counting walks the whole graph.
   int graph_node_count(hhds::Graph* g);
 
   absl::flat_hash_map<hhds::Graph*, int> node_count_memo_;
-  absl::flat_hash_set<hhds::Graph*>      flatten_walked_;  // defs already recursed into
 
 public:
   // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
@@ -258,8 +250,8 @@ public:
   // which an empty `icg_guards` result conflates.
   static bool plain_clock_cone(const hhds::Pin_class& clock_driver, const livehd::latch_contract::Design_clocks& clocks);
 
-  // Every STRUCTURAL rewrite the emitter makes to a body (the clock-gate-cell
-  // fold, the sim.flatten absorb, the packed self-ref wire split). Idempotent:
+  // Every STRUCTURAL rewrite the emitter makes to a body (today: the
+  // clock-gate-cell fold and compact-loop realization). Idempotent:
   // the first call per graph does the work, later ones return immediately.
   // A caller that MEASURES bodies before emitting (to_cgen_sim's partition
   // pre-scan holds pin handles into callees) must drive this over the whole
@@ -295,7 +287,7 @@ public:
   // the graphs must not be structurally rewritten while it is in use — which
   // holds, because prepare_graph() runs over the whole library first.
   void share_digest_memo(absl::flat_hash_map<hhds::Gid, uint64_t>* memo) { shared_digest_memo_ = memo; }
-  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay, int _flatten = 0,
+  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = true, bool _debug = false,
            bool _unknown_zero = false, bool _llvm_backend = false)
@@ -305,7 +297,6 @@ public:
       , vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off"))
       , observation_on(_observation_on || !_vcd.empty())
       , runtime_support_on(_runtime_support_on || _observation_on || !_vcd.empty())
-      , flatten_budget(_flatten)
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
       , llvm_backend_(_llvm_backend)

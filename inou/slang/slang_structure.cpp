@@ -4016,6 +4016,83 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     declare_value_symbol(vsym, /*force_reg=*/false);
   }
 
+  // ── hoist every remaining WRITTEN local's `mut` declare to module top ──────
+  // The last lazy-declare hazard. A plain packed local that is neither a reg,
+  // a wire, nor an aggregate has no pre-declare at all: it is declared at its
+  // FIRST TOUCH, and that touch can sit inside an if/case arm. cvfpu's
+  // fpnew_opgroup_multifmt_slice writes `local_operands[i]` from an unrolled
+  // `for` body's `if (i == 2) … else …`, so the declare landed in the THEN arm.
+  // Two failures follow: the SIBLING arm's write targets a name that is no
+  // longer bound (lower_branch rolls an in-arm declare's binding back at arm
+  // exit), and — because `i == 2` is comptime-false on the first iteration —
+  // upass DELETES the dead arm together with the declare inside it, so nothing
+  // declares the net at ALL ("assignment to undeclared variable
+  // 'gen_num_lanes_0_active_lane_local_operands'" when the emitted Pyrope is
+  // recompiled). Module top is where a `mut` accumulator belongs, exactly as
+  // for the regs/arrays/structs/wires hoisted above: the declare carries only
+  // the x-fill poison (`= 0sb?`), which every writer overwrites, so moving it
+  // ahead of the drivers cannot change a value.
+  //
+  // Scalars-only and WRITTEN-only, to keep the blast radius at the class that
+  // is actually broken: an aggregate rides its own pre-declare machinery, and a
+  // never-written local would gain a poison driver it does not have today.
+  // Recurses through generate blocks — the symbol is typically a genblock local
+  // (`begin : active_lane`), which `scope.members()` alone never reaches.
+  {
+    std::function<void(const slang::ast::Scope&)> hoist_muts = [&](const slang::ast::Scope& sc) {
+      for (const auto& member : sc.members()) {
+        // Mirror pass 1's prefix bookkeeping EXACTLY: lname_of() memoizes the
+        // flattened name the FIRST time it is asked, off `genblk_prefix_`, so
+        // naming a genblock local from an empty prefix here would rename it
+        // (`gen_num_lanes_0_active_lane_local_operands` -> `local_operands`)
+        // for the whole module.
+        if (member.kind == SymbolKind::GenerateBlock) {
+          const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+          if (gen.isUninstantiated) {
+            continue;
+          }
+          auto saved_prefix = genblk_prefix_;
+          if (!gen.name.empty() || gen.getParentScope()->asSymbol().kind != SymbolKind::GenerateBlockArray) {
+            genblk_prefix_ = absl::StrCat(genblk_prefix_, gen.getExternalName(), "_");
+          }
+          hoist_muts(gen);
+          genblk_prefix_ = saved_prefix;
+          continue;
+        }
+        if (member.kind == SymbolKind::GenerateBlockArray) {
+          const auto& arr          = member.as<slang::ast::GenerateBlockArraySymbol>();
+          auto        saved_prefix = genblk_prefix_;
+          for (const auto* entry : arr.entries) {
+            std::string idx_txt
+                = entry->arrayIndex != nullptr ? entry->arrayIndex->toString() : std::to_string(entry->constructIndex);
+            genblk_prefix_ = absl::StrCat(saved_prefix, arr.getExternalName(), "_", idx_txt, "_");
+            hoist_muts(*entry);
+          }
+          genblk_prefix_ = saved_prefix;
+          continue;
+        }
+        if (member.kind != SymbolKind::Variable) {
+          continue;  // a Net's driver is a ContinuousAssign — never inside an arm
+        }
+        const auto& vsym = member.as<slang::ast::ValueSymbol>();
+        if (declared_.contains(&vsym) || reg_syms_.contains(&vsym) || wire_syms_.contains(&vsym) || wire_split_tmp_.contains(&vsym)
+            || input_syms_.contains(&vsym) || output_syms_.contains(&vsym)) {
+          continue;
+        }
+        const auto& ct = vsym.getType().getCanonicalType();
+        if (!ct.isIntegral() || !ct.hasFixedRange() || ct.isStruct() || ct.isPackedUnion() || is_scalar_struct_var(vsym)
+            || mem_syms_.contains(&vsym) || flat_port_syms_.contains(&vsym)) {
+          continue;  // structs / memories / flattened buses have their own pre-declare
+        }
+        if (!writers_of.contains(&vsym)) {
+          continue;  // never driven: leave the (already undriven) read path alone
+        }
+        declare_value_symbol(vsym, /*force_reg=*/false);
+      }
+    };
+    hoist_muts(scope);
+  }
+
   // ── a WIRE-classified OUTPUT port needs its buffer too ─────────────────────
   // An output port is declared from io_meta, so `declared_` already holds it
   // and the lazy declare_value_symbol path never fires; the poison loop below

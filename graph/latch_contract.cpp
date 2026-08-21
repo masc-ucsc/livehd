@@ -1132,6 +1132,239 @@ std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Desi
 }
 
 namespace {
+
+// An INSTANTIATED gate cell, re-rooted onto the parent READ-ONLY.
+//
+// The flop's `clock_pin` is a `Sub` output, so the local cone walk necessarily
+// stops at the boundary. `root_port` above already decodes the def structurally
+// to find the clock ROOT; this adds the ENABLE it deliberately discards, which
+// is the whole reason a consumer used to have to INLINE the cell first.
+//
+// Doing it here rather than in each consumer is the point: `clock_op_of` is the
+// ONE recognizer, so lec, the phase schedule and inou.cgen.sim all gain the
+// hierarchical answer from this single place -- and pass.synth, which never
+// asks, keeps its gate cells intact and as high in the hierarchy as they were
+// written (a materializing PASS would have to be explicitly kept out of the
+// synth recipe; a query is inert by construction).
+//
+// LIMIT, refused BY NAME rather than approximated: the def's enable must reduce
+// to one of the def's own INPUT PORTS, because only then does it name a pin the
+// PARENT already drives. `materialize_clock_cells` handles a deeper in-def cone
+// by CLONING it into the caller (Cone_cloner) -- manufacturing the parent pin
+// that does not otherwise exist. A reader cannot do that, and must not.
+std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth);
+
+// The STATE-FREE gate flavour: a plain `assign clk_o = clk_i & en;` wrapper is a
+// clock gate too, and refusing it leaves the flop it clocks with an unfoldable
+// "derived clock" for want of a latch nobody wrote. `inline_clock_gate_cells`
+// recognized this arm by INLINING any state-free callee and letting the local
+// matcher see the resulting And; read-only, the shape has to be matched in the
+// def and re-rooted instead.
+//
+// `match_icg_def` cannot do this on its own: with no latch there is no
+// transparency window to say WHICH operand is the clock, and a def body holds no
+// flop to ask. Here in the PARENT that question is answerable --
+// `Design_clocks::is_clock` is the same discriminator `resolve_icg` uses locally
+// (and the very confusion its keying guards against: picking the ENABLE of a
+// `clk & en` as the clock operand).
+std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, const hhds::Node_class& inst, hhds::Graph* def,
+                                             const std::shared_ptr<hhds::GraphIO>& gio, const Design_clocks& clocks, int depth);
+
+std::optional<Icg_cone> sub_icg_cone(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth) {
+  if (clock_pin.is_invalid() || gu::is_const_pin(clock_pin) || gu::is_graph_input_pin(clock_pin)) {
+    return std::nullopt;
+  }
+  auto inst = clock_pin.get_master_node();
+  if (inst.is_invalid() || gu::type_op_of(inst) != Ntype_op::Sub) {
+    return std::nullopt;
+  }
+  auto def = inst.get_subnode_graph();
+  auto gio = inst.get_subnode_io();
+  if (!def || !gio) {
+    return std::nullopt;  // body-less blackbox: nothing to recognize
+  }
+  auto gate = match_icg_def(def.get());
+  if (!gate) {
+    return state_free_gate_cone(clock_pin, inst, def.get(), gio, clocks, depth);
+  }
+
+  // The def output this pin actually reads must be the gate's clock output; an
+  // ICG with a second output read elsewhere is not gating THIS pin.
+  {
+    bool is_gate_out = false;
+    for (const auto& d : gio->get_output_pin_decls()) {
+      if (d.name == gu::pin_name_of(gate->out)) {
+        is_gate_out = static_cast<uint32_t>(clock_pin.get_port_id()) == static_cast<uint32_t>(d.port_id);
+        break;
+      }
+    }
+    if (!is_gate_out) {
+      return std::nullopt;
+    }
+  }
+
+  // A def INPUT pin -> the parent pin driving that instance sink.
+  const auto parent_of = [&](const hhds::Pin_class& def_in) -> hhds::Pin_class {
+    if (def_in.is_invalid() || !gu::is_graph_input_pin(def_in)) {
+      return {};
+    }
+    const auto nm = gu::pin_name_of(def_in);
+    for (const auto& d : gio->get_input_pin_decls()) {
+      if (d.name != nm) {
+        continue;
+      }
+      for (const auto& e : inst.inp_edges()) {
+        if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
+          return e.driver;
+        }
+      }
+      break;
+    }
+    return {};
+  };
+
+  auto clk_src = parent_of(gate->clk_in);
+  auto en_src  = parent_of(gate->enable_cone);
+  if (clk_src.is_invalid() || en_src.is_invalid()) {
+    return std::nullopt;  // in-def enable cone: the caller refuses by name
+  }
+
+  Icg_cone cone;
+  cone.clock = clk_src;
+  cone.div   = 1;
+  cone.enables.push_back(en_src);
+
+  // The parent clock may itself be gated: one guard per cell down to the root,
+  // exactly as the materialized-cell branch below does.
+  if (depth < kMaxGateChain) {
+    if (auto inner = clock_op_depth(clk_src, clocks, depth + 1)) {
+      Icg_cone chained = cone;
+      absorb_chain(chained, *inner, /*inverted=*/false);
+      return chained;
+    }
+  }
+  return cone;
+}
+
+std::optional<Icg_cone> state_free_gate_cone(const hhds::Pin_class& clock_pin, const hhds::Node_class& inst, hhds::Graph* def,
+                                             const std::shared_ptr<hhds::GraphIO>& gio, const Design_clocks& clocks, int depth) {
+  if (def == nullptr || !gio) {
+    return std::nullopt;
+  }
+  // Entirely state-free, and no nested Sub (opaque here, so treat it as state) --
+  // the same test the inliner applied before it absorbed such a callee.
+  for (auto dn : def->body().nodes()) {
+    const auto dop = gu::type_op_of(dn);
+    if (dop == Ntype_op::Latch || dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Memory
+        || dop == Ntype_op::Sub) {
+      return std::nullopt;
+    }
+  }
+  // The def output this pin reads.
+  std::string oname;
+  for (const auto& d : gio->get_output_pin_decls()) {
+    if (static_cast<uint32_t>(d.port_id) == static_cast<uint32_t>(clock_pin.get_port_id())) {
+      oname = d.name;
+      break;
+    }
+  }
+  if (oname.empty()) {
+    return std::nullopt;
+  }
+  auto opin = def->get_output_pin(oname);
+  if (opin.is_invalid()) {
+    return std::nullopt;
+  }
+  hhds::Pin_class inner;
+  for (const auto& e : opin.inp_edges()) {
+    inner = e.driver;
+    break;
+  }
+  // Peel a known-one width mask, exactly as match_icg_def does: the Pyrope round
+  // trip makes a one-bit output explicit as `(value & 1)`.
+  for (int hops = 0; hops < 4 && !inner.is_invalid() && !gu::is_const_pin(inner) && !gu::is_graph_input_pin(inner); ++hops) {
+    auto nd = inner.get_master_node();
+    if (gu::type_op_of(nd) != Ntype_op::And) {
+      break;
+    }
+    hhds::Pin_class value;
+    int             values = 0;
+    bool            mask   = true;
+    for (const auto& e : nd.inp_edges()) {
+      if (gu::is_const_pin(e.driver)) {
+        mask = mask && const_is(e.driver, 1);
+      } else if (!e.driver.is_invalid()) {
+        value = e.driver;
+        ++values;
+      }
+    }
+    if (!mask || values != 1) {
+      break;
+    }
+    inner = value;
+  }
+  if (inner.is_invalid() || gu::is_const_pin(inner) || gu::is_graph_input_pin(inner)) {
+    return std::nullopt;
+  }
+  auto gate_node = inner.get_master_node();
+  if (gu::type_op_of(gate_node) != Ntype_op::And) {
+    return std::nullopt;
+  }
+  // Exactly two non-constant operands, and BOTH must be def input ports: only
+  // then does each name a pin the parent already drives.
+  std::vector<hhds::Pin_class> operands;
+  for (const auto& e : gate_node.inp_edges()) {
+    if (gu::is_const_pin(e.driver)) {
+      continue;
+    }
+    if (e.driver.is_invalid() || !gu::is_graph_input_pin(e.driver)) {
+      return std::nullopt;
+    }
+    operands.push_back(e.driver);
+  }
+  if (operands.size() != 2) {
+    return std::nullopt;
+  }
+  const auto parent_of = [&](const hhds::Pin_class& def_in) -> hhds::Pin_class {
+    const auto nm = gu::pin_name_of(def_in);
+    for (const auto& d : gio->get_input_pin_decls()) {
+      if (d.name != nm) {
+        continue;
+      }
+      for (const auto& e : inst.inp_edges()) {
+        if (static_cast<uint32_t>(e.sink.get_port_id()) == static_cast<uint32_t>(d.port_id)) {
+          return e.driver;
+        }
+      }
+      break;
+    }
+    return {};
+  };
+  auto p0 = parent_of(operands[0]);
+  auto p1 = parent_of(operands[1]);
+  if (p0.is_invalid() || p1.is_invalid()) {
+    return std::nullopt;
+  }
+  // Which side is the clock? Ask the design, never the port name.
+  const bool c0 = clocks.is_clock(p0);
+  const bool c1 = clocks.is_clock(p1);
+  if (c0 == c1) {
+    return std::nullopt;  // neither or both: not a gate we can name
+  }
+  Icg_cone cone;
+  cone.clock = c0 ? p0 : p1;
+  cone.div   = 1;
+  cone.enables.push_back(c0 ? p1 : p0);
+  if (depth < kMaxGateChain) {
+    if (auto chained_inner = clock_op_depth(cone.clock, clocks, depth + 1)) {
+      Icg_cone chained = cone;
+      absorb_chain(chained, *chained_inner, /*inverted=*/false);
+      return chained;
+    }
+  }
+  return cone;
+}
+
 std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const Design_clocks& clocks, int depth) {
   if (clock_pin.is_invalid()) {
     return std::nullopt;
@@ -1160,6 +1393,11 @@ std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const D
       }
       return c;
     }
+  }
+  // An INSTANTIATED gate: recognized read-only and re-rooted onto the parent,
+  // so no consumer has to inline the cell to see its enable.
+  if (auto sub = sub_icg_cone(clock_pin, clocks, depth)) {
+    return sub;
   }
   return resolve_icg_depth(clock_pin, clocks, depth);
 }

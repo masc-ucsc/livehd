@@ -44,10 +44,6 @@ void Inou_cgen::setup() {
                         "VCD data settles a few ticks after each clock edge, with X during the settle window "
                         "(sim.vcd_fake_delay); false = plain edge-aligned updates (no X, no delay)",
                         "true");
-  m2.add_label_optional("flatten",
-                        "sim.flatten=N: structurally inline a sub-instance whose callee body has <= N nodes into "
-                        "its parent before occurrence-wide color planning, bottom-up. 0 = never",
-                        "0");
   m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
   m2.add_label_optional("runtime_support", "emit checkpoint/probe/query state-walk methods", "true");
   m2.add_label_optional("slop_u",
@@ -171,22 +167,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   if (bad_flag) {
     return;
   }
-  // sim.flatten=N — inline any callee of <= N nodes. Validated here as well as
-  // in the sim.* namespace, because this label is also reachable directly.
-  int  flatten_budget = 0;
-  auto flatten_s      = var.get("flatten");
-  if (!flatten_s.empty()) {
-    const auto* b = flatten_s.data();
-    const auto* e = b + flatten_s.size();
-    auto [p, ec]  = std::from_chars(b, e, flatten_budget);
-    if (ec != std::errc{} || p != e || flatten_budget < 0) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-          .msg("sim.flatten expects a non-negative node count, got '{}'", flatten_s)
-          .hint("0 keeps every sub-instance as its own struct; N inlines any callee whose body has <= N nodes")
-          .emit();
-      return;
-    }
-  }
   // Simulator lowering still performs backend-specific structural rewrites
   // (clock-gate folding, optional small-instance flattening, and compact-loop
   // realization). Build those into a private output library: the EPRP input
@@ -243,7 +223,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // BEFORE Color_plan retains occurrence handles. The rewrites delete nodes
   // and rewire edges, so planning first would retain stale class indices.
   {
-    Cgen_sim prep(dir, vcd_out, top, fakedelay, flatten_budget);
+    Cgen_sim prep(dir, vcd_out, top, fakedelay);
     for (const auto& g : sim_graphs) {
       // A body that cannot be prepared cannot be emitted correctly (the
       // diagnostic came from prepare_graph): stop the whole emission rather
@@ -329,7 +309,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     vcd_out,
                     top,
                     fakedelay,
-                    flatten_budget,
                     /*color_plan=*/nullptr,
                     compact_kernel_defs.contains(g.get()),
                     observe_on,
@@ -430,7 +409,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                   vcd_out,
                   top,
                   fakedelay,
-                  flatten_budget,
                   plan,
                   compact_kernel_defs.contains(g.get()),
                   observe_on,
