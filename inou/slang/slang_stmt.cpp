@@ -18,14 +18,52 @@
 
 using slang::ast::StatementKind;
 
+namespace {
+// Defined below, next to the other loop helpers; declared here because the
+// statement-list lowering needs it. (Two anonymous namespaces in one TU are
+// the same namespace, so this is a plain forward declaration.)
+bool subtree_has_break(const slang::ast::Statement& stmt);
+}  // namespace
+
 void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
   switch (stmt.kind) {
     case StatementKind::Empty: return;
-    case StatementKind::List:
-      for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        lower_statement(*s);
+    case StatementKind::List : {
+      // A `break` ends the CURRENT ITERATION as well as the loop, so everything
+      // after it in this list must not run when the break was taken.
+      // lower_for_loop's `broken` flag only guards LATER iterations; guard the
+      // REMAINDER of this list on the same flag. Without it,
+      //   for (i = 0; i < 4; i++) begin  if (stop[i]) break;  acc += d[i];  end
+      // still accumulates d[i] in the breaking iteration.
+      //
+      // `break_flags_.back()` is exactly the flag the Break statement raises
+      // (see StatementKind::Break below), and subtree_has_break deliberately
+      // does not look inside a nested loop, so the flag and the break always
+      // belong to the same loop -- PROVIDED the nearest enclosing loop is the
+      // one that owns that flag. It is not when the nearest loop is ROLLED (an
+      // LNAST `for`: uPass's func_break already ends the iteration, and the
+      // flag on the stack belongs to some OUTER unrolled loop) or when it
+      // pushed the "no flag of my own" sentinel (while/repeat/foreach). Guard
+      // on neither: `own_brk_flag()` returns the flag only when it is ours.
+      const auto& list = stmt.as<slang::ast::StatementList>().list;
+      size_t      arms = 0;
+      for (size_t i = 0; i < list.size(); ++i) {
+        lower_statement(*list[i]);
+        const auto* flag = own_brk_flag();
+        if (flag == nullptr || i + 1 >= list.size() || !subtree_has_break(*list[i])) {
+          continue;
+        }
+        auto guard = builder_.create_eq_stmts(*flag, "0");
+        auto if_id = builder_.create_if_stmt(false);
+        builder_.add_if_cond(if_id, guard);
+        builder_.push_stmts(builder_.add_if_stmts(if_id));
+        ++arms;
+      }
+      while (arms-- > 0) {
+        builder_.pop_stmts();
       }
       return;
+    }
     case StatementKind::Block: {
       const auto& block = stmt.as<slang::ast::BlockStatement>();
       if (block.blockKind != slang::ast::StatementBlockKind::Sequential) {
@@ -149,13 +187,25 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       return;
     }
     case StatementKind::Break:
+      // A ROLLED loop (an LNAST `for`) carries the break as a marker node and
+      // uPass lowers it to `loop_exec = false; loop_next_active = false` — the
+      // real semantics, including "the rest of THIS iteration does not run",
+      // which the unrolled `broken`-flag form below can only approximate.
+      if (!loop_rolled_.empty() && loop_rolled_.back()) {
+        emit_loop_marker(Lnast_ntype::create_func_break());
+        return;
+      }
       // Inside an unrolled loop whose body contains a break, the loop set up a
       // `broken` flag and guards every iteration on it (see lower_for_loop);
       // the break itself just raises the flag. It sits wherever it was written
       // — typically an `if` arm — so the raise inherits that condition, which
       // is exactly the priority-select semantics ("first match wins").
-      if (!break_flags_.empty()) {
-        builder_.create_assign_stmts(break_flags_.back(), "1");
+      //
+      // own_brk_flag() is null when the NEAREST loop is not the flag's owner (a
+      // while/repeat/foreach pushed the sentinel): raising an OUTER loop's flag
+      // there would terminate the wrong loop, so refuse instead.
+      if (const auto* flag = own_brk_flag(); flag != nullptr) {
+        builder_.create_assign_stmts(*flag, "1");
         return;
       }
       emit_unsupported(stmt.sourceRange,
@@ -163,10 +213,17 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     case StatementKind::Continue:
-      // `continue` skips the REST of one iteration, which needs a per-iteration
-      // flag rather than the loop-wide one break uses. Not implemented yet —
-      // refuse rather than lower it as a break, which would silently drop every
-      // later iteration.
+      // A ROLLED loop gets it for free: uPass lowers the marker to
+      // `loop_exec = false` WITHOUT clearing loop_next_active, so this
+      // iteration stops and every later one still runs.
+      if (!loop_rolled_.empty() && loop_rolled_.back()) {
+        emit_loop_marker(Lnast_ntype::create_func_continue());
+        return;
+      }
+      // Unrolled, `continue` skips the REST of one iteration, which needs a
+      // per-iteration flag rather than the loop-wide one break uses. Not
+      // implemented — refuse rather than lower it as a break, which would
+      // silently drop every later iteration.
       emit_unsupported(stmt.sourceRange,
                        "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
@@ -575,7 +632,7 @@ bool Slang_context::unroll_tick(const slang::ast::Statement& stmt) {
              "unroll-limit",
              "comptime",
              std::format("loop unroll limit of {} exhausted", options_.unroll_limit),
-             "make the loop bounds compile-time constants, or raise --set inou.verilog.unroll_limit");
+             "make the loop bounds compile-time constants, or raise --set compile.slang.unroll_limit");
   return false;
 }
 
@@ -606,12 +663,23 @@ const slang::ast::Expression* peel_loop_expr(const slang::ast::Expression& raw) 
 }
 }  // namespace
 
+// A bare loop-control marker (`break` / `continue`), in the shape prp2lnast
+// emits: the node plus one fresh tmp ref, no argument.
+void Slang_context::emit_loop_marker(Lnast_ntype::Lnast_ntype_int head) {
+  auto  idx = builder_.add_child(head);
+  auto& ln  = *builder_.lnast;
+  ln.add_child(idx, builder_.mint_tmp_ref());
+}
+
 bool Slang_context::lower_deferred_for(const slang::ast::ForLoopStatement& stmt) {
   using slang::ast::BinaryOperator;
   using slang::ast::ExpressionKind;
   using slang::ast::UnaryOperator;
 
-  if (stmt.loopVars.size() != 1 || stmt.stopExpr == nullptr || stmt.steps.size() != 1 || subtree_has_break(stmt.body)) {
+  // A body containing `break` used to be refused here and sent to the unroller.
+  // It no longer needs to be: the loop is emitted as an LNAST `for`, and uPass
+  // owns break/continue (func_break/func_continue -> loop_exec/loop_next_active).
+  if (stmt.loopVars.size() != 1 || stmt.stopExpr == nullptr || stmt.steps.size() != 1) {
     return false;
   }
   const auto* ivar = stmt.loopVars[0];
@@ -659,19 +727,43 @@ bool Slang_context::lower_deferred_for(const slang::ast::ForLoopStatement& stmt)
   builder_.add_value_child_pub(range, start);
   builder_.add_value_child_pub(range, end);
 
+  // PYROPE HAS NO SHADOWING, and the `for` node BINDS its index. By the time we
+  // get here the process has usually already emitted this symbol's lazy
+  // `mut <name> = 0sb?` declare, so binding the loop to that same name nests the
+  // `for`'s binding inside the declare's scope. Written as Pyrope that is a hard
+  // error --
+  //     variable shadowing: 'i' is already declared in an enclosing scope
+  // -- but slang builds LNAST directly and never meets the parser check, so it
+  // used to sail through and be mis-lowered instead: uPass moved the statements
+  // that PRECEDED the loop after it, which silently dropped a pre-loop
+  // initialization (`o = 8'd7; for (…) o = o + d[i];` lost the 7). Bind a FRESH
+  // name the process cannot have declared, and point every body read of the
+  // symbol at it for as long as we are inside the body.
+  auto        loop_name = fresh_local("idx");
+  const auto  prev_it   = sym_lname_.find(ivar);
+  const bool  had_prev  = prev_it != sym_lname_.end();
+  std::string prev_name = had_prev ? prev_it->second : std::string{};
+  sym_lname_[ivar]      = loop_name;
+
   auto loop = builder_.add_child(Lnast_ntype::create_for());
-  auto name = lname_of(*ivar);
-  ln.add_child(loop, Lnast_node::create_ref(name));
+  ln.add_child(loop, Lnast_node::create_ref(loop_name));
   ln.add_child(loop, Lnast_node::create_ref(range_id));
   auto body = ln.add_child(loop, Lnast_ntype::create_stmts());
 
   const bool was_declared = declared_.contains(ivar);
   declared_.insert(ivar);  // the for node, rather than a declare, binds it
   builder_.push_stmts(body);
+  loop_rolled_.push_back(true);  // break/continue in here become LNAST markers
   lower_statement(stmt.body);
+  loop_rolled_.pop_back();
   builder_.pop_stmts();
   if (!was_declared) {
     declared_.erase(ivar);
+  }
+  if (had_prev) {
+    sym_lname_[ivar] = prev_name;
+  } else {
+    sym_lname_.erase(ivar);
   }
   ln.add_child(loop, Lnast_node::create_const("val"));
   return true;
@@ -683,9 +775,32 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     return;
   }
 
+  // `--set compile.slang.roll_loops=true`: hand a canonical loop to LNAST intact
+  // rather than unrolling it here. A non-canonical shape falls through to the
+  // unroller below.
+  if (options_.roll_loops && lower_deferred_for(stmt)) {
+    return;
+  }
+
   // Bind the loop variables as EvalContext locals so the stop/step
   // expressions and body reads of them constant-fold (tier 1).
-  std::vector<const slang::ast::ValueSymbol*> locals;
+  std::vector<const slang::ast::ValueSymbol*>                                           locals;
+  // A counter declared OUTSIDE the for-header OUTLIVES the loop: SystemVerilog
+  // leaves it at the value that failed the stop test (or, with a `break`, at
+  // the breaking iteration's value), and real code READS it afterwards --
+  // cva6's miss_handler indexes the AMO bypass port with it
+  // (`bypass_ports_req[id] = amo_bypass_req` after `for (id = 0; id < NR_PORTS;
+  // id++)`), and pmp's `if (i == NrPMPEntries)` no-match fallback tests it. The
+  // unroll steps the counter COMPTIME only, so without an explicit write-back
+  // every such read binds to the declare-time `0sb?` poison and the whole cone
+  // folds to x -- silently, with a clean exit 0.
+  //
+  // Keep the assignment TARGET EXPRESSION, not just the symbol, so the
+  // write-back rides the normal lvalue path (lazy declare + note_write +
+  // struct/bundle-port split). A counter declared IN the header
+  // (`for (int i = 0; ...)`) goes out of scope with the loop in SV too, so it
+  // is deliberately NOT recorded here.
+  std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> outlives;
   for (const auto* lv : stmt.loopVars) {
     slang::ConstantValue init;
     if (const auto* ie = lv->getInitializer()) {
@@ -714,6 +829,7 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
           if (auto cv = try_eval(assign.right())) {
             eval_ctx_->createLocal(&sym, *cv);
             locals.push_back(&sym);
+            outlives.emplace_back(&sym, &assign.left());
             continue;
           }
         }
@@ -752,9 +868,34 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     brk_flag = fresh_local("brk");
     builder_.create_declare_stmts(brk_flag, "mut", "", "");
     builder_.create_assign_stmts(brk_flag, "0");
-    break_flags_.push_back(brk_flag);
   }
+  // Push UNCONDITIONALLY (the empty sentinel when this loop owns no flag) so a
+  // `break` that reaches this frame can never raise an OUTER loop's flag.
+  break_flags_.push_back(brk_flag);
 
+  // `<counter> = <its comptime value right now>`, emitted into whatever stmts
+  // block is on top. Must run while the EvalContext local is still alive.
+  const auto emit_counter_writeback = [&] {
+    const bool saved_nb         = current_assign_nonblocking_;
+    current_assign_nonblocking_ = false;  // a loop counter is a BLOCKING write
+    for (const auto& [sym, lhs] : outlives) {
+      const auto* cv = eval_ctx_->findLocal(sym);
+      if (cv == nullptr || !cv->isInteger()) {
+        continue;
+      }
+      set_pending_loc(stmt.sourceRange);
+      assign_to(*lhs, const_text(cv->integer()));
+      clear_pending_loc();
+    }
+    current_assign_nonblocking_ = saved_nb;
+  };
+
+  // An unroll that ABORTED (budget exhausted, non-const stop/step) leaves the
+  // counter at a partial value; writing that back would ship a wrong constant
+  // on top of an already-reported error.
+  bool unroll_ok = true;
+
+  loop_rolled_.push_back(false);  // this body is UNROLLED: break uses brk_flag
   while (true) {
     if (stmt.stopExpr != nullptr) {
       auto cv = try_eval(*stmt.stopExpr);
@@ -764,6 +905,7 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
                    "comptime",
                    "for-loop condition must be compile-time constant to unroll",
                    "only constant-bounded loops are synthesizable by --reader slang");
+        unroll_ok = false;
         break;
       }
       if (!cv->isTrue()) {
@@ -771,6 +913,7 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       }
     }
     if (!unroll_tick(stmt)) {
+      unroll_ok = false;  // budget exhausted; unroll_tick already reported it
       break;
     }
 
@@ -785,6 +928,12 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       builder_.add_if_cond(if_id, guard);
       auto arm = builder_.add_if_stmts(if_id);
       builder_.push_stmts(arm);
+      // The counter holds THIS iteration's value for the whole iteration, and a
+      // taken break freezes it there. So the write goes at the TOP of the
+      // guarded arm: last-wins plus the guard make the SURVIVING write the
+      // breaking iteration's. (Without a break the terminal write below is the
+      // last one anyway, so no per-iteration store is emitted in that case.)
+      emit_counter_writeback();
       lower_statement(stmt.body);
       builder_.pop_stmts();
     }
@@ -798,17 +947,35 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       }
     }
     if (!stepped) {
+      unroll_ok = false;
       break;
     }
     if (stmt.stopExpr == nullptr && stmt.steps.empty()) {
       emit_error(stmt.sourceRange, "loop-no-progress", "comptime", "for loop without condition or step cannot unroll");
+      unroll_ok = false;
       break;
     }
   }
 
-  if (!brk_flag.empty()) {
-    break_flags_.pop_back();
+  // Loop exit: the counter holds the first value that FAILED the stop test.
+  // With a runtime break it only reaches that value when no break fired, so the
+  // terminal write is guarded the same way the iterations are.
+  if (unroll_ok && !outlives.empty()) {
+    if (brk_flag.empty()) {
+      emit_counter_writeback();
+    } else {
+      auto guard = builder_.create_eq_stmts(brk_flag, "0");
+      auto if_id = builder_.create_if_stmt(false);
+      builder_.add_if_cond(if_id, guard);
+      auto arm = builder_.add_if_stmts(if_id);
+      builder_.push_stmts(arm);
+      emit_counter_writeback();
+      builder_.pop_stmts();
+    }
   }
+
+  loop_rolled_.pop_back();
+  break_flags_.pop_back();
 
   for (const auto* lv : locals) {
     eval_ctx_->deleteLocal(lv);
@@ -840,6 +1007,13 @@ void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {
     count = *c;
     body  = &r.body;
   }
+
+  // while/do-while/repeat unroll here WITHOUT a `broken` flag, so a `break` in
+  // the body has nothing of its own to raise. Mark the stacks accordingly: the
+  // Break arm then refuses instead of raising an OUTER for-loop's flag (which
+  // would terminate the wrong loop), and it never mistakes an outer ROLLED
+  // loop's marker semantics for its own.
+  Unflagged_loop_scope loop_scope(this);
 
   if (count >= 0) {
     for (int64_t i = 0; i < count; ++i) {
@@ -911,5 +1085,8 @@ void Slang_context::lower_foreach(const slang::ast::ForeachLoopStatement& stmt) 
     }
     eval_ctx_->deleteLocal(dim.loopVar);
   };
+  // Same as lower_while_loop: unrolled here, owns no `broken` flag (see
+  // Unflagged_loop_scope).
+  Unflagged_loop_scope loop_scope(this);
   recurse(0);
 }

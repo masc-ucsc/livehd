@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Build a gold-shaped wrapper for a cgen top with split aggregate ports."""
 
+# PEP 604 (`X | None`) is a 3.10 feature, but this helper runs under whatever
+# `python3` lgcheck finds on PATH -- inside a bazel sandbox that is macOS's
+# /usr/bin/python3 (3.9), where the annotations below raise TypeError at
+# class-definition time. Deferring every annotation to a string keeps the
+# modern spelling and runs on 3.9.
+from __future__ import annotations
+
 import argparse
 import dataclasses
 import pathlib

@@ -1,0 +1,75 @@
+/*
+:name: loop_break_leftover
+:type: equiv
+:verilog_top: loop_break_leftover.top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+
+// `:equiv_engine: cvc5` (skip lgcheck, `lhd lec` is the oracle) is NOT the
+// usual latch/clock-edge reason here: yosys's Verilog front end cannot parse a
+// `break` inside a `for` at all —
+//     loop_break_leftover.v:43: ERROR: Can't resolve task name `\break'.
+// — so lgcheck can only ever answer INCONCLUSIVE on this golden, and an
+// inconclusive lgcheck does not fail the pair. Without this tag a REFUTED
+// `lhd lec` verdict would be reported and then swallowed, and the fixture would
+// pass while proving nothing. `lhd lec` reads the golden with `--reader slang`,
+// which is the front end this fixture is about.
+
+// TWO NESTED COMPTIME LOOPS whose control flow is entirely decided at
+// elaboration time, written so that every way of getting loop lowering wrong
+// changes an OUTPUT:
+//
+//   * an INNER `break` with statements after it — the accumulate below it must
+//     not run in the breaking iteration (c == 3 contributes nothing, and for
+//     r == 1 that cell would otherwise pass the parity filter and add data[7]);
+//   * an OUTER `break` with a statement after it — `rows` must not be bumped
+//     for the row that breaks;
+//   * a `continue` (spelled as its guard on the Verilog side, see the golden)
+//     that skips half the cells;
+//   * INDUCTION VALUES THAT OUTLIVE THE LOOP. `r_o` / `rows_o` / `c_seen_o` are
+//     read after the loops, and each one indexes `data`, so a wrong or unknown
+//     leftover selects a different bit rather than merely printing a different
+//     number. In SystemVerilog a counter declared outside its `for` header keeps
+//     its exit value; Pyrope's `for` index does NOT outlive the loop, so the
+//     Pyrope spelling carries the value out in an explicit `mut`.
+//   * A NAME THAT MUST NOT BE TOUCHED. `c_o` is 9 and stays 9: on the Verilog
+//     side a block-level `c` is SHADOWED by the inner `for (int c = ...)`
+//     header, so the inner counter must not write through to it. (Pyrope has no
+//     shadowing at all, so the Pyrope side states the same claim as a distinct
+//     name the loop never writes.)
+//
+// The accepted cells are (r, c) with r in 0..2, c in 0..2, r+c even:
+//   (0,0) (0,2) (1,1) (2,0) (2,2)  ->  data bits 0, 2, 5, 8, 10
+// and the leftovers are r = 3, rows = 3, c_seen = 2, c = 9.
+//
+// `loop_break_leftover_1.prp` is the same design written out BY HAND with no
+// loops at all; it is LEC'd against this file.
+pub mod top(data:u16) -> (acc_o:u8@[0], r_o:u4@[0], rows_o:u4@[0], c_seen_o:u4@[0], c_o:u4@[0], pick_o:u1@[0],
+                          sel_o:u1@[0]) {
+  mut acc:u8      = 0
+  mut r_last:u4   = 0  // the outer index, carried out of the loop by hand
+  mut rows:u4     = 0
+  mut c_seen:u4   = 0  // the inner index of the last ACCEPTED cell
+  const c_kept:u4 = 9  // never written by either loop
+
+  for r in 0..<4 {
+    r_last = r
+    if r == 3 { break }  // `rows` below must not run for this row
+    for c in 0..<4 {
+      if c == 3 { break }                    // the accumulate below must not run for this cell
+      if ((r + c) & 1) != 0 { continue }     // keep only even-parity cells
+      acc    = acc + data#[(r * 4) + c]
+      c_seen = c
+    }
+    rows = rows + 1
+  }
+
+  acc_o    = acc
+  r_o      = r_last
+  rows_o   = rows
+  c_seen_o = c_seen
+  c_o      = c_kept
+  pick_o   = data#[r_last * 4]  // r_last = 3 -> data#[12]
+  sel_o    = data#[c_kept]      // c_kept  = 9 -> data#[9]
+}

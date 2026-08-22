@@ -396,6 +396,164 @@ void Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
 }
 
 namespace {
+// --- per-node diagnostic provenance ----------------------------------------
+//
+// A refusal that names only the REGION ("region 'miss_handler.miss_handler'")
+// leaves the user staring at a 12k-node module with nothing to grep. Every
+// per-node refusal in map_region therefore reports BOTH the original source
+// location (hhds::attrs::srcid, resolved through the region's source graph)
+// and the nearest user-visible signal name.
+
+// Source span of a region node. Best-effort: a node with no srcid -- or a
+// library whose srcmap was not loaded -- yields a null span, which renders
+// location-less rather than wrong (diag::to_text never fabricates a location).
+[[nodiscard]] livehd::diag::Span node_span(const livehd::partition::Region_body& rb, const hhds::Node_class& n) {
+  if (rb.src == nullptr || n.is_invalid()) {
+    return {};
+  }
+  auto a = n.attr(hhds::attrs::srcid);
+  if (!a.has() || a.get() == 0) {
+    return {};
+  }
+  return rb.src->source_locator().resolve_span(a.get());
+}
+
+// Nearest user-visible signal name for `n`. Synthesis-stage nodes are mostly
+// UNNAMED (only what the source named keeps a name attr), so `debug_name`
+// alone -- "shl_10620" -- tells a user nothing. Anchor on a real signal
+// instead: this node's own named driver pin, else a bounded breadth-first walk
+// of the fan-out (the named value it feeds, or the module port it reaches),
+// else of the fan-in (the named operand it reads). `relation` comes back as
+// "" / "feeds" / "reads" so the caller can say which way it had to look.
+[[nodiscard]] std::string nearest_named_signal(const hhds::Node_class& n, std::string_view& relation) {
+  // Two independent budgets, because two different things can blow up here: the
+  // NODE budget bounds how far the search spreads, and the EDGE budget bounds
+  // one step of it -- out_edges() is a lazy view over live storage and a
+  // clock/reset-like pin fans out to 100k+ sinks, so bounding dequeues alone
+  // would still let a single node enqueue the whole fan-out.
+  constexpr size_t kMaxNodes = 256;
+  constexpr size_t kMaxEdges = 4096;
+  relation                   = {};
+  if (n.is_invalid()) {
+    return {};
+  }
+  // The value a node produces, named. out_pins() is the node's driver pins
+  // directly -- walking out_edges() instead would re-visit one pin once per
+  // consumer.
+  const auto named_of = [](const hhds::Node_class& node) -> std::string {
+    for (const auto& p : node.out_pins()) {
+      if (auto nm = gu::pin_name_of(p); !nm.empty()) {
+        return std::string{nm};
+      }
+    }
+    auto nn = gu::node_name_of(node);
+    return nn.empty() ? std::string{} : std::string{nn};
+  };
+  if (auto own = named_of(n); !own.empty()) {
+    relation = "is";
+    return own;
+  }
+  const auto walk = [&](bool downstream) -> std::string {
+    absl::flat_hash_set<hhds::Node_class> seen{n};
+    std::vector<hhds::Node_class>         frontier{n};
+    size_t                                nodes = 0;
+    size_t                                edges = 0;
+    while (!frontier.empty() && nodes < kMaxNodes && edges < kMaxEdges) {
+      std::vector<hhds::Node_class> next;
+      for (const auto& cur : frontier) {
+        if (++nodes > kMaxNodes || edges >= kMaxEdges) {
+          break;
+        }
+        if (downstream) {
+          for (const auto& e : cur.out_edges()) {
+            if (++edges > kMaxEdges) {
+              break;
+            }
+            // A module port is the best anchor of all: it is the name the
+            // instantiating design uses for this value.
+            if (gu::is_graph_output_pin(e.sink)) {
+              if (auto nm = gu::pin_name_of(e.sink); !nm.empty()) {
+                return std::string{nm};
+              }
+            }
+            auto sn = e.sink.get_master_node();
+            if (sn.is_invalid() || !seen.insert(sn).second) {
+              continue;
+            }
+            if (auto nm = named_of(sn); !nm.empty()) {
+              return nm;
+            }
+            next.push_back(sn);
+          }
+        } else {
+          for (const auto& e : cur.inp_edges()) {
+            if (++edges > kMaxEdges) {
+              break;
+            }
+            if (auto nm = gu::pin_name_of(e.driver); !nm.empty()) {  // also resolves a module INPUT port
+              return std::string{nm};
+            }
+            auto dn = e.driver.get_master_node();
+            if (dn.is_invalid() || !seen.insert(dn).second) {
+              continue;
+            }
+            if (auto nm = named_of(dn); !nm.empty()) {
+              return nm;
+            }
+            next.push_back(dn);
+          }
+        }
+      }
+      frontier.swap(next);
+    }
+    return {};
+  };
+  if (auto down = walk(true); !down.empty()) {
+    relation = "feeds";
+    return down;
+  }
+  if (auto up = walk(false); !up.empty()) {
+    relation = "reads";
+    return up;
+  }
+  return {};
+}
+
+// A constant rendered for a ONE-LINE diagnostic: the literal, its PAYLOAD width,
+// and how many of those bits are unknown.
+//
+// The width and the unknown count are not decoration. Dlop's carrier is SIGNED,
+// so a non-negative value always renders with one leading `0` beyond its payload
+// (`literal_payload_bits`): a u6 whose every bit is unknown prints as
+// `0ub0??????`, and that leading digit reads as a seventh value bit -- or, worse,
+// as a sign -- to anyone who did not write the renderer. Spelling out
+// "(6 bits, 6 unknown)" says plainly that this is a six-bit value, entirely
+// unknown, and not a negative one.
+//
+// An all-unknown 4096-bit literal would otherwise take the whole message
+// hostage, so a long spelling is elided in the middle.
+[[nodiscard]] std::string const_brief(const Dlop& v) {
+  auto       s   = std::format("{}", v);  // Dlop's formatter renders to_pyrope()
+  const auto bin = v.to_binary();
+  const auto unk = static_cast<size_t>(std::count(bin.begin(), bin.end(), '?'));
+  if (s.size() > 44) {
+    s = std::format("{}...{}", s.substr(0, 28), s.substr(s.size() - 6));
+  }
+  return std::format("{} ({} bits, {} unknown)", s, gu::literal_payload_bits(v), unk);
+}
+
+// "<cell>_<nid>" plus the nearest named signal: `shl_10620 (feeds 'mshr_d')`.
+[[nodiscard]] std::string node_identity(const hhds::Node_class& n) {
+  std::string_view rel;
+  const auto       nm = nearest_named_signal(n, rel);
+  if (nm.empty()) {
+    return gu::debug_name(n);
+  }
+  if (rel == "is") {
+    return std::format("{} '{}'", gu::debug_name(n), nm);
+  }
+  return std::format("{} ({} '{}')", gu::debug_name(n), rel, nm);
+}
 // Resolve the original source "file:line" of region output `po` into q.crit_*
 // (2opt-freq A). Best-effort: a missing srcid or an unresolvable span just
 // leaves crit_src empty — the QoR row is still useful without provenance.
@@ -409,15 +567,12 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
   if (onode.is_invalid()) {
     return;
   }
-  auto a = onode.attr(hhds::attrs::srcid);
-  if (!a.has() || a.get() == 0) {
-    return;
-  }
-  auto span = rb.src->source_locator().resolve_span(a.get());
+  auto span = node_span(rb, onode);
   if (!span.file.empty() && span.start_line.has_value()) {
     q.crit_src = span.file + ":" + std::to_string(*span.start_line);
   }
 }
+
 }  // namespace
 
 // Memory admission (2opt-incr subtask 0). Deliberately MEASURED, not predicted:
@@ -565,6 +720,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (!refusal_.empty()) {
     return;
   }
+
+  // Source excerpts for this region's diagnostics. The srcids stamped on the
+  // region's nodes resolve through the SOURCE graph's locator (which chains to
+  // the library's shared srcmap), so every refusal below can print the original
+  // Pyrope/Verilog line, not just a node id. Restored on scope exit.
+  livehd::diag::Locator_scope diag_scope(rb.src != nullptr ? &rb.src->source_locator() : nullptr);
 
   // Per-region wall time: the only way to tell a cache that hits a lot from a
   // cache that saves time. A hit on a 200ms region and a miss on a 200s one
@@ -861,6 +1022,74 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // downstream read would otherwise flood the log).
   bool unsupported = false;
 
+  // Per-node refusal, with provenance. Unlike the region-level message it
+  // replaces, every record now carries the offending node's identity and its
+  // original source location -- so two of these no longer collapse into one
+  // line by the sink's (code, span, message) dedup. That is the point (a
+  // 12k-node region can hold dozens of independently broken cells), but it
+  // also means a systematically broken region would print one line per node:
+  // report the first kMaxRefusals in full and summarize the rest.
+  constexpr size_t kMaxRefusals = 10;
+  size_t           refusals     = 0;
+  const auto       refuse       = [&](const hhds::Node_class& bad,
+                                      std::string_view        code,
+                                      std::string_view        category,
+                                      std::string_view        what,
+                                      std::string_view        hint     = {},
+                                      const hhds::Pin_class&  note_pin = {},
+                                      std::string_view        note_msg = {}) {
+    unsupported = true;
+    if (refusals++ >= kMaxRefusals) {
+      return;  // counted; the post-loop summary reports the total
+    }
+    auto b = livehd::diag::err("pass.abc", code, category);
+    b.at(node_span(rb, bad));
+    b.msg("pass.abc: {} in region '{}': {}", node_identity(bad), rb.module_name, what);
+    if (!hint.empty()) {
+      b.hint(hint);
+    }
+    if (!note_pin.is_invalid() && !note_msg.empty()) {
+      if (auto sp = node_span(rb, note_pin.get_master_node()); !sp.is_null()) {
+        b.note(note_msg, sp);
+      }
+    }
+    b.emit();
+  };
+
+  // SHL / SRA share this: the amount is a constant the mapper cannot use.
+  const auto refuse_shift_amount
+      = [&](const hhds::Node_class& bad, std::string_view op_name, const Dlop& amt, const hhds::Pin_class& amt_pin) {
+          // UNKNOWN is tested FIRST, and that order is load-bearing: Dlop::unknown()
+          // fills the base plane with -1 (hlop init_unknown) and Dlop::is_negative()
+          // reads only that plane, so EVERY x-carrying value answers "negative".
+          // `!has_unknowns() && is_negative()` is the idiom upass/tolg already uses
+          // (pin_can_be_negative); with the tests the other way round every unknown
+          // amount is misreported as a livehd internal bug.
+          if (!amt.has_unknowns() && amt.is_negative()) {
+            refuse(
+                bad,
+                "negative-shift-amount",
+                "internal",
+                std::format("{} shift amount is the NEGATIVE constant {} -- a shift count must be >= 0", op_name, const_brief(amt)),
+                "no pass should have produced this: upass.bitwidth rejects a negative shift count, so a negative "
+                "constant reaching synthesis is a folding/lowering bug in livehd, not a design error",
+                amt_pin,
+                "shift amount defined here");
+            return;
+          }
+          refuse(bad,
+                 "unknown-shift-amount",
+                 "unsupported",
+                 std::format("{} shift amount is the constant {}, which carries unknown (?) bits -- ABC has no X value, so "
+                             "the shift cannot be technology-mapped",
+                             op_name,
+                             const_brief(amt)),
+                 "a RUNTIME (non-constant) shift amount is supported and becomes a barrel shifter; only an UNKNOWN constant "
+                 "is not. Trace the amount back to the value that was never given a definite assignment",
+                 amt_pin,
+                 "shift amount defined here");
+        };
+
   // Set_mask is wiring, not logic. Materializing every output bit is ruinous
   // for sparse updates of a wide packed state bus (Rob: 7,760 nodes expanded
   // to 179M bitnet hash entries). Keep the selected positions as compact runs
@@ -947,13 +1176,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto& resolving = resolving_wiring_bit[drv];
       if (!resolving.insert(eff).second) {
         if (!unsupported) {
-          livehd::diag::err("pass.abc", "combinational-cycle", "unsupported")
-              .msg("pass.abc: region '{}': bit {} of '{}' has a combinational wiring cycle",
-                   rb.module_name,
-                   eff,
-                   gu::debug_name(master))
-              .emit();
-          unsupported = true;
+          refuse(master, "combinational-cycle", "unsupported", std::format("bit {} has a combinational wiring cycle", eff));
         }
         return abc_const_bit(false);
       }
@@ -1013,13 +1236,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto& resolving = resolving_wiring_bit[drv];
       if (!resolving.insert(eff).second) {
         if (!unsupported) {
-          livehd::diag::err("pass.abc", "combinational-cycle", "unsupported")
-              .msg("pass.abc: region '{}': bit {} of '{}' has a combinational wiring cycle",
-                   rb.module_name,
-                   eff,
-                   gu::debug_name(master))
-              .emit();
-          unsupported = true;
+          refuse(master, "combinational-cycle", "unsupported", std::format("bit {} has a combinational wiring cycle", eff));
         }
         return abc_const_bit(false);
       }
@@ -1041,10 +1258,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         // lane width), never "zero lanes" -- fail closed like the non-constant
         // mask/position arms rather than emitting a const0 bus.
         if (!unsupported) {
-          livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-              .msg("pass.abc: malformed concat (missing lane operand, or a non-constant lane width) in region '{}'", rb.module_name)
-              .emit();
-          unsupported = true;
+          refuse(master,
+                 "unsupported-cell",
+                 "unsupported",
+                 "malformed concat (missing lane operand, or a non-constant lane width)");
         }
         resolving.erase(eff);
         return abc_const_bit(false);
@@ -1078,15 +1295,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // downstream cone. Suppress follow-on diagnostics once the first missing
     // producer has identified the region-level failure.
     if (!unsupported) {
-      livehd::diag::err("pass.abc", "unmaterialized-driver", "internal")
-          .msg("pass.abc: region '{}': bit {} of driver '{}' (node op {}) could not be materialized",
-               rb.module_name,
-               eff,
-               gu::debug_name(drv.get_master_node()),
-               Ntype::get_name(gu::type_op_of(drv.get_master_node())))
-          .hint("the colored region contains a combinational cycle or an invalid boundary; refusing to emit a wrong netlist")
-          .emit();
-      unsupported = true;
+      refuse(drv.get_master_node(),
+             "unmaterialized-driver",
+             "internal",
+             std::format("bit {} of this driver could not be materialized", eff),
+             "the colored region contains a combinational cycle or an invalid boundary; refusing to emit a wrong netlist");
     }
     auto* net  = abc_const_bit(false);
     slots[eff] = net;
@@ -1289,14 +1502,27 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       flops.push_back(std::move(f));
     }
     if (!clk_demoted.empty()) {
-      livehd::diag::warn("pass.abc", "derived-clock-native", "unsupported")
+      // Name the registers, not just their count: "3 register(s)" in a 12k-node
+      // region is unactionable. First few by identity + declaration site; the
+      // set is unordered, so sort by nid to keep the report reproducible.
+      std::vector<hhds::Node_class> demoted(clk_demoted.begin(), clk_demoted.end());
+      std::sort(demoted.begin(), demoted.end(), [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
+      auto w = livehd::diag::warn("pass.abc", "derived-clock-native", "unsupported");
+      w.at(node_span(rb, demoted.front()))
           .msg(
               "pass.abc region '{}': {} register(s) clocked by region-internal logic (a gated/derived clock) kept as "
               "native flops — a DFF cell cannot take its clock from mapped logic; the clock cone is still mapped and "
               "reconnected",
               rb.module_name,
-              clk_demoted.size())
-          .emit();
+              clk_demoted.size());
+      constexpr size_t kMaxNamed = 5;
+      for (size_t k = 0; k < std::min(kMaxNamed, demoted.size()); ++k) {
+        w.note(std::format("kept native: {}", node_identity(demoted[k])), node_span(rb, demoted[k]));
+      }
+      if (demoted.size() > kMaxNamed) {
+        w.note(std::format("... and {} more register(s)", demoted.size() - kMaxNamed));
+      }
+      w.emit();
     }
   }
 
@@ -1533,7 +1759,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // Sub/Memory instance, and rebuilt unchanged on read-back. Warn so the
       // user knows this cone is not technology-mapped.
       livehd::diag::warn("pass.abc", "div-blackbox", "unsupported")
-          .msg("pass.abc: division in region '{}' is blackboxed (kept as a native div, not technology-mapped)", rb.module_name)
+          .at(node_span(rb, n))
+          .msg("pass.abc: {} in region '{}': division is blackboxed (kept as a native div, not technology-mapped)",
+               node_identity(n),
+               rb.module_name)
           .emit();
     }
     if (op == Ntype_op::Rem) {
@@ -1549,7 +1778,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // rewrite_trivial_rems() above, so reaching this point means the shape
       // genuinely has no easy gate-level translation.
       livehd::diag::err("pass.abc", "rem-unsupported", "unsupported")
-          .msg("pass.abc: remainder (`%`) in region '{}' has no gate-level translation", rb.module_name)
+          .at(node_span(rb, n))
+          .msg("pass.abc: {} in region '{}': remainder (`%`) has no gate-level translation", node_identity(n), rb.module_name)
           .hint(
               "only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
               "remainders out of the synthesized region")
@@ -1860,10 +2090,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto a_drv = gu::get_driver_of_sink_name(n, "a");
       auto m_drv = gu::get_driver_of_sink_name(n, "mask");
       if (!gu::is_const_pin(m_drv)) {
-        livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-            .msg("pass.abc: get_mask with a non-constant mask in region '{}' is not supported", rb.module_name)
-            .emit();
-        unsupported = true;
+        refuse(n,
+               "unsupported-cell",
+               "unsupported",
+               "get_mask has a non-constant mask, which cannot be technology-mapped",
+               {},
+               m_drv,
+               "mask driven here");
       } else {
         auto mask   = gu::hydrate_const(m_drv);
         bool neg    = mask.is_negative();
@@ -1902,20 +2135,26 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // bit of a wide sparse-update bus here.
       auto m_drv = gu::get_driver_of_sink_name(n, "mask");
       if (!gu::is_const_pin(m_drv)) {
-        livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-            .msg("pass.abc: set_mask with a non-constant mask in region '{}' is not supported", rb.module_name)
-            .emit();
-        unsupported = true;
+        refuse(n,
+               "unsupported-cell",
+               "unsupported",
+               "set_mask has a non-constant mask, which cannot be technology-mapped",
+               {},
+               m_drv,
+               "mask driven here");
       }
     } else if (op == Ntype_op::Sext) {
       // out[i] = a[min(i, from_bit)] (sign bit at from_bit replicated above).
       auto a_drv = gu::get_driver_of_sink_name(n, "a");
       auto b_drv = gu::get_driver_of_sink_name(n, "b");
       if (!gu::is_const_pin(b_drv)) {
-        livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-            .msg("pass.abc: sext with a non-constant bit position in region '{}' is not supported", rb.module_name)
-            .emit();
-        unsupported = true;
+        refuse(n,
+               "unsupported-cell",
+               "unsupported",
+               "sext has a non-constant bit position, which cannot be technology-mapped",
+               {},
+               b_drv,
+               "bit position driven here");
       } else {
         int from_bit = static_cast<int>(gu::hydrate_const(b_drv).to_just_i64());
         for (int b = 0; b < out_bits; ++b) {
@@ -2041,13 +2280,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         if (gu::is_const_pin(b_d)) {
           auto amt_c = gu::hydrate_const(b_d);
           if (amt_c.has_unknowns() || amt_c.is_negative()) {
-            // An unknown (x-bit) or negative constant shift amount cannot be
-            // soundly technology-mapped (ABC has no X; a negative shift is
-            // rejected upstream by upass.bitwidth), never from a clean `a<<N`.
-            livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-                .msg("pass.abc: shl with an unknown/negative constant shift amount in region '{}' is not supported", rb.module_name)
-                .emit();
-            unsupported = true;
+            // Unknown and negative are DIFFERENT failures and get different
+            // reports. An unknown (`?`) amount is a value that was never given
+            // a definite assignment -- ABC has no X, so the shift cannot be
+            // mapped. A NEGATIVE amount is a livehd bug: no hardware shift
+            // takes one, and upass.bitwidth rejects it upstream, so one
+            // reaching synthesis means an earlier pass folded/lowered it wrong.
+            // Neither case touches a RUNTIME amount, which is fully supported
+            // (it becomes the barrel shifter built below).
+            refuse_shift_amount(n, "shl", amt_c, b_d);
           } else {
             // Clean non-negative integer: out[i] = a[i-amt], 0 below. A value too
             // big for i64 (or simply >= out_bits) shifts everything out -> 0.
@@ -2162,12 +2403,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (gu::is_const_pin(b_d)) {
         auto amt_c = gu::hydrate_const(b_d);
         if (amt_c.has_unknowns() || amt_c.is_negative()) {
-          // Unknown (x-bit) or negative constant shift: unmappable (ABC has no X;
-          // a negative shift is rejected upstream by upass.bitwidth). Mirrors SHL.
-          livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-              .msg("pass.abc: sra with an unknown/negative constant shift amount in region '{}' is not supported", rb.module_name)
-              .emit();
-          unsupported = true;
+          refuse_shift_amount(n, "sra", amt_c, b_d);  // see the SHL arm for why the two cases are reported apart
         } else {
           int64_t amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(cw);
           // The LEC fits the amount to cw bits (BITVECTOR_ASHR/LSHR operands are
@@ -2340,18 +2576,23 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = (b < out_w && b < static_cast<int>(acc.size())) ? acc[b] : abc_const_bit(false);
       }
     } else {
-      livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-          .msg(
-              "pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; "
-              "concat is pure wiring, resolved per demanded bit; div/mod are blackboxed)",
-              Ntype::get_name(op),
-              rb.module_name)
-          .emit();
-      unsupported = true;
+      refuse(n,
+             "unsupported-cell",
+             "unsupported",
+             std::format("cell '{}' has no combinational bit-blast yet", Ntype::get_name(op)),
+             "supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; concat is pure "
+             "wiring, resolved per demanded bit; div/mod are blackboxed");
     }
   }
   if (unsupported) {
+    if (refusals > kMaxRefusals) {
+      livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
+          .msg("pass.abc: region '{}': {} further node(s) were refused; only the first {} are reported above",
+               rb.module_name,
+               refusals - kMaxRefusals,
+               kMaxRefusals)
+          .emit();
+    }
     Abc_NtkDelete(manNtk);
     return;
   }

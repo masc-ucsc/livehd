@@ -5,7 +5,16 @@
 :pyrope_top: selfref_slice_assign
 */
 //
-// FIXME tracker -- concurrent slice assignments to one wire are ORDERED (LEC-
+// TRACKER -- concurrent slice assignments to one wire are ORDERED.
+//
+// AS OF 2026-08-21 THE READER REFUSES THIS SHAPE: `lhd compile` on the golden
+// .v now reports `unsupported-driver-order` rather than silently sequencing the
+// assigns, so the `.v` axis is listed in _STATEMATCH_FIXME in inou/prp/BUILD.
+// The Pyrope below is the OLD (wrong) sequenced lowering, kept as the record of
+// what the silent miscompile looked like. The refusal is the interim fix; the
+// real one is bit-granular driver ordering.
+//
+// The original report: concurrent slice assignments to one wire were ORDERED (LEC-
 // refuted). The three `assign` statements below drive disjoint bit-fields of `w`
 // and read each other; being CONCURRENT, they settle to w[3:2]=hi, w[1]=w[2]=hi[0],
 // w[0]=~w[1]. The reader instead threads them through SSA in source order, so

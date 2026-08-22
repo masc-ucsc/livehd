@@ -327,6 +327,20 @@ sh_test(
     ],
 )
 
+# An instance output read ONLY as the index of an array element whose field is
+# accessed (`data_i[bin].tag`) must still count as a READ of that net, or the
+# net keeps its poison initializer and the instance binding is dropped as dead.
+sh_test(
+    name = "slang_instance_output_as_member_index",
+    size = "large",
+    srcs = ["tests/instance_output_member_index_test.sh"],
+    args = ["$(location tests/sv/instance_output_as_member_index.v)"],
+    data = [
+        "tests/sv/instance_output_as_member_index.v",
+        "//lhd",
+    ],
+)
+
 # Disjoint generated always_ff blocks over one flattened packed register must
 # combine their slice resets into one asynchronous reset. Losing that metadata
 # turns reset assertion without a clock edge into a stale-state mismatch.

@@ -1549,6 +1549,43 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
           process_child(gc);
         }
       } else if (stmt_is_scope_barrier(type)) {
+        // A LOOP is a scope barrier for RENAMING — the runner unrolls it and a
+        // later elaboration round SSAs the result inline — but its body still
+        // WRITES outer names, and copying it verbatim left rename_map
+        // untouched. That is a miscompile on BOTH sides: the body reads and
+        // writes the BASE name (so it saw the DECLARATION's value, not the
+        // live one), and every post-loop read stayed bound to the pre-loop
+        // version (so it never saw what the loop computed). Measured on
+        //     mut a:u8 = 0;  a = 7;  for j in 0..=1 { a = (a + 1)#[0..=7] };  o = a
+        // which answered `o = 7`: the loop ran against the declare's 0 and its
+        // result was discarded. (A name written only ONCE before the loop is
+        // not in rename_map, which is why the same design with `mut a:u8 = 7`
+        // was correct and hid this for so long.)
+        //
+        // Do exactly what an if-branch does above: carry in by materializing
+        // `base = <live version>` ahead of the loop and resetting the rename to
+        // base, so the body reads the live value and post-loop reads see the
+        // body's writes.
+        if (Lnast_ntype::is_for(type) || Lnast_ntype::is_while(type)) {
+          absl::flat_hash_set<std::string> lwrites;
+          collect_branch_writes(child, lwrites);
+          // SORTED: the carry-in stores land in the emitted LNAST, and a hash
+          // set's iteration order is not a stable function of the source. The
+          // compile cache compares generations byte for byte, so an unordered
+          // emission would make a warm run differ from a cold one for no
+          // semantic reason.
+          std::vector<std::string> ordered(lwrites.begin(), lwrites.end());
+          std::sort(ordered.begin(), ordered.end());
+          for (const auto &var : ordered) {
+            auto it = rename_map.find(var);
+            if (it != rename_map.end() && it->second != var) {
+              auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
+              staging->add_child(st, Lnast_node::create_ref(var));
+              staging->add_child(st, Lnast_node::create_ref(it->second));
+              it->second = var;  // loop writes + post-loop reads use the base
+            }
+          }
+        }
         // Separate-scope / pure-structure nodes (func_def, declare, for, …):
         // the outer rename_map must NOT leak in, so copy verbatim. This is an
         // EXPLICIT closed list — see stmt_is_scope_barrier.

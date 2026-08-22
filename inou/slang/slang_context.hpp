@@ -49,6 +49,18 @@ class Slang_context {
 public:
   struct Options {
     int  unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
+    // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
+    // unrolling it here. LNAST already owns loops with `break`/`continue`
+    // (uPass lowers func_break/func_continue to loop_exec/loop_next_active, the
+    // semantics the slang-side `broken`-flag unroll can only approximate), and
+    // Pyrope forbids shadowing — which is fine, because lname_of already
+    // uniquifies per SYMBOL (`c`, `c_s1`, …), so an inner declaration that
+    // shadows an outer one comes out under its own name.
+    //
+    // OFF by default: the rolled body keeps the index as a RUNTIME ref instead
+    // of const-folding it, so uPass (not slang) decides the final shape. A loop
+    // whose shape is not canonical still unrolls here.
+    bool roll_loops                = false;
     bool keep_timecheck            = false;
     // The USER passed --ignore-unknown-modules (inou_slang always injects it
     // at the slang level so the reader owns the policy): lower unknown-module
@@ -106,6 +118,12 @@ private:
   absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>>
       output_info_;  // {flat bits, is_signed} per output, for the body-top X-default poison-init of non-reg outputs
   absl::flat_hash_set<const slang::ast::Symbol*> reg_syms_;  // clocked state vars
+  // Symbols that ALSO have a continuous-assign driver. A packed array whose
+  // element 0 is `assign`ed while [1..N] are flops (the cvfpu pipeline idiom,
+  // `assign q[0] = in; FFL(q[i+1], q[i], …)`) is only PARTLY register, so its
+  // async-reset slices can never cover the whole symbol -- see
+  // finalize_pending_async_resets.
+  absl::flat_hash_set<const slang::ast::Symbol*> cont_assign_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>
       wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
@@ -136,8 +154,47 @@ private:
   absl::flat_hash_set<const slang::ast::Symbol*> blocking_ff_state_;
   // Stack of `broken` flag lnames, innermost unrolled loop last. A loop whose
   // body contains a `break` guards each iteration on its flag and the break
-  // raises it; loops without one push nothing and lower exactly as before.
+  // raises it. A loop that owns no flag pushes the EMPTY SENTINEL rather than
+  // nothing: a `break` inside it must NOT reach into an outer loop's flag and
+  // terminate the wrong loop, so the sentinel makes own_brk_flag() answer "no
+  // flag of mine" and the break is refused instead.
   std::vector<std::string>                       break_flags_;
+  // One entry per enclosing loop currently being lowered: true when that loop
+  // became an LNAST `for` (rolled), false when it is being unrolled here. Only
+  // the NEAREST enclosing loop matters — a `break` binds to it — so this must be
+  // pushed by every loop lowering, not only the ones that own a break flag.
+  std::vector<bool>                              loop_rolled_;
+  // The `broken` flag of the NEAREST enclosing loop, or nullptr when that loop
+  // has none of its own (a rolled LNAST `for`, whose break is a marker uPass
+  // lowers, or a while/repeat/foreach that pushed the sentinel).
+  [[nodiscard]] const std::string* own_brk_flag() const {
+    if (!loop_rolled_.empty() && loop_rolled_.back()) {
+      return nullptr;  // rolled: func_break owns the semantics
+    }
+    if (break_flags_.empty() || break_flags_.back().empty()) {
+      return nullptr;
+    }
+    return &break_flags_.back();
+  }
+  // RAII push/pop for a loop lowering that owns NO break flag (while, do-while,
+  // repeat, foreach). Both stacks must be balanced on every exit path, and
+  // those loops have many.
+  class Unflagged_loop_scope {
+  public:
+    explicit Unflagged_loop_scope(Slang_context* self) : self_(self) {
+      self_->loop_rolled_.push_back(false);
+      self_->break_flags_.emplace_back();  // sentinel: this loop owns no flag
+    }
+    Unflagged_loop_scope(const Unflagged_loop_scope&)            = delete;
+    Unflagged_loop_scope& operator=(const Unflagged_loop_scope&) = delete;
+    ~Unflagged_loop_scope() {
+      self_->break_flags_.pop_back();
+      self_->loop_rolled_.pop_back();
+    }
+
+  private:
+    Slang_context* self_;
+  };
   absl::flat_hash_set<const slang::ast::Symbol*> mem_syms_;             // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*> mem_wensize_emitted_;  // memories whose wensize attr was emitted
   absl::flat_hash_set<const slang::ast::Symbol*> declared_;             // declare stmt already emitted
@@ -483,6 +540,8 @@ private:
   // function/config bindings and either unrolls the now-constant range or
   // diagnoses the still-runtime domain. Returns false for every other shape.
   bool        lower_deferred_for(const slang::ast::ForLoopStatement& stmt);
+  // A bare loop-control marker (`break` / `continue`) inside a rolled loop.
+  void        emit_loop_marker(Lnast_ntype::Lnast_ntype_int head);
   void        lower_while_loop(const slang::ast::Statement& stmt);  // While/DoWhile/Repeat
   void        lower_foreach(const slang::ast::ForeachLoopStatement& stmt);
   bool        unroll_tick(const slang::ast::Statement& stmt);  // false = budget exhausted (diag emitted)

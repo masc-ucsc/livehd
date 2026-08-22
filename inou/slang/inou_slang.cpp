@@ -88,15 +88,22 @@ void Inou_slang::setup() {
 
   m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m1.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m1.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
+  m1.add_label_optional(
+      "includes",
+      "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
-  m1.add_label_optional("preserve_param_provenance",
-                        "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m1.add_label_optional("roll_loops",
+                        "true to hand a canonical procedural `for` to LNAST as a LOOP (break/continue supported) instead of "
+                        "unrolling it in the reader");
+  m1.add_label_optional(
+      "preserve_param_provenance",
+      "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
   m1.add_label_optional("struct_port_bundles",
-                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
+                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a "
+                        "struct is a bundle)");
   m1.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
@@ -108,15 +115,22 @@ void Inou_slang::setup() {
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
   m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m2.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m2.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
+  m2.add_label_optional(
+      "includes",
+      "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
-  m2.add_label_optional("preserve_param_provenance",
-                        "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m2.add_label_optional("roll_loops",
+                        "true to hand a canonical procedural `for` to LNAST as a LOOP (break/continue supported) instead of "
+                        "unrolling it in the reader");
+  m2.add_label_optional(
+      "preserve_param_provenance",
+      "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
   m2.add_label_optional("struct_port_bundles",
-                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
+                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a "
+                        "struct is a bundle)");
   m2.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
@@ -151,9 +165,8 @@ void Inou_slang::work(Eprp_var& var) {
       }
     }
   }
-  const auto user_has = [&](std::string_view flag) {
-    return std::find(user_flags.begin(), user_flags.end(), flag) != user_flags.end();
-  };
+  const auto user_has
+      = [&](std::string_view flag) { return std::find(user_flags.begin(), user_flags.end(), flag) != user_flags.end(); };
 
   if (!user_has("-q") && !user_has("--quiet")) {
     argv.push_back(strdup("--quiet"));
@@ -257,30 +270,42 @@ void Inou_slang::work(Eprp_var& var) {
 
   // Timechecks on generated `mod`s are suppressed by default for slang input
   // (the direct reader predates the io/timing conventions, todo/ 1s subtask E),
-  // overridable via --set inou.verilog.timecheck=true.
+  // overridable via --set compile.slang.timecheck=true.
   const bool keep_timecheck = var.has_label("timecheck") && var.get("timecheck") == "true";
 
   Slang_context::Options opts;
-  opts.keep_timecheck = keep_timecheck;
+  opts.keep_timecheck            = keep_timecheck;
   // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
   // blackbox sub-instances; the copy injected above (so slang itself never
   // hard-errors and the reader owns the diagnostic) does not.
-  opts.blackbox_unknown = user_has("--ignore-unknown-modules");
+  opts.blackbox_unknown          = user_has("--ignore-unknown-modules");
   // Keep package-parameter references symbolic (`pkg.PARAM` + `pub comptime
   // const` package units) for provenance-preserving Pyrope emission.
-  opts.preserve_param_provenance
-      = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
+  opts.preserve_param_provenance = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
   // Emit qualifying packed-struct ports as tuple/bundle ports (per-leaf dotted
   // io after SSA). Defaulted ON by the CLI for pyrope-emitting no-graphs
   // compiles, mirroring preserve_param_provenance.
-  opts.struct_port_bundles = !var.has_label("struct_port_bundles") || var.get("struct_port_bundles") == "true";
+  opts.struct_port_bundles       = !var.has_label("struct_port_bundles") || var.get("struct_port_bundles") == "true";
   // flat_top_io: keep ONLY the top module's ports packed (Verilog-vs-Verilog
   // equivalence needs the emitted top interface to match the source module's).
-  opts.flat_top_io         = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
+  opts.flat_top_io               = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;
     }
+  }
+  opts.roll_loops = var.has_label("roll_loops") && var.get("roll_loops") == "true";
+  if (opts.roll_loops) {
+    // Still opt-in while it earns mileage, but no longer known-broken: the
+    // statement-ordering miscompile it used to hit was an SSA bug (a loop is a
+    // rename barrier, so a name written before the loop kept its pre-loop
+    // version across it) and is fixed in upass/ssa. A rolled nested loop with
+    // break + continue + a shadowed counter now LEC-PROVES against a
+    // hand-written reference, and rolled-vs-unrolled is structurally identical.
+    livehd::diag::warn("inou.slang", "roll-loops-experimental", "unsupported")
+        .msg("inou.slang: roll_loops hands canonical `for` loops to LNAST instead of unrolling them here (opt-in, still settling)")
+        .hint("a non-canonical loop shape still unrolls in the reader; report any rolled-vs-unrolled difference")
+        .emit();
   }
 
   // Run ONE slang Driver/Compilation over `argv` plus every positional source

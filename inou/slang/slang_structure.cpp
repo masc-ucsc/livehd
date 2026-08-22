@@ -1057,7 +1057,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     }
     std::string name(ps.name);
     const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
-                       && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+                        && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
@@ -1156,6 +1156,27 @@ std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortS
 // as a reg BEFORE the declares run, or a comb read declares it `mut` first.
 void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
   for (const auto& member : body.members()) {
+    if (member.kind == SymbolKind::ContinuousAssign) {
+      // Note the symbol so the async-reset slice accumulator can tell a wholly
+      // registered vector from one that is only partly register. A CONCATENATED
+      // lvalue (`assign {a, q[0]} = …`) drives each lane, and lhs_base_symbol
+      // answers nullptr for the concat itself, so walk the lanes.
+      const auto& asg = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+      if (asg.kind == slang::ast::ExpressionKind::Assignment) {
+        const std::function<void(const slang::ast::Expression&)> note_cont_lhs = [&](const slang::ast::Expression& e) {
+          if (e.kind == slang::ast::ExpressionKind::Concatenation) {
+            for (const auto* op : e.as<slang::ast::ConcatenationExpression>().operands()) {
+              note_cont_lhs(*op);
+            }
+            return;
+          }
+          if (const auto* lsym = lhs_base_symbol(e)) {
+            cont_assign_syms_.insert(lsym);
+          }
+        };
+        note_cont_lhs(asg.as<slang::ast::AssignmentExpression>().left());
+      }
+    }
     if (member.kind == SymbolKind::GenerateBlock) {
       const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
       if (!gen.isUninstantiated) {
@@ -1432,6 +1453,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   bundle_port_info_.clear();
   bundle_out_shadow_.clear();
   reg_syms_.clear();
+  cont_assign_syms_.clear();
   wire_syms_.clear();
   wire_split_tmp_.clear();
   wire_split_flat_.clear();
@@ -3153,6 +3175,40 @@ struct Store_counter : public slang::ast::ASTVisitor<Store_counter, slang::ast::
 struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::VisitFlags::AllGood> {
   absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
   absl::flat_hash_set<const slang::ast::ValueSymbol*> writes;
+  // GENUINE reads only — a value an expression actually reads (an rvalue, or a
+  // selector index). note_lhs's base insert is NOT one of these: a partial
+  // write records a base read purely because the ORDERED lowering spells
+  // `x[0] = e` as `mut x__w1 = x; x__w1#[0] = e`. Telling the two apart is what
+  // lets the driver-order check below see a driver that really does read bits
+  // its SIBLINGS write.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> rhs_reads;
+
+  // Every SELECTOR nested along an lvalue PATH is a genuine rvalue read of its
+  // index (`q[i][j].f = e` reads both `i` and `j`), while the path's own base is
+  // a write target, not an rvalue. Descending with visit() would record the base
+  // as an rhs_read; this walks the path and visits only the selectors. Missing
+  // them is exactly the failure the MemberAccess rvalue handler below documents,
+  // in its lvalue mirror: the index net ends up with no reader at all.
+  void note_path_selectors(const slang::ast::Expression& e) {
+    switch (e.kind) {
+      case ExpressionKind::Conversion  : note_path_selectors(e.as<slang::ast::ConversionExpression>().operand()); return;
+      case ExpressionKind::MemberAccess: note_path_selectors(e.as<slang::ast::MemberAccessExpression>().value()); return;
+      case ExpressionKind::ElementSelect: {
+        const auto& es = e.as<slang::ast::ElementSelectExpression>();
+        es.selector().visit(*this);
+        note_path_selectors(es.value());
+        return;
+      }
+      case ExpressionKind::RangeSelect: {
+        const auto& rs = e.as<slang::ast::RangeSelectExpression>();
+        rs.left().visit(*this);
+        rs.right().visit(*this);
+        note_path_selectors(rs.value());
+        return;
+      }
+      default: return;
+    }
+  }
 
   void note_lhs(const slang::ast::Expression& lhs) {
     switch (lhs.kind) {
@@ -3167,6 +3223,7 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
       case ExpressionKind::ElementSelect: {
         const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
         es.selector().visit(*this);
+        note_path_selectors(es.value());  // `q[i][j] = e` also reads `i`
         if (const auto* sym = lhs_base_symbol(es.value())) {
           writes.insert(sym);
           reads.insert(sym);  // partial write reads the base (RMW)
@@ -3177,6 +3234,7 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
         const auto& rs = lhs.as<slang::ast::RangeSelectExpression>();
         rs.left().visit(*this);
         rs.right().visit(*this);
+        note_path_selectors(rs.value());
         if (const auto* sym = lhs_base_symbol(rs.value())) {
           writes.insert(sym);
           reads.insert(sym);
@@ -3184,6 +3242,7 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
         return;
       }
       case ExpressionKind::MemberAccess: {
+        note_path_selectors(lhs.as<slang::ast::MemberAccessExpression>().value());  // `q[i].f = e` reads `i`
         if (const auto* sym = lhs_base_symbol(lhs)) {
           writes.insert(sym);
           reads.insert(sym);
@@ -3230,10 +3289,23 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
     // root symbol note_lhs() uses for writes.
     if (const auto* sym = lhs_base_symbol(expr)) {
       reads.insert(sym);
+      rhs_reads.insert(sym);
     }
+    // KEEP DESCENDING. Defining handle() REPLACES slang's default traversal for
+    // this node, so returning here discards the whole sub-expression — and with
+    // it every read nested in a SELECTOR. `data_i[lfsr_bin].tag` then recorded
+    // only `data_i`, and `lfsr_bin` had no reader at all: the back-edge wire
+    // classification never saw the early read, the net stayed a `0sb?`-poisoned
+    // `mut`, its instance-output binding (`lfsr_bin = i_lfsr.refill_way_bin`)
+    // emitted after every reader and was dropped as dead, and CVA6's
+    // miss_handler read an X way-index forever (`data_i[lfsr_bin]`, 3 sites).
+    expr.value().visit(*this);
   }
 
-  void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&expr.symbol); }
+  void handle(const slang::ast::ValueExpressionBase& expr) {
+    reads.insert(&expr.symbol);
+    rhs_reads.insert(&expr.symbol);
+  }
 };
 
 }  // namespace
@@ -3353,14 +3425,21 @@ static void collect_state_outputs(const slang::ast::InstanceSymbol&             
 void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // ── pass 1: collect drivers (recursing through generate blocks) ───────────
   struct Driver {
-    const slang::ast::Symbol*                           member;
+    const slang::ast::Symbol*                           member = nullptr;
     std::string                                         prefix;  // genblk name prefix at collection point
     absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
     absl::flat_hash_set<const slang::ast::ValueSymbol*> writes;
     // UninstantiatedDef (blackbox) only: inferred per-connection direction,
     // aligned with getPortConnections() (see the inference pass below).
     std::vector<bool>                                   bb_outs;
+    // Subset of `reads` that is a GENUINE read (see Dep_collector::rhs_reads).
+    // Left empty for driver kinds that do not collect it, which keeps them out
+    // of the driver-order check below.
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> rhs_reads;
   };
+  // Every set/vector default-constructs empty, so a construction site names only
+  // `member` and `prefix` -- adding a field must not mean editing five brace
+  // lists again (this struct grew one and all five had to change).
   std::vector<Driver>                            drivers;
   std::vector<size_t>                            unknown_idx;  // drivers[] entries that are blackbox instances
   // External nets driven by pure flop/latch state outputs; reads of them are
@@ -3391,7 +3470,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         case SymbolKind::Net: {
           const auto& ns = member.as<slang::ast::NetSymbol>();
           if (const auto* expr = ns.getInitializer()) {
-            Driver        d{&member, genblk_prefix_, {}, {}, {}};
+            Driver        d{.member = &member, .prefix = genblk_prefix_};
             Dep_collector dc;
             expr->visit(dc);
             d.reads = std::move(dc.reads);
@@ -3413,28 +3492,30 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::ContinuousAssign: {
-          Driver        d{&member, genblk_prefix_, {}, {}, {}};
+          Driver        d{.member = &member, .prefix = genblk_prefix_};
           Dep_collector dc;
           member.as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(dc);
-          d.reads  = std::move(dc.reads);
-          d.writes = std::move(dc.writes);
+          d.reads     = std::move(dc.reads);
+          d.writes    = std::move(dc.writes);
+          d.rhs_reads = std::move(dc.rhs_reads);
           drivers.push_back(std::move(d));
           break;
         }
 
         case SymbolKind::ProceduralBlock: {
-          Driver        d{&member, genblk_prefix_, {}, {}, {}};
+          Driver        d{.member = &member, .prefix = genblk_prefix_};
           Dep_collector dc;
           member.as<slang::ast::ProceduralBlockSymbol>().getBody().visit(dc);
-          d.reads  = std::move(dc.reads);
-          d.writes = std::move(dc.writes);
+          d.reads     = std::move(dc.reads);
+          d.writes    = std::move(dc.writes);
+          d.rhs_reads = std::move(dc.rhs_reads);
           drivers.push_back(std::move(d));
           break;
         }
 
         case SymbolKind::Instance: {
           collect_state_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
-          Driver d{&member, genblk_prefix_, {}, {}, {}};
+          Driver d{.member = &member, .prefix = genblk_prefix_};
           for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
             const auto* expr = conn->getExpression();
             if (expr == nullptr || conn->port.kind != SymbolKind::Port) {
@@ -3499,7 +3580,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
                              "instance (pyrope emission imports it)");
             break;
           }
-          drivers.push_back(Driver{&member, genblk_prefix_, {}, {}, {}});
+          drivers.push_back(Driver{.member = &member, .prefix = genblk_prefix_});
           unknown_idx.push_back(drivers.size() - 1);
           break;
         }
@@ -3772,6 +3853,87 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           wire_syms_.insert(net);
           break;
         }
+      }
+    }
+
+    // ── REFUSE a driver order that reads a net before anyone writes it ──────
+    //
+    // Continuous assigns are ORDER-FREE in Verilog; this reader has to
+    // linearize them. Pass 2 above deliberately drops EVERY ordering edge of a
+    // driver that reads the net it writes (`i_writes_r`), because at SYMBOL
+    // granularity two partial writers reading each other's bits look like a
+    // cycle. Source order then decides — and a generate loop emitting a
+    // reduction tree ROOT-first is exactly backwards:
+    //
+    //   for (genvar level = 0; level < NumLevels; level++)          // lzc.sv:74
+    //     assign sel_nodes[2**level-1+l] = sel_nodes[2**(level+1)-1+l*2] | ...;
+    //
+    // The root reads sibling bits no driver has written yet, takes the
+    // multi-writer net's `0sb?` seed, and the whole cone folds to X. That used
+    // to ship SILENTLY at exit 0 with no diagnostic: six CVA6 modules
+    // (lzc_p1..p7) had EVERY output an x constant, twenty-six had at least one.
+    // A wrong netlist is far worse than a refused one.
+    //
+    // The test is exact and needs no bit ranges: a driver that BOTH genuinely
+    // reads and writes the net, emitted at or before the FIRST driver that
+    // writes it, is by construction reading bits nobody has written. An
+    // ordinary RMW chain (`assign x[0] = a; assign x[1] = x[0];`) has its
+    // reader strictly after the first writer and is untouched; a non-writing
+    // early reader is the back-edge `wire` case handled just above; and a legal
+    // instance state-feedback net (seq_out_nets) is excluded with it.
+    for (const auto& [net, ws] : writers_of) {
+      if (net == nullptr || ws.size() < 2 || reg_syms_.contains(net) || input_syms_.contains(net) || seq_out_nets.contains(net)
+          || wire_syms_.contains(net)) {
+        continue;
+      }
+      size_t first_write = SIZE_MAX;
+      for (size_t w : ws) {
+        first_write = std::min(first_write, pos[w]);
+      }
+      for (size_t w : ws) {
+        // ONLY a continuous assign. A procedural block ORDERS ITS OWN
+        // statements, so a process that reads and writes one net is just an
+        // ordinary sequential read — two `always` blocks sharing an `integer i`
+        // loop counter is the common shape, and flagging it is a false alarm.
+        // A continuous assign has no internal order, so a self-read there is
+        // genuinely a read of what a SIBLING driver produces.
+        if (drivers[w].member == nullptr || drivers[w].member->kind != SymbolKind::ContinuousAssign) {
+          continue;
+        }
+        if (pos[w] > first_write || !drivers[w].rhs_reads.contains(net)) {
+          continue;
+        }
+        // ...and only a PARTIAL (slice) driver. The failure is several drivers
+        // splitting one net by bits and reading each other's slices; a driver
+        // that writes the WHOLE net cannot be reading a slice a sibling owns,
+        // and its own read is overwritten by whatever writes the net last
+        // (`assign _T_619 = _T_619;`, a firrtl self-copy tautology, is the
+        // shape that makes this matter).
+        {
+          const auto& asg = drivers[w].member->as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+          if (asg.kind != slang::ast::ExpressionKind::Assignment) {
+            continue;
+          }
+          const auto* lhs = &asg.as<slang::ast::AssignmentExpression>().left();
+          while (lhs->kind == ExpressionKind::Conversion) {
+            lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (lhs->kind == ExpressionKind::NamedValue || lhs->kind == ExpressionKind::HierarchicalValue) {
+            continue;  // whole-net driver
+          }
+        }
+        const auto* member = drivers[w].member;
+        emit_unsupported(member != nullptr ? slang::SourceRange(member->location, member->location) : slang::SourceRange(),
+                         "unsupported-driver-order",
+                         std::string("--reader slang cannot order the drivers of '") + std::string(net->name)
+                             + "': a driver reads that net and also writes it, before any driver has written it, so the "
+                               "read takes the net's undefined initial value",
+                         "the reader lowers order-free continuous assigns into ORDERED statements, and a generate loop "
+                         "that assigns a reduction tree root-first reads sibling bits its later iterations produce "
+                         "(common_cells lzc.sv / rr_arb_tree.sv). Rewrite the Verilog so the net is written before it "
+                         "is read -- give each level its own net instead of slicing one, or move the assign out of the "
+                         "`for` -- or read this file with --reader yosys-slang");
+        break;  // one refusal per net is enough
       }
     }
   }
@@ -5034,6 +5196,30 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
     };
     bool harvested = harvest(cond_stmt.ifTrue);
+    // A symbol that ALSO has a continuous-assign driver is only PARTLY a
+    // register, so `full` (its whole declared width) is a denominator the reset
+    // slices can never reach — queueing it would only guarantee a spurious
+    // `unsupported-partial-async-reset` once the module has lowered. cvfpu's
+    // pipelines are exactly this shape (`assign q[0] = in;` + `FFL(q[i+1],
+    // q[i], …)`, 77 sites in CVA6). Take the pre-existing demote-to-synchronous
+    // path for those instead, which is what this reader did before the slice
+    // accumulator existed.
+    //
+    // Checked BEFORE the queueing loop below, not inside it: bailing out
+    // mid-loop would leave the SIBLING symbols already queued in
+    // pending_async_resets_ while this process is demoted to a synchronous
+    // reset, so finalize_pending_async_resets would either complete their
+    // coverage from stale slices (an async reset attr on a register whose reset
+    // was demoted) or report a partial-coverage error this process no longer
+    // owns.
+    if (harvested) {
+      for (const auto& [sym, p] : partials) {
+        if (p.mask != p.full && cont_assign_syms_.contains(sym)) {
+          harvested = false;
+          break;
+        }
+      }
+    }
     if (harvested) {
       // A single process may cover the whole register, or generated sibling
       // processes may cover disjoint slices. Queue the latter until the entire
@@ -5296,10 +5482,10 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
         ln.add_child(idx, Lnast_node::create_const("clock_pin"));
         ln.add_child(idx, Lnast_node::create_ref(lname_of(*clk_sym)));
         if (negedge) {
-          auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-          ln.add_child(idx, Lnast_node::create_ref(tgt));
-          ln.add_child(idx, Lnast_node::create_const("posclk"));
-          ln.add_child(idx, Lnast_node::create_const("false"));
+          auto neg_idx = builder_.add_child(Lnast_ntype::create_attr_set());
+          ln.add_child(neg_idx, Lnast_node::create_ref(tgt));
+          ln.add_child(neg_idx, Lnast_node::create_const("posclk"));
+          ln.add_child(neg_idx, Lnast_node::create_const("false"));
         }
       }
     }

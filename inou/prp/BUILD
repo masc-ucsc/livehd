@@ -739,6 +739,7 @@ _STATEMATCH_FIXME = [
     "mem_fwd_selfwrite",             # ref memory vs golden two-flop representation
     "mem_pending_sync_init",         # ref memory vs golden output flop representation
     "partsel_oob_ascending",         # `lhd compile` refuses the .v (negative-shift)
+    "selfref_slice_assign",          # `lhd compile` refuses the .v (unsupported-driver-order: concurrent slice assigns read each other)
     "phase_hier_latch_neg",          # regs: only 0/1 paired
     "phase_two_clock_ports",         # regs: only 0/2 paired
     "struct_top_port",               # regs: only 0/1 paired
