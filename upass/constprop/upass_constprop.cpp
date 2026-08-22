@@ -299,6 +299,35 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
 // negative via this quirk (the lone bit's zext value is 1); unknown and
 // negative-mask (carve-out) results pass through untouched.
 static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
+  // Dlop's multiword get_mask path historically lost the extra (unknown) plane
+  // for a wide positive mask: selecting bits 361..721 from a u1008 all-X value
+  // returned 361 known ones.  Besides being a needlessly hostile X refinement,
+  // that makes a Verilog -> Pyrope round trip disagree with the source under
+  // Yosys/lgcheck (the source keeps `?`, the folded Pyrope commits to ones).
+  //
+  // Rebuild positive-mask selections containing X bit-by-bit.  This is the
+  // exact get_mask contract (selected source positions packed LSB-first), and
+  // it uses Dlop's sign-extending bit accessors, so an unknown sign bit remains
+  // unknown above the stored words while a known 0/1 sign extends normally.
+  // Known-only values stay on Dlop's faster path; negative-mask carve-outs keep
+  // their existing specialized semantics.
+  if (value.has_unknowns() && !mask.has_unknowns() && !mask.is_negative()) {
+    std::string low_to_high;
+    const int   mask_bits = mask.get_bits();
+    low_to_high.reserve(static_cast<size_t>(std::max(mask_bits, 0)));
+    for (int pos = 0; pos < mask_bits; ++pos) {
+      if (!mask.bit_test(pos)) {
+        continue;
+      }
+      low_to_high.push_back(value.unknown_bit_test(pos) ? '?' : (value.bit_test(pos) ? '1' : '0'));
+    }
+    if (low_to_high.empty()) {
+      return *Dlop::create_integer(0);
+    }
+    std::reverse(low_to_high.begin(), low_to_high.end());
+    return *Dlop::from_pyrope(std::string{"0ub"} + low_to_high);
+  }
+
   Dlop r = *value.get_mask_op(mask);
   if (!mask.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
     return *Dlop::create_integer(1);

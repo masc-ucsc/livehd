@@ -305,6 +305,27 @@ TEST(UpassConstprop, FoldsGetMask) {
   EXPECT_EQ(cp.get_result("a").to_just_i64(), 0x78);
 }
 
+TEST(UpassConstprop, WideGetMaskPreservesUnknownPlane) {
+  ConstpropFixture f;
+  auto             op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_get_mask());
+  f.ln->add_child(op, Lnast_node::create_ref("a"));
+  f.ln->add_child(op, Lnast_node::create_const(Dlop::unknown(1008)->to_pyrope()));
+  f.ln->add_child(op, Lnast_node::create_const(Dlop::get_mask_value(721, 361)->to_pyrope()));
+
+  TestableConstprop cp(f.lm);
+  cp.position(op);
+  cp.push_from_cursor(&uPass_constprop::process_get_mask);
+
+  const auto result = cp.get_result("a");
+  ASSERT_TRUE(result.is_integer());
+  ASSERT_TRUE(result.has_unknowns());
+  for (int bit = 0; bit <= 360; ++bit) {
+    EXPECT_TRUE(result.unknown_bit_test(bit)) << "selected bit " << bit << " lost its unknown marker";
+  }
+  EXPECT_FALSE(result.unknown_bit_test(361));
+  EXPECT_FALSE(result.bit_test(361));
+}
+
 // ── Logical ──────────────────────────────────────────────────────────────────
 
 TEST(UpassConstprop, FoldsLogAndBothTrue) {
