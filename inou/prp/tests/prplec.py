@@ -239,7 +239,7 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
                 return 1
 
     expect = (var_test.params.get('lec_expect') or 'proven').strip().lower()
-    lec_base = _merge_sets(['formal.cache=false'],   # hermetic: no cross-run reuse
+    lec_base = _merge_sets(['lhd.incremental=false'],   # hermetic: no cross-run reuse
                            shared_compile,
                            _sets(base_test, 'lec_set'), _sets(var_test, 'lec_set'))
 

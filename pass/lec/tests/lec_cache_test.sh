@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for the 2f-fcore verdict cache (formal.cache, --workdir
+# Contract for the 2f-fcore verdict cache (lhd.incremental, --workdir
 # formal_cache.json). A def-pair whose hierarchical (Merkle) canonical digests
 # AND verdict-relevant options match a stored PROVEN record is settled with no
 # analysis at all; anything else re-proves. Soundness: only definitive Proven
@@ -98,11 +98,11 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' REFUTED"; then echo "FAIL: ref
 elif echo "$OUT" | grep -q "'leaf' PROVEN (cache)"; then echo "FAIL: a REFUTED def was served PROVEN from the cache"; fail=1
 else echo "ok: refutes always re-prove"; fi
 
-# 6) Opt-out: formal.cache=false runs with no cache at all.
-H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set formal.cache=false
+# 6) Opt-out: lhd.incremental=false runs with no cache at all.
+H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set lhd.incremental=false
 if [ "$RC" -ne 0 ]; then echo "FAIL: cache=false rc=$RC"; fail=1
-elif echo "$OUT" | grep -q "lec\[cache\]\|PROVEN (cache)"; then echo "FAIL: formal.cache=false still used the cache"; fail=1
-else echo "ok: formal.cache=false disables the cache"; fi
+elif echo "$OUT" | grep -q "lec\[cache\]\|PROVEN (cache)"; then echo "FAIL: lhd.incremental=false still used the cache"; fail=1
+else echo "ok: lhd.incremental=false disables the cache"; fi
 
 # 7) The strategy hint file section exists and records a winning engine per def.
 if ! grep -q '"hints"' "$WD/formal_cache.json"; then echo "FAIL: no hints section persisted"; fail=1

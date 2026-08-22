@@ -37,7 +37,7 @@ json_ok() {  # $1 = candidate JSON text
 #   * emit-kinds (verilog/ln/lg/...), recipes (O0/O1/O2), dump, config — these
 #     are `lhd describe` items (JSON records by design, no pretty page); reaching
 #     them via `lhd help X` is a describe courtesy, not a command help page.
-CMDS=("" compile lec formal scan tool pyrope pass sim list describe version \
+CMDS=("" compile lec formal scan tool pyrope pass sim synth list describe version \
       "tool cat" "tool grep" "tool diff" "tool tree" \
       "pass color" "pass partition" "pass single_edge" "pass abc" "pass opentimer" "pass liberty" "pass semdiff" \
       "pyrope fmt" "pyrope lsp" "formal verify" "formal lec")

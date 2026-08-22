@@ -48,6 +48,14 @@ echo "$out" | grep -q '"name":"pass.opentimer.hier","method":"pass.opentimer","d
 echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top must be hidden (use --top / lhd.top): $out"
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
+# ONE incremental switch (lhd.incremental); the per-tier cache flags are gone.
+echo "$out" | grep -q '"name":"lhd.incremental","method":"lhd","default":"true"' || fail "lhd.incremental missing/wrong: $out"
+echo "$out" | grep -q '"name":"compile.cache"' && fail "compile.cache must be gone (use lhd.incremental): $out"
+echo "$out" | grep -q '"name":"pass.abc.cache"' && fail "pass.abc.cache must be gone (use lhd.incremental): $out"
+echo "$out" | grep -q '"name":"formal.cache"' && fail "formal.cache must be gone (use lhd.incremental): $out"
+# The synth.* command namespace (kSynthSetOptions), like sim.*.
+echo "$out" | grep -q '"name":"synth.liberty","method":"synth","default":""' || fail "synth.liberty missing/wrong: $out"
+echo "$out" | grep -q '"name":"synth.opentimer","method":"synth","default":"true"' || fail "synth.opentimer missing/wrong: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
 echo "$out" | grep -q '"name":"formal.assume_check","method":"pass.lec","default":"true"' \

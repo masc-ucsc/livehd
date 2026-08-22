@@ -343,7 +343,8 @@ std::string& workdir(Options& opts) {
     if (::mkdtemp(buf.data()) == nullptr) {
       throw Lhd_error{"config", std::format("could not create scratch workdir under {}", tmpl), "pass --workdir DIR"};
     }
-    opts.workdir = buf;
+    opts.workdir         = buf;
+    opts.workdir_scratch = true;
   }
   ensure_dir(opts.workdir + "/logs");
   return opts.workdir;
@@ -552,20 +553,59 @@ void check_known_set_passes(const Options& opts) {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
       // this list in sync with apply_lhd_settings / list_set_options.
-      if (flag != "seed" && flag != "top" && flag != "stats") {
+      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental") {
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
-                        "the lhd.* namespace takes: seed, top, stats (`lhd list options lhd`)"};
+                        "the lhd.* namespace takes: seed, top, stats, incremental (`lhd list options lhd`)"};
+      }
+      if ((flag == "stats" || flag == "incremental") && value != "true" && value != "false" && value != "1" && value != "0"
+          && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config lhd.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
     }
-    if (pass == "compile" && (flag == "lnast_fmt" || flag == "cache")) {
+    if (pass == "compile" && flag == "cache") {
+      // The per-tier switch was folded into the one kernel knob: a directed
+      // answer, not the generic unknown-flag guess.
+      throw Lhd_error{
+          "usage",
+          "--set/--config 'compile.cache' was removed",
+          std::format("use --set lhd.incremental={} instead (one switch for the compile, pass.abc and formal caches)", value)};
+    }
+    if (pass == "compile" && flag == "lnast_fmt") {
       // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
-      // self-check runs, or whether Pyrope incremental compile reuse is active.
-      // Both are folded into kernel decisions and merge_sets never copies them
-      // into a pass (their `pass` matches none).
+      // self-check runs. Folded into a kernel decision; merge_sets never copies
+      // it into a pass (its `pass` matches none).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      continue;
+    }
+    if (pass == "synth") {
+      // `synth.*` is the synth-command namespace (consumed by synth_command, not
+      // a pass). Single source of truth = kSynthSetOptions.
+      const Synth_set_option* opt = nullptr;
+      for (const auto& s : kSynthSetOptions) {
+        if (s.name == flag) {
+          opt = &s;
+          break;
+        }
+      }
+      if (opt == nullptr) {
+        std::string known;
+        for (const auto& s : kSynthSetOptions) {
+          known += known.empty() ? "" : ", ";
+          known += s.name;
+        }
+        throw Lhd_error{"usage",
+                        std::format("--set/--config references unknown synth flag 'synth.{}'", flag),
+                        std::format("the synth.* namespace takes: {}; pass tuning rides the pass namespaces (abc.*, color.*, "
+                                    "opentimer.*)",
+                                    known)};
+      }
+      if (opt->kind == Synth_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
+          && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config synth.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
     }
@@ -738,16 +778,9 @@ bool lnastfmt_enabled(const Options& opts) {
   return enabled;
 }
 
-bool compile_cache_enabled(const Options& opts) {
-  bool enabled = true;
-  for (const auto& [key, value] : opts.sets) {
-    if (key != "compile.cache") {
-      continue;
-    }
-    enabled = value == "true" || value == "1" || value == "on";
-  }
-  return enabled;
-}
+// The Pyrope compile cache follows the one shared `lhd.incremental` switch
+// (apply_lhd_settings folds it into Options before any command runs).
+bool compile_cache_enabled(const Options& opts) { return opts.incremental; }
 
 // Apply every `--set <channel>.log=<level>` to the livehd::log registry (the
 // channel and level were already validated by check_known_set_passes). In a
@@ -783,6 +816,8 @@ void apply_lhd_settings(Options& opts) {
     } else if (key == "lhd.stats") {
       // canonical form of --stats; the flag and the set spelling both turn it on
       opts.stats = opts.stats || (value != "false" && value != "0" && value != "off");
+    } else if (key == "lhd.incremental") {
+      opts.incremental = value != "false" && value != "0" && value != "off";
     }
   }
 }

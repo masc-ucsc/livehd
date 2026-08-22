@@ -1206,6 +1206,22 @@ sh_test(
     ],
 )
 
+# `lhd synth`: the one-shot compile -> color synth -> abc -> opentimer flow
+# over one in-memory design, plus the ONE shared incremental switch
+# (lhd.incremental): workdir layout, the {kind:synth, abc, sta} qor member,
+# warm re-run hits at both tiers with byte-identical Verilog, an honest cold
+# run, no-workdir scratch mode with --emit-dir lg:/report:, a read-only lg:
+# input, and the negative controls (one Liberty spelling, retired cache flags).
+sh_test(
+    name = "lhd_synth_test",
+    size = "large",
+    srcs = ["lhd_synth_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
+)
+
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
 # pass.abc samples its own RSS while bit-blasting and refuses a region that will

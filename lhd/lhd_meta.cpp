@@ -15,13 +15,16 @@ namespace lhd {
 
 namespace {
 
-constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
+constexpr std::string_view kSteps
+    = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
-constexpr std::string_view kEmitKinds =
-    R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","diagnostics"])json";
+constexpr std::string_view kEmitKinds
+    = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
     R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
+
+constexpr std::string_view kJsonSynthCommand
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -618,6 +621,15 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
+  if (name == "synth") {
+    print_json_line(kJsonSynthCommand);
+    return 0;
+  }
+  if (name == "report") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"report","description":"The `lhd synth` QoR sidecars as files: qor.json (pass.abc, kind abc-map: per-region + total gates/area/critical delay) and timing.json (pass.opentimer, kind sta: max_delay, critical path, endpoints). With a --workdir they also land in <workdir>/synth/; the same two objects ride the result envelope's `qor` member either way. --emit-dir only","direction":"out"})json");
+    return 0;
+  }
   if (name == "sim") {
     print_json_line(
         R"json({"schema_version":1,"name":"sim","description":"Executable C++ simulation (inou.cgen.sim): a standalone Bazel module of per-module Slop<N> structs (functional Out cycle(In)) over the ../hlop library. Each module is a small <name>.hpp interface plus a <name>.cpp body, so a body edit recompiles only that .o. --emit-dir only; `cd DIR && bazel build //:sim`","direction":"out"})json");
@@ -752,6 +764,9 @@ void print_general_help() {
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
+      "  synth      one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA (QoR + timing)\n"
+      "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
+      "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
       "               lhd sim foo.prp my_test --arg n=4\n"
@@ -1138,7 +1153,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion);
 }
 
@@ -1199,6 +1214,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
   }
   if (topic == "sim") {  // the `sim` COMMAND, not the `sim` emit-kind describe returns
     print_json_line(kJsonSimCommand);
+    return 0;
+  }
+  if (topic == "synth") {
+    print_json_line(kJsonSynthCommand);
     return 0;
   }
   if (topic == "list") {
@@ -1621,6 +1640,56 @@ int help_command(const Options& opts) {
         "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
         "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
     return print_options_section({"sim."});
+  }
+  if (topic == "synth") {
+    std::print("{}",
+               "lhd synth — one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA\n"
+               "\n"
+               "usage: lhd synth [--top M] [--workdir W] <file.prp|file.sv|lg:DIR|ln:DIR ...> [--emit-dir lg:NET] [--stats]\n"
+               "  The four manual steps over ONE in-memory design:\n"
+               "    lhd compile X --top M --emit-dir lg:L        (sources, ln:, lg:, mixed — as `lhd compile`)\n"
+               "    lhd pass color synth --top M lg:L              (always `synth`: per-(def,color) regions)\n"
+               "    lhd pass abc --top M lg:L --emit-dir lg:NET    (ABC tech-map to the Liberty cells)\n"
+               "    lhd pass opentimer --top M lg:NET cells.lib    (STA; synth.opentimer=false skips it)\n"
+               "  --top is resolved once (a bare entity name is enough; a sole module needs none), the\n"
+               "  coloring never touches an lg: input (it happens in memory), and ONE Liberty feeds both\n"
+               "  abc and opentimer. Other colorings are the manual steps, not a synth knob.\n"
+               "\n"
+               "  --workdir is optional. With one, <workdir>/synth/ keeps:\n"
+               "    lg/          the compiled design   (`lhd lec --ref lg:W/synth/lg ...` pairs against it)\n"
+               "    net/         the mapped netlist    (--emit-dir lg: relocates it instead)\n"
+               "    qor.json     pass.abc QoR          timing.json  pass.opentimer critical path\n"
+               "  and the incremental tiers are live: the compile cache and <workdir>/abc_cache reuse\n"
+               "  everything unchanged since the last run (lhd.incremental, default true; =false is an\n"
+               "  honest cold run with byte-identical outputs). Without --workdir the flow runs in a\n"
+               "  scratch dir: only --emit-dir lg:/verilog:/report: and the printed report survive.\n"
+               "\n"
+               "report:\n"
+               "  default   one abc-map line (regions, gates, area, max delay) + the STA critical path\n"
+               "  --stats   plus one row per (definition, color) from abc and from opentimer (resynth=1|0)\n"
+               "  --result-json: the envelope's `qor` member is {kind:\"synth\", abc:{...}, sta:{...}}, plus\n"
+               "  `phases` (per-step ms) and `incremental.{compile,abc}` (hits/misses/ms per reuse tier);\n"
+               "  --stats also prints those as `incremental[stats]:` + `phases[stats]:` rows\n"
+               "\n"
+               "flags:\n"
+               "  --top M                    top module (bare entity or file.entity)\n"
+               "  --workdir W                keep intermediates + reports under W/synth/, enable incremental reuse\n"
+               "  --emit-dir lg:DIR/         the mapped netlist library (instead of W/synth/net)\n"
+               "  --emit-dir report:DIR/     copy qor.json + timing.json into DIR (handy without --workdir)\n"
+               "  --emit verilog:FILE        the mapped netlist as Verilog (also --emit-dir verilog:DIR/)\n"
+               "  --stats                    the per-color rows (see report:)\n"
+               "  --reader / --recipe        the `lhd compile` front-end knobs (slang by default; O1)\n"
+               "  --set synth.flag=value     the flow knobs (below); pass tuning rides the pass namespaces:\n"
+               "                             --set abc.adder=cla  --set color.absorb=false  --set opentimer.hier=false\n"
+               "  --set lhd.incremental=false  cold run (no compile-cache / abc_cache reuse)\n"
+               "\n"
+               "examples:\n"
+               "  lhd synth cpu.prp --top Cpu --workdir W                  # reports in W/synth/; re-run is incremental\n"
+               "  lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json\n"
+               "  lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep\n"
+               "  lhd synth cpu.sv --top cpu --set synth.liberty=cells.lib --set synth.opentimer=false\n"
+               "  lhd synth cpu.prp --top Cpu --set abc.adder=cla --emit verilog:net.v\n");
+    return print_options_section({"synth."});
   }
   if (topic == "list") {
     std::print(

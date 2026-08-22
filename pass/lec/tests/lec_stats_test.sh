@@ -37,7 +37,7 @@
 #      discharges ALL of them, and prove_equal then returns Proven from the
 #      `bad.isNull()` branch (query.cpp, "; every cut discharged by the cone pass")
 #      having never called solver.checkSat();
-#   2. the verdict cache (formal.cache, default true whenever --workdir is given)
+#   2. the verdict cache (lhd.incremental, default true whenever --workdir is given)
 #      replays a stored PROVEN record -- so the SECOND run of this script against the
 #      same $W settles with no solver at all. That is every hand-run: TEST_TMPDIR is
 #      unset outside bazel and $W falls back to a persistent /tmp/lecstats.
@@ -101,7 +101,7 @@ grep -q "PROVEN equivalent" "$OUT" || { echo "FAIL: the fixture stopped being PR
 
 # 2) *** THE FORK GATE *** engine=auto races ind|bmc in two FORKED children, so
 #    everything asserted here had to cross the wire codec to be visible at all.
-run_lec fork --set formal.engine=auto --set formal.cones=false --set formal.cache=false --stats
+run_lec fork --set formal.engine=auto --set formal.cones=false --set lhd.incremental=false --stats
 if grep -q "raced ind|bmc" "$OUT"; then
   echo "ok: the fixture really did fork (raced ind|bmc)"
 else
@@ -135,7 +135,7 @@ fi
 
 # 3) The canonical per-pass spelling is equivalent to the CLI sugar. `--stats` is
 #    lhd-global; `formal.stats` is what `lhd describe`/`--set` list.
-run_lec canon --set formal.engine=auto --set formal.cones=false --set formal.cache=false --set formal.stats=true
+run_lec canon --set formal.engine=auto --set formal.cones=false --set lhd.incremental=false --set formal.stats=true
 if [ "$(grep -c 'stats\]:' "$OUT")" -ge 5 ]; then
   echo "ok: --set formal.stats=true is equivalent to --stats"
 else

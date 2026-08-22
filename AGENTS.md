@@ -59,7 +59,15 @@ per-step logs land under `--workdir`. Examples:
 lhd compile foo.v --reader yosys-verilog --top foo --recipe O1 --emit verilog:out.v
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
 lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set lec.solver=lgyosys
+lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> abc -> opentimer, one shot
 ```
+`lhd synth` is the fused synthesis flow (reports in `W/synth/`; `--emit-dir
+lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the
+individual `lhd pass color|abc|opentimer` steps remain for any other
+coloring or for inspecting intermediates. Every persistent reuse tier (the
+compile cache, `abc_cache/`, the formal verdict cache) lives under a
+user-named `--workdir` and follows the ONE switch `--set
+lhd.incremental=true|false` (default true) — there is no per-tier cache flag.
 Internally lhd drives the registered EPRP methods (conceptually the pipe
 `inou.yosys.tolg |> pass.cprop |> inou.cgen.verilog`); pass/inou names in
 `--set` and the step logs use that vocabulary.

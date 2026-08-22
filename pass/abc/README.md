@@ -233,7 +233,8 @@ lossy, so exact gate lineage is unrecoverable.
 The oracle loop — edit a little RTL, resynthesize, compare QoR — changes a handful
 of regions per iteration; the rest map to the *same* netlist. `--workdir W` turns
 on a persistent per-region cache (under `W/abc_cache`) that skips ABC for any
-region whose pre-ABC logic is unchanged. The cache is a **speedup, never an oracle
+region whose pre-ABC logic is unchanged (the one shared switch is
+`--set lhd.incremental=false`; there is no per-pass cache flag). The cache is a **speedup, never an oracle
 of record**: a miss only costs an ABC run, and every reuse is gated by an *exact*
 structural compare (not a digest whose collision would miscompile). Regions
 correspond by **module name**, and are stitched into the fresh wrapper by

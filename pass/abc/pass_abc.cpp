@@ -99,18 +99,12 @@ void Pass_abc::setup() {
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
                        "");
-  m.add_label_optional("cache",
-                       "true|false INCREMENTAL synthesis (2opt-incr): keep a persistent cache of previously mapped "
-                       "regions under --workdir (abc_cache/), content-addressed by a canonical region digest. A "
-                       "region whose logic, boundary and resolved ABC recipe are unchanged since a prior run is "
-                       "cloned from the cache instead of re-running ABC -- a small RTL edit then re-synthesizes only "
-                       "the regions it touched. Salted by the Liberty content and the register/memory mapping mode. "
-                       "Only active with a user --workdir (a scratch dir would start cold every run) -- the "
-                       "formal.cache convention",
-                       "true");
   m.add_label_optional("cache_dir",
-                       "INTERNAL kernel plumbing: the cache directory, always <workdir>/abc_cache (set after user "
-                       "--set merging, so it is not customizable). Empty = no workdir = no cache",
+                       "INTERNAL kernel plumbing: the INCREMENTAL synthesis region cache (2opt-incr) directory, always "
+                       "<workdir>/abc_cache (set after user --set merging, so it is not customizable). A region whose "
+                       "logic, boundary and resolved ABC recipe are unchanged since a prior run is cloned from the cache "
+                       "instead of re-running ABC; salted by the Liberty content and the register/memory mapping mode. "
+                       "Empty = no user --workdir, or `lhd.incremental=false` = no cache",
                        "");
   m.add_label_optional("flatten",
                        "auto|true|false whole-design flatten: inline the instance hierarchy and map the flat design as "
@@ -586,18 +580,15 @@ void Pass_abc::work(Eprp_var& var) {
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 
-  // Incremental region cache (2opt-incr A+C). ON by default, but only WITH a
-  // place to live: the kernel points cache_dir at <workdir>/abc_cache exactly
-  // when the user passed --workdir (the formal.cache convention -- a fabricated
-  // scratch workdir would start cold every run and cache into a dir about to
-  // vanish). Constructed before the mapper so a salt mismatch (edited Liberty,
-  // different mapping mode) starts cold before any region is digested. The out
-  // dir is wiped by the kernel every run, so a cache living inside it would
-  // self-destruct -- refuse the overlap.
-  auto cache_dir = std::string{var.get("cache_dir", "")};
-  if (!truthy(var.get("cache", "true"))) {
-    cache_dir.clear();
-  }
+  // Incremental region cache (2opt-incr A+C). ON by default (`lhd.incremental`),
+  // but only WITH a place to live: the kernel points cache_dir at
+  // <workdir>/abc_cache exactly when the user passed --workdir (the formal-cache
+  // convention -- a fabricated scratch workdir would start cold every run and
+  // cache into a dir about to vanish). Constructed before the mapper so a salt
+  // mismatch (edited Liberty, different mapping mode) starts cold before any
+  // region is digested. The out dir is wiped by the kernel every run, so a cache
+  // living inside it would self-destruct -- refuse the overlap.
+  auto                                     cache_dir = std::string{var.get("cache_dir", "")};
   std::unique_ptr<livehd::abc::Incr_cache> incr;
   if (!cache_dir.empty()) {
     std::error_code ec;

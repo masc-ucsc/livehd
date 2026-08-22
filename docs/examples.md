@@ -29,6 +29,32 @@ Newer chisel/firrtl generation: (like using until reserved SV keyword)
  ./bazel-bin/lhd/lhd compile --top XSCore --emit-dir pyrope:xs_core_prp -- -F ../xs/repo/build/rtl/filelist.f -DSYNTHESIZE -Wno-implicit-conv -Wno-unconnected-port
 ```
 
+## One-shot synthesis (`lhd synth`)
+
+The fused flow — compile -> `pass color synth` -> `pass abc` -> `pass
+opentimer` over one in-memory design. `--top` takes the bare entity, one
+Liberty feeds both abc and opentimer (`synth.liberty`, default
+`$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), and with a `--workdir`
+the compiled design, the mapped netlist and both reports land under
+`W/synth/` while a re-run reuses everything unchanged (compile cache +
+`abc_cache/`; `--set lhd.incremental=false` forces an honest cold run with the
+same netlist):
+
+```
+./bazel-bin/lhd/lhd synth dino_prp/PipelinedDualIssueCPU.prp --top PipelinedDualIssueCPU --workdir W --stats
+#   W/synth/lg        the compiled design   (lec reference: --ref lg:W/synth/lg)
+#   W/synth/net       the mapped netlist    (--emit-dir lg:DIR relocates it)
+#   W/synth/qor.json  pass.abc QoR;  W/synth/timing.json  the OpenTimer critical path
+./bazel-bin/lhd/lhd synth lg:dino_lg --top PipelinedDualIssueCPU --emit-dir lg:dino_net --emit-dir report:rep
+./bazel-bin/lhd/lhd synth dino_prp/PipelinedDualIssueCPU.prp --top PipelinedDualIssueCPU \
+    --set abc.adder=cla --set synth.opentimer=false --emit verilog:net.v --result-json r.json
+```
+
+`--result-json`'s `qor` member is `{kind:"synth", abc:{...}, sta:{...}}` — each
+sub-object exactly what the standalone pass embeds. The manual steps below stay
+the way to run a different coloring (`synth` colors with `synth`, always) or
+to look at an intermediate.
+
 ## Synthesis + timing QoR on one XiangShan module (2opt-freq loop)
 
 The frequency-optimization loop primitives on `xs_core_prp/Alu.prp` (imports

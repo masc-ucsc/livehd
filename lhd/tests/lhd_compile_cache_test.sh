@@ -77,8 +77,8 @@ PY
 
 # Cold: both closure files parse/lower and the exact shared-layout artifacts land.
 compile "$W/cold.json"
-[ "$(field "$W/cold.json" compile_cache.enabled)" = true ] || fail "cache not enabled with named workdir"
-[ "$(field "$W/cold.json" compile_cache.misses)" = 3 ] || fail "cold closure did not report three misses"
+[ "$(field "$W/cold.json" incremental.compile.enabled)" = true ] || fail "cache not enabled with named workdir"
+[ "$(field "$W/cold.json" incremental.compile.misses)" = 3 ] || fail "cold closure did not report three misses"
 has_phase "$W/cold.json" pass.upass || fail "cold compile skipped upass"
 SCOPE="$W/w/incr/scopes/compile/top"
 [ -f "$SCOPE/inventory.json" ] || fail "scope inventory missing"
@@ -103,8 +103,8 @@ LEAF_LNAST_INODE=$(inode "$SCOPE/ln/${LEAF_SNAPSHOT%.prp}/tree.bin") || fail "mi
 
 # Byte-identical warm run: no parser redo and no lower/recipe/formal work.
 compile "$W/warm.json"
-[ "$(field "$W/warm.json" compile_cache.misses)" = 0 ] || fail "warm compile reported a miss"
-[ "$(field "$W/warm.json" compile_cache.hits)" -ge 6 ] || fail "warm compile did not restore parse+graph units"
+[ "$(field "$W/warm.json" incremental.compile.misses)" = 0 ] || fail "warm compile reported a miss"
+[ "$(field "$W/warm.json" incremental.compile.hits)" -ge 6 ] || fail "warm compile did not restore parse+graph units"
 has_phase "$W/warm.json" pass.upass && fail "warm compile reran upass"
 has_phase "$W/warm.json" lnast.tolg && fail "warm compile reran tolg"
 [ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] || fail "warm lg is not structurally identical to cold"
@@ -127,7 +127,7 @@ p = Path(__import__('sys').argv[1])
 p.write_text("// comment-only edit\n" + p.read_text())
 PY
 compile "$W/comment.json"
-[ "$(field "$W/comment.json" compile_cache.misses)" = 1 ] || fail "comment edit did not reparse exactly one file"
+[ "$(field "$W/comment.json" incremental.compile.misses)" = 1 ] || fail "comment edit did not reparse exactly one file"
 has_phase "$W/comment.json" pass.upass && fail "comment edit unnecessarily reran upass"
 [ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] || fail "comment-hit lg differs structurally from cold"
 # The manifest is the Tier-A commit point. A one-file comment update replaces
@@ -151,9 +151,9 @@ d["context"] += "|manufactured-collision"
 p.write_text(json.dumps(d, separators=(",", ":")) + "\n")
 PY
 compile "$W/context_mismatch.json"
-[ "$(field "$W/context_mismatch.json" compile_cache.refused)" -ge 1 ] \
+[ "$(field "$W/context_mismatch.json" incremental.compile.refused)" -ge 1 ] \
   || fail "exact context mismatch was not refused"
-[ "$(field "$W/context_mismatch.json" compile_cache.misses)" = 3 ] \
+[ "$(field "$W/context_mismatch.json" incremental.compile.misses)" = 3 ] \
   || fail "context mismatch did not rebuild the complete source closure"
 [ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
   || fail "context-mismatch rebuild differs structurally from cold"
@@ -193,16 +193,16 @@ for graph in old_graph["graphs"]:
 (old / "lg/graph_inventory.json").write_text(json.dumps(old_graph, separators=(",", ":")) + "\n")
 PY
 compile "$W/edit.json"
-[ "$(field "$W/edit.json" compile_cache.misses)" = 1 ] || fail "semantic edit did not miss the changed file"
+[ "$(field "$W/edit.json" incremental.compile.misses)" = 1 ] || fail "semantic edit did not miss the changed file"
 has_phase "$W/edit.json" pass.upass || fail "semantic-hash collision incorrectly restored stale graphs"
-[ "$(field "$W/edit.json" compile_cache.hits)" -ge 2 ] || fail "semantic edit did not reuse the unrelated side unit"
+[ "$(field "$W/edit.json" incremental.compile.hits)" -ge 2 ] || fail "semantic edit did not reuse the unrelated side unit"
 [ "$("$LHD" tool diff "lg:$W/cold_lg" "lg:$W/lg" --structural -q)" != identical ] \
   || fail "structural H5 checker accepted a real semantic edit"
 
 # Partial dirty-cone H5: compare the mixed restored+fresh result against an
 # honestly cache-disabled compile of the edited source.
 "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/edit_cold_lg" --workdir "$W/edit_cold_w" \
-  --set compile.cache=false -q --result-json "$W/edit_cold.json" || fail "semantic-edit cold reference failed"
+  --set lhd.incremental=false -q --result-json "$W/edit_cold.json" || fail "semantic-edit cold reference failed"
 [ "$("$LHD" tool diff "lg:$W/edit_cold_lg" "lg:$W/lg" --structural -q)" = identical ] \
   || fail "mixed restored+fresh semantic edit differs from cold"
 
@@ -216,7 +216,7 @@ p = Path(__import__('sys').argv[1])
 p.write_bytes(b"damaged")
 PY
 compile_lg_only "$W/damaged.json" "$W/lg"
-[ "$(field "$W/damaged.json" compile_cache.refused)" -ge 1 ] || fail "damaged cache was not attributed as refused"
+[ "$(field "$W/damaged.json" incremental.compile.refused)" -ge 1 ] || fail "damaged cache was not attributed as refused"
 has_phase "$W/damaged.json" pass.upass || fail "damaged cache did not recover through a cold rebuild"
 
 # A leaf gaining state changes its implicit clock interface and therefore every
@@ -233,7 +233,7 @@ compile "$W/stateful.json"
 has_phase "$W/stateful.json" pass.upass || fail "stateful exporter did not invalidate its importer"
 grep -q 'input.*clock' "$W/v/"*.v || fail "leaf state did not re-port the parent clock"
 "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/stateful_cold_lg" --workdir "$W/stateful_cold_w" \
-  --set compile.cache=false -q --result-json "$W/stateful_cold.json" || fail "stateful cold reference failed"
+  --set lhd.incremental=false -q --result-json "$W/stateful_cold.json" || fail "stateful cold reference failed"
 STATE_DIFF=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --structural -q)
 STATE_TEXT=$("$LHD" tool diff "lg:$W/stateful_cold_lg" "lg:$W/lg" --top leaf.add1 -q)
 [ "$STATE_DIFF" = identical ] || fail "statefulness dirty cone differs from cold: $STATE_DIFF; $STATE_TEXT"
@@ -249,9 +249,9 @@ PY
 )
 rm -f "$SCOPE/pyrope/$SNAPSHOT"
 compile "$W/missing_snapshot.json"
-[ "$(field "$W/missing_snapshot.json" compile_cache.refused)" -ge 1 ] \
+[ "$(field "$W/missing_snapshot.json" incremental.compile.refused)" -ge 1 ] \
   || fail "missing Tier-A snapshot was not attributed as refused"
-[ "$(field "$W/missing_snapshot.json" compile_cache.misses)" = 1 ] \
+[ "$(field "$W/missing_snapshot.json" incremental.compile.misses)" = 1 ] \
   || fail "missing Tier-A snapshot did not reparse exactly its unit"
 
 [ "$(cat "$W/w/abc_cache/owner")" = abc-owned ] || fail "compile collided with the abc workdir tenant"
@@ -260,9 +260,9 @@ compile "$W/missing_snapshot.json"
 
 # The off switch leaves no ambiguity in telemetry and always runs the full path.
 "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/off_lg" --workdir "$W/off_w" \
-  --set compile.cache=false -q --result-json "$W/off.json" || fail "cache-off compile failed"
-[ "$(field "$W/off.json" compile_cache.enabled)" = false ] || fail "cache-off telemetry says enabled"
-[ "$(field "$W/off.json" compile_cache.hits)" = 0 ] || fail "cache-off reported hits"
+  --set lhd.incremental=false -q --result-json "$W/off.json" || fail "cache-off compile failed"
+[ "$(field "$W/off.json" incremental.compile.enabled)" = false ] || fail "cache-off telemetry says enabled"
+[ "$(field "$W/off.json" incremental.compile.hits)" = 0 ] || fail "cache-off reported hits"
 has_phase "$W/off.json" pass.upass || fail "cache-off did not run the full path"
 [ ! -e "$W/off_w/incr" ] || fail "cache-off created persistent incremental state"
 
@@ -277,7 +277,7 @@ if "$LHD" compile "$W/src/top.prp" --top top --emit-dir "lg:$W/store_fail_lg" \
   fail "compile succeeded after a cache store failure"
 fi
 chmod 700 "$W/store_fail_w/incr/scopes/compile/top"
-[ "$(field "$W/store_fail.json" compile_cache.store_failed)" -ge 1 ] \
+[ "$(field "$W/store_fail.json" incremental.compile.store_failed)" -ge 1 ] \
   || fail "cache store failure was not reported"
 
 # Rename/delete: a semantic rebuild prunes the removed graph from both the
@@ -336,7 +336,7 @@ EOF
   --result-json "$W/shared_sim.json" || fail "shared-workdir sim failed"
 
 compile "$W/post_shared.json"
-[ "$(field "$W/post_shared.json" compile_cache.misses)" = 0 ] \
+[ "$(field "$W/post_shared.json" incremental.compile.misses)" = 0 ] \
   || fail "sibling workdir tenants evicted the compile scope"
 [ -d "$W/w/abc_cache" ] || fail "shared-workdir abc tenant missing"
 [ -s "$W/w/formal_cache.json" ] || fail "shared-workdir formal tenant missing"
@@ -473,12 +473,12 @@ p.write_text(p.read_text().replace("a + 1", "a + 3"))
 PY
 fcompile "$FW/edit.json" "$FW/edit.jsonl"
 has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the dirty cone"
-[ "$(field "$FW/edit.json" compile_cache.refused)" -ge 1 ] \
+[ "$(field "$FW/edit.json" incremental.compile.refused)" -ge 1 ] \
   || fail "a partial restore of a warning-carrying generation was not counted as refused"
 [ "$(fwarns "$FW/edit.jsonl")" = "$COLD_WARNS" ] \
   || fail "semantic edit did not reproduce the pass.formal warnings live"
 "$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/edit_cold_lg" \
-  --workdir "$FW/edit_cold_w" --set compile.cache=false -q --result-json "$FW/edit_cold.json" \
+  --workdir "$FW/edit_cold_w" --set lhd.incremental=false -q --result-json "$FW/edit_cold.json" \
   || fail "formal-warning cold reference failed"
 [ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
   || fail "refused partial restore diverged from cold"

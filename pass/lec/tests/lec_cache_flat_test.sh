@@ -7,7 +7,7 @@
 # and so stores/hits exactly ONE verdict. Cold run stores; identical warm re-run hits
 # ("PROVEN (cache)", no solver); a verdict-relevant option change (bound) is a new key
 # (miss); a design edit is a new digest (miss); a REFUTE is never cached;
-# formal.cache=false opts out.
+# lhd.incremental=false opts out.
 
 set -u
 
@@ -70,9 +70,9 @@ OUT=$(H c.v a.v)
 ckn "$OUT" "0 hit(s), 1 stored" "REFUTE never stored"   # a fresh store line would list >=1 stored for THIS run; c!=a refutes
 ck  "$OUT" "REFUTED"            "c vs a refutes"
 
-# 5) formal.cache=false opts out (no cache line at all even with a --workdir).
-OUT=$(H b.v a.v --set formal.cache=false)
-ckn "$OUT" "lec\[cache\]:" "formal.cache=false opts out of the cache"
+# 5) lhd.incremental=false opts out (no cache line at all even with a --workdir).
+OUT=$(H b.v a.v --set lhd.incremental=false)
+ckn "$OUT" "lec\[cache\]:" "lhd.incremental=false opts out of the cache"
 
 if [ $fail -ne 0 ]; then echo "lec_cache_flat_test: FAILED"; exit 1; fi
 echo "lec_cache_flat_test: PASSED"

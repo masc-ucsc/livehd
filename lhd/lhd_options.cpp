@@ -33,6 +33,7 @@ const std::vector<std::string_view> kOutputKinds{"ln",
                                                  "graphviz",
                                                  "metadata",
                                                  "results",
+                                                 "report",
                                                  "diagnostics"};
 
 std::string canonical_kind(std::string_view kind) {
@@ -305,7 +306,7 @@ void load_config(Options& opts) {
   // ignored (one lhd.toml can serve every step of a flow), so only the
   // recipe-consuming commands pick it up.
   opts.sets.insert(opts.sets.begin(), file_sets.begin(), file_sets.end());
-  if (opts.recipe.empty() && opts.command == "compile") {
+  if (opts.recipe.empty() && (opts.command == "compile" || opts.command == "synth")) {
     opts.recipe = file_recipe;
   }
 }
@@ -648,15 +649,19 @@ Options parse_args(int argc, char** argv) {
                         "the LSP server is now `lhd pyrope lsp` (not `lhd lsp`)",
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
-      if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim"
-          || a == "formal") {
+      if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe" || a == "version"
+          || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim" || a == "synth" || a == "formal") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
         // `tools` is silently accepted as an alias for `tool` (common typo).
         opts.command = (a == "tools") ? std::string{"tool"} : std::string{a};
-        cmd_path     = opts.command;  // command-path root for --set abbreviation (2h-set_path)
+        // Command-path root for --set abbreviation (2h-set_path). `synth` runs
+        // the pass.color / pass.abc / pass.opentimer steps, so its root is
+        // `pass`: `--set abc.adder=cla` resolves to pass.abc exactly as it does
+        // after `lhd pass abc` (the synth.* namespace itself never collects a
+        // prefix — canonical_set_key keeps it verbatim).
+        cmd_path     = (a == "synth") ? std::string{"pass"} : opts.command;
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
@@ -666,7 +671,7 @@ Options parse_args(int argc, char** argv) {
       // may intervene); inferred from the source-file extensions (.prp ->
       // pyrope, .v/.sv -> verilog) when omitted.
       opts.language = a;
-    } else if (opts.command == "compile" || opts.command == "pass" || opts.command == "sim") {
+    } else if (opts.command == "compile" || opts.command == "pass" || opts.command == "sim" || opts.command == "synth") {
       // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
       // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
       // `sim` positionals are the .prp source(s) plus an optional test selector,
@@ -713,7 +718,7 @@ Options parse_args(int argc, char** argv) {
   // and reports its own real error.
   if (!want_help && n_user_tokens == 1
       && (opts.command == "compile" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool"
-          || opts.command == "pass" || opts.command == "sim" || opts.command == "formal")) {
+          || opts.command == "pass" || opts.command == "sim" || opts.command == "synth" || opts.command == "formal")) {
     want_help = true;
   }
 
@@ -734,8 +739,8 @@ Options parse_args(int argc, char** argv) {
   load_config(opts);
 
   // Infer the source language from the file extensions when not given.
-  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "sim") && opts.language.empty()
-      && !opts.files.empty()) {
+  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "sim" || opts.command == "synth")
+      && opts.language.empty() && !opts.files.empty()) {
     bool any_prp = false;
     bool any_v   = false;
     for (const auto& f : opts.files) {
@@ -760,8 +765,8 @@ Options parse_args(int argc, char** argv) {
   // sources via the raw `--` args (e.g. `-- -F filelist.f`) instead of a
   // positional .v file, in which case there is no extension to infer from, so
   // pin the language to verilog.
-  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && !opts.raw_args.empty()
-      && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
+  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth") && opts.language.empty()
+      && !opts.raw_args.empty() && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
     opts.language = "verilog";
   }
 

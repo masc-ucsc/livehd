@@ -400,6 +400,17 @@ void write_pretty_qor(const std::string& qor_json, bool stats) {
       rendered = write_pretty_sta(d, stats);
     } else if (kind == "abc-map") {
       rendered = write_pretty_abc_map(d, stats);
+    } else if (kind == "synth") {
+      // `lhd synth`: the abc-map summary, then the STA report (absent when
+      // synth.opentimer=false). Each sub-report renders exactly as its pass's
+      // own envelope would, so the one-shot and the manual steps read alike.
+      rendered = true;
+      if (auto a = d.FindMember("abc"); a != d.MemberEnd() && a->value.IsObject()) {
+        rendered = write_pretty_abc_map(a->value, stats) && rendered;
+      }
+      if (auto s = d.FindMember("sta"); s != d.MemberEnd() && s->value.IsObject()) {
+        rendered = write_pretty_sta(s->value, stats) && rendered;
+      }
     }
   }
   if (!rendered) {
@@ -490,6 +501,52 @@ void write_pretty(const Options& opts, const Result& res) {
   if (!res.qor_json.empty()) {
     write_pretty_qor(res.qor_json, opts.stats);
   }
+  if (opts.stats) {
+    // The reuse tiers and where the time went -- the rows a stats report
+    // builder wants, printed in the same `<what>[stats]:` shape as the
+    // per-color rows above (the JSON twin is the envelope's `incremental` and
+    // `phases` members).
+    if (res.compile_cache.present) {
+      std::print("  incremental[stats]: compile enabled={} hits={} misses={} redone={:.1f}ms refused={} store_failed={}\n",
+                 res.compile_cache.enabled,
+                 res.compile_cache.hits,
+                 res.compile_cache.misses,
+                 res.compile_cache.redone_ms,
+                 res.compile_cache.refused,
+                 res.compile_cache.store_failed);
+    }
+    if (res.abc_incr.present) {
+      std::print("  incremental[stats]: abc enabled={} regions={} hits={} misses={} hit={:.1f}ms miss={:.1f}ms store_failed={}\n",
+                 res.abc_incr.enabled,
+                 res.abc_incr.regions,
+                 res.abc_incr.hits,
+                 res.abc_incr.misses,
+                 res.abc_incr.hit_ms,
+                 res.abc_incr.miss_ms,
+                 res.abc_incr.store_failed);
+    }
+    if (!res.phase_ms.empty()) {
+      // One row, execution order, duplicates summed (a step that ran twice
+      // is one number here, as the JSON consumer is told to sum it).
+      std::vector<std::pair<std::string, double>> rows;
+      double                                      total = 0;
+      for (const auto& [name, ms] : res.phase_ms) {
+        total   += ms;
+        auto it  = std::find_if(rows.begin(), rows.end(), [&](const auto& r) { return r.first == name; });
+        if (it == rows.end()) {
+          rows.emplace_back(name, ms);
+        } else {
+          it->second += ms;
+        }
+      }
+      std::string line = "  phases[stats]:";
+      for (const auto& [name, ms] : rows) {
+        line += std::format(" {}={:.1f}ms", name, ms);
+      }
+      line += std::format(" total={:.1f}ms", total);
+      std::print("{}\n", line);
+    }
+  }
   if (res.status != "pass") {
     std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);
     if (!res.error_hint.empty()) {
@@ -512,7 +569,7 @@ std::string compute_run_id(const Options& opts) {
   // Hash the RESOLVED config: the implicit default recipe must hash the same
   // as the equivalent explicit --recipe.
   std::string recipe  = opts.recipe;
-  if (recipe.empty() && opts.command == "compile") {
+  if (recipe.empty() && (opts.command == "compile" || opts.command == "synth")) {
     recipe = "O1";
   }
   buf += std::format("|top={}|reader={}|recipe={}", opts.top, opts.reader, recipe);
@@ -657,22 +714,54 @@ void write_result(const Options& opts, const Result& res) {
     w.EndArray();
   }
 
-  if (res.compile_cache.present) {
-    w.Key("compile_cache");
+  // Incremental-reuse telemetry, one object per tier (`lhd.incremental`). The
+  // compile tier is the kernel's own; pass.abc's counters ride the embedded
+  // "qor" member (its `incremental` object) and the formal verdict cache its
+  // own report lines.
+  if (res.compile_cache.present || res.abc_incr.present) {
+    w.Key("incremental");
     w.StartObject();
-    w.Key("enabled");
-    w.Bool(res.compile_cache.enabled);
-    w.Key("hits");
-    w.Uint64(res.compile_cache.hits);
-    w.Key("misses");
-    w.Uint64(res.compile_cache.misses);
-    w.Key("redone_ms");
-    const auto redone_txt = std::format("{:.3f}", res.compile_cache.redone_ms);
-    w.RawValue(redone_txt.data(), redone_txt.size(), rapidjson::kNumberType);
-    w.Key("store_failed");
-    w.Uint64(res.compile_cache.store_failed);
-    w.Key("refused");
-    w.Uint64(res.compile_cache.refused);
+    if (res.compile_cache.present) {
+      w.Key("compile");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.compile_cache.enabled);
+      w.Key("hits");
+      w.Uint64(res.compile_cache.hits);
+      w.Key("misses");
+      w.Uint64(res.compile_cache.misses);
+      w.Key("redone_ms");
+      const auto redone_txt = std::format("{:.3f}", res.compile_cache.redone_ms);
+      w.RawValue(redone_txt.data(), redone_txt.size(), rapidjson::kNumberType);
+      w.Key("store_failed");
+      w.Uint64(res.compile_cache.store_failed);
+      w.Key("refused");
+      w.Uint64(res.compile_cache.refused);
+      w.EndObject();
+    }
+    if (res.abc_incr.present) {
+      // Mirrors the abc-map report's own `incremental` object (qor.abc),
+      // so a report builder keys on ONE member for every tier.
+      w.Key("abc");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.abc_incr.enabled);
+      w.Key("hits");
+      w.Uint64(res.abc_incr.hits);
+      w.Key("misses");
+      w.Uint64(res.abc_incr.misses);
+      w.Key("hit_ms");
+      const auto hit_txt = std::format("{:.3f}", res.abc_incr.hit_ms);
+      w.RawValue(hit_txt.data(), hit_txt.size(), rapidjson::kNumberType);
+      w.Key("miss_ms");
+      const auto miss_txt = std::format("{:.3f}", res.abc_incr.miss_ms);
+      w.RawValue(miss_txt.data(), miss_txt.size(), rapidjson::kNumberType);
+      w.Key("regions");
+      w.Uint64(res.abc_incr.regions);
+      w.Key("store_failed");
+      w.Uint64(res.abc_incr.store_failed);
+      w.EndObject();
+    }
     w.EndObject();
   }
 

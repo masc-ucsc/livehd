@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # End-to-end test for INCREMENTAL `lhd pass abc` (todo/livehd/2opt-incr A+C):
-# a persistent region cache (--set abc.cache=DIR) content-addressed by a
+# a persistent region cache (under --workdir, lhd.incremental) content-addressed by a
 # canonical region digest. The properties under test, in order of importance:
 #
 #   1. SOUNDNESS: a netlist assembled from cached + fresh regions is
@@ -31,8 +31,18 @@ fail() {
 }
 run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"; }
 
-# hits/misses from the LAST run's qor envelope: "incremental":{"hits":H,"misses":M,...}
-incr_field() { sed -n 's/.*"incremental":{[^}]*"'"$1"'":\([0-9]*\).*/\1/p' "$W/r.json"; }
+# hits/misses from the LAST run's qor report: qor.incremental.{hits,misses,abc_started}
+# ("" when the cache did not run; the envelope's own `incremental.abc` member
+# then still says enabled=false, which is why this reads the qor object).
+incr_field() {
+  python3 - "$W/r.json" "$1" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["qor"]["incremental"][sys.argv[2]])
+except Exception:
+    print("")
+PY
+}
 region_count() { grep -o '"resynth":[01]' "$W/r.json" | wc -l | tr -d ' '; }
 resynth_count() { grep -o '"resynth":1' "$W/r.json" | wc -l | tr -d ' '; }
 expect_incr() {
@@ -64,7 +74,7 @@ compile_and_color() {  # $1 = lg dir tag
 
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
-  # (<workdir>/abc_cache, the formal.cache convention), on by default.
+  # (<workdir>/abc_cache), on by default (lhd.incremental).
   run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set abc.library="$LIB" \
       --workdir "$W/wabc" --stats
 }
@@ -129,16 +139,16 @@ expect_resynth 3 0 "NoChange after the edit"
 [ "$(incr_field abc_started)" = 0 ] || fail "all-hit edited run still started ABC/read Liberty"
 
 # --- 5. the off switch and the no-workdir gate --------------------------------
-# cache=false: no cache is touched and the envelope carries no counters.
+# lhd.incremental=false: no cache is touched and the envelope carries no counters.
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set abc.library="$LIB" \
-    --set abc.cache=false --workdir "$W/wabc" --stats
-[ -z "$(incr_field hits)" ] || fail "cache=false still ran the cache"
+    --set lhd.incremental=false --workdir "$W/wabc" --stats
+[ -z "$(incr_field hits)" ] || fail "lhd.incremental=false still ran the cache"
 expect_resynth 3 3 "cache-disabled full run"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
-# its default of true (the formal.cache convention).
+# its default of true.
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set abc.library="$LIB" --stats
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
 expect_resynth 3 3 "no-workdir full run"
-echo "PASS: cache=false and no-workdir both disable cleanly"
+echo "PASS: lhd.incremental=false and no-workdir both disable cleanly"
 
 echo "PASS: all incremental pass.abc flows"

@@ -135,12 +135,12 @@ echo "ok: formal_report.json written"
 # 2f-latch M8 step 0a. `lhd formal verify` runs its bmc-first|ind-first
 # portfolio either FORKED (results shipped back through serialize_verify) or
 # SEQUENTIALLY IN-PROCESS (when a verdict cache is active, i.e. --workdir and
-# formal.cache on). Verify_result::unsupported was missing from that wire codec,
+# lhd.incremental on). Verify_result::unsupported was missing from that wire codec,
 # so the FORKED shapes silently dropped it and the parent reported a clean
 # exit-0 for a design the encoder never encoded. Measured before the fix:
 #   no --workdir                       -> rc 0   (forked, flag lost)
 #   --workdir                          -> rc 7   (in-process, flag kept)
-#   no --workdir + formal.cache=false  -> rc 0   (forked, flag lost)
+#   no --workdir + lhd.incremental=false  -> rc 0   (forked, flag lost)
 # The invariant pinned here is the one that survives every later milestone: all
 # three shapes AGREE. (When M8 teaches the encoder this design, all three flip
 # to 0 together; a divergence is always the codec bug coming back.)
@@ -153,7 +153,7 @@ verdict_rc() { # <extra args...>  -> prints the exit code
 }
 rc_nowd=$(verdict_rc)
 rc_wd=$(verdict_rc --workdir "$W/vwd3")
-rc_nocache=$(verdict_rc --set formal.cache=false)
+rc_nocache=$(verdict_rc --set lhd.incremental=false)
 if [ "$rc_nowd" != "$rc_wd" ] || [ "$rc_nowd" != "$rc_nocache" ]; then
   fail "the verify verdict depends on the INVOCATION SHAPE: no-workdir=$rc_nowd workdir=$rc_wd cache=false=$rc_nocache (a Verify_result field is being dropped by the fork-race wire codec — see serialize_verify)"
 fi

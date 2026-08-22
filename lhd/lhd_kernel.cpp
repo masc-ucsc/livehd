@@ -40,6 +40,15 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
       }
     }
   }
+  // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
+  if (key.size() > 6 && key.substr(0, 6) == "synth.") {
+    auto flag = key.substr(6);
+    for (const auto& s : kSynthSetOptions) {
+      if (s.name == flag) {
+        return std::string{key};
+      }
+    }
+  }
   auto names_a_pass = [](std::string_view candidate) {
     auto pos = candidate.rfind('.');
     return pos != std::string_view::npos && !set_pass_method(candidate.substr(0, pos)).empty();
@@ -150,13 +159,15 @@ std::vector<Set_option> list_set_options() {
                            "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
                            "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
                            "SLOWER -- a diagnosis tool, not something to leave on or to time a run with"});
-  out.push_back(Set_option{
-      "compile.cache",
-      "compile",
-      "true",
-      "reuse unchanged Pyrope parse and lowered graph units when a user-named --workdir is present; false forces an honest "
-      "full compile while retaining compile_cache telemetry in --result-json. Has no effect without --workdir or on "
-      "Verilog/IR-only inputs"});
+  out.push_back(
+      Set_option{"lhd.incremental",
+                 "lhd",
+                 "true",
+                 "the ONE switch for every persistent reuse tier: the Pyrope compile cache (unchanged parse and lowered graph "
+                 "units), pass.abc's per-region cache (abc_cache/), and the formal/lec verdict cache (formal_cache.json). Reuse "
+                 "needs a user-named --workdir to live under, so this only matters with one. false forces an honest cold run "
+                 "with byte-identical outputs (reuse is a speedup, never an oracle) while the --result-json telemetry keeps "
+                 "reporting enabled=false. There is no per-tier switch"});
   out.push_back(Set_option{
       "compile.lnast_fmt",
       "compile",
@@ -174,6 +185,10 @@ std::vector<Set_option> list_set_options() {
       continue;  // accepted spelling, canonical name listed instead
     }
     out.push_back(Set_option{std::format("sim.{}", s.name), "sim", std::string{s.default_value}, std::string{s.help}});
+  }
+  // The `synth.*` command namespace (synth_command), same single-source rule.
+  for (const auto& s : kSynthSetOptions) {
+    out.push_back(Set_option{std::format("synth.{}", s.name), "synth", std::string{s.default_value}, std::string{s.help}});
   }
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
   return out;
@@ -205,6 +220,8 @@ void run_engine_command(Options& opts, Result& res) {
     pass_command(opts, res);
   } else if (opts.command == "sim") {
     sim_command(opts, res);
+  } else if (opts.command == "synth") {
+    synth_command(opts, res);
   } else {
     throw Lhd_error{"usage", std::format("unknown command '{}'", opts.command), ""};
   }

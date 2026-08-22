@@ -45,10 +45,9 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize", "assume_check",        "bound",   "cache",       "engine", "hier_preflight", "jobs",   "mine",
-    "min_timeout",    "partitions",          "phase",   "report",      "reset",  "reset_cycles",   "retry",  "rlimit",
-    "solver",         "spec_mining_timeout", "simfail", "simfail_run", "split",  "stats",          "strict", "timeout",
-    "witness",
+    "allow_oversize",      "assume_check", "bound",       "engine", "hier_preflight", "jobs",   "mine",    "min_timeout",
+    "partitions",          "phase",        "report",      "reset",  "reset_cycles",   "retry",  "rlimit",  "solver",
+    "spec_mining_timeout", "simfail",      "simfail_run", "split",  "stats",          "strict", "timeout", "witness",
 };
 
 // REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
@@ -86,9 +85,13 @@ inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] =
 // instead of the generic unknown-flag guess. Keyed on the flag leaf, so it
 // applies whatever namespace it was spelled under.
 inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] = {
-    {"yosys",
+    {      "cache",
+     "incremental reuse is ONE kernel switch now: `--set lhd.incremental=false` turns the compile, pass.abc and "
+     "formal/lec caches off together (they are on by default under a user --workdir). The per-tier "
+     "compile.cache / pass.abc.cache / formal.cache flags are gone" },
+    {      "yosys",
      "yosys is linked in-process now (Yosys::Pass::call), so there is no external binary to point at. The label was "
-     "registered but never read; drop the flag"},
+     "registered but never read; drop the flag"                     },
     {"budget_mode",
      "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
      "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "
@@ -291,6 +294,17 @@ void        formal_command(Options& opts, Result& res);
 void        semdiff_command(Options& opts, Result& res);
 void        load_lg_into_var(const std::string& library_path, Eprp_var& var);
 void        pass_command(Options& opts, Result& res);
+// Stamp labels["top"] with --top resolved once against the graphs in `var`
+// (full internal `file.entity` name; an unresolvable name passes through).
+void        set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels, std::string_view diag_pass);
+// Slurp a pass's "qor" sidecar label into the envelope's "qor" member.
+void        embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res);
+// Fill res.abc_incr from the abc-map report in res.qor_json (a bare abc-map
+// or the `abc` member of a synth report); no-op when there is none.
+void        harvest_abc_incremental(Result& res);
+// `lhd synth`: compile -> pass.color synth -> pass.abc -> pass.opentimer over
+// ONE in-memory design (lhd_kernel_synth.cpp).
+void        synth_command(Options& opts, Result& res);
 void        tool_command(Options& opts, Result& res);
 
 }  // namespace lhd

@@ -582,7 +582,8 @@ is one JSON result object whose `error.class` says why it failed
 lhd compile foo.prp                   # parse + lower + diagnostics (quick check)
 lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # netlist
 lhd compile foo.prp --emit-dir ln:foo_lns/     # emit IR; ln:/lg: dirs are also
-lhd compile ln:foo_lns/ --emit net.v           #   valid INPUTS (compile/sim/lec)
+lhd compile ln:foo_lns/ --emit net.v           #   valid INPUTS (compile/sim/lec/synth)
+lhd synth foo.prp --top foo --workdir W --stats  # compile -> color synth -> abc -> opentimer
 lhd sim foo.prp                       # run every test block in the file
 lhd sim foo.prp add.basic --arg n=4   # one test (dotted selector), runtime args
 lhd formal verify foo.prp props.verify.prp --top foo --set formal.bound=12
@@ -592,6 +593,18 @@ lhd scan foo.prp                      # list the file's imports
 lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
 ```
 
+* **`lhd synth`** is the one-shot synthesis flow (compile -> `pass color synth`
+  -> `pass abc` tech-map -> `pass opentimer` STA) over one in-memory design.
+  `--top` takes the bare entity; one Liberty (`--set synth.liberty=…`, default
+  `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`) feeds abc and
+  opentimer. With `--workdir W` the compiled design, mapped netlist, `qor.json`
+  and `timing.json` land in `W/synth/` and a re-run reuses everything unchanged
+  (`--set lhd.incremental=false` = honest cold run, same netlist). Outputs:
+  `--emit-dir lg:` / `--emit verilog:` (mapped netlist), `--emit-dir report:`
+  (the two JSON reports); `--stats` adds per-color rows; pass knobs ride their
+  pass namespace (`--set abc.adder=cla`, `--set color.absorb=false`). The
+  coloring is always `synth` — use the manual `lhd pass color <alg>` + `lhd pass
+  abc` steps for anything else.
 * **`lhd sim`** builds a C++ simulation of the `test` blocks. It needs the sim
   runtime headers — if a copied binary reports "could not locate the sim
   runtime headers (slop.hpp)", run the `bazel-bin/lhd/lhd` binary from a

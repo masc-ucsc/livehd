@@ -78,6 +78,7 @@ cc_library(
         "lhd_kernel_compile.cpp",
         "lhd_kernel_formal.cpp",
         "lhd_kernel_internal.hpp",
+        "lhd_kernel_synth.cpp",
         "lhd_kernel_passes.cpp",
         "lhd_kernel_sim.cpp",
         "lhd_kernel_tool.cpp",

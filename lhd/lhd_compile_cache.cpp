@@ -2039,7 +2039,7 @@ void compile_cache_materialize_sources(Result& res, Eprp_var& var) {
     ++res.compile_cache.refused;
     throw Lhd_error{"config",
                     "could not materialize the current hermetic compile-cache source generation",
-                    "remove the damaged compile scope or rerun with --set compile.cache=false"};
+                    "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
   }
   // The disk generation must be THIS run's: a concurrent compile sharing the
   // scope may have published a different generation between our store and this

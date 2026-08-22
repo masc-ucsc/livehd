@@ -56,10 +56,28 @@ void validate_emits(const Options& opts) {
   // file. (pyrope: is allowed as a single file for a one-unit design; the
   // multi-unit check lives in emit_pyrope_single_file.)
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean") {
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean"
+        || e.kind == "report") {
       throw Lhd_error{"usage",
                       std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
-                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle:/lean: one file per unit"};
+                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle:/lean: one file per unit, "
+                      "report: the synth qor.json + timing.json"};
+    }
+  }
+  // `report:` is the synth flow's QoR/timing sidecar directory; no other
+  // command produces one, so anywhere else it is a typo, not a silent no-op.
+  if (opts.command != "synth") {
+    reject_emit_kind(opts, "report", {"usage", "--emit-dir report: is a `lhd synth` output (qor.json + timing.json)", ""});
+  }
+  if (opts.command == "synth") {
+    // synth emits the MAPPED netlist (lg:/verilog:) and the reports; the
+    // LNAST-side observables belong to `lhd compile`.
+    for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim"}) {
+      reject_emit_kind(opts,
+                       k,
+                       {"usage",
+                        std::format("synth does not emit {}: (its outputs are the mapped netlist as lg:/verilog: and report:)", k),
+                        "run `lhd compile` for the pre-synthesis observables"});
     }
   }
 
@@ -1634,7 +1652,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // workdir() lazily creates ephemeral scratch, so capture the user's intent
     // before the first timed pass asks for a log path. Incremental persistence
     // is never activated merely because the kernel needed temporary files.
-    const bool user_workdir   = !opts.workdir.empty();
+    const bool user_workdir   = !opts.workdir.empty() && !opts.workdir_scratch;
     res.compile_cache.present = user_workdir;
     res.compile_cache.enabled = user_workdir && compile_cache_enabled(opts);
     setup_diag(opts, "compile.pyrope");

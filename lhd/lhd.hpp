@@ -117,6 +117,17 @@ struct Options {
   // diagnosis tool — never leave it on, and never time a run with it.
   bool stats = false;
 
+  // `--set lhd.incremental=true|false` (default true): the ONE switch for every
+  // persistent reuse tier -- the Pyrope compile cache, pass.abc's per-region
+  // cache, and the formal/lec verdict cache. Reuse also needs a user-named
+  // --workdir (the caches live under it; a scratch dir would start cold every
+  // run), so `incremental` means "reuse when there is somewhere to keep it".
+  // false forces an honest cold run with byte-identical outputs (reuse is a
+  // speedup, never an oracle of record) while the telemetry keeps reporting
+  // enabled=false, so a benchmark row can tell a disabled tier from an old
+  // binary. There is deliberately no per-tier switch.
+  bool incremental = true;
+
   std::string              impl_kind, impl_path, impl_top;  // lec --impl
   std::string              ref_kind, ref_path, ref_top;     // lec --ref
   std::string              formal_filter;                   // formal verify / lec: formal-block name glob
@@ -141,6 +152,12 @@ struct Options {
 
   std::string result_json;
   std::string workdir;
+  // Set by workdir() when it MINTED an ephemeral scratch dir because the user
+  // named none. Every persistent-reuse gate (compile cache, abc_cache,
+  // formal verdict cache) keys on "user-named workdir", so a command that
+  // needs a scratch path BEFORE it runs a sub-flow (synth mints <scratch>/synth
+  // and then compiles into it) must not turn reuse on by accident.
+  bool        workdir_scratch = false;
 
   std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
 
@@ -222,7 +239,7 @@ struct Result {
 
   // `lhd compile` incremental front-end accounting (docs/opt_loop_incr.md L8).
   // Present for a Pyrope source compile with a user-named --workdir, including
-  // compile.cache=false (enabled=false + zero counters), so benchmark rows can
+  // lhd.incremental=false (enabled=false + zero counters), so benchmark rows can
   // distinguish an honestly disabled cache from an old binary that reports no
   // cache telemetry. `redone_ms` is work on cache misses only; sync/lookup/store
   // have disjoint Phase_timer rows and never ride this counter.
@@ -235,6 +252,24 @@ struct Result {
     uint64_t store_failed{0};
     uint64_t refused{0};
   } compile_cache;
+
+  // pass.abc's incremental region reuse (`lhd synth` / `lhd pass abc`),
+  // harvested from the embedded qor report (harvest_abc_incremental) so the
+  // envelope's `incremental` member carries EVERY reuse tier in one place --
+  // what a stats report builder (../lhdsuite) reads, instead of digging the
+  // counters out of the pass's own qor object. `regions` is the mapped region
+  // count; `store_failed` the regions the cache could not snapshot (each one
+  // re-runs ABC forever -- a bug, not a property of the design).
+  struct Abc_incr_stats {
+    bool     present{false};
+    bool     enabled{false};  // the region cache ran (user --workdir + lhd.incremental); false = honest cold map
+    uint64_t hits{0};
+    uint64_t misses{0};
+    double   hit_ms{0.0};
+    double   miss_ms{0.0};
+    uint64_t regions{0};
+    uint64_t store_failed{0};
+  } abc_incr;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph
   // restore/store). Not serialized; the public machine contract is the stats
@@ -421,6 +456,38 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
     {       "checkpoint_every",
      "0",  Sim_set_option::Kind::non_neg_num,
      "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"                      },
+};
+
+// The `synth.*` command-namespace options (consumed by synth_command -- the
+// one-shot compile -> pass.color synth -> pass.abc -> pass.opentimer flow --
+// not pass labels). Same contract as kSimSetOptions: this array is the single
+// source of truth for --set validation, `lhd list options`, and the
+// `lhd synth --help` options block. Pass-level tuning still rides the pass
+// namespaces (`--set abc.adder=cla`, `--set color.absorb=false`, ...).
+struct Synth_set_option {
+  enum class Kind { boolean, file };
+  std::string_view name;
+  std::string_view default_value;
+  Kind             kind;
+  std::string_view help;
+};
+
+// The Liberty file `synth.liberty` resolves to under $HAGENT_TECH_DIR when the
+// knob is empty (the same default pass.abc uses on its own).
+inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
+
+inline constexpr Synth_set_option kSynthSetOptions[] = {
+    {  "liberty",
+     "",    Synth_set_option::Kind::file,
+     "PATH -- the ONE Liberty .lib for the whole flow: pass.abc maps to its cells and pass.opentimer times with "
+     "it. Empty = $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). A "
+     "`pass.abc.library` --set is refused under synth so the two stages can never disagree"                               },
+    {"opentimer",
+     "true", Synth_set_option::Kind::boolean,
+     "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
+     "report). false stops after the ABC map"                                                                             },
+    {      "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of

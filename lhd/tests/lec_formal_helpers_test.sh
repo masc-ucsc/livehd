@@ -23,7 +23,7 @@ EOF
 
 run_lec() {
   OUT=$("$LHD" lec --ref "$W/ref.v" --impl "$W/impl.v" --top dut \
-    --set formal.lec.hier=false --set formal.cache=true --workdir "$W/cache" "$@" 2>&1)
+    --set formal.lec.hier=false --set lhd.incremental=true --workdir "$W/cache" "$@" 2>&1)
   RC=$?
 }
 

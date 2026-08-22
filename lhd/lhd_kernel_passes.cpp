@@ -14,6 +14,7 @@
 #include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "rapidjson/document.h"
 #include "semdiff.hpp"
 
 namespace lhd {
@@ -503,7 +504,7 @@ void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
 // every pass consumer gets the full internal name (they match g->get_name()
 // exactly); an unresolvable name passes through unchanged (each pass keeps its
 // own not-found policy).
-static void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels, std::string_view diag_pass) {
+void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels, std::string_view diag_pass) {
   if (opts.top.empty()) {
     return;
   }
@@ -520,7 +521,7 @@ static void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Ep
 
 // Slurp a pass's "qor" sidecar label into the envelope's "qor" member so an
 // agent loop reads its score straight from --result-json (2opt-freq A/D).
-static void embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res) {
+void embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res) {
   auto qit = labels.find("qor");
   if (qit == labels.end() || qit->second.empty() || !fs::exists(qit->second)) {
     return;
@@ -533,6 +534,56 @@ static void embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res) {
   if (!j.empty()) {
     res.qor_json = std::move(j);
     res.outputs.push_back(qit->second);
+  }
+}
+
+void harvest_abc_incremental(Result& res) {
+  if (res.qor_json.empty()) {
+    return;
+  }
+  rapidjson::Document d;
+  d.Parse(res.qor_json.data(), res.qor_json.size());
+  if (d.HasParseError() || !d.IsObject()) {
+    return;
+  }
+  const rapidjson::Value* abc = &d;
+  if (auto k = d.FindMember("kind"); k != d.MemberEnd() && k->value.IsString() && std::string_view{k->value.GetString()} == "synth") {
+    auto a = d.FindMember("abc");
+    if (a == d.MemberEnd() || !a->value.IsObject()) {
+      return;
+    }
+    abc = &a->value;
+  }
+  auto num = [](const rapidjson::Value& v, const char* key, double& out) {
+    auto it = v.FindMember(key);
+    if (it == v.MemberEnd() || !it->value.IsNumber()) {
+      return false;
+    }
+    out = it->value.GetDouble();
+    return true;
+  };
+  if (auto r = abc->FindMember("regions"); r != abc->MemberEnd() && r->value.IsArray()) {
+    res.abc_incr.present = true;
+    res.abc_incr.regions = r->value.Size();
+    for (const auto& region : r->value.GetArray()) {
+      if (auto c = region.FindMember("cache"); region.IsObject() && c != region.MemberEnd() && c->value.IsString()
+          && std::string_view{c->value.GetString()} == "store-failed") {
+        ++res.abc_incr.store_failed;
+      }
+    }
+  }
+  if (auto inc = abc->FindMember("incremental"); inc != abc->MemberEnd() && inc->value.IsObject()) {
+    res.abc_incr.present = true;
+    res.abc_incr.enabled = true;
+    double v            = 0;
+    if (num(inc->value, "hits", v)) {
+      res.abc_incr.hits = static_cast<uint64_t>(v);
+    }
+    if (num(inc->value, "misses", v)) {
+      res.abc_incr.misses = static_cast<uint64_t>(v);
+    }
+    num(inc->value, "hit_ms", res.abc_incr.hit_ms);
+    num(inc->value, "miss_ms", res.abc_incr.miss_ms);
   }
 }
 
@@ -712,7 +763,7 @@ void pass_command(Options& opts, Result& res) {
     // QoR sidecar (2opt-freq A): default under --workdir. A stats request
     // without a user workdir gets an ephemeral sidecar so the normal result
     // renderer still has the structured per-color rows to print/embed.
-    const bool        user_workdir  = !opts.workdir.empty();
+    const bool        user_workdir  = !opts.workdir.empty() && !opts.workdir_scratch;
     const std::string ephemeral_qor = opts.stats && !user_workdir ? (fs::path(workdir(opts)) / "qor.json").string() : std::string{};
     if (user_workdir || !ephemeral_qor.empty()) {
       labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
@@ -725,8 +776,8 @@ void pass_command(Options& opts, Result& res) {
     // exactly like lec's formal_cache.json -- a scratch workdir would make
     // every run cold, so no --workdir means no cache. The location is kernel
     // policy, not a user knob (set AFTER merge_sets on purpose); the user
-    // switch is `pass.abc.cache=true|false`.
-    if (user_workdir) {
+    // switch is the one shared `lhd.incremental` (no per-pass cache flag).
+    if (user_workdir && opts.incremental) {
       labels["cache_dir"] = (fs::path(opts.workdir) / "abc_cache").string();
     }
     run_step("pass.abc", var, labels, opts, res);
@@ -738,6 +789,7 @@ void pass_command(Options& opts, Result& res) {
       res.outputs.push_back(lg_out->path);
     }
     embed_qor_sidecar(labels, res);
+    harvest_abc_incremental(res);
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
       std::erase(res.outputs, ephemeral_qor);
     }
