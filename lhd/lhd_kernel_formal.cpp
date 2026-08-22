@@ -1800,8 +1800,26 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
     auto            t0 = std::chrono::steady_clock::now();
-    auto            r  = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
-                                           : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    // A Liberty-model (`--lib`) comparison pits a gate-level netlist against
+    // RTL. Under proven-child collapse the boxes are an abstraction the cone
+    // pass refutes on cuts the flat miter proves (dino PipelinedDualIssueCPU:
+    // `nxt:pc`, `io_dmem_address`, `bbin:ALU#n:…:io_inputx` come back abc DIFF
+    // collapsed and PROVEN flat), so the collapsed attempt can only ever settle
+    // by induction. Its BMC leg can at best produce an abstract refute that
+    // needs flat confirmation anyway, while burning exactly the wall clock the
+    // `cheap_unknown` retry gate below reads: on dino the collapsed attempt
+    // sat under the gate by luck (7.5 s of a 12 s line with an optimized lhd)
+    // and a debug build blew through it and lost the def with no retry. So:
+    // collapsed attempt ind-only, and its Unknown is an unconditional ground
+    // for the flat retry (which keeps the requested engine).
+    const bool        netlist_cmp      = sub_lib != nullptr && !sub_lib->empty();
+    const std::string requested_engine = o.engine;
+    if (netlist_cmp && !coll.empty() && o.engine == "auto") {
+      o.engine = "ind";
+    }
+    auto r   = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
+                                 : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    o.engine = requested_engine;
     // Both a REFUTE and an UNKNOWN under proven-child collapse get ONE flat re-solve
     // (collapse cleared, children descended) — for opposite reasons:
     //
@@ -1855,8 +1873,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // any single refusal reason -- and it scales with whatever formal.timeout is.
     const long long cheap_ms               = o.timeout > 0 ? static_cast<long long>(o.timeout) * 100 : 1000;
     const bool      cheap_unknown          = r.elapsed_ms >= 0 && r.elapsed_ms < cheap_ms;
-    const bool      unknown_under_collapse
-        = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused && (!force_flat[def_ix].empty() || cheap_unknown);
+    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
+                                             && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
     //        place a wrong PROVEN silently converts a DEFINITE counterexample into
     //        a run-level pass, so it gets the same flat confirmation (a) already
@@ -1880,7 +1898,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                    : proven_absorbing     ? "confirmation (a collapsed proof may not overrule a child's counterexample)"
                                           : "retry (UF boxes disable the eager bit-blaster)");
       }
-      livehd::lec::Lec_options oflat = o;
+      livehd::lec::Lec_options oflat = o;  // o.engine is the requested engine again (the ind-only leg is over)
       // Drop the SPECULATIVE proven-child boxes being confirmed, but KEEP the
       // TRUSTED boxes: they cover a cell the encoder cannot model (a Latch), so
       // re-flattening them would refuse the whole miter (exit 7) and destroy the
@@ -3440,65 +3458,100 @@ static void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
       .emit();
 }
 
-// The IMPL is one FLAT def but the REF still instantiates its hierarchy: inline
-// the ref's Sub instances so both sides own the same state.
+// The IMPL dropped part of the REF's hierarchy: inline, into each ref def the
+// impl still has, every instance whose def the impl library no longer holds,
+// so both sides own the same state.
 //
-// `pass color flat` fuses the whole hierarchy into ONE abc region, so its netlist
-// is a SINGLE graph while the ref keeps its children. The ref top then owns only
-// its own flops (dino: pc, cycleCount) and EVERY child register is impl-only
-// unpaired state — no flop bijection, so the flop-cut inductive miter is never
-// built and the run degrades to a whole-design BMC that times out. Inlining is
-// semantics-preserving and gives each spliced flop its hierarchical name
-// (`pipeA_if_id.reg_0`), which is exactly what the netlist calls it, so tier-1
-// name pairing resolves them. Returns how many instances were spliced.
+// Two producers do this to a netlist. `pass color flat` fuses the WHOLE
+// hierarchy into ONE abc region, so the impl is a single graph while the ref
+// keeps every child; `pass color synth` (and `lhd synth`) ABSORBS every def
+// below the region window into its parents (color.absorb), so the impl keeps
+// the big defs (dino: ALU, the register file, StageReg_6) and flattens the
+// small ones (the issue unit, Control, the other StageRegs) into the top. In
+// both shapes the ref top owns only its own flops (dino: pc, cycleCount) while
+// the impl top owns `pipeA_if_id.reg_0` and friends, so those are impl-only
+// unpaired state, no flop bijection exists, the flop-cut inductive miter is
+// never built, and the def degrades to a whole-design BMC that times out and
+// falls to the flat retry (dino: ~8 s wasted before the cone pass proves it).
 //
-// Deliberately narrow: ONLY when the impl top holds no Sub at all. A netlist that
-// kept its hierarchy (`pass color synth`) already pairs def by def, and flattening
-// there would throw away the decomposition that makes it tractable.
-static size_t flatten_ref_to_match_flat_impl(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* ref_g,
-                                             hhds::Graph* impl_g) {
+// Inlining is semantics-preserving and gives each spliced flop its hierarchical
+// name (`pipeA_if_id.reg_0`), which is exactly what the netlist calls it, so
+// tier-1 name pairing resolves them and the collapsed hierarchical proof goes
+// through with the kept defs still boxed. An instance whose def the impl DOES
+// keep is left alone: that pair proves def by def, and flattening it would
+// throw away the decomposition that makes the proof tractable.
+//
+// Only for a mapped-netlist comparison (a `--lib` cell model library, and at
+// least one cell instance in the impl top): an ordinary design whose children
+// upass inlined is not this case. Returns how many instances were spliced.
+static size_t inline_ref_instances_absorbed_by_impl(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib,
+                                                    const std::vector<std::shared_ptr<hhds::Graph>>&    ref_graphs,
+                                                    const std::vector<std::shared_ptr<hhds::Graph>>&    impl_graphs,
+                                                    hhds::Graph* ref_g, hhds::Graph* impl_g) {
   if (ref_g == nullptr || impl_g == nullptr || sub_lib.empty()) {
     return 0;  // no `--lib`: this is not a mapped-netlist comparison
   }
-  // A mapped netlist is ALL Subs — every Liberty cell is one. Only a DESIGN
-  // instance (not a `--lib` cell model) says the impl kept its hierarchy, and at
-  // least one cell must actually be there: an impl with NEITHER is an ordinary
-  // design whose children upass inlined, and flattening the ref would throw away
-  // a per-def decomposition that already works.
   bool has_cell = false;
   for (auto n : impl_g->body().nodes()) {
-    if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
-      continue;
+    if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub && sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
+      has_cell = true;
+      break;
     }
-    if (sub_lib.find(n.get_subnode_gid()) == sub_lib.end()) {
-      return 0;  // hierarchical impl: leave the ref alone
-    }
-    has_cell = true;
   }
   if (!has_cell) {
     return 0;
   }
+  // The defs the impl still has, by full name AND by entity tail (a netlist
+  // keeps `file.entity`; the tail covers a regenerated `plain.entity` side).
+  absl::flat_hash_set<std::string> impl_defs;
+  for (const auto& sp : impl_graphs) {
+    if (sp) {
+      const std::string full{sp->get_name()};
+      impl_defs.insert(full);
+      impl_defs.insert(lec_entity_of(full));
+    }
+  }
+  auto impl_has_def = [&](std::string_view def_name) {
+    const std::string full{def_name};
+    return impl_defs.contains(full) || impl_defs.contains(lec_entity_of(full));
+  };
+  // Every ref def the impl still has gets the treatment, the top included: an
+  // absorbed def is inlined at ALL its sites, so a kept child may hold absorbed
+  // grandchildren too.
+  std::vector<hhds::Graph*> hosts{ref_g};
+  for (const auto& sp : ref_graphs) {
+    if (sp && sp.get() != ref_g && impl_has_def(sp->get_name()) && sub_lib.find(sp->get_gid()) == sub_lib.end()) {
+      hosts.push_back(sp.get());
+    }
+  }
   size_t done = 0;
-  // Splicing a child can expose the grandchildren it instantiated, so sweep until
-  // the ref is flat. Bounded: each round must make progress or it stops.
-  for (int round = 0; round < 64; ++round) {
-    std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
-    for (auto n : ref_g->body().nodes()) {
-      if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
+  for (auto* host : hosts) {
+    // Splicing a child can expose the grandchildren it instantiated, so sweep
+    // until nothing absorbed is left. Bounded: each round must make progress.
+    for (int round = 0; round < 64; ++round) {
+      std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
+      for (auto n : host->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
+          continue;  // a Liberty cell is the impl's vocabulary, never an absorbed def
+        }
+        auto sio = n.get_subnode_io();
+        if (sio == nullptr || impl_has_def(sio->get_name())) {
+          continue;  // the impl kept this def: it pairs def by def
+        }
         insts.push_back(n);
       }
+      if (insts.empty()) {
+        break;
+      }
+      size_t spliced = 0;
+      for (const auto& inst : insts) {
+        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec") ? 1 : 0;
+      }
+      if (spliced == 0) {
+        break;  // nothing inlinable left (a real blackbox): stop rather than spin
+      }
+      done += spliced;
     }
-    if (insts.empty()) {
-      break;
-    }
-    size_t spliced = 0;
-    for (const auto& inst : insts) {
-      spliced += livehd::graph_util::inline_sub_instance(ref_g, inst, "pass.lec") ? 1 : 0;
-    }
-    if (spliced == 0) {
-      break;  // nothing inlinable left (a real blackbox): stop rather than spin
-    }
-    done += spliced;
   }
   return done;
 }
@@ -3590,7 +3643,7 @@ void lec_command(Options& opts, Result& res) {
   // Whether the USER passed --workdir (captured before load_side_graphs' first
   // workdir() call fabricates a scratch temp dir): the lecfail witness testbench
   // + VCD are on-by-default only for a persistent, user-named --workdir.
-  const bool workdir_set = !opts.workdir.empty();
+  const bool workdir_set = !opts.workdir.empty() && !opts.workdir_scratch;
   setup_diag(opts, "lec");
 #ifndef NDEBUG
   // NDEBUG is only defined under `-c opt`; a dbg/fastbuild binary runs the SMT
@@ -3971,13 +4024,49 @@ void lec_command(Options& opts, Result& res) {
     // untouched by inlining the top alone and that def stays inconclusive.
     // A `--lib` model itself never instantiates one, so skip those (they are
     // shared with ref_defs — mutating one would be a cross-side edit).
-    if (auto nflat = flatten_ref_to_match_flat_impl(sub_lib, ref_g.get(), impl_g.get()); nflat > 0) {
-      std::print("lec: flattened {} ref instance(s) to match a flat impl netlist\n", nflat);
-      ref_defs.clear();  // the children are inline now; only the top is comparable
-      ref_defs.push_back(ref_g.get());
-      for (const auto& [gid, gp] : sub_lib) {
-        if (gp != nullptr && gp != ref_g.get() && gp != impl_g.get()) {
-          ref_defs.push_back(gp);
+    if (auto nflat = inline_ref_instances_absorbed_by_impl(sub_lib, ref_var.graphs, impl_var.graphs, ref_g.get(), impl_g.get());
+        nflat > 0) {
+      std::print("lec: inlined {} ref instance(s) whose def the impl netlist absorbed\n", nflat);
+      // Those defs are inline now wherever the impl dropped them; a ref def the
+      // impl still has stays comparable def by def.
+      absl::flat_hash_set<std::string> keep;
+      for (const auto& sp : impl_var.graphs) {
+        if (sp) {
+          keep.insert(std::string{sp->get_name()});
+          keep.insert(lec_entity_of(sp->get_name()));
+        }
+      }
+      std::erase_if(ref_defs, [&](hhds::Graph* d) {
+        return d != ref_g.get() && sub_lib.find(d->get_gid()) == sub_lib.end() && !keep.contains(std::string{d->get_name()})
+               && !keep.contains(lec_entity_of(d->get_name()));
+      });
+    }
+    if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+      for (auto* side : {ref_g.get(), impl_g.get()}) {
+        // The same instances through the hierarchy view the encoder walks.
+        for (auto hn : side->grouped_hierarchy().nodes()) {
+          if (livehd::graph_util::type_op_of(hn) != Ntype_op::Sub || sub_lib.find(hn.get_subnode_gid()) != sub_lib.end()) {
+            continue;
+          }
+          auto sio = hn.get_subnode_io();
+          std::fprintf(stderr,
+                       "[LEC_COLLAPSE] after-prep %s HIER-VIEW sub '%s' def '%s'\n",
+                       side == ref_g.get() ? "ref " : "impl",
+                       std::string(hn.get_hier_name()).c_str(),
+                       sio == nullptr ? "?" : std::string(sio->get_name()).c_str());
+        }
+        for (auto n : side->body().nodes()) {
+          if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
+            continue;
+          }
+          auto sio = n.get_subnode_io();
+          std::fprintf(stderr,
+                       "[LEC_COLLAPSE] after-prep %s top sub '%s' def '%s' out_edges=%d body=%d\n",
+                       side == ref_g.get() ? "ref " : "impl",
+                       std::string(n.get_name()).c_str(),
+                       sio == nullptr ? "?" : std::string(sio->get_name()).c_str(),
+                       n.has_out_edges() ? 1 : 0,
+                       n.get_subnode_graph() != nullptr ? 1 : 0);
         }
       }
     }
@@ -4143,12 +4232,12 @@ void lec_command(Options& opts, Result& res) {
       .emit();
 
   // 2f-fcore verdict cache: persistent only under a user-named --workdir
-  // (formal_cache.json; opt out with --set formal.cache=false). Keyed cache-wide
+  // (formal_cache.json; opt out with --set lhd.incremental=false). Keyed cache-wide
   // by kFormalSrcSalt — the build-time content hash of the prover sources — so
   // a prover change invalidates every stored verdict automatically. v1 wires
   // it into the hierarchical driver (the default path).
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
-  if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+  if (workdir_set && opts.incremental) {
     // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
     // treats an unopenable path as "the cache is only ever a speedup" and
     // returns silently -- so without this, every run stored to memory, wrote
@@ -5291,7 +5380,7 @@ static void emit_mined_block(const std::string& path, const std::string& design_
 void formal_verify_command(Options& opts, Result& res) {
   // Captured before any workdir() call fabricates a scratch dir: the simfail
   // testbench + VCD default ON only for a persistent, user-named --workdir.
-  const bool workdir_set = !opts.workdir.empty();
+  const bool workdir_set = !opts.workdir.empty() && !opts.workdir_scratch;
   setup_diag(opts, "formal");
 #ifndef NDEBUG
   livehd::diag::info("pass.formal", "formal-debug-build-slow", "progress")
@@ -5515,7 +5604,7 @@ void formal_verify_command(Options& opts, Result& res) {
   }
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
-  if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+  if (workdir_set && opts.incremental) {
     // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
     // treats an unopenable path as "the cache is only ever a speedup" and
     // returns silently -- so without this, every run stored to memory, wrote

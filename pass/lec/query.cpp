@@ -860,7 +860,7 @@ std::string serialize_verify(const Verify_result& v) {
   // so a field missing from this codec is SILENTLY LOST and the parent sees
   // unsupported=false. Reproduced: `lhd formal verify latch_verify_hold.prp`
   // exited 0 "pass" on a design whose encoder REFUSED the Latch cell, and only
-  // the non-forking paths (--workdir, formal.cache=false) told the truth.
+  // the non-forking paths (--workdir, lhd.incremental=false) told the truth.
   // Best-effort TAIL: an older/truncated blob leaves both false (prior behavior).
   b.push_back(static_cast<char>(v.unsupported ? 1 : 0));
   b.push_back(static_cast<char>(v.oversize_refused ? 1 : 0));
@@ -2776,6 +2776,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
   const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
+  if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+    // Debug-only: the expanded collapse set and each side's entity resolution
+    // for it, then (scan_boxes below) every Sub instance's box decision.
+    for (const auto& d : opts.collapse) {
+      const std::string e = entity_of(d);
+      auto              r = ref_ent_uniq.find(e);
+      auto              i = impl_ent_uniq.find(e);
+      std::fprintf(stderr,
+                   "[LEC_COLLAPSE] requested '%s' entity '%s' ref_uniq='%s' impl_uniq='%s'\n",
+                   d.c_str(),
+                   e.c_str(),
+                   r == ref_ent_uniq.end() ? "<absent>" : r->second.c_str(),
+                   i == impl_ent_uniq.end() ? "<absent>" : i->second.c_str());
+    }
+    for (const auto& [k, v] : collapse_defs) {
+      std::fprintf(stderr, "[LEC_COLLAPSE] set '%s'\n", k.c_str());
+    }
+  }
 
   // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER of
   // these four lines is mandatory and load-bearing (verified empirically; none
@@ -2861,6 +2879,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   bool                                                    nk_collision = false;
   auto                                                    scan_boxes   = [&](hhds::Graph* g, bool in_ref) {
     for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) == Ntype_op::Sub && std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        auto dsio = node.get_subnode_io();
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] %s occ-walk sub '%s' def '%s' has_out_edges=%d\n",
+                     in_ref ? "ref " : "impl",
+                     std::string(node.get_hier_name()).c_str(),
+                     dsio == nullptr ? "?" : std::string(dsio->get_name()).c_str(),
+                     node.has_out_edges() ? 1 : 0);
+      }
       if (graph_util::type_op_of(node) != Ntype_op::Sub || !node.has_out_edges()) {
         continue;  // the encoder skips consumer-less nodes before its box path
       }
@@ -2874,6 +2901,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // their boxes to correspond), else the full per-side name.
       const std::string defkey = canon_def(in_ref, defname);
       const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
+      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] %s sub '%s' def '%s' key '%s' body=%d force_collapse=%d lib=%d\n",
+                     in_ref ? "ref " : "impl",
+                     std::string(node.get_hier_name()).c_str(),
+                     defname.c_str(),
+                     defkey.c_str(),
+                     node.get_subnode_graph() != nullptr ? 1 : 0,
+                     force_collapse ? 1 : 0,
+                     sub_lib != nullptr && sub_lib->find(node.get_subnode_gid()) != sub_lib->end() ? 1 : 0);
+      }
       // Mirrors encode.cpp's Sub classification for every node THIS walk reaches:
       // a sub with a body is DESCENDED (not a box) unless force-collapsed; a
       // sub_lib-resolvable combinational def is flattened inline (not a box);
@@ -7403,6 +7441,32 @@ bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
   return false;
 }
 
+// The collapse set as the hierarchical driver hands it over is spelled by
+// ENTITY (`StageReg_6`), while a Sub instance names its def in full
+// (`StageReg_6.StageReg_6`); a user --collapse may use either. Match both, and
+// an entity-vs-entity agreement too. Erring towards "collapsed" is safe here: a
+// collapsed instance is a sequence-transducer box whose outputs are per-cycle
+// symbols, so no combinational loop can close through it and there is nothing
+// to inline -- whereas inlining it on ONE side (the ref's feedback path is
+// native logic, the impl's runs through Liberty-cell Subs where the detector
+// stops) leaves the boxes one-sided and every cut through them refutable.
+// dino's netlist LEC lost its whole collapsed top proof to exactly that.
+bool collapse_names_def(const absl::flat_hash_set<std::string>& collapsed, std::string_view full) {
+  auto entity = [](std::string_view n) -> std::string_view {
+    auto d = n.rfind('.');
+    return d == std::string_view::npos ? n : n.substr(d + 1);
+  };
+  if (collapsed.contains(std::string{full}) || collapsed.contains(std::string{entity(full)})) {
+    return true;
+  }
+  for (const auto& c : collapsed) {
+    if (entity(c) == entity(full)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool has_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
   if (root == nullptr) {
     return false;
@@ -7410,7 +7474,7 @@ bool has_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
   const absl::flat_hash_set<std::string> collapsed(opts.collapse.begin(), opts.collapse.end());
   for (const auto node : root->body().nodes()) {
     auto io = node.get_subnode_io();
-    if (io != nullptr && !collapsed.contains(std::string{io->get_name()}) && has_direct_boundary_feedback(node)) {
+    if (io != nullptr && !collapse_names_def(collapsed, io->get_name()) && has_direct_boundary_feedback(node)) {
       return true;
     }
   }
@@ -7427,7 +7491,7 @@ bool inline_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
     std::vector<hhds::Node_class> targets;
     for (const auto node : root->body().nodes()) {
       auto io = node.get_subnode_io();
-      if (io != nullptr && !collapsed.contains(std::string{io->get_name()}) && has_direct_boundary_feedback(node)) {
+      if (io != nullptr && !collapse_names_def(collapsed, io->get_name()) && has_direct_boundary_feedback(node)) {
         targets.push_back(node);
       }
     }
