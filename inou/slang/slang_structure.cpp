@@ -3426,16 +3426,16 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // ── pass 1: collect drivers (recursing through generate blocks) ───────────
   struct Driver {
     const slang::ast::Symbol*                           member = nullptr;
-    std::string                                         prefix;  // genblk name prefix at collection point
-    absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
-    absl::flat_hash_set<const slang::ast::ValueSymbol*> writes;
+    std::string                                         prefix{};  // genblk name prefix at collection point
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> reads{};
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> writes{};
     // UninstantiatedDef (blackbox) only: inferred per-connection direction,
     // aligned with getPortConnections() (see the inference pass below).
-    std::vector<bool>                                   bb_outs;
+    std::vector<bool>                                   bb_outs{};
     // Subset of `reads` that is a GENUINE read (see Dep_collector::rhs_reads).
     // Left empty for driver kinds that do not collect it, which keeps them out
     // of the driver-order check below.
-    absl::flat_hash_set<const slang::ast::ValueSymbol*> rhs_reads;
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> rhs_reads{};
   };
   // Every set/vector default-constructs empty, so a construction site names only
   // `member` and `prefix` -- adding a field must not mean editing five brace
