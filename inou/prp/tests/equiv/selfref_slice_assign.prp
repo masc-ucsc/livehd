@@ -4,31 +4,9 @@
 :verilog_top: selfref_slice_assign
 :pyrope_top: selfref_slice_assign
 */
-//
-// TRACKER -- concurrent slice assignments to one wire are ORDERED.
-//
-// AS OF 2026-08-21 THE READER REFUSES THIS SHAPE: `lhd compile` on the golden
-// .v now reports `unsupported-driver-order` rather than silently sequencing the
-// assigns, so the `.v` axis is listed in _STATEMATCH_FIXME in inou/prp/BUILD.
-// The Pyrope below is the OLD (wrong) sequenced lowering, kept as the record of
-// what the silent miscompile looked like. The refusal is the interim fix; the
-// real one is bit-granular driver ordering.
-//
-// The original report: concurrent slice assignments to one wire were ORDERED (LEC-
-// refuted). The three `assign` statements below drive disjoint bit-fields of `w`
-// and read each other; being CONCURRENT, they settle to w[3:2]=hi, w[1]=w[2]=hi[0],
-// w[0]=~w[1]. The reader instead threads them through SSA in source order, so
-// `w__w1#[0] = ~((w >> 1) & 1)` reads the ORIGINAL (poison) `w`, not the settled
-// w[1]. Reordering the same three assigns in the source changes the result, which
-// is the signature of the bug: continuous assigns must be solved, not sequenced.
+// The Verilog golden uses three concurrent partial drivers that read sibling
+// slices. This independent direct expression states their settled value:
+// w[3:2]=hi, w[1]=hi[0], and w[0]=~hi[0]. Source order must not affect it.
 pub comb selfref_slice_assign::[timecheck=false](hi:u2) -> (q:u4) {
-  mut w = 0
-  w = 0ub????
-  mut w__w1 = w
-  w__w1#[0..=0] = ((~((w >> 1) & 1)) & 1)
-  mut w__w2 = w__w1
-  w__w2#[1..=1] = ((w__w1 >> 2) & 1)
-  mut w__w3 = w__w2
-  w__w3#[2..=3] = hi
-  q = w__w3
+  q = (hi << 2) | ((hi & 1) << 1) | ((~hi) & 1)
 }

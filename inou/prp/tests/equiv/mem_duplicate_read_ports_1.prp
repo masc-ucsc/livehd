@@ -1,0 +1,16 @@
+/*
+:name: mem_duplicate_read_ports_1
+:type: lec
+:lec_grep: 1 via dout merge
+*/
+// Equivalent spelling with two separately materialized reads at the same
+// address. LEC must merge equal-address douts even when read-port counts differ.
+mod mem_duplicate_read_ports(waddr:u2, wdata:u8, we:u1, raddr:u2) -> (result:u8@[0]) {
+  reg mem:[4]u8 = 0
+  const rd0 = mem[raddr]
+  const rd1 = mem[raddr]
+  result = rd0 ^ (rd1 << 1)
+  if we {
+    mem[waddr] = wdata
+  }
+}

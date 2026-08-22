@@ -1,0 +1,14 @@
+/*
+:name: mem_duplicate_read_ports
+:type: lec
+:lec_top: mem_duplicate_read_ports
+*/
+// One async read port, with its value reused twice.
+mod mem_duplicate_read_ports(waddr:u2, wdata:u8, we:u1, raddr:u2) -> (result:u8@[0]) {
+  reg mem:[4]u8 = 0
+  const rd = mem[raddr]
+  result = rd ^ (rd << 1)
+  if we {
+    mem[waddr] = wdata
+  }
+}

@@ -772,33 +772,96 @@ bool driver_reads_target(const slang::ast::Expression& expr, const slang::ast::V
   return false;
 }
 
+// Per-attempt state shared by every seed_const_net frame of ONE fold.
+struct Seed_memo {
+  // A shared non-constant cone can be reached from thousands of reset-value
+  // candidates. Remembering the negative result keeps this fold linear: without
+  // it a diamond-shaped datapath is traversed exponentially and every failed
+  // eval grows EvalContext::Diagnostics (EnqEntry_4 reached tens of GB).
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> failed;
+  // A leaf that could not be seeded does NOT always make its reader
+  // non-constant: a conditional with a constant condition, a `$bits()` type
+  // query and a replication count never evaluate the operand that failed
+  // (`assign cw = ONE ? 8'hA5 : d;` used as an async-reset value). Attempt the
+  // fold anyway, under a small per-fold budget so a big shared RUNTIME cone
+  // still bails out quickly instead of being re-walked for every candidate.
+  int  spec_evals_left = 256;
+  // A refusal caused by the DEPTH cap is a property of the path, not of the
+  // symbol, so it must not be memoized (the same guard graph/split_selfref
+  // spells `cap_hit == cap_before`). A `visiting` cycle IS a property of the
+  // symbol -- a net on a comb cycle depends on itself -- and stays memoized.
+  bool depth_capped     = false;
+};
+
+bool seed_const_net(const slang::ast::ValueSymbol& sym, slang::ast::EvalContext& ctx,
+                    absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, Seed_memo& memo, int depth);
+
+// One dependency of a constant-fold: true when it needs no seeding at all
+// (already an EvalContext local, or a Parameter/EnumValue/Genvar that
+// NamedValueExpression::eval resolves directly) or when seeding it worked.
+bool seed_dep(const slang::ast::ValueSymbol& dep, slang::ast::EvalContext& ctx,
+              absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, Seed_memo& memo, int depth) {
+  if (ctx.findLocal(&dep) != nullptr) {
+    return true;
+  }
+  const auto kind = dep.kind;
+  if (kind == slang::ast::SymbolKind::Parameter || kind == slang::ast::SymbolKind::EnumValue
+      || kind == slang::ast::SymbolKind::Genvar) {
+    return true;
+  }
+  return seed_const_net(dep, ctx, visiting, memo, depth);
+}
+
 // Seed a net/var's constant value into `ctx` (as an EvalContext local) by
 // chasing its whole-net driver, recursively seeding the driver's own net
 // leaves first. Best-effort: returns true if `sym` got a constant value.
 bool seed_const_net(const slang::ast::ValueSymbol& sym, slang::ast::EvalContext& ctx,
-                    absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, int depth) {
+                    absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, Seed_memo& memo, int depth) {
   if (ctx.findLocal(&sym) != nullptr) {
     return true;
   }
-  if (depth > 64 || !visiting.insert(&sym).second) {
-    return false;  // depth cap / cycle
+  if (memo.failed.contains(&sym)) {
+    return false;
   }
-  bool ok = false;
+  if (depth > 64) {
+    memo.depth_capped = true;
+    return false;
+  }
+  if (!visiting.insert(&sym).second) {
+    return false;  // cycle
+  }
+  const bool capped_before = memo.depth_capped;
+  bool       ok            = false;
   if (const auto* drv = whole_net_driver(sym)) {
     Named_value_collector col;
     drv->visit(col);
+    bool deps_ready = true;
     for (const auto* dep : col.syms) {
-      if (dep != &sym) {
-        seed_const_net(*dep, ctx, visiting, depth + 1);  // best-effort
+      // A runtime value must have a constant whole-net driver we can seed;
+      // otherwise evaluating `drv` USUALLY fails and appends a diagnostic to
+      // EvalContext...
+      if (dep != &sym && !seed_dep(*dep, ctx, visiting, memo, depth + 1)) {
+        deps_ready = false;
+        break;
       }
     }
-    auto cv = drv->eval(ctx);
-    if (!cv.bad()) {
-      ctx.createLocal(&sym, std::move(cv));
-      ok = true;
+    // ...USUALLY, not always: see Seed_memo::spec_evals_left.
+    if (!deps_ready && memo.spec_evals_left > 0) {
+      --memo.spec_evals_left;
+      deps_ready = true;
+    }
+    if (deps_ready) {
+      auto cv = drv->eval(ctx);
+      if (!cv.bad()) {
+        ctx.createLocal(&sym, std::move(cv));
+        ok = true;
+      }
     }
   }
   visiting.erase(&sym);
+  if (!ok && memo.depth_capped == capped_before) {
+    memo.failed.insert(&sym);
+  }
   return ok;
 }
 
@@ -825,10 +888,15 @@ std::optional<slang::ConstantValue> Slang_context::try_eval_const_net(const slan
   // nets resolve via findLocal.
   slang::ast::EvalContext                             ctx(body_->asSymbol(), slang::ast::EvalFlags::IsScript);
   absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
+  Seed_memo                                           memo;
   Named_value_collector                               col;
   expr.visit(col);
   for (const auto* dep : col.syms) {
-    seed_const_net(*dep, ctx, visiting, 0);
+    // Best-effort, deliberately: `expr` itself may never READ the leaf that
+    // could not be seeded (`{$bits(runtime_net){1'b0}}`, a conditional with a
+    // constant condition). Let the single eval below decide -- that is one
+    // eval per fold, so the memo still keeps this attempt linear.
+    (void)seed_dep(*dep, ctx, visiting, memo, 0);
   }
   auto cv = expr.eval(ctx);
   if (cv.bad()) {
@@ -2190,7 +2258,17 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // aggregate identity is required by whole-array read_all/update semantics and
   // by Verilog -> Pyrope state correspondence. Multi-dimensional arrays always
   // take the linearized memory path.
-  if (dims.size() == 1 && !is_reg && !has_init && flat_bits > 0 && flat_bits <= 65536) {
+  const bool flat_io_port = flat_port_syms_.contains(&sym);
+  if (dims.size() == 1 && (flat_io_port || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
+    if (has_init) {
+      // The flat branch has no INIT representation (the Memory branch below is
+      // the only one that emits mem_init_vals_). A flat IO port reaches here
+      // even WITH power-on contents, so say so instead of dropping them.
+      emit_warning(slang::SourceRange(sym.location, sym.location),
+                   "mem-init-ignored",
+                   "unsupported",
+                   std::string("power-on contents of flattened array port '") + std::string(sym.name) + "' are ignored");
+    }
     Mem_info fmi;
     fmi.lower       = arr.range.lower();
     fmi.upper       = arr.range.upper();
@@ -2198,7 +2276,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     fmi.elem_bits   = ei.bits;
     fmi.elem_signed = ei.is_signed;
     fmi.size        = arr.range.width();
-    mem_info_.emplace(&sym, fmi);
+    mem_info_.insert_or_assign(&sym, fmi);
     mem_syms_.insert(&sym);
     flat_port_syms_.insert(&sym);  // reuse the flat bit-slice get/set machinery
     auto name = lname_of(sym);
@@ -2246,7 +2324,11 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
       auto fi = tinfo(f.getType());
       mi.fields.push_back({std::string(f.name), static_cast<int64_t>(f.bitOffset), fi.bits, fi.is_signed});
     }
-    mem_info_.emplace(&sym, mi);
+    // insert_or_assign, NOT emplace: emit_module_io already registered a flat
+    // Mem_info for every unpacked-array PORT, and emplace would silently keep
+    // that record -- `rec` below would then drive emit_tuple_typedef from a
+    // descriptor with no fields and is_tuple=false.
+    mem_info_.insert_or_assign(&sym, mi);
     mem_syms_.insert(&sym);
 
     const auto& rec  = mem_info_.at(&sym);
@@ -2291,7 +2373,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   mi.elem_signed = ei.is_signed;
   mi.size        = total;
   mi.dims        = dims;
-  mem_info_.emplace(&sym, mi);
+  mem_info_.insert_or_assign(&sym, mi);  // see the note on the struct branch above
   mem_syms_.insert(&sym);
 
   auto  name = lname_of(sym);
@@ -3436,6 +3518,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     // Left empty for driver kinds that do not collect it, which keeps them out
     // of the driver-order check below.
     absl::flat_hash_set<const slang::ast::ValueSymbol*> rhs_reads{};
+    // True when this driver was elaborated from a generate loop. Multiple
+    // partial continuous assignments only have the unsupported cross-iteration
+    // ordering ambiguity in that context; ordinary source-level split drivers
+    // retain their source order.
+    bool                                                in_generate_loop = false;
   };
   // Every set/vector default-constructs empty, so a construction site names only
   // `member` and `prefix` -- adding a field must not mean editing five brace
@@ -3445,6 +3532,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // External nets driven by pure flop/latch state outputs; reads of them are
   // order-free (see collect_state_outputs) so pass 2 skips their back-edges.
   absl::flat_hash_set<const slang::ast::Symbol*> seq_out_nets;
+  // Ordinary (non-generated) partial continuous drivers that read sibling
+  // slices of the same net. Their RHS must read the resolved wire while their
+  // LHS writes the split accumulator; see emit_driver below.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> resolved_cont_selfrefs;
+  size_t                                              generate_loop_depth = 0;
 
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
@@ -3495,9 +3587,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           Driver        d{.member = &member, .prefix = genblk_prefix_};
           Dep_collector dc;
           member.as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(dc);
-          d.reads     = std::move(dc.reads);
-          d.writes    = std::move(dc.writes);
-          d.rhs_reads = std::move(dc.rhs_reads);
+          d.reads            = std::move(dc.reads);
+          d.writes           = std::move(dc.writes);
+          d.rhs_reads        = std::move(dc.rhs_reads);
+          d.in_generate_loop = generate_loop_depth != 0;
           drivers.push_back(std::move(d));
           break;
         }
@@ -3555,12 +3648,14 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         case SymbolKind::GenerateBlockArray: {
           const auto& arr          = member.as<slang::ast::GenerateBlockArraySymbol>();
           auto        saved_prefix = genblk_prefix_;
+          ++generate_loop_depth;
           for (const auto* entry : arr.entries) {
             std::string idx_txt
                 = entry->arrayIndex != nullptr ? entry->arrayIndex->toString() : std::to_string(entry->constructIndex);
             genblk_prefix_ = absl::StrCat(saved_prefix, arr.getExternalName(), "_", idx_txt, "_");
             collect(*entry);
           }
+          --generate_loop_depth;
           genblk_prefix_ = saved_prefix;
           break;
         }
@@ -3845,13 +3940,36 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         if (drivers[r].writes.contains(net)) {
           if (seq_out_nets.contains(net)) {
             wire_syms_.insert(net);
-            break;
+            continue;  // NOT `break`: a LATER reader may still be a resolvable split driver
+          }
+          if (drivers[r].member != nullptr && drivers[r].member->kind == SymbolKind::ContinuousAssign
+              && !drivers[r].in_generate_loop && drivers[r].rhs_reads.contains(net) && ws.size() > 1) {
+            const auto& asg = drivers[r].member->as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+            if (asg.kind == ExpressionKind::Assignment) {
+              const auto* lhs = &asg.as<slang::ast::AssignmentExpression>().left();
+              while (lhs->kind == ExpressionKind::Conversion) {
+                lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+              }
+              if (lhs->kind != ExpressionKind::NamedValue && lhs->kind != ExpressionKind::HierarchicalValue) {
+                // Continuous assigns are concurrent. Represent an ordinary
+                // split net as one resolved wire around a mut accumulator so
+                // every RHS observes the complete set of sibling drivers.
+                wire_syms_.insert(net);
+                resolved_cont_selfrefs.insert(net);
+                break;
+              }
+            }
           }
           continue;
         }
+        // A plain early read only needs `wire`; keep scanning, because a LATER
+        // reader may be the split self-referential continuous driver that also
+        // needs `resolved_cont_selfrefs`. Bailing out here on the FIRST match
+        // made the classification depend on driver index order and silently
+        // left those drivers on the old source-ordered (miscompiling) path.
         if (pos[r] < wpos) {
           wire_syms_.insert(net);
-          break;
+          continue;
         }
       }
     }
@@ -3897,7 +4015,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // loop counter is the common shape, and flagging it is a false alarm.
         // A continuous assign has no internal order, so a self-read there is
         // genuinely a read of what a SIBLING driver produces.
-        if (drivers[w].member == nullptr || drivers[w].member->kind != SymbolKind::ContinuousAssign) {
+        if (drivers[w].member == nullptr || drivers[w].member->kind != SymbolKind::ContinuousAssign
+            || !drivers[w].in_generate_loop) {
           continue;
         }
         if (pos[w] > first_write || !drivers[w].rhs_reads.contains(net)) {
@@ -3925,14 +4044,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         const auto* member = drivers[w].member;
         emit_unsupported(member != nullptr ? slang::SourceRange(member->location, member->location) : slang::SourceRange(),
                          "unsupported-driver-order",
-                         std::string("--reader slang cannot order the drivers of '") + std::string(net->name)
-                             + "': a driver reads that net and also writes it, before any driver has written it, so the "
-                               "read takes the net's undefined initial value",
-                         "the reader lowers order-free continuous assigns into ORDERED statements, and a generate loop "
-                         "that assigns a reduction tree root-first reads sibling bits its later iterations produce "
-                         "(common_cells lzc.sv / rr_arb_tree.sv). Rewrite the Verilog so the net is written before it "
-                         "is read -- give each level its own net instead of slicing one, or move the assign out of the "
-                         "`for` -- or read this file with --reader yosys-slang");
+                         std::string("--reader slang cannot order generated partial drivers of '") + std::string(net->name)
+                             + "': a continuous assignment inside a generate loop reads and writes the net before another "
+                               "iteration has written the slices it reads",
+                         "give each generated level its own net, arrange the generated assignments so every slice is "
+                         "written before it is read, or move the split assignments out of the generate loop");
         break;  // one refusal per net is enough
       }
     }
@@ -4524,7 +4640,37 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   }
 
   auto emit_driver = [&](size_t i) {
-    const auto&                                                    d = drivers[i];
+    const auto& d            = drivers[i];
+    auto        saved_prefix = genblk_prefix_;
+    genblk_prefix_           = d.prefix;
+    // A split continuous equation reads the RESOLVED wire, not the accumulator
+    // that receives its own partial store. Lower its RHS before redirecting the
+    // written symbol to `__wtmp`; this makes sibling slice drivers concurrent
+    // instead of snapshotting poison in source order.
+    std::optional<std::string> resolved_cont_rhs;
+    if (d.member != nullptr && d.member->kind == SymbolKind::ContinuousAssign) {
+      for (const auto* w : d.writes) {
+        if (resolved_cont_selfrefs.contains(w) && d.rhs_reads.contains(w)) {
+          const auto& raw = d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+          if (raw.kind == ExpressionKind::Assignment) {
+            // Install the continuous-assign context lower_continuous_assign
+            // would install: this runs BEFORE it, so the PREVIOUS driver's
+            // procedural state (proc_blocking_written_ gates the lazy declare
+            // in lower_named_value) would otherwise still be in effect, and
+            // the pending loc would be empty so the RHS statements would carry
+            // no source mapping.
+            proc_kind_ = Proc_kind::none;
+            proc_assign_style_.clear();
+            proc_blocking_written_.clear();
+            current_assign_nonblocking_ = false;
+            set_pending_loc(raw.sourceRange);
+            resolved_cont_rhs = to_int_value(lower_rvalue(raw.as<slang::ast::AssignmentExpression>().right()));
+            clear_pending_loc();
+          }
+          break;
+        }
+      }
+    }
     // Split-wire redirect: while THIS driver (a writer of the net) emits, its
     // writes AND its own RMW reads resolve to the `mut` accumulator; every other
     // driver keeps reading the resolved wire.
@@ -4538,8 +4684,6 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
       }
     }
-    auto saved_prefix = genblk_prefix_;
-    genblk_prefix_    = d.prefix;
     switch (d.member->kind) {
       case SymbolKind::Net: {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
@@ -4590,7 +4734,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         clear_pending_loc();
         break;
       }
-      case SymbolKind::ContinuousAssign: lower_continuous_assign(d.member->as<slang::ast::ContinuousAssignSymbol>()); break;
+      case SymbolKind::ContinuousAssign:
+        lower_continuous_assign(d.member->as<slang::ast::ContinuousAssignSymbol>(),
+                                resolved_cont_rhs ? &*resolved_cont_rhs : nullptr);
+        break;
       case SymbolKind::ProceduralBlock : lower_process(d.member->as<slang::ast::ProceduralBlockSymbol>()); break;
       case SymbolKind::Instance        : lower_instance(d.member->as<slang::ast::InstanceSymbol>()); break;
       case SymbolKind::UninstantiatedDef:
@@ -4650,7 +4797,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   }
 }
 
-void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca) {
+void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs) {
   proc_kind_ = Proc_kind::none;
   proc_assign_style_.clear();
   proc_blocking_written_.clear();
@@ -4668,7 +4815,13 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
     return;
   }
   set_pending_loc(as.sourceRange);
-  lower_assign(as.as<slang::ast::AssignmentExpression>());
+  const auto& assign = as.as<slang::ast::AssignmentExpression>();
+  if (precomputed_rhs != nullptr) {
+    current_assign_nonblocking_ = false;
+    assign_to(assign.left(), *precomputed_rhs);
+  } else {
+    lower_assign(assign);
+  }
   clear_pending_loc();
 }
 

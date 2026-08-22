@@ -75,7 +75,7 @@ SLANG_LADDER = {
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
     "mt_basic_test": "lec",
-    "multiassign": "error",  # concurrent slice assigns read each other (`{out[4],out[2:1]} = {2'b11, out[3]}` reads out[3], written by the NEXT assign): unsupported-driver-order
+    "multiassign": "lec",  # ordinary concurrent slice assigns are resolved together; only generated-loop cross-iteration drivers are refused
     "mux": "lec",
     "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
     "mux2": "lec",

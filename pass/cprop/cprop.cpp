@@ -3373,6 +3373,18 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   for (auto it = post_sweep.rbegin(); it != post_sweep.rend(); ++it) {
     canonicalize_concat_pack(current_graph, *it);
   }
+  // The first scalar sweep deliberately sees the hand-spelled Or/SHL packs so
+  // their slice reads can break false word-level cycles before canonicalization.
+  // Some generated packs are too nested for that spelling matcher, but become a
+  // direct Get_mask(Concat(...)) above. Revisit only Get_mask nodes so the Concat
+  // lane table can expose the unique disjoint driver (TraceBuffer and Reduction).
+  // This is still node-non-increasing and value preserving; scalar_node either
+  // rewires/deletes the read or leaves it untouched.
+  for (auto node : stable_nodes(current_graph)) {
+    if (!node.is_invalid() && type_op_of(node) == Ntype_op::Get_mask) {
+      scalar_node(node);
+    }
+  }
   // Merge duplicate nodes after the scalar/canonical folds (duplicated inlined
   // cones merge wholesale). Re-materialize again: canonicalize_concat_pack
   // mints the Concat cells, and a stale vector would hide every freshly

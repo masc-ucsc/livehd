@@ -656,7 +656,6 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             "tests/equiv/mem_write_during_reset.prp",
             "tests/equiv/async_mem_reset_demoted.prp",
             "tests/equiv/reg_decl_init_dropped.prp",
-            "tests/equiv/selfref_slice_assign.prp",
             "tests/equiv/selfref_concat_assign.prp",
             # NOTE: the three phase_* pairs (phase_latch_flop_edges,
             # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
@@ -739,7 +738,6 @@ _STATEMATCH_FIXME = [
     "mem_fwd_selfwrite",             # ref memory vs golden two-flop representation
     "mem_pending_sync_init",         # ref memory vs golden output flop representation
     "partsel_oob_ascending",         # `lhd compile` refuses the .v (negative-shift)
-    "selfref_slice_assign",          # `lhd compile` refuses the .v (unsupported-driver-order: concurrent slice assigns read each other)
     "phase_hier_latch_neg",          # regs: only 0/1 paired
     "phase_two_clock_ports",         # regs: only 0/2 paired
     "struct_top_port",               # regs: only 0/1 paired
@@ -851,7 +849,6 @@ _STATEMATCH_FIXME = [
         "mem_write_during_reset",   # memory write not gated by the async reset
         "async_mem_reset_demoted",  # async reset OF a memory demoted to sync
         "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
-        "selfref_slice_assign",     # concurrent slice assigns solved in source order
         "selfref_concat_assign",    # self-referential whole-vector assign never driven
         # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
         "partsel_oob_ascending",    # out-of-range select on a `[0:N]` vector: negative shift, not X
@@ -1050,7 +1047,6 @@ _V2PRP2V_VERILOG_FIXME = [
     "async_mem_reset_demoted",
     "async_reset_pin_wire",
     "reg_decl_init_dropped",
-    "selfref_slice_assign",
     "selfref_concat_assign",
     # 2026-08-02 chimera sweep (see _V2PRP2V_NATIVE_FIXME for the root cause).
     "partsel_oob_ascending",

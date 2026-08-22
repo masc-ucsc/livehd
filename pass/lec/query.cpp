@@ -16,6 +16,7 @@
 #include <cstring>
 #include <format>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -6626,8 +6627,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // pair equal DISCHARGES the merge; only then may the two symbols share
     // inputs (speculative reduction).
     struct Merge_cand {
-      cvc5::Term  ref_dout, impl_dout;
-      size_t      obligation;   // index into `merge_obl`
+      cvc5::Term  to_dout, from_dout;
+      size_t      obligation;   // index into `merge_obl`, or max() when the address Terms are identical
       bool        needs_array;  // a forwarding read: also needs the arrays proven equal
       std::string mem_key;
     };
@@ -6635,22 +6636,81 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     std::vector<Merge_cand> merge_cands;
     for (const auto& [key, rrd] : re.mem_rd) {
       auto it = ie.mem_rd.find(key);
-      if (it == ie.mem_rd.end() || it->second.size() != rrd.size()) {
+      if (it == ie.mem_rd.end()) {
         continue;
       }
-      for (size_t k = 0; k < rrd.size(); ++k) {
-        const auto& a = rrd[k];
-        const auto& b = it->second[k];
-        if (a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()) {
+      const auto& ird = it->second;
+
+      // Front ends need not materialize the same NUMBER of async read ports.
+      // Re-reading generated Pyrope commonly duplicates a constant-index read
+      // that the direct Verilog path shared (TraceBuffer: 59 vs 62). All reads
+      // of the same array at the same address nevertheless return one value.
+      // First coalesce every exactly-equal address group onto one REF symbol;
+      // this also joins duplicate ports within either side. No solver premise
+      // is needed because equal cvc5 Terms are the same address expression.
+      std::vector<bool> ref_grouped(rrd.size(), false);
+      for (size_t r = 0; r < rrd.size(); ++r) {
+        if (ref_grouped[r]) {
           continue;
         }
-        // Two ways the douts are justified equal, both needing equal addresses:
-        //   - both read the SHARED committed contents (fwd==0): immediate; or
-        //   - both read their OWN next-state array, but those arrays were just
-        //     proven equal by the port decomposition (a forwarding read).
-        // `needs_array` records which, and is checked after round 1.
-        merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
-        merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+        const auto& canonical = rrd[r];
+        // ONE scan of `ird`: `crosses` (any same-address partner on the impl
+        // side is what makes this group worth forming) and the mergeable
+        // partners come from the same walk.
+        bool                crosses = false;
+        std::vector<size_t> cross;  // indices into `ird`
+        for (size_t bi = 0; bi < ird.size(); ++bi) {
+          const auto& b = ird[bi];
+          if (canonical.addr != b.addr || canonical.dout.getSort() != b.dout.getSort()) {
+            continue;
+          }
+          crosses = true;
+          if (canonical.dout != b.dout && canonical.from_shared_cur == b.from_shared_cur) {
+            cross.push_back(bi);
+          }
+        }
+        if (!crosses) {
+          continue;
+        }
+        for (size_t j = r + 1; j < rrd.size(); ++j) {
+          const auto& a = rrd[j];
+          if (canonical.addr == a.addr && canonical.dout.getSort() == a.dout.getSort() && canonical.from_shared_cur
+              && a.from_shared_cur) {
+            ref_grouped[j] = true;
+            if (a.dout != canonical.dout) {
+              merge_cands.push_back({canonical.dout, a.dout, std::numeric_limits<size_t>::max(), false, key});
+            }
+          }
+        }
+        for (size_t bi : cross) {
+          const auto& b = ird[bi];
+          merge_cands.push_back({canonical.dout,
+                                 b.dout,
+                                 std::numeric_limits<size_t>::max(),
+                                 !(canonical.from_shared_cur && b.from_shared_cur),
+                                 key});
+        }
+      }
+
+      // When counts agree, retain the positional proof route for equivalent
+      // but non-identical address cones. Exact groups above already cover the
+      // common case and are deliberately allowed when counts differ.
+      if (ird.size() == rrd.size()) {
+        for (size_t k = 0; k < rrd.size(); ++k) {
+          const auto& a = rrd[k];
+          const auto& b = ird[k];
+          if (a.addr == b.addr || a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()
+              || a.from_shared_cur != b.from_shared_cur) {
+            continue;
+          }
+          // Two ways the douts are justified equal, both needing equal addresses:
+          //   - both read the SHARED committed contents (fwd==0): immediate; or
+          //   - both read their OWN next-state array, but those arrays were just
+          //     proven equal by the port decomposition (a forwarding read).
+          // `needs_array` records which, and is checked after round 1.
+          merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
+          merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+        }
       }
     }
 
@@ -6679,10 +6739,21 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (size_t k = 0; k < merge_obl.size(); ++k) {
         addr_ok += r1[n_direct + n_sub + k] == Cone_verdict::Proven ? 1 : 0;
       }
+      // Most merges are now EXACT-address groups that need no solver premise,
+      // so `merge_obl` is no longer the merge population: reporting `addr_ok /
+      // merge_obl.size()` alone reads as "0/0 read-port merges" on a run with
+      // dozens of live merges.
+      size_t exact = 0;
+      for (const auto& c : merge_cands) {
+        exact += c.obligation == std::numeric_limits<size_t>::max() ? 1 : 0;
+      }
       std::fprintf(stderr,
-                   "[LEC_CONE] -- %zu direct cut(s), %zu memory port obligation(s), %d/%zu read-port merges\n",
+                   "[LEC_CONE] -- %zu direct cut(s), %zu memory port obligation(s), %zu read-port merge(s) "
+                   "(%zu exact-address, %d/%zu address-proved)\n",
                    n_direct,
                    subs.size(),
+                   merge_cands.size(),
+                   exact,
                    addr_ok,
                    merge_obl.size());
     }
@@ -6725,10 +6796,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto build_merge = [&]() {
       Cone_merge_map m;
       for (const auto& c : merge_cands) {
-        const bool addr_ok  = r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
+        const bool addr_ok
+            = c.obligation == std::numeric_limits<size_t>::max() || r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
         const bool array_ok = !c.needs_array || mem_proven.contains(c.mem_key);
         if (addr_ok && array_ok) {
-          m.emplace(c.impl_dout, c.ref_dout);
+          m.emplace(c.from_dout, c.to_dout);
         }
       }
       return m;

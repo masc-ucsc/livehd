@@ -306,6 +306,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   //  * Get_mask const [a,b) extraction -> descend at positions [a+lo, a+hi)
   //  * to-unsigned / unary-zext Get_mask -> position-preserving descent
   //  * Sum with no subtrahend and pairwise-DISJOINT operand footprints == Or
+  //  * a real Sum slice [lo,hi) -> add the independently resolved LOW hi bits,
+  //    then slice the result (low result bits never depend on higher inputs)
   //  * Or operands with footprints outside the requested slice -> exact zero
   //  * EQ control bit -> rebuild only from complete bounded operands
   //  * Concat -> re-based descent into the lane(s) the slice lands in (the
@@ -461,7 +463,52 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           }
         }
         if (op == Ntype_op::Sum && !disjoint) {
-          usable = false;  // a real adder -> cannot slice
+          // A real adder cannot distribute [lo,hi) operand-by-operand because
+          // carries cross `lo`. It can still be resolved exactly from each
+          // operand's LOW `hi` bits: modulo 2^hi arithmetic is independent of
+          // every higher input bit. Rebuild that truncated sum and select its
+          // [lo,hi) result. This is the packed carry-chain shape used by
+          // Reduction.sv (`cin[k]` depends on an earlier `cout[j]`).
+          //
+          // A narrower signed operand would be sign-extended before addition;
+          // resolving it as a packed low slice would instead zero-extend it, so
+          // retain the conservative refusal for that case.
+          bool                         low_ok = true;
+          std::vector<hhds::Pin_class> lows;
+          lows.reserve(operands.size());
+          for (auto& d : operands) {
+            const int dbits = gu::bits_of(d);
+            if (!gu::is_unsign(d) && (dbits <= 0 || dbits < hi)) {
+              // A narrower/unbounded SIGNED addend: an operand-shape refusal,
+              // not a budget or depth one. Say which, or the `Stop_reason`
+              // report blames whichever limit fired last (the conflation the
+              // enum exists to remove).
+              if (split_dbg) {
+                std::print("split[dbg]:   Sum low-slice refused: signed addend bits={} < hi={}\n", dbits, hi);
+              }
+              stop_reasons |= kStopShape;  // diagnostic only: this refusal is PERMANENT,
+              low_ok = false;              // so it must stay memoizable (cap_hit untouched)
+              break;
+            }
+            auto low = self(self, d, 0, hi, depth + 1);
+            if (low.is_invalid()) {
+              low_ok = false;
+              break;
+            }
+            lows.push_back(low);
+          }
+          if (low_ok) {
+            auto n = gu::create_typed_node(*g, Ntype_op::Sum);
+            ++created;
+            ++total_created;
+            for (auto& low : lows) {
+              low.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            }
+            auto dp = n.create_driver_pin(0);
+            gu::set_ubits(dp, hi);
+            res = slice_node(dp);
+          }
+          usable = false;  // handled above, or conservatively refused
         }
         if (usable && bounded && disjoint) {
           hhds::Pin_class cover;

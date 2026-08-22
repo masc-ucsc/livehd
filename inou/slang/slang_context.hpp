@@ -258,7 +258,7 @@ private:
   // Unknown-module definition names already diagnosed (one warning per name,
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
   absl::flat_hash_set<std::string>               unknown_warned_;
-  void                                           lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca);
+  void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
   void                                           declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
   void                                           declare_reg(const slang::ast::ValueSymbol& sym);
   absl::flat_hash_set<const slang::ast::Symbol*> reg_declared_;

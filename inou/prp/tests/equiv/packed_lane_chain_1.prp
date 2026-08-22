@@ -1,0 +1,13 @@
+/*
+:name: packed_lane_chain_1
+:type: lec
+*/
+// Generated-source spelling: the upper lane reads the lower lane from the
+// complete packed wire. The word-level feedback disappears after the OR/shift
+// pack is canonicalized to Concat and its constant slice is resolved.
+pub comb packed_lane_chain(a:u4, b:u4) -> (result:u8) {
+  wire lanes:u8
+  const upper = lanes#[0..=3] ^ b
+  lanes = (upper << 4) | a
+  result = lanes
+}
