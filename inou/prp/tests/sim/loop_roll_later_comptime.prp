@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_later_comptime
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: *=0
 */
 // The first loop computes a comptime trip count for the second. Rolling it

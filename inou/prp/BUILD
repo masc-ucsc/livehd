@@ -590,6 +590,13 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
         ],
         data = [
             "//inou/prp:tests/prplib.py",
+            # An equiv fixture may also carry `simulation` in its `:type:`
+            # (matched_filter does), and prplib then imports prpsim. Without it
+            # here the module is only found by leaking through the runfiles
+            # symlink into the source tree -- it is outside the action key, so
+            # editing prpsim.py leaves these targets falsely (cached) PASSED,
+            # and it is simply absent under a stricter sandbox.
+            "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
             "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
@@ -1317,7 +1324,7 @@ _SIMEQ = [
     "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
     "dyn_tuple_idxexpr", "dyn_tuple_mixed", "dyn_tuple_mut_ro", "dyn_tuple_pair",
     "dyn_tuple_sel", "flop_reset_matrix", "gen_type_cast", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
-    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "lg_rename", "loop_accum",
+    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "lg_rename", "loop_accum", "matched_filter",
     "match_const_else", "match_no_else", "mem_const_idx", "mem_init", "mem_init_scalar",
     "mem_init_tuple", "mem_pending_sync_init", "mem_rom", "mem_whole_cond_const",
     "mem_write_only", "mod_acc_state", "mod_call_mod", "mod_call_pipe", "mod_call_pipe2",

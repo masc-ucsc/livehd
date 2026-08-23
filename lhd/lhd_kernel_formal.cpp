@@ -1909,7 +1909,76 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                   : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
+      // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
+      // a collapsed REFUTE: it cannot tell "the collapsed counterexample was an
+      // artifact of the boxes" (instance_state_anon: mispaired lanes, the
+      // flat pass is the rescue) from "the counterexample needs more than k
+      // cycles to reach an output through the real children". MEASURED on the
+      // lhdsuite matched_filter core with one tap's product broken: `tap`
+      // REFUTES, the parent REFUTES under collapse, and the flat 6-cycle BMC
+      // after the 70-cycle reset hold sees nothing — the broken product needs
+      // LOG2N+2 = 8 cycles to reach `y` — so the run shipped as PASS(6), exit
+      // 0, on a design with a concrete disproof. Deepen instead: re-run the
+      // flat miter with the bound extended by the design's flush depth (the
+      // most cycles a divergence can be delayed by flat). A REFUTE there is
+      // real; a pass there is the spurious-box case and stands under the
+      // ordinary bounded-proof policy; an Unknown stays inconclusive, keeping
+      // the collapsed witness (a hard fail under strict), and must NOT fall
+      // through to the collapsed int-blast retry below.
+      auto deepen_if_bounded = [&](livehd::lec::Query_result& cand) -> bool {  // true = demoted to Unknown
+        if (!(cand.verdict == Verdict::Proven && cand.bounded)) {
+          return false;
+        }
+        const int flush = std::max(cand.reset_hold, r.reset_hold);
+        if (flush <= 0) {
+          // No reset-hold / pipeline-flush prologue -- reset_hold is 0 for every
+          // phase but after_reset. The deepened options would then be BYTE
+          // IDENTICAL to the flat run that just finished (same graphs, same
+          // bound, same options), so the re-solve buys no coverage and can only
+          // flake: an identical query that happens to exceed formal.timeout the
+          // second time would demote a settled bounded PROVEN to INCONCLUSIVE,
+          // a hard fail under the default formal.strict=true.
+          return false;
+        }
+        livehd::lec::Lec_options odeep = oflat;
+        odeep.bound                    = std::max(oflat.bound > 0 ? oflat.bound : 6, cand.checked_steps) + flush;
+        {
+          std::lock_guard report_lock(report_mutex);
+          std::print("lec[hier]: '{}' flat confirmation only BOUNDED ({} step(s)) -> deepening to bound {} (+ flush depth {})\n",
+                     name,
+                     cand.checked_steps,
+                     odeep.bound,
+                     flush);
+        }
+        auto rd      = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], odeep, sub_lib)
+                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], odeep, sub_lib);
+        rd.cvc5     += cand.cvc5;
+        rd.solve_ms += cand.solve_ms;  // the shallow flat leg really ran: the budget must see it
+        if (rd.verdict == Verdict::Unknown) {
+          cand.verdict = Verdict::Unknown;
+          cand.witness = r.witness;
+          cand.detail  = std::format(
+              "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
+              "cannot overrule the collapsed-box REFUTE; {}",
+              cand.checked_steps,
+              odeep.bound,
+              rd.detail);
+          cand.cvc5     = rd.cvc5;
+          // The deepened leg is usually the one that burned the whole per-query
+          // cap; dropping its solve_ms here let every remaining def draw a fresh
+          // full timeout and overrun the soft total by one cap per demoted def.
+          cand.solve_ms = rd.solve_ms;
+          return true;
+        }
+        rd.detail = std::format("deepened flat confirmation (bound {} = {} + flush {}); ", odeep.bound, odeep.bound - flush, flush)
+                    + rd.detail;
+        cand      = std::move(rd);
+        return false;
+      };
       if (refuted_under_collapse) {
+        if (deepen_if_bounded(rf)) {
+          absorb_demoted = true;  // see the int_blast_retry guard below
+        }
         rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                     + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
         rf.elapsed_ms  = -1;  // the progress record carries the combined wall-clock below
@@ -1919,7 +1988,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // The flat run is the authority here. If it settles, adopt it either way;
         // if it cannot, the collapsed PROVEN must NOT stand — a child's
         // counterexample is on the table and nothing discharged it, which is the
-        // definition of inconclusive.
+        // definition of inconclusive. A merely bounded flat pass is deepened
+        // first, exactly as above: a bounded pass cannot absorb a counterexample.
+        deepen_if_bounded(rf);
         if (rf.verdict != Verdict::Unknown) {
           rf.detail = "flat-confirm after collapsed-box PROVEN absorbing a refutation" + std::string(rf.detail.empty() ? "" : "; ")
                       + rf.detail + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
@@ -1928,11 +1999,33 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           r              = std::move(rf);
         } else {
           r.verdict = Verdict::Unknown;
-          r.detail  = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                     + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+          r.detail        = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
+                            + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                            + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
           r.cvc5         += rf.cvc5;
-          absorb_demoted  = true;  // see the int_blast_retry guard below
+          r.solve_ms     += rf.solve_ms;  // same reason as the arm below: the flat leg ran
+          absorb_demoted  = true;         // see the int_blast_retry guard below
         }
+      } else if (!force_flat_refuted[def_ix].empty() && deepen_if_bounded(rf)) {
+        // Same rule as the two arms above, and for the same reason: a child's
+        // counterexample is on the table (force_flat_refuted is non-empty), so a
+        // merely BOUNDED flat pass cannot absorb it. Without this the UNKNOWN
+        // arm was the remaining door to the exact false PASS the deepening
+        // exists to close -- a collapsed re-solve that gives up instead of
+        // refuting, then a shallow 6-cycle flat retry that cannot reach the
+        // divergence. Gated on a real child REFUTE: an ordinary Unknown -> flat
+        // retry with nothing to absorb must not pay for a second solve.
+        r.verdict       = Verdict::Unknown;
+        r.detail        = "a bounded flat retry cannot clear a collapsed-box UNKNOWN while a child REFUTE stands"
+                          + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                          + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+        r.cvc5         += rf.cvc5;
+        r.solve_ms     += rf.solve_ms;  // both flat legs really ran: the soft budget must see them
+        // The progress record below carries the combined wall clock, exactly as
+        // in the three sibling arms; leaving the collapsed leg's value here
+        // would report a def that burned two full solves as taking milliseconds.
+        r.elapsed_ms    = -1;
+        absorb_demoted  = true;  // see the int_blast_retry guard below
       } else if (rf.verdict != Verdict::Unknown) {
         rf.detail = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                     + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
@@ -4481,7 +4574,8 @@ void lec_command(Options& opts, Result& res) {
         }
       }
     }
-    auto t0 = std::chrono::steady_clock::now();
+    auto t0              = std::chrono::steady_clock::now();
+    bool confirm_demoted = false;  // a collapsed REFUTE whose flat confirmation could not settle even deepened
     if (!settled_by_cache) {
       r = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
       if (r.verdict == livehd::lec::Verdict::Refuted && !o.collapse.empty()) {
@@ -4496,17 +4590,61 @@ void lec_command(Options& opts, Result& res) {
         // boxes being confirmed. Clearing trust would re-flatten a latch and turn
         // this real counterexample into an encoder refusal (exit 7).
         oflat.collapse.assign(o.trust.begin(), o.trust.end());
-        auto rf   = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
+        auto      rf    = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
+        // Same rule as the hierarchical driver, INCLUDING its `flush > 0` guard:
+        // a bounded "no CEX up to k" cannot by itself overrule a collapsed
+        // REFUTE whose witness may need up to the flush depth more cycles to
+        // reach an output flat -- but with no flush depth the "deepened" options
+        // are byte-identical to the run that just finished, so the re-solve buys
+        // nothing and can only flake a settled bounded PROVEN into a strict hard
+        // failure. reset_hold is 0 for every phase but after_reset.
+        const int flush = std::max(rf.reset_hold, r.reset_hold);
+        if (rf.verdict == livehd::lec::Verdict::Proven && rf.bounded && flush > 0) {
+          livehd::lec::Lec_options odeep = oflat;
+          odeep.bound                    = std::max(oflat.bound > 0 ? oflat.bound : 6, rf.checked_steps) + flush;
+          std::print("lec: '{}' flat confirmation only BOUNDED ({} step(s)) -> deepening to bound {} (+ flush depth {})\n",
+                     impl_g->get_name(),
+                     rf.checked_steps,
+                     odeep.bound,
+                     flush);
+          auto rd      = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), odeep, sub_lib_ptr);
+          rd.cvc5     += rf.cvc5;
+          rd.solve_ms += rf.solve_ms;  // the shallow flat leg really ran
+          if (rd.verdict == livehd::lec::Verdict::Unknown) {
+            rf.verdict = livehd::lec::Verdict::Unknown;
+            rf.witness = r.witness;
+            rf.detail  = std::format(
+                "INCONCLUSIVE: flat confirmation only BOUNDED ({} step(s)) and the deepened run (bound {}) did not settle — "
+                "cannot overrule the collapsed-box REFUTE; {}",
+                rf.checked_steps,
+                odeep.bound,
+                rd.detail);
+            rf.cvc5         = rd.cvc5;
+            rf.solve_ms     = rd.solve_ms;  // the deepened leg is usually the expensive one
+            confirm_demoted = true;
+          } else {
+            rd.detail
+                = std::format("deepened flat confirmation (bound {} = {} + flush {}); ", odeep.bound, odeep.bound - flush, flush)
+                  + rd.detail;
+            rf = std::move(rd);
+          }
+        }
         rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                     + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
-        rf.elapsed_ms  = -1;      // the progress record carries the combined wall-clock below
-        rf.cvc5       += r.cvc5;  // the collapsed run's cvc5 effort was still spent (formal.stats)
+        rf.elapsed_ms   = -1;          // the progress record carries the combined wall-clock below
+        rf.cvc5        += r.cvc5;      // the collapsed run's cvc5 effort was still spent (formal.stats)
+        rf.solve_ms    += r.solve_ms;  // and so was its solve time
         r              = std::move(rf);
       }
       // int_blast=auto second leg (same rule as the hierarchical driver): a
       // solver-give-up Unknown earns one int-blasted re-solve at min_timeout,
       // BEFORE the trusted-box demotion so a retry refute obeys it too.
-      r = livehd::lec::int_blast_retry(ref_g.get(), impl_g.get(), o, std::move(r), sub_lib_ptr);
+      // NOT after a demoted confirmation: `o` still carries the collapse, so
+      // this would re-solve the very collapsed miter whose REFUTE is the thing
+      // left unconfirmed, and report that spurious-or-not refute as the verdict.
+      if (!confirm_demoted) {
+        r = livehd::lec::int_blast_retry(ref_g.get(), impl_g.get(), o, std::move(r), sub_lib_ptr);
+      }
       // Same trusted-box discipline as the hierarchical driver: a refute that
       // turns on a trusted box input is not a disproof (the leaf may treat it as
       // don't-care and cannot be flattened) — degrade to Unknown, keep witness.

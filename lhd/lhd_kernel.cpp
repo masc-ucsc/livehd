@@ -169,6 +169,16 @@ std::vector<Set_option> list_set_options() {
                  "with byte-identical outputs (reuse is a speedup, never an oracle) while the --result-json telemetry keeps "
                  "reporting enabled=false. There is no per-tier switch"});
   out.push_back(Set_option{
+      "compile.unroll",
+      "compile",
+      "false",
+      "true|false: unroll every comptime range loop into one instance per iteration on the way to the LGraph. Default "
+      "false: an eligible loop is KEPT as one replicated instance (its body lifted to a generated definition), which is "
+      "O(1) in the trip count for the front end and for hierarchical synthesis/LEC; a loop the lifter declines (a "
+      "register written in the body, a carry without a declared type, a nested loop whose domain reads the index, …) "
+      "unrolls either way, with the reason in the pass.upass log. Backends that cannot consume the compact form expand it "
+      "themselves, so results are identical; only representation and speed differ"});
+  out.push_back(Set_option{
       "compile.lnast_fmt",
       "compile",
 #ifndef NDEBUG

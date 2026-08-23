@@ -1,0 +1,24 @@
+/*
+:name: comptime_signed_array
+:type: equiv
+:verilog_top: comptime_signed_array.top
+:pyrope_top: top
+*/
+
+// A comptime name used in an integer type constraint must be folded into the
+// array element type. These two declarations both describe signed four-bit
+// elements; the golden states that width directly.
+comptime const W = 4
+
+pub comb top(x:s4) -> (from_range:s4, from_bits:s4) {
+  mut range_values:[2]signed(
+    min=-(1 << (W - 1)),
+    max=(1 << (W - 1)) - 1,
+  ) = 0
+  mut bits_values:[2]signed(bits=W) = 0
+
+  range_values[0] = x
+  bits_values[1]  = x
+  from_range = range_values[0]
+  from_bits  = bits_values[1]
+}

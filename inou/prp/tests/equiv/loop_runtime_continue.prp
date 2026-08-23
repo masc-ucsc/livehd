@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: loop_runtime_continue.top
 :pyrope_top: top
-:set: compile.upass.roll=true
 */
 
 // Runtime continue disables only the remainder of the current occurrence. It

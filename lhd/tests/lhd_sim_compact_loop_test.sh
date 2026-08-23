@@ -56,7 +56,7 @@ EOF
 # Warm-workdir digest check and source-size scaling: changing only COUNT must
 # regenerate the wrapper, while the parent module's source size remains flat.
 write_design 4
-"$LHD" sim "$W/compact.prp" --setup-only --workdir "$W/scale" --set compile.upass.roll=true -q >/dev/null 2>&1 \
+"$LHD" sim "$W/compact.prp" --setup-only --workdir "$W/scale" -q >/dev/null 2>&1 \
   || fail "small compact setup failed"
 H="$W/scale/sim/compact.top.hpp"
 C="$W/scale/sim/compact.top.cpp"
@@ -65,7 +65,7 @@ grep -q 'static constexpr std::size_t count = 4' "$H" || fail "small descriptor 
 SMALL_BYTES=$(( $(wc -c < "$H") + $(wc -c < "$C") ))
 
 write_design 400
-"$LHD" sim "$W/compact.prp" --setup-only --workdir "$W/scale" --set compile.upass.roll=true -q >/dev/null 2>&1 \
+"$LHD" sim "$W/compact.prp" --setup-only --workdir "$W/scale" -q >/dev/null 2>&1 \
   || fail "large compact setup failed"
 grep -q 'static constexpr std::size_t count = 400' "$H" || fail "descriptor-aware digest reused the count=4 source"
 grep -q 'std::array<Callee, count> lanes' "$H" || fail "compact state is not a std::array"
@@ -92,7 +92,7 @@ if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
 fi
 
 write_design 4
-"$LHD" sim "$W/compact.prp" --workdir "$W/run" --set compile.upass.roll=true --set sim.vcd=true \
+"$LHD" sim "$W/compact.prp" --workdir "$W/run" --set sim.vcd=true \
   --set sim.checkpoint_every=1 --set sim.checkpoint_max=2 -q >/dev/null 2>&1 || fail "compact host run failed"
 VCD="$W/run/top.run.vcd"
 [ -s "$VCD" ] || VCD="$W/run/top_run.vcd"
@@ -106,7 +106,7 @@ grep -Fq 'u_loop_0[0]' "$LATEST/regs.json" || fail "checkpoint lacks occurrence 
 grep -Fq 'u_loop_0[3]' "$LATEST/regs.json" || fail "checkpoint lacks occurrence 3 path"
 
 "$LHD" sim "$W/compact.prp" top.run --list-signals --result-json "$W/signals.json" --workdir "$W/query" \
-  --set compile.upass.roll=true -q >/dev/null 2>&1 || fail "compact list-signals failed"
+  -q >/dev/null 2>&1 || fail "compact list-signals failed"
 python3 - "$W/signals.json" <<'PY' || fail "compact query paths are wrong"
 import json, sys
 names = {s["name"] for s in json.load(open(sys.argv[1]))["debug"]["signals"]}

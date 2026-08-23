@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_final_only
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 *=1
 */
 // `z` has no value entering ordinal zero. Every iteration defines it, and no

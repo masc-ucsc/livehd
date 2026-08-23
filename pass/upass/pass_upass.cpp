@@ -178,7 +178,15 @@ void Pass_upass::setup() {
   m1.add_label_optional("roll",
                         "true|false: keep an eligible comptime range loop ROLLED — lift its body to one generated "
                         "definition and emit a single replicated instance (see todo_loop_cond_sub.md) instead of "
-                        "unrolling one copy per iteration. Default FALSE while the LEC/formal paths still expand it.",
+                        "unrolling one copy per iteration. Default TRUE; the lhd kernel seeds it from the user-facing "
+                        "`compile.unroll` switch (roll = !unroll).",
+                        "true");
+  m1.add_label_optional("roll_arrays",
+                        "true|false: let a rolled loop carry an ARRAY (`mut v:[N]T` written by index) across the lifted "
+                        "boundary as an `[N]T` port. Default FALSE: such a loop unrolls (logged). The rolled form is "
+                        "correct through Verilog emission, but every replica body then carries an N*W-bit lane "
+                        "demux/mux (MEASURED 26x the gates of the unrolled design on a 64-tap matched filter) and "
+                        "lhd sim / lhd lec do not consume it faithfully yet.",
                         "false");
   m1.add_label_optional("roll_cap",
                         "roll: maximum replica count still eligible to roll; a larger trip count falls back to "
@@ -229,6 +237,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("dce");     // dce:mark -> runner skips the post-DCE staging rebuild (lg-only flows)
   capture_opt("roll");    // upass.roll=true -> lift an eligible range-loop body and emit one replicated instance
   capture_opt("roll_cap");
+  capture_opt("roll_arrays");
 
   if (!upass_order.empty()) {
     return;

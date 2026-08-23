@@ -118,7 +118,7 @@ class PrpRunner:
         """`:set: a.b=c d.e=f` — per-fixture pass flags, appended to every mode.
 
         Used by fixtures that must exercise a non-default lowering (e.g.
-        `:set: upass.roll=true` to keep a source loop rolled instead of
+        `:set: compile.unroll=true` to unroll a source loop instead of keeping it rolled, or
         unrolling it).
         """
         spec = test.params.get('set')
@@ -785,7 +785,7 @@ class PrpRunner:
         # simfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
         cmd += ['--set', 'formal.simfail_run=false']
-        # `:set:` rides here too: without it a `:set: upass.roll=true` fixture
+        # `:set:` rides here too: without it a `:set: compile.unroll=true` fixture
         # silently verifies the DEFAULT lowering, so a rolled-only regression
         # passes green while its name and header claim the rolled netlist.
         cmd += self._extra_sets(test)
@@ -956,7 +956,26 @@ class PrpRunner:
             print('{} - expect_instances - failed: {}'.format(name, err))
             return 1
 
-        cmd = self.lhd_lgraph(test, 'expect')
+        # A header-only `_<N>` variant means "the base source, my flags" (see
+        # prplec.py): lower the BASE sibling under this variant's `:set:`, or
+        # the count is taken over an empty file and every name is "found 0".
+        src = test.params['files'][0]
+        base_src = None
+        try:
+            import prplec
+            if prplec.is_header_only(src if os.path.isabs(src) else os.path.join(tmp_dir, src)):
+                stem, _, tail = src[:-len('.prp')].rpartition('_')
+                if stem and tail.isdigit():
+                    base_src = stem + '.prp'
+        except Exception:
+            base_src = None
+        if base_src is not None:
+            saved = test.params['files']
+            test.params['files'] = [base_src] + saved[1:]
+            cmd = self.lhd_lgraph(test, 'expect')
+            test.params['files'] = saved
+        else:
+            cmd = self.lhd_lgraph(test, 'expect')
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         log, _ = proc.communicate()
         if proc.returncode != 0:

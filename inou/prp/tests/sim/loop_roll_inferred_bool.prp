@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_inferred_bool
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 *=1
 */
 // `seen` is intentionally untyped. Its inferred boolean kind must survive as a

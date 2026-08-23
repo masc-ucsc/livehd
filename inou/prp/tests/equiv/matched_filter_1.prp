@@ -1,0 +1,28 @@
+/*
+:name: matched_filter_1
+:type: lec
+:set: compile.upass.roll_arrays=true
+:expect_instances: u_loop_0=1 u_loop_1=1 u_loop_2=1 u_loop_3=1 t=1
+:lec_grep: roll declined for `for lvl`: a loop nested in the body has a domain that reads the index
+*/
+// The base design with ARRAY carries allowed to roll (`compile.upass.roll_arrays=true`):
+// the tap chain and each of the LOG2N=3 per-level node loops become ONE
+// replicated Sub each — `:expect_instances:` pins that — LEC'd against the
+// base, which under the default (`compile.unroll=false`, roll_arrays=false)
+// declines every loop of this design ("`v` is an array carried across the
+// lifted boundary") and is therefore one instance per iteration (15 Subs).
+//
+// The `:lec_grep:` pins the one loop that must NOT roll even then: the level
+// loop's body holds the node loop whose domain `N >> (lvl + 1)` reads `lvl` —
+// a runtime port inside a lifted body — so it unrolls and each of its three
+// copies rolls the inner loop with a constant count (4, 2, 1).
+//
+// STATUS 2026-08-22: the rolled form is correct through Verilog emission
+// (Icarus reproduces the golden signature bit for bit) and `lhd lec` proves
+// rolled == unrolled for every sub-shape tried (taps only, comb levels,
+// stateful callee + scalar carry, stateful output into a lane), but on the
+// full design `lhd lec` reports a divergence at the LAST checked step with
+// all-zero inputs (rolled vs the golden .v) or only a bounded pass (rolled vs
+// unrolled) — an encoder artifact of registers inside materialized
+// occurrences still to be run down. Until then this pair may be RED; that is
+// the claim, not a reason to tag it.

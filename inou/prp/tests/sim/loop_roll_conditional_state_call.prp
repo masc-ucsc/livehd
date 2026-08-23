@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_conditional_state_call
 :type: simulation
-:set: compile.upass.roll=true
 */
 
 // One compact runtime loop whose lifted body conditionally calls a stateful

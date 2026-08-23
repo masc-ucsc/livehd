@@ -12447,7 +12447,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                           : canonical_result ? absl::StrCat("Slop_u<", width, ">::from_proven(", expr, ")")
                                              : absl::StrCat("Slop_u<", width, ">{", expr, "}");
               } else {
-                landing = sub_width_expr_ ? absl::StrCat("Slop<", eval_width, ">{", expr, "}") : expr;
+                // A signed landing over an UNSIGNED expression (a Get_mask
+                // rendered as `Slop_u<W>::get_mask_op_opt`, feeding a signed
+                // pin such as a packed-array element write) has no implicit
+                // Slop_u -> Slop conversion: wrap it, exactly as the inline
+                // render path does.
+                landing = (sub_width_expr_ || expr_is_u) ? absl::StrCat("Slop<", eval_width, ">{", expr, "}") : expr;
               }
               const auto  cse_key = absl::StrCat(use_u ? "u" : "s", ":", eval_width, ":", landing);
               auto        cse_it  = cse_extract ? extraction_cse.find(cse_key) : extraction_cse.end();

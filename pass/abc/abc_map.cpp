@@ -623,25 +623,56 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
 
   // The exact reading is the guarantee; the projection is only allowed to make a
   // hopeless region die sooner.
-  const bool over_now       = grown > budget;
+  //
+  // TWO ceilings, each measured against its OWN number. Per-color GROWTH is what
+  // tells a single oversize region from a merely large run, but growth alone has
+  // no ceiling on the accumulated footprint: process_footprint_bytes() is sticky
+  // after free (host_mem.hpp) and the malloc_trim at the color boundary is
+  // glibc-only, so on macOS a 300-color run whose colors each add well under the
+  // budget still walks the process into the address-space limit lhd_main armed
+  // as RLIMIT_AS -- and ABC does not null-check its allocations, so that lands
+  // as a bare SIGSEGV with no diagnostic and no qor.json.
+  //
+  // The absolute test must NOT reuse `budget`: pass.abc.memory_budget_mb is
+  // documented and used as a per-color GROWTH knob, and lhd's own ~23 MiB
+  // baseline already exceeds a modestly pinned one, so measuring TOTAL rss
+  // against it would refuse the first region of every such run. Measure it
+  // against the process-wide backstop instead -- literally the value lhd_main
+  // hands to RLIMIT_AS -- which is 0 ("unenforceable") when nothing pins it.
+  const uint64_t total_ceiling  = cost::configured_budget_bytes();
+  const bool     over_growth    = grown > budget;                             // this region alone
+  const bool     over_total     = total_ceiling != 0 && rss > total_ceiling;  // the process is at the hard limit
+  const bool     over_now       = over_growth || over_total;
   const bool over_projected = grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
     return false;
   }
 
-  const auto        mib         = [](uint64_t b) { return b >> 20; };
-  // Say which budget this actually is: an explicit memory_budget_mb is taken
-  // verbatim and no reserve is subtracted, so quoting a reserve there would
-  // describe a derivation that never happened.
-  const std::string budget_desc = opts_.memory_budget_mb > 0
-                                      ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
-                                      : std::format("per-color growth budget {} MiB (physical {} MiB minus a {} MiB reserve)",
-                                                    mib(budget),
-                                                    mib(cost::physical_ram_bytes()),
-                                                    mib(cost::reserve_bytes()));
-  refusal_                      = std::format(
+  const auto        mib = [](uint64_t b) { return b >> 20; };
+  // Name the ceiling the refusal actually came from, or the message describes a
+  // derivation that never happened. An explicit memory_budget_mb is taken
+  // verbatim and no reserve is subtracted, so quoting a reserve there would be
+  // a second such invention.
+  const std::string budget_desc
+      = (!over_growth && over_total)
+            ? std::format(
+                  "process memory ceiling {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, else physical minus "
+                  "reserve) -- the whole-PROCESS footprint, not this color's growth",
+                  mib(total_ceiling))
+        : opts_.memory_budget_mb > 0 ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
+                                     : std::format("per-color growth budget {} MiB (physical {} MiB minus a {} MiB reserve)",
+                                                   mib(budget),
+                                                   mib(cost::physical_ram_bytes()),
+                                                   mib(cost::reserve_bytes()));
+  // Once earlier colors exist to blame, say so: their retained memory is the
+  // cost, and the caller's stock `color.max_ge=<smaller>` hint is then the
+  // wrong advice.
+  const std::string cause = (over_growth || qor_.empty())
+                                ? std::string{}
+                                : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
+  refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-                           "(was {} MiB, color added {} MiB){}, {}",
+      "(was {} MiB, color added {} MiB){}, {}{}",
       region,
       blasted,
       total,
@@ -650,7 +681,8 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
       mib(rss_before),
       mib(grown),
       over_now ? std::string{} : std::format(", projected color growth {} MiB", mib(projected_growth)),
-      budget_desc);
+      budget_desc,
+      cause);
   return true;
 }
 
@@ -732,6 +764,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       = [&t_start] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(); };
   const uint64_t process_peak_before = cost::process_peak_rss_bytes();
   uint64_t       sampled_peak_rss    = cost::process_footprint_bytes();
+  // The ACCOUNTING baseline for color_peak_rss_kb: this region's footprint on
+  // entry, captured unconditionally. Deliberately not the admission baseline
+  // `rss_before` below, which is pinned to 0 under allow_oversize -- reusing it
+  // made every color report the whole sticky process peak as its own growth,
+  // exactly in the large-design mode the per-color number exists to explain.
+  const uint64_t rss_entry           = sampled_peak_rss;
   const auto     trace_stage         = [&](std::string_view stage) {
     sampled_peak_rss = std::max(sampled_peak_rss, cost::process_footprint_bytes());
     if (!opts_.verbose) {
@@ -3877,7 +3915,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // avoids attributing an early large color's retained HWM to every later tiny
   // color while still capturing peaks at the end of ABC's blocking flow.
   const uint64_t color_peak     = process_peak > process_peak_before ? process_peak : sampled_peak_rss;
-  qor_.back().color_peak_rss_kb = color_peak > rss_before ? (color_peak - rss_before) >> 10 : 0;
+  qor_.back().color_peak_rss_kb = color_peak > rss_entry ? (color_peak - rss_entry) >> 10 : 0;
   Abc_NtkDelete(mapped);
   // &get/&dc4/&dch/&nf leave GIA managers in the global frame even after
   // &put.  A large region then poisons the next tiny job (Rob's 438-node

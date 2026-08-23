@@ -1,8 +1,11 @@
 /*
 :name: loop_module_ordinal_space
 :type: simulation
-:expect_instances: head__li0=1 head__li1=1 tail__li2=1 tail__li3=1 *=4
+:expect_instances: u_loop_0=1 u_loop_1=1 head=1 tail=1 *=4
 */
+// 2026-08-22: `compile.unroll` defaults to false, so this loop now ROLLS (one
+// replicated Sub per source loop; the `_li<n>` unrolled names only exist under
+// `--set compile.unroll=true`). The instance claim above is the rolled shape.
 // Sequential loops in one parent share one module-scoped occurrence ordinal
 // space. The second site continues after the first site's count.
 

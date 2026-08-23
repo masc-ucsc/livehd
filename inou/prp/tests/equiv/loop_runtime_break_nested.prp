@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: loop_runtime_break_nested.top
 :pyrope_top: top
-:set: compile.upass.roll=true
 */
 
 // Nested rolling gives each inner loop an independent activation chain; break

@@ -1,8 +1,10 @@
 /*
 :name: loop_cond_break_no_sub
 :type: simulation
-:expect_instances: *=0
+:expect_instances: u_loop_0=1 *=1
 */
+// 2026-08-22: `compile.unroll` defaults to false, so this loop now ROLLS into
+// one replicated Sub (`u_loop_0`); it had no instance at all when unrolled.
 // Control fixture for loop lifting: the loop has conditional carry updates and
 // a break, but no Sub call.  Unlike loop_cond_sub_break, the break is after the
 // current ordinal's write, so ordinal 5 contributes and ordinals 6/7 do not.

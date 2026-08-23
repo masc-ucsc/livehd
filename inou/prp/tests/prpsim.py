@@ -97,7 +97,7 @@ def run_simulation(runner, tmp_dir, test):
 
     # `:set:` must reach the SIM lowering too. run_simulation builds its command
     # from scratch rather than composing on lhd_upass, so without this a fixture
-    # that sets e.g. `upass.roll=true` would assert a rolled graph elsewhere and
+    # that sets e.g. the default (`compile.unroll=false`) would assert a rolled graph elsewhere and
     # still SIMULATE the default (unrolled) lowering.
     extra = runner._extra_sets(test)
 

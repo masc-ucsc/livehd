@@ -1635,7 +1635,9 @@ private:
           if (const int dw = declared_slop_width(src_, lv); dw > 0) {
             local_decl_w_[ln] = std::max(local_decl_w_[ln], dw);
           }
-          if (!ts_node_is_null(rv)) {
+          // A compound write (`s += e`) reads its own target exactly as
+          // `s = s + e` does, so it must not size the local from `e` alone.
+          if (!ts_node_is_null(rv) && compound_binop(n).empty()) {
             assigns_.emplace_back(ln, rv);
           }
         }
@@ -2492,10 +2494,45 @@ private:
     fail(std::string("unsupported statement in test: `") + std::string(t) + "` -> " + text_of(src_, n).substr(0, 40));
   }
 
+  // The binary operator a compound assignment folds (`+=` -> "+"), or "" for a
+  // plain `=`. The assignment node carries it as an aliased child of its
+  // `operator` field (`assign_add`, `assign_sub`, ...), the same shape
+  // prp2lnast's compound_factory decodes. The emitter used to take the rvalue
+  // alone, so `sum += v` in a test silently became `sum = v` (measured: a
+  // four-term accumulator ended holding only its last term).
+  std::string compound_binop(TSNode assign) {
+    TSNode op = field(assign, "operator");
+    if (ts_node_is_null(op)) {
+      return "";
+    }
+    TSNode           inner = ts_node_named_child(op, 0);
+    std::string_view kind  = ts_node_is_null(inner) ? std::string_view{} : ntype(inner);
+    if (kind.empty() || kind == "assign") {
+      return "";
+    }
+    static const std::map<std::string_view, std::string> table = {
+        {"assign_add", "+"},     {"assign_sub", "-"},     {"assign_mul", "*"},     {"assign_div", "/"},
+        {"assign_bit_or", "|"},  {"assign_bit_and", "&"}, {"assign_bit_xor", "^"}, {"assign_shl", "<<"},
+        {"assign_sra", ">>"},
+    };
+    auto it = table.find(kind);
+    if (it == table.end()) {
+      fail("unsupported compound assignment `" + std::string(kind) + "` in test");
+    }
+    return it->second;
+  }
+
   void gen_assignment(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
     TSNode      lv = field(n, "lvalue");
     TSNode      rv = field(n, "rvalue");
+    // `x op= e` is `x = x op e` on every lvalue kind below (a poke, a write
+    // through a ref, a test local).
+    const std::string bop     = compound_binop(n);
+    auto              rhs_val = [&]() {
+      Val r = eval(rv);
+      return bop.empty() ? r : fold_binary(bop, eval(lv), r);
+    };
 
     // poke `acc.field = v` -> set an input latch (or force an internal reg).
     // The value is a Slop of its own width and __prp_poke re-expresses it at the
@@ -2503,7 +2540,7 @@ private:
     // 64-bit staging).
     std::string base, fld;
     if (inst_dot(lv, base, fld)) {
-      o << ind << "__prp_poke(" << field_access(base, fld, /*write=*/true) << ", " << to_slop(eval(rv)).cpp << ");\n";
+      o << ind << "__prp_poke(" << field_access(base, fld, /*write=*/true) << ", " << to_slop(rhs_val()).cpp << ");\n";
       return;
     }
 
@@ -2524,7 +2561,7 @@ private:
       if (!ref_writable_.count(lname)) {
         fail("cannot write through the read-only reference '" + lname + "' (bind it with `regref`, not `sigref`)");
       }
-      o << ind << "__prp_poke(" << it->second.storage << ", " << to_slop(eval(rv)).cpp << ");\n";
+      o << ind << "__prp_poke(" << it->second.storage << ", " << to_slop(rhs_val()).cpp << ");\n";
       return;
     }
     if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
@@ -2538,7 +2575,7 @@ private:
     }
     // The local's declared width is >= every value assigned to it (see
     // infer_local_widths), so this conversion never loses anything.
-    o << ind << lname << " = " << at_width(eval(rv), local_w_.at(lname)) << ";\n";
+    o << ind << lname << " = " << at_width(rhs_val(), local_w_.at(lname)) << ";\n";
   }
 
   void gen_if(std::ostringstream& o, TSNode n, int depth) {

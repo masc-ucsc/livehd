@@ -1,7 +1,6 @@
 /*
 :name: loop_lec_index
 :type: lec
-:set: compile.upass.roll=true
 :lec_set: formal.engine=ind
 */
 // PYROPE-vs-PYROPE group (README "Pyrope ↔ Pyrope variants"): this file is the

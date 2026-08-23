@@ -126,6 +126,11 @@ struct Query_result {
   // deeper-than-bound cycles are out of scope by design.
   int checked_steps = 0;
   int output_checks = 0;
+  // The reset/flush prologue the BMC ran before its checked window = the
+  // deepest pipeline's latency (pipeline_flush_latency). A collapsed-box
+  // counterexample can surface flat up to this many cycles later than it did
+  // under the boxes, which is how the kernel sizes a deepened confirmation.
+  int reset_hold    = 0;
 
   // Structural-correspondence report (so `lhd lec` can ITERATE instead of bailing
   // on the first unmatched cut point). When the two designs don't expose the same

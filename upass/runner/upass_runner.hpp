@@ -364,6 +364,10 @@ protected:
   // `port_name` is the io port this type slot belongs to (empty for a declare's
   // slot); with provenance on it records the alias into Lnast::io_type_names.
   bool emit_scalar_named_type_slot(std::string_view type_name, std::string_view port_name = {});
+  // Emit a declare/type_spec slot while concretizing scalar named aliases at
+  // the element leaf of an array type. Array dimensions are copied verbatim:
+  // they are values, not type names, and have their own comptime fold path.
+  bool emit_concrete_type_slot();
   // Resolve an IMPORTED scalar alias `pkg.PType` off the exporting unit's pub
   // list ("type" kind) + its "MAX|MIN" pub_values face. True when the range
   // was recovered — used by the declare borrow AND the type-slot concretizer
@@ -603,6 +607,10 @@ protected:
     // range [0,1] loses Pyrope's bool-vs-int distinction and, for a rolled
     // carry, used to let `true` widen inconsistently across the lifted boundary.
     Io_kind             kind      = Io_kind::none;
+    // An ARRAY carry (`mut v:[N]T`): the boundary port is declared `[N]T` too
+    // (comp_type_array over the element range in max/min); lnast.tolg lowers
+    // such a port as the packed bus plus the lane view. 0 = scalar.
+    int64_t             array_size = 0;
   };
 
   // ── generic `<T,…>` per-call-site binding (2f-generics) ──────────────────
@@ -986,12 +994,13 @@ protected:
   static constexpr std::size_t                  kInlineMaxDepth = 256;
   std::size_t                                   inline_budget_{200000};
 
-  // compile.upass.roll — lift an eligible comptime range-loop body into one
+  // compile.unroll — lift an eligible comptime range-loop body into one
   // generated definition and emit a single replicated instance instead of
   // unrolling. Default OFF: rolling is opt-in until the LEC/formal paths
   // handle a replicated Sub natively rather than by expansion.
   bool     roll_enabled_{false};
   uint64_t roll_cap_{1024};
+  bool     roll_arrays_{false};  // compile.upass.roll_arrays: array-typed carries may cross the lifted boundary
   // Per-unit counter making each lifted definition's name unique (the dedup in
   // specialized_emitted_ / pass_upass is BY NAME and silently DROPS a second
   // definition that collides).

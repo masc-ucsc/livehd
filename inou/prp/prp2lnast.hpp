@@ -130,8 +130,8 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
-  // Primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
-  // `unsigned`/`bool`/`string`) as it appears in does/equals/case operand
+  // Primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/`bool`/`string`)
+  // as it appears in does/equals/case operand
   // position (plain `identifier` there — the grammar's *_type nodes only
   // exist in type contexts).
   static bool is_prim_type_token(std::string_view txt);
@@ -143,6 +143,11 @@ protected:
   // name — e.g. `i2` — still wins because the fold consults the symbol
   // table / type-info first). Anything else falls through to expr_to_node.
   Lnast_node  does_operand_to_node(TSNode n);
+  // Fold the integer-only expression subset admitted by integer type bounds.
+  // Names resolve through the already-seen comptime-const bindings, so a type
+  // such as `signed(bits=W)` or `signed(max=(1 << W)-1)` is canonicalized
+  // before uPass consumes its prim_type_int(max,min) node.
+  std::optional<Dlop> resolve_type_int_value(TSNode n) const;
   // Shared by emit_type_expr (declare side) and does_operand_to_node
   // (operand side): classify an integer type keyword and refine its (max,min)
   // bounds from a `(max=…, min=…, bits=…)` constraint/argument tuple. Returns
@@ -516,18 +521,18 @@ protected:
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
 
-  // File-/body-scope `const NAME = <int literal>` bindings,
+  // File-/body-scope `const NAME = <compile-time integer expression>` bindings,
   // recorded as the declaration is lowered (process_lvalue_for_assign scalar
-  // branch). Lets `@[NAME]`, `stage[NAME]`, and `pipe[NAME]` timing slots
-  // accept a compile-time-resolvable const in place of a bare literal.
+  // branch). Lets integer type bounds and `@[NAME]`/`stage[NAME]`/`pipe[NAME]`
+  // timing slots accept a compile-time-resolvable const in place of a literal.
   // No-shadowing is already enforced, so a name is unambiguous along the
   // visible chain; a later binding may overwrite an earlier same-name one.
   //
-  // ALSO tracks `mut NAME = <int literal>` with declaration-time-capture
-  // semantics: record on the `mut` decl, UPDATE on
-  // a later statement-level plain `NAME = <int literal>`, and ERASE on any
-  // other write (non-literal rhs, compound op, or any write inside an if/for/
-  // while/match/lambda body — see conditional_depth_). A timing slot then
+  // ALSO tracks `mut NAME = <compile-time integer expression>` with
+  // declaration-time-capture semantics: record on the `mut` decl, UPDATE on a
+  // later statement-level plain write of another resolvable expression, and
+  // ERASE on any other write (runtime rhs, compound op, or any write inside an
+  // if/for/while/match/lambda body — see conditional_depth_). A timing slot then
   // resolves the value that was statically known AT THE LAMBDA DECLARATION
   // POINT; a mut that has since gone runtime is erased and the slot errors.
   absl::flat_hash_map<std::string, int64_t> const_int_bindings_;
@@ -625,7 +630,8 @@ protected:
   // call before the store (replaces the old attr_set(wrap) tag).
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
-                                       std::string_view overflow_kind = {}, bool rhs_name_bindable = false);
+                                       std::string_view overflow_kind = {}, bool rhs_name_bindable = false,
+                                       std::optional<int64_t> resolved_rvalue_int = std::nullopt);
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;

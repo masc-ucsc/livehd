@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_external_reg
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: lane__li*=4 *=4
 */
 // An enclosing reg is deliberately not a value carry: every source-unrolled

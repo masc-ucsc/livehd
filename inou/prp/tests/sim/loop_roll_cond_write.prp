@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_cond_write
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: *=1
 */
 // A ROLLED loop whose carry is written CONDITIONALLY. This is the shape the

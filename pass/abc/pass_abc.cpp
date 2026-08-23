@@ -169,8 +169,60 @@ std::string jesc(std::string_view s) {
 // under lhd), and optionally write the qor.json sidecar (2opt-freq A). The
 // design max delay is the worst REGION delay — an ABC estimate blind to
 // cross-region paths; pass.opentimer is the whole-design scorer.
+// Physical instantiation counts, read off the EMITTED netlist library: the
+// decomposition absorbs same-color child bodies into the parent's region (the
+// parent row then holds that logic per copy, and the child's standalone rows
+// are mapped but never instantiated — the rolled matched filter's tap chain
+// and `tap` itself end up inside the top), while every other region def is a
+// Sub instance somewhere under the top. Walking the output library from the
+// top and counting Sub instances per def, top-down, is therefore the one
+// count that matches what was built: a region row weighs gates x instances,
+// an absorbed def's own rows weigh 0.
+struct Abc_hier {
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint64_t>> children;  // def -> child def -> Sub count
+};
+
+absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hier, std::string_view top) {
+  absl::flat_hash_map<std::string, uint64_t> inst;
+  inst[std::string(top)] = 1;
+  // The hierarchy is acyclic: iterate to a fixed point (at most depth rounds).
+  for (bool changed = true; changed;) {
+    absl::flat_hash_map<std::string, uint64_t> next;
+    next[std::string(top)] = 1;
+    for (const auto& [src, kids] : hier.children) {
+      const auto it = inst.find(src);
+      if (it == inst.end() || it->second == 0) {
+        continue;
+      }
+      for (const auto& [child, n] : kids) {
+        next[child] += it->second * n;
+      }
+    }
+    changed = next != inst;
+    inst    = std::move(next);
+  }
+  return inst;
+}
+
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
-              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started) {
+              const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started, const Abc_hier& hier) {
+  // PHYSICAL totals: a region's gates times the number of times its module is
+  // instantiated (a replicated loop body N times, a shared `tap` 64 times).
+  // The per-module sums are kept beside them as module_gates/module_area —
+  // they answer "how much did abc map", not "how big is the chip".
+  const auto instances = physical_instances(hier, top);
+  const auto inst_of   = [&](const livehd::abc::Region_qor& q) -> uint64_t {
+    if (q.module == top) {
+      return 1;
+    }
+    if (hier.children.empty()) {
+      return 1;  // no netlist was emitted (stats-only) — nothing to weigh by
+    }
+    const auto it = instances.find(q.module);
+    return it == instances.end() ? 0 : it->second;
+  };
+  uint64_t tgates_phys       = 0;
+  double   tarea_phys        = 0.0;
   int      tgates            = 0;
   double   tarea             = 0.0;
   int      tdivbb            = 0;  // blackboxed div/mod cones (the score under-reports)
@@ -186,6 +238,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   for (size_t r = 0; r < qor.size(); ++r) {
     tgates       += qor[r].gates;
     tarea        += qor[r].area;
+    tgates_phys  += static_cast<uint64_t>(qor[r].gates) * inst_of(qor[r]);
+    tarea_phys   += qor[r].area * static_cast<double>(inst_of(qor[r]));
     tdivbb       += qor[r].div_blackbox;
     tinput_nodes += qor[r].input_nodes;
     tinput_ge    += qor[r].input_ge;
@@ -210,12 +264,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     crit += ")";
   }
-  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}{}\n",
-             qor.size(),
-             tgates,
-             tarea,
-             crit,
-             tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
+  std::print(
+      "pass.abc qor: {} region(s), {} gates, area {:.2f} (physical: every region x its instantiations; mapped once: {} gates, area "
+      "{:.2f}){}{}\n",
+      qor.size(),
+      tgates_phys,
+      tarea_phys,
+      tgates,
+      tarea,
+      crit,
+      tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
 
   if (incr != nullptr) {
     // The number that actually answers "did incremental help": what the
@@ -237,12 +295,18 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
-  j += std::format("\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f}",
-                   qor.size(),
-                   tinput_nodes,
-                   tinput_ge,
-                   tgates,
-                   tarea);
+  // `gates`/`area` are PHYSICAL (region x instantiations); `module_gates`/
+  // `module_area` are the per-mapped-module sums (what abc worked on once).
+  j              += std::format(
+      "\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},"
+      "\"module_gates\":{},\"module_area\":{:.4f}",
+      qor.size(),
+      tinput_nodes,
+      tinput_ge,
+      tgates_phys,
+      tarea_phys,
+      tgates,
+      tarea);
   if (peak_rss_kb != 0) {
     j += std::format(",\"peak_rss_kb\":{}", peak_rss_kb);
   }
@@ -280,14 +344,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += ",";
     }
     j += std::format(
-        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"ms\":{:.1f},"
-        "\"resynth\":{}",
+        "{{\"module\":\"{}\",\"color\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},\"instances\":{},"
+        "\"ms\":{:.1f},\"resynth\":{}",
         jesc(q.module),
         q.color,
         q.input_nodes,
         q.input_ge,
         q.gates,
         q.area,
+        inst_of(q),
         q.ms,
         q.resynth ? 1 : 0);
     if (q.peak_rss_kb != 0) {
@@ -553,6 +618,22 @@ void Pass_abc::work(Eprp_var& var) {
     return;
   }
 
+  // `--top` is optional for `lhd pass abc`, and build_decomposition resolves an
+  // empty one into its OWN local copy (pass_partition.cpp resolve_order) — the
+  // caller's `top` is never written back. Resolve it here by the same rule
+  // (first non-null resolve_graphs entry, which is why the top is pushed first
+  // above), or emit_qor seeds physical_instances with "" , matches no def, and
+  // reports 0 physical gates / 0 instances for every region. It also fills in
+  // qor.json's "top" field and the module name in the refusal hints below.
+  if (top.empty()) {
+    for (const auto& g : resolve_graphs) {
+      if (g) {
+        top = std::string{g->get_name()};
+        break;
+      }
+    }
+  }
+
   // Size gate. When ABC is about to inline the WHOLE hierarchy and bit-blast it
   // as a single unit, refuse a very large design up front. The per-region RSS
   // admission (Mapper::over_budget) only samples DURING bit-blast; the
@@ -672,6 +753,26 @@ void Pass_abc::work(Eprp_var& var) {
 
   mapper.stop();  // no-op for an all-hit incremental run
 
+  // Instantiation counts from the netlist that was just emitted (see Abc_hier).
+  Abc_hier hier;
+  for (const auto gid : outlib.all_gids()) {
+    auto g = outlib.get_graph(gid);
+    if (!g) {
+      continue;
+    }
+    auto& kids = hier.children[std::string(g->get_name())];
+    for (auto n : g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+        continue;
+      }
+      if (auto cio = n.get_subnode_io(); cio != nullptr) {
+        ++kids[std::string(cio->get_name())];
+      } else if (auto child = n.get_subnode_graph(); child != nullptr) {
+        ++kids[std::string(child->get_name())];
+      }
+    }
+  }
+
   // Memory admission (2opt-incr subtask 0). Raised HERE, not from map_region:
   // .fatal() throws, and build_decomposition's callback runs above stop(), so
   // throwing from the region would skip Abc_Stop and leak the frame plus every
@@ -697,7 +798,7 @@ void Pass_abc::work(Eprp_var& var) {
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started());
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started(), hier);
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

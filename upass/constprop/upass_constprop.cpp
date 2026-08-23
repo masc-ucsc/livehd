@@ -2420,8 +2420,8 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
-// `uint`/`unsigned`/`bool`/`string`) in `does`/`equals`/`case` operand
+// Decode a primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/
+// `bool`/`string`) in `does`/`equals`/`case` operand
 // position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
 // site) precisely so this decode can run. Returns nullopt for any other name.
 std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_token(std::string_view name) {
@@ -2437,7 +2437,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
     return op;
   }
   const bool is_u = (name == "uint" || name == "unsigned");
-  const bool is_s = (name == "int" || name == "integer");
+  const bool is_s = (name == "signed" || name == "int" || name == "integer");
   if (is_u || is_s) {
     op.kind    = Does_operand::Kind::integer;
     op.max_inf = true;  // unsized → unbounded above

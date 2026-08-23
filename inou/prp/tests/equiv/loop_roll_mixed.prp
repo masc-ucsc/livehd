@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_mixed
 :type: lec
-:set: compile.upass.roll=true
 */
 // PYROPE-vs-PYROPE group: this is the REFERENCE, compiled with the source loop
 // kept ROLLED (one replicated Sub over a lifted body, O(1) in the trip count).

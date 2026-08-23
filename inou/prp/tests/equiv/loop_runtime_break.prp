@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: loop_runtime_break.top
 :pyrope_top: top
-:set: compile.upass.roll=true
 */
 // A `break` whose condition is only known at RUNTIME is LEGAL Pyrope: the loop
 // bound is still comptime, so the hardware is the priority structure the golden

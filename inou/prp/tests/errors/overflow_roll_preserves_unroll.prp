@@ -1,7 +1,6 @@
 /*
 :name: overflow_roll_preserves_unroll
 :type: error
-:set: compile.upass.roll=true
 :error: does not fit
 */
 // The rolled body would be analyzed only once and hide the accumulated range.

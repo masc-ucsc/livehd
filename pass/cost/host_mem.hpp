@@ -130,7 +130,11 @@ namespace livehd::cost {
 // budget. Not tunable -- `budget_mb` below is the tunable.
 [[nodiscard]] uint64_t reserve_bytes();
 
-// The ceiling a single ABC region may reach, as TOTAL process RSS.
+// The memory ceiling pass.abc admits against. ONE number, applied to two
+// readings (Mapper::over_budget): a single region's GROWTH over its entry RSS,
+// and the process's TOTAL footprint -- either crossing it is a refusal, because
+// growth alone cannot bound a long multi-color run whose footprint is sticky
+// after free, and total alone cannot tell one oversize region from a large run.
 // `budget_mb > 0` pins it explicitly (reproducible hosts and CI); otherwise it
 // is physical - reserve. Returns 0 when physical RAM is unknown and no explicit
 // budget was given, meaning "unenforceable -- do not gate".

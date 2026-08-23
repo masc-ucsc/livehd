@@ -998,12 +998,27 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
   while (!pending.empty()) {
     const size_t i = pending.front();
     pending.pop();
-    for (const auto& edge : plan.sites_[i].node.inp_edges()) {
-      if (plan.sites_[i].kind == Site_kind::loop_control && is_loop_carry_input(plan.sites_[i].node, edge)) {
-        continue;
+    if (std::getenv("LHD_SIM_PLAN_DEBUG") != nullptr && plan.sites_[i].kind == Site_kind::loop_control) {
+      for (const auto& edge : plan.sites_[i].node.inp_edges()) {
+        const auto drv = edge.driver.get_master_node();
+        std::print(stderr, "[plan] loop site {} sink pid {} <- driver pid {} op {} self={} indexed={}\n", i, edge.sink.get_port_id(),
+                   edge.driver.get_port_id(), drv.is_invalid() ? -1 : static_cast<int>(gu::type_op_of(drv)),
+                   !drv.is_invalid() && drv == plan.sites_[i].node, !drv.is_invalid() && index.contains(drv.get_occurrence_index()));
       }
+    }
+    for (const auto& edge : plan.sites_[i].node.inp_edges()) {
       const auto driver = edge.driver.get_master_node();
       if (driver.is_invalid()) {
+        continue;
+      }
+      // A carry input has TWO drivers: the compact node's own carry self-edge
+      // (the eager chain inside the wrapper — not a parent-level dependency)
+      // and the parent's SEED, which ordinal 0 consumes. Only the self-edge is
+      // skipped; skipping every carry edge marked the seed cone dead, and a
+      // runtime seed (a packed array built before the loop) then reached the
+      // wrapper as `0 /*UNRESOLVED-CYCLE*/` (a constant seed hid it).
+      if (plan.sites_[i].kind == Site_kind::loop_control && is_loop_carry_input(plan.sites_[i].node, edge)
+          && driver == plan.sites_[i].node) {
         continue;
       }
       if (const auto it = index.find(driver.get_occurrence_index()); it != index.end()) {
@@ -1015,6 +1030,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     plan.sites_[i].live = true;
   }
   plan.summary_.live_sites = live.size();
+  if (std::getenv("LHD_SIM_PLAN_DEBUG") != nullptr) {
+    for (size_t i = 0; i < plan.sites_.size(); ++i) {
+      const auto& st = plan.sites_[i];
+      std::print(stderr, "[plan] site {} kind {} op {} live {} id {}\n", i, static_cast<int>(st.kind),
+                 static_cast<int>(gu::type_op_of(st.node)), st.live, st.structural_id.substr(0, 40));
+    }
+  }
 
   for (size_t consumer = 0; consumer < plan.sites_.size(); ++consumer) {
     if (!plan.sites_[consumer].live) {
@@ -1061,8 +1083,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
       dep.consumer      = consumer;
       dep.producer_port = edge.driver.get_port_id();
       dep.consumer_port = edge.sink.get_port_id();
-      if (is_loop_carry(plan.sites_[consumer].node, edge)) {
-        continue;  // already represented once from Subnode_group::carries()
+      if (is_loop_carry(plan.sites_[consumer].node, edge) && dep.producer == consumer) {
+        continue;  // the self-edge: already represented once from Subnode_group::carries()
       } else if (plan.sites_[dep.producer].kind == Site_kind::state) {
         dep.kind = Dependency_kind::state_read;
       } else if (plan.sites_[dep.consumer].kind == Site_kind::state) {
@@ -2420,7 +2442,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
     }
     uint32_t consumer_input = 0;
     for (const auto& edge : base_site.node.inp_edges()) {
-      if (base_site.kind == Site_kind::loop_control && is_loop_carry_input(base_site.node, edge)) {
+      // Only the carry SELF-edge stays inside the native kernel; the parent's
+      // seed of that carry is an ordinary value use (see the liveness walk).
+      if (base_site.kind == Site_kind::loop_control && is_loop_carry_input(base_site.node, edge)
+          && edge.driver.get_master_node() == base_site.node) {
         ++consumer_input;
         continue;
       }

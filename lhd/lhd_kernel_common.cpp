@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 
+#include "absl/container/flat_hash_set.h"
 #include "color_common.hpp"
 #include "diag.hpp"
 #include "file_output.hpp"
@@ -93,6 +94,59 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   return hit;
 }
 
+// "pass --top" is only actionable if the reader is told WHICH name to pass, and
+// on a real design the answer is almost always unique: the module no other
+// module instantiates. Walk the Sub instances once and name the roots (capped,
+// so a flat 172-module library cannot turn one error line into a wall of text).
+// Best effort by construction -- this builds an error message, so a graph that
+// refuses to load must not replace the real error with a second one.
+namespace {
+std::string top_candidates_hint(const Eprp_var& v, std::string_view flag) {
+  absl::flat_hash_set<std::string> instantiated;
+  std::vector<std::string>         names;
+  try {
+    for (const auto& g : v.graphs) {
+      if (!g) {
+        continue;
+      }
+      names.emplace_back(g->get_name());
+      for (auto n : g->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+          continue;
+        }
+        if (auto cio = n.get_subnode_io(); cio != nullptr) {
+          instantiated.emplace(cio->get_name());
+        } else if (auto child = n.get_subnode_graph(); child != nullptr) {
+          instantiated.emplace(child->get_name());
+        }
+      }
+    }
+  } catch (...) {
+    return std::format("{} NAME names the design's root module", flag);
+  }
+  std::vector<std::string> roots;
+  for (auto& n : names) {
+    if (!instantiated.contains(n)) {
+      roots.emplace_back(n);
+    }
+  }
+  std::sort(roots.begin(), roots.end());
+  if (roots.empty()) {
+    return std::format("{} NAME names the design's root module", flag);
+  }
+  constexpr size_t kMaxShown = 8;
+  const size_t     shown     = std::min(roots.size(), kMaxShown);
+  std::string      list      = join_csv(std::vector<std::string>(roots.begin(), roots.begin() + static_cast<ptrdiff_t>(shown)));
+  if (roots.size() > shown) {
+    list += std::format(", ... ({} more)", roots.size() - shown);
+  }
+  if (roots.size() == 1) {
+    return std::format("nothing instantiates '{}' -- that is the root: {} {}", roots.front(), flag, roots.front());
+  }
+  return std::format("{} module(s) are instantiated by nothing: {}", roots.size(), list);
+}
+}  // namespace
+
 std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
                                             std::string_view side, std::string_view cmd, std::string_view diag_pass) {
   const std::string& t = !side_top.empty() ? side_top : shared_top;
@@ -120,9 +174,13 @@ std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string
     return v.graphs.front();
   }
   if (side.empty()) {
-    throw Lhd_error{"usage", std::format("{}: design has {} modules; pass --top", cmd, v.graphs.size()), ""};
+    throw Lhd_error{"usage",
+                    std::format("{}: design has {} modules; pass --top", cmd, v.graphs.size()),
+                    top_candidates_hint(v, "--top")};
   }
-  throw Lhd_error{"usage", std::format("{}: {} has {} modules; pass --{}-top or --top", cmd, side, v.graphs.size(), side), ""};
+  throw Lhd_error{"usage",
+                  std::format("{}: {} has {} modules; pass --{}-top or --top", cmd, side, v.graphs.size(), side),
+                  top_candidates_hint(v, std::format("--{}-top", side))};
 }
 
 void ensure_dir(const std::string& path) {
@@ -572,6 +630,23 @@ void check_known_set_passes(const Options& opts) {
           "--set/--config 'compile.cache' was removed",
           std::format("use --set lhd.incremental={} instead (one switch for the compile, pass.abc and formal caches)", value)};
     }
+    if (pass == "compile.upass" && flag == "roll") {
+      // The representation switch moved up a level and flipped: loops are
+      // KEPT in the LGraph by default, `compile.unroll=true` expands them.
+      const bool keep = value == "true" || value == "1" || value == "on";
+      throw Lhd_error{"usage",
+                      "--set/--config 'compile.upass.roll' was removed",
+                      std::format("use --set compile.unroll={} instead (false = keep each comptime loop as one replicated "
+                                  "instance in the LGraph, the default; true = unroll it into one instance per iteration)",
+                                  keep ? "false" : "true")};
+    }
+    if (pass == "compile" && flag == "unroll") {
+      // Kernel gate seeded into pass.upass as `roll=!unroll` (compile_sources).
+      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      continue;
+    }
     if (pass == "compile" && flag == "lnast_fmt") {
       // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
       // self-check runs. Folded into a kernel decision; merge_sets never copies
@@ -760,6 +835,21 @@ void check_known_set_passes(const Options& opts) {
 // build it is pure overhead, so default it ON in debug builds (catch producer
 // bugs early) and OFF in release. `--set compile.lnast_fmt=true|false` (or the
 // bare `lnast_fmt`) overrides either default; validated by check_known_set_passes.
+// `compile.unroll` (default false): whether a comptime range loop is UNROLLED
+// into one instance per iteration on the way to the LGraph. Off, an eligible
+// loop is kept as ONE replicated instance (pass.upass `roll`); the backends
+// that cannot consume the compact form expand it themselves. Validated by
+// check_known_set_passes; seeded into pass.upass by compile_sources.
+bool compile_unroll_requested(const Options& opts) {
+  bool unroll = false;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.unroll") {
+      unroll = (value == "true" || value == "1" || value == "on");
+    }
+  }
+  return unroll;
+}
+
 bool lnastfmt_enabled(const Options& opts) {
 #ifdef NDEBUG
   bool enabled = false;
@@ -918,7 +1008,14 @@ void write_io_entry(std::ofstream& ofs, const Lnast_io_entry& e) {
   ofs << "{\"n\":\"" << json_escape_min(e.name) << "\",\"b\":" << e.bits << ",\"s\":" << (e.is_signed ? 1 : 0)
       << ",\"r\":" << (e.is_ref ? 1 : 0) << ",\"v\":" << (e.is_varargs ? 1 : 0) << ",\"k\":" << static_cast<int>(e.kind)
       << ",\"smin\":" << e.stages_min << ",\"smax\":" << e.stages_max << ",\"t\":\"" << json_escape_min(e.type_name)
-      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":" << e.range_max << "}";
+      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":"
+      << e.range_max
+      // has_default and the array-port view (`a:[N]T`) are as load-bearing as
+      // the width: lnast.tolg builds its element view from array_size alone, so
+      // dropping these three here silently re-lowers `a[i]` against the raw
+      // packed bus on any unit restored from an ln: manifest.
+      << ",\"hd\":" << (e.has_default ? 1 : 0) << ",\"as\":" << e.array_size << ",\"eb\":" << e.elem_bits
+      << ",\"es\":" << (e.elem_signed ? 1 : 0) << "}";
 }
 
 void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
@@ -1110,6 +1207,10 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
       x.has_range  = e.HasMember("hr") && e["hr"].GetInt() != 0;
       x.range_min  = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
       x.range_max  = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
+      x.has_default = e.HasMember("hd") && e["hd"].GetInt() != 0;
+      x.array_size  = e.HasMember("as") ? e["as"].GetInt64() : 0;
+      x.elem_bits   = e.HasMember("eb") ? e["eb"].GetInt() : 0;
+      x.elem_signed = e.HasMember("es") && e["es"].GetInt() != 0;
       out.push_back(std::move(x));
     }
   };

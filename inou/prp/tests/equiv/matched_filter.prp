@@ -1,0 +1,137 @@
+/*
+:name: matched_filter
+:type: equiv simulation
+:verilog_top: matched_filter.top
+:pyrope_top: top
+:equiv_engine: cvc5
+*/
+// Pulse-compression matched filter (radar correlator), TREE form — the
+// loop-machinery benchmark block: one design whose three source loops have
+// three different shapes, so that rolling, LEC, synthesis and simulation can
+// be measured on each. This is the SMALL twin (8 taps, 4-bit samples); the
+// bench-scale one (64 taps, 16-bit) is the `matched_filter` core in
+// ../lhdsuite.
+//
+// `:equiv_engine: cvc5` (lhd lec only, no yosys lgcheck): the coefficient
+// register is written only under `load`, so in yosys' miter the two sides'
+// unconstrained initial coefficient states never re-synchronize and
+// `sat -tempinduct` cannot converge — measured at induction step 106 with a
+// 14M-variable problem, still running after 6 CPU-minutes, at 4-bit widths.
+// lhd's flop-cut inductive miter pairs the registers and proves it in ms.
+//
+//   N taps; the return signal `x` enters one sample per cycle and walks down
+//   the tap chain (one register per tap).  Each tap multiplies its delayed
+//   sample by its own coefficient register; the coefficients are loaded
+//   through the same kind of shift chain (`load` high for N cycles, the
+//   reference waveform presented one sample per cycle on `c_in`).
+//   The N products are reduced by a LOG2N-level adder tree with one register
+//   per level.  Throughput 1 sample/cycle, latency LOG2N+1 past the tap delay.
+//
+// Three source loops, three different shapes for the loop machinery:
+//   1. the tap chain      — uniform replica with two scalar carries and an
+//                           ordinal-indexed array write of the product;
+//   2. the tree levels    — the live width halves per level (not a replica);
+//   3. the nodes per level — uniform body, outer-index-dependent trip count,
+//                           comptime-indexed reads `v[2j]`, `v[2j+1]`.
+
+comptime const N     = 8
+comptime const LOG2N = 3
+
+// `timecheck=false`: a FIR mixes delays by design — the sample register is a
+// pipeline stage (cycle 1) and the coefficient register is state (cycle 0),
+// and the product needs both. The cycle typechecker has no delay-line notion.
+mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:s4@[0], p:s8@[0]) {
+  reg x_r:s4 = 0
+  reg c_r:s4 = 0
+  x_out = x_r
+  c_out = c_r
+  p     = x_r * c_r
+  x_r = x_in
+  if load { c_r = c_in }
+}
+
+mod add_node(a:s12, b:s12) -> (s:s12@[0]) {
+  reg s_r:s12 = 0
+  s = s_r
+  wrap s_r = a + b
+}
+
+pub mod top(x:s4, c_in:s4, load:bool) -> (y:s12@[0]) {
+  mut xs:s4 = x
+  mut cs:s4 = c_in
+  mut v:[N]s12 = 0
+  for i in 0..<N {
+    const t = tap(x_in=xs, c_in=cs, load=load)
+    xs   = t.x_out
+    cs   = t.c_out
+    v[i] = t.p
+  }
+  // In-place pairwise reduction: level lvl folds the first N>>lvl live
+  // entries into the first N>>(lvl+1).  Reads (2j, 2j+1) always sit at or
+  // beyond the write index j, so program order never clobbers a live input.
+  for lvl in 0..<LOG2N {
+    for j in 0..<(N >> (lvl + 1)) {
+      v[j] = add_node(a=v[2 * j], b=v[2 * j + 1])
+    }
+  }
+  y = v[0]
+}
+
+test top.pulse_compression {
+  mut dut = top
+  mut peak:s12      = 0
+  mut peak_cycle    = 0
+  mut sumsq:s12     = 0
+  mut early_nonzero = false
+  mut y11:s12 = 0
+  mut y16:s12 = 0
+  mut y17:s12 = 0
+  mut y19:s12 = 0
+  mut y20:s12 = 0
+  // A test block sees no file-scope comptime constant, so N=8 / LOG2N=3 are
+  // spelled out below.
+  tick 40 {
+    if clock < 8 {
+      // Load the reference r[k] = ((k*37)&15)-8, one sample per cycle: tap i
+      // ends up holding r[N-1-i] (time reversed), which is what makes the
+      // filter MATCHED to the reference.
+      dut.load = true
+      dut.c_in = ((clock * 37) & 15) - 8
+      dut.x    = 0
+    } elif clock < 16 {
+      // Then the return signal: the same code, once.
+      dut.load = false
+      dut.c_in = 0
+      const r  = (((clock - 8) * 37) & 15) - 8
+      dut.x    = r
+      sumsq   += r * r
+    } else {
+      dut.load = false
+      dut.c_in = 0
+      dut.x    = 0
+    }
+    step
+    if dut.y > peak {
+      peak       = dut.y
+      peak_cycle = clock
+    }
+    if clock < 11 and dut.y != 0 {
+      early_nonzero = true
+    }
+    if clock == 11 { y11 = dut.y }
+    if clock == 16 { y16 = dut.y }
+    if clock == 17 { y17 = dut.y }
+    if clock == 19 { y19 = dut.y }
+    if clock == 20 { y20 = dut.y }
+  }
+  // The matched output peaks at the code's energy when the whole pulse sits
+  // in the tap chain; the response around it is the code's autocorrelation
+  // (symmetric, with negative sidelobes — so signed products are checked too).
+  assert(peak == sumsq, "peak must equal the reference energy")
+  assert(peak == 204, "sum of squares of the 8-sample code")
+  assert(peak_cycle == 18, "peak lands 2N+LOG2N-1 cycles in")
+  assert(not early_nonzero, "nothing reaches y before the pulse does")
+  assert(y11 == 40, "first sample of the response")
+  assert(y16 == -67 and y20 == -67, "sidelobe at +-2")
+  assert(y17 == -24 and y19 == -24, "sidelobe at +-1")
+}

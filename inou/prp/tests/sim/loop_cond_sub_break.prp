@@ -1,8 +1,11 @@
 /*
 :name: loop_cond_sub_break
 :type: simulation
-:expect_instances: add_lane__li*=6 xor_lane__li*=6 *=12
+:expect_instances: u_loop_0=1 add_lane=1 xor_lane=1 *=3
 */
+// 2026-08-22: `compile.unroll` defaults to false, so this loop now ROLLS (one
+// replicated Sub per source loop; the `_li<n>` unrolled names only exist under
+// `--set compile.unroll=true`). The instance claim above is the rolled shape.
 // A source `for` loop that is unrolled today and is eligible for the compact
 // replicated-Sub representation described by todo_loop_cond_sub.md.  The two
 // calls are in opposite runtime arms, so exactly one result contributes at

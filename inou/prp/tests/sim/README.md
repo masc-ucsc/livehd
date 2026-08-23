@@ -51,7 +51,7 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `tick_comptime_opaque.prp`   | up-counter  | 7 blocks                                | what a `tick` must make **opaque** (see below) |
 | `loop_cond_sub_break.prp` | conditional add/xor lanes | `loop_cond_sub_break.branch_vectors` | source `for`, pre-call `break`, runtime-conditional Sub calls, runtime `tick` break |
 | `loop_cond_break_no_sub.prp` | conditional reduction | `loop_cond_break_no_sub.branch_vectors` | source `for`, post-write `break`, no Sub calls, runtime `tick` break |
-| `loop_roll_carry.prp` | accumulator over a lifted body | `loop_roll_carry.accumulates` | a ROLLED loop (`compile.upass.roll=true`): one replicated `Sub`, asserted by `:expect_instances:` |
+| `loop_roll_carry.prp` | accumulator over a lifted body | `loop_roll_carry.accumulates` | a ROLLED loop (the default (`compile.unroll=false`)): one replicated `Sub`, asserted by `:expect_instances:` |
 | `loop_roll_carry_unrolled.prp` | same source, rolling off | `loop_roll_carry_unrolled.accumulates` | the other half of the rolled-vs-unrolled differential — same values, six instances |
 | `loop_roll_cond_write.prp` | conditionally-written carry | `loop_roll_cond_write.conditional_carry` | rolled; pins the carry-classification hazard (a variable written on only some paths is still a carry) |
 | `loop_roll_conditional_state_call.prp` | runtime-break loop with stateful conditional child | `rolled_cond_top.compact_for_and_conditional_child_if` | native `std::array` loop, cumulative activation, inactive carry bypass, reset-open child calls |
@@ -67,7 +67,7 @@ writes, it is one cycle behind. Put such reads below the `step`.
 
 - `:set: k=v [k=v ...]` — extra `--set` flags for every mode this fixture runs,
   the sim lowering included. Use the FULLY-QUALIFIED option name
-  (`compile.upass.roll=true`): `lhd compile` accepts the short `upass.roll`
+  (the default (`compile.unroll=false`)): `lhd compile` accepts the short `unroll`
   form but `lhd sim` rejects it, so a short-form fixture would silently
   simulate the default lowering while asserting the other one.
 - `:expect_instances: name=count [...]` — asserts how many `Sub` (instance)

@@ -291,13 +291,14 @@ void Pass_opentimer::time_work(Eprp_var& var) {
 
   auto g = selected.front();
 
-  // A design compiled with compile.upass.roll keeps ONE compact Sub standing
-  // for `count` occurrences. pass.opentimer is not occurrence-aware — all three
-  // hier modes walk a Sub as a single physical instance — so area, path count
-  // and every QoR number would come out short by count-1. Expand up front, for
-  // every mode, into opentimer's private library: the input library belongs to
-  // the caller and this pass only reads it. When there is no compact Sub (the
-  // common case) nothing is copied and the input graph is timed in place.
+  // A design compiled WITHOUT `compile.unroll` -- false is the DEFAULT, so this
+  // is the ordinary path -- keeps ONE compact Sub standing for `count`
+  // occurrences. pass.opentimer is not occurrence-aware — all three hier modes
+  // walk a Sub as a single physical instance — so area, path count and every
+  // QoR number would come out short by count-1. Expand up front, for every
+  // mode, into opentimer's private library: the input library belongs to the
+  // caller and this pass only reads it. A design with no comptime loops has no
+  // compact Sub; nothing is copied and the input graph is timed in place.
   const auto design_defs = g->definitions().graphs();
   if (pass.stats_) {
     // pass.abc stamps the mapped-region identity on each region graph's input
@@ -937,13 +938,30 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
     // setup driver pins and nets. Plain cells (trackable ops, flops) drive
     // through an implicit port-0 pin that materializes no PinEntry, so
-    // out_pins() misses it — fall back to the port-0 driver handle explicitly
-    // (Sub node ports are always materialized, no fallback there).
+    // out_pins() misses it — fall back to the port-0 driver handle explicitly.
+    // A Sub is NOT exempt from the miss: an abc-mapped gate whose only reader
+    // is a pin-trackable Concat (the MSB inverter of a shifted bus) comes back
+    // with an empty out_pins() view, and skipping it here means its net is
+    // never inserted -- every consumer the pin tracker later resolves onto that
+    // net then fails to connect, and the run dies on an incomplete timing
+    // graph. out_edges() does see the pin, so union the two and dedup.
     std::vector<hhds::Occurrence_pin> dpins;
+    absl::flat_hash_set<std::string>  seen_dnet;  // by NET NAME: two handles can name one port
+    const auto                        push_dpin = [&](const hhds::Occurrence_pin& dpin) {
+      if (dpin.is_invalid() || dpin.out_edges().empty()) {
+        return;
+      }
+      if (seen_dnet.insert(net_of_node(node, dpin, hier_mode_)).second) {
+        dpins.push_back(dpin);
+      }
+    };
     for (auto& dpin : node.out_pins()) {
-      dpins.push_back(dpin);
+      push_dpin(dpin);
     }
-    if (dpins.empty() && op != Ntype_op::Sub) {
+    for (const auto& e : node.out_edges()) {
+      push_dpin(e.driver);
+    }
+    if (dpins.empty()) {
       auto dpin0 = node.get_driver_pin(0);
       if (!dpin0.is_invalid()) {
         dpins.push_back(dpin0);
@@ -1113,13 +1131,37 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
     timer.insert_gate(instance_name, type_name);
 
-    // setup driver pins and nets
+    // Setup driver pins and nets. out_pins() is a LAZY VIEW and can come back
+    // empty for a driver that is nonetheless materialized and consumed -- the
+    // abc-mapped MSB inverter of a shifted bus, whose only reader is a
+    // pin-trackable Concat, is exactly that shape, and a Sub is not exempt
+    // (nothing then creates its output net, and every consumer the pin tracker
+    // resolves onto that net fails to connect -- an incomplete timing graph
+    // whose first symptom is four unconnected Liberty pins). out_edges() sees
+    // the pin, and a driver with no consumer needs no net at all, so take the
+    // union of both and dedup by pin.
+    std::vector<hhds::Occurrence_pin> dpins;
     for (auto& dpin : node.out_pins()) {
-      if (dpin.is_invalid() || dpin.out_edges().empty()) {
+      if (!dpin.is_invalid() && !dpin.out_edges().empty()) {
+        dpins.push_back(dpin);
+      }
+    }
+    for (const auto& e : node.out_edges()) {
+      if (!e.driver.is_invalid()) {
+        dpins.push_back(e.driver);
+      }
+    }
+    // Dedup on the LIBERTY PIN NAME, not on the pin handle: the two sources
+    // above can hand back different Occurrence_pin handles (base vs
+    // hier-qualified) for the same physical port, and OpenTimer asserts on a
+    // second connect of a pin that already has a net.
+    absl::flat_hash_set<std::string> connected_pin;
+    for (auto& dpin : dpins) {
+      auto pin_name = absl::StrCat(instance_name, ":", driver_pin_name_of(node, dpin));
+      if (!connected_pin.insert(pin_name).second) {
         continue;
       }
-      auto pin_name = absl::StrCat(instance_name, ":", driver_pin_name_of(node, dpin));
-      auto wire     = driver_net_of(node, dpin);
+      auto wire = driver_net_of(node, dpin);
       timer.connect_pin(pin_name, wire);
     }
 

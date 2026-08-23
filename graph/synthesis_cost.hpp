@@ -33,6 +33,13 @@ namespace livehd::graph_util {
     return 1;  // mapper wires a constant shift directly; no barrel network
   }
 
+  // A RIGHT shift's barrel is built at abc's shift width `cw = max(operand,
+  // result)` and then truncated (abc_map), NOT at the result width: a 1024-bit
+  // operand read as 20 bits still costs a 1024-bit-deep network per stage. This
+  // is the SRA path only -- build_shl takes out_w = the result width.
+  const auto     a_pin   = get_driver_of_sink_name(node, "a");
+  const uint64_t shift_w = std::max<uint64_t>(full, a_pin.is_invalid() ? 0 : static_cast<uint64_t>(std::max(0, real_width(a_pin))));
+
   uint64_t demand = full;
   if (op == Ntype_op::SRA) {
     int  selected_hi = 0;
@@ -66,7 +73,7 @@ namespace livehd::graph_util {
       saw_use     = true;
     }
     if (saw_use && selected_hi > 0) {
-      demand = std::min(full, static_cast<uint64_t>(selected_hi));
+      demand = std::min(shift_w, static_cast<uint64_t>(selected_hi));
     }
   }
 
@@ -76,12 +83,39 @@ namespace livehd::graph_util {
   // twice the 15-minute ceiling. A 2x shift-complexity safety factor captures
   // that super-linear optimization cost while leaving non-shift logic at the
   // higher shared QoR ceiling.
-  const uint64_t     stages          = static_cast<uint64_t>(std::max(1, real_width(amount)));
+  //
+  // A sliced demand does NOT scale every stage. build_shr_prefix (abc_arith.hpp)
+  // trims BACKWARDS: the last stage produces `demand` bits, but stage k still
+  // needs `need[k+1] + 2^k` (clamped to the shift width) from the one before it,
+  // so only the last few levels narrow at all. Charging `demand` at every stage
+  // undercounted a 1024-bit bus sliced to 20 bits by ~40x -- a color the window
+  // certified at its GE ceiling then handed ABC an order of magnitude more
+  // gates, which is exactly the shift-heavy blow-up the window exists to split.
+  // Replay the same recurrence here instead of approximating it; with no slice
+  // (demand == full) it collapses to the old stages*full product, so nothing
+  // else recalibrates.
+  const uint64_t stages = static_cast<uint64_t>(std::max(1, real_width(amount)));
+  uint64_t       muxes  = 0;
+  if (op == Ntype_op::SRA) {
+    uint64_t need = demand;  // need[nb] == the demanded low prefix
+    for (uint64_t k = stages; k-- > 0;) {
+      muxes             += need;  // stage k emits need[k+1] muxes
+      // sh = 2^k capped to the shift width; a shift at/past the top adds nothing.
+      const uint64_t sh  = k >= 63 || (uint64_t{1} << k) >= shift_w ? shift_w : uint64_t{1} << k;
+      need               = sh >= shift_w ? need : std::min(shift_w, need + sh);
+    }
+  } else {
+    // build_shl (abc_arith.hpp) makes its data vector out_w wide and ZERO-EXTENDS
+    // `a` into it, emitting exactly out_w muxes per stage -- a left shift costs
+    // the RESULT width, not the operand width, and is never demand-sliced. Only
+    // the right shift is built at cw = max(operand, result).
+    muxes = full * stages;
+  }
   constexpr uint64_t mux_gate_factor = 6;
-  if (demand > std::numeric_limits<uint64_t>::max() / stages / mux_gate_factor) {
+  if (muxes > std::numeric_limits<uint64_t>::max() / mux_gate_factor) {
     return std::numeric_limits<uint64_t>::max();
   }
-  return std::max<uint64_t>(1, demand * stages * mux_gate_factor);
+  return std::max<uint64_t>(1, muxes * mux_gate_factor);
 }
 
 }  // namespace livehd::graph_util

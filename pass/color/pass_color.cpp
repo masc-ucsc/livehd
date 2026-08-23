@@ -69,7 +69,11 @@ void Pass_color::setup() {
   // high-width color ran beyond 15 minutes, and 250k still crossed that time
   // bound. A 44k-bit runtime SRA exposed the missing gate-type multiplier:
   // width alone hid a multi-stage barrel mux. The shared synthesis estimate now
-  // charges result demand * amount bits * 3 gates/mux. On ROB, 99.9k-GE and
+  // replays what abc_arith actually emits: for a RIGHT shift the backward
+  // `need[k] = min(w, need[k+1] + 2^k)` prefix trim summed over the amount bits
+  // (so a narrow demanded slice discounts only the LAST few stages, not every
+  // stage), and for a LEFT shift the result width per stage, at 3 gates/mux.
+  // On ROB, 99.9k-GE and
   // 79.2k-GE SRA colors crossed the stated 15-minute ceiling; even 40k left a
   // 32.8k-GE mixed RenameBuffer shift region running past 18 minutes. A first
   // 25k run exposed another shift-heavy tail beyond 20 minutes, so variable

@@ -1,6 +1,6 @@
 /*
 :name: loop_roll_flat_2
-:set: compile.upass.roll=false
+:set: compile.unroll=true
 :lec_expect: refuted
 :lec_set: formal.lec.semdiff=structural
 :lec_grep_not: MATCHED \(semdiff compact-vs-unrolled virtual-occurrence fold

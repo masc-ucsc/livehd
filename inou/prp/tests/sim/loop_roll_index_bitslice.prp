@@ -1,0 +1,46 @@
+/*
+:name: loop_roll_index_bitslice
+:type: simulation
+:expect_instances: u_loop_0=1
+*/
+// A loop that BIT-SLICES with its index must still roll.
+//
+// `x#[(i*8)..=(i*8+7)]` has non-literal endpoints, so prp2lnast lowers it to a
+// `range` statement inside the body — the SAME node kind a nested loop's domain
+// uses. The roll planner's nested-domain guard matched every `range` in the
+// body and therefore refused this loop, which (with a runtime `break`) then
+// fell through to the source unroller and hard-errored with "`break` under a
+// runtime condition inside a comptime loop is not supported": a compile failure
+// on a design whose rolled form is fine. The guard now tests a nested `for`'s
+// own ITERABLE instead of any range node.
+//
+// `:expect_instances:` is the real claim — without it a silent fall back to
+// unrolling would still satisfy the value checks below.
+
+pub mod chunk_sum(x:u32) -> (o:u32@[0]) {
+  mut acc:u32 = 0
+  for i in 0..<4 {
+    const chunk = x#[(i*8)..=(i*8+7)]
+    if chunk == 0 { break }
+    acc = acc + chunk
+  }
+  o = acc
+}
+
+test bitslice.rolls {
+  mut dut = chunk_sum
+  tick 1 {
+    dut.x = 0x04030201
+    step
+    assert(dut.o == 10, "0x01+0x02+0x03+0x04")
+  }
+}
+
+test bitslice.break_stops_at_zero {
+  mut dut = chunk_sum
+  tick 1 {
+    dut.x = 0x04030005   // lane1 is 0: the runtime break stops after lane 0
+    step
+    assert(dut.o == 5, "the break must stop the accumulation at the zero lane")
+  }
+}

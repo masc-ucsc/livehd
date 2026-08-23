@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: loop_hier_state_match.top
 :pyrope_top: top
-:set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 lane_q=1 *=2
 */
 // Two source-loop calls create two physical stateful lane instances.  Each

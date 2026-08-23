@@ -13,8 +13,10 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -477,6 +479,7 @@ std::string serialize_result(const Query_result& r) {
   }
   put_u32(b, static_cast<uint32_t>(r.checked_steps));
   put_u32(b, static_cast<uint32_t>(r.output_checks));
+  put_u32(b, static_cast<uint32_t>(r.reset_hold));
   put_trace(b, r.trace);     // structured witness (the simfail reproduction sequence)
   put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
   put_u32(b, static_cast<uint32_t>(r.uncertain_pairs_used.size()));
@@ -712,12 +715,15 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     }
     r.unmatched_impl.push_back(std::move(s));
   }
-  uint32_t cs = 0, oc = 0;
+  uint32_t cs = 0, oc = 0, rh = 0;
   if (get_u32(b, cs)) {
     r.checked_steps = static_cast<int>(cs);
   }
   if (get_u32(b, oc)) {
     r.output_checks = static_cast<int>(oc);
+  }
+  if (get_u32(b, rh)) {
+    r.reset_hold = static_cast<int>(rh);
   }
   // Structured witness trace (mirror serialize_result). Best-effort: an older /
   // truncated blob simply leaves the trace empty (the fields are optional), so a
@@ -4910,6 +4916,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
     res.output_checks = static_cast<int>(decomp_diffs.size());
+    res.reset_hold    = reset_hold;
     // Incomplete correspondence gates BOTH verdict directions (see the set's
     // declaration): no Proven with unchecked obligations, no Refuted through an
     // unjustified shared-box assumption — only Unknown, with the sets surfaced.
@@ -8280,11 +8287,34 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
   mix(opts.phase);
   mix(opts.reset);
   mix(std::to_string(opts.reset_cycles));
+  // The assertion SET, not its sequence: the terms arrive in the order the
+  // encoder walked the design's state, and that order comes from per-process
+  // randomized hash containers — MEASURED on a two-register sidecar, three
+  // identical warm runs hit 0, 2 and 1 of its 2 obligations. An obligation
+  // does not depend on the order its hypotheses were stated in.
+  std::vector<std::string> hyps;
+  hyps.reserve(assertions.size());
   for (const auto& a : assertions) {
-    mix(a.toString());
+    hyps.push_back(a.toString());
+  }
+  std::sort(hyps.begin(), hyps.end());
+  for (const auto& h : hyps) {
+    mix(h);
   }
   mix(bad.toString());
-  return std::format("verify:{:016x}{:016x}", h0, h1);
+  auto key = std::format("verify:{:016x}{:016x}", h0, h1);
+  // LHD_FORMAL_KEY_DUMP=<file>: append the serialized obligation behind each
+  // key, so two runs that should have hit can be diffed term by term.
+  if (const char* dump = std::getenv("LHD_FORMAL_KEY_DUMP"); dump != nullptr && *dump != '\0') {
+    if (std::ofstream f(dump, std::ios::app); f) {
+      f << "== " << key << " scope=" << scope << "\n";
+      for (const auto& h : hyps) {
+        f << "  H " << h << "\n";
+      }
+      f << "  BAD " << bad.toString() << "\n";
+    }
+  }
+  return key;
 }
 
 }  // namespace
@@ -9232,7 +9262,6 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
 
   absl::flat_hash_map<int, size_t> prop_ix;              // encoder occ -> res.props index
   bool                             any_guarded = false;  // R1 Phase 2: some property sits in an if/match arm
-  int                              uid         = 0;
   bool                             any_refuted = false, any_unknown = false;
   int                              split_checks = 0;
   const Split_pick                 verify_split = (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty())
@@ -9256,9 +9285,15 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     const bool checking = phase_run ? (cyc >= reset_hold) : true;
 
     if (cyc > 0) {  // fresh-var state pinning (keeps per-cycle terms shallow)
+      // Named `s<cyc>_<flop>` like the cycle-0 state (`s0_<flop>`), NOT by a
+      // running counter: `state` is a hash map, so a counter numbered the
+      // flops in per-process order and the serialized obligation — which is
+      // the verify cache KEY — spelled `st0` for a_r in one run and for b_r
+      // in the next (measured: 0/2/1 warm hits over three identical runs of a
+      // two-register sidecar).
       Io_name_map<Val> ns;
       for (const auto& [key, pv] : state) {
-        cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
+        cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "s" + std::to_string(cyc) + "_" + key);
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
         ns[key] = Val{s, pv.width, pv.is_signed};
         if (mining_on) {
@@ -9269,7 +9304,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       state = std::move(ns);
       Io_name_map<cvc5::Term> nm;
       for (const auto& [key, pv] : mem) {
-        cvc5::Term s = tm.mkConst(pv.getSort(), "ma" + std::to_string(uid++));
+        cvc5::Term s = tm.mkConst(pv.getSort(), "m" + std::to_string(cyc) + "_" + key);
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv}));
         nm[key] = s;
       }

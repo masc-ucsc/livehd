@@ -421,7 +421,16 @@ void topo_chunk(const std::vector<hhds::Node_class>& nodes, uint64_t max_ge, int
   int      id  = next_id++;
   for (const auto& n : nodes) {  // members are already in forward_class order
     const uint64_t w = synthesis_ge_weight(n);
-    if (acc != 0 && acc + w > max_ge) {
+    // A WEIGHTLESS node never starts a new chunk. Pure wiring (a constant
+    // Get_mask) leaves the chunk exactly as heavy as it was, so chopping in
+    // front of it cannot bring anything under the cap -- it only adds a region
+    // boundary. That matters because `acc + 0 > max_ge` is true for every such
+    // node once one heavy node has already put the chunk over: it is precisely
+    // how a wide runtime SRA got separated from the constant slice that makes
+    // its demand narrow, which then costs pass.abc the FULL barrel (the
+    // discount is only valid while the two share a region -- see
+    // graph/synthesis_cost.hpp and ColorSize.WideSraUsesNarrowSliceDemand).
+    if (w != 0 && acc != 0 && acc + w > max_ge) {
       id  = next_id++;
       acc = 0;
     }

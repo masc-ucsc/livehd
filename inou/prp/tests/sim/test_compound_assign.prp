@@ -1,0 +1,86 @@
+/*
+:name: test_compound_assign
+:type: simulation
+*/
+// A compound assignment on a TEST-LOCAL variable must fold `x = x op e`.
+// The driver emitter (inou/prp/prp_sim.cpp gen_assignment) used to take the
+// rvalue alone, so `s += r * r` became `s = r * r` and a four-term accumulator
+// ended holding only its last term (16, not 30) — in every placement: at the
+// tick's top level, inside an `if`, inside an `elif`. `s = s + e` was always
+// right, which is why no fixture caught it. Each test below is one placement.
+
+mod pass_through(x:s8) -> (y:s8@[0]) { y = x }
+
+test compound.plus_eq_in_elif {
+  mut dut = pass_through
+  mut s:s20 = 0
+  tick 4 {
+    if clock > 10 {
+      dut.x = 0
+    } elif clock < 4 {
+      const r = clock + 1
+      dut.x = r
+      s += r * r
+    } else {
+      dut.x = 0
+    }
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += in elif")
+}
+
+test compound.plus_eq_toplevel {
+  mut dut = pass_through
+  mut s:s20 = 0
+  tick 4 {
+    const r = clock + 1
+    dut.x = r
+    s += r * r
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += at tick top level")
+}
+
+test compound.plus_eq_in_if_no_const {
+  mut dut = pass_through
+  mut s:s20 = 0
+  tick 4 {
+    dut.x = 0
+    if clock < 4 {
+      s += (clock + 1) * (clock + 1)
+    }
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += in if, no local const")
+}
+
+test compound.other_ops {
+  mut dut = pass_through
+  mut a:s20 = 100
+  mut o:u8  = 0
+  mut m:s20 = 1
+  mut sh:u16 = 1
+  tick 4 {
+    dut.x = 0
+    a  -= clock + 1            // 100 - (1+2+3+4) = 90
+    o  |= 1 << clock           // 0b1111
+    m  *= 2                    // 16
+    sh <<= 1                   // 16
+    step
+  }
+  assert(a == 90, "-=")
+  assert(o == 15, "|=")
+  assert(m == 16, "*=")
+  assert(sh == 16, "<<=")
+}
+
+test compound.untyped_local_keeps_width {
+  mut dut = pass_through
+  mut s = 0
+  tick 40 {
+    dut.x = 0
+    s += 1000000               // 40M needs 27 bits; the local is not sized from `1000000` alone
+    step
+  }
+  assert(s == 40000000, "an untyped accumulator does not truncate")
+}

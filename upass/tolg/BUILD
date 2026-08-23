@@ -13,6 +13,7 @@ cc_library(
     deps = [
         "//graph",
         "//lnast",
+        "//upass/core:array_dim_hdr",
         "//pass/common:pass",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",

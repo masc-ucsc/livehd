@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
+        "//upass/core:array_dim_hdr",
         "//upass/core:upass",
     ],
     alwayslink = True,

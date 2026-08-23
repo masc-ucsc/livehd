@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_flat
 :type: lec
-:set: compile.upass.roll=true
 */
 // Rolled-vs-unrolled structural correspondence with no call boundary in the
 // loop body. Comparisons and muxes survive O1, so semdiff must recognize the

@@ -29,7 +29,10 @@
 #   :lec_set: k=v … extra `--set` for `lhd lec` (base = shared, variant = adds)
 #   :lec_sweep: k=v1,v2   run the pair once per value (repeatable: cartesian)
 #   :lec_expect: proven|refuted   what the run must report (default proven)
-#   :lec_grep: REGEX      must appear in the lec output (repeatable)
+#   :lec_grep: REGEX      must appear in the lec output (repeatable); when the two
+#                         sides compile with different flags, the IMPL side's own
+#                         `lhd compile` output is part of that text too (the ref
+#                         side's is not -- a grep is a claim about the variant)
 #   :lec_grep_not: REGEX  must NOT appear in the lec output (repeatable)
 #
 # Run one group by hand (base = every variant, or name a single variant):
@@ -157,15 +160,31 @@ class _Side:
 
 def _precompile(runner, tmp_dir, side, top, odir):
     """Elaborate one side into its own `lg:` library (needed only when the two
-    sides disagree on COMPILE flags — a single `lhd lec --set` cannot)."""
+    sides disagree on COMPILE flags — a single `lhd lec --set` cannot).
+
+    Returns (error, log). The log is handed back even on success: what the
+    front end said while compiling a side (e.g. `uPass - roll declined for
+    ...`) is part of HOW the pair was proven, so `:lec_grep:` must see it.
+    """
+    # `lhd.incremental=false`, as the lec command itself: a compile-cache hit
+    # replays the graph without running the front end, and then nothing the
+    # front end would have said (a `roll declined`) is there to grep.
+    wdir = odir + '_w'
     cmd = [runner.lhd, 'compile', side.src, '--top', top,
-           '--emit-dir', 'lg:' + odir, '--workdir', odir + '_w'] + _set_args(side.sets)
+           '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(_merge_sets(['lhd.incremental=false'], side.sets))
     rc, log = _run(cmd, tmp_dir)
+    # A pass's own chatter goes to the workdir's per-pass log, not the console.
+    for f in sorted(globmod.glob(os.path.join(tmp_dir if not os.path.isabs(wdir) else '', wdir, 'logs', '*.log'))):
+        try:
+            with open(f, errors='replace') as fh:
+                log += '\n--- {}\n{}'.format(os.path.basename(f), fh.read())
+        except OSError:
+            pass
     if rc != 0:
-        return 'compiling the {} side failed (rc={})\n  {}\n{}'.format(
-            side.label, rc, ' '.join(cmd), _tail(log))
+        return ('compiling the {} side failed (rc={})\n  {}\n{}'.format(
+            side.label, rc, ' '.join(cmd), _tail(log)), log)
     side.arg = 'lg:' + odir
-    return None
+    return (None, log)
 
 
 def _sweeps(base_test, var_test):
@@ -228,15 +247,27 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     # pyrope: input path). Same flags AND the same source is the SELF check: one
     # design elaborated twice, a real claim about the engine.
     shared_compile = ref.sets
+    # The IMPL side's own compile output is part of the grep haystack; the REF
+    # side's is kept for diagnostics ONLY. Merging both would make a `:lec_grep:`
+    # written as a claim about the impl configuration pass on the ref side's
+    # identical line -- and the two sides are pre-compiled here precisely
+    # BECAUSE their flags differ, so that is the common case, not a corner one.
+    impl_log = ''
+    ref_log  = ''
     if impl.sets != ref.sets:
         # Different compile flags per side: one `lhd lec --set` cannot say two
         # things, so each side is compiled into its own library first.
         shared_compile = []
         for side in (ref, impl):
-            err = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label))
+            err, log = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label))
             if err:
                 print('{} - lec - FAILED: {}'.format(name, err))
                 return 1
+            tagged = '--- compile {} ({})\n{}\n'.format(side.label, side.src, log)
+            if side is impl:
+                impl_log = tagged
+            else:
+                ref_log = tagged
 
     expect = (var_test.params.get('lec_expect') or 'proven').strip().lower()
     lec_base = _merge_sets(['lhd.incremental=false'],   # hermetic: no cross-run reuse
@@ -253,7 +284,7 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
         if verbose:
             print(out)
 
-        why  = _check(out, rc, expect, base_test, var_test)
+        why  = _check(impl_log + out, rc, expect, base_test, var_test)
         what = '{} vs {}{}'.format(os.path.basename(base), name,
                                    ' [' + ' '.join(combo) + ']' if combo else '')
         if why:
@@ -261,6 +292,10 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
             print('  ' + ' '.join(cmd))
             if not verbose:
                 print(_tail(out))
+                # The ref side never feeds the grep, but a ref-side compile
+                # oddity is still the likeliest cause of a surprise refutation.
+                if ref_log:
+                    print(_tail(ref_log))
             rc_all = 1
         else:
             print('{} - lec - success ({}: {})'.format(name, what, expect))

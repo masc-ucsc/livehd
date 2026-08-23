@@ -207,6 +207,12 @@ struct Lnast_io_entry {
   // comb inliner (a) not error when the arg is omitted and (b) skip the
   // prologue store when the arg IS provided so the actual wins. Comb-only.
   bool        has_default = false;
+  // Array-typed port (`a:[N]T`): the port is the PACKED bus of N lanes
+  // (`bits` = N*elem_bits, unsigned); lnast.tolg registers an element view for
+  // it so `a[i]` reads/writes lower like a body `mut` array. 0 = not an array.
+  int64_t     array_size  = 0;
+  int32_t     elem_bits   = 0;
+  bool        elem_signed = false;
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

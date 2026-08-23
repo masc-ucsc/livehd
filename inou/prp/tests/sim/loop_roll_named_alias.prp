@@ -1,7 +1,6 @@
 /*
 :name: loop_roll_named_alias
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 *=1
 */
 // The lifted definition cannot refer to a source-unit alias. The roller must

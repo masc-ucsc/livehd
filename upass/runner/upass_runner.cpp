@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "array_dim.hpp"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
@@ -408,12 +409,16 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
     inlining_enabled_ = !(v == "false" || v == "0" || v == "no" || v == "off");
   }
 
-  // compile.upass.roll=true: keep an eligible comptime range loop rolled (lift
+  // compile.unroll=false: keep an eligible comptime range loop rolled (lift
   // the body into one generated definition + a single replicated instance)
   // rather than emitting one body copy per iteration.
   if (auto it = options.find("roll"); it != options.end()) {
     const auto& v = it->second;
     roll_enabled_ = !(v.empty() || v == "false" || v == "0" || v == "no" || v == "off");
+  }
+  if (auto it = options.find("roll_arrays"); it != options.end()) {
+    const auto& v = it->second;
+    roll_arrays_  = !(v.empty() || v == "false" || v == "0" || v == "no" || v == "off");
   }
   if (auto it = options.find("roll_cap"); it != options.end()) {
     uint64_t    cap = 0;
@@ -1185,6 +1190,60 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
       emit_pop();
       return true;
     }
+
+    // A file-scope LOCAL alias lives in the source-unit shell, not in the
+    // extracted module's symbol table. Recover its primitive declaration from
+    // that shell. This is also what lets an alias nested below
+    // comp_type_array be concretized before tolg asks for the element width.
+    if (registry_ != nullptr && lm && lm->get_lnast()) {
+      std::string unit{lm->get_lnast()->get_graph_name()};
+      if (const auto dot = unit.rfind('.'); dot != std::string::npos) {
+        unit.resize(dot);
+      }
+      const auto fit = reg().function_registry.find(unit);
+      if (fit != reg().function_registry.end() && fit->second->get_lambda_kind().empty()) {
+        const auto& shell = *fit->second;
+        for (auto top : shell.children(shell.get_root())) {
+          if (!Lnast_ntype::is_stmts(shell.get_type(top))) {
+            continue;
+          }
+          for (auto stmt : shell.children(top)) {
+            if (!Lnast_ntype::is_declare(shell.get_type(stmt))) {
+              continue;
+            }
+            const auto name_n = shell.get_first_child(stmt);
+            const auto type_n = name_n.is_invalid() ? name_n : shell.get_sibling_next(name_n);
+            const auto mode_n = type_n.is_invalid() ? type_n : shell.get_sibling_next(type_n);
+            if (name_n.is_invalid() || type_n.is_invalid() || mode_n.is_invalid() || !Lnast_ntype::is_ref(shell.get_type(name_n))
+                || shell.get_name(name_n) != type_name || !Lnast_ntype::is_const(shell.get_type(mode_n))
+                || shell.get_name(mode_n) != "type") {
+              continue;
+            }
+            if (Lnast_ntype::is_prim_type_int(shell.get_type(type_n))) {
+              const auto max_n = shell.get_first_child(type_n);
+              const auto min_n = max_n.is_invalid() ? max_n : shell.get_sibling_next(max_n);
+              if (max_n.is_invalid() || min_n.is_invalid()) {
+                return false;
+              }
+              emit_push(Lnast_ntype::create_prim_type_int());
+              emit_leaf(Lnast_node::create_const(std::string(shell.get_name(max_n))));
+              emit_leaf(Lnast_node::create_const(std::string(shell.get_name(min_n))));
+              emit_pop();
+              return true;
+            }
+            if (Lnast_ntype::is_prim_type_bool(shell.get_type(type_n))) {
+              emit_leaf(Lnast_ntype::create_prim_type_bool());
+              return true;
+            }
+            if (Lnast_ntype::is_prim_type_string(shell.get_type(type_n))) {
+              emit_leaf(Lnast_ntype::create_prim_type_string());
+              return true;
+            }
+            return false;
+          }
+        }
+      }
+    }
   }
   if (!tb || tb->has_named_top() || tb->unnamed_top_count() > 1 || tb->get_value_kind() == upass::Kind::tuple) {
     return false;  // unresolved / a tuple-or-struct named type — keep the ref verbatim
@@ -1206,6 +1265,35 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
     return true;
   }
   return false;  // a tuple/struct named type (or a scalar with no baked range) — verbatim
+}
+
+bool uPass_runner::emit_concrete_type_slot() {
+  if (!materialize_) {
+    return false;
+  }
+  if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    return emit_scalar_named_type_slot(lm->current_text());
+  }
+  if (!Lnast_ntype::is_comp_type_array(lm->get_raw_ntype())) {
+    return false;
+  }
+
+  // comp_type_array(element_type, dimension): only the first child is a type
+  // slot. Recursing through it supports `[N][M]Alias`; copying every later
+  // child verbatim keeps a named/constant dimension on the value-fold path.
+  emit_push(lm->current_type());
+  if (lm->has_child()) {
+    lm->move_to_child();
+    if (!emit_concrete_type_slot()) {
+      emit_subtree_verbatim();
+    }
+    while (lm->move_to_sibling()) {
+      emit_subtree_verbatim();
+    }
+    lm->move_to_parent();
+  }
+  emit_pop();
+  return true;
 }
 
 // Report every `concat` lane that declares no width.
@@ -1728,8 +1816,9 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
       if (is_call && idx == 1) {
         call_callee = std::string(lm->current_raw_text());  // callee id — never frame-renamed
       }
-      if (is_type_slot && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref && emit_scalar_named_type_slot(lm->current_text())) {
-        // scalar named-type ref concretized to a prim_type — nothing else to emit
+      if (is_type_slot && emit_concrete_type_slot()) {
+        // scalar named-type refs, including array element aliases, concretized
+        // to primitive types — nothing else to emit
       } else if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
       } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
@@ -5571,6 +5660,57 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
       dst->set_srcid(newn, dst->source_locator().import_from(src->source_locator(), id));
     }
   }
+  if (Lnast_ntype::is_comp_type_array(type)) {
+    // `mut v:[N]T`: prp2lnast keeps the dimension as the expression it was
+    // written as (`ref N`). Every downstream reader takes the dim node's TEXT,
+    // and `Dlop::from_pyrope("N")` is the character code of 'N' — 78 lanes for
+    // any `[N]`. Fold a comptime-named dim to its digits while the declared
+    // type is copied; tolg now refuses a dim that is not a digit string.
+    bool first = true;
+    for (auto c : src->children(src_nid)) {
+      const bool is_dim = !first;
+      first             = false;
+      if (is_dim && (Lnast_ntype::is_ref(src->get_type(c)) || Lnast_ntype::is_const(src->get_type(c)))) {
+        // The dim rides as `ref N` or as `const '[N]'` (prp2lnast keeps the
+        // written text); a digit string is already folded.
+        std::string txt{src->get_name(c)};
+        if (txt.size() >= 2 && txt.front() == '[' && txt.back() == ']') {
+          txt = txt.substr(1, txt.size() - 2);
+        }
+        int64_t    n      = 0;
+        const bool digits = !txt.empty() && std::from_chars(txt.data(), txt.data() + txt.size(), n).ptr == txt.data() + txt.size();
+        if (!digits) {
+          // A GENERIC binding WINS over any same-named caller-scope constant.
+          // try_fold_ref reads the CALLER's symbol table, so consulting it for
+          // a name that IS a generic parameter sizes `buf<4>`'s `[N]` array by
+          // the caller's shadowing `const N = 16` -- silently, and with the
+          // packed bus four times too wide.
+          const Generic_bind* gb = nullptr;
+          if (type_subst != nullptr) {
+            if (auto git = type_subst->find(txt); git != type_subst->end()) {
+              gb = &git->second;
+            }
+          }
+          if (gb != nullptr) {
+            int64_t     gn = 0;
+            const auto& ct = gb->const_text;
+            if (!ct.empty() && std::from_chars(ct.data(), ct.data() + ct.size(), gn).ptr == ct.data() + ct.size() && gn > 0) {
+              dst->add_child(newn, Lnast_node::create_const("[" + std::to_string(gn) + "]"));
+              continue;
+            }
+            // A type/lambda/non-integer bind is not a dim: fall through to the
+            // recursion so type_subst still governs (and the bad dim is
+            // diagnosed downstream), never to the caller's constant.
+          } else if (auto fv = try_fold_ref(txt); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
+            dst->add_child(newn, Lnast_node::create_const("[" + std::to_string(fv->to_just_i64()) + "]"));
+            continue;
+          }
+        }
+      }
+      copy_subtree_into(src, c, dst, newn, type_subst);
+    }
+    return;
+  }
   for (auto c : src->children(src_nid)) {
     copy_subtree_into(src, c, dst, newn, type_subst);
   }
@@ -6121,6 +6261,89 @@ bool subtree_has_runtime_loop_control(const Lnast& ln, const Lnast_nid& body_stm
   return scan(body_stmts, false);
 }
 
+// A loop NESTED in the body whose domain reads the index or a carry cannot
+// survive rolling: inside the lifted definition those names are runtime ports,
+// and a `for` over a runtime range is a hard tolg error ("non-comptime `for`
+// loop"). The matched-filter tree is the canonical shape — `for lvl { for j in
+// 0..<(N >> (lvl+1)) … }` — where the OUTER loop must unroll (its body's inner
+// domain reads `lvl`) while each inner copy, left with a constant domain, rolls.
+bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& names) {
+  if (names.empty()) {
+    return false;
+  }
+  // Statement-order taint: a name is runtime inside the lifted body if it IS
+  // the index / a carry, or is computed from one (`%t = N >> (lvl + 1)` makes
+  // `%t` runtime, and `range(%d, 0, %t)` is then a runtime domain). prp2lnast
+  // emits the domain as a `range` statement ahead of the `for`, possibly through
+  // several tmps, so the walk must follow dataflow to the `for`'s own iterable
+  // ref -- a `range` node by itself is NOT evidence of anything (a bit-select
+  // with non-literal endpoints is spelled with one too).
+  absl::flat_hash_set<std::string> tainted(names.begin(), names.end());
+  const auto                       any_read_tainted = [&](const Lnast_nid& stmt, bool skip_first) {
+    bool first = true;
+    for (auto c : ln.children(stmt)) {
+      if (first && skip_first) {
+        first = false;
+        continue;
+      }
+      first = false;
+      if (Lnast_ntype::is_ref(ln.get_type(c)) && tainted.contains(std::string(ln.get_name(c)))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& stmts) -> bool {
+    for (auto stmt : ln.children(stmts)) {
+      const auto t = ln.get_type(stmt);
+      if (Lnast_ntype::is_func_def(t)) {
+        continue;
+      }
+      if (Lnast_ntype::is_stmts(t)) {
+        if (walk(stmt)) {
+          return true;
+        }
+        continue;
+      }
+      // A nested `for` is the whole point of this walk: its ITERABLE (child 1;
+      // child 0 is the index it binds) is the domain, and a tainted domain is
+      // the shape that cannot survive rolling. Test the iterable itself rather
+      // than every `range` statement in the body -- prp2lnast also emits
+      // `range` for a non-literal bit-select (`x#[(i*8)..=(i*8+7)]`) and for a
+      // tuple slice, and matching those refused the roll for a loop that merely
+      // slices with its index, which then falls through to the source unroller
+      // and hard-errors on a runtime `break`. The domain still reaches the
+      // iterable through the generic taint below, however many tmps it takes.
+      if (Lnast_ntype::is_for(t) && any_read_tainted(stmt, /*skip_first=*/true)) {
+        return true;
+      }
+      // Compound statements (if / for / while …): their nested stmts blocks
+      // are walked with the same taint set; their own condition refs are
+      // ordinary reads.
+      bool compound = false;
+      for (auto c : ln.children(stmt)) {
+        if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+          compound = true;
+          if (walk(c)) {
+            return true;
+          }
+        }
+      }
+      if (compound) {
+        continue;
+      }
+      // Three-address statement: dst = first ref child; taint it when any
+      // operand is tainted.
+      auto dst = ln.get_first_child(stmt);
+      if (!dst.is_invalid() && Lnast_ntype::is_ref(ln.get_type(dst)) && any_read_tainted(stmt, /*skip_first=*/true)) {
+        tainted.insert(std::string(ln.get_name(dst)));
+      }
+    }
+    return false;
+  };
+  return walk(body_stmts);
+}
+
 bool later_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& names) {
   if (names.empty()) {
     return false;
@@ -6296,6 +6519,21 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   if (later_loop_domain_reads_any(ln, body_stmts, produced)) {
     return refuse("a value the loop produces is used by a later comptime loop domain");
   }
+  {
+    // Everything that becomes an INPUT PORT of the lifted definition is runtime
+    // inside it, and lift_loop_body promotes the invariants too -- not just the
+    // index and the carry-ins. Omitting them let `for j in 0..<n` (n a loop
+    // invariant) be accepted for rolling and then abort in tolg with
+    // "non-comptime 'for' loop", on source that unrolls fine.
+    std::vector<std::string> runtime_in_body = produced;
+    runtime_in_body.emplace_back(ivar);
+    runtime_in_body.insert(runtime_in_body.end(), out.invariants.begin(), out.invariants.end());
+    if (nested_loop_domain_reads_any(ln, body_stmts, runtime_in_body)) {
+      return refuse(
+          "a loop nested in the body has a domain that reads the index, a carry or a loop invariant (all runtime inside the "
+          "lifted body)");
+    }
+  }
 
   // Repeated constant arithmetic over a bounded declared carry is also kept
   // source-unrolled: upass.bitwidth observes successive values and emits the
@@ -6396,6 +6634,41 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
                   sp = Spec_port{.inject = true, .max = max, .min = min};
                   return true;
                 }
+              }
+              if (Lnast_ntype::is_comp_type_array(tt)) {
+                // `mut v:[N]T`: carry the whole array across the boundary as an
+                // `[N]T` port (element range + size). A nested element type
+                // (2-D) is not a packed lane array and does not roll.
+                auto elem_n = tree.get_first_child(type_n);
+                auto len_n  = elem_n.is_invalid() ? elem_n : tree.get_sibling_next(elem_n);
+                if (elem_n.is_invalid() || len_n.is_invalid() || !Lnast_ntype::is_prim_type_int(tree.get_type(elem_n))
+                    || !Lnast_ntype::is_const(tree.get_type(len_n))) {
+                  return false;
+                }
+                const auto lanes = upass::array_dim_lanes(tree.get_name(len_n));
+                if (!lanes) {
+                  return false;  // a dim that did not fold to a literal (see array_dim.hpp)
+                }
+                const int64_t       count_i = *lanes;
+                auto                max_n   = tree.get_first_child(elem_n);
+                auto                min_n   = max_n.is_invalid() ? max_n : tree.get_sibling_next(max_n);
+                std::optional<Dlop> max;
+                std::optional<Dlop> min;
+                if (!max_n.is_invalid() && Lnast_ntype::is_const(tree.get_type(max_n))) {
+                  if (auto v = Dlop::from_pyrope(tree.get_name(max_n)); v->is_integer()) {
+                    max = *v;
+                  }
+                }
+                if (!min_n.is_invalid() && Lnast_ntype::is_const(tree.get_type(min_n))) {
+                  if (auto v = Dlop::from_pyrope(tree.get_name(min_n)); v->is_integer()) {
+                    min = *v;
+                  }
+                }
+                if (!(max || min)) {
+                  return false;
+                }
+                sp = Spec_port{.inject = true, .max = max, .min = min, .array_size = count_i};
+                return true;
               }
               if (Lnast_ntype::is_ref(tt)) {
                 return resolve_decl(tree.get_name(type_n));
@@ -6521,6 +6794,16 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
     out.types[n] = sp;
   }
+  if (!roll_arrays_) {
+    for (const auto& [n, sp] : out.types) {
+      if (sp.array_size > 0) {
+        return refuse(
+            std::format("`{}` is an array carried across the lifted boundary (every replica would own an "
+                        "N*W-bit lane demux/mux; compile.upass.roll_arrays=true to roll it anyway)",
+                        n));
+      }
+    }
+  }
   if (constant_arithmetic
       && std::ranges::any_of(out.carries, [&](const std::string& n) { return out.types.at(n).kind != Io_kind::boolean; })) {
     return refuse("rolling would hide per-iteration range/overflow diagnostics on a bounded carry");
@@ -6596,6 +6879,12 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
       body->add_child(st, Lnast_ntype::create_prim_type_bool());
     } else if (!p.type_name.empty()) {
       body->add_child(st, Lnast_node::create_ref(p.type_name));
+    } else if (p.array_size > 0) {
+      auto at = body->add_child(st, Lnast_ntype::create_comp_type_array());
+      auto pt = body->add_child(at, Lnast_ntype::create_prim_type_int());
+      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+      body->add_child(at, Lnast_node::create_const("[" + std::to_string(p.array_size) + "]"));
     } else {
       auto pt = body->add_child(st, Lnast_ntype::create_prim_type_int());
       body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
@@ -6661,6 +6950,12 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
       body->add_child(dcl, Lnast_ntype::create_prim_type_bool());
     } else if (!p.type_name.empty()) {
       body->add_child(dcl, Lnast_node::create_ref(p.type_name));
+    } else if (p.array_size > 0) {
+      auto at = body->add_child(dcl, Lnast_ntype::create_comp_type_array());
+      auto pt = body->add_child(at, Lnast_ntype::create_prim_type_int());
+      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+      body->add_child(at, Lnast_node::create_const("[" + std::to_string(p.array_size) + "]"));
     } else {
       auto pt = body->add_child(dcl, Lnast_ntype::create_prim_type_int());
       body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
@@ -6760,6 +7055,43 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     }
   }
 
+  // A callee named through an IMPORT ALIAS (`const tap = import("tap.tap")`,
+  // then `tap(...)`) is a const bound to the callee's tree name in THIS unit's
+  // symbol table; the lifted definition is compiled on its own and cannot see
+  // that binding ("call to undefined function 'tap'"). Spell the resolved tree
+  // name into the copied call instead, exactly what the call path itself does
+  // through try_fold_ref.
+  {
+    std::function<void(const Lnast_nid&)> resolve_callees = [&](const Lnast_nid& nid) {
+      if (nid.is_invalid()) {
+        return;
+      }
+      if (Lnast_ntype::is_func_call(body->get_type(nid))) {
+        auto dst = body->get_first_child(nid);
+        auto fn  = dst.is_invalid() ? dst : body->get_sibling_next(dst);
+        if (!fn.is_invalid() && Lnast_ntype::is_ref(body->get_type(fn))) {
+          const std::string callee{body->get_name(fn)};
+          if (auto fv = try_fold_ref(callee); fv && fv->is_string()) {
+            auto name = fv->to_pyrope();
+            if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
+              name = name.substr(1, name.size() - 2);
+            }
+            if (name.starts_with("ln:")) {
+              name = name.substr(3);
+            }
+            if (!name.empty() && name != callee) {
+              body->set_name(fn, name);
+            }
+          }
+        }
+      }
+      for (auto c : body->children(nid)) {
+        resolve_callees(c);
+      }
+    };
+    resolve_callees(stmts);
+  }
+
   // Epilogue: publish each carry on its output port.
   for (const auto& n : plan.carries) {
     auto wb = body->add_child(stmts, Lnast_ntype::create_store());
@@ -6779,11 +7111,23 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   // comptime seeds exactly as the emitting path below does. Returning without
   // that would let the pre-loop keep folding the PRE-loop value of every carry.
   if (!staging) {
+    const auto invalidate = [&](const std::string& n) {
+      if (const auto tit = plan.types.find(n); tit != plan.types.end() && tit->second.array_size > 0) {
+        const std::string unit{lm->get_top_module_name()};
+        for (int64_t e = 0; e < tit->second.array_size; ++e) {
+          const std::string lane = n + "." + std::to_string(e);
+          (void)symbol_table_.set(lane, Bundle::invalid_lconst);
+          symbol_table_.field_touched.insert(Symbol_table::field_touch_key(unit, lane));
+        }
+      } else {
+        (void)symbol_table_.set(n, Bundle::invalid_lconst);
+      }
+    };
     for (const auto& n : plan.finals) {
-      (void)symbol_table_.set(n, Bundle::invalid_lconst);
+      invalidate(n);
     }
     for (const auto& n : plan.carries) {
-      (void)symbol_table_.set(n, Bundle::invalid_lconst);
+      invalidate(n);
     }
     return;
   }
@@ -6859,7 +7203,23 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     // The source value is a runtime result now. Invalidate the old comptime
     // seed just as an uncertain scope does, so later statements cannot fold it
     // back to the pre-loop value.
-    (void)symbol_table_.set(name, Bundle::invalid_lconst);
+    if (const auto tit = plan.types.find(name); tit != plan.types.end() && tit->second.array_size > 0) {
+      // An ARRAY carry comes back as one packed runtime value, but the symbol
+      // table still holds its pre-loop LANES ("0".."N-1"): invalidating the bare
+      // name only clears slot 0, and a later `v[3]` then constant-folds to the
+      // seed (MEASURED: `y = v[0] + v[3]` after a rolled write loop lowered to
+      // `tuple_get(v,0) + 0`). Every lane is runtime after the loop.
+      const std::string unit{lm->get_top_module_name()};
+      for (int64_t e = 0; e < tit->second.array_size; ++e) {
+        const std::string lane = name + "." + std::to_string(e);
+        (void)symbol_table_.set(lane, Bundle::invalid_lconst);
+        // The loop wrote the lane (through the carry): say so, or constprop's
+        // unset-unused-field sweep reports every lane "declared but never set".
+        symbol_table_.field_touched.insert(Symbol_table::field_touch_key(unit, lane));
+      }
+    } else {
+      (void)symbol_table_.set(name, Bundle::invalid_lconst);
+    }
   }
 }
 
@@ -8474,7 +8834,7 @@ void uPass_runner::unroll_for() {
       step = 1;  // non-positive step is a comptime error (process_func_call); avoid a hang here
     }
     // ROLL: keep the loop as one replicated instance instead of emitting one
-    // body copy per iteration (compile.upass.roll). Declines back to unrolling
+    // body copy per iteration (compile.unroll). Declines back to unrolling
     // whenever the body is not eligible, so this is purely additive.
     // Runtime loop control cannot be represented by the ordinary source
     // unroller: later iterations need the activation recurrence. Route any
@@ -9879,7 +10239,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
           const auto arr_nid = lm->get_current_nid();
           const auto elem_n  = lm->get_lnast()->get_first_child(arr_nid);
           const auto dim_n   = elem_n.is_invalid() ? elem_n : lm->get_lnast()->get_sibling_next(elem_n);
-          if (!dim_n.is_invalid() && Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n))) {
+          if (!dim_n.is_invalid()
+              && (Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n))
+                  || Lnast_ntype::is_ref(lm->get_lnast()->get_type(dim_n)))) {
             std::string_view dim = lm->get_lnast()->get_name(dim_n);
             if (dim.size() >= 2 && dim.front() == '[' && dim.back() == ']') {
               dim.remove_prefix(1);
@@ -9889,6 +10251,17 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
             if (auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), n);
                 ec == std::errc{} && ptr == dim.end() && n >= 0) {
               array_size = *Dlop::create_integer(n);
+            } else if (auto fv = try_fold_ref(std::string(dim));
+                       fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
+              // `mut v:[N]T` with a comptime-named dim: prp2lnast keeps the
+              // written text (`const '[N]'` / `ref N`), the declare is copied
+              // VERBATIM into staging, and every downstream reader takes the
+              // dim node's text — `Dlop::from_pyrope("N")` is the character
+              // code of 'N', which silently sized every `[N]` array at 78
+              // lanes. Fold it to digits IN PLACE before the verbatim copy.
+              n          = fv->to_just_i64();
+              array_size = *Dlop::create_integer(n);
+              lm->get_lnast()->set_name(dim_n, "[" + std::to_string(n) + "]");
             }
           }
         }

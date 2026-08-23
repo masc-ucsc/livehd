@@ -1,0 +1,56 @@
+/*
+:name: matched_filter_2
+:type: lec
+*/
+// The same matched filter with every source loop spelled as a comptime
+// `while`: the unroller's other entry point, same hardware, LEC'd against the
+// `for`-range base.
+comptime const N     = 8
+comptime const LOG2N = 3
+
+// `timecheck=false`: a FIR mixes delays by design — the sample register is a
+// pipeline stage (cycle 1) and the coefficient register is state (cycle 0),
+// and the product needs both. The cycle typechecker has no delay-line notion.
+mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:s4@[0], p:s8@[0]) {
+  reg x_r:s4 = 0
+  reg c_r:s4 = 0
+  x_out = x_r
+  c_out = c_r
+  p     = x_r * c_r
+  x_r = x_in
+  if load { c_r = c_in }
+}
+
+mod add_node(a:s12, b:s12) -> (s:s12@[0]) {
+  reg s_r:s12 = 0
+  s = s_r
+  wrap s_r = a + b
+}
+
+pub mod top(x:s4, c_in:s4, load:bool) -> (y:s12@[0]) {
+  mut xs:s4 = x
+  mut cs:s4 = c_in
+  mut v:[N]s12 = 0
+  mut i = 0
+  while i < N {
+    const t = tap(x_in=xs, c_in=cs, load=load)
+    xs   = t.x_out
+    cs   = t.c_out
+    v[i] = t.p
+    i += 1
+  }
+  // In-place pairwise reduction: level lvl folds the first N>>lvl live
+  // entries into the first N>>(lvl+1).  Reads (2j, 2j+1) always sit at or
+  // beyond the write index j, so program order never clobbers a live input.
+  mut live = N
+  while live > 1 {
+    mut j = 0
+    while j < (live >> 1) {
+      v[j] = add_node(a=v[2 * j], b=v[2 * j + 1])
+      j += 1
+    }
+    live = live >> 1
+  }
+  y = v[0]
+}
+

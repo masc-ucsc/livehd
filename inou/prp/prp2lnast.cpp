@@ -2692,7 +2692,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                                 bool rhs_is_fcall, std::string_view rhs_fcall_name, std::string_view overflow_kind,
-                                                bool rhs_name_bindable) {
+                                                bool rhs_name_bindable, std::optional<int64_t> resolved_rvalue_int) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -2878,7 +2878,15 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     TSNode inner = child_by_field(lvalue, "identifier");
     if (!ts_node_is_null(inner)) {
       maybe_emit_timecheck(child_by_field(lvalue, "timing"), inner);
-      return process_lvalue_for_assign(inner, rvalue, decl_node, type_cast_node, rhs_is_fcall, rhs_fcall_name, overflow_kind);
+      return process_lvalue_for_assign(inner,
+                                       rvalue,
+                                       decl_node,
+                                       type_cast_node,
+                                       rhs_is_fcall,
+                                       rhs_fcall_name,
+                                       overflow_kind,
+                                       rhs_name_bindable,
+                                       resolved_rvalue_int);
     }
   }
   if (lvt == "identifier" || lvt == "typed_identifier") {
@@ -2923,13 +2931,15 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // enforced, so a fresh binding may safely overwrite an earlier same-name
     // one.
     //
-    //   - `const NAME = <int literal>`  → record (immutable, always valid;
+    //   - `const NAME = <compile-time integer expression>` → record
+    //       (immutable, always valid;
     //       no-shadowing + no-reassign make scoping unambiguous, so no depth
     //       gate).
-    //   - `mut   NAME = <int literal>`  → record with declaration-time-capture:
-    //       a later statement-level plain `NAME = <int literal>` UPDATEs it,
+    //   - `mut NAME = <compile-time integer expression>` → record with
+    //       declaration-time-capture. A later statement-level plain write of
+    //       another resolvable expression UPDATES it,
     //       and ANY other write ERASEs it. The
-    //       erase covers a non-literal rhs, a compound op (the scalar `rvalue`
+    //       erase covers a runtime rhs, a compound op (the scalar `rvalue`
     //       arrives as a tmp ref, never a const, so is_const() is false), and
     //       any write nested in a conditional/loop/lambda body (which makes
     //       the value no longer statically known — conditional_depth_ > 0).
@@ -2940,6 +2950,9 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     {
       std::string nm(trim(get_text(id)));
       auto        as_int = [&]() -> std::optional<int64_t> {
+        if (resolved_rvalue_int) {
+          return resolved_rvalue_int;
+        }
         if (!rvalue.is_const()) {
           return std::nullopt;
         }
@@ -3576,6 +3589,16 @@ void Prp2lnast::process_assignment(TSNode n) {
   const std::string_view overflow_kind = pending_overflow_kind;
   pending_overflow_kind                = {};
 
+  // Resolve before lowering: an expression such as `W + LOG` becomes a tmp
+  // ref in LNAST, which no longer exposes the value to the declaration's
+  // compile-time binding capture below.
+  std::optional<int64_t> resolved_rvalue_int;
+  if (!ts_node_is_null(rv)) {
+    if (auto v = resolve_type_int_value(rv); v && v->is_just_i64()) {
+      resolved_rvalue_int = v->to_just_i64();
+    }
+  }
+
   // Get rvalue node or fallback text for hidden tokens
   Lnast_node rvalue_node;
   if (ts_node_is_null(rv)) {
@@ -3658,7 +3681,8 @@ void Prp2lnast::process_assignment(TSNode n) {
                                   rhs_is_fcall,
                                   rhs_fcall_name,
                                   overflow_kind,
-                                  /*rhs_name_bindable=*/!rhs_positional_literal);
+                                  /*rhs_name_bindable=*/!rhs_positional_literal,
+                                  resolved_rvalue_int);
 }
 
 // ---------------- Control Flow ----------------
@@ -6570,7 +6594,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   bool signed_base   = false;
   if (kw == "uint" || kw == "unsigned") {
     unsigned_base = true;
-  } else if (kw == "int" || kw == "integer") {
+  } else if (kw == "signed" || kw == "int" || kw == "integer") {
     signed_base = true;
   } else if (kw.size() >= 2 && kw[0] == 'u'
              && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
@@ -6620,6 +6644,9 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     }
     std::string key(trim(get_text(lv)));
     std::string val(trim(get_text(rv)));
+    if (auto folded = resolve_type_int_value(rv)) {
+      val = std::string(folded->to_pyrope());
+    }
     if (key == "range") {
       // No `range` type argument — it would be pure sugar for max/min, so it
       // is rejected to keep a single way to bound an integer type.
@@ -6634,17 +6661,116 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     } else if (key == "min") {
       min_txt = val;
     } else if (key == "bits") {
-      auto bv = Dlop::from_pyrope(val);
-      if (bv->is_just_i64()) {
-        bits_to_bounds(static_cast<int>(bv->to_just_i64()), max_txt, min_txt);
+      auto bv = resolve_type_int_value(rv);
+      if (bv && bv->is_just_i64()) {
+        const auto bits = bv->to_just_i64();
+        if (bits < 0 || bits > kMaxIntTypeWidth) {
+          report_error(rv,
+                       "width-too-large",
+                       "type",
+                       std::format("integer type width '{}' is out of range (0..{} bits)", val, kMaxIntTypeWidth),
+                       "use a smaller bit width");
+        }
+        bits_to_bounds(static_cast<int>(bits), max_txt, min_txt);
       }
     }
   }
   return true;
 }
 
+std::optional<Dlop> Prp2lnast::resolve_type_int_value(TSNode n) const {
+  if (ts_node_is_null(n)) {
+    return std::nullopt;
+  }
+
+  const std::string_view t(ts_node_type(n));
+  if (t == "constant") {
+    auto v = Dlop::from_pyrope(trim(get_text(n)));
+    if (v && v->is_integer() && !v->has_unknowns()) {
+      return *v;
+    }
+    return std::nullopt;
+  }
+  if (t == "identifier") {
+    if (auto it = const_int_bindings_.find(std::string(trim(get_text(n)))); it != const_int_bindings_.end()) {
+      return *Dlop::create_integer(it->second);
+    }
+    return std::nullopt;
+  }
+  if (t == "tuple" || t == "expression_type") {
+    if (ts_node_named_child_count(n) == 1) {
+      return resolve_type_int_value(ts_node_named_child(n, 0));
+    }
+    return std::nullopt;
+  }
+  if (t == "unary_expression") {
+    TSNode op  = child_by_field(n, "operator");
+    TSNode arg = child_by_field(n, "argument");
+    auto   v   = resolve_type_int_value(arg);
+    if (!v || ts_node_is_null(op)) {
+      return std::nullopt;
+    }
+    const std::string_view kind(ts_node_type(op));
+    if (kind == "op_unary_minus") {
+      return *Dlop::create_integer(0)->sub_op(*v);
+    }
+    if (kind == "op_unary_plus") {
+      return v;
+    }
+    return std::nullopt;
+  }
+  if (t != "expression_item") {
+    return std::nullopt;
+  }
+
+  std::vector<Dlop>             values;
+  std::vector<std::string_view> ops;
+  for (TSNode c : ts_node_named_children(n)) {
+    const std::string_view ct(ts_node_type(c));
+    if (ct == "binary_times_op" || ct == "binary_other_op") {
+      TSNode inner = ts_node_named_child(c, 0);
+      if (ts_node_is_null(inner)) {
+        return std::nullopt;
+      }
+      ops.emplace_back(ts_node_type(inner));
+    } else {
+      auto v = resolve_type_int_value(c);
+      if (!v) {
+        return std::nullopt;
+      }
+      values.emplace_back(std::move(*v));
+    }
+  }
+  if (values.empty() || values.size() != ops.size() + 1) {
+    return std::nullopt;
+  }
+
+  Dlop result = values.front();
+  for (std::size_t i = 0; i < ops.size(); ++i) {
+    const auto& rhs = values[i + 1];
+    if (ops[i] == "op_add") {
+      result = result.add_op(rhs);
+    } else if (ops[i] == "op_sub") {
+      result = result.sub_op(rhs);
+    } else if (ops[i] == "op_mul") {
+      result = result.mult_op(rhs);
+    } else if (ops[i] == "op_shl") {
+      result = result.shl_op(rhs);
+    } else if (ops[i] == "op_sra") {
+      result = result.sra_op(rhs);
+    } else {
+      return std::nullopt;
+    }
+    if (!result.is_integer() || result.has_unknowns()) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
 bool Prp2lnast::is_prim_type_token(std::string_view txt) {
-  if (txt == "int" || txt == "integer" || txt == "uint" || txt == "unsigned" || txt == "bool" || txt == "string") {
+  if (txt == "int" || txt == "integer" || txt == "uint" || txt == "signed" || txt == "unsigned" || txt == "bool"
+      || txt == "string") {
     return true;
   }
   return txt.size() >= 2 && (txt[0] == 'u' || txt[0] == 's' || txt[0] == 'i')

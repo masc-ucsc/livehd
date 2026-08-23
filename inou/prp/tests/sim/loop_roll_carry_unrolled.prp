@@ -1,6 +1,7 @@
 /*
 :name: loop_roll_carry_unrolled
 :type: simulation
+:set: compile.unroll=true
 :expect_instances: stage__li*=6 *=6
 */
 // The source-unrolled twin of loop_roll_carry.prp. Six physical `stage`

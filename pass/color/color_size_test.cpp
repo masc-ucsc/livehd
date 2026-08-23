@@ -297,14 +297,30 @@ TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
   set_bits(word, 20);
   word.connect_sink(g->get_output_pin("y"));
 
-  EXPECT_EQ(synthesis_ge_weight(sra), 1200u) << "20 demanded bits * 10 mux stages * 3 gates/mux * 2x shift safety";
+  // 8344 muxes * 3 gates/mux * 2x shift safety. build_shr_prefix trims
+  // BACKWARDS from the demanded 20 bits -- need[] = {1024,1024,1024,1024,1024,
+  // 1012,980,916,788,532,20} -- so only the last five of the ten stages narrow
+  // at all. The slice is worth ~19%, not the ~98% a flat `demand * stages`
+  // would claim; asserting the flat product here is what let the window certify
+  // a color at its ceiling and hand ABC an order of magnitude more gates.
+  EXPECT_EQ(synthesis_ge_weight(sra), 50064u);
   Node2Id m;
   m[sra]   = 1;
   m[slice] = 1;
   Size_window_stats st;
-  (void)apply_size_window(g.get(), m, 0, 1500, &st);
+  (void)apply_size_window(g.get(), m, 0, 55000, &st);
   EXPECT_EQ(st.splits, 0u) << "the narrow slice must stay with its shift";
   EXPECT_EQ(st.left_over, 0u);
+
+  // The SHIPPED default window (pass_color.cpp max_ge=25000) is the case that
+  // actually matters: the SRA alone is over it, so a split cannot bring the
+  // region under the cap -- and if the weightless Get_mask were chopped off,
+  // pass.abc would lose the in-region precondition for the demand slice and
+  // build the FULL 10240-mux barrel instead of 8344.
+  Size_window_stats sd;
+  const auto        dflt = apply_size_window(g.get(), m, 1000, 25000, &sd);
+  EXPECT_EQ(dflt.at(sra), dflt.at(slice)) << "the shift and its constant slice must stay in one region under the default window";
+  EXPECT_EQ(sd.left_over, 1u) << "one node heavier than max is honestly reported, not chopped around";
 
   // Any unsliced observer needs the full result, so the discount disappears.
   shifted.connect_sink(g->get_output_pin("full"));

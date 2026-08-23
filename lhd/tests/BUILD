@@ -1446,8 +1446,14 @@ sh_test(
 
 # `lhd help X` == `lhd X --help` parity, sub-command-specific pages, and the
 # --diag-fmt pretty|jsonl rendering of every help page.
+# size=large (900s), not the default medium (300s): the script launches the lhd
+# binary ~200 times (every command x help/--help x pretty/jsonl), and a -c dbg
+# build spends ~1s per launch on pass registration alone. It measured 289s
+# against the 300s medium budget -- 96% of it -- so any addition to the command
+# surface tips it into a timeout that says nothing about the help contract.
 sh_test(
     name = "lhd_help_test",
+    size = "large",
     srcs = ["lhd_help_test.sh"],
     data = ["//lhd"],
 )

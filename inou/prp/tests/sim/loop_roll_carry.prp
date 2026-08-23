@@ -1,10 +1,9 @@
 /*
 :name: loop_roll_carry
 :type: simulation
-:set: compile.upass.roll=true
 :expect_instances: u_loop_0=1 stage=1 *=2
 */
-// A source `for` loop kept ROLLED (`compile.upass.roll=true`, todo_loop_cond_sub.md M4):
+// A source `for` loop kept ROLLED (`compile.unroll=false`, todo_loop_cond_sub.md M4):
 // the body is lifted into one generated definition and the loop becomes a
 // single replicated `Sub`, so the graph is O(1) in the trip count instead of
 // O(6).

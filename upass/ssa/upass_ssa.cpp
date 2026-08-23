@@ -7,12 +7,14 @@
 #include <bit>
 #include <format>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "array_dim.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
@@ -82,6 +84,10 @@ struct Type_info {
   bool    has_range = false;  // explicit `int(min,max)` bounds (both known, fit i64)
   int64_t range_min = 0;
   int64_t range_max = 0;
+  // `[N]T` port: packed bus of N lanes (see Lnast_io_entry).
+  int64_t array_size  = 0;
+  int32_t elem_bits   = 0;
+  bool    elem_signed = false;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast> &lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -89,6 +95,52 @@ Type_info type_info_from(const std::shared_ptr<Lnast> &lnast, Lnast_nid type_nid
     return ti;
   }
   const auto tty = lnast->get_type(type_nid);
+  if (Lnast_ntype::is_comp_type_array(tty)) {
+    // declare-style `comp_type_array(elem_type, const '[N]')`: the port is the
+    // packed, unsigned N*W-bit bus; the element type rides separately so tolg
+    // can register the lane view (signed lanes need their own sign).
+    auto elem_nid = lnast->get_first_child(type_nid);
+    auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast->get_sibling_next(elem_nid);
+    if (elem_nid.is_invalid() || len_nid.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(len_nid))) {
+      return ti;
+    }
+    const auto lanes = upass::array_dim_lanes(lnast->get_name(len_nid));
+    if (!lanes) {
+      return ti;  // a still-unfolded name, not a size (see array_dim.hpp)
+    }
+    const auto n  = *lanes;
+    auto       et = type_info_from(lnast, elem_nid);
+    if (et.kind != Io_kind::integer || et.bits <= 0) {
+      return ti;
+    }
+    // Validate the int64 product BEFORE narrowing to the int32 `bits` field.
+    // 268435456 lanes x 8 bits is exactly 2^31, which wraps to INT32_MIN; tolg
+    // then stamps a ONE-BIT port while the lane view it registers still carries
+    // the untruncated array_size, so `a[i]` indexes lanes out of a 1-bit bus --
+    // silently, and one lane fewer is a loud bad_alloc instead. The scalar path
+    // caps its width the same way (prp2lnast kMaxIntTypeWidth).
+    const int64_t total_bits = n * static_cast<int64_t>(et.bits);
+    if (total_bits <= 0 || total_bits > std::numeric_limits<int32_t>::max()) {
+      livehd::diag::sink().emit(
+          livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                   .code     = "width-too-large",
+                                   .category = "bitwidth",
+                                   .pass     = "upass.ssa",
+                                   .message  = std::format("array port packed width {} x {} bits is out of range (1..{})",
+                                                           n,
+                                                           et.bits,
+                                                           std::numeric_limits<int32_t>::max()),
+                                   .span     = lnast->span_of(len_nid)});
+      return Type_info{};
+    }
+    ti.kind        = Io_kind::integer;
+    ti.array_size  = n;
+    ti.elem_bits   = et.bits;
+    ti.elem_signed = et.is_signed;
+    ti.bits        = static_cast<int32_t>(total_bits);
+    ti.is_signed   = false;
+    return ti;
+  }
   if (Lnast_ntype::is_prim_type_bool(tty)) {
     ti.kind = Io_kind::boolean;
     return ti;
@@ -350,6 +402,45 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
   std::vector<Flat_field> flat_inputs;
   std::vector<Flat_field> flat_outputs;
 
+  // An `a:[N]T` port's array view, as it stood BEFORE this rebuild. uPass_ssa's
+  // own staging io re-emits every leaf as a flat prim_type_int (the packed
+  // width), so the second time a unit passes through here -- a `comb` restored
+  // from an `ln:` directory, where the manifest carries io_meta but the tree
+  // no longer carries comp_type_array -- re-deriving from the tree alone would
+  // drop array_size to 0 and lnast.tolg would then lower `a[i]` against the raw
+  // bus. Carry the view across the overwrite; the packed width has to agree, so
+  // a genuinely changed port cannot inherit a stale one.
+  struct Array_view {
+    int64_t size        = 0;
+    int32_t elem_bits   = 0;
+    bool    elem_signed = false;
+  };
+  // By VALUE, not by pointer into meta.inputs/meta.outputs: those two vectors
+  // are replaced wholesale a few lines below, and a pointer that is merely
+  // still-valid-today is a trap for the next edit that moves the restore call.
+  absl::flat_hash_map<std::string, Array_view> prior_array_view;
+  for (const auto* v : {&meta.inputs, &meta.outputs}) {
+    for (const auto& e : *v) {
+      if (e.array_size > 0 && e.elem_bits > 0) {
+        prior_array_view.insert_or_assign(e.name, Array_view{e.array_size, e.elem_bits, e.elem_signed});
+      }
+    }
+  }
+  auto restore_array_view = [&](std::vector<Flat_field>& fields) {
+    for (auto& f : fields) {
+      if (f.array_size > 0) {
+        continue;
+      }
+      const auto it = prior_array_view.find(f.name);
+      if (it == prior_array_view.end() || it->second.size * it->second.elem_bits != f.bits) {
+        continue;
+      }
+      f.array_size  = it->second.size;
+      f.elem_bits   = it->second.elem_bits;
+      f.elem_signed = it->second.elem_signed;
+    }
+  };
+
   // Read a `stages(min,max)` node's two const children. A `nil`
   // text (the `@[]` explicit no-check opt-out on a mod output) harvests as
   // -1: distinguishable from a declared `@[0]` (which IS a real check that a
@@ -509,6 +600,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
       }
     }
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
+    out.back().array_size  = ti.array_size;
+    out.back().elem_bits   = ti.elem_bits;
+    out.back().elem_signed = ti.elem_signed;
     out.back().has_range   = ti.has_range;
     out.back().range_min   = ti.range_min;
     out.back().range_max   = ti.range_max;
@@ -525,6 +619,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::
       flatten_assign(entry, std::string{}, /*collect_is_ref=*/false, flat_outputs, 0, 0);
     }
   }
+  restore_array_view(flat_inputs);
+  restore_array_view(flat_outputs);
   meta.invalidate_index();
   meta.inputs  = flat_inputs;
   meta.outputs = flat_outputs;

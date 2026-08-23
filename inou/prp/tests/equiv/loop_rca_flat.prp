@@ -3,7 +3,7 @@
 :type: equiv
 :verilog_top: loop_rca_flat.top
 :pyrope_top: top
-:expect_instances: rca__li*=8 *=8
+:expect_instances: u_loop_0=1 rca=1 *=2
 */
 // Eight preserved one-bit RCA calls inside a source loop.  The golden is a
 // single flat `+`, intentionally providing no child hierarchy to pair.  This is

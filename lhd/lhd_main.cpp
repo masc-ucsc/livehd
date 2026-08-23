@@ -58,15 +58,21 @@ int main(int argc, char** argv) {
   lhd::Options opts;
   lhd::Result  res;
 
+  // argv parsing runs BEFORE the diagnostics sink is configured from opts, so a
+  // failure here is counted straight into the envelope rather than emitted: the
+  // header must never say "0 errors" for a run that failed (see the sink
+  // reconciliation after run_engine_command below).
   try {
     opts = lhd::parse_args(argc, argv);
   } catch (const lhd::Lhd_error& e) {
-    res.command = "usage";
+    res.command  = "usage";
+    res.n_errors = 1;
     mark_failed(res, e);
     lhd::write_result(opts, res);
     return res.exit_code;
   } catch (const std::exception& e) {  // backstop: argv parsing must never abort
-    res.command = "usage";
+    res.command  = "usage";
+    res.n_errors = 1;
     mark_failed(res, lhd::Lhd_error{"usage", e.what(), ""});
     lhd::write_result(opts, res);
     return res.exit_code;
@@ -90,6 +96,27 @@ int main(int argc, char** argv) {
   if (!opts.language.empty()) {
     res.command += ' ';
     res.command += opts.language;
+  }
+
+  // Configure the diagnostics sink from `opts` ONCE, here, before anything can
+  // fail. Several failures are raised BEFORE any per-step setup_diag runs
+  // (--emit/--dump validation, an unknown `--set`, `lhd sim --list-tests`), and
+  // an unconfigured sink falls back to its env default: it would ignore
+  // --quiet and write its records to a stray ./diag.jsonl in the user's cwd
+  // while the declared `--emit diagnostics:` file stays empty. The per-step
+  // setup_diag calls inside the kernel re-apply these same three settings.
+  {
+    auto&            sink = livehd::diag::sink();
+    std::string_view diag_path{"off"};
+    for (const auto& e : opts.emits) {
+      if (e.kind == "diagnostics") {
+        diag_path = e.path;
+        break;
+      }
+    }
+    sink.set_human_stderr(!opts.quiet);
+    sink.set_stderr_jsonl(opts.diag_fmt == lhd::Diag_fmt::jsonl);
+    sink.set_jsonl_path(diag_path);
   }
 
   try {
@@ -116,12 +143,41 @@ int main(int argc, char** argv) {
     mark_failed(res, lhd::Lhd_error{"internal", "unknown exception", ""});
   }
 
-  auto& sink     = livehd::diag::sink();
-  res.n_errors   = sink.count(livehd::diag::Severity::error);
-  res.n_warnings = sink.count(livehd::diag::Severity::warning);
+  auto& sink = livehd::diag::sink();
   if (res.status == "pass" && sink.has_errors()) {
     mark_failed(res, lhd::classify_engine_failure("diagnostics reported errors"));
   }
+  // A kernel-level failure (a thrown Lhd_error, or any std::exception the
+  // catches above classified) never went through the diagnostics sink, so the
+  // envelope and the pretty header would report "0 errors" for a run that
+  // failed -- a reader cannot tell that from a miscounted success, and no
+  // `--emit diagnostics:` consumer sees the reason at all. Record it as the
+  // error it is, exactly once (an error already in the sink IS the reason, and
+  // re-reporting it would double the count).
+  if (res.status != "pass" && !sink.has_errors()) {
+    // Machine channel only: write_result already prints this same text to the
+    // human channel (`error[<class>]: …` in pretty mode, `error.message` in the
+    // envelope), so leaving the human copy on would say it twice.
+    sink.set_human_stderr(false);
+    // lhd's error CLASS (the exit-code vocabulary, see exit_code_for) folded
+    // onto the pinned diagnostic categories, the way `missing_file` folds onto
+    // `io` (core/tests/diag_test.cpp). "io" covers options and paths; anything
+    // that is not a user-facing input problem stays `internal`.
+    const std::string_view category = res.error_class == "syntax"        ? "syntax"
+                                      : res.error_class == "unsupported" ? "unsupported"
+                                      : (res.error_class == "usage" || res.error_class == "missing_file"
+                                         || res.error_class == "config" || res.error_class == "dependency")
+                                          ? "io"
+                                          : "internal";
+    auto                   b        = livehd::diag::err("lhd", "run-failed", category).msg("{}", res.error_message);
+    if (!res.error_hint.empty()) {
+      b.hint(res.error_hint);
+    }
+    b.emit();
+    sink.set_human_stderr(!opts.quiet);
+  }
+  res.n_errors   = sink.count(livehd::diag::Severity::error);
+  res.n_warnings = sink.count(livehd::diag::Severity::warning);
 
   lhd::write_result(opts, res);
   return res.exit_code;

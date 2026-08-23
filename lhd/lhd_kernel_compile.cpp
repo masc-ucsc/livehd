@@ -1202,6 +1202,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (!need_graphs && find_slot(opts.emit_dirs, "pyrope") != nullptr) {
     up["preserve_param_provenance"] = "true";
   }
+  // Loop representation: `compile.unroll` (kernel gate, default false) is the
+  // one user-facing switch; pass.upass's `roll` label is its inverse.
+  up["roll"] = compile_unroll_requested(opts) ? "false" : "true";
   merge_sets(opts, "compile.upass", up);
 
   // A user `--set upass.toln=0` keeps each tree's original (post-lnastfmt,

@@ -21,6 +21,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
+#include "array_dim.hpp"
 #include "cell.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -330,8 +331,27 @@ public:
         set_ubits(raw, mw);
         record(e.name, raw, mw);
       }
+      if (e.array_size > 0) {
+        // `a:[N]T` port: the packed bus above, plus the lane view that makes
+        // `a[i]` lower exactly like a body `mut` array (a rolled loop's array
+        // carry crosses the lifted boundary this way).
+        array_scalar_views_[e.name] = Array_scalar_view{
+            .size        = e.array_size,
+            .dims        = {e.array_size},
+            .elem_mw     = e.elem_bits,
+            .elem_signed = e.elem_signed,
+        };
+      }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
+      if (e.array_size > 0 && !array_scalar_views_.contains(e.name)) {
+        array_scalar_views_[e.name] = Array_scalar_view{
+            .size        = e.array_size,
+            .dims        = {e.array_size},
+            .elem_mw     = e.elem_bits,
+            .elem_signed = e.elem_signed,
+        };
+      }
       // An OUTPUT port's declared width is a declared type just like an
       // input's, and it is the common destination of a concat (`z:u6 = ...`).
       // Recording it here rather than only at a `declare` is what lets
@@ -1816,8 +1836,29 @@ private:
       auto mask = maskn.create_driver_pin(0);
       set_ubits(mask, base.mw);
 
+      // The value must enter the lane as its elem_mw-bit TWO'S-COMPLEMENT
+      // pattern. Shifting the raw (narrower, signed) value zero-extended it:
+      // MEASURED on the rolled matched filter, every negative s8 product
+      // written into an s12 lane through a runtime index came out +256 (the
+      // comptime-index store goes through Set_mask, which extends correctly).
+      // Sext to the lane width (wrap semantics for a wider value, exactly what
+      // `wrap` would do), then take the lane-wide unsigned pattern.
+      Pin lane_value = iv.pin;
+      if (view.elem_signed) {
+        auto sx = make_node(Ntype_op::Sext);
+        setup_sink_by_name(sx, "a").connect_driver(iv.pin);
+        setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+        auto sout = sx.create_driver_pin(0);
+        set_bits(sout, view.elem_mw);
+        set_sign(sout);
+        auto gm = make_node(Ntype_op::Get_mask);
+        setup_sink_by_name(gm, "a").connect_driver(sout);
+        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+        lane_value = gm.create_driver_pin(0);
+        set_ubits(lane_value, view.elem_mw);
+      }
       auto shifted = make_node(Ntype_op::SHL);
-      setup_sink_by_name(shifted, "a").connect_driver(iv.pin);
+      setup_sink_by_name(shifted, "a").connect_driver(lane_value);
       setup_sink_by_name(shifted, "b").connect_driver(offset);
       auto placed = shifted.create_driver_pin(0);
       set_ubits(placed, base.mw);
@@ -2739,17 +2780,15 @@ private:
     int64_t size     = 0;
     if (!elem_nid.is_invalid() && !len_nid.is_invalid()) {
       std::string len_txt{lnast_->get_name(len_nid)};
-      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
-        len_txt = len_txt.substr(1, len_txt.size() - 2);
-      }
-      auto d = Dlop::from_pyrope(len_txt);
-      if (!d || !d->is_just_i64() || d->to_just_i64() <= 0) {
-        error_here("upass.tolg: array '{}' size '{}' is not a positive comptime constant",
-                   lnast_->get_name(name_nid),
-                   lnast_->get_name(len_nid));
+      const auto  lanes = Lnast_ntype::is_const(lnast_->get_type(len_nid)) ? upass::array_dim_lanes(len_txt) : std::nullopt;
+      if (!lanes) {
+        error_here(
+            "upass.tolg: array '{}' size '{}' is not a positive comptime constant (a named constant must fold before lowering)",
+            lnast_->get_name(name_nid),
+            lnast_->get_name(len_nid));
         return;
       }
-      size = d->to_just_i64();
+      size = *lanes;
     }
     const auto [elem_mw, elem_signed] = declared_width(elem_nid);
     if (size <= 0 || elem_mw <= 0) {
@@ -2792,15 +2831,12 @@ private:
     // flat address i*D1 + j.
     std::vector<int64_t> dims;
     while (true) {
-      // The size const's text is the raw '[N]' annotation — strip the brackets.
-      auto len_txt = std::string(lnast_->get_name(len_nid));
-      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
-        len_txt = len_txt.substr(1, len_txt.size() - 2);
-      }
-      int64_t d = 0;
-      if (auto c = Dlop::from_pyrope(len_txt); c && c->is_just_i64()) {
-        d = c->to_just_i64();
-      }
+      // The size const's text is the raw '[N]' annotation (array_dim_lanes
+      // strips the brackets). Going through the shared reader is what keeps a
+      // still-unfolded `[N]` from lowering as 78 entries here, the way it used
+      // to when this site called Dlop::from_pyrope directly.
+      const auto len_txt = std::string(lnast_->get_name(len_nid));
+      const auto d       = upass::array_dim_lanes(len_txt).value_or(0);
       if (d <= 0) {
         error_here(
             "upass.tolg: memory '{}' size '{}' is not a positive "
@@ -3839,8 +3875,21 @@ private:
       setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(ait->second.elem_mw)));
       auto out = gm.create_driver_pin(0);
       if (ait->second.elem_signed) {
-        set_sbits(out, ait->second.elem_mw);
-        record(lnast_->get_name(dst), out, ait->second.elem_mw);
+        // A Get_mask is UNSIGNED by construction: stamping the sign on its
+        // driver does not survive cprop's constant-slice fold (the read of a
+        // comptime index folds straight onto the packed lane and came back
+        // zero-extended — MEASURED `mut a:[2]s8; a[0] = -3; y:s12 = a[0]` read
+        // 253, while a runtime index, a `reg` array and a same-width consumer
+        // were all fine). Ride a same-width Sext, the abc read-back idiom: its
+        // `b` is the kept bit COUNT, the result is a signed elem_mw-bit value.
+        set_ubits(out, ait->second.elem_mw);  // the lane itself: an unsigned elem_mw-bit pattern (an unsized pin emits as ONE bit)
+        auto sx = make_node(Ntype_op::Sext);
+        setup_sink_by_name(sx, "a").connect_driver(out);
+        setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(ait->second.elem_mw)));
+        auto sout = sx.create_driver_pin(0);
+        set_bits(sout, ait->second.elem_mw);
+        set_sign(sout);
+        record(lnast_->get_name(dst), sout, ait->second.elem_mw);
       } else {
         bind_result(lnast_->get_name(dst), out, ait->second.elem_mw);
       }
