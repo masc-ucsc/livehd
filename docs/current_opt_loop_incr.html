@@ -15,7 +15,7 @@ code{background:#f4f4f4;padding:0 .2rem}
 dt{font-weight:bold;margin-top:.4rem}
 </style>
 <h1>Incremental rebuild loop — full vs cold vs incremental</h1>
-<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-22 19:23. Derived, never authored — re-run <code>bazel run //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current current-20260822 --previous matrix-20260820-0044 --host mada4</code> to refresh. Verdicts use an epsilon of <b>3.0%</b>; anything inside it is not a win. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
+<p>Generated from <code>bench/ledger.jsonl</code> at 2026-08-22 21:26. Derived, never authored — re-run <code>bazel run //bench:ledger -- render --flow incr --out ../livehd/docs/current_opt_loop_incr.html --current current-20260822 --previous matrix-20260820-0044 --host mada4</code> to refresh. Verdicts use an epsilon of <b>3.0%</b>; anything inside it is not a win. <b>1 host section(s) — never compare a number across them</b> (I11).</p>
 <p>Synthesis resource policy: one shared color sizing for every design; each ABC color must stay within the soft bounds of <b>16 GiB peak RSS</b> and <b>15 minutes</b>. <code>abc_peak_rss_kb</code> is sampled before STA; <code>synth_peak_rss_kb</code> is the conservative whole-process diagnostic. Oversize regions are failures, not speedups.</p>
 <h2>At a glance</h2>
 <table><tr><th>target</th><th>phase</th><th>full (ms)</th><th>cold (ms)</th><th>incremental (ms)</th><th>previous speedup<br><small>2026-08-20</small></th><th>incr speedup</th></tr>
@@ -85,7 +85,7 @@ that is a measurement, not redundancy.</p>
 
 </details>
 <h2>host: mada4</h2>
-<p>lhd <code>ee0f5af76</code> &middot; lhdsuite <code>1c83ffd</code> &middot; pdk <code>6971617b18b2f322d8f574af7e53f79ddd75dafe</code><br>baseline <b>current-20260822</b> &rarr; current <b>current-20260822</b> (latest row 2026-08-22T19:23:36)</p>
+<p>lhd <code>7adac5e9f</code> &middot; lhdsuite <code>1c83ffd</code> &middot; pdk <code>6971617b18b2f322d8f574af7e53f79ddd75dafe</code><br>baseline <b>current-20260822</b> &rarr; current <b>current-20260822</b> (latest row 2026-08-22T21:26:12)</p>
 <p class="worse">HARD FAILURE &mdash; I3 guardrail breached (5): xs_alu/sim sim_cycles_per_s (edit), xs_alu/sim sim_cycles_per_s_with_cc (edit), xs_alu/sim sim_exec_ms (edit), xs_renametable/sim sim_cycles_per_s (edit), xs_renametable/sim sim_exec_ms (edit); non-time gate failed (1): xs_exu/compile warm != cold; did not pass: cva6/sim (edit), cva6/synth (full), dino/synth (full), minion/lec (full), minion/synth (full), xs_alu/synth (full), xs_backend/compile (full), xs_backend/synth (full), xs_div/synth (full), xs_exu/synth (full), xs_renametable/synth (full), xs_rob/sim (full), xs_rob/synth (full)</p>
 <h3>1. Wall clock — full vs cold vs incremental</h3>
 <p><b>incr speedup</b> = cold / incremental: what the machinery buys on a rebuild. <b>cache cost</b> = (cold &minus; full) / full: what it charges on a first run — flagged past <b>+5%</b>. A cell reading &quot;-&quot; is a mode that was not run; it is never a zero. <b>A mode that did not pass is shown but never used</b>: its wall clock is the time to a crash, not the time to an answer, so both derived columns read &quot;-&quot;.</p>
@@ -212,6 +212,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>cva6</td><td>synth</td><td><code>max_delay</code></td><td class="">7</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>cva6</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>cva6</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">119,552</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">1,572</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">836.2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_all_count</code></td><td class="">2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">1,573</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">837.2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>cva6</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>cva6</td><td>synth</td><td><code>max_region_ms</code></td><td class="">836</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>cva6</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">155,336</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>cva6</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">94</td><td class="">107</td><td class="">52</td><td class="">106</td><td class="noise">lower is better</td></tr>
@@ -230,6 +251,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>dino</td><td>synth</td><td><code>max_delay</code></td><td class="">59</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>dino</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>dino</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">124,576</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">6,285</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">405.4</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">18,883</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">1,924</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_all_count</code></td><td class="">4</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">25,168</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">2,329</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>dino</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>dino</td><td>synth</td><td><code>max_region_ms</code></td><td class="">1,653</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>dino</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">306,380</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>dino</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">582</td><td class="">495</td><td class="">520</td><td class="">457</td><td class="noise">lower is better</td></tr>
@@ -248,6 +290,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>minion</td><td>synth</td><td><code>max_delay</code></td><td class="">55</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>minion</td><td>synth</td><td><code>div_blackbox</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>minion</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">1,236,860</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">77</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">157,886</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">7,038</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">45,062</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">464.2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">5</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">444,576</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">96,351</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">16</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">168,636</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">8,936</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_all_count</code></td><td class="">130</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">823,181</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">113,380</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">31</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">7,021</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>minion</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">591.2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>minion</td><td>synth</td><td><code>max_region_ms</code></td><td class="">69,954</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>minion</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">2,011,680</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>minion</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">29,061</td><td class="">30,870</td><td class="">28,536</td><td class="">27,584</td><td class="noise">lower is better</td></tr>
@@ -266,6 +329,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>xs_alu</td><td>synth</td><td><code>max_delay</code></td><td class="">66</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_alu</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_alu</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">121,320</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">3,149</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">355</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">10,561</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">2,055</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_all_count</code></td><td class="">3</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">13,729</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">2,414</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">19</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_alu</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">3.9</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_alu</td><td>synth</td><td><code>max_region_ms</code></td><td class="">2,055</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_alu</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">197,888</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>xs_alu</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">942</td><td class="">352</td><td class="">63</td><td class="">243</td><td class="noise">lower is better</td></tr>
@@ -286,6 +370,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>xs_div</td><td>synth</td><td><code>max_delay</code></td><td class="">41</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_div</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_div</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">135,076</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">3,199</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">271</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">14,201</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">2,526</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_all_count</code></td><td class="">3</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">17,724</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">2,811</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">324</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_div</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">14.6</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_div</td><td>synth</td><td><code>max_region_ms</code></td><td class="">2,526</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_div</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">283,696</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>xs_exu</td><td>compile</td><td><code>hits</code></td><td class="">0</td><td class="">0</td><td class="">1,069</td><td class="">534</td><td class="noise">higher is better</td></tr>
@@ -301,6 +406,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>xs_exu</td><td>synth</td><td><code>max_delay</code></td><td class="">66</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_exu</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_exu</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">1,227,252</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">43</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">107,084</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">4,883</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">59,039</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">3,915</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">12</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">1,153,411</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">53,095</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">25</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">336,064</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">13,878</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_all_count</code></td><td class="">108</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">1,658,524</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">75,934</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">26</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">2,926</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_exu</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">163.6</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_exu</td><td>synth</td><td><code>max_region_ms</code></td><td class="">28,621</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_exu</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">1,794,160</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>xs_renametable</td><td>compile</td><td><code>hits</code></td><td class="">0</td><td class="">0</td><td class="">29</td><td class="">14</td><td class="noise">higher is better</td></tr>
@@ -316,6 +442,27 @@ that is a measurement, not redundancy.</p>
 <tr><td>xs_renametable</td><td>synth</td><td><code>max_delay</code></td><td class="">90</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_renametable</td><td>synth</td><td><code>div_blackbox</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_renametable</td><td>synth</td><td><code>abc_peak_rss_kb</code></td><td class="">3,342,892</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_1k_5k_count</code></td><td class="">80</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_1k_5k_ge_sum</code></td><td class="">118,383</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_1k_5k_ms_sum</code></td><td class="">4,823</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_25k_50k_count</code></td><td class="">1</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_25k_50k_ge_sum</code></td><td class="">45,798</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_25k_50k_ms_sum</code></td><td class="">7,334</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_50k_125k_count</code></td><td class="">10</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_50k_125k_ge_sum</code></td><td class="">1,166,879</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_50k_125k_ms_sum</code></td><td class="">158,419</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_5k_25k_count</code></td><td class="">12</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_5k_25k_ge_sum</code></td><td class="">127,170</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_5k_25k_ms_sum</code></td><td class="">26,213</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_all_count</code></td><td class="">105</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_all_ge_sum</code></td><td class="">1,458,553</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_all_ms_sum</code></td><td class="">196,804</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_ge_125k_count</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_ge_125k_ge_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_ge_125k_ms_sum</code></td><td class="">0</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_lt_1k_count</code></td><td class="">2</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_lt_1k_ge_sum</code></td><td class="">323</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
+<tr><td>xs_renametable</td><td>synth</td><td><code>color_lt_1k_ms_sum</code></td><td class="">13.8</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_renametable</td><td>synth</td><td><code>max_region_ms</code></td><td class="">26,410</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="noise">lower is better</td></tr>
 <tr><td>xs_renametable</td><td>synth</td><td><code>synth_peak_rss_kb</code></td><td class="">27,679,912</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="unknown">direction unknown</td></tr>
 <tr><td>xs_renametable</td><td>sim</td><td><code>sim_setup_ms</code></td><td class="">76,760</td><td class="">88,503</td><td class="">7,536</td><td class="">80,033</td><td class="noise">lower is better</td></tr>
@@ -534,5 +681,25 @@ that is a measurement, not redundancy.</p>
 <tr class="total"><td><b>total (wall)</b></td><td class="">1,770,000.0</td><td class="">100.0%</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td><td class="miss">-</td></tr>
 </table>
 <p><i>no per-pass data recorded for: cva6/sim, cva6/lec, cva6/formal, dino/sim, dino/lec, dino/formal, minion/sim, minion/lec, minion/formal, xs_alu/sim, xs_backend/compile, xs_backend/synth, xs_exu/compile, xs_renametable/sim, xs_rob/sim</i> — the command ran without <code>--result-json</code>, so only its wall clock is known.</p>
-<h3>6. &sect;8 gate — baseline <code>current-20260822</code> &rarr; current <code>current-20260822</code></h3>
+<h3>6. ABC color-size / synthesis-time histogram</h3>
+<p>All <b>resynthesized</b> colors recorded across full, cold, and incremental runs. Cache hits are excluded because their milliseconds measure snapshot loading, not ABC synthesis. A failed downstream STA run remains useful here when its QoR file is complete.</p>
+<table><tr><th>input GE bucket</th><th>histogram</th><th>mapped colors</th><th>avg input GE</th><th>avg ABC ms</th></tr>
+<tr><td>&lt;1k</td><td class='bar'>&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;</td><td>62</td><td>171.194</td><td>12.7</td></tr>
+<tr><td>1k–5k</td><td class='bar'>&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;</td><td>205</td><td>1,939</td><td>90.8</td></tr>
+<tr><td>5k–25k</td><td class='bar'>&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;</td><td>57</td><td>11,851</td><td>974.2</td></tr>
+<tr><td>25k–50k</td><td class='bar'>&#9608;</td><td>4</td><td>37,475</td><td>2,928.3</td></tr>
+<tr><td>50k–125k</td><td class='bar'>&#9608;&#9608;&#9608;&#9608;</td><td>27</td><td>102,402</td><td>11,402.4</td></tr>
+<tr><td>&ge;125k</td><td class='bar'>&#9608;</td><td>0</td><td>-</td><td>-</td></tr>
+</table>
+<h4>Per-design color summary</h4>
+<table><tr><th>target</th><th>full colors</th><th>cold colors</th><th>incremental remapped</th><th>avg input GE</th><th>avg ABC ms</th></tr>
+<tr><td>cva6</td><td>2</td><td>-</td><td>-</td><td>786.5</td><td>418.6</td></tr>
+<tr><td>dino</td><td>4</td><td>-</td><td>-</td><td>6,292</td><td>582.3</td></tr>
+<tr><td>minion</td><td>130</td><td>-</td><td>-</td><td>6,332</td><td>872.2</td></tr>
+<tr><td>xs_alu</td><td>3</td><td>-</td><td>-</td><td>4,576</td><td>804.7</td></tr>
+<tr><td>xs_div</td><td>3</td><td>-</td><td>-</td><td>5,908</td><td>937.1</td></tr>
+<tr><td>xs_exu</td><td>108</td><td>-</td><td>-</td><td>15,357</td><td>703.1</td></tr>
+<tr><td>xs_renametable</td><td>105</td><td>-</td><td>-</td><td>13,891</td><td>1,874.3</td></tr>
+</table>
+<h3>7. &sect;8 gate — baseline <code>current-20260822</code> &rarr; current <code>current-20260822</code></h3>
 <p>only one config_id on this host yet — nothing to gate against. The baseline column does not move once set (&sect;9.6).</p>
