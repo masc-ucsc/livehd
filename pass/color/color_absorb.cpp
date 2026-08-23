@@ -6,6 +6,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "color_common.hpp"
 #include "color_reduce.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
@@ -56,7 +57,7 @@ public:
       // GE; scalar node weight would inline a deliberately shared pattern back
       // into every caller and recreate the ABC explosion reduction removed.
       // A body-less Sub remains a cheap black-box boundary under this metric.
-      sum += gu::mappable_ge_weight(n);
+      sum += synthesis_ge_weight(n);
     }
     on_path_.erase(gid);
     memo_.emplace(gid, sum);

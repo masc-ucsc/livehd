@@ -347,7 +347,7 @@ uint64_t est_verilog_lines(const Cone& k) {
 uint64_t est_mappable_ge(const Cone& k) {
   uint64_t ge = 0;
   for (const auto& n : k.members) {
-    ge += gu::mappable_ge_weight(n);
+    ge += synthesis_ge_weight(n);
   }
   return ge;
 }

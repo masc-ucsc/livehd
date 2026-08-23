@@ -19,14 +19,17 @@
 #include "cell.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
+#include "synthesis_cost.hpp"
 
 namespace livehd::color {
 
 constexpr int32_t NO_COLOR = 0;
 
-using Node = hhds::Node_class;
+using Node    = hhds::Node_class;
 using NodeSet = absl::flat_hash_set<hhds::Node_class>;
 using Node2Id = absl::flat_hash_map<hhds::Node_class, int>;
+
+using livehd::graph_util::synthesis_ge_weight;
 
 // Union-find over node identities (a region = connected component of same-color
 // nodes). Shared by the continuous per-region split (apply_coloring) and the
@@ -104,14 +107,22 @@ private:
 // color id AS WRITTEN (post seeded-base shift), which is the id pass.partition
 // turns into the `<def>__c<id>` module name.
 struct Def_color_sizes {
-  absl::flat_hash_map<int, uint64_t> color_nodes;
+  absl::flat_hash_map<int, uint64_t>    color_nodes;
   // Gate equivalents per color, same keys as `color_nodes`. This -- not the node
   // count -- is what the size window bounds and what predicts ABC's memory: a
   // 200k-node region of wide datapath passes any node gate and still OOMs
   // (todo/livehd/2c-color-size.html R1).
-  absl::flat_hash_map<int, uint64_t> color_ge;
-  uint64_t partitionable = 0;  // nodes the algorithm was allowed to color
-  uint64_t uncolored = 0;      // ... that it left without a color
+  absl::flat_hash_map<int, uint64_t>    color_ge;
+  // Diagnose a window escape without another graph walk: an over-max region is
+  // normally caused by one indivisible graph node heavier than max_ge. Keep the
+  // largest node's identity alongside each color's aggregate.
+  absl::flat_hash_map<int, uint64_t>    color_max_node_ge;
+  absl::flat_hash_map<int, uint64_t>    color_max_node_bits;
+  absl::flat_hash_map<int, uint64_t>    color_max_node_id;
+  absl::flat_hash_map<int, std::string> color_max_node_op;
+  absl::flat_hash_map<int, bool>        color_max_node_const_shift;
+  uint64_t                              partitionable = 0;  // nodes the algorithm was allowed to color
+  uint64_t                              uncolored     = 0;  // ... that it left without a color
 };
 
 // Per-pass options shared by every algorithm. `hier` selects whether the pass
@@ -123,13 +134,13 @@ struct Def_color_sizes {
 // connected same-color region. `keep_colored` preserves pre-existing colors on
 // nodes the algorithm leaves uncolored (the 2p iterative flow).
 struct Color_opts {
-  bool hier = true;
-  bool verbose = false;
-  bool compact = true;
-  bool continuous = false;
+  bool hier         = true;
+  bool verbose      = false;
+  bool compact      = true;
+  bool continuous   = false;
   bool keep_colored = false;
 
-  // Size window, in MAPPABLE gate equivalents (graph_util::mappable_ge_weight:
+  // Size window, in synthesis gate equivalents (synthesis_ge_weight:
   // a Sub instance counts ~1, everything else ge_weight), honored by the
   // algorithms that opt in (today: synth). Regions below `min_ge` are merged
   // into a neighbour; regions above `max_ge` are split. 0 disables that half of
@@ -137,7 +148,7 @@ struct Color_opts {
   //
   // Both default to 0 -- INERT -- on purpose: this struct is the algorithm's
   // contract, and an algorithm asked for the raw coloring must give the raw
-  // coloring. The shipped policy (1000 / 30000000) lives on the pass.color
+  // coloring. The shipped policy (1000 / 25000) lives on the pass.color
   // labels, so it applies to the CLI without silently rewriting what a direct
   // caller or a unit test asked for.
   uint64_t min_ge = 0;
@@ -170,8 +181,7 @@ struct Color_opts {
     return false;
   }
   auto op = livehd::graph_util::type_op_of(n);
-  return op != Ntype_op::Nconst && op != Ntype_op::IO &&
-         op != Ntype_op::Invalid;
+  return op != Ntype_op::Nconst && op != Ntype_op::IO && op != Ntype_op::Invalid;
 }
 
 // Write `node2id` onto `g`'s regular nodes. Applies the continuous split when
@@ -183,8 +193,7 @@ struct Color_opts {
 // algorithm=="block-attr", or "seeded":true carried by a later rebuild) win
 // over the algorithm: seeded nodes keep their color and algorithm ids shift
 // above the max seeded id.
-int apply_coloring(hhds::Graph *g, const Node2Id &node2id,
-                   const Color_opts &opts, Def_color_sizes *sizes = nullptr);
+int apply_coloring(hhds::Graph *g, const Node2Id &node2id, const Color_opts &opts, Def_color_sizes *sizes = nullptr);
 
 // True when g's active coloring carries source-seeded block regions.
 [[nodiscard]] bool has_seeded_coloring(hhds::Graph *g);
@@ -202,15 +211,12 @@ void del_coloring_info(hhds::Graph *g);
 // "region_opts" pass.abc consumes) from g's CURRENT coloring_info into a
 // freshly built one, so a pass.color rebuild never drops the user's block
 // annotations. Identity when g carries no seeded coloring.
-[[nodiscard]] std::string preserve_seeded_info(hhds::Graph *g,
-                                               std::string fresh_json);
+[[nodiscard]] std::string preserve_seeded_info(hhds::Graph *g, std::string fresh_json);
 
 // Build the serialized ColoringInfo for `g` from its active (flat) coloring:
 // schema_version, top, algorithm, params (verbatim JSON object string), and a
 // per-color {region_cnt, instance_cnt} map. `params_json` is inlined as-is.
-[[nodiscard]] std::string
-build_coloring_info_json(hhds::Graph *g, std::string_view top,
-                         std::string_view algorithm,
-                         std::string_view params_json);
+[[nodiscard]] std::string build_coloring_info_json(hhds::Graph *g, std::string_view top, std::string_view algorithm,
+                                                   std::string_view params_json);
 
-} // namespace livehd::color
+}  // namespace livehd::color

@@ -54,7 +54,7 @@ void Pass_color::setup() {
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("synth_alg", "synth: pipe|synth boundary mode", "synth");
-  // The size window. MAPPABLE gate equivalents (graph_util::mappable_ge_weight:
+  // The size window. Synthesis gate equivalents (synthesis_ge_weight:
   // Sub instances count ~1 -- their logic is weighed in their own def), not
   // nodes: ABC's memory scales with the BIT-BLASTED gate count, so a 200k-node
   // region of wide datapath passes any node gate and still exhausts the host.
@@ -62,15 +62,26 @@ void Pass_color::setup() {
                        "synth: merge a region below this many gate-equivalents into its best-connected "
                        "neighbour (0 => no lower bound). Kills singleton regions",
                        "1000");
-  // 30M GE ~= 1 GB of expected ABC peak, calibrated at ~30 bytes/GE from the
-  // one hard data point there is: a flat XSCore run reached 221 GB against
-  // 7.43e9 boundary GE. The window now counts MAPPABLE GE (Sub ports excluded),
-  // which is smaller, so the same cap is if anything more conservative. Raise it
-  // on a bigger host; lower it if admission fires.
+  // The earlier 30M-GE default was disproved by the ROB stress point: one
+  // 28.2M-GE region grew past 65 GiB and missed a 30-minute budget. A 6M probe
+  // was still projected oversize; 3M later peaked at 14.6 GiB, 2M crossed the
+  // 16 GiB ceiling while translating, 1M reached 18 GiB in ABC, and a 500k
+  // high-width color ran beyond 15 minutes, and 250k still crossed that time
+  // bound. A 44k-bit runtime SRA exposed the missing gate-type multiplier:
+  // width alone hid a multi-stage barrel mux. The shared synthesis estimate now
+  // charges result demand * amount bits * 3 gates/mux. On ROB, 99.9k-GE and
+  // 79.2k-GE SRA colors crossed the stated 15-minute ceiling; even 40k left a
+  // 32.8k-GE mixed RenameBuffer shift region running past 18 minutes. A first
+  // 25k run exposed another shift-heavy tail beyond 20 minutes, so variable
+  // shifts carry an additional 2x complexity safety factor. The 25k shared
+  // ceiling then preserves larger ordinary-logic regions while splitting the
+  // super-linear shift tail. Every color is independently gated at 16 GiB and
+  // 15 minutes. Keep this shared rather than a per-design exception; full/cold
+  // may map more colors while warm incremental reuses them.
   m.add_label_optional("max_ge",
-                       "synth: split a region above this many MAPPABLE gate-equivalents (0 => no upper bound). "
-                       "Default ~1 GB of expected ABC peak per region (~30 bytes/GE); raise it on a bigger host",
-                       "30000000");
+                       "synth: split a region above this many synthesis gate-equivalents (0 => no upper bound). "
+                       "Default 25k synthesis GE, calibrated for the 16 GiB / 15-minute per-color soft bounds",
+                       "25000");
   m.add_label_optional("absorb",
                        "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
                        "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
@@ -242,7 +253,7 @@ void Pass_color::color(Eprp_var& var) {
   opts.continuous   = parse_bool(var.get("continuous", "false"));
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
   opts.min_ge       = parse_ge_bound(var, "min_ge", "1000");
-  opts.max_ge       = parse_ge_bound(var, "max_ge", "30000000");
+  opts.max_ge       = parse_ge_bound(var, "max_ge", "25000");
   opts.name_weight  = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {

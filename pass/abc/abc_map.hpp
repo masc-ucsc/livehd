@@ -62,6 +62,7 @@ struct Map_options {
   // reproducible hosts/CI (0 => physical RAM minus an OS reserve);
   // `allow_oversize` acknowledges the risk and disables the guard.
   int               memory_budget_mb = 0;
+  uint64_t          time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
   bool              allow_oversize   = false;
 };
 
@@ -94,7 +95,7 @@ struct Region_qor {
   std::string module;  // region module name (<top>__c<color>)
   int         color       = 0;
   uint64_t    input_nodes = 0;      // source-region nodes before bit blasting
-  uint64_t    input_ge    = 0;      // graph_util mappable-GE estimate before ABC
+  uint64_t    input_ge    = 0;      // graph_util synthesis-GE estimate before ABC
   int         gates       = 0;      // mapped standard cells
   double      area        = 0.0;    // sum of Liberty cell areas
   float       delay       = -1.0f;  // critical arrival in library time units; <0 => unavailable
@@ -103,13 +104,15 @@ struct Region_qor {
   // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
   // gates/area/delay under-report — the score is partial until the div is
   // strength-reduced away. Surfaced so an agent never trusts a blind score.
-  int         div_blackbox = 0;
+  int         div_blackbox      = 0;
   // Where this region's wall time went, and whether the incremental cache was
   // able to take it. Without these two, "the cache hit 199 of 264 regions" says
   // nothing about whether the run got faster — the misses can hold all the time.
-  double      ms           = 0.0;   // wall ms this region spent in map_region
-  const char* cache        = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
-  bool        resynth      = true;  // this invocation rebuilt the region (false = incremental cache hit)
+  double      ms                = 0.0;   // wall ms this region spent in map_region
+  uint64_t    peak_rss_kb       = 0;     // whole-process high-water after this color; 0 = unavailable/cache hit
+  uint64_t    color_peak_rss_kb = 0;     // per-color peak growth over its entry RSS baseline
+  const char* cache             = "";    // "" (no cache) | hit | mapped | uncacheable | store-failed
+  bool        resynth           = true;  // this invocation rebuilt the region (false = incremental cache hit)
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
@@ -161,9 +164,11 @@ public:
   // frame and every live network), so it records the refusal and work() turns it
   // into the fatal AFTER stop() has run.
   [[nodiscard]] const std::string* admission_refusal() const { return refusal_.empty() ? nullptr : &refusal_; }
+  [[nodiscard]] const std::string* time_refusal() const { return time_refusal_.empty() ? nullptr : &time_refusal_; }
 
 private:
   std::string refusal_;
+  std::string time_refusal_;
 
   // True (and fills refusal_) when the process has grown past the memory budget
   // while translating `region`. `blasted`/`total` describe how far the

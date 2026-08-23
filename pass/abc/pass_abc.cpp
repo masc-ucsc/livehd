@@ -57,12 +57,12 @@ void Pass_abc::setup() {
       "(and `<cmd> -h` inside an ABC shell for each command's switches)",
       "");
   m.add_label_optional("small_flow",
-                       "optional ABC command string used for regions whose pre-ABC mappable-GE estimate is in "
+                       "optional ABC command string used for regions whose pre-ABC synthesis-GE estimate is in "
                        "[small_min_ge, small_ge]; "
                        "empty disables size-tiered mapping. Explicit region_opts flow overrides this selection",
                        "");
-  m.add_label_optional("small_min_ge", "inclusive lower mappable-GE bound for small_flow (0 means no lower bound)", "0");
-  m.add_label_optional("small_ge", "non-negative mappable-GE threshold for small_flow (0 disables it)", "0");
+  m.add_label_optional("small_min_ge", "inclusive lower synthesis-GE bound for small_flow (0 means no lower bound)", "0");
+  m.add_label_optional("small_ge", "non-negative synthesis-GE threshold for small_flow (0 disables it)", "0");
   m.add_label_optional("register",
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
@@ -85,8 +85,12 @@ void Pass_abc::setup() {
   m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("memory_budget_mb",
-                       "memory-admission ceiling (total process RSS, MiB) for one ABC region; "
+                       "memory-admission ceiling (additional process RSS, MiB) for one ABC color; "
                        "0 => physical RAM minus max(2 GiB, 20%) of OS reserve. Physical only, never swap",
+                       "0");
+  m.add_label_optional("time_budget_ms",
+                       "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
+                       "oversize color fails with its name so color.max_ge can be reduced",
                        "0");
   m.add_label_optional("allow_oversize",
                        "true|false skip memory admission and map the region regardless. It may exhaust "
@@ -167,22 +171,28 @@ std::string jesc(std::string_view s) {
 // cross-region paths; pass.opentimer is the whole-design scorer.
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
               const std::string& qor_path, const livehd::abc::Incr_cache* incr, bool abc_started) {
-  int      tgates       = 0;
-  double   tarea        = 0.0;
-  int      tdivbb       = 0;  // blackboxed div/mod cones (the score under-reports)
-  uint64_t tinput_nodes = 0;
-  uint64_t tinput_ge    = 0;
-  int      worst        = -1;  // index of the region with the worst delay
+  int      tgates            = 0;
+  double   tarea             = 0.0;
+  int      tdivbb            = 0;  // blackboxed div/mod cones (the score under-reports)
+  uint64_t tinput_nodes      = 0;
+  uint64_t tinput_ge         = 0;
+  uint64_t peak_rss_kb       = 0;
+  uint64_t color_peak_rss_kb = 0;
+  int      worst             = -1;  // index of the region with the worst delay
   // Where the run's time went, split by what the cache did with each region.
   // hits/misses alone cannot distinguish "the cache saved nothing" from "the
   // cache saved everything there was to save" — these can.
   double   hit_ms = 0.0, miss_ms = 0.0;
   for (size_t r = 0; r < qor.size(); ++r) {
-    tgates                                                       += qor[r].gates;
-    tarea                                                        += qor[r].area;
-    tdivbb                                                       += qor[r].div_blackbox;
-    tinput_nodes                                                 += qor[r].input_nodes;
-    tinput_ge                                                    += qor[r].input_ge;
+    tgates       += qor[r].gates;
+    tarea        += qor[r].area;
+    tdivbb       += qor[r].div_blackbox;
+    tinput_nodes += qor[r].input_nodes;
+    tinput_ge    += qor[r].input_ge;
+    if (qor[r].resynth) {
+      peak_rss_kb       = std::max(peak_rss_kb, qor[r].peak_rss_kb);
+      color_peak_rss_kb = std::max(color_peak_rss_kb, qor[r].color_peak_rss_kb);
+    }
     (std::string_view{qor[r].cache} == "hit" ? hit_ms : miss_ms) += qor[r].ms;
     if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
       worst = static_cast<int>(r);
@@ -233,6 +243,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
                    tinput_ge,
                    tgates,
                    tarea);
+  if (peak_rss_kb != 0) {
+    j += std::format(",\"peak_rss_kb\":{}", peak_rss_kb);
+  }
+  if (color_peak_rss_kb != 0) {
+    j += std::format(",\"color_peak_rss_kb\":{}", color_peak_rss_kb);
+  }
   if (tdivbb > 0) {
     j += std::format(",\"div_blackbox\":{}", tdivbb);
   }
@@ -274,6 +290,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
         q.area,
         q.ms,
         q.resynth ? 1 : 0);
+    if (q.peak_rss_kb != 0) {
+      j += std::format(",\"peak_rss_kb\":{}", q.peak_rss_kb);
+    }
+    if (q.color_peak_rss_kb != 0) {
+      j += std::format(",\"color_peak_rss_kb\":{}", q.color_peak_rss_kb);
+    }
     if (q.cache[0] != '\0') {
       j += std::format(",\"cache\":\"{}\"", q.cache);
     }
@@ -395,6 +417,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto qor_path            = std::string{var.get("qor", "")};
   auto region_opts_s       = std::string{var.get("region_opts", "")};
   auto mem_budget_s        = std::string{var.get("memory_budget_mb", "0")};
+  auto time_budget_s       = std::string{var.get("time_budget_ms", "0")};
   bool allow_oversize      = truthy(var.get("allow_oversize", "false"));
   auto flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
@@ -425,6 +448,18 @@ void Pass_abc::work(Eprp_var& var) {
     if (ec != std::errc{} || p != e || memory_budget_mb < 0) {
       livehd::diag::err("pass.abc", "bad-memory-budget", "io")
           .msg("pass.abc: memory_budget_mb must be a non-negative integer, got '{}'", mem_budget_s)
+          .fatal();
+      return;
+    }
+  }
+  uint64_t time_budget_ms = 0;
+  {
+    auto* b      = time_budget_s.data();
+    auto* e      = time_budget_s.data() + time_budget_s.size();
+    auto [p, ec] = std::from_chars(b, e, time_budget_ms);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-time-budget", "io")
+          .msg("pass.abc: time_budget_ms must be a non-negative integer, got '{}'", time_budget_s)
           .fatal();
       return;
     }
@@ -500,6 +535,7 @@ void Pass_abc::work(Eprp_var& var) {
   opts.block_size        = block_size;
   opts.multiplier        = multiplier.value();
   opts.memory_budget_mb  = memory_budget_mb;
+  opts.time_budget_ms    = time_budget_ms;
   opts.allow_oversize    = allow_oversize;
   if (allow_oversize) {
     // Loud on purpose: this is the flag that lets a run take the machine down,
@@ -662,4 +698,12 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.abc_started());
+  if (const auto* refusal = mapper.time_refusal()) {
+    livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
+        .msg("{}", *refusal)
+        .hint(std::format("re-color into more, smaller regions: `lhd pass color synth --top {} lg:... "
+                          "--set color.max_ge=<smaller>`; full/cold may take longer, warm runs should reuse the extra colors",
+                          top))
+        .fatal();
+  }
 }

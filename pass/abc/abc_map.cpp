@@ -18,6 +18,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <numeric>
 #include <print>
 #include <span>
@@ -39,6 +42,7 @@
 #include "host_mem.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
+#include "synthesis_cost.hpp"
 
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
@@ -585,10 +589,8 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
 //
 // Projection: RSS grows roughly linearly in nodes blasted, so
 //   projected_translation = rss_before + growth_so_far * total / blasted
-// and the ABC flow that follows costs multiples of the translated netlist again.
-// kFlowPeakFactor is intentionally conservative-but-modest; the guard does not
-// lean on it, because it re-checks on every sample and refuses the moment the
-// real RSS crosses the budget regardless of any projection.
+// The projection can reject a clearly hopeless translation early, while the
+// repeated exact samples and process backstop police later ABC network forms.
 bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total) {
   const uint64_t budget = cost::budget_bytes(opts_.memory_budget_mb);
   if (budget == 0 || blasted == 0) {
@@ -598,37 +600,31 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // charges (and it counts compressed/paged pages resident_size drops under
   // pressure), so it is the number that actually decides whether we get killed.
   // NB it is equally STICKY after free() -- freed pages linger until the
-  // allocator returns them -- so this stays a conservative "total footprint vs
-  // budget" gate, not a live-bytes count (that needs a malloc interposer).
+  // allocator returns them. Subtract the color-entry baseline so a long run is
+  // not refused merely because completed mapped modules remain in its output
+  // library; this is still conservative within one color.
   const uint64_t rss = cost::process_footprint_bytes();
   if (rss == 0) {
     return false;
   }
 
-  // How much more than the translated netlist the ABC flow peaks at. MEASURED on
-  // flattened single-region designs (probe at 5% vs peak RSS of the full run):
-  // ALU 6.1x, RegisterFile 2.5x, ImmediateGenerator 29.6x, dino CPU 12.3x. It is
-  // emphatically NOT a constant -- read_lib's fixed cost dominates small regions,
-  // which is what makes ImmediateGenerator's 96 gates look 29x.
-  constexpr double   kFlowPeakFactor     = 10.0;
-  // Extrapolating from a 5% sample multiplies whatever it sees by ~20, and then
-  // by the factor above: ~200x. RSS at that point moves in malloc-arena steps, so
-  // a single arena faulting in would project GiBs out of noise and FATAL a region
-  // that fits. Two guards keep the projection honest: only extrapolate a signal
-  // far larger than an arena step, and only act on it when it clears the budget
-  // by a wide margin. Anything in between is left to the exact test below.
+  // RSS at the first sample moves in large allocator/startup steps. Multiplying
+  // that extrapolation by a guessed post-translation ABC factor produced severe
+  // false positives (ROB: 8.3 GiB measured, 363 GiB predicted at a 16 GiB
+  // ceiling). Use translation growth itself, require a large signal, and refuse
+  // early only when even the projection clears the budget by a wide margin.
+  // The exact live-RSS check remains the resource guarantee.
   constexpr uint64_t kMinGrowthToProject = uint64_t{256} << 20;
   constexpr uint64_t kProjectionMargin   = 4;
 
-  const uint64_t grown     = rss > rss_before ? rss - rss_before : 0;
-  const double   fraction  = static_cast<double>(blasted) / static_cast<double>(total);
-  const uint64_t projected = rss_before + static_cast<uint64_t>(static_cast<double>(grown) / fraction);
-  const uint64_t peak      = rss_before + static_cast<uint64_t>(static_cast<double>(projected - rss_before) * kFlowPeakFactor);
+  const uint64_t grown            = rss > rss_before ? rss - rss_before : 0;
+  const double   fraction         = static_cast<double>(blasted) / static_cast<double>(total);
+  const uint64_t projected_growth = static_cast<uint64_t>(static_cast<double>(grown) / fraction);
 
   // The exact reading is the guarantee; the projection is only allowed to make a
   // hopeless region die sooner.
-  const bool over_now       = rss > budget;
-  const bool over_projected = grown >= kMinGrowthToProject && peak / kProjectionMargin > budget;
+  const bool over_now       = grown > budget;
+  const bool over_projected = grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
     return false;
   }
@@ -637,22 +633,23 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // Say which budget this actually is: an explicit memory_budget_mb is taken
   // verbatim and no reserve is subtracted, so quoting a reserve there would
   // describe a derivation that never happened.
-  const std::string budget_desc = opts_.memory_budget_mb > 0 ? std::format("budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
-                                                             : std::format("budget {} MiB (physical {} MiB minus a {} MiB reserve)",
-                                                                           mib(budget),
-                                                                           mib(cost::physical_ram_bytes()),
-                                                                           mib(cost::reserve_bytes()));
+  const std::string budget_desc = opts_.memory_budget_mb > 0
+                                      ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
+                                      : std::format("per-color growth budget {} MiB (physical {} MiB minus a {} MiB reserve)",
+                                                    mib(budget),
+                                                    mib(cost::physical_ram_bytes()),
+                                                    mib(cost::reserve_bytes()));
   refusal_                      = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
-      "(was {} MiB){}, {}",
+                           "(was {} MiB, color added {} MiB){}, {}",
       region,
       blasted,
       total,
       100.0 * fraction,
       mib(rss),
       mib(rss_before),
-      over_now ? std::string{}
-               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak", mib(projected), mib(peak)),
+      mib(grown),
+      over_now ? std::string{} : std::format(", projected color growth {} MiB", mib(projected_growth)),
       budget_desc);
   return true;
 }
@@ -717,7 +714,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // A refusal already happened: work() will make it fatal once the ABC frame is
   // torn down, so translating the remaining regions can only burn time and
   // overwrite the FIRST refusal -- the one that is the actual root cause.
-  if (!refusal_.empty()) {
+  if (!refusal_.empty() || !time_refusal_.empty()) {
     return;
   }
 
@@ -733,7 +730,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const auto t_start = std::chrono::steady_clock::now();
   const auto since
       = [&t_start] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(); };
-  const auto trace_stage = [&](std::string_view stage) {
+  const uint64_t process_peak_before = cost::process_peak_rss_bytes();
+  uint64_t       sampled_peak_rss    = cost::process_footprint_bytes();
+  const auto     trace_stage         = [&](std::string_view stage) {
+    sampled_peak_rss = std::max(sampled_peak_rss, cost::process_footprint_bytes());
     if (!opts_.verbose) {
       return;
     }
@@ -781,7 +781,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   const uint64_t input_nodes = rb.nodes.size();
   uint64_t       input_ge    = 0;
   for (const auto& node : rb.nodes) {
-    input_ge += gu::mappable_ge_weight(node);
+    input_ge += gu::synthesis_ge_weight(node);
   }
 
   uint64_t register_bits = 0;
@@ -1032,12 +1032,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                                      std::string_view        code,
-                                      std::string_view        category,
-                                      std::string_view        what,
-                                      std::string_view        hint     = {},
-                                      const hhds::Pin_class&  note_pin = {},
-                                      std::string_view        note_msg = {}) {
+                          std::string_view        code,
+                          std::string_view        category,
+                          std::string_view        what,
+                          std::string_view        hint     = {},
+                          const hhds::Pin_class&  note_pin = {},
+                          std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total
@@ -1369,18 +1369,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     region_in_name.emplace(port.src_driver, port.name);
   }
 
-  // A region consisting solely of a constant left shift is pure bus wiring.
-  // ABC turns the zero-padding into one mapped object per output bit (Rob has
-  // hundreds of these regions, growing to 10k bits each). Rebuild the typed
-  // wiring node directly; OpenTimer tracks constant SHL bit identity and no
-  // Liberty delay is being skipped because there is no Boolean gate here.
-  if (rb.nodes.size() == 1 && gu::type_op_of(rb.nodes.front()) == Ntype_op::SHL) {
+  // A region consisting solely of a constant shift is pure bus wiring (plus
+  // sign extension for SRA). ABC turns its padding into one mapped object per
+  // output bit (Rob has hundreds of these regions, growing to 10k bits each).
+  // Rebuild the typed wiring node directly; OpenTimer tracks constant shift bit
+  // identity and no Liberty delay is being skipped because there is no Boolean
+  // gate here.
+  const auto single_shift_op = rb.nodes.size() == 1 ? gu::type_op_of(rb.nodes.front()) : Ntype_op::Invalid;
+  if (single_shift_op == Ntype_op::SHL || single_shift_op == Ntype_op::SRA) {
     const auto src_node = rb.nodes.front();
     const auto a        = gu::get_driver_of_sink_name(src_node, "a");
     const auto b        = gu::get_driver_of_sink_name(src_node, "b");
     auto       ait      = region_in_name.find(a);
     if (!a.is_invalid() && gu::is_const_pin(b) && (gu::is_const_pin(a) || ait != region_in_name.end())) {
-      auto node = gu::create_typed_node(*rb.body, Ntype_op::SHL);
+      auto node = gu::create_typed_node(*rb.body, single_shift_op);
       if (gu::is_const_pin(a)) {
         gu::create_const(*rb.body, gu::hydrate_const(a)).connect_sink(gu::setup_sink_by_name(node, "a"));
       } else {
@@ -1414,7 +1416,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       q.resynth     = true;
       q.ms          = since();
       qor_.push_back(std::move(q));
-      std::print("[pass.abc] region '{}': constant SHL kept as native wiring, {:.0f} ms\n", rb.module_name, since());
+      std::print("[pass.abc] region '{}': constant {} kept as native wiring, {:.0f} ms\n",
+                 rb.module_name,
+                 Ntype::get_name(single_shift_op),
+                 since());
       Abc_NtkDelete(manNtk);
       return;
     }
@@ -2757,6 +2762,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   trace_stage("flow-complete");
 
+  // Translation is sampled repeatedly above, but ABC's optimization/mapping
+  // command can create several network forms between those samples. Check the
+  // exact live footprint again at the color boundary. Calling with a completed
+  // fraction suppresses extrapolation and reports the real post-flow RSS.
+  if (!opts_.allow_oversize && over_budget(rb.module_name, rss_before, blast_total, blast_total)) {
+    return;  // mapper.stop() owns the current ABC network; work() raises refusal_
+  }
+
   // --- QoR read-back (2opt-freq A): critical delay/area/gates from the Liberty
   // pin-to-pin data while the flow's result is still a mapped LOGIC network
   // (Abc_NtkDelayTrace requires one; the netlist conversion below is only for
@@ -3833,13 +3846,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         crit += std::format(" @ {}", q.crit_src);
       }
     }
-    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}, {:.0f} ms{}\n",
+    const uint64_t live_rss_mib = cost::process_rss_bytes() >> 20;
+    const uint64_t peak_rss_mib = cost::process_peak_rss_bytes() >> 20;
+    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}, {:.0f} ms, RSS {} MiB (peak {} MiB){}\n",
                rb.module_name,
                q.gates,
                q.area,
                q.delay,
                since(),
+               live_rss_mib,
+               peak_rss_mib,
                crit);
+    std::fflush(stdout);  // live benchmark policy needs each completed color immediately
   }
   trace_stage("readback-complete");
 
@@ -3850,8 +3868,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (incr_ != nullptr && pre_g != nullptr) {
     incr_->store(rb, *rb.pre_lib, rb.pre_name, qor_.back(), recipe, outlib_);
   }
-  qor_.back().cache = "miss";
-  qor_.back().ms    = since();
+  qor_.back().cache             = "miss";
+  qor_.back().ms                = since();
+  const uint64_t process_peak   = cost::process_peak_rss_bytes();
+  qor_.back().peak_rss_kb       = process_peak >> 10;
+  // A process HWM is sticky across colors. Charge this color the new HWM only
+  // when it advanced; otherwise use the largest live-RSS stage sample. This
+  // avoids attributing an early large color's retained HWM to every later tiny
+  // color while still capturing peaks at the end of ABC's blocking flow.
+  const uint64_t color_peak     = process_peak > process_peak_before ? process_peak : sampled_peak_rss;
+  qor_.back().color_peak_rss_kb = color_peak > rss_before ? (color_peak - rss_before) >> 10 : 0;
   Abc_NtkDelete(mapped);
   // &get/&dc4/&dch/&nf leave GIA managers in the global frame even after
   // &put.  A large region then poisons the next tiny job (Rob's 438-node
@@ -3859,6 +3885,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // 0.35 s in a fresh frame).  Clear all per-network/GIA workspace while
   // retaining the frame's parsed Liberty library and installed aliases.
   Abc_FrameDeleteAllNetworks(frame);
+#if defined(__GLIBC__)
+  // Hundreds of ROB colors showed the glibc heap RSS growing monotonically
+  // even though the ABC networks above were deleted. Return completely free
+  // heap pages at the color boundary so the next color's 16-GiB admission
+  // check measures live state, not reusable pages retained by malloc arenas.
+  // QoR's peak sample is intentionally taken before this trim.
+  (void)malloc_trim(0);
+#endif
+  if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
+    time_refusal_
+        = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms)", rb.module_name, qor_.back().ms, opts_.time_budget_ms);
+  }
 }
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {
@@ -3887,7 +3925,7 @@ void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::
       if (gu::is_builtin_node(node)) {
         continue;
       }
-      const auto ge      = gu::mappable_ge_weight(node);
+      const auto ge      = gu::synthesis_ge_weight(node);
       const auto op_name = std::string{Ntype::get_name(gu::type_op_of(node))};
       auto&      s       = by_op[op_name];
       ++s.nodes;
@@ -3915,7 +3953,7 @@ void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::
     ranked.emplace_back(name, &stats);
   }
   std::ranges::sort(ranked, [](const auto& lhs, const auto& rhs) { return lhs.second->ge > rhs.second->ge; });
-  std::print("  operation GE: {} nodes, {} total MAPPABLE GE across {} def(s)\n", total_nodes, total_ge, graphs.size());
+  std::print("  operation GE: {} nodes, {} total synthesis GE across {} def(s)\n", total_nodes, total_ge, graphs.size());
   for (const auto& [name, stats] : ranked) {
     std::print("    {:<12} nodes {:>8}  GE {:>12}  max/node {:>10}\n", name, stats->nodes, stats->ge, stats->max_ge);
   }

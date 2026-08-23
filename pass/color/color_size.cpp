@@ -26,12 +26,10 @@ using livehd::graph_util::bits_of;
   return gu::is_graph_input_pin(d) || !gu::pin_name_of(d).empty() || gu::has_name(d.get_master_node());
 }
 // The window weighs what ABC will BLAST, not what the region touches: a Sub
-// counts ~1 (node_util mappable_ge_weight). With Sub port bits in the weight,
+// counts ~1 (synthesis_ge_weight). With Sub port bits in the weight,
 // a 2-node glue+instance region "weighs" thousands of GE, dodges the min floor
 // forever, and XSCore ends up with tens of thousands of zero-logic regions the
 // mapper pays call overhead for.
-using livehd::graph_util::mappable_ge_weight;
-
 constexpr int NO_REGION = -1;
 
 // A region whose adjacency is larger than this never ACTS as a merge initiator
@@ -129,7 +127,7 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id, int name_weig
     }
     const int r      = it->second;
     node2region_[n]  = r;
-    weight_[r]      += mappable_ge_weight(n);
+    weight_[r]      += synthesis_ge_weight(n);
     members_[r].emplace_back(n);
   }
 
@@ -422,7 +420,7 @@ void topo_chunk(const std::vector<hhds::Node_class>& nodes, uint64_t max_ge, int
   uint64_t acc = 0;
   int      id  = next_id++;
   for (const auto& n : nodes) {  // members are already in forward_class order
-    const uint64_t w = mappable_ge_weight(n);
+    const uint64_t w = synthesis_ge_weight(n);
     if (acc != 0 && acc + w > max_ge) {
       id  = next_id++;
       acc = 0;
@@ -467,7 +465,7 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
       }
       uint64_t w = 0;
       for (const auto& n : b) {
-        w += mappable_ge_weight(n);
+        w += synthesis_ge_weight(n);
       }
       if (w <= max_ge) {
         const int id = next_cluster++;

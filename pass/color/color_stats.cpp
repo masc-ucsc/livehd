@@ -6,6 +6,7 @@
 #include <format>
 #include <numeric>
 #include <print>
+#include <ranges>
 #include <tuple>
 
 namespace livehd::color {
@@ -26,14 +27,34 @@ void Color_stats::add(std::string_view def, const Def_color_sizes& sizes, uint64
   row.ge        = def_ge;
   defs_.emplace_back(std::move(row));
 
-  total_nodes_ += sizes.partitionable;
+  total_nodes_     += sizes.partitionable;
   total_uncolored_ += sizes.uncolored;
-  flat_nodes_ += sizes.partitionable * instances;
-  total_ge_ += def_ge;
+  flat_nodes_      += sizes.partitionable * instances;
+  total_ge_        += def_ge;
 
   for (const auto& [color, nodes] : sizes.color_nodes) {
-    auto it = sizes.color_ge.find(color);
-    partitions_.emplace_back(Partition{std::string{def}, color, nodes, it == sizes.color_ge.end() ? 0 : it->second});
+    auto      it = sizes.color_ge.find(color);
+    Partition p;
+    p.def   = std::string{def};
+    p.color = color;
+    p.nodes = nodes;
+    p.ge    = it == sizes.color_ge.end() ? 0 : it->second;
+    if (auto n = sizes.color_max_node_ge.find(color); n != sizes.color_max_node_ge.end()) {
+      p.max_node_ge = n->second;
+    }
+    if (auto n = sizes.color_max_node_bits.find(color); n != sizes.color_max_node_bits.end()) {
+      p.max_node_bits = n->second;
+    }
+    if (auto n = sizes.color_max_node_id.find(color); n != sizes.color_max_node_id.end()) {
+      p.max_node_id = n->second;
+    }
+    if (auto n = sizes.color_max_node_op.find(color); n != sizes.color_max_node_op.end()) {
+      p.max_node_op = n->second;
+    }
+    if (auto n = sizes.color_max_node_const_shift.find(color); n != sizes.color_max_node_const_shift.end()) {
+      p.max_node_const_shift = n->second;
+    }
+    partitions_.emplace_back(std::move(p));
   }
 }
 
@@ -64,14 +85,14 @@ void Color_stats::print_histogram(const std::vector<uint64_t>& ge_desc) {
     const char* label;
   };
   static constexpr Bucket buckets[] = {
-      {0, 1, "1"},
-      {2, 9, "2-9"},
-      {10, 99, "10-99"},
-      {100, 999, "100-999"},
-      {1000, 4999, "1k-5k"},
-      {5000, 49999, "5k-50k"},
-      {50000, 199999, "50k-200k"},
-      {200000, UINT64_MAX, ">=200k"},
+      {     0,          1,        "1"},
+      {     2,          9,      "2-9"},
+      {    10,         99,    "10-99"},
+      {   100,        999,  "100-999"},
+      {  1000,       4999,    "1k-5k"},
+      {  5000,      49999,   "5k-50k"},
+      { 50000,     199999, "50k-200k"},
+      {200000, UINT64_MAX,   ">=200k"},
   };
   std::print(stderr, "color[stats]: GE histogram\n");
   for (const auto& b : buckets) {
@@ -100,14 +121,13 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
   const auto     singl = std::count(sizes.begin(), sizes.end(), uint64_t{1});
   // The 2opt-incr sweet spot: synthesis time is super-linear above it, tool
   // overhead dominates below it (todo/livehd/2opt-incr.html).
-  const auto band = std::count_if(sizes.begin(), sizes.end(), [](uint64_t n) { return n >= 1000 && n <= 5000; });
+  const auto     band  = std::count_if(sizes.begin(), sizes.end(), [](uint64_t n) { return n >= 1000 && n <= 5000; });
   // "% of design" is against the INSTANCE-WEIGHTED total, not the per-def sum. A
   // 100-node partition in a top that also holds a 10-node def instantiated 1000
   // times is 1% of the design, not 91% of it -- and against the per-def sum the
   // "degenerate" verdict below would fire on a perfectly good coloring.
-  const auto pct = [&](uint64_t n) {
-    return flat_nodes_ == 0 ? 0.0 : 100.0 * static_cast<double>(n) / static_cast<double>(flat_nodes_);
-  };
+  const auto     pct
+      = [&](uint64_t n) { return flat_nodes_ == 0 ? 0.0 : 100.0 * static_cast<double>(n) / static_cast<double>(flat_nodes_); };
 
   std::print(stderr,
              "color[stats]: alg {} -- {} partition(s) over {} def(s), {} partitionable node(s)\n",
@@ -134,7 +154,7 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
   // the gap between the two IS the finding on a wide-datapath design.
   const auto ge = sizes_desc(true);
   if (!ge.empty() && total_ge_ != 0) {
-    const double   ge_avg = static_cast<double>(total_ge_) / static_cast<double>(ge.size());
+    const double   ge_avg     = static_cast<double>(total_ge_) / static_cast<double>(ge.size());
     const uint64_t ge_pct_den = total_ge_;
     std::print(stderr,
                "color[stats]: GE        max {} ({:.1f}% of GE), min {}, avg {:.1f}, median {}, total {}\n",
@@ -166,6 +186,28 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
         std::print(stderr,
                    "color[stats]:           OVER-MAX regions remain -- pass.abc admission may refuse this "
                    "design; an indivisible single node (a wide Mult) can exceed max on its own\n");
+        auto offenders = partitions_;
+        std::erase_if(offenders, [&](const Partition& p) { return p.ge <= max_ge; });
+        std::ranges::sort(offenders, [](const Partition& a, const Partition& b) {
+          return std::tie(b.ge, a.def, a.color) < std::tie(a.ge, b.def, b.color);
+        });
+        const size_t detail_limit = per_def ? offenders.size() : std::min<size_t>(offenders.size(), 12);
+        for (const auto& p : offenders | std::views::take(detail_limit)) {
+          const bool shift = p.max_node_op == "shl" || p.max_node_op == "sra";
+          std::print(stderr,
+                     "color[stats]:           {} c{}: {} GE; largest node n{} {} bits={} GE={}{}\n",
+                     p.def,
+                     p.color,
+                     p.ge,
+                     p.max_node_id,
+                     p.max_node_op,
+                     p.max_node_bits,
+                     p.max_node_ge,
+                     shift ? (p.max_node_const_shift ? " amount=constant" : " amount=runtime") : "");
+        }
+        if (offenders.size() > detail_limit) {
+          std::print(stderr, "color[stats]:           ... {} more over-max region(s)\n", offenders.size() - detail_limit);
+        }
       }
     }
   }
@@ -205,9 +247,7 @@ void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, ui
   if (sizes.size() == 1) {
     std::print(stderr, "color[stats]: => ONE partition holds the whole design -- pass.abc will map it as a single region\n");
   } else if (pct(max) >= 90.0) {
-    std::print(stderr,
-               "color[stats]: => degenerate: one partition holds {:.1f}% of the design; the rest are noise\n",
-               pct(max));
+    std::print(stderr, "color[stats]: => degenerate: one partition holds {:.1f}% of the design; the rest are noise\n", pct(max));
   }
 }
 

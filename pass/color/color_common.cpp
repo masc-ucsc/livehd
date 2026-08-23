@@ -107,8 +107,24 @@ int apply_coloring(hhds::Graph* g, const Node2Id& node2id_in, const Color_opts& 
     auto tally = [&](int color) {
       seen_ids.insert(color);
       if (sizes != nullptr) {
+        const uint64_t ge = synthesis_ge_weight(n);
         ++sizes->color_nodes[color];
-        sizes->color_ge[color] += livehd::graph_util::mappable_ge_weight(n);
+        sizes->color_ge[color] += ge;
+        if (ge > sizes->color_max_node_ge[color]) {
+          uint64_t bits = 0;
+          for (const auto& e : n.out_edges()) {
+            bits = std::max<uint64_t>(bits, livehd::graph_util::bits_of(e.driver));
+          }
+          sizes->color_max_node_ge[color]   = ge;
+          sizes->color_max_node_bits[color] = bits;
+          sizes->color_max_node_id[color]   = n.get_debug_nid();
+          const auto op                     = livehd::graph_util::type_op_of(n);
+          sizes->color_max_node_op[color]   = std::string{Ntype::get_name(op)};
+          if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+            sizes->color_max_node_const_shift[color]
+                = livehd::graph_util::is_const_pin(livehd::graph_util::get_driver_of_sink_name(n, "b"));
+          }
+        }
       }
     };
     if (seeded && has_color(n) && color_of(n) != 0) {

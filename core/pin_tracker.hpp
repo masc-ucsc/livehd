@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -130,26 +131,26 @@ public:
 
     const auto amount_u  = static_cast<size_t>(amount_i);
     const auto a_sbits_u = static_cast<size_t>(a_sbits);
-    I(a_sbits_u >= amount_u);
-
-    auto&      pv       = full_map[dst_pin];
-    const auto out_bits = a_sbits_u - amount_u;
-    pv.resize(out_bits, {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
+    const Pin_vector source = it->second;
+
+    auto&      pv       = full_map[dst_pin];
+    const auto out_bits = amount_u < a_sbits_u ? a_sbits_u - amount_u : size_t{1};
+    pv.resize(out_bits, {Zero_pin, -1});
 
     for (size_t i = 0; i < out_bits; ++i) {
-      if (i >= it->second.size()) {
-        pv[i].id  = it->second.back().id;
-        pv[i].pos = it->second.back().pos;
-      } else {
-        pv[i].id  = it->second[i].id;
-        pv[i].pos = it->second[i].pos;
-      }
+      // Arithmetic right shift is wiring: output bit i comes from input bit
+      // i+amount.  An overshift repeats the sign bit.  Keeping one bit in that
+      // case is important for the one-bit SRA nodes emitted by ABC read-back;
+      // unsigned/logical overshifts are represented by zero-fill wiring, not
+      // by an SRA node.
+      const auto src = std::min(amount_u + i, source.size() - 1);
+      pv[i]          = source[src];
     }
   }
 
@@ -344,7 +345,7 @@ protected:
     }
   }
 
-  Pin Zero_pin;
+  Pin                                  Zero_pin;
   // WARNING: Pin_vector MUST have pointer stability on resize of full_map
   absl::node_hash_map<Pin, Pin_vector> full_map;
 

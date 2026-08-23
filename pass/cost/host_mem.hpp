@@ -57,6 +57,12 @@ namespace livehd::cost {
 // This process's CURRENT resident set size (not the peak).
 [[nodiscard]] uint64_t process_rss_bytes();
 
+// Peak resident set reached by this process, normalized to bytes on every
+// platform. Unlike process_rss_bytes(), this intentionally never decreases;
+// pass.abc samples it at each completed color so its QoR report can separate
+// the ABC high-water mark from later one-shot synthesis phases such as STA.
+[[nodiscard]] uint64_t process_peak_rss_bytes();
+
 // This process's CURRENT physical footprint -- the metric the OS actually acts
 // on when it decides to kill a process (macOS jetsam charges phys_footprint; the
 // Linux OOM killer scores on RSS). On Darwin this is TASK_VM_INFO.phys_footprint,

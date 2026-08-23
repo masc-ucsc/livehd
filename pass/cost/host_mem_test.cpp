@@ -42,6 +42,14 @@ TEST(HostMem, RssIsPlausibleAndInBytes) {
   EXPECT_LT(rss, livehd::cost::physical_ram_bytes());
 }
 
+TEST(HostMem, PeakRssIsPlausibleAndInBytes) {
+  const auto rss  = livehd::cost::process_rss_bytes();
+  const auto peak = livehd::cost::process_peak_rss_bytes();
+  ASSERT_NE(0U, peak);
+  EXPECT_GE(peak, rss);
+  EXPECT_LT(peak, livehd::cost::physical_ram_bytes());
+}
+
 // The guard samples RSS to decide whether to keep translating, so a reading that
 // does not respond to real allocation would let an oversize run through.
 TEST(HostMem, RssTracksATouchedAllocation) {

@@ -21,6 +21,7 @@
 using livehd::color::apply_size_window;
 using livehd::color::Node2Id;
 using livehd::color::Size_window_stats;
+using livehd::color::synthesis_ge_weight;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::ge_weight;
 using livehd::graph_util::set_bits;
@@ -262,6 +263,52 @@ TEST(ColorSize, IndivisibleOversizeNodeIsCountedNotDropped) {
 
   EXPECT_EQ(out.size(), 1u) << "the node survives";
   EXPECT_EQ(st.left_over, 1u) << "an unsplittable region must be reported";
+}
+
+// A wide runtime SRA followed only by a narrow constant slice is not a full
+// width synthesis cone: pass.abc demand-builds just the selected prefix, but
+// only while the shift and Get_mask remain in the same region. The window must
+// budget that actual demand or it isolates the SRA and creates the full barrel
+// shifter it was trying to bound (ROB c819 took over ten minutes that way).
+TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_sra_demand");
+  auto  gio = lib.create_io("sra_demand");
+  gio->add_input("a", 0);
+  gio->add_input("amount", 1);
+  gio->add_output("y", 2);
+  gio->add_output("full", 3);
+  auto g = gio->create_graph();
+
+  auto a      = g->get_input_pin("a");
+  auto amount = g->get_input_pin("amount");
+  set_bits(a, 1024);
+  set_bits(amount, 10);
+  auto sra = create_typed_node(*g, Ntype_op::SRA);
+  a.connect_sink(livehd::graph_util::setup_sink_by_name(sra, "a"));
+  amount.connect_sink(livehd::graph_util::setup_sink_by_name(sra, "b"));
+  auto shifted = sra.create_driver_pin(0);
+  set_bits(shifted, 1024);
+
+  auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+  shifted.connect_sink(livehd::graph_util::setup_sink_by_name(slice, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer((int64_t{1} << 20) - 1))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(slice, "mask"));
+  auto word = slice.create_driver_pin(0);
+  set_bits(word, 20);
+  word.connect_sink(g->get_output_pin("y"));
+
+  EXPECT_EQ(synthesis_ge_weight(sra), 1200u) << "20 demanded bits * 10 mux stages * 3 gates/mux * 2x shift safety";
+  Node2Id m;
+  m[sra]   = 1;
+  m[slice] = 1;
+  Size_window_stats st;
+  (void)apply_size_window(g.get(), m, 0, 1500, &st);
+  EXPECT_EQ(st.splits, 0u) << "the narrow slice must stay with its shift";
+  EXPECT_EQ(st.left_over, 0u);
+
+  // Any unsliced observer needs the full result, so the discount disappears.
+  shifted.connect_sink(g->get_output_pin("full"));
+  EXPECT_EQ(synthesis_ge_weight(sra), 61440u);
 }
 
 // Isolated leftovers are BIN-PACKED. Two clouds that share no node-node edge

@@ -817,8 +817,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
               .fatal();
           return;
         }
-        auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sra(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
+        auto       b_const = hydrate_const(b_dpin);
+        const auto a_bits  = io_bits_of(a_dpin);
+        if (a_bits <= 0) {
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("SRA input has no usable width on node {}", debug_name(node))
+              .hint("bitwidth/cprop must stamp the shifted operand before pass.opentimer tracks its wiring")
+              .fatal();
+          return;
+        }
+        pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const);
       } else if (op == Ntype_op::Sext) {
         auto a_dpin = hier_driver_of(node, "a");
         auto b_dpin = hier_driver_of(node, "b");

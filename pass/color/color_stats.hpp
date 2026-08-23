@@ -28,8 +28,7 @@ public:
   // makes the `flat` projection right: `pass.color flat` sets pass.abc's
   // flatten=auto, so ABC inlines the hierarchy and maps ONE region holding
   // every instance -- not one region per def.
-  void add(std::string_view def, const Def_color_sizes &sizes,
-           uint64_t instances);
+  void add(std::string_view def, const Def_color_sizes& sizes, uint64_t instances);
 
   [[nodiscard]] bool empty() const { return partitions_.empty(); }
 
@@ -49,9 +48,14 @@ public:
 private:
   struct Partition {
     std::string def;
-    int         color = 0;
-    uint64_t    nodes = 0;
-    uint64_t    ge    = 0;
+    int         color         = 0;
+    uint64_t    nodes         = 0;
+    uint64_t    ge            = 0;
+    uint64_t    max_node_ge   = 0;
+    uint64_t    max_node_bits = 0;
+    uint64_t    max_node_id   = 0;
+    std::string max_node_op;
+    bool        max_node_const_shift = false;
   };
   struct Def_row {
     std::string def;
@@ -61,11 +65,11 @@ private:
 
   std::vector<Partition> partitions_;
   std::vector<Def_row>   defs_;
-  uint64_t               total_nodes_ = 0;
+  uint64_t               total_nodes_     = 0;
   uint64_t               total_uncolored_ = 0;
-  uint64_t               flat_nodes_ = 0;  // sum of nodes * instances
-  uint64_t               total_ge_ = 0;
-  uint64_t               absorbed_defs_ = 0;
+  uint64_t               flat_nodes_      = 0;  // sum of nodes * instances
+  uint64_t               total_ge_        = 0;
+  uint64_t               absorbed_defs_   = 0;
 
   // Partition sizes, largest first. Sorted by (size, def, color) so the report
   // does not inherit hash-iteration order. `by_ge` sorts on gate equivalents

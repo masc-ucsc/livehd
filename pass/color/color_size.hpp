@@ -71,7 +71,7 @@ struct Size_window_stats {
 //     between two regions. Nothing downstream of a coloring requires a quotient
 //     DAG (verified across pass.partition / pass.abc / pass.lec / cgen-verilog).
 //
-// Weights are MAPPABLE gate equivalents (graph_util::mappable_ge_weight): a
+// Weights are synthesis gate equivalents (synthesis_ge_weight): a
 // Sub counts ~1, since its logic is weighed in its own def's regions -- port-bit
 // weights let zero-logic glue+instance regions dodge the floor forever.
 // `name_weight` (default 1 = off) tilts the merge toward absorbing anonymous

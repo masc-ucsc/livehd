@@ -1438,11 +1438,13 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // mask hlop's concat_op then elides for that lane. Naming Slop_u also
       // carries the width in the TYPE, which is how concat_op learns the lane
       // table without a second operand list.
-      std::string args;
+      struct Concat_expr {
+        int         width;
+        std::string text;
+      };
+      std::vector<Concat_expr> exprs;
+      exprs.reserve(lanes.size());
       for (size_t i = 0; i < lanes.size(); ++i) {
-        if (i) {
-          absl::StrAppend(&args, ", ");
-        }
         const auto& l = lanes[i];
         // Read the lane at w+1 bits, NOT at its own declared width.
         // `Slop<M>::zext_to<W>()` keeps min(M, W) bits -- it clamps to the
@@ -1456,7 +1458,39 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         // operand() also gets the SIGN right at that width: a signed lane
         // sign-extends into the carrier first, so the Slop_u mask below takes
         // its true two's-complement window rather than a zero-padded one.
-        absl::StrAppend(&args, "Slop_u<", l.width, ">{", operand(l.value, l.width + 1), "}");
+        exprs.push_back({l.width, absl::StrCat("Slop_u<", l.width, ">{", operand(l.value, l.width + 1), "}")});
+      }
+      // Clang limits a fold expression to 256 operands. Large generated
+      // packed buses can legitimately exceed that (Minion has a 321-lane
+      // concat), so assemble fixed-size groups first and concatenate those
+      // groups at the root. This preserves the MSB-first lane order while
+      // keeping every Slop_u::concat_op instantiation comfortably below the
+      // compiler's expression-nesting limit.
+      constexpr size_t kConcatGroup = 128;
+      while (exprs.size() > kConcatGroup) {
+        std::vector<Concat_expr> grouped;
+        grouped.reserve((exprs.size() + kConcatGroup - 1) / kConcatGroup);
+        for (size_t begin = 0; begin < exprs.size(); begin += kConcatGroup) {
+          const auto  end         = std::min(begin + kConcatGroup, exprs.size());
+          int         group_width = 0;
+          std::string group_args;
+          for (size_t i = begin; i < end; ++i) {
+            if (i != begin) {
+              absl::StrAppend(&group_args, ", ");
+            }
+            group_width += exprs[i].width;
+            absl::StrAppend(&group_args, exprs[i].text);
+          }
+          grouped.push_back({group_width, absl::StrCat("Slop_u<", group_width, ">::concat_op(", group_args, ")")});
+        }
+        exprs = std::move(grouped);
+      }
+      std::string args;
+      for (size_t i = 0; i < exprs.size(); ++i) {
+        if (i) {
+          absl::StrAppend(&args, ", ");
+        }
+        absl::StrAppend(&args, exprs[i].text);
       }
       // Assemble UNSIGNED and land signed. Slop<N>::concat_op would sign-extend
       // from the top lane's MSB, but a Concat cell's value is defined to be the
@@ -2289,7 +2323,7 @@ uint64_t Cgen_sim::hier_graph_digest(hhds::Graph* g) {
   }
   memo[gid] = 0;  // cycle guard: a re-entry folds 0 rather than recursing
 
-  uint64_t h = sim_graph_digest(g);
+  uint64_t              h = sim_graph_digest(g);
   // Sorted, so the fold does not depend on node iteration order -- the parent's
   // own body hash already carries the instantiation structure.
   std::vector<uint64_t> children;
@@ -2315,9 +2349,7 @@ uint64_t Cgen_sim::hier_graph_digest(hhds::Graph* g) {
 // drops the whole index in one step, instead of leaving every record to
 // mismatch individually — which would strand a record for a module that no
 // longer exists in the design.
-static std::string gen_schema_tag() {
-  return absl::StrCat(kSimGenVersion, "-", absl::Hex(livehd::kCgenSrcSalt, absl::kZeroPad16));
-}
+static std::string gen_schema_tag() { return absl::StrCat(kSimGenVersion, "-", absl::Hex(livehd::kCgenSrcSalt, absl::kZeroPad16)); }
 
 // {"gen":"simgen-63-<salt>","modules":{"file.entity":{"d":"0123456789abcdef",
 //                                                     "f":["file.entity.cpp",...]}}}
@@ -2379,8 +2411,8 @@ void Cgen_sim::load_gen_digests() {
     }
     size_t fp = t.find("\"f\":[", rec);
     if (fp != std::string::npos && fp < end) {
-      fp += 5;
-      const size_t list_end = t.find(']', fp);
+      fp                    += 5;
+      const size_t list_end  = t.find(']', fp);
       std::string  name;
       while (list_end != std::string::npos && fp < list_end && quoted(fp, name)) {
         record.files.push_back(name);
@@ -2402,7 +2434,7 @@ void Cgen_sim::save_gen_digests() {
     keys.push_back(k);
   }
   std::sort(keys.begin(), keys.end());  // stable file bytes
-  std::string text = absl::StrCat("{\"gen\":\"", gen_schema_tag(), "\",\"modules\":{");
+  std::string text  = absl::StrCat("{\"gen\":\"", gen_schema_tag(), "\",\"modules\":{");
   bool        first = true;
   for (const auto& k : keys) {
     const auto& record = gen_digests_.at(k);
@@ -2483,8 +2515,7 @@ bool Cgen_sim::generation_current(hhds::Graph* g, bool color_root) {
 
 std::shared_ptr<File_output> Cgen_sim::open_out(std::string_view basename) {
   note_emitted(basename);
-  return std::make_shared<File_output>(odir.empty() ? std::string(basename)
-                                                    : absl::StrCat(odir, "/", basename));
+  return std::make_shared<File_output>(odir.empty() ? std::string(basename) : absl::StrCat(odir, "/", basename));
 }
 
 void Cgen_sim::note_emitted(std::string_view basename) { emitted_files_.emplace_back(basename); }
@@ -3046,9 +3077,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
         auto        cone = livehd::latch_contract::clock_op_of(d, design_clocks);
         std::string dbg  = absl::StrCat("[clkdbg] flop ",
-                                        debug_name(node),
-                                        " clock_op_of=",
-                                        cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
+                                       debug_name(node),
+                                       " clock_op_of=",
+                                       cone ? (cone->clock_inverted ? "INVERTED" : (cone->div != 1 ? "DIV" : "cone")) : "nullopt");
         if (cone) {
           absl::StrAppend(&dbg,
                           " clock=",
@@ -3578,7 +3609,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // ---- memories (Ntype_op::Memory -> std::array<Slop<bits>,size> member) ----
   struct MemPort {
-    bool            rd = false;
+    bool            rd  = false;
     size_t          pid = 0;  // Memory port group (raw sink pid / stride)
     hhds::Pin_class addr, enable, din;
     int             dout_pid = -1;  // read port: driver pin id = n_wr + rd_index
@@ -4724,9 +4755,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // The direct rung consumes the plan's execution slots over the complete
   // ordinary occurrence tree. Unsupported state protocols fail closed here;
   // no state class is silently approximated by the retired module scheduler.
-  const bool staged_flat            = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
-                                      && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
-  bool       direct_color_supported = color_root;
+  const bool staged_flat = staged_bridge_children && mems.empty() && !has_fall && !has_refresh
+                           && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
+  bool direct_color_supported = color_root;
   if (direct_color_supported) {
     const bool  color_debug      = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
     const auto& hierarchy_clocks = hierarchy_clocks_for_root();
@@ -5009,8 +5040,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // Both state views bind the SAME declaration: `<member>` for the
         // current value and `<member>_din` for the pending one, and both were
         // declared by value_type(bits, unsign) off the Q pin.
-        case Bkind::state_current:
-        case Bkind::state_pending: {
+        case Bkind::state_current     :
+        case Bkind::state_pending     : {
           if (s.owner_site == livehd::sim::Color_plan::invalid_index) {
             return false;
           }
@@ -5601,8 +5632,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   if (color_runtime_root) {
     const std::string runtime_header_name = fstem + ".color-runtime.hpp";
-    auto              runtime_header
-        = open_out(runtime_header_name);
+    auto              runtime_header      = open_out(runtime_header_name);
     runtime_header->append("// Generated simulator color runtime. Do not edit.\n#pragma once\n");
     runtime_header->append("#include \"", fstem, ".hpp\"\n");
     runtime_header->append("\n");
@@ -6594,7 +6624,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (!live_dout_pids.contains(static_cast<uint32_t>(rd_order[i]->dout_pid))) {
               continue;
             }
-            auto dp                        = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
+            auto dp = node.get_driver_pin(static_cast<hhds::Port_id>(rd_order[i]->dout_pid));
             dout2idx[dp.get_class_index()] = static_cast<int>(i);
           }
           // deps[i] = read ports whose dout appears in port i's address cone
@@ -6681,7 +6711,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // UNDEF-then-FWD-then-stored chain does (and at latency 1 the same
             // resolved value is what the read register latches, at the edge).
             stage_through(read_prefix(p.rdidx));  // program-order staging, see above
-            ensure_fn(p.addr);                    // computed read address emitted before this early (loop_last) memory node
+            ensure_fn(p.addr);  // computed read address emitted before this early (loop_last) memory node
             int  ab  = std::max(1, bits_of(p.addr));
             auto var = absl::StrCat("cg_", std::to_string(tmp_cnt++));
             fout->append(absl::StrCat("    ",
@@ -7480,8 +7510,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // unconditional evaluation (transparency semantics), and VCD builds keep
       // the eager form (an X-window dump reads dins the gate would skip).
       const bool  lazy_guard = !f.is_latch && !latch_low && !latch_high && vcd_file.empty()
-                               && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
-                               && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
+                              && ::getenv("LIVEHD_SIM_NOLAZY") == nullptr
+                              && (!f.clock_guards.empty() || !f.sec_clock.is_invalid() || !f.tick_field.empty());
       std::string gcond;
       if (lazy_guard) {
         if (with_cen) {
@@ -9001,7 +9031,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return {};
     };
-    const auto occurrence_guard_expr = [&](const hhds::Occurrence_pin&             pin,
+    const auto occurrence_guard_expr       = [&](const hhds::Occurrence_pin&             pin,
                                            const hhds::Pin_class&                  clock_root,
                                            livehd::sim::Color_plan::Execution_slot target_slot,
                                            int depth) { return occurrence_guard_value(pin, clock_root, target_slot, depth).text; };
@@ -9885,8 +9915,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // One digest-named TU per verified canonical class. Occurrence-specific
     // storage is supplied only through the ordered boundary ABI below.
     const std::string kernel_header_name = fstem + ".color-kernels.hpp";
-    auto              kernel_header
-        = open_out(kernel_header_name);
+    auto              kernel_header      = open_out(kernel_header_name);
     kernel_header->append("// Generated canonical simulator kernels. Do not edit.\n#pragma once\n#include <cstdint>\n");
     fout->append("#include \"", kernel_header_name, "\"\n");
     absl::flat_hash_set<std::string> expected_kernel_files;
@@ -10085,8 +10114,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto   instance_stem  = kernel_instance_file_stem(color_index, kernel->signature);
       kernel_header->append("void ", instance_name, "(void*, void**, std::uint64_t*);\n");
       const std::string kernel_path = instance_stem + ".cpp";
-      auto       kernel_out = open_out(kernel_path);
-      const auto slot_is_u
+      auto              kernel_out  = open_out(kernel_path);
+      const auto        slot_is_u
           = [&](size_t slot_index) { return slot_index < direct_slot_is_u.size() && direct_slot_is_u[slot_index]; };
       // The ABI is a void* type-pun: the cast has to name the type the binding
       // site took the address of. `direct_slot_is_u` is the ONE authority that
@@ -10241,9 +10270,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             if (memory == nullptr || memory->bits <= 0 || memory->size <= 0) {
               return reject("memory member has an invalid storage width");
             }
-            const uint64_t memory_result_width
-                = version.output_port == Ntype::Memory_readall_pid ? static_cast<uint64_t>(memory->bits) * memory->size
-                                                                  : static_cast<uint64_t>(memory->bits);
+            const uint64_t memory_result_width = version.output_port == Ntype::Memory_readall_pid
+                                                            ? static_cast<uint64_t>(memory->bits) * memory->size
+                                                            : static_cast<uint64_t>(memory->bits);
             if (memory_result_width > std::numeric_limits<uint32_t>::max()) {
               return reject("memory member result is too wide for LLVM");
             }
@@ -10344,8 +10373,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (definition_edge.driver.is_invalid() || is_const_pin(definition_edge.driver)) {
                 continue;
               }
-              const auto sink = definition_edge.sink.get_port_id();
-              const auto name = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(sink));
+              const auto     sink       = definition_edge.sink.get_port_id();
+              const auto     name       = Ntype::get_sink_name(Ntype_op::Memory, static_cast<int>(sink));
               // `ports` IS indexed by port group -- a linear search over a
               // duplicated `pid` field also matches the default-constructed
               // gap entries, which all report group 0.
@@ -10354,10 +10383,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               bool           required   = false;
               if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
                 required = memory->is_whole() && (name == "update" || name == "update_enable" || name == "init" || name == "reset");
-                required
-                    |= port != nullptr && !port->rd
-                       && (str_tools::ends_with(name, "addr") || str_tools::ends_with(name, "din")
-                           || (str_tools::ends_with(name, "enable") && name != "update_enable"));
+                required |= port != nullptr && !port->rd
+                            && (str_tools::ends_with(name, "addr") || str_tools::ends_with(name, "din")
+                                || (str_tools::ends_with(name, "enable") && name != "update_enable"));
               } else {
                 required  = memory->is_whole() && !memory->registered() && name == "update";
                 required |= port != nullptr && port->rd && static_cast<hhds::Port_id>(port->dout_pid) == version.output_port
@@ -10377,15 +10405,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               value = llvm_kernel.constant(1, 0, true);  // the boundary already applied this mask
             }
             if (!is_const_pin(edge.driver)) {
-              const auto  key     = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
-              const auto* use_ptr = select_internal_use(key, edge);
+              const auto  key               = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
+              const auto* use_ptr           = select_internal_use(key, edge);
               bool        bound_to_internal = false;
               if (use_ptr != nullptr) {
                 const auto& use       = *use_ptr;
                 const auto  output_it = llvm_outputs.find(use.producer_version);
                 if (output_it != llvm_outputs.end()) {
                   bound_to_internal = true;
-                  value = output_it->second;
+                  value             = output_it->second;
                   if (use.preextracted) {
                     const auto work_width = std::max(value.width, use.producer_extract_hi);
                     value                 = llvm_kernel.resize(value, work_width, value.unsign);
@@ -10420,7 +10448,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             if (value.width == 0) {
-              const auto  key         = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
+              const auto  key          = input_key(member, static_cast<uint32_t>(edge_inputs[input]));
               const auto* producer_use = select_internal_use(key, edge);
               std::string available_reads;
               for (const auto& read : abi.reads) {
@@ -10449,28 +10477,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                 static_cast<int>(slot.kind),
                                 direct_read_expr(slot, slot_index).empty() ? "/unreadable" : "/readable");
               }
-              return reject(
-                  absl::StrCat("member ",
-                               member,
-                               " (`",
-                               version.structural_id,
-                               "`, ",
-                               op_name(type_op_of(node)),
-                               ") input ",
-                               edge_inputs[input],
-                               " has no LLVM value; internal producer=",
-                               producer_use == nullptr ? "none" : std::to_string(producer_use->producer_version),
-                               producer_use != nullptr && !llvm_outputs.contains(producer_use->producer_version)
-                                   ? " (not emitted yet)"
-                                   : "",
-                               "; ABI reads=[",
-                               available_reads,
-                               "]",
-                               "; planned bindings=[",
-                               planned_bindings,
-                               "]",
-                               "; driver=",
-                               debug_name(edge.driver.get_master_node())));
+              return reject(absl::StrCat(
+                  "member ",
+                  member,
+                  " (`",
+                  version.structural_id,
+                  "`, ",
+                  op_name(type_op_of(node)),
+                  ") input ",
+                  edge_inputs[input],
+                  " has no LLVM value; internal producer=",
+                  producer_use == nullptr ? "none" : std::to_string(producer_use->producer_version),
+                  producer_use != nullptr && !llvm_outputs.contains(producer_use->producer_version) ? " (not emitted yet)" : "",
+                  "; ABI reads=[",
+                  available_reads,
+                  "]",
+                  "; planned bindings=[",
+                  planned_bindings,
+                  "]",
+                  "; driver=",
+                  debug_name(edge.driver.get_master_node())));
             }
             operands.push_back(value);
           }
@@ -10542,7 +10568,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                     reset     = llvm_kernel.reduce_or(reset, 1, true);
                     force     = reset;
                     auto init = memory->init.is_invalid() ? llvm_kernel.constant(whole_width, 0, memory->unsign)
-                                                          : memory_operand(std::nullopt, "init");
+                                                                 : memory_operand(std::nullopt, "init");
                     if (init.width == 0) {
                       return reject("whole-array memory update has no initial value");
                     }
@@ -10626,7 +10652,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("memory read callback has no address value");
               }
               const auto symbol = emit_llvm_memory_read_helper(color_plan_->sites()[version.base_site], *read_port, address.width);
-              result            = llvm_kernel.external_read(symbol, address, result_width, result_unsign);
+              result = llvm_kernel.external_read(symbol, address, result_width, result_unsign);
               break;
             }
             case Ntype_op::Flop:
@@ -10651,7 +10677,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               bool neg_enable = false;
               if (type_op_of(node) == Ntype_op::Latch) {
                 const auto polarity = get_driver(find_sink_pin(node, "posclk"));
-                neg_enable          = !polarity.is_invalid() && is_const_pin(polarity) && hydrate_const(polarity).is_known_false();
+                neg_enable = !polarity.is_invalid() && is_const_pin(polarity) && hydrate_const(polarity).is_known_false();
               }
               if (neg_enable) {
                 enable = llvm_kernel.unary_not(enable, 1, true);
@@ -10668,7 +10694,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
                 auto initial = operand_at("initial");
                 initial      = initial.width == 0 ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                                  : llvm_kernel.resize(initial, result_width, result_unsign);
+                                                         : llvm_kernel.resize(initial, result_width, result_unsign);
                 result       = llvm_kernel.mux(reset, result, initial, result_width, result_unsign);
               }
               break;
@@ -10677,7 +10703,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               result = llvm_kernel.constant(result_width, 0, result_unsign);
               for (size_t i = 0; i < operands.size(); ++i) {
                 const auto operation = edges[i].sink.get_port_id() == 0 ? Cgen_llvm::Binary_op::add : Cgen_llvm::Binary_op::sub;
-                result               = llvm_kernel.binary(operation, result, operands[i], result_width, result_unsign);
+                result = llvm_kernel.binary(operation, result, operands[i], result_width, result_unsign);
               }
               break;
             }
@@ -10686,9 +10712,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::Rem:
               if (operands.size() < 2) {
                 result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                          : llvm_kernel.resize(operands[0], result_width, result_unsign);
+                                                 : llvm_kernel.resize(operands[0], result_width, result_unsign);
               } else {
-                const auto operation  = type_op_of(node) == Ntype_op::Div ? Cgen_llvm::Binary_op::div : Cgen_llvm::Binary_op::rem;
+                const auto operation = type_op_of(node) == Ntype_op::Div ? Cgen_llvm::Binary_op::div : Cgen_llvm::Binary_op::rem;
                 uint32_t   work_width = std::max({operands[0].width, operands[1].width, result_width});
                 if (!operands[0].unsign || !operands[1].unsign) {
                   ++work_width;
@@ -10724,8 +10750,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("comparison does not have two operands");
               }
               const auto operation = type_op_of(node) == Ntype_op::EQ   ? Cgen_llvm::Binary_op::eq
-                                     : type_op_of(node) == Ntype_op::LT ? Cgen_llvm::Binary_op::lt
-                                                                        : Cgen_llvm::Binary_op::gt;
+                                            : type_op_of(node) == Ntype_op::LT ? Cgen_llvm::Binary_op::lt
+                                                                               : Cgen_llvm::Binary_op::gt;
               result               = llvm_kernel.binary(operation, operands[0], operands[1], result_width, true);
               break;
             }
@@ -10735,8 +10761,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("shift does not have two operands");
               }
               const auto operation = type_op_of(node) == Ntype_op::SHL ? Cgen_llvm::Binary_op::shl
-                                     : operands[0].unsign              ? Cgen_llvm::Binary_op::lshr
-                                                                       : Cgen_llvm::Binary_op::ashr;
+                                            : operands[0].unsign              ? Cgen_llvm::Binary_op::lshr
+                                                                              : Cgen_llvm::Binary_op::ashr;
               result               = llvm_kernel.binary(operation, operands[0], operands[1], result_width, result_unsign);
               break;
             }
@@ -10828,9 +10854,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (lane_value.width == 0) {
                   return reject("concat lane has no LLVM value");
                 }
-                lane_value        = llvm_kernel.resize(lane_value, static_cast<uint32_t>(lane.width), true);
+                lane_value = llvm_kernel.resize(lane_value, static_cast<uint32_t>(lane.width), true);
                 const auto amount = llvm_kernel.constant(static_cast<uint32_t>(total), static_cast<uint64_t>(lane.width), true);
-                assembled  = llvm_kernel.binary(Cgen_llvm::Binary_op::shl, assembled, amount, static_cast<uint32_t>(total), true);
+                assembled = llvm_kernel.binary(Cgen_llvm::Binary_op::shl, assembled, amount, static_cast<uint32_t>(total), true);
                 lane_value = llvm_kernel.resize(lane_value, static_cast<uint32_t>(total), true);
                 assembled
                     = llvm_kernel.binary(Cgen_llvm::Binary_op::bit_or, assembled, lane_value, static_cast<uint32_t>(total), true);
@@ -10914,7 +10940,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::AttrSet:
             case Ntype_op::IO:
               result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                        : llvm_kernel.resize(operands[0], result_width, result_unsign);
+                                               : llvm_kernel.resize(operands[0], result_width, result_unsign);
               break;
             default: return reject("member operation is not implemented by cgen_llvm");
           }
@@ -11750,8 +11776,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (!secondary_state && !reference_clock.empty()) {
           const auto input = node.get_graph()->get_input_pin(reference_clock);
           if (!input.is_invalid() && local_clocks_for(node.get_graph()).is_clock(input)) {
-            const bool clock_high            = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
-                                               || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
+            const bool clock_high = color.slot == livehd::sim::Color_plan::Execution_slot::post_rise_eval
+                                    || color.slot == livehd::sim::Color_plan::Execution_slot::fall_commit;
             pin2var[input.get_class_index()] = absl::StrCat(slop_u_ && is_unsign(input) ? "Slop_u<1>" : "Slop<1>",
                                                             "::create_integer(",
                                                             clock_high ? "1" : "0",
@@ -12134,7 +12160,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 const auto resolved = resolved_input->driver;
                 if (conditional_occurrence(site.node)) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test = absl::StrCat("(",
+                  commit_test           = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                   break;
@@ -12176,7 +12202,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                               && root.net.get_graph() == g && pin_name_of(root.net.base_pin()) == clock_input_of(g);
                 if (!plain_root_clock) {
                   const auto activation = occurrence_bool_expr(resolved, 0);
-                  commit_test = absl::StrCat("(",
+                  commit_test           = absl::StrCat("(",
                                              activation.empty() ? operand(definition_inputs[input].driver, 1) : activation,
                                              ").is_known_true()");
                 }
@@ -12479,10 +12505,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                  ? member_value
                                                  : stored_operand(source, std::max(wbits_of(source), 1));
             source_expr                    = range_extract_expr(source_value,
-                                                                slot.width,
-                                                                direct_slot_is_u[slot_index],
-                                                                slot.producer_extract_lo,
-                                                                slot.producer_extract_hi);
+                                             slot.width,
+                                             direct_slot_is_u[slot_index],
+                                             slot.producer_extract_lo,
+                                             slot.producer_extract_hi);
           } else if (op == Ntype_op::Sub) {
             const auto sio = node.get_subnode_io();
             I(sio != nullptr);

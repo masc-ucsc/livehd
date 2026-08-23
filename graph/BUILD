@@ -37,6 +37,7 @@ cc_library(
         "port_reach.hpp",
         "occurrence_materialize.hpp",
         "split_selfref.hpp",
+        "synthesis_cost.hpp",
     ],
     copts = COPTS,
     includes = ["."],

@@ -107,6 +107,17 @@ cc_test(
 )
 
 cc_test(
+    name = "pin_tracker_smoke",
+    srcs = [
+        "tests/pin_tracker_smoke.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "diag_test",
     srcs = [
         "tests/diag_test.cpp",

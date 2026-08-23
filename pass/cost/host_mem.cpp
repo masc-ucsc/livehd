@@ -61,7 +61,7 @@ uint64_t physical_ram_bytes() {
   }
   const uint64_t host = static_cast<uint64_t>(pages) * static_cast<uint64_t>(page_size);
   // Whatever actually kills us first is the real "physical" memory here.
-  const uint64_t cg = cgroup_limit_bytes();
+  const uint64_t cg   = cgroup_limit_bytes();
   return cg != 0 && cg < host ? cg : host;
 #endif
 }
@@ -72,8 +72,7 @@ uint64_t process_rss_bytes() {
   // now" -- it never goes down after a network is freed. mach task_info does.
   mach_task_basic_info_data_t info{};
   mach_msg_type_number_t      count = MACH_TASK_BASIC_INFO_COUNT;
-  if (::task_info(::mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count)
-      != KERN_SUCCESS) {
+  if (::task_info(::mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) {
     return 0;
   }
   return info.resident_size;
@@ -91,6 +90,18 @@ uint64_t process_rss_bytes() {
   }
   const long page_size = ::sysconf(_SC_PAGE_SIZE);
   return page_size <= 0 ? 0 : static_cast<uint64_t>(resident) * static_cast<uint64_t>(page_size);
+#endif
+}
+
+uint64_t process_peak_rss_bytes() {
+  struct rusage usage{};
+  if (::getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss <= 0) {
+    return 0;
+  }
+#if defined(__APPLE__)
+  return static_cast<uint64_t>(usage.ru_maxrss);  // bytes on Darwin
+#else
+  return static_cast<uint64_t>(usage.ru_maxrss) * 1024;  // KiB on Linux
 #endif
 }
 
