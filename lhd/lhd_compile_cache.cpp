@@ -2424,32 +2424,42 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
   }
 }
 
-bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path) {
+Overlay_status compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path) {
   if (res.compile_cache_overlay_graphs.empty()) {
-    return true;
+    return Overlay_status::ok;
   }
   Phase_timer phase(res, "compile.cache.lg_overlay");
+  // Everything before `mutated` turns true is VALIDATION of the cache scope.
+  // The destination library still holds the complete live-derived design there,
+  // so a refusal costs exactness, not correctness -- it is COUNTED and the
+  // caller warns. From the first delete_graphio on, the destination is
+  // mid-transplant and a failure is real damage.
+  bool        mutated = false;
+  const auto  decline = [&res]() {
+    ++res.compile_cache.refused;
+    // Consume the pending list either way: no counter or report may later claim
+    // these bodies were reused when none were transplanted.
+    res.compile_cache_overlay_graphs.clear();
+    return Overlay_status::declined;
+  };
   try {
     auto expected = read_graph_inventory(res);
     if (!expected) {
-      ++res.compile_cache.refused;
-      return false;
+      return decline();
     }
     check_ir_body_magic(res.compile_cache_scope + "/lg", "graph_", kHhdsGraphBodyMagic, "compile cache lg:");
     auto& cache      = livehd::Hhds_graph_library::instance(res.compile_cache_scope + "/lg");
     bool  digestable = true;
     auto  actual     = graph_rows(cache, res, digestable);
     if (!digestable || actual.size() != expected->rows.size()) {
-      ++res.compile_cache.refused;
-      return false;
+      return decline();
     }
     for (size_t i = 0; i < actual.size(); ++i) {
       const auto& a = actual[i];
       const auto& e = expected->rows[i];
       if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1
           || a.owner != e.owner) {
-        ++res.compile_cache.refused;
-        return false;
+        return decline();
       }
     }
 
@@ -2460,6 +2470,7 @@ bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::s
       var_names.emplace_back(graph ? std::string(graph->get_name()) : std::string{});
     }
     auto& dst = livehd::Hhds_graph_library::instance(lib_path);
+    mutated   = true;  // past this point a failure is not cosmetic
     for (const auto& name : wanted) {
       dst.delete_graphio(name);
     }
@@ -2476,16 +2487,25 @@ bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::s
       }
       auto io = dst.find_io(var_names[i]);
       if (!io || !io->has_graph()) {
+        // Not a benign race: the row check above proved this name has a body in
+        // the cache, and its fresh body is already deleted here. The library is
+        // missing a module this compile produced -- damage, not a downgrade.
         ++res.compile_cache.refused;
-        return false;
+        return Overlay_status::damaged;
       }
       var.graphs[i] = io->get_graph();
     }
     res.compile_cache_overlay_graphs.clear();
-    return true;
+    return Overlay_status::ok;
   } catch (...) {
-    ++res.compile_cache.refused;
-    return false;
+    if (mutated) {
+      // load_merge/delete_graphio threw with the destination half-transplanted.
+      ++res.compile_cache.refused;
+      return Overlay_status::damaged;
+    }
+    // A corrupt cached body magic, an unreadable inventory, a racing scope: the
+    // destination was never touched, so the live result stands.
+    return decline();
   }
 }
 

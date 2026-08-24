@@ -641,6 +641,41 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
   auto gio = g->get_io();
 
+  // THE one "is this Sub a Liberty cell?" question, shared by the 3rd phase
+  // (net population + pin tracker) and the 5th phase (gate instantiation). Two
+  // phases answering it differently is how a wide boundary gets modelled as a
+  // single Boolean pin in one place and as a black box in the other. Memoized
+  // by DEF NAME: a mapped netlist has a handful of cell types over millions of
+  // instances, so the Celllib lookup (and its std::string) happens once per
+  // type. The celllib is read and flushed in the constructor, so the answer is
+  // already stable here -- setup_hier relies on the same thing to build
+  // opaque_gids_.
+  absl::flat_hash_map<std::string, bool> liberty_cell_memo;
+  const auto                             is_liberty_cell = [&](const auto& node) -> bool {
+    auto io = node.get_subnode_io();
+    if (!io) {
+      return false;
+    }
+    const std::string tname{io->get_name()};
+    if (auto it = liberty_cell_memo.find(tname); it != liberty_cell_memo.end()) {
+      return it->second;
+    }
+    const auto& lib     = timer.celllib(ot::MAX);
+    const bool  is_cell = lib && lib->cell(tname) != nullptr;
+    liberty_cell_memo.emplace(tname, is_cell);
+    return is_cell;
+  };
+  // ABC's builtin tie cells (emitted when the Liberty has no constant cells).
+  // Named once so the 3rd and 5th phases agree these are NOT gates.
+  const auto is_tie_cell = [](const auto& node) -> bool {
+    auto io = node.get_subnode_io();
+    if (!io) {
+      return false;
+    }
+    const auto tname = io->get_name();
+    return tname == "_const0_" || tname == "_const1_";
+  };
+
   // Pin-level `bits` on a graph-IO pin is usually unset (widths live on the
   // GraphIO decl) — the pin tracker needs the real width, so fall back to the
   // decl when the driver is a module input.
@@ -761,10 +796,43 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     auto  pn = local.get_pin_name();
     return io && !pn.empty() ? bits_of(local, *io, pn) : 0;
   };
-  auto seed_constant = [&](const auto& dpin, int32_t bits) {
+  // A Liberty technology-cell (Sub) output is ONE Boolean pin: bit 0 is the
+  // physical net and any wider pin stamp is padding. The producer stamps that
+  // shape with add_scalar when the walk reaches it (3rd phase, below), but the
+  // forward walk does NOT guarantee the producer comes first: hhds emits a
+  // loop_break Sub (a bodyless sequential stub keeps that flag -- pass/partition
+  // and pass/abc carry decl.loop_break onto the clone) as a forward SOURCE,
+  // whose out-edges add no in-degree to its consumers, and a preserved comb
+  // cycle falls out in raw storage order. Deferring the consumer cannot fix it
+  // (a Sub whose only driver pin resolves to a graph IO pin never reaches
+  // add_scalar at all, and the loop's no-progress guard would then fatal the
+  // whole run); seed the producer's own entry from here instead. It is not a
+  // guess -- it is the same add_scalar(key, bits_of(dpin)) call the producer
+  // makes on the same key -- so the producer's later stamp is an idempotent
+  // rewrite. Without it the tracker's add_input fallback mints a provisional
+  // {net.0 .. net.N-1} bus that the consumer COPIES, and bit k>0 resolves to
+  // "net.k", a net that is never inserted: an unconnected Liberty input pin.
+  //
+  // Only a LIBERTY cell is one Boolean pin, so the seed carries add_scalar's
+  // precondition with it. (A native_comb_boundary node is never a Sub --
+  // pass/abc keeps Sub out of the preserved-SCC candidate set -- so the Sub
+  // test already excludes the wide per-bit boundary shape.)
+  auto seed_cell_output = [&](const auto& dpin) {
+    if (is_resolved_const(dpin)) {
+      return;
+    }
+    const auto master = dpin.get_master_node();
+    if (master.is_invalid() || type_op_of(master) != Ntype_op::Sub || !is_liberty_cell(master)) {
+      return;
+    }
+    pin_tracker.add_scalar_if_absent(trk_id(dpin), bits_of(dpin));
+  };
+  auto seed_operand = [&](const auto& dpin, int32_t bits) {
     if (is_resolved_const(dpin)) {
       pin_tracker.add_constant(trk_id(dpin), bits);
+      return;
     }
+    seed_cell_output(dpin);
   };
 
   // The node set for the forward (net-population) walk. Flat mode iterates the
@@ -846,7 +914,17 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       // the PO net, silently un-timing every gate cone fed by that input (the
       // PI arrival lands on the original net). The feed-through PO itself has
       // no combinational content to time. Consts likewise never carry a net.
-      if (!is_graph_input_pin(driver_dpin) && !is_const_pin(driver_dpin)) {
+      // A native combinational boundary (pass.abc's preserved SCC remainder) is
+      // the same case: STA cuts the path at that node's OWN output net, where
+      // make_opaque_logic_boundary puts the zero-arrival PI — and OpenTimer
+      // cannot put a PI on the PO's pin name (insert_primary_input asserts the
+      // name is unused). Renaming its net onto the PO would point every
+      // consumer at a net nothing drives (a PO pin is not an rct root), leaving
+      // the cut PI dangling and the whole cone behind it unscored. As with a
+      // flop that drives a PO, the PO itself simply carries no arrival.
+      const bool driver_is_boundary = !is_const_pin(driver_dpin) && !driver_dpin.get_master_node().is_invalid()
+                                      && driver_dpin.get_master_node().attr(livehd::attrs::native_comb_boundary).has();
+      if (!is_graph_input_pin(driver_dpin) && !is_const_pin(driver_dpin) && !driver_is_boundary) {
         set_overwrite(net_of(driver_dpin, hier_mode_), driver_dpin, driver_name);
       }
     }
@@ -870,14 +948,56 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   auto                     pending_nodes      = forward_nodes();
   size_t                   opaque_logic_nodes = 0;
   std::vector<std::string> opaque_logic_examples;
-  const auto               make_opaque_logic_boundary = [&](const hhds::Occurrence_node& node, const std::string& wname) {
-    auto bits = bits_of(node.get_driver_pin(0));
+  size_t                   ambiguous_or_nodes = 0;
+  std::vector<std::string> ambiguous_or_examples;
+  // Counting is per NODE (the warning says "node(s)"), while the cut itself is
+  // per DRIVER NET, so the counter lives outside the boundary builder: a node
+  // with several output nets is counted, and named in the examples, once.
+  // record_example=false keeps the feedback-specific example list (whose hint
+  // says "remove the combinational feedback") free of boundaries cut for a
+  // different reason; the COUNT still includes them, so the total stays honest.
+  const auto               note_opaque_logic_node = [&](const hhds::Occurrence_node& node, bool& counted, bool record_example) {
+    if (counted) {
+      return;
+    }
+    counted = true;
+    ++opaque_logic_nodes;
+    if (record_example && opaque_logic_examples.size() < 5) {
+      opaque_logic_examples.push_back(debug_name(node));
+    }
+  };
+  // Width of THIS output pin. get_driver_pin(0)/out_edges() are only the
+  // fallback for a pin with no `bits` annotation: sizing one pin's cut by the
+  // widest of ALL the node's outputs is wrong the moment a boundary node has
+  // more than one. It cannot today -- pass/abc keeps Sub/Memory/registers out
+  // of the preserved-SCC remainder and only those cells expose several driver
+  // pins -- so this is a no-op rewrite that keeps the helper honest.
+  //
+  // hint_bits: a caller that already knows the exact RESOLVED width (the pin
+  // tracker's own vector) passes it here. The driver pin stamp alone can be
+  // NARROWER than the bus the tracker resolved, and a boundary narrower than
+  // its consumers leaves the upper bit-PIs uninserted -- every Get_mask reader
+  // above the cut then clamps to nothing or resolves onto a net never created.
+  const auto boundary_bits_of
+      = [&](const hhds::Occurrence_node& node, const hhds::Occurrence_pin& dpin, int32_t hint_bits) -> int32_t {
+    auto bits = bits_of(dpin);
+    if (bits <= 0) {
+      bits = bits_of(node.get_driver_pin(0));
+    }
     if (bits <= 0) {
       for (const auto& e : node.out_edges()) {
         bits = std::max(bits, bits_of(e.driver));
       }
     }
-    bits = std::max(bits, 1);
+    return std::max({bits, hint_bits, 1});
+  };
+  const auto make_opaque_logic_boundary = [&](const hhds::Occurrence_node& node,
+                                              const hhds::Occurrence_pin&  dpin,
+                                              const std::string&           wname,
+                                              bool&                        counted,
+                                              int32_t                      hint_bits      = 0,
+                                              bool                         record_example = true) {
+    const auto bits = boundary_bits_of(node, dpin, hint_bits);
     pin_tracker.add_opaque(wname, bits);
     timer.insert_primary_input(wname);
     set_input_delays(wname);
@@ -886,11 +1006,27 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       timer.insert_primary_input(bit_name);
       set_input_delays(bit_name);
     }
-    ++opaque_logic_nodes;
-    if (opaque_logic_examples.size() < 5) {
-      opaque_logic_examples.push_back(debug_name(node));
-    }
+    note_opaque_logic_node(node, counted, record_example);
   };
+  // Same boundary, but for a driver net that phase 2 already renamed onto a
+  // primary output. A PI on the stale net would cut the path at a net no
+  // consumer resolves to, and the PO's own name cannot take a PI (OpenTimer
+  // asserts on a name that is already a pin). Leave the net and the tracker
+  // entry resolvable -- the driverless-net shape the plain gate case already
+  // leaves for a PO-driving cell -- so a pin-trackable consumer still lands on
+  // a net that exists: Pin_tracker auto-add_input()s a missing source, and
+  // connect_pin to an absent net silently un-nets the pin, which compute_timing
+  // then reports as an incomplete timing graph.
+  const auto make_renamed_logic_boundary
+      = [&](const hhds::Occurrence_node& node, const hhds::Occurrence_pin& dpin, const std::string& wname, bool& counted) {
+          const auto bits = boundary_bits_of(node, dpin, 0);
+          timer.insert_net(wname);
+          for (int32_t i = 1; i < bits; ++i) {
+            timer.insert_net(absl::StrCat(wname, ".", str_tools::to_s(i)));
+          }
+          pin_tracker.add_opaque(wname, bits);
+          note_opaque_logic_node(node, counted, true);
+        };
   while (!pending_nodes.empty()) {
     std::vector<hhds::Occurrence_node> deferred_nodes;
     bool                               net_progress = false;
@@ -900,7 +1036,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
 
-      bool root_track = Ntype::is_pin_trackable(op);
+      // One node can expose several driver nets; the warning counts NODES.
+      bool boundary_counted = false;
+      bool root_track       = Ntype::is_pin_trackable(op);
       if (root_track) {
         auto       dpin0                = node.get_driver_pin(0);
         // This trackable node's OWN output: name it from the traversal node (its
@@ -909,7 +1047,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto       wname                = hier_mode_ ? absl::StrCat("n$", net_of_node(node, dpin0, true)) : trk_id(dpin0);
         const bool native_comb_boundary = node.base_node().attr(livehd::attrs::native_comb_boundary).has();
         if (native_comb_boundary) {
-          make_opaque_logic_boundary(node, wname);
+          // `wname` is the reserved "n$" tracker name, never a PO pin name, and
+          // it is exactly what the pv-driven overwrite below points consumers
+          // at — so this cut is NOT skipped when the node drives a PO.
+          make_opaque_logic_boundary(node, dpin0, wname, boundary_counted);
         } else if (op == Ntype_op::Set_mask) {
           auto a_dpin     = hier_driver_of(node, "a");
           auto mask_dpin  = hier_driver_of(node, "mask");
@@ -932,8 +1073,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           auto       mask_const = hydrate_const(mask_dpin);
           const auto a_bits     = operand_bits_of(node, "a", a_dpin);
-          seed_constant(a_dpin, a_bits);
-          seed_constant(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
+          seed_operand(a_dpin, a_bits);
+          seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
           pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, mask_const, trk_id(value_dpin));
         } else if (op == Ntype_op::Get_mask) {
           auto a_dpin    = hier_driver_of(node, "a");
@@ -956,7 +1097,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           auto       mask_const = hydrate_const(mask_dpin);
           const auto a_bits     = operand_bits_of(node, "a", a_dpin);
-          seed_constant(a_dpin, a_bits);
+          seed_operand(a_dpin, a_bits);
           pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_const);
         } else if (op == Ntype_op::SRA) {
           auto a_dpin = hier_driver_of(node, "a");
@@ -1000,7 +1141,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
                 .fatal();
             return;
           }
-          seed_constant(a_dpin, a_bits);
+          seed_operand(a_dpin, a_bits);
           pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const);
         } else if (op == Ntype_op::Sext) {
           auto a_dpin = hier_driver_of(node, "a");
@@ -1023,7 +1164,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           auto       b_const = hydrate_const(b_dpin);
           const auto a_bits  = operand_bits_of(node, "a", a_dpin);
-          seed_constant(a_dpin, a_bits);
+          seed_operand(a_dpin, a_bits);
           pin_tracker.add_sext(wname, trk_id(a_dpin), a_bits, b_const);
         } else if (op == Ntype_op::SHL) {
           auto a_dpin = hier_driver_of(node, "a");
@@ -1047,7 +1188,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
           auto       b_const = hydrate_const(b_dpin);
           const auto a_bits  = operand_bits_of(node, "a", a_dpin);
-          seed_constant(a_dpin, a_bits);
+          seed_operand(a_dpin, a_bits);
           pin_tracker.add_shl(wname, trk_id(a_dpin), a_bits, b_const);
         } else if (op == Ntype_op::Concat) {
           // Wiring/packing, NOT logic: every result bit keeps the identity of the
@@ -1092,7 +1233,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
               return;
             }
             const auto lane_bits = tracked_bits_of(it->second) > 0 ? tracked_bits_of(it->second) : lanes[i].width;
-            seed_constant(it->second, lane_bits);
+            seed_operand(it->second, lane_bits);
             srcs.push_back({trk_id(it->second), lane_bits, lanes[i].width, lanes[i].offset});
           }
           // Literal sum(w) width of a result that is never negative. The driver
@@ -1106,18 +1247,40 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             continue;
           }
           for (auto e : inps) {
+            // add_or IGNORES an untracked operand (it returns early), so an
+            // unseeded cell output silently drops its whole timing arc and the
+            // Or result collapses onto the zero net.
+            seed_cell_output(e.driver);
             pin_tracker.add_or(wname, trk_id(e.driver));
           }
           // A packed OR of disjoint shifted lanes is wiring and every result
           // bit resolves to one source bit. Overlapping live lanes are real
-          // Boolean logic, however. Such an OR can remain native only when ABC
-          // deliberately preserved a combinational-cycle remainder; cut STA at
-          // that exact native result rather than renaming it to constant zero.
+          // Boolean logic: no bit rename can express "bit i is a OR b".
+          //
+          // Falling through is NOT safe. The driver loop below inspects only
+          // pv[0], so an overlap in a HIGHER bit renames the whole net onto
+          // pv[0]'s lane and DELETES the other fan-in cone from the timing
+          // graph with no report; an overlap in bit 0 collapses to kZeroNet,
+          // destroying the bit identity every Get_mask reader above needs.
+          //
+          // Model it honestly instead: the same explicit zero-arrival cut used
+          // for an ABC-preserved native combinational SCC. Mapped cones on both
+          // sides stay scored, each bit keeps a real per-bit net, and the cut is
+          // counted and named. Never fatal — an lg: netlist built by an older
+          // pass.abc, by hand, or by a foreign flow (i.e. one carrying no
+          // livehd::attrs::native_comb_boundary) is not a reason to abandon
+          // timing for the entire design.
           if (pin_tracker.has_ambiguous(wname)) {
-            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-                .msg("opentimer can not treat overlapping native OR inputs as wiring on node {} (tmap first)", debug_name(node))
-                .fatal();
-            return;
+            // Width BEFORE add_opaque rewrites the entry: add_or already
+            // resolved the true bus width (max over the inputs), which the
+            // driver pin stamp may under-report.
+            const auto tracked_w = static_cast<int32_t>(pin_tracker.get_pin_vector(wname).size());
+            make_opaque_logic_boundary(node, dpin0, wname, boundary_counted, tracked_w, /*record_example=*/false);
+            ++ambiguous_or_nodes;
+            if (ambiguous_or_examples.size() < 5) {
+              auto src = src_of_node(g, node);
+              ambiguous_or_examples.push_back(src.empty() ? debug_name(node) : absl::StrCat(debug_name(node), " @ ", src));
+            }
           }
         } else if (op == Ntype_op::And) {
           Dlop                 a_mask = *Dlop::create_integer(-1);
@@ -1141,6 +1304,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           if (!a_dpin.is_invalid()) {
+            seed_cell_output(a_dpin);  // add_and, like add_or, drops an untracked operand
             pin_tracker.add_and(wname, trk_id(a_dpin), a_mask);
           }
         } else {
@@ -1216,12 +1380,45 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         } else if (native_comb_boundary) {
           // The exact node remains in the LGraph, but its output is an explicit
           // path boundary for this partial STA model.
-          make_opaque_logic_boundary(node, wname);
-        } else {
-          timer.insert_net(wname);
-          if (op == Ntype_op::Sub) {
-            pin_tracker.add_scalar(wname, bits_of(dpin));
+          if (is_overwritten(dnet, dpin)) {
+            // drives a primary output directly: already a PO net
+            make_renamed_logic_boundary(node, dpin, wname, boundary_counted);
+          } else {
+            make_opaque_logic_boundary(node, dpin, wname, boundary_counted);
           }
+        } else if (op != Ntype_op::Sub) {
+          // Flop/Latch/Memory/Div/Rem: the 4th phase turns each output into a
+          // per-bit primary input, and an untracked driver falls through to the
+          // tracker's own add_input, so `<net>.k` resolves to a net that exists.
+          timer.insert_net(wname);
+        } else if (is_liberty_cell(node)) {
+          // ONE Boolean pin: exactly Pin_tracker::add_scalar's precondition,
+          // and the same predicate the 5th phase uses to insert this gate.
+          timer.insert_net(wname);
+          pin_tracker.add_scalar(wname, bits_of(dpin));
+        } else if (is_tie_cell(node)) {
+          // The 5th phase instantiates no gate for a tie; its net stays
+          // driverless. Every bit is a real known constant — not "bit 0 is the
+          // signal, the rest is padding".
+          timer.insert_net(wname);
+          pin_tracker.add_constant(wname, std::max(bits_of(dpin), 1));
+        } else {
+          // A Sub that is NOT a Liberty cell is not one Boolean timing pin, so
+          // it must not get add_scalar: that would retire every bit above 0 to
+          // the zero-arrival net. Two sub-cases, mirroring the 5th phase:
+          //   * a design module with a body under hier=stitch is DESCENDED —
+          //     the occurrence resolver hands consumers the child's internal
+          //     driver, never this instance pin, so there is nothing to track;
+          //   * a body-less black box is refused outright by the 5th phase
+          //     ("whole-design timing hit black-box ..." / "not a cell in the
+          //     Liberty library"), which aborts before any QoR is published.
+          // Leaving no tracker entry keeps that refusal the single place this
+          // is decided. If that fatal is ever relaxed (a real IP macro), the
+          // replacement is NOT add_input/nothing — it is add_opaque plus one
+          // inserted net per bit, the shape the 4th phase gives a flop; without
+          // the bit nets, OpenTimer log-and-skips the connects and
+          // compute_timing reports unconnected Liberty input pins.
+          timer.insert_net(wname);
         }
       }
       net_progress = true;
@@ -1239,15 +1436,24 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   if (opaque_logic_nodes != 0) {
     auto w = livehd::diag::warn("pass.opentimer", "native-comb-boundary", "unsupported");
     w.msg(
-         "pass.opentimer cut {} native combinational-logic node(s) into zero-arrival timing boundaries; the reported delay "
-         "covers mapped cones around them but is not an end-to-end score through the feedback",
-         opaque_logic_nodes)
-        .hint("remove the combinational feedback to obtain an all-standard-cell netlist and complete timing");
+        "pass.opentimer cut {} native combinational-logic node(s) into zero-arrival timing boundaries; the reported delay "
+        "covers mapped cones around them but is not an end-to-end score through the cut",
+        opaque_logic_nodes);
+    if (!opaque_logic_examples.empty()) {
+      w.hint("remove the combinational feedback to obtain an all-standard-cell netlist and complete timing");
+    }
+    if (ambiguous_or_nodes != 0) {
+      w.hint("technology-map overlapping OR inputs before pass.opentimer to model their Boolean delay");
+      w.note(std::format("{} timing boundary node(s) contain overlapping live OR inputs", ambiguous_or_nodes));
+    }
     for (const auto& name : opaque_logic_examples) {
       w.note(std::format("timing boundary: {}", name));
     }
     if (opaque_logic_nodes > opaque_logic_examples.size()) {
       w.note(std::format("... and {} more node(s)", opaque_logic_nodes - opaque_logic_examples.size()));
+    }
+    for (const auto& name : ambiguous_or_examples) {
+      w.note(std::format("overlapping OR timing boundary: {}", name));
     }
     w.emit();
   }
@@ -1331,7 +1537,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // ABC's builtin tie cells (emitted when the Liberty has no constant
     // cells): a constant never transitions, so it contributes no arrival —
     // leave its output net driverless and skip the gate.
-    if (type_name == "_const0_" || type_name == "_const1_") {
+    if (is_tie_cell(node)) {
       continue;
     }
 

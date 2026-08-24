@@ -483,6 +483,39 @@ has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the
 [ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
   || fail "refused partial restore diverged from cold"
 
+# A damaged cache scope may not turn a COMPLETE live compile into a config
+# error. Overlaying validated clean bodies is EXACTNESS only (H5-exact
+# presentation of unchanged graphs); the live pipeline has already produced a
+# checked result for every graph. So an unreadable cached body is a WARNING plus
+# a cold-equal result -- only a HALF-FINISHED transplant (bodies deleted from
+# the destination, merge then failed) may fail the build.
+python3 - "$FW/src/fleaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 3", "a + 4"))
+PY
+FBODY=$(find "$FSCOPE/lg" -name 'body.bin' -print 2>/dev/null | head -1)
+[ -n "$FBODY" ] || fail "no cached graph body to damage"
+printf 'damaged' > "$FBODY"
+fcompile "$FW/ovdmg.json" "$FW/ovdmg.jsonl"
+grep -q '"code":"cache-overlay-declined"' "$FW/ovdmg.jsonl" \
+  || fail "a declined clean-body overlay was not reported: $(cat "$FW/ovdmg.jsonl")"
+if grep '"code":"cache-overlay-declined"' "$FW/ovdmg.jsonl" | grep -q '"severity":"error"'; then
+  fail "a cosmetic overlay refusal was reported at error severity"
+fi
+"$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/ovdmg_cold_lg" \
+  --workdir "$FW/ovdmg_cold_w" --set lhd.incremental=false -q --result-json "$FW/ovdmg_cold.json" \
+  || fail "overlay-declined cold reference failed"
+[ "$("$LHD" tool diff "lg:$FW/ovdmg_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
+  || fail "a declined overlay changed the compile result"
+# This run republishes a healthy generation, so the NEXT compile is warm again
+# and must NOT replay the overlay warning: it describes a SCOPE, not the design,
+# so it has to sit OUTSIDE the stored [diag_mark, diag_end) window.
+fcompile "$FW/ovheal.json" "$FW/ovheal.jsonl"
+if grep -q '"code":"cache-overlay-declined"' "$FW/ovheal.jsonl"; then
+  fail "the declined-overlay warning was cached into the generation and replayed"
+fi
+
 # A clean generic `mod` is NOT an ordinary restored Sub body. A dirty caller
 # needs the template statements to materialize its concrete specialization.
 # Storing every mod metadata-only used to leave `g.madd` registered but

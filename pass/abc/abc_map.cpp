@@ -246,6 +246,17 @@ void Mapper::stop() {
   if (pabc_ != nullptr) {
     Abc_Stop();
     pabc_ = nullptr;
+#if defined(__APPLE__)
+    // Abc_Stop releases the frame's last networks to malloc, but Darwin may
+    // retain those pages and their xzone reservations. A large final color can
+    // therefore leave too little VA for the HHDS/QoR finalization that follows
+    // even though the physical footprint is below its ceiling. Relieve only
+    // after the frame is gone, when those allocations are actually reclaimable.
+    const uint64_t pressure_ceiling = cost::configured_budget_bytes();
+    if (pressure_ceiling != 0 && cost::process_footprint_bytes() > pressure_ceiling - pressure_ceiling / 4) {
+      (void)malloc_zone_pressure_relief(nullptr, size_t{2} << 30);
+    }
+#endif
   }
 }
 
@@ -660,8 +671,8 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   const std::string budget_desc
       = (!over_growth && over_total)
             ? std::format(
-                  "process memory ceiling {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, else physical minus "
-                  "reserve) -- the whole-PROCESS footprint, not this color's growth",
+                  "process physical-memory ceiling {} MiB (LIVEHD_MEMORY_BUDGET_MB, else physical minus reserve; Darwin "
+                  "RLIMIT_AS has separate VA-only allocator headroom) -- the whole-PROCESS footprint, not this color's growth",
                   mib(total_ceiling))
         : opts_.memory_budget_mb > 0 ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
                                      : std::format("per-color growth budget {} MiB (physical {} MiB minus a {} MiB reserve)",
@@ -4027,6 +4038,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // 0.35 s in a fresh frame).  Clear all per-network/GIA workspace while
   // retaining the frame's parsed Liberty library and installed aliases.
   Abc_FrameDeleteAllNetworks(frame);
+  if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
+    time_refusal_
+        = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms)", rb.module_name, qor_.back().ms, opts_.time_budget_ms);
+  }
+  // Publish the completed color before allocator housekeeping: a pressure scan
+  // can itself take time, and the heartbeat should identify the finished work
+  // immediately rather than making that pause look like part of ABC mapping.
+  report_completion(qor_.back());
 #if defined(__GLIBC__)
   // Hundreds of ROB colors showed the glibc heap RSS growing monotonically
   // even though the ABC networks above were deleted. Return completely free
@@ -4065,11 +4084,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     pressure_relief_done_        = true;
   }
 #endif
-  if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
-    time_refusal_
-        = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms)", rb.module_name, qor_.back().ms, opts_.time_budget_ms);
-  }
-  report_completion(qor_.back());
 }
 
 void Mapper::report_completion(const Region_qor& q) {

@@ -198,7 +198,7 @@ Sig node_anchor(const Node& n) {
   return h;
 }
 
-// Const operand token: VALUE-BLIND on purpose. Loop unrolling produces cone
+// Const operand token: normally VALUE-BLIND on purpose. Loop unrolling produces cone
 // after cone identical except for an index constant (`== 10'sh15c`, `15d`,
 // ...); folding the value would split every iteration into its own bucket and
 // hide exactly the repetition reduce exists to find. The value's storage SHAPE
@@ -207,11 +207,31 @@ Sig node_anchor(const Node& n) {
 // that port's width/sign well-defined. Which values a slot actually held is
 // folded into the pattern's NAME later (pattern_identity), so content
 // addressing still holds.
-Sig const_token(const Pin& d) {
+//
+// Get_mask/Set_mask are different: their mask is structural wiring metadata,
+// not a runtime data operand. pass.abc can map them only while that mask stays
+// constant. Include its value in the token so reduce creates separate pattern
+// bodies instead of promoting differing masks into an un-mappable input port.
+bool const_value_is_structural(const Node& n, const Pin& sink) {
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask) {
+    return false;
+  }
+  // Ask for the mask's pid, never for the pid's NAME: get_sink_name ASSERTS on
+  // any pid the cell does not declare (Get_mask/Set_mask carry `mask` on pid 2,
+  // so a graph that parked it elsewhere aborts the whole pass), while
+  // get_sink_pid answers a known name without a string build.
+  return sink.get_port_id() == Ntype::get_sink_pid(op, "mask");
+}
+
+Sig const_token(const Pin& d, bool value_sensitive) {
   const auto v = gu::hydrate_const(d);
   Sig        h = sig_seed(0xc0157e2ULL);
   h            = sig_u64(h, static_cast<uint64_t>(v.get_bits()));
   h            = sig_u64(h, (v.is_negative() ? 2ULL : 0ULL) | (v.has_unknowns() ? 1ULL : 0ULL));
+  if (value_sensitive) {
+    h = sig_str(h, v.serialize());
+  }
   return h;
 }
 
@@ -257,7 +277,7 @@ void compute_signatures(Cone& k, const absl::flat_hash_map<Node, int32_t>& cone_
         }
         Sig t;
         if (gu::is_const_pin(d)) {
-          t = const_token(d);
+          t = const_token(d, const_value_is_structural(n, e.sink));
         } else if (auto m = d.get_master_node(); is_member(m)) {
           auto ms = sig.find(m);
           if (ms == sig.end()) {
@@ -399,15 +419,58 @@ bool is_wide_dynamic_shift_node(const Node& n) {
   return !amount.is_invalid() && !gu::is_const_pin(amount);
 }
 
+// The ONE producer the two-member exception below may absorb: ADDRESS
+// ARITHMETIC. graph_util weighs Concat/Get_mask/Set_mask as pure wiring
+// (ge_weight == 0: they rename bit positions and mint no gate) and a Sum/Sext
+// index adder as its own narrow output width -- the packed-array shape's
+// producer is a 9-bit `index + 1`. None of them changes the order of magnitude
+// of the body the singleton exception already admits. A Mux, a Mult, a Div, a
+// wide bitwise op or a SECOND shift does, so those keep the normal guards.
+// Nconst is absent on purpose: is_partitionable excludes constants, so a const
+// is a cone LEAF, never a member.
+bool is_address_arith_node(const Node& n) {
+  switch (gu::type_op_of(n)) {
+    case Ntype_op::Sum:
+    case Ntype_op::Sext:
+    case Ntype_op::Concat:
+    case Ntype_op::Get_mask:
+    case Ntype_op::Set_mask: return true;
+    default                : return false;
+  }
+}
+
 bool is_synthesis_expensive_pattern(const Cone& k) {
+  if (is_wide_shift_slice(k)) {
+    return true;
+  }
+  if (!is_wide_dynamic_shift_node(k.root)) {
+    return false;
+  }
+  if (k.members.size() == 1) {
+    return true;
+  }
   // With bounded mining, a multi-fanout wide shift roots its cone and normally
   // pulls in one address-arithmetic producer before max_nodes cuts it.  That
   // two-node form is just as expensive as a singleton shift (Rob's repeated
   // 32k/52k-bit selects); treating only the singleton as special leaves every
-  // copy to expand independently.  Keep the exception bounded to two members:
-  // an unbounded maximal cone that merely ends in a shift still uses the normal
-  // text/GE profitability guards.
-  return is_wide_shift_slice(k) || (k.members.size() <= 2 && is_wide_dynamic_shift_node(k.root));
+  // copy to expand independently.  Bound the exception HARD, because it turns
+  // OFF both the text-profit and the max_pattern_ge guards: exactly one extra
+  // member, it must be address arithmetic, and it may not outweigh the shift
+  // that justifies the exception.  The body admitted here is therefore never
+  // more than twice the body the singleton case already admits; a cone whose
+  // real cost lives in a companion Mux/Mult/Div/second shift keeps the normal
+  // text/GE profitability guards, as does any larger cone that merely ends in
+  // a shift.
+  if (k.members.size() != 2) {
+    return false;
+  }
+  for (const auto& n : k.members) {
+    if (n == k.root) {
+      continue;
+    }
+    return is_address_arith_node(n) && synthesis_ge_weight(n) <= synthesis_ge_weight(k.root);
+  }
+  return false;
 }
 
 // True when the cone touches a parallel duplicate edge (same driver pin AND
@@ -659,7 +722,7 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       o.kind       = 0;
       o.cval       = v.serialize();
       o.cunk       = v.has_unknowns();
-      o.key        = const_token(d);
+      o.key        = const_token(d, const_value_is_structural(n, e.sink));
       o.pin        = d;
     } else if (auto mn = d.get_master_node(); K.sig.contains(mn)) {
       o.kind  = 2;

@@ -1466,15 +1466,33 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     const std::chrono::duration<double, std::milli> dt  = std::chrono::steady_clock::now() - redo_begin;
     res.compile_cache.redone_ms                        += dt.count();
   }
-  if (!compile_cache_overlay_clean_graphs(res, var, lib_path)) {
+  // Overlaying validated clean bodies is EXACTNESS, not correctness: the live
+  // pipeline above already produced a complete, checked result for every graph.
+  // Only a failure that left the library mid-transplant may fail the compile.
+  const auto overlay_status = compile_cache_overlay_clean_graphs(res, var, lib_path);
+  if (overlay_status == Overlay_status::damaged) {
     throw Lhd_error{"config",
-                    "could not overlay validated clean graph bodies after a partial cache refusal",
+                    "the compile cache left the graph library incomplete while overlaying validated clean bodies",
                     "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
   }
   // Closes the window the compile cache carries (Result::compile_cache_diag_mark).
   // Everything below is EMITS, which a warm restore re-runs — and whose targets
   // are not part of the cache key — so their records must not ride along.
   res.compile_cache_diag_end = livehd::diag::sink().records().size();
+  if (overlay_status == Overlay_status::declined) {
+    // Deliberately AFTER compile_cache_diag_end: this record describes THIS
+    // run's cache scope, not the design. Inside the window it would be stored
+    // into the generation and replayed by every later warm restore of a scope
+    // that is no longer damaged.
+    livehd::diag::warn("lhd.compile", "cache-overlay-declined", "io")
+        .msg(
+            "compile cache: the validated clean graph bodies could not be reused; unchanged modules are reported as "
+            "re-derived rather than cache-exact")
+        .hint(
+            "the compile result is complete and correct; the scope is republished by this run, or pass --set "
+            "lhd.incremental=false to skip the cache entirely")
+        .emit();
+  }
 
   if (wants_dump(opts, "lg")) {
     screen_dump_graphs(var, "post-recipe");

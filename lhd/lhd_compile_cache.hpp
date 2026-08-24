@@ -31,7 +31,19 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
 // After a warning-carrying partial restore runs the full pipeline live, replace
 // clean definitions with their validated cached final bodies. This retains the
 // live diagnostic stream while keeping unchanged graph presentation H5-exact.
-bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path);
+//
+// The overlay is an EXACTNESS step, never a correctness one: the live pipeline
+// has already produced a complete, validated result for every graph. So the
+// outcome is three-valued, and only one of the three may fail the compile.
+enum class Overlay_status {
+  ok,        // every requested body was transplanted (or none was requested)
+  declined,  // refused BEFORE the destination library was touched -- the live
+             // result stands; unchanged graphs are simply re-derived, not
+             // cache-exact. Cosmetic: warn, keep exit status successful.
+  damaged    // failed AFTER the destination bodies were deleted -- the library
+             // is mid-transplant and no longer holds a complete design. Fatal.
+};
+Overlay_status compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path);
 // All-clean, lg-only fast path: validate the immutable cached library by its
 // published file inventory and reuse/materialize it without deserializing IR.
 bool compile_cache_restore_lg_artifact(Options& opts, Result& res, const std::string& lib_path);

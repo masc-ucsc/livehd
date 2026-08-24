@@ -278,6 +278,49 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   }
 }
 
+// A Get_mask mask determines wiring identity, not runtime data. Differing
+// masks must split the pattern bucket instead of becoming a const input port:
+// pass.abc deliberately requires this operand to remain constant.
+TEST(ColorReduce, DivergentGetMaskStaysStructural) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_structural_mask");
+  for (int i = 0; i < 4; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 5);
+  }
+  auto g = gio->create_graph();
+
+  auto k5   = gu::create_const(*g, *Dlop::create_integer(5));
+  auto k6   = gu::create_const(*g, *Dlop::create_integer(6));
+  auto make = [&](int i, const hhds::Pin_class& mask) {
+    auto x = create_typed_node(*g, Ntype_op::Xor);
+    g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
+    auto xp = x.create_driver_pin(0);
+    gu::set_bits(xp, 3);
+    auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+    xp.connect_sink(gu::setup_sink_by_name(slice, "a"));
+    mask.connect_sink(gu::setup_sink_by_name(slice, "mask"));
+    auto out = slice.create_driver_pin(0);
+    gu::set_bits(out, 2);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  };
+  make(0, k5);
+  make(1, k5);
+  make(2, k5);
+  make(3, k6);
+
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, small_opts(), &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, st.promoted_consts);
+  EXPECT_EQ(1u, count_ops(g.get(), Ntype_op::Xor));
+  EXPECT_EQ(1u, count_ops(g.get(), Ntype_op::Get_mask));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
 // A constant every site agrees on stays INSIDE the body: no const port, no
 // per-site const wiring.
 TEST(ColorReduce, AgreedConstStaysInternal) {
@@ -801,4 +844,54 @@ TEST(ColorReduce, WideDynamicShiftWithAddressProducerBypassesTextProfitGuard) {
   EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::Sum));
   EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SRA));
   EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
+// The two-member wide-shift exception is for an ADDRESS-ARITHMETIC producer.
+// A companion that carries real mapping cost of its own (here a 256-bit Mult,
+// 65536 GE against the shift's ~12k) must still face the GE ceiling: the root
+// shift does not license an arbitrarily expensive shared body.
+TEST(ColorReduce, WideDynamicShiftWithExpensiveProducerKeepsGeGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift_expensive");
+  for (int i = 0; i < 9; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 10);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto a     = g->get_input_pin(std::string{"in"} + std::to_string(3 * i));
+    auto b     = g->get_input_pin(std::string{"in"} + std::to_string(3 * i + 1));
+    auto index = g->get_input_pin(std::string{"in"} + std::to_string(3 * i + 2));
+    gu::set_bits(a, 256);
+    gu::set_bits(b, 256);
+    gu::set_bits(index, 8);
+
+    auto mult = create_typed_node(*g, Ntype_op::Mult);
+    a.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(0));
+    auto value = mult.create_driver_pin(0);
+    gu::set_bits(value, 256);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    value.connect_sink(shift.create_sink_pin(0));
+    index.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 256);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o           = small_opts();
+  o.max_nodes      = 2;
+  o.max_pattern_ge = 20000;  // the shipped pass.color default
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(0u, st.patterns);
+  EXPECT_EQ(1u, st.oversize_skipped);
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Mult));
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::SRA));
 }

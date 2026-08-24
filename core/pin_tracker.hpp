@@ -51,15 +51,46 @@ public:
     pv.assign(static_cast<size_t>(std::max(bits, 0)), {Zero_pin, 0});
   }
 
-  // A technology-cell output is one Boolean Liberty pin even when a stale or
-  // carrier-width annotation says the LGraph value is wider. Bit 0 is the
-  // physical timing net; any requested upper bits are zero extension, not
-  // independent bus nets. Replace a provisional add_input entry because a
+  // PRECONDITION: `wname` is the output of a LIBERTY TECHNOLOGY CELL, and the
+  // CALLER must have proven it (pass/opentimer/opentimer.cpp: is_liberty_cell,
+  // the same predicate that decides whether a Sub becomes an ot::Timer gate).
+  // Such an output is one Boolean pin even when a stale or carrier-width
+  // annotation says the LGraph value is wider: bit 0 is the physical timing
+  // net; any requested upper bit is zero extension, not an independent bus net.
+  //
+  // NOT for a genuinely wide opaque boundary -- a black-box instance, a design
+  // module, an unmapped operator. Every bit above 0 would be retired to the
+  // zero-arrival net and its timing arcs dropped without a diagnostic. Model
+  // such a boundary as add_opaque() PLUS one real timer net per bit (the shape
+  // Pass_opentimer uses for a flop/latch/memory output); add_opaque alone, or
+  // no entry at all, leaves consumers pointing at `<net>.k` names that nobody
+  // inserted, and OpenTimer log-and-skips those connects into unconnected
+  // Liberty input pins.
+  //
+  // Replaces (does not merge with) a provisional add_input entry, because a
   // hierarchy walk may encounter a sibling consumer before this producer.
   void add_scalar(Pin wname, int32_t bits) {
     auto& pv = full_map[wname];
     pv.assign(static_cast<size_t>(std::max(bits, 1)), {Zero_pin, 0});
     pv[0] = {wname, 0};
+  }
+
+  // add_scalar that never rewrites an existing entry, for use by a CONSUMER
+  // that reached a cell output before the walk reached the cell. Forward order
+  // does not guarantee the producer comes first (hhds treats a loop_break Sub
+  // as a forward SOURCE -- its out-edges add no in-degree to its sinks -- and a
+  // comb-cycle tail is emitted in raw storage order), and once a consumer has
+  // COPIED the add_input fallback's provisional {net.0 .. net.N-1} bus into its
+  // own pin vector, the producer's later add_scalar can no longer undo it: the
+  // consumer keeps resolving bit k>0 onto net.k, a net no timing graph ever
+  // inserts. Seeding writes exactly what the producer writes, so whichever
+  // order the two arrive in, the result is the same.
+  bool add_scalar_if_absent(Pin wname, int32_t bits) {
+    if (full_map.contains(wname)) {
+      return false;
+    }
+    add_scalar(wname, bits);
+    return true;
   }
 
   void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask) {
