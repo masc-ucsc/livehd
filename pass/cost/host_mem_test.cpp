@@ -166,11 +166,11 @@ TEST(HostMem, ChildShareTightensTheInheritedLimit) {
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
     ::setenv("LIVEHD_MEMORY_BUDGET_MB", "4096", 1);
-    const uint64_t parent_limit = livehd::cost::install_memory_backstop();  // vsize + 4 GiB
+    const uint64_t parent_limit = livehd::cost::install_memory_backstop();  // Darwin: vsize + budget + VA slack
     if (parent_limit == 0) {
       _exit(10);  // could not arm at all
     }
-    const uint64_t share_limit = livehd::cost::arm_child_share(4);  // vsize + 1 GiB
+    const uint64_t share_limit = livehd::cost::arm_child_share(4);  // still a strict 1/4-budget share
     if (share_limit == 0) {
       _exit(11);  // refused to re-arm -- the "already strict" guard swallowed it
     }

@@ -30,6 +30,38 @@ public:
     }
   }
 
+  // Replace any prior wiring interpretation with a fresh timing boundary.
+  // OpenTimer uses this only for exact native combinational logic that cannot
+  // be represented as a bit rename (for example a deliberately preserved
+  // feedback SCC). The logic remains in the LGraph; the timing path is cut at
+  // its output instead of silently treating the logic as zero-delay wiring.
+  void add_opaque(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.resize(static_cast<size_t>(std::max(bits, 0)));
+    for (int32_t i = 0; i < bits; ++i) {
+      pv[static_cast<size_t>(i)] = {wname, i};
+    }
+  }
+
+  // A constant has no transition/arrival regardless of its logic value. Map
+  // every bit to the one real zero-arrival net instead of minting a synthetic
+  // bus name that no timing netlist can drive.
+  void add_constant(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.assign(static_cast<size_t>(std::max(bits, 0)), {Zero_pin, 0});
+  }
+
+  // A technology-cell output is one Boolean Liberty pin even when a stale or
+  // carrier-width annotation says the LGraph value is wider. Bit 0 is the
+  // physical timing net; any requested upper bits are zero extension, not
+  // independent bus nets. Replace a provisional add_input entry because a
+  // hierarchy walk may encounter a sibling consumer before this producer.
+  void add_scalar(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.assign(static_cast<size_t>(std::max(bits, 1)), {Zero_pin, 0});
+    pv[0] = {wname, 0};
+  }
+
   void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask) {
     auto& pv = full_map[dst_pin];
     pv.clear();
@@ -76,7 +108,9 @@ public:
       }
 
       while (pos < end) {
-        if (v_pv.size() <= pick_v_pos) {
+        if (v_pv.empty()) {
+          pv[pos] = {Zero_pin, 0};
+        } else if (v_pv.size() <= pick_v_pos) {
           pv[pos] = v_pv.back();
         } else {
           pv[pos] = v_pv[pick_v_pos];
@@ -111,6 +145,10 @@ public:
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
+    if (it->second.empty()) {
+      pv.assign(a_sbits_u + amount_u, {Zero_pin, 0});
+      return;
+    }
 
     for (size_t i = 0; i < a_sbits_u; ++i) {
       if (i >= it->second.size()) {
@@ -142,6 +180,10 @@ public:
     auto&      pv       = full_map[dst_pin];
     const auto out_bits = amount_u < a_sbits_u ? a_sbits_u - amount_u : size_t{1};
     pv.resize(out_bits, {Zero_pin, -1});
+    if (source.empty()) {
+      pv.assign(out_bits, {Zero_pin, 0});
+      return;
+    }
 
     for (size_t i = 0; i < out_bits; ++i) {
       // Arithmetic right shift is wiring: output bit i comes from input bit
@@ -169,6 +211,10 @@ public:
     if (it == full_map.end()) {
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
+    }
+    if (it->second.empty()) {
+      pv.assign(amount_u, {Zero_pin, 0});
+      return;
     }
 
     for (size_t i = 0; i < amount_u; ++i) {
@@ -296,6 +342,13 @@ public:
       return empty;
     }
     return it->second;
+  }
+
+  bool has_pin(Pin dst_pin) const { return full_map.contains(dst_pin); }
+
+  bool has_ambiguous(Pin dst_pin) const {
+    const auto it = full_map.find(dst_pin);
+    return it != full_map.end() && std::ranges::any_of(it->second, [](const auto& p) { return p.pos < 0; });
   }
 
   /* LCOV_EXCL_START */

@@ -753,3 +753,52 @@ TEST(ColorReduce, WideDynamicShiftBypassesTextProfitGuard) {
   EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SHL));
   EXPECT_EQ(3u, subs_of(g.get()).size());
 }
+
+// Bounded mining pulls one address-arithmetic producer into a wide shift's
+// cone.  This is the shape emitted for packed-array reads in Rob; sharing only
+// singleton shifts leaves each 30k+-bit barrel network to expand separately.
+TEST(ColorReduce, WideDynamicShiftWithAddressProducerBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift_address");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g   = gio->create_graph();
+  auto one = gu::create_const(*g, *Dlop::create_integer(1));
+
+  for (int i = 0; i < 3; ++i) {
+    auto value = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto index = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(value, 32768);
+    gu::set_bits(index, 9);
+
+    auto address = create_typed_node(*g, Ntype_op::Sum);
+    index.connect_sink(address.create_sink_pin(0));
+    one.connect_sink(address.create_sink_pin(0));
+    auto amount = address.create_driver_pin(0);
+    gu::set_bits(amount, 9);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    value.connect_sink(shift.create_sink_pin(0));
+    amount.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 32768);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::Sum));
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SRA));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}

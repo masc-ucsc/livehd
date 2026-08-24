@@ -74,8 +74,8 @@ struct Options {
   // cwd(exec-root)-relative path per line, empty when everything was read; the
   // format Bazel's unused_inputs_list consumes for input pruning.
   std::string unused_inputs;
-  std::string recipe;       // resolved per-command default in the kernel
-  std::string config;       // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
+  std::string recipe;  // resolved per-command default in the kernel
+  std::string config;  // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
 
@@ -179,8 +179,8 @@ struct Options {
   // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
   // nearest checkpoint <= the target and resumes from there. -1 = not requested.
   long                                             sim_restart_cycle = -1;  // --restart-cycle N: jump to cycle N
-  long                                             sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
-  long                                             sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
+  long                                             sim_vcd_from      = -1;  // --vcd-from Y: trace VCD starting at cycle Y
+  long                                             sim_vcd_to        = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
   bool        sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
   long        sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
   // `sim` observability: query signal values without re-instrumenting (the driver
@@ -282,6 +282,9 @@ struct Result {
   std::vector<std::pair<std::string, std::string>> compile_cache_unit_keys;
   std::vector<std::string>                         compile_cache_clean_units;
   std::vector<std::string>                         compile_cache_restored_graphs;
+  // Clean final graph bodies to overlay after a diagnostic-carrying partial
+  // restore is refused and the complete pipeline runs live.
+  std::vector<std::string>                         compile_cache_overlay_graphs;
   // Unit names of this scope's PRIOR generation (empty when none/incompatible).
   // Ghost pruning may delete artifacts of a unit that left the closure only
   // when that unit provably belonged to this same scope's previous compile.
@@ -443,7 +446,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "having neither an initializer nor a reset"                                                           },
     {             "checkpoint",
      "true",      Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)"    },
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)" },
     {    "checkpoint_min_secs",
      "10",  Sim_set_option::Kind::non_neg_num,
      "wall-clock floor in seconds between checkpoints (a short run writes none)"                           },
@@ -459,7 +462,8 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
 };
 
 // The `synth.*` command-namespace options (consumed by synth_command -- the
-// one-shot compile -> pass.color synth -> pass.abc -> pass.opentimer flow --
+// one-shot compile -> pass.color reduce -> pass.color synth -> pass.abc ->
+// pass.opentimer flow --
 // not pass labels). Same contract as kSimSetOptions: this array is the single
 // source of truth for --set validation, `lhd list options`, and the
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
@@ -481,13 +485,17 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",    Synth_set_option::Kind::file,
      "PATH -- the ONE Liberty .lib for the whole flow: pass.abc maps to its cells and pass.opentimer times with "
      "it. Empty = $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). A "
-     "`pass.abc.library` --set is refused under synth so the two stages can never disagree"                               },
+     "`pass.abc.library` --set is refused under synth so the two stages can never disagree"                                },
     {"opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                             },
-    {      "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {     "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "report). false stops after the ABC map"                                                                              },
+    {   "reduce",
+     "true", Synth_set_option::Kind::boolean,
+     "extract repeated one- and two-node combinational cones into shared definitions before synthesis coloring. "
+     "This bounds duplicated wide operations in large generated designs; false keeps the compiled graph shape"             },
+    {      "sdc", "",    Synth_set_option::Kind::file,  "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,         "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of

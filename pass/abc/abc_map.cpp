@@ -18,7 +18,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
-#if defined(__GLIBC__)
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#elif defined(__GLIBC__)
 #include <malloc.h>
 #endif
 #include <numeric>
@@ -186,7 +188,7 @@ std::string Mapper::resolve_recipe() const {
   // under a different recipe. Both flow strings are pinned (map_region picks one
   // by mode, and the mode is in the salt); '|' separates fields that never
   // contain '|'.
-  return std::format("comb={}|seq={}|adder={}|block={}|mult={}",
+  return std::format("native-wiring=2|comb={}|seq={}|adder={}|block={}|mult={}",
                      comb_flow(),
                      seq_flow(),
                      static_cast<int>(opts_.adder),
@@ -627,23 +629,25 @@ bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t bl
   // TWO ceilings, each measured against its OWN number. Per-color GROWTH is what
   // tells a single oversize region from a merely large run, but growth alone has
   // no ceiling on the accumulated footprint: process_footprint_bytes() is sticky
-  // after free (host_mem.hpp) and the malloc_trim at the color boundary is
-  // glibc-only, so on macOS a 300-color run whose colors each add well under the
-  // budget still walks the process into the address-space limit lhd_main armed
-  // as RLIMIT_AS -- and ABC does not null-check its allocations, so that lands
-  // as a bare SIGSEGV with no diagnostic and no qor.json.
+  // after free (host_mem.hpp), so the allocator-pressure relief at the color
+  // boundary is part of the resource guarantee. Without it, a many-color run
+  // whose colors each add well under the budget can still walk the process into
+  // the address-space limit lhd_main armed as RLIMIT_AS -- and ABC does not
+  // null-check its allocations, so that lands as a bare SIGSEGV with no
+  // diagnostic and no qor.json.
   //
   // The absolute test must NOT reuse `budget`: pass.abc.memory_budget_mb is
   // documented and used as a per-color GROWTH knob, and lhd's own ~23 MiB
   // baseline already exceeds a modestly pinned one, so measuring TOTAL rss
   // against it would refuse the first region of every such run. Measure it
-  // against the process-wide backstop instead -- literally the value lhd_main
-  // hands to RLIMIT_AS -- which is 0 ("unenforceable") when nothing pins it.
+  // against the process-wide PHYSICAL budget instead. On Darwin RLIMIT_AS has
+  // separate VA-only allocator headroom (host_mem.cpp); admission must not count
+  // that as physical capacity. A zero budget still means "unenforceable".
   const uint64_t total_ceiling  = cost::configured_budget_bytes();
   const bool     over_growth    = grown > budget;                             // this region alone
   const bool     over_total     = total_ceiling != 0 && rss > total_ceiling;  // the process is at the hard limit
   const bool     over_now       = over_growth || over_total;
-  const bool over_projected = grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
+  const bool     over_projected = grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
     return false;
   }
@@ -852,6 +856,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                  opts_.small_ge);
     }
   }
+  if (opts_.flow.empty() && opts_.large_ge != 0 && !opts_.large_flow.empty() && input_ge >= opts_.large_ge) {
+    opts_.flow = opts_.large_flow;
+    if (opts_.verbose) {
+      std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", rb.module_name, input_ge, opts_.large_ge);
+    }
+  }
   apply_region_overrides(rb);
   if (opts_.verbose) {
     uint64_t input_bits  = 0;
@@ -909,6 +919,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     q.cache       = hit ? "hit" : "miss";
     q.resynth     = !hit;
     qor_.push_back(std::move(q));
+    report_completion(qor_.back());
     return;
   }
   if (incr_ != nullptr && rb.reuse_eligible) {
@@ -929,13 +940,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         q.cache        = "hit";
         q.resynth      = false;
         q.ms           = since();
-        std::print("[pass.abc] region '{}': cache hit -- {} gates, area {:.2f}, delay {:.2f} ({:.0f} ms)\n",
-                   rb.module_name,
-                   q.gates,
-                   q.area,
-                   q.delay,
-                   q.ms);
         qor_.push_back(std::move(q));
+        report_completion(qor_.back());
         return;
       }
     }
@@ -1070,12 +1076,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   constexpr size_t kMaxRefusals = 10;
   size_t           refusals     = 0;
   const auto       refuse       = [&](const hhds::Node_class& bad,
-                          std::string_view        code,
-                          std::string_view        category,
-                          std::string_view        what,
-                          std::string_view        hint     = {},
-                          const hhds::Pin_class&  note_pin = {},
-                          std::string_view        note_msg = {}) {
+                                      std::string_view        code,
+                                      std::string_view        category,
+                                      std::string_view        what,
+                                      std::string_view        hint     = {},
+                                      const hhds::Pin_class&  note_pin = {},
+                                      std::string_view        note_msg = {}) {
     unsupported = true;
     if (refusals++ >= kMaxRefusals) {
       return;  // counted; the post-loop summary reports the total
@@ -1454,11 +1460,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       q.resynth     = true;
       q.ms          = since();
       qor_.push_back(std::move(q));
-      std::print("[pass.abc] region '{}': constant {} kept as native wiring, {:.0f} ms\n",
-                 rb.module_name,
-                 Ntype::get_name(single_shift_op),
-                 since());
       Abc_NtkDelete(manNtk);
+      report_completion(qor_.back());
       return;
     }
   }
@@ -1575,7 +1578,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // Keep the SHLs and their OR as native zero-delay wiring, just like
   // Get_mask/Set_mask at the mapper boundary. pass.opentimer's pin tracker
   // understands both operations, so timing identity is preserved bit-for-bit.
+  // Native boundary nodes. Most are zero-delay packed wiring discovered below;
+  // a structurally cyclic combinational remainder is added after the wiring
+  // scan because ABC itself only accepts acyclic Boolean networks.
   absl::flat_hash_set<hhds::Node_class> native_wiring;
+  absl::flat_hash_set<hhds::Node_class> native_comb_logic;
   auto                                  node_output_width = [](const hhds::Node_class& n) {
     int width = 0;
     for (const auto& e : n.out_edges()) {
@@ -1583,6 +1590,36 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     return width != 0 ? width : gu::bits_of(n.create_driver_pin(0));
   };
+
+  // These cells only rearrange or select bits when their control operand is a
+  // constant. Rebuilding them as exact typed nodes is both more faithful to
+  // their zero-delay wiring role and dramatically smaller than materializing
+  // one Liberty buffer/inverter per bit (Backend contains hundreds of
+  // megabit-scale slice/pack colors). Variable shifts remain real logic and
+  // still cross ABC. And/Or are deliberately excluded: only the proven
+  // disjoint wide-OR shape below is wiring rather than Boolean logic.
+  const auto const_operand = [](const hhds::Node_class& n, std::string_view sink) {
+    const auto d = gu::get_driver_of_sink_name(n, sink);
+    return !d.is_invalid() && gu::is_const_pin(d);
+  };
+  for (const auto& n : rb.nodes) {
+    const auto op     = gu::type_op_of(n);
+    bool       wiring = op == Ntype_op::Concat;
+    // The control operand must be CONSTANT for the cell to be a bit rename.
+    // A non-constant mask/position is real logic -- and, crucially, one the
+    // bit-blast loop below REFUSES with a precise per-node diagnostic. Marking
+    // it native here would skip that refusal and silently hand pass.opentimer a
+    // node its pin tracker also cannot model, turning a clean ABC refusal into a
+    // fatal in a later pass.
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
+      wiring = const_operand(n, "mask");
+    } else if (op == Ntype_op::Sext || op == Ntype_op::SRA || op == Ntype_op::SHL) {
+      wiring = const_operand(n, "b");
+    }
+    if (wiring) {
+      native_wiring.insert(n);
+    }
+  }
   for (const auto& n : rb.nodes) {
     if (gu::type_op_of(n) != Ntype_op::Or || node_output_width(n) < 4096) {
       continue;
@@ -1643,13 +1680,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       shifts.push_back(shl);
     }
-    if (!packing || shifts.size() < 2) {
+    if (!packing || shifts.empty()) {
       if (opts_.verbose) {
         std::print("[pass.abc] region '{}': rejected {}-bit shift/OR pack after {} shift(s): {}\n",
                    rb.module_name,
                    node_output_width(n),
                    shifts.size(),
-                   reject.empty() ? "too few shifts" : reject);
+                   reject.empty() ? "no shifted lane" : reject);
       }
       continue;
     }
@@ -1721,6 +1758,88 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::print("[pass.abc] region '{}': kept {} exported packed-wiring node(s) native including ancestors\n",
                rb.module_name,
                exported_wiring.size());
+  }
+
+  // ABC cannot ingest a combinational SCC. Preserve such logic exactly as
+  // native typed nodes and map every acyclic cone around it. This is a boundary
+  // cut, not an approximation: native->mapped edges become ABC PIs,
+  // mapped->native edges become POs, and read-back reconnects the original
+  // feedback. Kahn's unpeeled remainder includes the SCC plus any nodes whose
+  // only schedule predecessor is that SCC; keeping the whole remainder native
+  // is conservative and prevents an arbitrary edge choice from changing with
+  // traversal order.
+  {
+    std::vector<hhds::Node_class>         comb;
+    absl::flat_hash_set<hhds::Node_class> comb_set;
+    for (const auto& n : rb.nodes) {
+      const auto op = gu::type_op_of(n);
+      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell || op == Ntype_op::Div
+          || op == Ntype_op::Rem) {
+        continue;
+      }
+      comb.push_back(n);
+      comb_set.insert(n);
+    }
+    absl::flat_hash_map<hhds::Node_class, size_t>                        indegree;
+    absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> consumers;
+    std::vector<hhds::Node_class>                                        queue;
+    indegree.reserve(comb.size());
+    consumers.reserve(comb.size());
+    queue.reserve(comb.size());
+    for (const auto& n : comb) {
+      size_t degree = 0;
+      for (const auto& e : n.inp_edges()) {
+        const auto producer = e.driver.get_master_node();
+        if (!producer.is_invalid() && comb_set.contains(producer)) {
+          ++degree;
+          consumers[producer].push_back(n);
+        }
+      }
+      indegree.emplace(n, degree);
+      if (degree == 0) {
+        queue.push_back(n);
+      }
+    }
+    size_t peeled = 0;
+    for (size_t head = 0; head < queue.size(); ++head) {
+      const auto n = queue[head];
+      ++peeled;
+      if (auto it = consumers.find(n); it != consumers.end()) {
+        for (const auto& consumer : it->second) {
+          auto& degree = indegree.at(consumer);
+          if (--degree == 0) {
+            queue.push_back(consumer);
+          }
+        }
+      }
+    }
+    if (peeled != comb.size()) {
+      std::vector<hhds::Node_class> cyclic_remainder;
+      cyclic_remainder.reserve(comb.size() - peeled);
+      for (const auto& n : comb) {
+        if (indegree.at(n) != 0) {
+          cyclic_remainder.push_back(n);
+          native_wiring.insert(n);
+          native_comb_logic.insert(n);
+        }
+      }
+      auto w = livehd::diag::warn("pass.abc", "comb-loop-native", "unsupported");
+      w.at(node_span(rb, cyclic_remainder.front()))
+          .msg(
+              "pass.abc region '{}': preserved {} node(s) in a combinational-cycle remainder as native logic; acyclic cones "
+              "around it are still technology-mapped",
+              rb.module_name,
+              cyclic_remainder.size())
+          .hint("remove the combinational feedback to obtain an all-standard-cell region and a complete timing score");
+      constexpr size_t kMaxNamed = 5;
+      for (size_t k = 0; k < std::min(kMaxNamed, cyclic_remainder.size()); ++k) {
+        w.note(std::format("kept native: {}", node_identity(cyclic_remainder[k])), node_span(rb, cyclic_remainder[k]));
+      }
+      if (cyclic_remainder.size() > kMaxNamed) {
+        w.note(std::format("... and {} more node(s)", cyclic_remainder.size() - kMaxNamed));
+      }
+      w.emit();
+    }
   }
 
   if (opts_.verbose) {
@@ -2109,8 +2228,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       for (int b = 0; b < out_bits; ++b) {
         Abc_Obj_t* acc = nullptr;
         for (const auto& [v, drv] : data) {
-          Abc_Obj_t* term = abc_bit(drv, b);  // data_v[b]
-          Abc_Obj_t* hit  = nullptr;          // selector matches value v
+          Abc_Obj_t* hit = nullptr;  // selector matches value v
           if (op == Ntype_op::Hotmux) {
             hit = abc_bit(sel, v);  // one-hot: bit v of selector
           } else {
@@ -2123,8 +2241,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
               hit = abc_const_bit(true);
             }
           }
-          auto* prod = abc_bin(term, hit, '&');
-          acc        = acc == nullptr ? prod : abc_bin(acc, prod, '|');
+          // A constant-only selector can guard a syntactic self-reference
+          // (generated RTL uses this for an invalid/X arm).  Form the guard
+          // first: an unreachable arm must not recursively demand its data.
+          if (hit == abc_const0()) {
+            continue;
+          }
+          Abc_Obj_t* term = abc_bit(drv, b);  // data_v[b]
+          auto*      prod = abc_bin(term, hit, '&');
+          acc             = acc == nullptr ? prod : abc_bin(acc, prod, '|');
         }
         slots[b] = acc == nullptr ? abc_const_bit(false) : acc;
       }
@@ -3123,6 +3248,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (auto nm = gu::node_name_of(bb.node); !nm.empty()) {
       nn.attr(hhds::attrs::name).set(std::string{nm});
     }
+    if (native_comb_logic.contains(bb.node)) {
+      nn.attr(livehd::attrs::native_comb_boundary).set({});
+    }
     br.node = nn;
     br.out_pin.resize(bb.outs.size());
     br.out_bit.resize(bb.outs.size());
@@ -3873,30 +4001,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   }
   trace_stage("readback-srcmap");
 
-  {
-    // One QoR line per region (stdout is the step log under lhd). qor_.back()
-    // is this region's row: pushed above, and every later exit path is fatal.
-    const auto& q = qor_.back();
-    std::string crit;
-    if (!q.crit_output.empty()) {
-      crit = std::format("  critical output '{}'", q.crit_output);
-      if (!q.crit_src.empty()) {
-        crit += std::format(" @ {}", q.crit_src);
-      }
-    }
-    const uint64_t live_rss_mib = cost::process_rss_bytes() >> 20;
-    const uint64_t peak_rss_mib = cost::process_peak_rss_bytes() >> 20;
-    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}, {:.0f} ms, RSS {} MiB (peak {} MiB){}\n",
-               rb.module_name,
-               q.gates,
-               q.area,
-               q.delay,
-               since(),
-               live_rss_mib,
-               peak_rss_mib,
-               crit);
-    std::fflush(stdout);  // live benchmark policy needs each completed color immediately
-  }
   trace_stage("readback-complete");
 
   // rb.body now holds the complete mapped netlist: snapshot it (and the pre-abc
@@ -3930,11 +4034,77 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // check measures live state, not reusable pages retained by malloc arenas.
   // QoR's peak sample is intentionally taken before this trim.
   (void)malloc_trim(0);
+#elif defined(__APPLE__)
+  // Darwin's allocator has the same retained-page behavior, exposed more
+  // directly by TASK_VM_INFO.phys_footprint. Do not scan every malloc zone
+  // after each tiny color: thousands of needless maximal-relief calls fragment
+  // Darwin's allocator address space and can make a later allocation fail even
+  // while the physical footprint is safe. Once the process is genuinely under
+  // pressure, periodically ask all zones to return a bounded amount of
+  // reclaimable pages. The mapped HHDS body remains live and is untouched.
+  // QoR's peak sample is intentionally taken first.
+  //
+  // Backend has more than 3,000 colors. Once it crossed the pressure threshold,
+  // calling maximal all-zone relief after every color performed more than 2,000
+  // complete zone scans and eventually made a later allocation fail while
+  // physical footprint was still about 10 GiB below the process ceiling. Even
+  // rate-limited maximal all-zone scans reproduced the failure at a different
+  // color. The Darwin API documents a nonzero goal as best-effort bounded
+  // release, so combine a 2-GiB goal with one all-zone scan per 64 completed
+  // colors. A default-zone-only scan still let Backend's other zones cross the
+  // physical ceiling at color 3,240. The nonzero goal bounds virtual-address
+  // churn, and host_mem's Darwin VA allowance leaves room for the holes, while
+  // retaining ample physical headroom between scans.
+  const uint64_t     pressure_ceiling        = cost::configured_budget_bytes();
+  constexpr uint64_t kPressureReliefInterval = 64;
+  constexpr size_t   kPressureReliefGoal     = size_t{2} << 30;
+  const bool relief_due = !pressure_relief_done_ || completed_regions_ - last_pressure_relief_region_ >= kPressureReliefInterval;
+  if (pressure_ceiling != 0 && relief_due && cost::process_footprint_bytes() > pressure_ceiling - pressure_ceiling / 4) {
+    (void)malloc_zone_pressure_relief(nullptr, kPressureReliefGoal);
+    last_pressure_relief_region_ = completed_regions_;
+    pressure_relief_done_        = true;
+  }
 #endif
   if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
     time_refusal_
         = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms)", rb.module_name, qor_.back().ms, opts_.time_budget_ms);
   }
+  report_completion(qor_.back());
+}
+
+void Mapper::report_completion(const Region_qor& q) {
+  ++completed_regions_;
+  const std::string_view cache = q.cache == nullptr || q.cache[0] == '\0' ? "none" : q.cache;
+  std::string line = std::format("PROGRESS pass.abc completed={} region='{}' color={} resynth={} cache={} ge={} gates={} ms={:.1f}",
+                                 completed_regions_,
+                                 q.module,
+                                 q.color,
+                                 q.resynth ? 1 : 0,
+                                 cache,
+                                 q.input_ge,
+                                 q.gates,
+                                 q.ms);
+  std::print("{}\n", line);  // captured in the pass's complete internal step log
+  std::fflush(stdout);
+  livehd::diag::sink().progress("pass.abc",
+                                line,
+                                {
+                                    {"completed", std::to_string(completed_regions_)},
+                                    {"region", q.module},
+                                    {"color", std::to_string(q.color)},
+                                    {"resynth", q.resynth ? "1" : "0"},
+                                    {"cache", std::string{cache}},
+                                    {"input_nodes", std::to_string(q.input_nodes)},
+                                    {"input_ge", std::to_string(q.input_ge)},
+                                    {"gates", std::to_string(q.gates)},
+                                    {"area", std::format("{:.2f}", q.area)},
+                                    {"delay", std::format("{:.2f}", q.delay)},
+                                    {"ms", std::format("{:.1f}", q.ms)},
+                                    {"color_peak_rss_kb", std::to_string(q.color_peak_rss_kb)},
+                                    {"process_peak_rss_kb", std::to_string(q.peak_rss_kb)},
+                                    {"critical_output", q.crit_output},
+                                    {"critical_src", q.crit_src},
+  });
 }
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {

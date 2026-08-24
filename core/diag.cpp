@@ -422,6 +422,39 @@ void Sink::emit(Diagnostic d) {
   records_.push_back(std::move(d));
 }
 
+void Sink::progress(std::string_view pass, std::string_view message,
+                    std::initializer_list<std::pair<std::string_view, std::string>> attrs) {
+  const std::lock_guard lock(mutex_);
+  init_output();
+  if (!human_stderr_) {
+    return;
+  }
+  const uint64_t progress_seq = progress_seq_++;
+  if (stderr_jsonl_) {
+    std::string out{"{\"schema_version\":1,\"kind\":\"progress\","};
+    append_kv_str(out, "pass", pass);
+    out += ",\"seq\":";
+    out += std::to_string(progress_seq);
+    out += ',';
+    append_kv_str(out, "message", message);
+    out        += ",\"attrs\":{";
+    bool first  = true;
+    for (const auto& [key, value] : attrs) {
+      if (!first) {
+        out += ',';
+      }
+      first = false;
+      append_kv_str(out, key, value);
+    }
+    out += "}}";
+    std::fputs(out.c_str(), stderr);
+  } else {
+    std::fwrite(message.data(), 1, message.size(), stderr);
+  }
+  std::fputc('\n', stderr);
+  std::fflush(stderr);
+}
+
 void Sink::fatal(Diagnostic d) {
   d.severity   = Severity::error;
   auto message = d.message;
@@ -445,6 +478,7 @@ void Sink::clear() {
   seen_.clear();
   step_.clear();
   seq_                  = 0;
+  progress_seq_         = 0;
   error_count_          = 0;
   deferred_error_count_ = 0;
   warn_count_           = 0;

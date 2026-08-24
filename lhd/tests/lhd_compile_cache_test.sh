@@ -483,4 +483,50 @@ has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the
 [ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
   || fail "refused partial restore diverged from cold"
 
+# A clean generic `mod` is NOT an ordinary restored Sub body. A dirty caller
+# needs the template statements to materialize its concrete specialization.
+# Storing every mod metadata-only used to leave `g.madd` registered but
+# non-inlinable here, after which tolg tried to instantiate the nonexistent
+# unspecialized GraphIO. Keep this as a genuinely mixed hit/miss run: editing
+# leaf dirties leaf+top while the generic owner and its u8 specialization hit.
+GW="$W/generic"
+mkdir -p "$GW/src"
+cat > "$GW/src/g.prp" <<'EOF'
+pub mod madd<T>(a:T, b:T) -> (r:T@[0]) { r = a ^ b }
+EOF
+cat > "$GW/src/leaf.prp" <<'EOF'
+pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+EOF
+cat > "$GW/src/top.prp" <<'EOF'
+const madd = import("g.madd")
+const leaf = import("leaf")
+mod top(x:u8) -> (y:u8@[0]) {
+  const v = leaf.bump(a=x)
+  y = madd<u8>(a=v, b=x)
+}
+EOF
+gcompile() {  # RESULT_JSON OUTPUT_LG WORKDIR [extra options]
+  local result=$1 out=$2 work=$3
+  shift 3
+  "$LHD" compile "$GW/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$work" \
+    -q --result-json "$result" "$@" || fail "generic-template compile failed: $(cat "$result" 2>/dev/null)"
+}
+gcompile "$GW/cold.json" "$GW/lg" "$GW/w"
+python3 - "$GW/src/leaf.prp" <<'PY'
+from pathlib import Path
+p = Path(__import__('sys').argv[1])
+p.write_text(p.read_text().replace("a + 1", "a + 2"))
+PY
+gcompile "$GW/mixed.json" "$GW/lg" "$GW/w"
+[ "$(field "$GW/mixed.json" incremental.compile.hits)" -ge 2 ] \
+  || fail "generic-template mixed run restored no clean units"
+[ "$(field "$GW/mixed.json" incremental.compile.misses)" -ge 1 ] \
+  || fail "generic-template semantic edit reported no dirty unit"
+GCAT=$("$LHD" tool cat "lg:$GW/lg" -q) || fail "could not inspect generic-template mixed output"
+grep -q 'g.madd__u8_u8' <<<"$GCAT" \
+  || fail "generic-template mixed run did not retain the concrete specialization"
+gcompile "$GW/edit_cold.json" "$GW/edit_cold_lg" "$GW/edit_cold_w" --set lhd.incremental=false
+[ "$("$LHD" tool diff "lg:$GW/edit_cold_lg" "lg:$GW/lg" --structural -q)" = identical ] \
+  || fail "generic-template mixed restored+fresh result differs from cold"
+
 echo "PASS: incremental Pyrope compile cache"

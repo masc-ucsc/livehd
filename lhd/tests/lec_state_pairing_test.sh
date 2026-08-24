@@ -288,5 +288,76 @@ echo "$OUT" | grep -q "pair-free BMC from reset/no-reset initialization (dropped
 echo "$OUT" | grep -q "synthetic ? initialization (no reset)" || fail "#10 missing tracked-? initialization: $OUT"
 echo "PASS: reset-less mod_mux_aligned shape proves via pair-free tracked-? BMC"
 
+# ---------------------------------------------------------------------------
+# 11. Cross-front-end aggregate recoding. The Verilog side keeps validity in
+#     one packed shift register and instantiates one parameterized registered
+#     leaf definition. Pyrope emits scalar loop replicas (`__liN`) and a
+#     primitive-width generic specialization (`pipe_cell__u4`). A full proof
+#     requires BOTH contracts: pair/collapse the unique specialization with the
+#     elaborated Verilog leaf, then prove the packed/scalar transition relation
+#     and establish its base from reset. Neither ind-only nor bounded BMC alone
+#     is sufficient.
+# ---------------------------------------------------------------------------
+cat > "$W/aggregate_ref.v" <<'EOF'
+module pipe_cell #(parameter W = 4)(
+  input clock, input reset, input [W-1:0] d, output [W-1:0] q
+);
+  reg [W-1:0] q_r;
+  always @(posedge clock) begin
+    if (reset) q_r <= {W{1'b0}};
+    else       q_r <= d + 1'b1;
+  end
+  assign q = q_r;
+endmodule
+
+module dut(input clock, input reset, input [3:0] d,
+           output [3:0] q, output valid);
+  wire [3:0] q0;
+  pipe_cell #(.W(4)) c0(.clock(clock), .reset(reset), .d(d),  .q(q0));
+  pipe_cell #(.W(4)) c1(.clock(clock), .reset(reset), .d(q0), .q(q));
+  reg [2:0] valid_pipe;
+  always @(posedge clock) begin
+    if (reset) valid_pipe <= 3'b000;
+    else       valid_pipe <= (valid_pipe << 1) | 3'b001;
+  end
+  assign valid = valid_pipe[2];
+endmodule
+EOF
+cat > "$W/aggregate_impl.prp" <<'EOF'
+pub mod pipe_cell<T>::[timecheck=false](d:T) -> (q:T@[0]) {
+  reg q_r = 0
+  q = q_r
+  const full = d + 1
+  q_r = full#[0..=(d.[bits] - 1)]
+}
+
+mod valid_stage::[timecheck=false](in_valid:bool, clear:bool) -> (out_valid:bool@[0]) {
+  reg valid_r:bool = false
+  out_valid = valid_r
+  valid_r = if clear { false } else { in_valid }
+}
+
+pub mod dut::[timecheck=false](d:u4, reset:bool) -> (q:u4@[0], valid:bool@[0]) {
+  mut x:u4 = d
+  for i in 0..<2 {
+    x = pipe_cell<u4>(d=x).q
+  }
+  mut v:bool = not reset
+  for i in 0..<3 {
+    v = valid_stage(in_valid=v, clear=reset)
+  }
+  q = x
+  valid = v
+}
+EOF
+OUT=$("$LHD" lec --ref "$W/aggregate_ref.v" --impl "$W/aggregate_impl.prp" --top dut --workdir "$W/wd11" 2>&1)
+RC=$?
+[ "$RC" -eq 0 ] || fail "#11 aggregate recoding should be PROVEN (rc=$RC): $OUT"
+echo "$OUT" | grep -q "lec block 'pipe_cell' pass" || fail "#11 primitive specialization leaf was not paired/proven: $OUT"
+echo "$OUT" | grep -q "PROVEN by packed/scalar relation" || fail "#11 missing combined base+step proof: $OUT"
+echo "$OUT" | grep -q "packed/scalar relation reached from reset" || fail "#11 missing reset-reachable base disclosure: $OUT"
+echo "$OUT" | grep -q "PROVEN equivalent" || fail "#11 did not report unbounded equivalence: $OUT"
+echo "PASS: primitive generic leaf collapse + reset-established packed/scalar induction"
+
 echo "ALL PASS: lec tier-2 uncertain state correspondence"
 exit 0

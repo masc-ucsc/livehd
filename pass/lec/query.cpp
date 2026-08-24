@@ -517,6 +517,8 @@ std::string serialize_result(const Query_result& r) {
     put_str(b, certificate);
   }
   put_i64(b, r.solve_ms);  // best-effort tail: solver-only budget accounting
+  b.push_back(static_cast<char>(r.packed_scalar_step_proven ? 1 : 0));
+  b.push_back(static_cast<char>(r.packed_scalar_base_proven ? 1 : 0));
   return b;
 }
 
@@ -792,6 +794,14 @@ bool deserialize_result(std::string_view b, Query_result& r) {
   int64_t solve_ms = 0;
   if (get_i64(b, solve_ms)) {
     r.solve_ms = solve_ms;
+  }
+  if (!b.empty()) {
+    r.packed_scalar_step_proven = b.front() != 0;
+    b.remove_prefix(1);
+  }
+  if (!b.empty()) {
+    r.packed_scalar_base_proven = b.front() != 0;
+    b.remove_prefix(1);
   }
   return true;
 }
@@ -1378,6 +1388,22 @@ bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
   return true;
 }
 
+bool try_packed_scalar_proven(const Query_result& ind, const Query_result& bmc, Query_result& out) {
+  if (!ind.packed_scalar_step_proven || !bmc.packed_scalar_base_proven || bmc.verdict != Verdict::Proven
+      || bmc.output_checks <= 0) {
+    return false;
+  }
+  out                       = ind;
+  out.verdict               = Verdict::Proven;
+  out.bounded               = false;
+  out.engine                = "ind+bmc-base";
+  out.packed_scalar_base_proven = true;
+  out.detail = "auto: PROVEN by packed/scalar relation (BMC from reset establishes the base; induction preserves the relation and "
+               "all outputs); "
+             + ind.detail + "; base: " + bmc.detail;
+  return true;
+}
+
 // Run one engine, converting any escaping C++ exception (e.g. a cvc5 API
 // exception from a malformed term — see the seed_state width-fit fix above)
 // into a clearly-tagged Unknown result instead of letting it propagate and
@@ -1427,6 +1453,13 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
     rb.cvc5     += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
     rb.solve_ms += ri.solve_ms;
     return rb;
+  }
+  Query_result ps;
+  if (try_packed_scalar_proven(ri, rb, ps)) {
+    ps.elapsed_ms  = now_ms(t0);
+    ps.cvc5       += rb.cvc5;
+    ps.solve_ms   += rb.solve_ms;
+    return ps;
   }
   Query_result bp;
   if (try_bounded_proven(rb, bp)) {  // bp is a copy of rb, so it already carries rb.cvc5
@@ -1887,7 +1920,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     if (hr.engine == "bmc" && hr.verdict == Verdict::Refuted) {
       trusted = true;
     }
-    if (hr.engine == "bmc" && !trusted) {
+    if (hr.engine == "bmc" && !trusted && !hr.packed_scalar_base_proven) {
       Query_result bounded;
       if (try_bounded_proven(hr, bounded)) {
         hr      = std::move(bounded);
@@ -1934,6 +1967,15 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       rb.solve_ms += ri.solve_ms;
       rb.solve_ms += carried_solve_ms;
       return rb;
+    }
+    Query_result ps;
+    if (try_packed_scalar_proven(ri, rb, ps)) {
+      ps.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
+      ps.cvc5       += rb.cvc5;
+      ps.cvc5       += carried;
+      ps.solve_ms   += rb.solve_ms;
+      ps.solve_ms   += carried_solve_ms;
+      return ps;
     }
     Query_result bp;
     if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
@@ -1998,7 +2040,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     return r;
   };
   auto trust = [](int i, const Query_result& r) -> bool {
-    return (i == 0 && r.verdict == Verdict::Proven) || (i == 1 && r.verdict == Verdict::Refuted);
+    return (i == 0 && r.verdict == Verdict::Proven && !r.packed_scalar_step_proven) || (i == 1 && r.verdict == Verdict::Refuted);
   };
   auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
   if (!race.forked) {
@@ -2037,6 +2079,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     r.detail       = "auto: " + std::string(engines[race.winner]) + " reached " + vname(r.verdict) + " first in "
                + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return with(std::move(r));
+  }
+  Query_result ps;
+  if (try_packed_scalar_proven(race.results[0], race.results[1], ps)) {
+    ps.elapsed_ms = now_ms(t0);
+    return with(std::move(ps));
   }
   Query_result bp;
   if (try_bounded_proven(race.results[1], bp)) {
@@ -2499,6 +2546,91 @@ inline void merge_top_in(Top_in& slot, int w, bool sgn) {
   return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {ones});
 }
 
+struct Packed_scalar_bridge {
+  std::string              wide_key;
+  std::vector<std::string> bit_keys;  // LSB first
+};
+
+// Parse the stable loop-replica spelling produced by uPass, e.g.
+// `tree_valid__li64_valid_r`. The numeric occurrence is deliberately removed
+// from the group key; its value supplies the bit/stage order.
+bool split_loop_replica_key(std::string_view key, std::string& group, int& replica) {
+  const auto mark = key.rfind("__li");
+  if (mark == std::string_view::npos) {
+    return false;
+  }
+  size_t end = mark + 4;
+  while (end < key.size() && std::isdigit(static_cast<unsigned char>(key[end]))) {
+    ++end;
+  }
+  if (end == mark + 4) {
+    return false;
+  }
+  int value = 0;
+  for (size_t i = mark + 4; i < end; ++i) {
+    value = value * 10 + (key[i] - '0');
+  }
+  group   = std::string(key.substr(0, mark)) + "\x1f" + std::string(key.substr(end));
+  replica = value;
+  return true;
+}
+
+// Conservative one-to-many candidate mining. A candidate exists only when a
+// unique one-sided N-bit reference flop faces a unique, contiguous group of N
+// one-bit implementation loop replicas. The spelling proposes a relation; it
+// does NOT justify it. The inductive step and reset-reachable BMC base are both
+// proved before the portfolio may turn it into a full equivalence result.
+std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side,
+                                                               const Io_name_map<int>& impl_side) {
+  std::map<std::string, std::map<int, std::string>> groups;
+  for (const auto& [key, width] : impl_side) {
+    if (width != 1 || ref_side.contains(key)) {
+      continue;
+    }
+    std::string group;
+    int         replica = 0;
+    if (split_loop_replica_key(key, group, replica)) {
+      groups[group].emplace(replica, key);
+    }
+  }
+
+  std::map<int, std::vector<std::vector<std::string>>> groups_by_width;
+  for (const auto& [group, members] : groups) {
+    if (members.size() < 2) {
+      continue;
+    }
+    int expected = members.begin()->first;
+    std::vector<std::string> bits;
+    for (const auto& [replica, key] : members) {
+      if (replica != expected++) {
+        bits.clear();
+        break;
+      }
+      bits.push_back(key);
+    }
+    if (!bits.empty()) {
+      groups_by_width[static_cast<int>(bits.size())].push_back(std::move(bits));
+    }
+  }
+
+  std::map<int, std::vector<std::string>> wide_by_width;
+  for (const auto& [key, width] : ref_side) {
+    if (width > 1 && !impl_side.contains(key)) {
+      wide_by_width[width].push_back(key);
+    }
+  }
+
+  std::vector<Packed_scalar_bridge> out;
+  for (auto& [width, scalar_groups] : groups_by_width) {
+    auto wit = wide_by_width.find(width);
+    if (scalar_groups.size() != 1 || wit == wide_by_width.end() || wit->second.size() != 1) {
+      continue;  // an arbitrary choice among same-shaped groups is not a correspondence
+    }
+    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front())});
+  }
+  return out;
+}
+
 }  // namespace
 
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
@@ -2718,8 +2850,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // full name; its pairing degrades to one-sided obligations, which the
   // miters already gate to inconclusive (never a Proven/Refuted).
   auto entity_of = [](std::string_view n) -> std::string {
-    auto d = n.rfind('.');
-    return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
+    auto        d = n.rfind('.');
+    std::string entity(d == std::string_view::npos ? n : n.substr(d + 1));
+    const auto  spec = entity.find("__");
+    if (spec == std::string::npos || spec == 0 || spec + 2 >= entity.size()) {
+      return entity;
+    }
+    size_t p = spec + 2;
+    while (p < entity.size()) {
+      const size_t end = entity.find('_', p);
+      const auto token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
+      bool       width = token == "bool";
+      if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
+        width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
+      }
+      if (!width) {
+        return entity;
+      }
+      if (end == std::string::npos) {
+        return entity.substr(0, spec);
+      }
+      p = end + 1;
+    }
+    return entity;
   };
   // Per design: entity -> the unique full callee name, or "" when ambiguous.
   absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
@@ -3946,6 +4099,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // reset-hold prologue drive both designs into their reset state — so the
     // checked window genuinely exercises free-running behavior from reset.
     Io_name_map<Val>                 ref_state, impl_state;
+    std::vector<Packed_scalar_bridge> bmc_packed_scalar;
     absl::flat_hash_set<std::string> bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
     {
       Io_name_map<int>  fw;
@@ -4013,6 +4167,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       collect_flops(ref);
       side_ix = 1;
       collect_flops(impl);
+      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1]);
 
       // ── bit-blasted state correspondence ──────────────────────────────────
       // Synthesis can implement ONE N-bit register as N one-bit library DFF
@@ -4925,6 +5080,46 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const bool incomplete          = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
     const bool dead_state_only     = internal_state_only(res.unmatched_ref, res.unmatched_impl);
     const bool blocking_incomplete = incomplete && !dead_state_only;
+    auto prove_packed_scalar_base = [&]() {
+      if (bmc_packed_scalar.empty()) {
+        return;
+      }
+      cvc5::Term relation_bad;
+      for (const auto& bridge : bmc_packed_scalar) {
+        auto wide = ref_state.find(bridge.wide_key);
+        if (wide == ref_state.end() || wide->second.width != static_cast<int>(bridge.bit_keys.size())) {
+          res.detail += "; packed/scalar base unavailable (wide state missing)";
+          return;
+        }
+        std::vector<cvc5::Term> bits;
+        bits.reserve(bridge.bit_keys.size());
+        for (auto it = bridge.bit_keys.rbegin(); it != bridge.bit_keys.rend(); ++it) {
+          auto bit = impl_state.find(*it);
+          if (bit == impl_state.end() || bit->second.width != 1) {
+            res.detail += "; packed/scalar base unavailable (replica state missing)";
+            return;
+          }
+          bits.push_back(bit->second.term);
+        }
+        cvc5::Term packed = bits.front();
+        for (size_t i = 1; i < bits.size(); ++i) {
+          packed = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {packed, bits[i]});
+        }
+        cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {wide->second.term, packed});
+        relation_bad    = relation_bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {relation_bad, diff});
+      }
+      solver.push();
+      solver.assertFormula(relation_bad);
+      const auto br = solve_check();
+      solver.pop();
+      if (br.isUnsat()) {
+        res.packed_scalar_base_proven = true;
+        res.detail += "; packed/scalar relation reached from reset";
+      } else {
+        res.detail += br.isSat() ? "; packed/scalar relation not reached at the checked base"
+                                 : "; packed/scalar base check returned unknown";
+      }
+    };
     if (!res.unmatched_ref.empty()) {
       res.detail
           += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
@@ -4982,6 +5177,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             res.detail += "; one-sided internal state is unobservable from every common obligation";
           }
         }
+        if (res.verdict == Verdict::Proven) {
+          prove_packed_scalar_base();
+        }
         return res;
       }
       if (!lec_decompose_fallback(opts.decompose)) {
@@ -4993,9 +5191,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
+    solver.push();
     solver.assertFormula(bad);
     cvc5::Result r = solve_check();
     if (r.isUnsat()) {
+      solver.pop();
       if (blocking_incomplete) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
@@ -5004,6 +5204,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (dead_state_only) {
           res.detail += "; one-sided internal state is unobservable from every common obligation";
         }
+        prove_packed_scalar_base();
       }
     } else if (r.isSat()) {
       // A concrete reachable divergence is a genuine refutation only when the
@@ -5357,6 +5558,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   add_flops(ref);
   ind_side_ix = 1;
   add_flops(impl);
+  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1]);
 
   // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
   // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
@@ -5408,6 +5610,41 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     ind_bitblast.emplace(key, std::move(bits));
   }
+  int ind_packed_scalar_applied = 0;
+  for (const auto& bridge : ind_packed_scalar) {
+    if (ind_bitblast.contains(bridge.wide_key)) {
+      continue;
+    }
+    auto pit = shared.find(bridge.wide_key);
+    if (pit == shared.end() || pit->second.width != static_cast<int>(bridge.bit_keys.size())) {
+      continue;
+    }
+    bool available = true;
+    for (const auto& bit : bridge.bit_keys) {
+      if (ind_side[0].contains(bit)) {
+        available = false;
+        break;
+      }
+    }
+    if (!available) {
+      continue;
+    }
+    for (size_t i = 0; i < bridge.bit_keys.size(); ++i) {
+      const auto b = static_cast<uint32_t>(i);
+      cvc5::Term t = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
+      shared[bridge.bit_keys[i]] = Val{t, 1, false};
+    }
+    ind_bitblast.emplace(bridge.wide_key, bridge.bit_keys);
+    ++ind_packed_scalar_applied;
+  }
+  auto gate_packed_scalar_step = [&]() {
+    if (res.verdict != Verdict::Proven || ind_packed_scalar_applied == 0) {
+      return;
+    }
+    res.verdict                     = Verdict::Unknown;
+    res.packed_scalar_step_proven   = true;
+    res.detail += "; packed/scalar transition relation is inductive; awaiting a reset-reachable base proof";
+  };
   // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
   // cut), corresponding on both designs: the inductive miter assumes it equal and
   // proves the box's next-state (UF) equal alongside the parent's.
@@ -5866,6 +6103,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                      + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
                      + ind_ref_plan.describe() + "]";
         disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
+        gate_packed_scalar_step();
         return res;
       }
     }
@@ -6119,6 +6357,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (phase_dead_state_only) {
         res.detail += "; one-sided internal state is unobservable from every common obligation";
       }
+      gate_packed_scalar_step();
       return res;
     }
     // SAT here is NOT a disproof: the assumed-equal current state may be
@@ -7095,6 +7334,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (dead_state_only) {
         res.detail += "; one-sided internal state is unobservable from every common obligation";
       }
+      gate_packed_scalar_step();
       return res;
     }
     res.nothing_compared  = true;
@@ -7196,6 +7436,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (res.verdict == Verdict::Proven && dead_state_only) {
         res.detail += "; one-sided internal state is unobservable from every common obligation";
       }
+      gate_packed_scalar_step();
       return res;
     }
     // sel symbol absent (should not happen): fall through to the monolithic solve.
@@ -7243,6 +7484,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (dead_state_only) {
         res.detail += "; one-sided internal state is unobservable from every common obligation";
       }
+      gate_packed_scalar_step();
       return res;
     }
     res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size()) + " cuts PROVEN"
@@ -7327,6 +7569,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail += " (hit formal.timeout=" + std::to_string(opts.timeout) + "s; raise --set formal.timeout)";
     }
   }
+  gate_packed_scalar_step();
   return res;
 }
 

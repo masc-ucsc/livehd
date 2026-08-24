@@ -20,11 +20,11 @@ constexpr std::string_view kSteps
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds
     = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","diagnostics"])json";
-constexpr std::string_view kErrorClasses =
-    R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
+constexpr std::string_view kErrorClasses
+    = R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 constexpr std::string_view kJsonSynthCommand
-    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> pass.color reduce (synth.reduce=true; shares repeated one/two-node combinational cones) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on — other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + abc_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"synth.flag=value | abc.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -36,7 +36,7 @@ std::string json_escape(std::string_view s) {
   out.reserve(s.size() + 8);
   for (char c : s) {
     switch (c) {
-      case '"': out += "\\\""; break;
+      case '"' : out += "\\\""; break;
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
       case '\r': out += "\\r"; break;
@@ -56,8 +56,8 @@ std::string json_escape(std::string_view s) {
 // capped so one option stays one line; `lhd describe pass.flag` has the
 // full text.
 std::string brief_help(std::string_view help) {
-  auto        cut = help.find(". ");
-  std::string out{cut == std::string_view::npos ? help : help.substr(0, cut)};
+  auto             cut = help.find(". ");
+  std::string      out{cut == std::string_view::npos ? help : help.substr(0, cut)};
   constexpr size_t kMax = 108;
   if (out.size() > kMax) {
     out.resize(kMax);
@@ -127,7 +127,7 @@ int list_options(const Options& opts) {
     }
   }
 
-  const auto              all = list_set_options();
+  const auto                     all = list_set_options();
   std::vector<const Set_option*> sel;
   for (const auto& o : all) {
     if (filter.empty() || std::regex_search(o.name, re)) {
@@ -193,7 +193,10 @@ int describe_option(const Options& opts, const std::string& name) {
   auto prefix = name.substr(0, name.rfind('.'));
   for (const auto& o : all) {
     if (o.name.size() > prefix.size() && o.name.compare(0, prefix.size(), prefix) == 0 && o.name[prefix.size()] == '.') {
-      std::print(stderr, "lhd describe: unknown option '{}' (`lhd list options {}\\..*` shows what {} accepts)\n", name, prefix,
+      std::print(stderr,
+                 "lhd describe: unknown option '{}' (`lhd list options {}\\..*` shows what {} accepts)\n",
+                 name,
+                 prefix,
                  prefix);
       return 1;
     }
@@ -598,7 +601,8 @@ int describe_command(const Options& opts) {
     return 0;
   }
   if (name == "recipe:O1" || name == "O1") {
-    print_json_line(R"json({"schema_version":1,"name":"recipe:O1","steps":["pass.cprop"],"description":"Constant/copy propagation"})json");
+    print_json_line(
+        R"json({"schema_version":1,"name":"recipe:O1","steps":["pass.cprop"],"description":"Constant/copy propagation"})json");
     return 0;
   }
   if (name == "recipe:O2" || name == "O2") {
@@ -728,9 +732,8 @@ int print_options_section(std::initializer_list<std::string_view> prefixes) {
   // for several (so the shell keeps the '|' as one argument).
   std::string list_arg = prefixes.size() == 1 ? pattern : std::format("'{}'", pattern);
   if (prefixes.size() == 1) {
-    std::print(
-        "\noptions (--set {0}.flag=value; `lhd describe {0}.flag` for each listed flag option in `lhd list options {0}`):\n",
-        pattern);
+    std::print("\noptions (--set {0}.flag=value; `lhd describe {0}.flag` for each listed flag option in `lhd list options {0}`):\n",
+               pattern);
   } else {
     std::print("\noptions (--set <flag>=value; `lhd describe <flag>` for each listed flag option in `lhd list options {}`):\n",
                list_arg);
@@ -764,7 +767,7 @@ void print_general_help() {
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
-      "  synth      one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA (QoR + timing)\n"
+      "  synth      one-shot synthesis: compile -> reduce -> color synth -> abc tech-map -> opentimer STA (QoR + timing)\n"
       "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
@@ -1022,6 +1025,11 @@ int help_pass(const std::string& sub) {
         "  --set pass.abc.allow_oversize=true disables the guard.\n"
         "  Refused? `lhd pass color <alg> --top M lg:DIR --stats` sizes the regions first.\n"
         "\n"
+        "progress:\n"
+        "  Each completed color immediately flushes one `PROGRESS pass.abc` line with a\n"
+        "  monotonic completed count, region/color identity, resynth/cache state, QoR,\n"
+        "  elapsed milliseconds, and memory. Verbose per-stage ABC chatter remains off.\n"
+        "\n"
         "flags:\n"
         "  --top M                  select the module to map\n"
         "  --emit-dir lg:OUT/       output library (must differ from the input)\n"
@@ -1111,7 +1119,9 @@ int help_pass(const std::string& sub) {
     return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n", sub);
+    std::print(stderr,
+               "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n",
+               sub);
     return 1;
   }
   std::print(
@@ -1163,35 +1173,35 @@ std::string json_version() {
       kVersion);
 }
 
-constexpr std::string_view kJsonPyropeOverview =
-    R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
+constexpr std::string_view kJsonPyropeOverview
+    = R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
 
-constexpr std::string_view kJsonPassColor =
-    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|reduce|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","reduce","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
+constexpr std::string_view kJsonPassColor
+    = R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|reduce|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","reduce","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
 
-constexpr std::string_view kJsonPassPartition =
-    R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
+constexpr std::string_view kJsonPassPartition
+    = R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
 
-constexpr std::string_view kJsonPassSingleEdge =
-    R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
+constexpr std::string_view kJsonPassSingleEdge
+    = R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.single_edge.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
-constexpr std::string_view kJsonPassAbc =
-    R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
+constexpr std::string_view kJsonPassAbc
+    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
-constexpr std::string_view kJsonPassOpentimer =
-    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run)","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
+constexpr std::string_view kJsonPassOpentimer
+    = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run)","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
 
-constexpr std::string_view kJsonPassLiberty =
-    R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
+constexpr std::string_view kJsonPassLiberty
+    = R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
 
-constexpr std::string_view kJsonSimCommand =
-    R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
+constexpr std::string_view kJsonSimCommand
+    = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
 
-constexpr std::string_view kJsonList =
-    R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","recipes","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list recipes","lhd list log-channels"]})json";
+constexpr std::string_view kJsonList
+    = R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","recipes","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list recipes","lhd list log-channels"]})json";
 
-constexpr std::string_view kJsonDescribe =
-    R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, recipe:NAME, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | recipe:NAME | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
+constexpr std::string_view kJsonDescribe
+    = R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, recipe:NAME, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | recipe:NAME | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
 
 // Route a `--diag-fmt json` help page to its JSON record. `topic`/`sub` are the
 // normalized help words (formal lec already folded to lec by the caller).
@@ -1286,7 +1296,9 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassLiberty);
       return 0;
     }
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n", sub);
+    std::print(stderr,
+               "lhd help: unknown pass subcommand '{}' (color | partition | single_edge | abc | opentimer | liberty | semdiff)\n",
+               sub);
     return 1;
   }
   // `formal` is a family: the record follows the SUBCOMMAND, so
@@ -1581,73 +1593,74 @@ int help_command(const Options& opts) {
   }
   if (topic == "sim") {
     std::print("{}",
-        "lhd sim — build and run a C++ simulation of a Pyrope design's `test` blocks\n"
-        "\n"
-        "usage: lhd sim <file.prp> [test.name] [flags]\n"
-        "  Lowers the design's DUT to a Slop<N> struct (inou.cgen.sim, over ../hlop) and\n"
-        "  generates ONE C++ driver (drv.cpp) holding every `test` block. The driver is\n"
-        "  built with the host C++ compiler (header-only Slop runtime, no bazel) and run —\n"
-        "  each `test`'s asserts are checked dynamically (by running), not formally. An\n"
-        "  optional second positional selects a single test by name.\n"
-        "\n"
-        "  Each `test name(params)` parameter becomes a `--<name>` flag on the generated\n"
-        "  binary (defaulting to its signature default; a parameter with no default is\n"
-        "  required). The binary also accepts `--list-tests`, `--test NAME`, `--seed N`\n"
-        "  (hlop PRNG seed), and `--help`. `--arg key=value` / `--seed N` here are forwarded\n"
-        "  to it, and the built binary can be re-run directly with those flags.\n"
-        "\n"
-        "flags:\n"
-        "  --list-tests         list the design's tests + parameters, then exit (no build; JSON or\n"
-        "                       a human listing per --diag-fmt)\n"
-        "  --arg key=value      bind a test runtime parameter, forwarded as `--key value` (repeatable)\n"
-        "  --seed N             PRNG seed forwarded to the driver (else it keeps its default)\n"
-        "  --result-json PATH   (global) the result envelope gains a per-test `tests` array (status,\n"
-        "                       cycle, located failing assert) for tooling\n"
-        "  --restart-cycle N    resume from the nearest checkpoint <= cycle N (debug a long run)\n"
-        "  --vcd-from Y [--vcd-to Z]  trace a VCD over just cycles [Y, Z] (restarts near Y; implies VCD)\n"
-        "  --vcd-on-fail [--vcd-fail-window N]  on an assert fire, auto-dump a VCD of the last N cycles\n"
-        "  --list-signals       list the observable scalar signals (hierarchical names) as JSON, then exit\n"
-        "  --probe SIG,... [--probe-from A --probe-to B]  per-cycle JSON trajectory of SIG (no re-instrumenting)\n"
-        "  --break-when 'SIG OP V'  report the first cycle a `SIG >|<|>=|<=|==|!= VALUE|SIG` condition holds\n"
-        "  --query FILE|-|{...} batched JSON questions about the run, answered from ONE replay; the\n"
-        "                       answers become the result envelope's `query` member. The request is\n"
-        "                       {\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[{\"id\":..,\"op\":..}]}\n"
-        "                       with ops signals|value|values|changes|next_change|find|snapshot|diff;\n"
-        "                       a query names a signal (or a {scope|glob|regex|kind} selector) and a\n"
-        "                       time {\"cycle\":N}. Unknown ops/fields/phases and bad ranges are usage\n"
-        "                       errors; a bad SIGNAL is an in-band per-query error, so one typo never\n"
-        "                       erases the other answers. Not combinable with --restart-cycle/--vcd-*\n"
-        "  --setup-only         generate the C++ sim driver, do not build/run\n"
-        "  --run-only           host-compile + run an existing sim (needs --workdir from --setup-only)\n"
-        "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
-        "  --set sim.flag=value VCD + checkpoint knobs (the options block below; `lhd describe sim.flag`)\n"
-        "\n"
-        "examples:\n"
-        "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
-        "  lhd sim foo.prp --list-tests                   # enumerate the tests + params as JSON\n"
-        "  lhd sim foo.prp my_test                        # run just the `my_test` block\n"
-        "  lhd sim foo.prp my_test --arg n=4              # bind the test parameter n=4\n"
-        "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
-        "  lhd sim foo.prp --result-json r.json           # envelope + per-test located-failure array\n"
-        "  lhd sim foo.prp --set sim.vcd=true             # also dump a VCD per test\n"
-        "  lhd sim foo.prp my_test --result-json r.json \\\n"
-        "      --query '{\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[\n"
-        "        {\"id\":\"pc\",\"op\":\"value\",\"signal\":\"cpu.fetch.pc\",\"at\":{\"cycle\":42}},\n"
-        "        {\"id\":\"regs\",\"op\":\"signals\",\"scope\":\"cpu.rf\"}]}'\n"
-        "                                                # one replay answers both; `regs` needs none\n"
-        "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
-        "  ./build/sim/drv.bin --test my_test --seed 7    # run the built driver directly\n"
-        "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
-        "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
+               "lhd sim — build and run a C++ simulation of a Pyrope design's `test` blocks\n"
+               "\n"
+               "usage: lhd sim <file.prp> [test.name] [flags]\n"
+               "  Lowers the design's DUT to a Slop<N> struct (inou.cgen.sim, over ../hlop) and\n"
+               "  generates ONE C++ driver (drv.cpp) holding every `test` block. The driver is\n"
+               "  built with the host C++ compiler (header-only Slop runtime, no bazel) and run —\n"
+               "  each `test`'s asserts are checked dynamically (by running), not formally. An\n"
+               "  optional second positional selects a single test by name.\n"
+               "\n"
+               "  Each `test name(params)` parameter becomes a `--<name>` flag on the generated\n"
+               "  binary (defaulting to its signature default; a parameter with no default is\n"
+               "  required). The binary also accepts `--list-tests`, `--test NAME`, `--seed N`\n"
+               "  (hlop PRNG seed), and `--help`. `--arg key=value` / `--seed N` here are forwarded\n"
+               "  to it, and the built binary can be re-run directly with those flags.\n"
+               "\n"
+               "flags:\n"
+               "  --list-tests         list the design's tests + parameters, then exit (no build; JSON or\n"
+               "                       a human listing per --diag-fmt)\n"
+               "  --arg key=value      bind a test runtime parameter, forwarded as `--key value` (repeatable)\n"
+               "  --seed N             PRNG seed forwarded to the driver (else it keeps its default)\n"
+               "  --result-json PATH   (global) the result envelope gains a per-test `tests` array (status,\n"
+               "                       cycle, located failing assert) for tooling\n"
+               "  --restart-cycle N    resume from the nearest checkpoint <= cycle N (debug a long run)\n"
+               "  --vcd-from Y [--vcd-to Z]  trace a VCD over just cycles [Y, Z] (restarts near Y; implies VCD)\n"
+               "  --vcd-on-fail [--vcd-fail-window N]  on an assert fire, auto-dump a VCD of the last N cycles\n"
+               "  --list-signals       list the observable scalar signals (hierarchical names) as JSON, then exit\n"
+               "  --probe SIG,... [--probe-from A --probe-to B]  per-cycle JSON trajectory of SIG (no re-instrumenting)\n"
+               "  --break-when 'SIG OP V'  report the first cycle a `SIG >|<|>=|<=|==|!= VALUE|SIG` condition holds\n"
+               "  --query FILE|-|{...} batched JSON questions about the run, answered from ONE replay; the\n"
+               "                       answers become the result envelope's `query` member. The request is\n"
+               "                       {\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[{\"id\":..,\"op\":..}]}\n"
+               "                       with ops signals|value|values|changes|next_change|find|snapshot|diff;\n"
+               "                       a query names a signal (or a {scope|glob|regex|kind} selector) and a\n"
+               "                       time {\"cycle\":N}. Unknown ops/fields/phases and bad ranges are usage\n"
+               "                       errors; a bad SIGNAL is an in-band per-query error, so one typo never\n"
+               "                       erases the other answers. Not combinable with --restart-cycle/--vcd-*\n"
+               "  --setup-only         generate the C++ sim driver, do not build/run\n"
+               "  --run-only           host-compile + run an existing sim (needs --workdir from --setup-only)\n"
+               "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
+               "  --set sim.flag=value VCD + checkpoint knobs (the options block below; `lhd describe sim.flag`)\n"
+               "\n"
+               "examples:\n"
+               "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
+               "  lhd sim foo.prp --list-tests                   # enumerate the tests + params as JSON\n"
+               "  lhd sim foo.prp my_test                        # run just the `my_test` block\n"
+               "  lhd sim foo.prp my_test --arg n=4              # bind the test parameter n=4\n"
+               "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
+               "  lhd sim foo.prp --result-json r.json           # envelope + per-test located-failure array\n"
+               "  lhd sim foo.prp --set sim.vcd=true             # also dump a VCD per test\n"
+               "  lhd sim foo.prp my_test --result-json r.json \\\n"
+               "      --query '{\"schema_version\":1,\"kind\":\"sim_query\",\"queries\":[\n"
+               "        {\"id\":\"pc\",\"op\":\"value\",\"signal\":\"cpu.fetch.pc\",\"at\":{\"cycle\":42}},\n"
+               "        {\"id\":\"regs\",\"op\":\"signals\",\"scope\":\"cpu.rf\"}]}'\n"
+               "                                                # one replay answers both; `regs` needs none\n"
+               "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
+               "  ./build/sim/drv.bin --test my_test --seed 7    # run the built driver directly\n"
+               "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
+               "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
     return print_options_section({"sim."});
   }
   if (topic == "synth") {
     std::print("{}",
-               "lhd synth — one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA\n"
+               "lhd synth — one-shot synthesis: compile -> reduce -> color synth -> abc tech-map -> opentimer STA\n"
                "\n"
                "usage: lhd synth [--top M] [--workdir W] <file.prp|file.sv|lg:DIR|ln:DIR ...> [--emit-dir lg:NET] [--stats]\n"
-               "  The four manual steps over ONE in-memory design:\n"
+               "  The five manual steps over ONE in-memory design:\n"
                "    lhd compile X --top M --emit-dir lg:L        (sources, ln:, lg:, mixed — as `lhd compile`)\n"
+               "    lhd pass color reduce --top M lg:L             (synth.reduce=true; repeated small cones)\n"
                "    lhd pass color synth --top M lg:L              (always `synth`: per-(def,color) regions)\n"
                "    lhd pass abc --top M lg:L --emit-dir lg:NET    (ABC tech-map to the Liberty cells)\n"
                "    lhd pass opentimer --top M lg:NET cells.lib    (STA; synth.opentimer=false skips it)\n"

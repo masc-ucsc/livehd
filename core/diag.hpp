@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <format>
+#include <initializer_list>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -196,6 +197,14 @@ public:
   // CLI's --diag-fmt jsonl). set_human_stderr still gates the channel on/off.
   void set_stderr_jsonl(bool on);
 
+  // Ephemeral, non-diagnostic progress. Unlike an info Diagnostic this is not
+  // retained, deduplicated, counted, or written to diagnostics.jsonl: a large
+  // synthesis can complete thousands of colors. It follows the stderr policy
+  // (`-q` suppresses it; jsonl mode gets a structured object) and flushes every
+  // record so wrappers can provide a live heartbeat.
+  void progress(std::string_view pass, std::string_view message,
+                std::initializer_list<std::pair<std::string_view, std::string>> attrs = {});
+
   // Source-excerpt provider for the human channel. The pointed-to locator must
   // outlive its registration — prefer the RAII Locator_scope below, which the
   // emitting stages (parse, upass, tolg) wrap around their per-artifact
@@ -211,15 +220,16 @@ private:
   std::vector<Diagnostic>     records_;
   absl::flat_hash_set<size_t> seen_;  // per-step dedup keys
   std::string                 step_;
-  uint64_t                    seq_ = 0;
+  uint64_t                    seq_                  = 0;
+  uint64_t                    progress_seq_         = 0;
   // Counters are written under mutex_ but READ by has_errors()/count() without
   // it (those are on hot per-node paths). Atomics keep such a read well-defined
   // while a bounded parallel step (parse / cprop / prp_writer) is emitting.
-  std::atomic<size_t> error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
-  std::atomic<size_t> deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
-  std::atomic<size_t> warn_count_           = 0;
-  std::atomic<size_t> note_count_           = 0;
-  std::atomic<size_t> info_count_           = 0;  // progress/info records (never an error)
+  std::atomic<size_t>         error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
+  std::atomic<size_t>         deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
+  std::atomic<size_t>         warn_count_           = 0;
+  std::atomic<size_t>         note_count_           = 0;
+  std::atomic<size_t>         info_count_           = 0;  // progress/info records (never an error)
 
   enum class Json { uninit, none, stderr_, file };
   Json        json_out_ = Json::uninit;

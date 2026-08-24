@@ -46,7 +46,7 @@ run pass opentimer --top "${TOP}" lg:"$W/net" "$LIB" --workdir "$W/wt"
 [ -f "$W/wt/timing.json" ] || fail "no timing.json under --workdir"
 grep -q '"kind":"sta"' "$W/wt/timing.json" || fail "timing.json missing kind:sta"
 grep -q '"max_delay":' "$W/wt/timing.json" || fail "timing.json missing max_delay"
-grep -q '"critical_pin":"g[0-9]*_[A-Za-z0-9]*:' "$W/wt/timing.json" || fail "timing.json missing a gate critical_pin"
+grep -q '"critical_pin":"g[0-9]*_[A-Za-z0-9_]*__n[0-9]*:' "$W/wt/timing.json" || fail "timing.json missing a gate critical_pin"
 grep -q '"critical_src":"[^"]*abc_comb.prp:[0-9]*"' "$W/wt/timing.json" || fail "critical path not source-attributed"
 grep -q '"endpoints":\[{' "$W/wt/timing.json" || fail "timing.json missing endpoints"
 grep -q '"qor":{"schema_version":1,"kind":"sta"' "$W/r.json" || fail "envelope missing the qor member"
@@ -109,6 +109,69 @@ fi
     -q --result-json "$W/rd.json" 2> "$W/ot_def.err" || fail "default (hier=true) opentimer -> $(cat "$W/rd.json")"
 grep -q "\"module\":\"$TOP\"" "$W/wd/timing.json" || fail "default timing.json must report the real top name"
 grep -q '"max_delay":' "$W/wd/timing.json" || fail "default timing.json missing max_delay"
+
+# 4a. Cross-region pure-wiring order. occurrence forward order is only
+# topological inside one definition: the SRA producer below can land in an
+# earlier sibling region than the mapped gates that consume it, while the
+# result-side Sext remains in the other region. Tracker population must defer
+# the consumer until the producer identity exists, rather than minting an
+# `n$sra_*` timing root or reading a zero-width boundary pin.
+XPRP="$W/cross_region.prp"
+cat >"$XPRP" <<'EOF'
+pub mod ot_cross_region(a:s8, b:s8) -> (y:s8@[0]) {
+  const wide:s64 = a
+  const shifted  = wide >> 11
+  y = shifted + b
+}
+EOF
+XTOP=ot_cross_region.ot_cross_region
+run compile "$XPRP" --top ot_cross_region --emit-dir lg:"$W/xlg" --workdir "$W/xw1"
+run pass color synth --top "$XTOP" lg:"$W/xlg" --set color.max_ge=1 --set color.min_ge=0 --workdir "$W/xw2"
+run pass abc --top "$XTOP" lg:"$W/xlg" --emit-dir lg:"$W/xnet" --set abc.library="$LIB" --workdir "$W/xw3"
+grep -q '"regions":2' "$W/r.json" || fail "cross-region fixture did not split into two mapped regions"
+"$LHD" pass opentimer --top "$XTOP" lg:"$W/xnet" "$LIB" --workdir "$W/xwt" \
+    -q --result-json "$W/xr.json" 2> "$W/ot_cross.err" || fail "cross-region opentimer -> $(cat "$W/xr.json")"
+grep -q '"max_delay":' "$W/xwt/timing.json" || fail "cross-region timing.json missing max_delay"
+if grep -qE '^[WE] ' "$W/ot_cross.err"; then
+  fail "OpenTimer warnings/errors on cross-region wiring: $(grep -E '^[WE] ' "$W/ot_cross.err" | head -3)"
+fi
+
+# 4aa. Dense ABC input splitter driven by a parent constant. The child maps a
+# 300-bit adder and therefore instantiates __livehd_abc_input_bits_300; at this
+# occurrence its input resolves all the way to CONST_NODE. Constants are real
+# zero-arrival timing leaves, and each splitter SRA must retain its one-bit
+# output arity without inventing an `invalid_*` bus net.
+CSPR="$W/const_splitter.prp"
+cat >"$CSPR" <<'EOF'
+mod dense(a:u300) -> (y:u300@[0]) {
+  y = a + 1
+}
+
+pub mod ot_const_splitter() -> (y:u300@[0]) {
+  y = dense(a=0).y
+}
+EOF
+CSTOP=const_splitter.ot_const_splitter
+run synth "$CSPR" --top ot_const_splitter --workdir "$W/csw" --emit-dir lg:"$W/csnet" \
+    --set synth.liberty="$LIB" --set color.max_ge=1 --set color.min_ge=0
+"$LHD" tool tree lg:"$W/csnet" --top "$CSTOP" >"$W/cs.tree" \
+    || fail "could not inspect constant-splitter mapped hierarchy"
+grep -q '__livehd_abc_input_bits_300' "$W/cs.tree" || fail "constant-splitter fixture did not instantiate dense input helper"
+grep -q '"kind":"sta"' "$W/csw/synth/timing.json" || fail "constant-splitter timing.json missing STA report"
+
+# 4ab. A native divider is an intentional ABC black-box boundary, not an
+# unmapped cell that should make whole-design STA fail. Its output starts a new
+# zero-arrival segment while mapped input/output-side cones remain timed.
+DPRP="$W/div_boundary.prp"
+cat >"$DPRP" <<'EOF'
+pub mod ot_div_boundary(a:u16, b:u8) -> (y:u16@[0]) {
+  y = (a / (b | 1)) + 3
+}
+EOF
+run synth "$DPRP" --top ot_div_boundary --workdir "$W/dw" --emit-dir lg:"$W/dnet" \
+    --set synth.liberty="$LIB"
+grep -q '"div_blackbox":1' "$W/r.json" || fail "divider fixture was not reported as one ABC blackbox"
+grep -q '"kind":"sta"' "$W/dw/synth/timing.json" || fail "divider-boundary timing.json missing STA report"
 
 # 4b. negative control: with explicit hier=false a WRAPPER top -- one that only
 #     instantiates region modules, which are not Liberty cells -- must fail

@@ -39,9 +39,9 @@
 // floor on Darwin is the task's *current* virtual_size -- an arm64 process
 // reserves ~415 GiB of PROT_NONE VA at startup, so an absolute small limit
 // EINVALs for being BELOW the floor, not for being unsupported. Set it to
-// (virtual_size + budget) and it enforces to the byte (verified: malloc->NULL,
-// mmap->MAP_FAILED, new->bad_alloc, an incremental loop stops at exactly the
-// headroom). See arm_address_space_limit().
+// (virtual_size + a bounded allocation allowance) and it enforces to the byte
+// (verified: malloc->NULL, mmap->MAP_FAILED, new->bad_alloc). The allowance now
+// includes explicit VA-only allocator headroom; see arm_address_space_limit().
 
 #include <cstdint>
 
@@ -85,11 +85,12 @@ namespace livehd::cost {
 // bounds every child (yosys, a re-invoked `lhd sim`, a forked prover).
 //
 // Darwin: RLIMIT_AS's floor is the task's current virtual_size, so the installed
-// value is (virtual_size + budget) read at call time -- never hardcode the
-// ~415 GiB baseline, it is arm64- and OS-version-specific. Real allocations grow
-// VA ~1:1, so this bounds real memory to ~budget. Linux: the value is `budget`
-// absolute (baseline VA is a few MB). This is the HARD BACKSTOP described in the
-// file header: it protects the host, it does not produce a clean error.
+// value is (virtual_size + 1.25*budget) read at call time -- never hardcode the
+// ~415 GiB baseline, it is arm64- and OS-version-specific. The 25% VA-only
+// allowance covers allocator reservations/holes; sampled admission still gates
+// PHYSICAL footprint at `budget`. Linux: the value is `budget` absolute
+// (baseline VA is a few MB). This is the HARD BACKSTOP described in the file
+// header: it protects the host, it does not produce a clean error.
 [[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget);
 
 // The budget this process is configured for: env LIVEHD_MEMORY_BUDGET_MB when

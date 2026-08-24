@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // `lhd synth`: the one-shot synthesis flow.
 //
-//   compile (sources / ln: / lg:)  ->  pass.color synth  ->  pass.abc  ->  pass.opentimer
+//   compile -> pass.color reduce -> pass.color synth -> pass.abc -> pass.opentimer
 //
-// over ONE in-memory design. The same four steps run by hand are
+// over ONE in-memory design. The same five steps run by hand are
 //
 //   lhd compile cpu.prp --top Cpu --emit-dir lg:L --workdir W
+//   lhd pass color reduce --top Cpu.Cpu lg:L --workdir W
 //   lhd pass color synth --top Cpu.Cpu lg:L --workdir W
 //   lhd pass abc   --top Cpu.Cpu lg:L --emit-dir lg:N --workdir W
 //   lhd pass opentimer --top Cpu.Cpu lg:N cells.lib --workdir W
@@ -42,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -129,10 +131,11 @@ void synth_command(Options& opts, Result& res) {
                       std::format("replace `--set pass.abc.library={0}` with `--set synth.liberty={0}`", v)};
     }
   }
-  const std::string liberty = resolve_liberty(opts);
-  const bool        run_sta = truthy(synth_set(opts, "opentimer", "true"));
-  const std::string sdc     = synth_set(opts, "sdc", "");
-  const std::string spef    = synth_set(opts, "spef", "");
+  const std::string liberty    = resolve_liberty(opts);
+  const bool        run_sta    = truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_reduce = truthy(synth_set(opts, "reduce", "true"));
+  const std::string sdc        = synth_set(opts, "sdc", "");
+  const std::string spef       = synth_set(opts, "spef", "");
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -209,7 +212,7 @@ void synth_command(Options& opts, Result& res) {
   const std::string top{top_g->get_name()};
   opts.top = top;
 
-  // ---- 2. coloring ------------------------------------------------------------
+  // ---- 2. repeated-cone reduction + coloring ---------------------------------
   // Always `synth`: the per-(def, color) regions are what keep a large design
   // inside pass.abc's memory admission and what its incremental reuse is keyed
   // on. The colors live on the in-memory graphs only — <root>/lg is NOT
@@ -217,6 +220,42 @@ void synth_command(Options& opts, Result& res) {
   // region CONTENT, and on a warm compile <root>/lg is hardlinked from the
   // compile cache's generation, so an in-place save would write through into
   // the cache.
+  if (run_reduce) {
+    Eprp_var::Eprp_dict labels;
+    labels["seed"]      = opts.seed;
+    labels["top"]       = top;
+    labels["min_nodes"] = "1";
+    labels["max_nodes"] = "2";
+    labels["min_count"] = "3";
+    labels["min_win"]   = "1";
+    merge_sets(opts, "pass.color", labels);
+    labels["alg"] = "reduce";  // forced AFTER merge: a user --set color.alg never re-targets this step
+    if (opts.stats) {
+      labels["stats"] = "true";
+    }
+    run_step("pass.color", var, labels, opts, res);
+
+    // reduce creates content-addressed pat_* definitions in the same in-memory
+    // GraphLibrary. Eprp_var is a snapshot from before that rewrite, so append
+    // the new definitions before synth coloring. A separate `lhd pass color`
+    // command naturally reloads them from disk; the fused command must expose
+    // the identical graph set without saving/reloading the compiled cache.
+    absl::flat_hash_set<hhds::Gid> loaded;
+    loaded.reserve(var.graphs.size());
+    for (const auto& g : var.graphs) {
+      if (g) {
+        loaded.insert(g->get_gid());
+      }
+    }
+    auto& lib = livehd::Hhds_graph_library::instance(lg_dir);
+    for (const auto gid : lib.all_gids()) {
+      if (!loaded.contains(gid)) {
+        if (auto g = lib.get_graph(gid)) {
+          var.add(g);
+        }
+      }
+    }
+  }
   {
     Eprp_var::Eprp_dict labels;
     labels["alg"]  = "synth";

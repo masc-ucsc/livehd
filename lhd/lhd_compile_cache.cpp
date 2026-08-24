@@ -81,6 +81,7 @@ struct Prior_cache {
   bool                                          compatible{false};
   std::map<std::string, Prior_unit>             units;
   std::map<std::string, std::shared_ptr<Lnast>> lnasts;
+  std::vector<std::string>                      order;
 };
 
 struct Graph_row {
@@ -426,6 +427,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
   for (const auto& ln : var.lnasts) {
     loaded.emplace(ln->get_top_module_name());
   }
+  const auto preloaded = loaded;
   for (const auto& path : seeds) {
     const auto unit = import_detail::unit_name_of(path);
     const auto abs  = import_detail::abspath_of(path);
@@ -515,7 +517,81 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
     // here would turn a harmless fingerprint collision into path aliasing.
     out[i].snapshot_file = std::format("unit_{:08}.prp", i);
   }
-  return out;
+
+  // Match discover_imports exactly: all seed files are published first in
+  // command-line order, then each import breadth is published in logical-name
+  // order. The source inventory used to remain alphabetized here. That is a
+  // valid closure representation, but LNAST order is load-bearing for uPass's
+  // registries and CSE representatives; on XS it made an incremental cold
+  // compile produce a different NewCSR graph from the cache-disabled oracle.
+  // Snapshot ordinals above stay name-sorted so changing traversal order does
+  // not create needless cache-file churn.
+  std::map<std::string, size_t> by_name;
+  for (size_t i = 0; i < out.size(); ++i) {
+    by_name.emplace(out[i].name, i);
+  }
+  // `satisfied` mirrors the capture walk above: a name an ALREADY-LOADED lnast
+  // provides needs no import breadth of its own. `placed` is the separate
+  // ordering view -- a captured unit must appear exactly once in the result even
+  // when a preloaded lnast happens to share its logical name (a seed .prp beside
+  // an `ln:` import of the same module). Folding the two sets into one dropped
+  // that unit from the returned closure, and with it from the inventory and the
+  // closure key, so a later edit of it could not dirty the cache.
+  std::set<std::string> satisfied = preloaded;
+  std::set<std::string> placed;
+  std::vector<size_t>   order;
+  order.reserve(out.size());
+  const auto place = [&](const std::string& name, size_t index) {
+    if (!placed.insert(name).second) {
+      return;
+    }
+    satisfied.insert(name);
+    order.push_back(index);
+  };
+  for (const auto& path : seeds) {
+    const auto name = import_detail::unit_name_of(path);
+    if (const auto it = by_name.find(name); it != by_name.end()) {
+      place(name, it->second);
+    }
+  }
+  size_t next_scan = 0;
+  while (next_scan < order.size()) {
+    const size_t          scan_end = order.size();
+    std::set<std::string> found;
+    for (size_t pos = next_scan; pos < scan_end; ++pos) {
+      for (const auto& raw : out[order[pos]].imports) {
+        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
+          continue;
+        }
+        const auto names = import_detail::candidates(raw);
+        if (std::any_of(names.begin(), names.end(), [&](const auto& name) { return satisfied.contains(name); })) {
+          continue;
+        }
+        for (const auto& name : names) {
+          if (by_name.contains(name)) {
+            found.insert(name);
+            break;
+          }
+        }
+      }
+    }
+    for (const auto& name : found) {
+      place(name, by_name.at(name));
+    }
+    next_scan = scan_end;
+  }
+  // Defensive only: every captured source should be reachable from a seed,
+  // but retain a deterministic complete inventory if a future resolver shape
+  // introduces an alias that the logical-name walk above cannot reconstruct.
+  for (const auto& [name, index] : by_name) {
+    place(name, index);
+  }
+  std::vector<Source_unit> ordered;
+  ordered.reserve(out.size());
+  for (const auto index : order) {
+    ordered.push_back(std::move(out[index]));
+  }
+  return ordered;
 }
 
 void digest_node(const Lnast& ln, const Lnast_nid& nid, std::string& bytes) {
@@ -754,14 +830,17 @@ Prior_cache load_prior(const std::string& scope, const std::string& context, boo
       }
       unit.imports.emplace_back(import.GetString());
     }
-    if (!prior.units.emplace(u["name"].GetString(), std::move(unit)).second) {
+    const std::string name = u["name"].GetString();
+    if (!prior.units.emplace(name, std::move(unit)).second) {
       return {};
     }
+    prior.order.push_back(name);
   }
   if (materialize_lnasts) {
     try {
-      for (const auto& [name, unit] : prior.units) {
-        auto ln = load_compact_lnast(scope + "/ln/" + lnast_unit_dir(unit.snapshot_file), name);
+      for (const auto& name : prior.order) {
+        const auto& unit = prior.units.at(name);
+        auto        ln   = load_compact_lnast(scope + "/ln/" + lnast_unit_dir(unit.snapshot_file), name);
         if (semantic_hash(*ln) != unit.semantic_hash) {
           return {};
         }
@@ -886,27 +965,6 @@ uint64_t graph_interface_hash(const hhds::GraphIO& io) {
   add('i', io.get_input_pin_decls());
   add('o', io.get_output_pin_decls());
   return hash_bytes(bytes);
-}
-
-void recreate_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& src) {
-  if (dst.find_io(src.get_name())) {
-    return;
-  }
-  auto io = dst.create_io(src.get_name());
-  for (const auto& p : src.get_input_pin_decls()) {
-    io->add_input(p.name, p.port_id, p.loop_break);
-    if (p.bits != 0) {
-      io->set_bits(p.name, p.bits);
-    }
-    io->set_unsign(p.name, p.unsign);
-  }
-  for (const auto& p : src.get_output_pin_decls()) {
-    io->add_output(p.name, p.port_id, p.loop_break);
-    if (p.bits != 0) {
-      io->set_bits(p.name, p.bits);
-    }
-    io->set_unsign(p.name, p.unsign);
-  }
 }
 
 std::vector<Graph_row> graph_rows(hhds::GraphLibrary& lib, const Result& res, bool& digestable) {
@@ -2047,7 +2105,8 @@ void compile_cache_materialize_sources(Result& res, Eprp_var& var) {
   // miscompile. Recompute the closure key from the loaded rows and compare.
   std::vector<Source_unit> rows;
   rows.reserve(current.units.size());
-  for (const auto& [name, unit] : current.units) {
+  for (const auto& name : current.order) {
+    const auto& unit = current.units.at(name);
     Source_unit row;
     row.name          = name;
     row.semantic_hash = unit.semantic_hash;
@@ -2060,10 +2119,23 @@ void compile_cache_materialize_sources(Result& res, Eprp_var& var) {
                     "compile-cache scope changed while this compile was running",
                     "another lhd process shares this --workdir scope; rerun, or use separate workdirs"};
   }
+  // The inventory array preserves capture_closure's deterministic source
+  // order. Prior_cache::units/lnasts are maps for lookup only; iterating the
+  // map here alphabetized 500+ restored roots before a graph-cache refusal.
+  // That changed registry and CSE representative order relative to a cold
+  // parse (XS ExeUnitImp split shared Get_mask nodes), so a full fallback was
+  // semantically equal but not H5-identical. Rebuild the forest in the exact
+  // captured order.
   var.lnasts.clear();
-  for (auto& [name, ln] : current.lnasts) {
-    (void)name;
-    var.add(std::move(ln));
+  for (const auto& name : current.order) {
+    auto it = current.lnasts.find(name);
+    if (it == current.lnasts.end()) {
+      ++res.compile_cache.refused;
+      throw Lhd_error{"config",
+                      "compile-cache source order references a missing LNAST",
+                      "remove the damaged compile scope or rerun with --set lhd.incremental=false"};
+    }
+    var.add(std::move(it->second));
   }
 }
 
@@ -2144,6 +2216,7 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
   const std::set<std::string> clean(res.compile_cache_clean_units.begin(), res.compile_cache_clean_units.end());
   const bool                  full_clean
       = expected->closure_key == res.compile_cache_closure_key && clean.size() == res.compile_cache_unit_keys.size();
+  res.compile_cache_overlay_graphs.clear();
   // A PARTIAL restore re-runs the pipeline over the dirty cone only, so its live
   // records and the stored ones would overlap on an unknown boundary: the stored
   // records carry no per-graph attribution, so there is no sound way to replay
@@ -2157,6 +2230,12 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
   // (graph_rows) just to refuse was pure waste on every incremental compile of
   // a design that warns.
   if (!full_clean && !expected->pipeline_diags.empty()) {
+    for (const auto& row : expected->rows) {
+      if (row.has_body && !row.owner.empty() && clean.contains(row.owner) && !row.unit_key.empty()
+          && row.unit_key == key_of(row.owner, res)) {
+        res.compile_cache_overlay_graphs.push_back(row.name);
+      }
+    }
     ++res.compile_cache.refused;
     return false;
   }
@@ -2233,30 +2312,27 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     // a failure would exempt the freshly re-lowered fallback graphs from all
     // three — and the store would then cache the unoptimized result.
     std::vector<std::string> restored_names;
-    size_t                   restored_bodies = 0;
+    std::set<std::string>    eligible_names;
     for (size_t i = 0; i < actual.size(); ++i) {
       const auto& row = actual[i];
-      if (row.has_body && eligible(expected->rows[i]) && !dst.copy_from(cache, row.name)) {
-        ++res.compile_cache.refused;
-        return false;
-      }
       if (row.has_body && eligible(expected->rows[i])) {
-        ++restored_bodies;
+        eligible_names.insert(row.name);
         restored_names.push_back(row.name);
       }
     }
-    // Bodyless declarations are cheap and may be referenced by any restored
-    // body. Dirty lowering/pruning will retain only the live ones.
+    // Merge performs the cross-library Sub-Gid remap that a definition-local
+    // copy cannot: collision-probed name Gids can differ between the cached
+    // and fresh libraries. Load the validated generation, then remove stale
+    // dirty bodies before lowering recreates them. Existing foreign bodies in
+    // a shared destination are keep-ours; bodyless declarations remain
+    // available to restored definitions.
+    dst.load_merge(res.compile_cache_scope + "/lg");
     for (const auto& row : actual) {
-      if (!row.has_body) {
-        auto io = cache.find_io(row.name);
-        if (!io) {
-          ++res.compile_cache.refused;
-          return false;
-        }
-        recreate_decl(dst, *io);
+      if (row.has_body && !eligible_names.contains(row.name)) {
+        dst.delete_graphio(row.name);
       }
     }
+    const size_t restored_bodies = eligible_names.size();
     // Scoped load: a cold compile's var holds only this closure's graphs, so
     // foreign modules living in a shared destination library must not leak
     // into var (they would ride every emit). They stay in the library itself.
@@ -2342,6 +2418,71 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       replay_pipeline_diags(*expected);
     }
     return total;
+  } catch (...) {
+    ++res.compile_cache.refused;
+    return false;
+  }
+}
+
+bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path) {
+  if (res.compile_cache_overlay_graphs.empty()) {
+    return true;
+  }
+  Phase_timer phase(res, "compile.cache.lg_overlay");
+  try {
+    auto expected = read_graph_inventory(res);
+    if (!expected) {
+      ++res.compile_cache.refused;
+      return false;
+    }
+    check_ir_body_magic(res.compile_cache_scope + "/lg", "graph_", kHhdsGraphBodyMagic, "compile cache lg:");
+    auto& cache      = livehd::Hhds_graph_library::instance(res.compile_cache_scope + "/lg");
+    bool  digestable = true;
+    auto  actual     = graph_rows(cache, res, digestable);
+    if (!digestable || actual.size() != expected->rows.size()) {
+      ++res.compile_cache.refused;
+      return false;
+    }
+    for (size_t i = 0; i < actual.size(); ++i) {
+      const auto& a = actual[i];
+      const auto& e = expected->rows[i];
+      if (a.name != e.name || a.interface_hash != e.interface_hash || a.has_body != e.has_body || a.h0 != e.h0 || a.h1 != e.h1
+          || a.owner != e.owner) {
+        ++res.compile_cache.refused;
+        return false;
+      }
+    }
+
+    const std::set<std::string> wanted(res.compile_cache_overlay_graphs.begin(), res.compile_cache_overlay_graphs.end());
+    std::vector<std::string>    var_names;
+    var_names.reserve(var.graphs.size());
+    for (const auto& graph : var.graphs) {
+      var_names.emplace_back(graph ? std::string(graph->get_name()) : std::string{});
+    }
+    auto& dst = livehd::Hhds_graph_library::instance(lib_path);
+    for (const auto& name : wanted) {
+      dst.delete_graphio(name);
+    }
+    // load_merge remaps every cached Sub Gid through the destination's actual
+    // name table. Non-overlay bodies already present in dst are keep-ours.
+    dst.load_merge(res.compile_cache_scope + "/lg");
+    // load_merge replaces each selected Graph object after its stable name is
+    // reintroduced. Refresh Eprp_var's shared_ptrs before emit/store; retaining
+    // the deleted fresh objects would make downstream traversal assert even
+    // though Sub Gids in dirty parents already resolve to the merged bodies.
+    for (size_t i = 0; i < var.graphs.size(); ++i) {
+      if (!wanted.contains(var_names[i])) {
+        continue;
+      }
+      auto io = dst.find_io(var_names[i]);
+      if (!io || !io->has_graph()) {
+        ++res.compile_cache.refused;
+        return false;
+      }
+      var.graphs[i] = io->get_graph();
+    }
+    res.compile_cache_overlay_graphs.clear();
+    return true;
   } catch (...) {
     ++res.compile_cache.refused;
     return false;
@@ -2476,15 +2617,16 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
       const auto lowered_dir = fs::path(temp) / "lowered_ln";
       fs::create_directories(lowered_dir);
       for (size_t i = 0; i < var.lnasts.size(); ++i) {
-        // Restored clean graphs skip both upass and tolg, so bulky `mod`/`pipe`
-        // statement bodies — always Sub instances, never inlined or comptime-
-        // evaluated — are stored metadata-only (their authoritative form is the
-        // cached LGraph). Everything else KEEPS its body: a clean `comb` can
-        // still be inlined or comptime-called (`cassert(f(3)==4)`) by a dirty
-        // neighbor, and the function registry hands it exactly this tree. This
-        // mirrors the ln: import rule in pyrope_parse.
+        // Restored clean graphs skip both upass and tolg, so bulky CONCRETE
+        // `mod`/`pipe` statement bodies — always Sub instances, never inlined
+        // or comptime-evaluated — are stored metadata-only (their authoritative
+        // form is the cached LGraph). A TEMPLATE module is different: a dirty
+        // neighbor needs its body to recreate a concrete specialization, so it
+        // must remain available to the function registry. A clean `comb` keeps
+        // its body for the same reason (inline/comptime calls). This mirrors the
+        // ln: import rule in pyrope_parse.
         const auto lk        = var.lnasts[i]->get_lambda_kind();
-        const bool meta_only = lk == "mod" || lk == "pipe";
+        const bool meta_only = !var.lnasts[i]->is_template() && (lk == "mod" || lk == "pipe");
         save_compact_lnast(var.lnasts[i], lowered_dir / lowered_lnast_dir(i), meta_only);
       }
     }

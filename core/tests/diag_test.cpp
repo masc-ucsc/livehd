@@ -256,16 +256,19 @@ TEST(diag, info_is_not_an_error) {
 
 TEST(diag, info_severity_string_and_jsonl_payload) {
   EXPECT_EQ(livehd::diag::to_string(Severity::info), "info");
-  Diagnostic d{.severity    = Severity::info,
-               .code        = "lec-block-refuted",
-               .category    = "progress",
-               .pass        = "pass.lec",
-               .message     = "lec block 'cpu' fail"};
+  Diagnostic d{.severity = Severity::info,
+               .code     = "lec-block-refuted",
+               .category = "progress",
+               .pass     = "pass.lec",
+               .message  = "lec block 'cpu' fail"};
   d.verdict     = "fail";
   d.engine      = "bmc";
   d.duration_ms = 1234;
-  d.attrs       = {{"bound", "6"}, {"witness", "step 2"}};
-  auto line     = livehd::diag::to_jsonl(d, 3);
+  d.attrs       = {
+      {  "bound",      "6"},
+      {"witness", "step 2"}
+  };
+  auto line = livehd::diag::to_jsonl(d, 3);
   EXPECT_NE(line.find("\"severity\":\"info\""), std::string::npos);
   EXPECT_NE(line.find("\"verdict\":\"fail\""), std::string::npos);
   EXPECT_NE(line.find("\"engine\":\"bmc\""), std::string::npos);
@@ -275,6 +278,42 @@ TEST(diag, info_severity_string_and_jsonl_payload) {
   auto txt = livehd::diag::to_text(d);
   EXPECT_NE(txt.find("livehd:info:"), std::string::npos);
   EXPECT_NE(txt.find("[verdict=fail engine=bmc 1234ms]"), std::string::npos);
+}
+
+TEST(diag, ephemeral_progress_is_pretty_or_jsonl_and_not_counted) {
+  Sink s;
+  s.set_jsonl_path("off");
+  s.set_human_stderr(true);
+
+  testing::internal::CaptureStderr();
+  s.progress("pass.abc",
+             "PROGRESS pass.abc completed=1 region='m__c7'",
+             {
+                 {"completed",     "1"},
+                 {   "region", "m__c7"}
+  });
+  EXPECT_EQ(testing::internal::GetCapturedStderr(), "PROGRESS pass.abc completed=1 region='m__c7'\n");
+  EXPECT_TRUE(s.records().empty());
+  EXPECT_EQ(s.count(Severity::info), 0u);
+
+  s.set_stderr_jsonl(true);
+  testing::internal::CaptureStderr();
+  s.progress("pass.abc",
+             "PROGRESS pass.abc completed=2 region='m__c8'",
+             {
+                 {"completed",     "2"},
+                 {   "region", "m__c8"}
+  });
+  const auto json = testing::internal::GetCapturedStderr();
+  EXPECT_NE(json.find("\"kind\":\"progress\""), std::string::npos);
+  EXPECT_NE(json.find("\"pass\":\"pass.abc\""), std::string::npos);
+  EXPECT_NE(json.find("\"seq\":1"), std::string::npos);
+  EXPECT_NE(json.find("\"attrs\":{\"completed\":\"2\",\"region\":\"m__c8\"}"), std::string::npos);
+
+  s.set_human_stderr(false);  // -q policy
+  testing::internal::CaptureStderr();
+  s.progress("pass.abc", "PROGRESS pass.abc completed=3");
+  EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
 }
 
 TEST(diag, error_without_payload_serializes_unchanged) {

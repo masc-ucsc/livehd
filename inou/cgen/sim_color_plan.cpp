@@ -44,6 +44,147 @@ using Value_use           = Color_plan::Value_use;
 using Version_role        = Color_plan::Version_role;
 using Occurrence_step_key = std::tuple<hhds::Gid, hhds::Nid, bool, uint64_t>;
 
+constexpr std::pair<int, int> kPacked_footprint_bail{-1, -1};
+
+hhds::Occurrence_pin occurrence_driver_at(const hhds::Occurrence_node& node, hhds::Port_id pid) {
+  hhds::Occurrence_pin result;
+  for (const auto& edge : node.inp_edges()) {
+    if (edge.sink.get_port_id() != pid) {
+      continue;
+    }
+    if (!result.is_invalid()) {
+      return {};  // only fixed single-driver operands are traceable
+    }
+    result = edge.driver;
+  }
+  return result;
+}
+
+int occurrence_const_shl_amount(const hhds::Occurrence_node& node) {
+  const auto amount = occurrence_driver_at(node, 1);
+  if (amount.is_invalid() || !gu::is_const_pin(amount)) {
+    return -1;
+  }
+  const auto value = gu::hydrate_const(amount);
+  if (!value.is_just_i64() || value.has_unknowns() || value.to_just_i64() < 0 || value.to_just_i64() > (1 << 28)) {
+    return -1;
+  }
+  return static_cast<int>(value.to_just_i64());
+}
+
+// Sound over-approximation of the positions an occurrence pin may set. This
+// is deliberately the same proof direction as cprop's packed-slice fold: an
+// imprecise operand overlaps the requested lane and prevents refinement.
+//
+// `budget` bounds the TOTAL pins visited by one top-level query. The depth cap
+// alone does not: an And/Or/Xor arm recurses into every operand, so a wide
+// packed tree costs fanin^depth pin visits, and `discover` runs this once per
+// operand of every crossing Or. Exhausting the budget bails, which is the same
+// fail-closed answer an unbounded operand already produces.
+std::pair<int, int> occurrence_packed_footprint(const hhds::Occurrence_pin& pin, int depth = 0, int* budget = nullptr) {
+  int  local_budget = 4096;
+  int& visits       = budget == nullptr ? local_budget : *budget;
+  if (pin.is_invalid() || depth > 16 || --visits < 0) {
+    return kPacked_footprint_bail;
+  }
+  if (gu::is_const_pin(pin)) {
+    const auto value = gu::hydrate_const(pin);
+    if (value.is_negative()) {
+      return kPacked_footprint_bail;
+    }
+    if (value.has_unknowns()) {
+      return {0, value.get_bits()};
+    }
+    const int first = value.get_first_bit_set();
+    const int last  = value.get_last_bit_set();
+    return first < 0 || last < 0 ? std::pair<int, int>{0, 0} : std::pair<int, int>{first, last + 1};
+  }
+  if (gu::is_graph_input_pin(pin)) {
+    const int bits = gu::bits_of(pin);
+    return gu::is_unsign(pin) && bits > 0 ? std::pair<int, int>{0, bits} : kPacked_footprint_bail;
+  }
+  const auto node = pin.get_master_node();
+  const auto op   = gu::type_op_of(node);
+  if (op == Ntype_op::SHL) {
+    const int shift = occurrence_const_shl_amount(node);
+    const auto value = occurrence_driver_at(node, 0);
+    const auto inner = occurrence_packed_footprint(value, depth + 1, &visits);
+    if (shift < 0 || inner.first < 0) {
+      return kPacked_footprint_bail;
+    }
+    return inner.second <= inner.first ? std::pair<int, int>{0, 0}
+                                       : std::pair<int, int>{inner.first + shift, inner.second + shift};
+  }
+  if (op == Ntype_op::Get_mask) {
+    const auto mask = occurrence_driver_at(node, 2);
+    if (!mask.is_invalid() && gu::is_const_pin(mask)) {
+      const auto constant = gu::hydrate_const(mask);
+      const auto [lo, hi]  = constant.get_mask_range();
+      if (!constant.has_unknowns() && constant.is_positive() && lo >= 0 && hi > lo) {
+        const auto inner = occurrence_packed_footprint(occurrence_driver_at(node, 0), depth + 1, &visits);
+        if (inner.first >= 0) {
+          const int clipped_lo = std::max(inner.first, lo);
+          const int clipped_hi = std::min(inner.second, hi);
+          return clipped_hi <= clipped_lo ? std::pair<int, int>{0, 0}
+                                          : std::pair<int, int>{clipped_lo - lo, clipped_hi - lo};
+        }
+        return {0, hi - lo};
+      }
+    }
+  }
+  if (op == Ntype_op::And) {
+    // The result of a bitwise And can be nonzero only where every operand can
+    // be nonzero. One positive constant mask is therefore enough to bound a
+    // wide field wrapper even when another operand has an unknown footprint.
+    // Intersect every bound we can prove; ignoring an unbound operand only
+    // widens the result and remains conservative.
+    std::pair<int, int> bound = kPacked_footprint_bail;
+    for (const auto& edge : node.inp_edges()) {
+      const auto operand = occurrence_packed_footprint(edge.driver, depth + 1, &visits);
+      if (operand.first < 0) {
+        continue;
+      }
+      if (operand.second <= operand.first) {
+        return {0, 0};
+      }
+      if (bound.first < 0) {
+        bound = operand;
+      } else {
+        bound.first  = std::max(bound.first, operand.first);
+        bound.second = std::min(bound.second, operand.second);
+        if (bound.second <= bound.first) {
+          return {0, 0};
+        }
+      }
+    }
+    if (bound.first >= 0) {
+      return bound;
+    }
+  }
+  if (op == Ntype_op::Or || op == Ntype_op::Xor) {
+    // A nested pack is often another Or tree. Its possible support is the
+    // union of its operands' supports; unlike the unique-owner query below,
+    // every operand must be bounded before that union is useful.
+    std::pair<int, int> bound{std::numeric_limits<int>::max(), 0};
+    bool                any = false;
+    for (const auto& edge : node.inp_edges()) {
+      const auto operand = occurrence_packed_footprint(edge.driver, depth + 1, &visits);
+      if (operand.first < 0) {
+        return kPacked_footprint_bail;
+      }
+      if (operand.second <= operand.first) {
+        continue;
+      }
+      bound.first  = std::min(bound.first, operand.first);
+      bound.second = std::max(bound.second, operand.second);
+      any          = true;
+    }
+    return any ? bound : std::pair<int, int>{0, 0};
+  }
+  const int bits = gu::bits_of(pin);
+  return gu::is_unsign(pin) && bits > 0 ? std::pair<int, int>{0, bits} : kPacked_footprint_bail;
+}
+
 Occurrence_step_key occurrence_step_key(const hhds::Occurrence_step& step) {
   return {step.subnode.gid, step.subnode.value, step.ordinal.has_value(), step.ordinal.value_or(0)};
 }
@@ -717,8 +858,23 @@ bool is_timing_input(const hhds::Occurrence_pin& sink) {
 std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::Design_clocks& clocks, bool& versioning_complete) {
   const auto op = gu::type_op_of(node);
   if (op == Ntype_op::Memory) {
-    const auto clock = lc::sink_driver_hier(node, "clock_pin");
-    if (clock.is_invalid()) {
+    // Memory timing is PER PORT: raw sink ids are laid out in 16-pin groups,
+    // so there may be no unsuffixed/port-zero clock even though later write
+    // ports are registered. Treating such an array as combinational puts its
+    // read value and write-input cone in one data version and manufactures a
+    // read -> address/data -> Memory -> read cycle (XS Rob's robDeqGroup).
+    // Per-port pins live at `port * Memory_port_stride + <base offset>`, and
+    // `clock_pin` is base offset 2 (graph/cell.cpp). Test the raw id directly:
+    // get_sink_name allocates a std::string per edge on a hot per-node path.
+    const auto clock_off = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
+    bool       has_clock = false;
+    for (const auto& edge : node.inp_edges()) {
+      if (edge.sink.get_port_id() % Ntype::Memory_port_stride == clock_off) {
+        has_clock = true;
+        break;
+      }
+    }
+    if (!has_clock) {
       return std::nullopt;  // combinational arrays are data colors, not state actions
     }
     const auto posclk = lc::sink_driver_hier(node, "posclk");
@@ -1491,6 +1647,71 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
         for (int depth = 0; depth < 16 && !crossing.is_invalid() && !gu::is_const_pin(crossing); ++depth) {
           const auto packed    = crossing.get_master_node();
           const auto packed_op = gu::type_op_of(packed);
+          if (packed_op == Ntype_op::Or) {
+            // Firtool also spells packed records as an Or of disjoint,
+            // constant-shifted fields. At word grain an input field and an
+            // unrelated output field can then close a false hierarchy cycle
+            // (XS Rob: interrupt_safe versus deqPtrVec). Refine only when one
+            // operand is the unique possible owner of the requested range;
+            // an unbounded footprint counts as an overlap and fails closed.
+            hhds::Occurrence_pin overlapper;
+            size_t               overlaps = 0;
+            size_t               fanin    = 0;
+            bool                 malformed = false;
+            for (const auto& input : packed.inp_edges()) {
+              if (++fanin > 4096 || input.sink.get_port_id() != 0) {
+                malformed = true;
+                break;
+              }
+              const auto footprint = occurrence_packed_footprint(input.driver);
+              if (footprint.first < 0 || !(hi <= footprint.first || lo >= footprint.second)) {
+                overlapper = input.driver;
+                ++overlaps;
+              }
+            }
+            if (malformed || overlaps != 1) {
+              break;
+            }
+            crossing = overlapper;
+            rebased  = true;
+            continue;
+          }
+          if (packed_op == Ntype_op::SHL) {
+            const int shift = occurrence_const_shl_amount(packed);
+            const auto value = occurrence_driver_at(packed, 0);
+            if (shift < 0 || value.is_invalid() || lo < shift) {
+              break;  // unknown shift or a slice that straddles the zero fill
+            }
+            crossing       = value;
+            lo            -= shift;
+            hi            -= shift;
+            surface_shift += static_cast<uint32_t>(shift);
+            rebased        = true;
+            continue;
+          }
+          if (packed_op == Ntype_op::Get_mask) {
+            const auto value = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "a"));
+            const auto mask  = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "mask"));
+            if (value.is_invalid() || mask.is_invalid() || !gu::is_const_pin(mask)) {
+              break;
+            }
+            const auto constant       = gu::hydrate_const(mask);
+            const auto [mask_lo, mask_hi] = constant.get_mask_range();
+            if (constant.has_unknowns() || !constant.is_positive() || mask_lo < 0 || mask_hi <= mask_lo
+                || hi > mask_hi - mask_lo) {
+              break;
+            }
+            // Compose nested constant slices before crossing a packed child
+            // output. A wide child field may span several Or/SHL lanes even
+            // though its parent consumes only one narrow subfield; tracing the
+            // outer demand through this select makes that exact subfield the
+            // range tested for unique ownership.
+            crossing = value;
+            lo      += mask_lo;
+            hi      += mask_lo;
+            rebased  = true;
+            continue;
+          }
           if (packed_op == Ntype_op::Concat) {
             const auto lanes = gu::concat_lanes(packed.base_node());
             if (lanes.empty()) {
@@ -2784,7 +3005,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
           const size_t next = back_edge[(i + 1) % back_edge.size()];
           const auto&  vs   = plan.version_sites_[idx];
           const auto&  site = plan.sites_[vs.base_site];
-          hops += std::format("\n    {:>2}. {} op={} name={} graph={} path={} nid={} depth={} ge={}{}{}",
+          hops += std::format("\n    {:>2}. {} op={} name={} graph={} path={} nid={} depth={} ge={} role={} version={} slot={}{}{}",
                               i,
                               vs.structural_id.substr(0, 10),
                               Ntype::get_name(gu::type_op_of(site.node)),
@@ -2794,6 +3015,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations) {
                               static_cast<unsigned long long>(site.node.get_debug_nid() >> 2),
                               site.node.path().steps().size(),
                               site.gate_equivalents,
+                              version_role_name(vs.role),
+                              state_version_name(vs.version),
+                              execution_slot_name(vs.slot),
                               via_of[std::pair<size_t, size_t>{vs.base_site, plan.version_sites_[next].base_site}],
                               value_via[std::pair<size_t, size_t>{idx, next}]);
         }

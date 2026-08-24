@@ -303,7 +303,8 @@ void        embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res);
 // Fill res.abc_incr from the abc-map report in res.qor_json (a bare abc-map
 // or the `abc` member of a synth report); no-op when there is none.
 void        harvest_abc_incremental(Result& res);
-// `lhd synth`: compile -> pass.color synth -> pass.abc -> pass.opentimer over
+// `lhd synth`: compile -> pass.color reduce -> pass.color synth -> pass.abc ->
+// pass.opentimer over
 // ONE in-memory design (lhd_kernel_synth.cpp).
 void        synth_command(Options& opts, Result& res);
 void        tool_command(Options& opts, Result& res);

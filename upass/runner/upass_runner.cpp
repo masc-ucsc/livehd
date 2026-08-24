@@ -4464,7 +4464,6 @@ bool uPass_runner::try_inline_func_call() {
   const std::string source_callee_name(callee_name);
 
   auto callee = lookup_callee(callee_name);
-
   // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb`
   // whose call produces RUNTIME hardware is left as a func_call so tolg lowers
   // it to a module instance instead of inlining (preserving the comb boundary
@@ -7239,6 +7238,16 @@ void uPass_runner::emit_named_instance_call(const std::string& dst, const std::s
     auto in = s->add_child(root, Lnast_ntype::create_store());
     s->add_child(in, Lnast_node::create_ref("__inst_name"));
     s->add_child(in, Lnast_node::create_const(inst_name));
+  }
+  // The rewritten callee may be a specialization minted by THIS runner and
+  // therefore not present in the shared registry until the queue folds in
+  // new_lnasts. stamp_loop_inst_suffix cannot classify that name yet. Carry
+  // the loop identity explicitly so cold generation and a mixed run that has
+  // the same specialization restored name the Sub identically.
+  if (!loop_iter_ordinals_.empty()) {
+    auto is = s->add_child(root, Lnast_ntype::create_store());
+    s->add_child(is, Lnast_node::create_ref(std::string(call_inst_suffix_marker)));
+    s->add_child(is, Lnast_node::create_const(loop_inst_suffix()));
   }
   // Named actuals: `store(port, value)` per binding, so tolg wires by name (never
   // by declaration order — a type-distinguished unnamed actual is resolved by

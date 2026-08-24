@@ -1,0 +1,7 @@
+pub mod abc_comb_loop::[timecheck=false](clock:u1, a:u8) -> (o:u8@[]) {
+  reg q:u8
+  wire feedback:u8
+  feedback = (feedback & a) | q
+  q = feedback ^ a
+  o = q
+}

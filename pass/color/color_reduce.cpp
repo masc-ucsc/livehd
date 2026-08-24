@@ -400,7 +400,14 @@ bool is_wide_dynamic_shift_node(const Node& n) {
 }
 
 bool is_synthesis_expensive_pattern(const Cone& k) {
-  return is_wide_shift_slice(k) || (k.members.size() == 1 && is_wide_dynamic_shift_node(k.root));
+  // With bounded mining, a multi-fanout wide shift roots its cone and normally
+  // pulls in one address-arithmetic producer before max_nodes cuts it.  That
+  // two-node form is just as expensive as a singleton shift (Rob's repeated
+  // 32k/52k-bit selects); treating only the singleton as special leaves every
+  // copy to expand independently.  Keep the exception bounded to two members:
+  // an unbounded maximal cone that merely ends in a shift still uses the normal
+  // text/GE profitability guards.
+  return is_wide_shift_slice(k) || (k.members.size() <= 2 && is_wide_dynamic_shift_node(k.root));
 }
 
 // True when the cone touches a parallel duplicate edge (same driver pin AND
@@ -672,7 +679,7 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       o.shape     = shape_of(d);
       o.shape.pid = 0;  // a leaf's source pid is not part of the pattern
       o.tie       = (static_cast<uint64_t>(d.get_master_node().get_debug_nid()) << 16U)
-              ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
+                    ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
     }
     by_port[static_cast<int>(e.sink.get_port_id())].push_back(std::move(o));
   }

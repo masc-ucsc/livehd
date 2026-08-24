@@ -63,6 +63,14 @@ void Pass_abc::setup() {
                        "");
   m.add_label_optional("small_min_ge", "inclusive lower synthesis-GE bound for small_flow (0 means no lower bound)", "0");
   m.add_label_optional("small_ge", "non-negative synthesis-GE threshold for small_flow (0 disables it)", "0");
+  m.add_label_optional("large_flow",
+                       "ABC command string for indivisible over-large regions at or above large_ge; empty disables the tier. "
+                       "An explicit global flow or region_opts flow wins",
+                       "strash; &get -n; &nf {D}; &put");
+  m.add_label_optional("large_ge",
+                       "inclusive synthesis-GE threshold for large_flow (0 disables it); default protects wide indivisible "
+                       "operations from unbounded &dch choice synthesis",
+                       "200000");
   m.add_label_optional("register",
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
@@ -297,7 +305,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   // `gates`/`area` are PHYSICAL (region x instantiations); `module_gates`/
   // `module_area` are the per-mapped-module sums (what abc worked on once).
-  j              += std::format(
+  j += std::format(
       "\"total\":{{\"regions\":{},\"input_nodes\":{},\"input_ge\":{},\"gates\":{},\"area\":{:.4f},"
       "\"module_gates\":{},\"module_area\":{:.4f}",
       qor.size(),
@@ -470,6 +478,8 @@ void Pass_abc::work(Eprp_var& var) {
   auto small_flow          = std::string{var.get("small_flow", "")};
   auto small_min_ge_s      = std::string{var.get("small_min_ge", "0")};
   auto small_ge_s          = std::string{var.get("small_ge", "0")};
+  auto large_flow          = std::string{var.get("large_flow", "")};
+  auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
   bool map_memory          = truthy(var.get("memory", "false"));
   auto register_max_bits_s = std::string{var.get("register_max_bits", "4096")};
@@ -559,6 +569,18 @@ void Pass_abc::work(Eprp_var& var) {
         .fatal();
     return;
   }
+  uint64_t large_ge = 0;
+  {
+    auto* b      = large_ge_s.data();
+    auto* e      = large_ge_s.data() + large_ge_s.size();
+    auto [p, ec] = std::from_chars(b, e, large_ge);
+    if (ec != std::errc{} || p != e) {
+      livehd::diag::err("pass.abc", "bad-large-ge", "io")
+          .msg("pass.abc: large_ge must be a non-negative integer, got '{}'", large_ge_s)
+          .fatal();
+      return;
+    }
+  }
   uint64_t register_max_bits = 4096;
   {
     auto* b      = register_max_bits_s.data();
@@ -589,6 +611,8 @@ void Pass_abc::work(Eprp_var& var) {
   opts.small_flow        = small_flow;
   opts.small_min_ge      = small_min_ge;
   opts.small_ge          = small_ge;
+  opts.large_flow        = large_flow;
+  opts.large_ge          = large_ge;
   opts.map_register      = map_register;
   opts.map_memory        = map_memory;
   opts.register_max_bits = register_max_bits;

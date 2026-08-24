@@ -127,6 +127,18 @@ struct resynth_t {
 };
 inline constexpr resynth_t resynth{};
 
+// Marker on exact native logic that pass.abc retained because it belongs to a
+// combinational-cycle remainder. OpenTimer consumes this structurally: the
+// node remains in the emitted netlist, while STA cuts a documented boundary at
+// its output instead of mistaking And/Or for ordinary packed-bit wiring.
+struct native_comb_boundary_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr native_comb_boundary_t native_comb_boundary{};
+
 // Per-node place annotation (ArchFP / physical-design floorplan rectangle).
 // Replaces Lgraph_attributes::node_place_map.
 struct place_t {
@@ -311,6 +323,8 @@ template <>
 inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>

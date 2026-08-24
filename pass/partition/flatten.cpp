@@ -120,6 +120,9 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (ctx->synth_region_id != 0) {
     neo.attr(livehd::attrs::synth_region_id).set(ctx->synth_region_id);
   }
+  if (auto a = orig.attr(livehd::attrs::native_comb_boundary); a.has()) {
+    neo.attr(livehd::attrs::native_comb_boundary).set(a.get());
+  }
   // The flat per-def color is what pass.partition consumes downstream — carry
   // it verbatim so the flattened def partitions exactly like the hierarchy did
   // (per-instance hier colors are a different storage; flatten works on the

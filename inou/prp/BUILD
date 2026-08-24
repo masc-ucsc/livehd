@@ -52,6 +52,7 @@ filegroup(
         "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_block_attr.prp",
         "tests/pyrope/abc_comb.prp",
+        "tests/pyrope/abc_comb_loop.prp",
         "tests/pyrope/abc_constmul.prp",
         "tests/pyrope/abc_flat_names.prp",
         "tests/pyrope/abc_mathops.prp",

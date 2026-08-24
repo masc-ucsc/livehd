@@ -96,6 +96,14 @@ struct Query_result {
   // produce identical output sequences" -- unbounded.
   bool bounded = false;
 
+  // A name-independent packed-register <-> scalar-replica relation can prove
+  // the inductive STEP, but it is not a complete proof until BMC from reset
+  // establishes that relation on a reachable state. These two wire-visible
+  // flags let the auto portfolio combine the independently checked obligations;
+  // an explicit ind-only run remains Unknown.
+  bool packed_scalar_step_proven = false;
+  bool packed_scalar_base_proven = false;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;

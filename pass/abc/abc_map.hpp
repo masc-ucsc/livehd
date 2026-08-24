@@ -27,8 +27,14 @@ struct Map_options {
   // logic use a deliberately cheap mapper without sacrificing the QoR of
   // small timing-sensitive cones. Disabled when empty or small_ge == 0.
   std::string       small_flow;
-  uint64_t          small_min_ge      = 0;
-  uint64_t          small_ge          = 0;
+  uint64_t          small_min_ge = 0;
+  uint64_t          small_ge     = 0;
+  // Indivisible wide operations can exceed color.max_ge by orders of
+  // magnitude. The default large tier skips ABC's unbounded structural-choice
+  // synthesis and maps the already bit-blasted AIG directly. Empty or
+  // large_ge==0 disables the tier; an explicit global/per-region flow wins.
+  std::string       large_flow;
+  uint64_t          large_ge          = 0;
   // Sequential technology-mapping knobs (independent because their cost differs:
   // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
   // array + address decode). register=true maps flops to Liberty DFF cells (falls
@@ -237,6 +243,21 @@ private:
   // Overlay any per-region overrides for rb.color onto opts_ (caller saves and
   // restores opts_ around the region).
   void apply_region_overrides(const livehd::partition::Region_body& rb);
+
+  // One compact, flushed record after each color has completely finished.
+  // Kept separate from verbose stage tracing so long-running synthesis always
+  // has a stable heartbeat that wrappers can forward without scraping ABC's
+  // implementation chatter.
+  void report_completion(const Region_qor& q);
+
+  uint64_t completed_regions_ = 0;
+#if defined(__APPLE__)
+  // Maximal malloc-zone relief walks every Darwin allocator zone. Repeating it
+  // for each of thousands of tiny colors fragments virtual address space even
+  // when physical footprint is safe, so abc_map.cpp rate-limits pressure scans.
+  uint64_t last_pressure_relief_region_ = 0;
+  bool     pressure_relief_done_        = false;
+#endif
 };
 
 }  // namespace livehd::abc

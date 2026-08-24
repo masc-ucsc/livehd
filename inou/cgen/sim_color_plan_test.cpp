@@ -2,6 +2,7 @@
 
 #include "sim_color_plan.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -228,6 +229,87 @@ std::shared_ptr<hhds::Graph> make_fixed_top_input_lane_extract(std::string_view 
   return graph;
 }
 
+std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+  auto  io  = lib.create_io(std::string(tag) + "_or_pack_feedback");
+  io->add_input("low", 0);
+  io->add_output("out", 1);
+  io->set_bits("low", 1);
+  io->set_bits("out", 1);
+  io->set_unsign("low", true);
+  io->set_unsign("out", true);
+  auto graph = io->create_graph();
+  gu::set_bits(graph->get_input_pin("low"), 1);
+  gu::set_unsign(graph->get_input_pin("low"));
+
+  auto packed_or = gu::create_typed_node(*graph, Ntype_op::Or);
+  auto packed = packed_or.create_driver_pin(0);
+  gu::set_bits(packed, 16);
+  gu::set_unsign(packed);
+
+  auto wide_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  packed.connect_sink(gu::setup_sink_by_name(wide_read, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(0xffff)).connect_sink(gu::setup_sink_by_name(wide_read, "mask"));
+  auto wide_lane = wide_read.create_driver_pin(0);
+  gu::set_bits(wide_lane, 16);
+  gu::set_unsign(wide_lane);
+
+  auto low_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  wide_lane.connect_sink(gu::setup_sink_by_name(low_read, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(0x100)).connect_sink(gu::setup_sink_by_name(low_read, "mask"));
+  auto low_lane = low_read.create_driver_pin(0);
+  gu::set_bits(low_lane, 1);
+  gu::set_unsign(low_lane);
+  low_lane.connect_sink(graph->get_output_pin("out"));
+
+  auto high_lane = gu::create_typed_node(*graph, Ntype_op::SHL);
+  graph->get_input_pin("low").connect_sink(high_lane.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(8)).connect_sink(high_lane.create_sink_pin(1));
+  auto shifted = high_lane.create_driver_pin(0);
+  gu::set_bits(shifted, 16);
+  gu::set_unsign(shifted);
+  shifted.connect_sink(packed_or.create_sink_pin(0));
+
+  auto feedback_wide = gu::create_typed_node(*graph, Ntype_op::Not);
+  low_lane.connect_sink(feedback_wide.create_sink_pin(0));
+  auto feedback_value = feedback_wide.create_driver_pin(0);
+  gu::set_bits(feedback_value, 16);
+  gu::set_unsign(feedback_value);
+  auto feedback_masked = gu::create_typed_node(*graph, Ntype_op::And);
+  feedback_value.connect_sink(feedback_masked.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(0xf)).connect_sink(feedback_masked.create_sink_pin(0));
+  auto feedback = feedback_masked.create_driver_pin(0);
+  gu::set_bits(feedback, 16);
+  gu::set_unsign(feedback);
+  auto feedback_pack = gu::create_typed_node(*graph, Ntype_op::Or);
+  feedback.connect_sink(feedback_pack.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(feedback_pack.create_sink_pin(0));
+  auto feedback_packed = feedback_pack.create_driver_pin(0);
+  gu::set_bits(feedback_packed, 16);
+  gu::set_unsign(feedback_packed);
+  feedback_packed.connect_sink(packed_or.create_sink_pin(0));
+  return graph;
+}
+
+std::shared_ptr<hhds::Graph> make_memory_with_late_port_clock(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+  auto  io  = lib.create_io(std::string(tag) + "_late_memory_clock");
+  io->add_input("clk", 0);
+  io->add_output("q", 1);
+  io->set_bits("clk", 1);
+  io->set_bits("q", 8);
+  auto graph = io->create_graph();
+
+  auto memory = gu::create_typed_node(*graph, Ntype_op::Memory);
+  memory.set_name("late_clock_mem");
+  constexpr hhds::Port_id port = 3;
+  graph->get_input_pin("clk").connect_sink(memory.create_sink_pin(port * Ntype::Memory_port_stride + 2));
+  auto q = memory.create_driver_pin(0);
+  gu::set_bits(q, 8);
+  q.connect_sink(graph->get_output_pin("q"));
+  return graph;
+}
+
 std::shared_ptr<hhds::Graph> make_narrow_child_boundary(std::string_view tag) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
@@ -335,6 +417,23 @@ TEST(SimColorPlan, CompactLoopDiscoveryIsConstantSizeAndCutsCarry) {
   EXPECT_EQ(text.find("nid"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-control"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-carry cut=true"), std::string::npos);
+}
+
+TEST(SimColorPlan, MemoryClockOnLaterPortCreatesStateUpdate) {
+  auto graph = make_memory_with_late_port_clock("late_memory_clock");
+  auto plan  = livehd::sim::Color_plan::discover(graph.get());
+
+  size_t memory_site = livehd::sim::Color_plan::invalid_index;
+  for (size_t i = 0; i < plan.sites().size(); ++i) {
+    if (gu::type_op_of(plan.sites()[i].node) == Ntype_op::Memory) {
+      memory_site = i;
+      break;
+    }
+  }
+  ASSERT_NE(memory_site, livehd::sim::Color_plan::invalid_index);
+  EXPECT_TRUE(std::ranges::any_of(plan.version_sites(), [&](const auto& version) {
+    return version.base_site == memory_site && version.role == livehd::sim::Color_plan::Version_role::state_update;
+  })) << "a clock on any Memory port makes the array sequential";
 }
 
 TEST(SimColorPlan, RetainedPoliciesSurvivePlanMove) {
@@ -589,6 +688,28 @@ TEST(SimColorPlan, ConstantGetMaskTopInputKeepsTheExtractedLaneWidth) {
     EXPECT_EQ(use.producer_extract_hi, 8u);
   }
   EXPECT_EQ(lane_uses, 2u) << plan.report();
+}
+
+TEST(SimColorPlan, DisjointOrPackDoesNotCreateAWordLevelFeedbackCycle) {
+  auto graph = make_disjoint_or_pack_feedback("disjoint_or_pack");
+  auto plan  = livehd::sim::Color_plan::discover(graph.get());
+
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  ASSERT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
+  size_t lane_uses = 0;
+  for (const auto& use : plan.value_uses()) {
+    const auto& consumer = plan.version_sites()[use.consumer_version];
+    if (gu::type_op_of(plan.sites()[consumer.base_site].node) != Ntype_op::Get_mask || use.consumer_port != 0) {
+      continue;
+    }
+    ++lane_uses;
+    EXPECT_TRUE(use.top_input);
+    EXPECT_TRUE(use.preextracted);
+    EXPECT_EQ(use.producer_extract_lo, 0u);
+    EXPECT_EQ(use.producer_extract_hi, 1u);
+  }
+  EXPECT_EQ(lane_uses, 2u) << "the low field binds directly to its unique Or operand at both observation versions\n"
+                           << plan.report();
 }
 
 TEST(SimColorPlan, StateActionsRemainSingletonColors) {

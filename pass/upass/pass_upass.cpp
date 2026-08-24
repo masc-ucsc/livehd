@@ -569,7 +569,6 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
     function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
-
     // A pre-elaborated import is reused as-is: it stays REGISTERED above (so
     // callers resolve it through its restored io_meta) and is lowered by the
     // tolg step below, but its body is NOT re-walked — re-running constprop/

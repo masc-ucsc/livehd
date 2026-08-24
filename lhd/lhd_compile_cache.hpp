@@ -28,6 +28,10 @@ void compile_cache_materialize_sources(Result& res, Eprp_var& var);
 // Tier A's current Merkle closure key, checks every cached graph/interface,
 // and copies the exact final post-formal library into `lib_path`.
 bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path);
+// After a warning-carrying partial restore runs the full pipeline live, replace
+// clean definitions with their validated cached final bodies. This retains the
+// live diagnostic stream while keeping unchanged graph presentation H5-exact.
+bool compile_cache_overlay_clean_graphs(Result& res, Eprp_var& var, const std::string& lib_path);
 // All-clean, lg-only fast path: validate the immutable cached library by its
 // published file inventory and reuse/materialize it without deserializing IR.
 bool compile_cache_restore_lg_artifact(Options& opts, Result& res, const std::string& lib_path);

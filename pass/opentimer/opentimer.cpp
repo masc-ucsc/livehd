@@ -121,20 +121,61 @@ template <typename Node>
 // the port suffix, one appends it) and the driver/consumer nets would not meet.
 // The master node's get_hier_name is the stable, representation-independent id
 // (the same primitive LEC keys flops on). Module-IO pins keep their decl name.
+//
+// get_hier_name deliberately describes named hierarchy, not every virtual
+// occurrence of a repeated site. OpenTimer, however, builds one physical timing
+// occurrence per virtual lane. Qualify it with a stable hash of the complete
+// occurrence path so repeated lanes receive distinct gate/net names without
+// physically unrolling the source LGraph. Hashing keeps the already-long Minion
+// names bounded; the same resolved driver path yields the same suffix at each
+// consumer.
+template <typename Node>
+[[nodiscard]] std::string occurrence_name(const Node& node) {
+  std::string name{node.get_hier_name()};
+  if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
+    const auto path = node.get_occurrence_index().path;
+    if (!path.steps().empty()) {
+      uint64_t   hash = 1469598103934665603ULL;
+      const auto mix  = [&](uint64_t value) {
+        for (size_t byte = 0; byte < sizeof(value); ++byte) {
+          hash ^= (value >> (byte * 8)) & 0xffU;
+          hash *= 1099511628211ULL;
+        }
+      };
+      mix(static_cast<uint64_t>(path.root_gid()));
+      for (const auto& step : path.steps()) {
+        mix(static_cast<uint64_t>(step.subnode.gid));
+        mix(static_cast<uint64_t>(step.subnode.value));
+        mix(step.ordinal ? static_cast<uint64_t>(*step.ordinal) + 1 : 0);
+      }
+      absl::StrAppend(&name, "__occ", std::format("{:016x}", hash));
+    }
+  }
+  return name;
+}
+
 template <typename Pin>
 [[nodiscard]] std::string net_of(const Pin& dpin, bool hier) {
   if (!hier) {
+    if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+      if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
+        return wire_name(dpin.base_pin());
+      } else {
+        return wire_name(dpin);
+      }
+    }
+    const auto suffix = absl::StrCat("__n", dpin.get_master_node().get_debug_nid());
     if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
-      return wire_name(dpin.base_pin());
+      return absl::StrCat(wire_name(dpin.base_pin()), suffix);
     } else {
-      return wire_name(dpin);
+      return absl::StrCat(wire_name(dpin), suffix);
     }
   }
   if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
     return wire_name(dpin);  // module IO: the declared port name (root level)
   }
   auto master = dpin.get_master_node();
-  auto base   = master.get_hier_name();
+  auto base   = occurrence_name(master);
   auto pid    = dpin.get_port_id();
   return pid == 0 ? base : absl::StrCat(base, "_", static_cast<uint32_t>(pid));
 }
@@ -148,16 +189,24 @@ template <typename Pin>
 template <typename Node, typename Pin>
 [[nodiscard]] std::string net_of_node(const Node& owner, const Pin& dpin, bool hier) {
   if (!hier) {
+    if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+      if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
+        return wire_name(dpin.base_pin());
+      } else {
+        return wire_name(dpin);
+      }
+    }
+    const auto suffix = absl::StrCat("__n", owner.get_debug_nid());
     if constexpr (std::same_as<Pin, hhds::Occurrence_pin>) {
-      return wire_name(dpin.base_pin());
+      return absl::StrCat(wire_name(dpin.base_pin()), suffix);
     } else {
-      return wire_name(dpin);
+      return absl::StrCat(wire_name(dpin), suffix);
     }
   }
   if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
     return wire_name(dpin);
   }
-  auto base = owner.get_hier_name();
+  auto base = occurrence_name(owner);
   auto pid  = dpin.get_port_id();
   return pid == 0 ? base : absl::StrCat(base, "_", static_cast<uint32_t>(pid));
 }
@@ -167,12 +216,12 @@ template <typename Node, typename Pin>
 template <typename Node>
 [[nodiscard]] std::string inst_of(const Node& node, bool hier) {
   if (hier) {
-    return std::string{node.get_hier_name()};
+    return occurrence_name(node);
   }
   if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
-    return default_instance_name(node.base_node());
+    return absl::StrCat(default_instance_name(node.base_node()), "__n", node.get_debug_nid());
   } else {
-    return default_instance_name(node);
+    return absl::StrCat(default_instance_name(node), "__n", node.get_debug_nid());
   }
 }
 
@@ -503,7 +552,7 @@ std::string Pass_opentimer::get_driver_net_name(const hhds::Occurrence_pin& dpin
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
-  return wire_name(dpin.base_pin());
+  return net_of(dpin, false);
 }
 
 std::string Pass_opentimer::driver_net_of(const hhds::Occurrence_node& owner, const hhds::Occurrence_pin& dpin) const {
@@ -516,7 +565,7 @@ std::string Pass_opentimer::driver_net_of(const hhds::Occurrence_node& owner, co
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
-  return wire_name(dpin.base_pin());
+  return net_of_node(owner, dpin, false);
 }
 
 std::vector<hhds::Occurrence_node> Pass_opentimer::leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const {
@@ -637,6 +686,19 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     return net_of(pin, hier_mode_);
   };
 
+  // A hierarchy-resolved operand can land directly on a pin-trackable node in
+  // a sibling mapped region. Its pin annotation is not guaranteed to survive
+  // that boundary, but the tracker's vector is the exact wiring width once the
+  // producer has been processed.
+  auto tracked_bits_of = [&](const auto& dpin) -> int32_t {
+    auto bits = io_bits_of(dpin);
+    if (bits > 0) {
+      return bits;
+    }
+    const auto& pv = pin_tracker.get_pin_vector(trk_id(dpin));
+    return static_cast<int32_t>(pv.size());
+  };
+
   // Record a driver pin -> net-name override. Keyed by the hier-unique net name
   // when flattening (Class_index collides across instances), by Class_index in
   // flat mode (byte-for-byte the original behaviour).
@@ -667,6 +729,42 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
     return {};
+  };
+
+  auto is_resolved_const = [&](const auto& dpin) {
+    if (is_const_pin(dpin)) {
+      return true;
+    }
+    // HHDS singleton constants carry a valid pin but an intentionally invalid
+    // regular Node_class; test the reserved nid before type_op_of().
+    return dpin.get_master_node().get_debug_nid() == hhds::Graph::CONST_NODE;
+  };
+  auto operand_bits_of = [&](const hhds::Occurrence_node& owner, std::string_view sname, const auto& dpin) -> int32_t {
+    if (const auto bits = tracked_bits_of(dpin); bits > 0) {
+      return bits;
+    }
+    // A descended helper input can resolve through multiple call boundaries
+    // to an ownerless singleton constant. The callee's local GraphIO remains
+    // the finite-width operation contract (e.g. abc's 870-bit input splitter).
+    auto local = get_driver_of_sink_name(owner.base_node(), sname);
+    if (local.is_invalid()) {
+      return 0;
+    }
+    if (const auto bits = bits_of(local); bits > 0) {
+      return bits;
+    }
+    if (!is_graph_input_pin(local)) {
+      return 0;
+    }
+    auto* pg = local.get_graph();
+    auto  io = pg != nullptr ? pg->get_io() : nullptr;
+    auto  pn = local.get_pin_name();
+    return io && !pn.empty() ? bits_of(local, *io, pn) : 0;
+  };
+  auto seed_constant = [&](const auto& dpin, int32_t bits) {
+    if (is_resolved_const(dpin)) {
+      pin_tracker.add_constant(trk_id(dpin), bits);
+    }
   };
 
   // The node set for the forward (net-population) walk. Flat mode iterates the
@@ -754,266 +852,404 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  // 3rd: populate all the net names (forward walk, pin-tracker for trackable ops).
-  for (auto& node : forward_nodes()) {
-    auto op = type_op_of(node);
-    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
-      continue;
+  auto tracker_ready = [&](const auto& dpin) {
+    if (is_const_pin(dpin) || is_graph_input_pin(dpin)) {
+      return true;
     }
+    const auto master = dpin.get_master_node();
+    return master.is_invalid() || !Ntype::is_pin_trackable(type_op_of(master)) || pin_tracker.has_pin(trk_id(dpin));
+  };
 
-    bool root_track = Ntype::is_pin_trackable(op);
-    if (root_track) {
-      auto dpin0 = node.get_driver_pin(0);
-      // This trackable node's OWN output: name it from the traversal node (its
-      // hier chain is intact; a create_driver_pin/out_pins handle drops it). The
-      // "n$" prefix keeps the pure-rewiring output out of the real-net space.
-      auto wname = hier_mode_ ? absl::StrCat("n$", net_of_node(node, dpin0, true)) : trk_id(dpin0);
-      if (op == Ntype_op::Set_mask) {
-        auto a_dpin     = hier_driver_of(node, "a");
-        auto mask_dpin  = hier_driver_of(node, "mask");
-        auto value_dpin = hier_driver_of(node, "value");
-        if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node))
-              .fatal();
-          return;
-        }
-        if (!is_const_pin(mask_dpin)) {
-          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-              .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
-              .fatal();
-          return;
-        }
-        auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_set_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const, trk_id(value_dpin));
-      } else if (op == Ntype_op::Get_mask) {
-        auto a_dpin    = hier_driver_of(node, "a");
-        auto mask_dpin = hier_driver_of(node, "mask");
-        if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node))
-              .fatal();
-          return;
-        }
-        if (!is_const_pin(mask_dpin)) {
-          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-              .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
-              .fatal();
-          return;
-        }
-        auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_get_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const);
-      } else if (op == Ntype_op::SRA) {
-        auto a_dpin = hier_driver_of(node, "a");
-        auto b_dpin = hier_driver_of(node, "b");
-        if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("Invalid corrupt SRA node {} (cprop should have deleted it)", debug_name(node))
-              .fatal();
-          return;
-        }
-        if (!is_const_pin(b_dpin)) {
-          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-              .msg("opentimer can not handle non-constant SRA on node {} (cprop/tmap first)", debug_name(node))
-              .fatal();
-          return;
-        }
-        auto       b_const = hydrate_const(b_dpin);
-        const auto a_bits  = io_bits_of(a_dpin);
-        if (a_bits <= 0) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("SRA input has no usable width on node {}", debug_name(node))
-              .hint("bitwidth/cprop must stamp the shifted operand before pass.opentimer tracks its wiring")
-              .fatal();
-          return;
-        }
-        pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const);
-      } else if (op == Ntype_op::Sext) {
-        auto a_dpin = hier_driver_of(node, "a");
-        auto b_dpin = hier_driver_of(node, "b");
-        if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("Invalid corrupt Sext node {} (cprop should have deleted it)", debug_name(node))
-              .fatal();
-          return;
-        }
-        if (!is_const_pin(b_dpin)) {
-          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-              .msg("opentimer can not handle non-constant Sext on node {} (cprop/tmap first)", debug_name(node))
-              .fatal();
-          return;
-        }
-        auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sext(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
-      } else if (op == Ntype_op::SHL) {
-        auto a_dpin = hier_driver_of(node, "a");
-        if (a_dpin.is_invalid()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node))
-              .fatal();
-          return;
-        }
-        // SHL b is single-driver (the one-hot multi-shift form was removed).
-        auto b_dpin = hier_driver_of(node, "b");
-        if (!is_const_pin(b_dpin)) {
-          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-              .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
-              .fatal();
-          return;
-        }
-        auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_shl(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
-      } else if (op == Ntype_op::Concat) {
-        // Wiring/packing, NOT logic: every result bit keeps the identity of the
-        // lane bit it came from, so the tracker threads timing straight through
-        // and the cell contributes zero delay. Before this arm existed, Concat
-        // was not pin-trackable at all and fell into the "needs a tmap netlist"
-        // refusal below.
-        //
-        // Widths come from the BASE lane table (the interleaved const sinks);
-        // lane VALUES must come from the occurrence edges, since the base table
-        // drops the hier chain that trk_id/net_of need. Same split lec/encode
-        // uses: decode from base, resolve the value by sink pid.
-        const auto lanes = livehd::graph_util::concat_lanes(node.base_node());
-        if (lanes.empty()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-              .msg("malformed concat (missing lane operand, or a non-constant lane width) on node {}", debug_name(node))
-              .fatal();
-          return;
-        }
-        if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
-          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal").msg("{}", lane_bad).fatal();
-          return;
-        }
-        absl::flat_hash_map<hhds::Port_id, hhds::Occurrence_pin> lane_by_pid;
-        for (auto& e : node.inp_edges()) {
-          lane_by_pid.insert_or_assign(e.sink.get_port_id(), e.driver);
-        }
-        std::vector<Pin_tracker<std::string>::Concat_src> srcs;
-        srcs.reserve(lanes.size());
-        for (size_t i = 0; i < lanes.size(); ++i) {
-          auto it = lane_by_pid.find(static_cast<hhds::Port_id>(2 * i));  // lane i value = sink pid 2i
-          if (it == lane_by_pid.end()) {
+  // 3rd: populate all the net names (forward walk, pin-tracker for trackable
+  // ops). The occurrence forward walk is topological inside each definition,
+  // but not globally across sibling region instances: a consumer in __c1 can
+  // be yielded before its pure-wiring producer in __c3. Defer only a consumer
+  // that actually encounters such a dependency. This keeps the common path at
+  // one hierarchy-resolving edge walk per operand; a separate readiness scan
+  // doubles OpenTimer setup time on Minion's 1.5-million-node mapped design.
+  auto                     pending_nodes      = forward_nodes();
+  size_t                   opaque_logic_nodes = 0;
+  std::vector<std::string> opaque_logic_examples;
+  const auto               make_opaque_logic_boundary = [&](const hhds::Occurrence_node& node, const std::string& wname) {
+    auto bits = bits_of(node.get_driver_pin(0));
+    if (bits <= 0) {
+      for (const auto& e : node.out_edges()) {
+        bits = std::max(bits, bits_of(e.driver));
+      }
+    }
+    bits = std::max(bits, 1);
+    pin_tracker.add_opaque(wname, bits);
+    timer.insert_primary_input(wname);
+    set_input_delays(wname);
+    for (int32_t i = 1; i < bits; ++i) {
+      const auto bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
+      timer.insert_primary_input(bit_name);
+      set_input_delays(bit_name);
+    }
+    ++opaque_logic_nodes;
+    if (opaque_logic_examples.size() < 5) {
+      opaque_logic_examples.push_back(debug_name(node));
+    }
+  };
+  while (!pending_nodes.empty()) {
+    std::vector<hhds::Occurrence_node> deferred_nodes;
+    bool                               net_progress = false;
+    for (auto& node : pending_nodes) {
+      auto op = type_op_of(node);
+      if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
+        continue;
+      }
+
+      bool root_track = Ntype::is_pin_trackable(op);
+      if (root_track) {
+        auto       dpin0                = node.get_driver_pin(0);
+        // This trackable node's OWN output: name it from the traversal node (its
+        // hier chain is intact; a create_driver_pin/out_pins handle drops it). The
+        // "n$" prefix keeps the pure-rewiring output out of the real-net space.
+        auto       wname                = hier_mode_ ? absl::StrCat("n$", net_of_node(node, dpin0, true)) : trk_id(dpin0);
+        const bool native_comb_boundary = node.base_node().attr(livehd::attrs::native_comb_boundary).has();
+        if (native_comb_boundary) {
+          make_opaque_logic_boundary(node, wname);
+        } else if (op == Ntype_op::Set_mask) {
+          auto a_dpin     = hier_driver_of(node, "a");
+          auto mask_dpin  = hier_driver_of(node, "mask");
+          auto value_dpin = hier_driver_of(node, "value");
+          if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
             livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
-                .msg("concat lane {} has no value driver on node {}", i, debug_name(node))
+                .msg("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node))
                 .fatal();
             return;
           }
-          srcs.push_back({trk_id(it->second), io_bits_of(it->second), lanes[i].width, lanes[i].offset});
-        }
-        // Literal sum(w) width of a result that is never negative. The driver
-        // pin's stamp is deliberately not
-        // consulted: a narrowed stamp must not move a lane.
-        pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes));
-      } else if (op == Ntype_op::Or) {
-        for (auto e : node.inp_edges()) {
-          pin_tracker.add_or(wname, trk_id(e.driver));
-        }
-      } else if (op == Ntype_op::And) {
-        Dlop                 a_mask = *Dlop::create_integer(-1);
-        hhds::Occurrence_pin a_dpin;
-        for (auto e : node.inp_edges()) {
-          if (is_const_pin(e.driver)) {
-            a_mask = a_mask.and_op(hydrate_const(e.driver));
-          } else {
-            if (!a_dpin.is_invalid()) {
-              livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-                  .msg("pin_tracker needed for netlist can not handle multiple unknowns on node {}", debug_name(node))
+          if (!tracker_ready(a_dpin) || !tracker_ready(value_dpin)) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          if (!is_const_pin(mask_dpin)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+          auto       mask_const = hydrate_const(mask_dpin);
+          const auto a_bits     = operand_bits_of(node, "a", a_dpin);
+          seed_constant(a_dpin, a_bits);
+          seed_constant(value_dpin, static_cast<int32_t>(mask_const.get_bits()));
+          pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, mask_const, trk_id(value_dpin));
+        } else if (op == Ntype_op::Get_mask) {
+          auto a_dpin    = hier_driver_of(node, "a");
+          auto mask_dpin = hier_driver_of(node, "mask");
+          if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node))
+                .fatal();
+            return;
+          }
+          if (!tracker_ready(a_dpin)) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          if (!is_const_pin(mask_dpin)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+          auto       mask_const = hydrate_const(mask_dpin);
+          const auto a_bits     = operand_bits_of(node, "a", a_dpin);
+          seed_constant(a_dpin, a_bits);
+          pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_const);
+        } else if (op == Ntype_op::SRA) {
+          auto a_dpin = hier_driver_of(node, "a");
+          auto b_dpin = hier_driver_of(node, "b");
+          if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("Invalid corrupt SRA node {} (cprop should have deleted it)", debug_name(node))
+                .fatal();
+            return;
+          }
+          if (!tracker_ready(a_dpin)) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          if (!is_const_pin(b_dpin)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant SRA on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+          auto b_const = hydrate_const(b_dpin);
+          auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          if (a_bits <= 0 && is_resolved_const(a_dpin) && b_const.is_just_i64()) {
+            const auto shift = b_const.to_just_i64();
+            const auto out   = bits_of(node.get_driver_pin(0));
+            if (shift >= 0 && shift <= std::numeric_limits<int32_t>::max() - std::max(out, 1)) {
+              // Constants have zero arrival on every bit. Preserve only the
+              // trackable result arity: SRA emits max(a_bits-shift, 1) bits.
+              a_bits = static_cast<int32_t>(shift) + std::max(out, 1);
+            }
+          }
+          if (a_bits <= 0) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("SRA input has no usable width on node {} (operand {}, kind {}, graph_input={}, tracker={})",
+                     debug_name(node),
+                     debug_name(a_dpin.get_master_node()),
+                     Ntype::get_name(type_op_of(a_dpin.get_master_node())),
+                     is_graph_input_pin(a_dpin),
+                     trk_id(a_dpin))
+                .hint("bitwidth/cprop must stamp the shifted operand before pass.opentimer tracks its wiring")
+                .fatal();
+            return;
+          }
+          seed_constant(a_dpin, a_bits);
+          pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const);
+        } else if (op == Ntype_op::Sext) {
+          auto a_dpin = hier_driver_of(node, "a");
+          auto b_dpin = hier_driver_of(node, "b");
+          if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("Invalid corrupt Sext node {} (cprop should have deleted it)", debug_name(node))
+                .fatal();
+            return;
+          }
+          if (!tracker_ready(a_dpin)) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          if (!is_const_pin(b_dpin)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant Sext on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+          auto       b_const = hydrate_const(b_dpin);
+          const auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          seed_constant(a_dpin, a_bits);
+          pin_tracker.add_sext(wname, trk_id(a_dpin), a_bits, b_const);
+        } else if (op == Ntype_op::SHL) {
+          auto a_dpin = hier_driver_of(node, "a");
+          if (a_dpin.is_invalid()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node))
+                .fatal();
+            return;
+          }
+          if (!tracker_ready(a_dpin)) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          // SHL b is single-driver (the one-hot multi-shift form was removed).
+          auto b_dpin = hier_driver_of(node, "b");
+          if (!is_const_pin(b_dpin)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+          auto       b_const = hydrate_const(b_dpin);
+          const auto a_bits  = operand_bits_of(node, "a", a_dpin);
+          seed_constant(a_dpin, a_bits);
+          pin_tracker.add_shl(wname, trk_id(a_dpin), a_bits, b_const);
+        } else if (op == Ntype_op::Concat) {
+          // Wiring/packing, NOT logic: every result bit keeps the identity of the
+          // lane bit it came from, so the tracker threads timing straight through
+          // and the cell contributes zero delay. Before this arm existed, Concat
+          // was not pin-trackable at all and fell into the "needs a tmap netlist"
+          // refusal below.
+          //
+          // Widths come from the BASE lane table (the interleaved const sinks);
+          // lane VALUES must come from the occurrence edges, since the base table
+          // drops the hier chain that trk_id/net_of need. Same split lec/encode
+          // uses: decode from base, resolve the value by sink pid.
+          const auto lanes = livehd::graph_util::concat_lanes(node.base_node());
+          if (lanes.empty()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                .msg("malformed concat (missing lane operand, or a non-constant lane width) on node {}", debug_name(node))
+                .fatal();
+            return;
+          }
+          if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
+            livehd::diag::err("pass.opentimer", "netlist-malformed", "internal").msg("{}", lane_bad).fatal();
+            return;
+          }
+          absl::flat_hash_map<hhds::Port_id, hhds::Occurrence_pin> lane_by_pid;
+          bool                                                     lanes_ready = true;
+          for (auto& e : node.inp_edges()) {
+            lane_by_pid.insert_or_assign(e.sink.get_port_id(), e.driver);
+            lanes_ready = lanes_ready && tracker_ready(e.driver);
+          }
+          if (!lanes_ready) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          std::vector<Pin_tracker<std::string>::Concat_src> srcs;
+          srcs.reserve(lanes.size());
+          for (size_t i = 0; i < lanes.size(); ++i) {
+            auto it = lane_by_pid.find(static_cast<hhds::Port_id>(2 * i));  // lane i value = sink pid 2i
+            if (it == lane_by_pid.end()) {
+              livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+                  .msg("concat lane {} has no value driver on node {}", i, debug_name(node))
                   .fatal();
               return;
             }
-            a_dpin = e.driver;
+            const auto lane_bits = tracked_bits_of(it->second) > 0 ? tracked_bits_of(it->second) : lanes[i].width;
+            seed_constant(it->second, lane_bits);
+            srcs.push_back({trk_id(it->second), lane_bits, lanes[i].width, lanes[i].offset});
           }
-        }
-        if (!a_dpin.is_invalid()) {
-          pin_tracker.add_and(wname, trk_id(a_dpin), a_mask);
-        }
-      } else {
-        livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-            .msg("opentimer needs a tmap/synthesized netlist; got node {}", debug_name(node))
-            .fatal();
-        return;
-      }
-    }
-
-    // setup driver pins and nets. Plain cells (trackable ops, flops) drive
-    // through an implicit port-0 pin that materializes no PinEntry, so
-    // out_pins() misses it — fall back to the port-0 driver handle explicitly.
-    // A Sub is NOT exempt from the miss: an abc-mapped gate whose only reader
-    // is a pin-trackable Concat (the MSB inverter of a shifted bus) comes back
-    // with an empty out_pins() view, and skipping it here means its net is
-    // never inserted -- every consumer the pin tracker later resolves onto that
-    // net then fails to connect, and the run dies on an incomplete timing
-    // graph. out_edges() does see the pin, so union the two and dedup.
-    std::vector<hhds::Occurrence_pin> dpins;
-    absl::flat_hash_set<std::string>  seen_dnet;  // by NET NAME: two handles can name one port
-    const auto                        push_dpin = [&](const hhds::Occurrence_pin& dpin) {
-      if (dpin.is_invalid() || dpin.out_edges().empty()) {
-        return;
-      }
-      if (seen_dnet.insert(net_of_node(node, dpin, hier_mode_)).second) {
-        dpins.push_back(dpin);
-      }
-    };
-    for (auto& dpin : node.out_pins()) {
-      push_dpin(dpin);
-    }
-    for (const auto& e : node.out_edges()) {
-      push_dpin(e.driver);
-    }
-    if (dpins.empty()) {
-      auto dpin0 = node.get_driver_pin(0);
-      if (!dpin0.is_invalid()) {
-        dpins.push_back(dpin0);
-      }
-    }
-    for (auto& dpin : dpins) {
-      if (dpin.is_invalid() || dpin.out_edges().empty()) {
-        continue;
-      }
-      if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
-        I(!root_track);
-        continue;
-      }
-      // Driver-side net name comes from the traversal node (hier chain intact).
-      auto dnet  = net_of_node(node, dpin, hier_mode_);
-      auto wname = root_track ? (hier_mode_ ? absl::StrCat("n$", dnet) : trk_id(dpin)) : dnet;
-
-      if (root_track) {
-        const auto& pv = pin_tracker.get_pin_vector(wname);
-
-        if (pv.empty()) {
-          set_overwrite(dnet, dpin, std::string{kZeroNet});
-        } else if (pv.size() == 1) {  // single bit tracking result
-          if (pv[0].pos < 0) {
-            set_overwrite(dnet, dpin, std::string{kZeroNet});
+          // Literal sum(w) width of a result that is never negative. The driver
+          // pin's stamp is deliberately not
+          // consulted: a narrowed stamp must not move a lane.
+          pin_tracker.add_concat(wname, srcs, livehd::graph_util::concat_total_width(lanes));
+        } else if (op == Ntype_op::Or) {
+          auto inps = node.inp_edges();
+          if (std::any_of(inps.begin(), inps.end(), [&](const auto& e) { return !tracker_ready(e.driver); })) {
+            deferred_nodes.push_back(node);
             continue;
           }
-          if (pv[0].pos) {
-            auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
-            set_overwrite(dnet, dpin, bus_bit_name);
-          } else {
-            set_overwrite(dnet, dpin, pv[0].id);
+          for (auto e : inps) {
+            pin_tracker.add_or(wname, trk_id(e.driver));
           }
-        } else if (pv.size() > 1 && pv[0].pos < 0 && !is_overwritten(dnet, dpin)) {
-          set_overwrite(dnet, dpin, std::string{kZeroNet});
-        } else if (pv.size() > 1 && !is_overwritten(dnet, dpin)) {
-          // MULTI-bit tracker result: a module-boundary packed bus (pass.abc
-          // glue). bit 0 is the real signal, higher bits are const padding for a
-          // wide port, so a 1-bit cell reading this driver reads bit 0 — map it
-          // to pv[0]. A consumer that reads a specific higher bit goes through a
-          // Get_mask, which resolves inside the tracker (not via this overwrite);
-          // the is_overwritten guard keeps a phase-2 primary-output net intact.
-          if (pv[0].pos) {
-            set_overwrite(dnet, dpin, absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos)));
-          } else {
-            set_overwrite(dnet, dpin, pv[0].id);
+          // A packed OR of disjoint shifted lanes is wiring and every result
+          // bit resolves to one source bit. Overlapping live lanes are real
+          // Boolean logic, however. Such an OR can remain native only when ABC
+          // deliberately preserved a combinational-cycle remainder; cut STA at
+          // that exact native result rather than renaming it to constant zero.
+          if (pin_tracker.has_ambiguous(wname)) {
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not treat overlapping native OR inputs as wiring on node {} (tmap first)", debug_name(node))
+                .fatal();
+            return;
+          }
+        } else if (op == Ntype_op::And) {
+          Dlop                 a_mask = *Dlop::create_integer(-1);
+          hhds::Occurrence_pin a_dpin;
+          auto                 inps = node.inp_edges();
+          if (std::any_of(inps.begin(), inps.end(), [&](const auto& e) { return !tracker_ready(e.driver); })) {
+            deferred_nodes.push_back(node);
+            continue;
+          }
+          for (auto e : inps) {
+            if (is_const_pin(e.driver)) {
+              a_mask = a_mask.and_op(hydrate_const(e.driver));
+            } else {
+              if (!a_dpin.is_invalid()) {
+                livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                    .msg("pin_tracker needed for netlist can not handle multiple unknowns on node {}", debug_name(node))
+                    .fatal();
+                return;
+              }
+              a_dpin = e.driver;
+            }
+          }
+          if (!a_dpin.is_invalid()) {
+            pin_tracker.add_and(wname, trk_id(a_dpin), a_mask);
+          }
+        } else {
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer needs a tmap/synthesized netlist; got node {}", debug_name(node))
+              .fatal();
+          return;
+        }
+      }
+
+      const bool native_comb_boundary = node.base_node().attr(livehd::attrs::native_comb_boundary).has();
+
+      // Setup driver pins and nets from one node-level edge expansion. Plain
+      // cells (trackable ops, flops) drive through an implicit port-0 pin that
+      // out_pins() misses, while node.out_edges() includes it. Do not probe each
+      // pin with dpin.out_edges(): resolving and materializing a wide hierarchical
+      // fanout once per pin dominated Minion STA setup (and the later loop probed
+      // every pin a second time).
+      std::vector<hhds::Occurrence_pin> dpins;
+      absl::flat_hash_set<std::string>  seen_dnet;  // by NET NAME: two handles can name one port
+      const auto                        push_dpin = [&](const hhds::Occurrence_pin& dpin) {
+        if (dpin.is_invalid()) {
+          return;
+        }
+        if (seen_dnet.insert(net_of_node(node, dpin, hier_mode_)).second) {
+          dpins.push_back(dpin);
+        }
+      };
+      const auto node_out_edges = node.out_edges();
+      for (const auto& e : node_out_edges) {
+        push_dpin(e.driver);
+      }
+      for (auto& dpin : dpins) {
+        if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+          I(!root_track);
+          continue;
+        }
+        // Driver-side net name comes from the traversal node (hier chain intact).
+        auto dnet  = net_of_node(node, dpin, hier_mode_);
+        auto wname = root_track ? (hier_mode_ ? absl::StrCat("n$", dnet) : trk_id(dpin)) : dnet;
+
+        if (root_track) {
+          const auto& pv = pin_tracker.get_pin_vector(wname);
+
+          if (pv.empty()) {
+            set_overwrite(dnet, dpin, std::string{kZeroNet});
+          } else if (pv.size() == 1) {  // single bit tracking result
+            if (pv[0].pos < 0) {
+              set_overwrite(dnet, dpin, std::string{kZeroNet});
+              continue;
+            }
+            if (pv[0].pos) {
+              auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
+              set_overwrite(dnet, dpin, bus_bit_name);
+            } else {
+              set_overwrite(dnet, dpin, pv[0].id);
+            }
+          } else if (pv.size() > 1 && pv[0].pos < 0 && !is_overwritten(dnet, dpin)) {
+            set_overwrite(dnet, dpin, std::string{kZeroNet});
+          } else if (pv.size() > 1 && !is_overwritten(dnet, dpin)) {
+            // MULTI-bit tracker result: a module-boundary packed bus (pass.abc
+            // glue). bit 0 is the real signal, higher bits are const padding for a
+            // wide port, so a 1-bit cell reading this driver reads bit 0 — map it
+            // to pv[0]. A consumer that reads a specific higher bit goes through a
+            // Get_mask, which resolves inside the tracker (not via this overwrite);
+            // the is_overwritten guard keeps a phase-2 primary-output net intact.
+            if (pv[0].pos) {
+              set_overwrite(dnet, dpin, absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos)));
+            } else {
+              set_overwrite(dnet, dpin, pv[0].id);
+            }
+          }
+        } else if (native_comb_boundary) {
+          // The exact node remains in the LGraph, but its output is an explicit
+          // path boundary for this partial STA model.
+          make_opaque_logic_boundary(node, wname);
+        } else {
+          timer.insert_net(wname);
+          if (op == Ntype_op::Sub) {
+            pin_tracker.add_scalar(wname, bits_of(dpin));
           }
         }
-      } else {
-        timer.insert_net(wname);
       }
+      net_progress = true;
     }
+    if (!deferred_nodes.empty() && !net_progress) {
+      const auto& node = deferred_nodes.front();
+      livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+          .msg("pin-tracker dependency did not converge at node {}", debug_name(node))
+          .hint("check for a combinational cycle or an unresolved mapped-region boundary")
+          .fatal();
+      return;
+    }
+    pending_nodes = std::move(deferred_nodes);
+  }
+  if (opaque_logic_nodes != 0) {
+    auto w = livehd::diag::warn("pass.opentimer", "native-comb-boundary", "unsupported");
+    w.msg(
+         "pass.opentimer cut {} native combinational-logic node(s) into zero-arrival timing boundaries; the reported delay "
+         "covers mapped cones around them but is not an end-to-end score through the feedback",
+         opaque_logic_nodes)
+        .hint("remove the combinational feedback to obtain an all-standard-cell netlist and complete timing");
+    for (const auto& name : opaque_logic_examples) {
+      w.note(std::format("timing boundary: {}", name));
+    }
+    if (opaque_logic_nodes > opaque_logic_examples.size()) {
+      w.note(std::format("... and {} more node(s)", opaque_logic_nodes - opaque_logic_examples.size()));
+    }
+    w.emit();
   }
 
   // 4th: create every sequential-boundary PI BEFORE queuing any gate
@@ -1024,17 +1260,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // incomplete timing graph.
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
-    if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
+    if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem) {
       continue;
     }
-    // Path boundary, not a cell (2opt-freq D): pass.abc keeps
-    // flops/latches/memories native — the Liberty stays combinational. Each
-    // consumed output (a flop/latch Q, a memory read-data port) becomes a
-    // virtual primary input arriving at 0, so state-to-state segments are
-    // scored; the din/en/addr cones end at their driving gate pins, which
-    // compute_timing already reads. A latch is deliberately a hard color/timing
-    // break here: transparency and time borrowing are not modeled. Clock/reset
-    // nets are not timed (no clock tree in this estimate).
+    // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops, latches,
+    // memories, and unsupported Div/Rem operators native — the Liberty stays
+    // combinational. Each consumed output becomes a virtual primary input
+    // arriving at 0, so the mapped cones on either side are still scored. A
+    // latch is deliberately a hard break here: transparency and time borrowing
+    // are not modeled. Clock/reset nets are not timed (no clock tree estimate).
     //
     // out_pins() does NOT materialize these outputs — a flop Q is an implicit
     // port-0 pin, and a MEMORY exposes each read-data port only on its
@@ -1079,8 +1313,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // instance land in the single ot::Timer under their hier-unique names.
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op) || op == Ntype_op::Flop
-        || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+    if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet || Ntype::is_pin_trackable(op)
+        || node.base_node().attr(livehd::attrs::native_comb_boundary).has() || op == Ntype_op::Flop || op == Ntype_op::Latch
+        || op == Ntype_op::Memory || op == Ntype_op::Div || op == Ntype_op::Rem) {
       continue;
     }
     if (op != Ntype_op::Sub) {
@@ -1169,8 +1404,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     for (auto& e : node.inp_edges()) {
       I(!(is_graph_input_pin(e.driver) && bits_of(e.driver) > 2));
 
-      auto wire     = get_driver_net_name(e.driver);
-      auto pin_name = absl::StrCat(instance_name, ":", sink_pin_name_of(node, e.sink));
+      // A hierarchy-flattened literal can arrive as HHDS's reserved singleton
+      // CONST_NODE: it is a valid occurrence pin whose regular Node_class is
+      // intentionally invalid, so is_const_pin alone does not recognize it.
+      // Constants have zero arrival and all share the real driverless zero net.
+      const bool singleton_const = e.driver.get_master_node().get_debug_nid() == hhds::Graph::CONST_NODE;
+      auto       wire     = (is_const_pin(e.driver) || singleton_const) ? std::string{kZeroNet} : get_driver_net_name(e.driver);
+      auto       pin_name = absl::StrCat(instance_name, ":", sink_pin_name_of(node, e.sink));
       timer.connect_pin(pin_name, wire);
     }
   }

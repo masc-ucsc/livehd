@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -365,7 +366,32 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
 // def keys so a design proven either way shares its pair hints.
 static std::string lec_entity_of(std::string_view n) {
   auto d = n.rfind('.');
-  return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
+  std::string entity(d == std::string_view::npos ? n : n.substr(d + 1));
+  const auto  spec = entity.find("__");
+  if (spec == std::string::npos || spec == 0 || spec + 2 >= entity.size()) {
+    return entity;
+  }
+  // uPass gives primitive-type template specializations a deterministic
+  // `<base>__uN_sN_bool` name. Slang has the already-elaborated module under
+  // `<base>`. Treat those as the same entity only when every suffix token is a
+  // primitive width; named/generic-value specializations remain distinct.
+  size_t p = spec + 2;
+  while (p < entity.size()) {
+    const size_t end = entity.find('_', p);
+    const auto token = std::string_view(entity).substr(p, end == std::string::npos ? std::string::npos : end - p);
+    bool       width = token == "bool";
+    if (!width && token.size() >= 2 && (token[0] == 'u' || token[0] == 's')) {
+      width = std::all_of(token.begin() + 1, token.end(), [](unsigned char c) { return std::isdigit(c); });
+    }
+    if (!width) {
+      return entity;
+    }
+    if (end == std::string::npos) {
+      return entity.substr(0, spec);
+    }
+    p = end + 1;
+  }
+  return entity;
 }
 
 // If a refute's FIRST diverging signal is a TRUSTED box's input
@@ -575,10 +601,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // keeps the full name (such defs simply stay flattened into their parents).
   // pass/lec's box-correspondence builder canonicalizes the same way, so the
   // entity keys pushed into o.collapse resolve on both sides.
-  auto entity_of = [](std::string_view n) -> std::string {
-    auto d = n.rfind('.');
-    return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
-  };
+  auto entity_of = [](std::string_view n) -> std::string { return lec_entity_of(n); };
   // formal.lec.trust set: def keys ASSUMED equal without a proof. Matched by the
   // canonical (entity) key the DAG uses, or by either side's full spelling.
   const absl::flat_hash_set<std::string> trust_set(base.trust.begin(), base.trust.end());
@@ -1885,7 +1908,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     //        while the flat run refutes with a concrete CEX). Accepting it skips
     //        the very retry (a) exists for. A collapsed PROVEN with nothing
     //        refuted anywhere is untouched — the common case pays nothing.
-    const bool proven_absorbing = r.verdict == Verdict::Proven && !coll.empty() && !force_flat_refuted[def_ix].empty();
+    // A parent may have inlined its ONLY child, leaving `coll` empty.  It is
+    // still absorbing that child's concrete counterexample, and a merely
+    // bounded parent pass must go through the same deep confirmation as the
+    // partially-collapsed case.  Keying this on `coll` let the all-inlined
+    // matched-filter parent accept PASS(6) even though the tap divergence
+    // reaches the top after that window.
+    const bool proven_absorbing = r.verdict == Verdict::Proven && !force_flat_refuted[def_ix].empty();
     bool       absorb_demoted   = false;  // set when that PROVEN is rejected: nothing may restore it
     if (refuted_under_collapse || unknown_under_collapse || proven_absorbing) {
       {
@@ -1905,8 +1934,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // real counterexample this confirm is meant to validate. Only when the
       // trust list is empty is this the original full clear.
       oflat.collapse.assign(base.trust.begin(), base.trust.end());
-      auto rf = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
-                                  : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
+      // When escalation already inlined every ordinary child, `r` is the flat
+      // query we are about to request.  Reuse it instead of spending the same
+      // solver budget twice; deepen_if_bounded below is the additional check
+      // that matters.
+      const bool already_flat = proven_absorbing && coll.empty();
+      auto       rf           = already_flat
+                                    ? r
+                                    : (order.size() == 1
+                                           ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
+                                           : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (formal.stats).
       // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
@@ -1993,18 +2030,28 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         deepen_if_bounded(rf);
         if (rf.verdict != Verdict::Unknown) {
           rf.detail = "flat-confirm after collapsed-box PROVEN absorbing a refutation" + std::string(rf.detail.empty() ? "" : "; ")
-                      + rf.detail + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+                      + rf.detail + (already_flat || r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
           rf.elapsed_ms  = -1;
-          rf.cvc5       += r.cvc5;
+          if (!already_flat) {
+            rf.cvc5 += r.cvc5;
+          }
           r              = std::move(rf);
         } else {
           r.verdict = Verdict::Unknown;
-          r.detail        = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
-                            + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                            + std::string(r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
-          r.cvc5         += rf.cvc5;
-          r.solve_ms     += rf.solve_ms;  // same reason as the arm below: the flat leg ran
-          absorb_demoted  = true;         // see the int_blast_retry guard below
+          r.detail  = "a collapsed proof absorbing a child's REFUTED block could not be confirmed flat"
+                      + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                      + std::string(already_flat || r.detail.empty() ? "" : "; collapsed run: ") + r.detail;
+          // When `rf` STARTED as a copy of `r` (already_flat), deepen_if_bounded
+          // already folded r's own effort into it -- accumulating again would
+          // double-charge the shared solver budget and starve the remaining defs.
+          if (already_flat) {
+            r.cvc5     = rf.cvc5;
+            r.solve_ms = rf.solve_ms;
+          } else {
+            r.cvc5     += rf.cvc5;
+            r.solve_ms += rf.solve_ms;  // same reason as the arm below: the flat leg ran
+          }
+          absorb_demoted = true;  // see the int_blast_retry guard below
         }
       } else if (!force_flat_refuted[def_ix].empty() && deepen_if_bounded(rf)) {
         // Same rule as the two arms above, and for the same reason: a child's

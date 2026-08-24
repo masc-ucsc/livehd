@@ -41,8 +41,28 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
 # 2. color every node (synth boundaries = the abc driver)
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
-# 3. ABC technology-map each colored region -> standard-cell netlist
-run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set abc.library="$LIB" --workdir "$W/w3"
+# 3. ABC technology-map each colored region -> standard-cell netlist. Every
+# completed color must produce one compact, flushed heartbeat with a monotonic
+# completion count; long synthesis wrappers rely on this stable prefix.
+"$LHD" pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net" --set abc.library="$LIB" --workdir "$W/w3" \
+    --diag-fmt pretty --result-json "$W/r.json" >"$W/abc_stdout.log" 2>"$W/abc_progress.log" \
+  || fail "pass abc -> $(cat "$W/r.json" 2>/dev/null)"
+awk '
+  /^PROGRESS pass[.]abc / {
+    ++seen
+    completed = 0
+    for (i = 1; i <= NF; ++i) {
+      if ($i ~ /^completed=/) {
+        split($i, a, "=")
+        completed = a[2] + 0
+      }
+    }
+    if (completed != seen || $0 !~ / color=[-0-9]+ resynth=[01] cache=[^ ]+ ge=[0-9]+ gates=[0-9]+ ms=[0-9.]+/) {
+      bad = 1
+    }
+  }
+  END { exit seen == 0 || bad }
+' "$W/abc_progress.log" || fail "pass abc completion heartbeat missing or inconsistent: $(cat "$W/abc_progress.log")"
 # 4. partition the SAME regions, keeping the original logic (the LEC twin)
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 # 5. behavioral model per combinational cell so the netlist Subs resolve for LEC
@@ -111,3 +131,71 @@ grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/"*.v || fail "no standard cell
 cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
 echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equivalent)"
+
+# ---------------------------------------------------------------------------
+# The default large-region tier omits unbounded &dch choice synthesis. Force
+# this tiny fixture through the tier, prove that selection was logged, and LEC
+# the directly mapped result. This is the Backend-wide-shift escape path: it
+# must remain a mapping recipe change, never a semantic approximation.
+# ---------------------------------------------------------------------------
+G="$W/large"
+mkdir -p "$G"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$G/net" --set abc.library="$LIB" \
+    --set abc.large_ge=1 --set abc.verbose=true --workdir "$G/w1"
+grep -q "large_flow selected" "$G/w1/logs/"*_lhd_pass_abc.log \
+  || fail "large-region tier was not selected at large_ge=1"
+run compile lg:"$G/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$G/netv" --workdir "$G/w2"
+cat "$G/netv/"*.v "$W/modelsv/"*.v > "$G/impl.v"
+run lec --set formal.solver=lgyosys --impl verilog:"$G/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$G/c"
+echo "PASS: pass.abc large-region direct flow is selected and LEC-equivalent"
+
+# ---------------------------------------------------------------------------
+# Constant shifts, slices, concats and set-mask cells are zero-delay wiring.
+# A wide pack/unpack must remain typed native wiring instead of expanding into
+# thousands of fake Liberty buffers/inverters. This is the retained-netlist
+# memory shape exercised by Backend's DelayReg and register-file glue.
+# ---------------------------------------------------------------------------
+P="$W/wide_wiring"
+mkdir -p "$P"
+cat >"$P/wide_wiring.prp" <<'EOF'
+pub mod wide_wiring(value:u4096, tag:u8) -> (out_value:u4096@[0], out_tag:u8@[]) {
+  const packed = (value << 8) | tag
+  out_value = packed#[8..=4103]
+  out_tag = packed#[0..=7]
+}
+EOF
+run compile "$P/wide_wiring.prp" --top wide_wiring --recipe O1 --emit-dir lg:"$P/lg" --workdir "$P/w1"
+run pass color synth --top wide_wiring.wide_wiring lg:"$P/lg" --workdir "$P/w2"
+"$LHD" pass abc --top wide_wiring.wide_wiring lg:"$P/lg" --emit-dir lg:"$P/net" --set abc.library="$LIB" \
+    --stats -q --result-json "$P/r.json" --workdir "$P/w3" \
+  || fail "pass abc rejected wide native wiring -> $(cat "$P/r.json" 2>/dev/null)"
+if grep -Eq '"gates":[1-9][0-9]*' "$P/r.json"; then
+  fail "wide zero-delay wiring expanded into Liberty gates: $(cat "$P/r.json")"
+fi
+run lec --impl lg:"$P/net" --ref lg:"$P/lg" --top wide_wiring.wide_wiring --workdir "$P/w4"
+echo "PASS: wide constant pack/unpack remains exact native zero-delay wiring"
+
+# ---------------------------------------------------------------------------
+# A real combinational SCC cannot enter ABC's acyclic Boolean network. Keep the
+# exact typed remainder native, map the acyclic cones around it, and report the
+# partial mapping explicitly. This is the IssueQueueVlduVstu shape that used to
+# fail after thousands of Backend colors had already completed.
+# ---------------------------------------------------------------------------
+C="$W/comb_loop"
+mkdir -p "$C"
+run compile inou/prp/tests/pyrope/abc_comb_loop.prp --top abc_comb_loop --recipe O1 --emit-dir lg:"$C/lg" --workdir "$C/w1"
+run pass color synth --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --workdir "$C/w2"
+"$LHD" pass abc --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --emit-dir lg:"$C/net" --set abc.library="$LIB" \
+    --diag-fmt jsonl --result-json "$C/r.json" --workdir "$C/w3" 2>"$C/diag.jsonl" \
+  || fail "pass abc rejected a preserved combinational SCC -> $(cat "$C/r.json" 2>/dev/null)"
+grep -q '"code":"comb-loop-native"' "$C/diag.jsonl" \
+  || fail "pass abc did not report the native combinational SCC boundary"
+run compile lg:"$C/net" --top abc_comb_loop.abc_comb_loop --recipe O0 --emit-dir verilog:"$C/netv" --workdir "$C/w4"
+grep -q ' = (a & ' "$C/netv/"*.v || fail "mapped output dropped the native feedback expression"
+"$LHD" pass opentimer --top abc_comb_loop.abc_comb_loop lg:"$C/net" "$LIB" --workdir "$C/w5" \
+    --diag-fmt jsonl --result-json "$C/rt.json" 2>"$C/ot.jsonl" \
+  || fail "opentimer rejected the explicit native SCC boundary -> $(cat "$C/rt.json" 2>/dev/null)"
+grep -q '"code":"native-comb-boundary"' "$C/ot.jsonl" \
+  || fail "opentimer did not report its partial native-combinational timing boundary"
+grep -q '"kind":"sta"' "$C/w5/timing.json" || fail "native-boundary timing report missing"
+echo "PASS: pass.abc preserves combinational SCCs and opentimer reports their explicit timing cuts"

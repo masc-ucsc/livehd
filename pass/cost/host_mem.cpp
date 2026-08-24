@@ -141,18 +141,27 @@ uint64_t arm_address_space_limit(uint64_t budget) {
 
 #if defined(__APPLE__)
   // RLIMIT_AS's floor on Darwin is the current virtual_size, so an absolute small
-  // limit EINVALs. Set (virtual_size + budget): real allocations grow VA ~1:1, so
-  // this caps real memory at ~budget. Read virtual_size NOW -- never hardcode the
-  // ~415 GiB arm64 baseline.
+  // limit EINVALs. Read virtual_size NOW -- never hardcode the ~415 GiB arm64
+  // baseline. Real allocator growth is not exactly 1:1 with physical footprint:
+  // xzone reservations and holes made Backend exhaust (virtual_size + budget)
+  // while its physical footprint was still 15-20% below budget. Give VA 25%
+  // accounting headroom; the sampled physical-footprint gate remains pinned to
+  // `budget`. With the default 80%-of-RAM budget, even 1:1 committed growth is
+  // still bounded to approximately installed RAM rather than unbounded swap.
   const uint64_t vsz = process_virtual_size();
   if (vsz == 0) {
     return 0;
   }
-  // Guard the addition against overflow (vsz is already ~415 GiB).
-  if (budget > UINT64_MAX - vsz) {
+  const uint64_t allocator_slack = budget / 4;
+  if (allocator_slack > UINT64_MAX - budget) {
     return 0;
   }
-  const uint64_t limit = vsz + budget;
+  const uint64_t va_budget = budget + allocator_slack;
+  // Guard the addition against overflow (vsz is already ~415 GiB).
+  if (va_budget > UINT64_MAX - vsz) {
+    return 0;
+  }
+  const uint64_t limit = vsz + va_budget;
 #else
   const uint64_t limit = budget;  // Linux: absolute VA cap, baseline VA is a few MB
 #endif
